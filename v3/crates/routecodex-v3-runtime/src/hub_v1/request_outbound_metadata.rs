@@ -107,10 +107,7 @@ pub(super) fn project_openai_chat_reasoning_summary_policy(
                 );
             }
             if reasoning_effort_rank(explicit.as_str()) >= reasoning_effort_rank(summary_effort) {
-                row.insert(
-                    "reasoning_effort".to_string(),
-                    Value::String(explicit),
-                );
+                row.insert("reasoning_effort".to_string(), Value::String(explicit));
                 return Ok(());
             }
             summary_effort

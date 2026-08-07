@@ -1488,3 +1488,249 @@ async fn pinned_unavailable_provider_consumes_error05_gate_before_terminal_relea
         .node_trace
         .contains(&"V3Router07OpaqueTargetHitOnce"));
 }
+
+/// direct 模式 Mode B websearch 全链：Req04 激活（web_search 声明本地化为
+/// websearch）、Resp03 拦截剥离、异步搜索 hop（backend direct pin）、
+/// hosted web_search_call + 原 call_id 配对投影、状态机 SearchResultCaptured。
+struct WebSearchHopTransport;
+#[async_trait]
+impl ResponsesTransport for WebSearchHopTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let body = request.body();
+        if body.get("model").and_then(serde_json::Value::as_str) == Some("gpt-search") {
+            // 搜索 hop 响应：Responses 格式 message + output_text。
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                br#"{"id":"resp_search","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"search result for routecodex"}]}]}"#
+                    .to_vec(),
+            ))
+        } else {
+            // 主模型响应：本地 websearch function_call（Mode B 需拦截）。
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                br#"{"id":"resp_main","output":[{"type":"function_call","name":"websearch","call_id":"call_ws_1","arguments":"{\"query\":\"routecodex\"}"}]}"#
+                    .to_vec(),
+            ))
+        }
+    }
+}
+
+fn direct_web_search_mode_b_manifest() -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[providers.openai]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
+
+[providers.openai.models.gpt-test]
+supports_streaming = true
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "openai.gpt-search"
+capabilities = ["text"]
+
+[providers.openai.models.gpt-search]
+supports_streaming = true
+capabilities = ["text"]
+
+[forwarders.responses]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "openai", model = "gpt-test", priority = 1 }]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "forwarder", id = "responses", priority = 1 },
+  { kind = "provider_model", provider = "openai", model = "gpt-search", priority = 2 },
+]
+"#,
+    )
+    .unwrap();
+    compile_v3_config_05_manifest(authoring).unwrap()
+}
+
+#[tokio::test]
+async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
+    let manifest = direct_web_search_mode_b_manifest();
+    let continuation_state = V3ResponsesDirectContinuationState::default();
+    let stopless_control = V3ResponsesDirectStoplessControlState::default();
+    let continuation_scope = V3ResponsesDirectContinuationScope::responses(
+        "/v1/responses",
+        "session-ws-direct",
+        "conversation-ws-direct",
+        4444,
+        "default",
+    );
+    let raw = test_responses_raw(
+        "default",
+        "req-ws-direct",
+        "exec-ws-direct",
+        json!({
+            "model": "client-model",
+            "input": "search routecodex",
+            "tools": [{"type": "web_search"}]
+        }),
+    );
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
+        &continuation_state,
+        &stopless_control,
+        &manifest,
+        raw,
+        continuation_scope.clone(),
+        crate::register_responses_direct_hooks(),
+        &WebSearchHopTransport,
+        1_000,
+    )
+    .await;
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    let value = match output.client_payload.body {
+        V3ClientBody::Json(value) => value,
+        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
+            panic!("direct JSON response must remain JSON")
+        }
+    };
+    let output_arr = value["output"].as_array().expect("output array");
+    // 拦截剥离：客户端看不到本地 websearch function_call。
+    assert!(!output_arr.iter().any(|item| {
+        item.get("type").and_then(Value::as_str) == Some("function_call")
+            && item.get("name").and_then(Value::as_str) == Some("websearch")
+    }));
+    // hosted web_search_call 等价结果（Codex 契约）。
+    let call = output_arr
+        .iter()
+        .find(|item| {
+            item.get("type").and_then(Value::as_str) == Some("web_search_call")
+        })
+        .expect("hosted web_search_call projected");
+    assert_eq!(call["status"], "completed");
+    assert_eq!(call["action"]["type"], "search");
+    assert_eq!(call["action"]["query"], "routecodex");
+    assert_eq!(call["results"][0]["text"], "search result for routecodex");
+    // 原 call_id 配对 function_call_output。
+    let paired = output_arr
+        .iter()
+        .find(|item| {
+            item.get("type").and_then(Value::as_str) == Some("function_call_output")
+        })
+        .expect("paired function_call_output");
+    assert_eq!(paired["call_id"], "call_ws_1");
+    assert_eq!(paired["output"], "search result for routecodex");
+    // ServerToolCenter websearch 桶状态：SearchResultCaptured。
+    let scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
+    let state = stopless_control
+        .web_search_load_for_scope(&scope)
+        .expect("center load")
+        .expect("websearch state present");
+    assert_eq!(state.phase(), crate::hub_v1::V3WebSearchCenterPhase::SearchResultCaptured);
+    assert_eq!(state.query(), Some("routecodex"));
+    assert_eq!(state.original_call_id(), Some("call_ws_1"));
+}
+
+#[tokio::test]
+async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
+    let manifest = direct_web_search_mode_b_manifest();
+    let continuation_state = V3ResponsesDirectContinuationState::default();
+    let stopless_control = V3ResponsesDirectStoplessControlState::default();
+    let continuation_scope = V3ResponsesDirectContinuationScope::responses(
+        "/v1/responses",
+        "session-ws-direct-2",
+        "conversation-ws-direct-2",
+        4444,
+        "default",
+    );
+    // 前置：上一轮搜索结果已捕获（SearchResultCaptured，original_call_id=call_ws_1）。
+    let scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
+    let captured = crate::hub_v1::V3WebSearchCenterState::new()
+        .transition_to(
+            crate::hub_v1::V3WebSearchCenterPhase::LocalToolSurfaceActive,
+            "test_seeded",
+        )
+        .expect("seed surface")
+        .transition_to(
+            crate::hub_v1::V3WebSearchCenterPhase::ToolCallObserved,
+            "test_seeded",
+        )
+        .expect("seed observed")
+        .transition_to(
+            crate::hub_v1::V3WebSearchCenterPhase::SearchDispatchPrepared,
+            "test_seeded",
+        )
+        .expect("seed prepared")
+        .transition_to(
+            crate::hub_v1::V3WebSearchCenterPhase::SearchInFlight,
+            "test_seeded",
+        )
+        .expect("seed in-flight")
+        .transition_to(
+            crate::hub_v1::V3WebSearchCenterPhase::SearchResultCaptured,
+            "test_seeded",
+        )
+        .expect("seed captured")
+        .with_original_call_id(Some("call_ws_1".to_string()))
+        .with_query(Some("routecodex".to_string()))
+        .with_normalized_result(Some(json!({"query": "routecodex", "text_result": "search result"})));
+    stopless_control
+        .web_search_store_for_scope(&scope, captured)
+        .expect("seed center");
+    // 下一轮：客户端把上一轮配对 function_call_output 原样送回。
+    let raw = test_responses_raw(
+        "default",
+        "req-ws-direct-2",
+        "exec-ws-direct-2",
+        json!({
+            "model": "client-model",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_ws_1",
+                "output": "search result"
+            }]
+        }),
+    );
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
+        &continuation_state,
+        &stopless_control,
+        &manifest,
+        raw,
+        continuation_scope.clone(),
+        crate::register_responses_direct_hooks(),
+        &WebSearchHopTransport,
+        2_000,
+    )
+    .await;
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    // Req04 配对验证：状态机收尾 Completed（不重建 payload）。
+    let state = stopless_control
+        .web_search_load_for_scope(&scope)
+        .expect("center load")
+        .expect("websearch state present");
+    assert_eq!(state.phase(), crate::hub_v1::V3WebSearchCenterPhase::Completed);
+}

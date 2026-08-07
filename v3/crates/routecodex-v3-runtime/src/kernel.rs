@@ -884,6 +884,26 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 }
                 Err(source) => return error_output(source, trace, &hook_registry),
             }
+            // direct websearch：独立于 stopless center 开关的 Req04 工具面
+            // 决策（Mode B 本地化 + 激活登记）与下一轮配对收尾。
+            match prepare_v3_responses_direct_web_search_control_request(
+                manifest,
+                stopless_control,
+                stopless_scope.as_ref(),
+                &mut standardized.body,
+                &mut trace,
+            ) {
+                Ok(()) => {}
+                Err(source) => return error_output(source, trace, &hook_registry),
+            }
+            if let Err(source) = apply_v3_responses_direct_web_search_control_completion(
+                stopless_control,
+                stopless_scope.as_ref(),
+                &standardized.body,
+                &mut trace,
+            ) {
+                return error_output(source, trace, &hook_registry);
+            }
         }
 
         let selected_pin = V3RemoteContinuationPin::new(
@@ -1209,35 +1229,132 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             };
         trace.push("V3DirectResp14ProviderProjectionPrepared");
         let mut direct_stopless_projected = false;
+        let direct_web_search_request_state = match (stopless_control, stopless_scope.as_ref())
+        {
+            (Some(control), Some(scope)) => match control.web_search_load_for_scope(scope) {
+                Ok(state) => state,
+                Err(error) => {
+                    return error_output(
+                        runtime_source("V3DirectWebSearchResp01Intercepted", error),
+                        trace,
+                        &hook_registry,
+                    )
+                }
+            },
+            _ => None,
+        };
         if let V3ClientBody::Json(body) = &mut response_projection.client_payload.body {
-            match apply_v3_responses_direct_stopless_json_response_control(
-                V3ResponsesDirectStoplessJsonResponseControlInput {
-                    manifest,
-                    server_id: &standardized.protocol_context.server_id,
-                    stopless_control,
-                    stopless_scope: stopless_scope.as_ref(),
-                    request_stopless_state: direct_stopless_request_state.as_ref(),
-                    transition_request_id: &standardized.protocol_context.request_id,
-                    transition_updated_at: now_epoch_ms,
-                    payload: body,
-                },
-                &mut trace,
+            if v3_responses_direct_stopless_center_enabled_for_server(
+                manifest,
+                &standardized.protocol_context.server_id,
             ) {
-                Ok(outcome) => {
-                    direct_stopless_projected = outcome.intercepted;
-                    match outcome.continuation_transition {
-                        V3DirectStoplessContinuationTransition::PassThrough => {}
-                        V3DirectStoplessContinuationTransition::Continue { response_id } => {
-                            response_projection.remote_continuation =
-                                V3RemoteContinuationObservation::Pending { response_id };
-                        }
-                        V3DirectStoplessContinuationTransition::Terminal => {
-                            response_projection.remote_continuation =
-                                V3RemoteContinuationObservation::Terminal;
+                match apply_v3_responses_direct_stopless_json_response_control(
+                    V3ResponsesDirectStoplessJsonResponseControlInput {
+                        manifest,
+                        server_id: &standardized.protocol_context.server_id,
+                        stopless_control,
+                        stopless_scope: stopless_scope.as_ref(),
+                        request_stopless_state: direct_stopless_request_state.as_ref(),
+                        request_web_search_state: direct_web_search_request_state.as_ref(),
+                        transition_request_id: &standardized.protocol_context.request_id,
+                        transition_updated_at: now_epoch_ms,
+                        payload: body,
+                    },
+                    &mut trace,
+                ) {
+                    Ok(outcome) => {
+                        direct_stopless_projected = outcome.intercepted;
+                        match outcome.continuation_transition {
+                            V3DirectStoplessContinuationTransition::PassThrough => {}
+                            V3DirectStoplessContinuationTransition::Continue { response_id } => {
+                                response_projection.remote_continuation =
+                                    V3RemoteContinuationObservation::Pending { response_id };
+                            }
+                            V3DirectStoplessContinuationTransition::Terminal => {
+                                response_projection.remote_continuation =
+                                    V3RemoteContinuationObservation::Terminal;
+                            }
                         }
                     }
+                    Err(source) => return error_output(source, trace, &hook_registry),
                 }
-                Err(source) => return error_output(source, trace, &hook_registry),
+            } else {
+                match apply_v3_responses_direct_web_search_json_response_control(
+                    stopless_control,
+                    stopless_scope.as_ref(),
+                    body,
+                    &mut trace,
+                ) {
+                    Ok(Some(state)) => {
+                        // Mode B 本地 websearch 拦截成功：执行异步搜索 hop
+                        // （backend direct pin 走正常 Hub 链 + VR 路由），结果
+                        // 投影为 hosted web_search_call + 原 call_id 配对，状态机
+                        // 迁移 ToolCallObserved -> SearchResultCaptured。
+                        let backend_binding = crate::hub_v1::resolve_request_web_search_backend_binding(
+                                manifest,
+                                &standardized.body,
+                            );
+                        let captured = match crate::hub_v1::execute_local_web_search_hop(
+                            manifest,
+                            &standardized.protocol_context.server_id,
+                            &direct_failure_session_scope,
+                            &provider_health,
+                            backend_binding.as_deref(),
+                            &state,
+                            transport,
+                            &standardized.protocol_context.request_id,
+                        )
+                        .await
+                        {
+                            Ok(captured) => captured,
+                            Err(error) => {
+                                return error_output(
+                                    runtime_source(
+                                        "V3DirectWebSearchResp02RuntimeControlUpdated",
+                                        error,
+                                    ),
+                                    trace,
+                                    &hook_registry,
+                                )
+                            }
+                        };
+                        match crate::hub_v1::project_web_search_result_into_finalized(
+                            body,
+                            &captured,
+                        ) {
+                            Ok(()) => {}
+                            Err(error) => {
+                                return error_output(
+                                    runtime_source(
+                                        "V3DirectWebSearchResp03HostedResultProjected",
+                                        error,
+                                    ),
+                                    trace,
+                                    &hook_registry,
+                                )
+                            }
+                        }
+                        if let (Some(control), Some(scope)) =
+                            (stopless_control, stopless_scope.as_ref())
+                        {
+                            if let Err(error) = control.web_search_store_for_scope(scope, captured)
+                            {
+                                return error_output(
+                                    runtime_source(
+                                        "V3DirectWebSearchResp02RuntimeControlUpdated",
+                                        error,
+                                    ),
+                                    trace,
+                                    &hook_registry,
+                                );
+                            }
+                        }
+                        trace.push("V3DirectWebSearchResp03HostedResultProjected");
+                        direct_stopless_projected = true;
+                    }
+                    Ok(None) => {}
+                    Err(source) => return error_output(source, trace, &hook_registry),
+                }
             }
         }
         if let V3RemoteContinuationObservation::Streaming { state } =

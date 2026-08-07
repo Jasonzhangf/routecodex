@@ -463,7 +463,10 @@ fn responses_invalid_reasoning_summary_policy_fails_before_anthropic_wire() {
     }))
     .expect_err("invalid summary policy must fail before provider wire");
 
-    assert!(error.to_string().contains("reasoning_summary_policy"), "{error}");
+    assert!(
+        error.to_string().contains("reasoning_summary_policy"),
+        "{error}"
+    );
 }
 
 #[test]

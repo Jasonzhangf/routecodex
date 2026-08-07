@@ -3,7 +3,7 @@ use super::request_outbound_format::{
 };
 use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,
-    build_v3_openai_chat_standard_request_from_chat_canonical,
+    build_v3_openai_chat_standard_request_for_selected_web_search_mode,
     build_v3_openai_responses_standard_request_from_chat_canonical,
     encode_v3_responses_semantic_as_anthropic_request, provider_protocol_compat_id,
     V3HubOpaquePayload, V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic,
@@ -105,8 +105,9 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
     let selected = input.selected_target();
     let provider_protocol_payload = match input.provider_protocol {
         V3HubProviderWireProtocol::OpenAiChat => {
-            build_v3_openai_chat_standard_request_from_chat_canonical(
+            build_v3_openai_chat_standard_request_for_selected_web_search_mode(
                 input.provider_semantic_payload(),
+                selected.web_search_execution_mode,
             )?
         }
         V3HubProviderWireProtocol::Responses => {
@@ -145,7 +146,9 @@ mod tests {
         V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubTargetResolution,
         V3HubTransportIntent,
     };
-    use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
+    use routecodex_v3_config::{
+        V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3WebSearchExecutionMode,
+    };
     use routecodex_v3_target::V3TargetCandidate;
     use serde_json::json;
 
@@ -164,6 +167,7 @@ mod tests {
             wire_model: "provider-wire-model".to_string(),
             visible_model_ids: vec!["client-route-alias".to_string()],
             model_capabilities: vec!["text".to_string()],
+            web_search_execution_mode: V3WebSearchExecutionMode::None,
             max_context_tokens: None,
             base_url: "https://provider.invalid/v1".to_string(),
             responses_process: None,
@@ -530,7 +534,10 @@ mod tests {
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("summary-derived effort must preserve the DeepSeek default max");
 
-        assert_eq!(req_compat.provider_semantic_payload()["reasoning_effort"], "max");
+        assert_eq!(
+            req_compat.provider_semantic_payload()["reasoning_effort"],
+            "max"
+        );
     }
 
     #[test]
@@ -550,7 +557,10 @@ mod tests {
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("explicit xhigh must use the registered DeepSeek max projection");
 
-        assert_eq!(req_compat.provider_semantic_payload()["reasoning_effort"], "max");
+        assert_eq!(
+            req_compat.provider_semantic_payload()["reasoning_effort"],
+            "max"
+        );
     }
 
     #[test]
@@ -570,7 +580,80 @@ mod tests {
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("explicit effort and summary must use the registered higher-level merge");
 
-        assert_eq!(req_compat.provider_semantic_payload()["reasoning_effort"], "high");
+        assert_eq!(
+            req_compat.provider_semantic_payload()["reasoning_effort"],
+            "high"
+        );
+    }
+
+    #[test]
+    fn openai_chat_relay_projects_responses_web_search_with_image_to_local_servertool_function() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "search images",
+                "tools": [{
+                    "type": "web_search",
+                    "external_web_access": true,
+                    "search_content_types": ["text", "image"],
+                    "search_context_size": "medium"
+                }]
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.web_search_execution_mode =
+            V3WebSearchExecutionMode::MetadataCenterLocalSearch;
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("Mode B OpenAI Chat relay must project built-in web search to local websearch function");
+        let payload = req_compat.provider_semantic_payload();
+        assert!(payload.get("web_search_options").is_none(), "{payload}");
+        let web_search = payload["tools"]
+            .as_array()
+            .and_then(|tools| {
+                tools.iter().find(|tool| {
+                    tool.pointer("/function/name").and_then(Value::as_str) == Some("websearch")
+                })
+            })
+            .expect("Mode B canonical local websearch function");
+        assert_eq!(
+            web_search["function"]["parameters"]["properties"]["search_content_types"]["items"]
+                ["enum"],
+            json!(["text", "image"])
+        );
+        assert_eq!(
+            web_search["function"]["parameters"]["properties"]["search_content_types"]["default"],
+            json!(["text", "image"])
+        );
+    }
+
+    #[test]
+    fn minimax_openai_chat_profile_accepts_local_websearch_function_projection() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "search images",
+                "tools": [{
+                    "type": "web_search",
+                    "external_web_access": true,
+                    "search_content_types": ["text", "image"]
+                }]
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.web_search_execution_mode =
+            V3WebSearchExecutionMode::ServertoolSearchBackend;
+        req07.previous.selected_target.compatibility_profile = Some("chat:minimax".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("MiniMax Chat compat must accept Mode B local websearch function");
+        assert!(req_compat.provider_semantic_payload()["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| {
+                tool.pointer("/function/name").and_then(Value::as_str) == Some("websearch")
+            })));
     }
 
     #[test]

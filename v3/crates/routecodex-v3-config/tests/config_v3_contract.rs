@@ -288,6 +288,131 @@ fn parses_full_config_v3_without_interpreting_targets() {
 }
 
 #[test]
+fn web_search_execution_mode_compiles_as_explicit_model_truth() {
+    let source = r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+
+[providers.native]
+type = "responses"
+base_url = "http://native.invalid/v1"
+default_model = "gpt-native"
+auth = { type = "api_key", entries = [{ alias = "key", env = "NATIVE_KEY" }] }
+[providers.native.models.gpt-native]
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "native_remote_search_tool_mix"
+
+[providers.local]
+type = "openai_chat"
+base_url = "http://local.invalid/v1"
+default_model = "local-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "LOCAL_KEY" }] }
+[providers.local.models.local-model]
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "servertool_search_backend"
+web_search_backend = "local.search"
+
+[providers.plain]
+type = "openai_chat"
+base_url = "http://plain.invalid/v1"
+default_model = "plain-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "PLAIN_KEY" }] }
+[providers.plain.models.plain-model]
+capabilities = ["text", "tools", "web_search"]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "native", model = "gpt-native", priority = 1 },
+  { kind = "provider_model", provider = "local", model = "local-model", priority = 2 },
+  { kind = "provider_model", provider = "plain", model = "plain-model", priority = 3 }
+]
+"#;
+
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect("explicit web-search execution modes must compile");
+
+    assert_eq!(
+        manifest.providers["native"].models["gpt-native"]
+            .web_search_execution_mode
+            .as_str(),
+        "native_remote_search_tool_mix"
+    );
+    assert_eq!(
+        manifest.providers["local"].models["local-model"]
+            .web_search_execution_mode
+            .as_str(),
+        "servertool_search_backend"
+    );
+    assert_eq!(
+        manifest.providers["local"].models["local-model"]
+            .web_search_backend_binding
+            .as_deref(),
+        Some("local.search"),
+        "Mode B must compile exactly one backend binding"
+    );
+    assert_eq!(
+        manifest.providers["plain"].models["plain-model"]
+            .web_search_execution_mode
+            .as_str(),
+        "none",
+        "web_search capability alone must not infer native or ServerTool execution"
+    );
+}
+
+#[test]
+fn metadata_center_local_search_requires_exactly_one_backend_binding() {
+    let source = r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+
+[providers.local]
+type = "openai_chat"
+base_url = "http://local.invalid/v1"
+default_model = "local-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "LOCAL_KEY" }] }
+[providers.local.models.local-model]
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "local", model = "local-model", priority = 1 }
+]
+"#;
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect_err("metadata_center_local_search without backend binding must fail");
+    assert!(
+        error.to_string().contains("requires exactly one web_search_backend binding"),
+        "unexpected error: {error}"
+    );
+
+    let source_with_backend = source.replace(
+        "web_search_execution_mode = \"metadata_center_local_search\"",
+        "web_search_execution_mode = \"metadata_center_local_search\"\nweb_search_backend = \"local.search\"",
+    );
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&source_with_backend).unwrap(),
+    )
+    .expect("metadata_center_local_search with backend binding must compile");
+    assert_eq!(
+        manifest.providers["local"].models["local-model"]
+            .web_search_backend_binding
+            .as_deref(),
+        Some("local.search")
+    );
+}
+
+#[test]
 fn omitted_snapshot_direct_preserves_config_compatibility() {
     let source = FULL_CONFIG.replace("snapshot_direct = false\n", "");
     let authoring = parse_v3_config_02_authoring(&source).unwrap();

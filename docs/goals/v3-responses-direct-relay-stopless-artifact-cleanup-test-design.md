@@ -1,8 +1,8 @@
-# V3 Responses Direct→Relay Stopless Artifact Cleanup Test Design
+# V3 Responses Direct→Relay Stopless Current-Turn Boundary Test Design
 
 ## Goal
 
-Prevent RouteCodex-generated historical `call_stopless_reasoning` CLI call/output pairs from re-entering an Anthropic provider request after a Responses Direct failure hands the original client payload to Relay. Preserve every non-stopless message, tool call, tool output, tool declaration, and argument byte.
+Prevent Req04 from interpreting or deleting historical Stopless-shaped call/output pairs. Stopless consumption requires same-scope MetadataCenter provenance and is limited to the current request suffix. Preserve every historical message, tool call, tool output, tool declaration, and argument byte.
 
 ## Lifecycle and owner
 
@@ -11,27 +11,27 @@ Direct provider failure
   -> Error05 selects cross-protocol Relay target
   -> server passes original Responses payload into Relay
   -> ReqInbound converts the full inbound payload to Chat canonical payload
-  -> Req04 stopless governance removes generated CLI artifacts from Chat canonical data
+  -> Req04 sees no same-scope StoplessCenter provenance and preserves historical data
   -> ReqOutbound projects the governed Chat canonical payload to Anthropic wire
   -> ProviderReqCompat sees unique real tool ids and no call_stopless_reasoning history
 ```
 
-Unique semantic owner: `V3HubReqChatProcess04Governed`, implemented by `apply_v3_stopless_request_hook_at_req04` and `strip_v3_stopless_request_artifacts_at_req04` in Rust. Provider codecs, Virtual Router, server handler, SSE, configuration, and stable stopless call-id generation are forbidden repair points.
+Unique semantic owner: `V3HubReqChatProcess04Governed`, implemented by `apply_v3_stopless_request_hook_at_req04` in Rust. It may consume only a current-suffix pair backed by same-scope StoplessCenter state. Provider codecs, Virtual Router, server handler, SSE, configuration, and call-id guessing are forbidden repair points.
 
 ## White-box contract
 
 - Input: Responses history containing two historical stopless CLI call/output pairs plus an unrelated real tool call/output pair.
-- Positive: Req04 removes every generated stopless call, output, CLI command, CLI stdout, and generated continuation guidance from Chat canonical payload data.
-- Negative: Req04 preserves the real call id, tool name, arguments, and output; it does not deduplicate arbitrary tool calls or randomize `call_stopless_reasoning`.
+- Positive: with same-scope MetadataCenter provenance, Req04 consumes only the matching current-suffix Stopless pair.
+- Negative: without provenance, Req04 preserves every historical Stopless-shaped and ordinary call/result pair in order and does not emit `Req04StoplessResultParsed`.
 - Unexpected: malformed or duplicate non-stopless tool identity continues through the existing explicit tool-governance/error contract; this fix must not silently repair it.
 
 ## Module black-box
 
-`responses_direct_to_relay_req04_strips_all_historical_stopless_pairs_before_anthropic_wire` executes the real Relay runtime with StoplessCenter enabled and captures the final Anthropic transport body.
+`responses_direct_to_relay_req04_preserves_historical_stopless_pairs_on_anthropic_wire` executes the real Relay runtime with StoplessCenter enabled and captures the final Anthropic transport body.
 
-- Before the fix: the body contains two `tool_use` blocks with id `call_stopless_reasoning` and matching tool results.
-- After the fix: no stopless call id, CLI command, or CLI stdout reaches the provider body.
-- Preservation assertion: `call_real_history` and `/workspace` remain present on Anthropic wire.
+- Before the fix: Req04 consumed the last Stopless-shaped pair solely from payload shape.
+- After the fix: both historical Stopless-shaped pairs and the ordinary tool pair reach Anthropic wire in order.
+- Preservation assertion: both historical call ids/stdout values plus `call_real_history` and `/workspace` remain present.
 
 ## Project black-box and live replay
 

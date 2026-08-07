@@ -97,13 +97,11 @@ fn anthropic_entry_req_inbound_hook_normalizes_to_chat_extension_before_req04() 
         normalized.payload()["messages"][3]["routecodex_chat_extension"],
         json!({"responses_tool_output_type":"function_call_output"})
     );
-    assert_eq!(
-        normalized.payload()["reasoning"],
-        json!({"thinking":{"type":"enabled","budget_tokens":1024}})
-    );
+    assert_eq!(normalized.payload()["reasoning_thinking_mode"], "enabled");
+    assert_eq!(normalized.payload()["reasoning_budget_tokens"], 1024);
     assert!(
-        normalized.payload()["reasoning"].get("effort").is_none(),
-        "Anthropic inbound thinking is a lossless reasoning.thinking extension and must not invent Responses reasoning.effort"
+        normalized.payload().get("reasoning_effort").is_none(),
+        "Anthropic inbound thinking must not invent a reasoning effort value"
     );
     assert_eq!(normalized.entry_protocol(), V3HubEntryProtocol::Anthropic);
     assert_eq!(normalized.node_id(), "V3HubReqInbound02Normalized");

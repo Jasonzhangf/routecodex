@@ -87,11 +87,26 @@ impl V3HubRespContinuation04Committed {
 pub struct V3HubRespContinuation04Outcome {
     data: V3HubRespContinuation04Committed,
     control_transition: Option<V3StoplessCenterState>,
+    web_search_transition: Option<V3WebSearchCenterState>,
 }
 
 impl V3HubRespContinuation04Outcome {
     pub fn control_transition(&self) -> Option<&V3StoplessCenterState> {
         self.control_transition.as_ref()
+    }
+
+    pub fn web_search_transition(&self) -> Option<&V3WebSearchCenterState> {
+        self.web_search_transition.as_ref()
+    }
+
+    pub fn into_parts(
+        self,
+    ) -> (
+        V3HubRespContinuation04Committed,
+        Option<V3StoplessCenterState>,
+        Option<V3WebSearchCenterState>,
+    ) {
+        (self.data, self.control_transition, self.web_search_transition)
     }
 
     pub fn into_data(self) -> V3HubRespContinuation04Committed {
@@ -110,7 +125,7 @@ impl Deref for V3HubRespContinuation04Outcome {
 pub(crate) fn commit_v3_hub_relay_response(
     input: V3HubRespChatProcess03Outcome,
 ) -> Result<V3HubRespContinuation04Outcome, V3HubRelayResponseError> {
-    let (input, control_transition) = input.into_parts();
+    let (input, control_transition, web_search_transition) = input.into_parts();
     let finalized_payload = input.previous.provider_payload().clone();
     let (action, canonical_context) = match input.terminality {
         V3HubResponseTerminality::Terminal => (V3HubContinuationCommit::None, None),
@@ -137,6 +152,7 @@ pub(crate) fn commit_v3_hub_relay_response(
             canonical_context,
         },
         control_transition,
+        web_search_transition,
     })
 }
 
@@ -434,8 +450,13 @@ fn local_continuation_context_ids(
 ) -> Result<Vec<String>, V3LocalContinuationError> {
     let call_ids = assert_v3_relay_local_continuation_context_has_call_ids(canonical_context)?;
     let mut non_internal_ids = Vec::new();
+    if let Some(response_id) = response_id.filter(|value| !value.trim().is_empty()) {
+        non_internal_ids.push(response_id.to_string());
+    }
     for id in &call_ids {
-        if !is_v3_stopless_internal_call_id(id) {
+        if !is_v3_stopless_internal_call_id(id)
+            && !non_internal_ids.iter().any(|existing| existing == id)
+        {
             non_internal_ids.push(id.clone());
         }
     }
@@ -464,7 +485,7 @@ pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
     action: V3HubContinuationCommit,
 ) -> Result<(), V3LocalContinuationError> {
     for context_id in restored_context_ids {
-        store.release_in_scope(&scope, context_id);
+        store.release_aliases_in_scope(&scope, context_id);
     }
     if action != V3HubContinuationCommit::LocalContext {
         return Ok(());

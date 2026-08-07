@@ -1,12 +1,14 @@
 use super::{
     V3HubRelayRequestError, V3HubRelayRequestHookEvent, V3HubRelayResponseError,
     V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized, V3StoplessCenterState,
-    V3StoplessCenterSteering,
+    V3StoplessCenterSteering, V3WebSearchCenterPhase, V3WebSearchCenterState,
 };
-use serde_json::{json, Map, Value};
-use servertool_core::stop_visible_text::{
-    build_stop_message_terminal_visible_payload, StopMessageTerminalVisiblePayloadInput,
+use serde_json::{json, Value};
+use servertool_core::cli_contract::{
+    build_client_exec_cli_projection_output, parse_servertool_cli_projection_tool_arguments,
+    ServertoolCliProjectionToolArgumentsInput,
 };
+use servertool_core::outcome_contract::is_client_exec_cli_projection;
 use std::sync::Arc;
 
 const STOPLESS_CALL_ID: &str = "call_stopless_reasoning";
@@ -15,9 +17,41 @@ pub(crate) fn is_v3_stopless_internal_call_id(call_id: &str) -> bool {
     call_id == STOPLESS_CALL_ID
 }
 
+/// Mode B 的 Req04 工具面激活：当前 canonical payload 声明了标准 hosted
+/// `web_search` / `web_search_preview` 工具时，返回 websearch ServerTool 实例的
+/// `LocalToolSurfaceActive` 状态。状态由调用方存入 relay/direct 的
+/// ServerToolCenter websearch 桶；本钩子只做同轮工具面判定，不持久化、不
+/// 修改历史与 continuation 不可变区。
+pub fn apply_v3_web_search_request_hook_at_req04(
+    payload: &mut Value,
+) -> Result<Option<V3WebSearchCenterState>, V3HubRelayRequestError> {
+    let has_declaration = payload
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| {
+            tools.iter().any(|tool| {
+                matches!(
+                    tool.get("type").and_then(Value::as_str),
+                    Some("web_search" | "web_search_preview")
+                )
+            })
+        });
+    if !has_declaration {
+        return Ok(None);
+    }
+    let state = V3WebSearchCenterState::new()
+        .transition_to(
+            V3WebSearchCenterPhase::LocalToolSurfaceActive,
+            "req04_web_search_surface_active",
+        )
+        .map_err(|reason| V3HubRelayRequestError::WebSearchToolSurfaceActivationFailed { reason })?;
+    Ok(Some(state))
+}
+
 pub struct V3StoplessResponseHookOutcome {
     pub input: V3HubRespInbound02Normalized,
     pub center_state: Option<V3StoplessCenterState>,
+    pub web_search_state: Option<V3WebSearchCenterState>,
     pub intercepted: bool,
 }
 
@@ -25,112 +59,616 @@ pub fn apply_v3_tool_call_servertool_hook_at_resp03(
     mut input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
 ) -> Result<V3StoplessResponseHookOutcome, V3HubRelayResponseError> {
+    if project_registered_servertool_calls_to_client_exec(&mut input, profile)? {
+        return Ok(V3StoplessResponseHookOutcome {
+            input,
+            center_state: None,
+            web_search_state: None,
+            intercepted: false,
+        });
+    }
+    if profile.web_search_local_surface_active()
+        && first_local_websearch_tool_call(input.provider_payload().as_ref())?.is_some()
+    {
+        return intercept_local_web_search_call(input, profile)?
+            .ok_or(V3HubRelayResponseError::MissingWebSearchActivation);
+    }
     if !profile.stopless_reasoning_stop_enabled() || !profile.stopless_schema_guidance_active() {
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
+            web_search_state: None,
             intercepted: false,
         });
     }
-    let object = input
-        .provider_payload()
-        .as_object()
-        .ok_or(V3HubRelayResponseError::ProviderResponseNotObject)?;
-    if let Some(tool_call) = first_reasoning_stop_tool_call(object.get("output"))? {
-        return match classify_reasoning_stop_arguments(tool_call.arguments) {
-            V3ReasoningStopDecision::Terminal { prefix } => {
-                let projected = build_stopless_terminal_visible_payload_from_reasoning_stop_prefix(
-                    input.provider_payload(),
-                    prefix,
-                );
-                *input.provider_payload_mut() = Arc::new(projected);
-                Ok(V3StoplessResponseHookOutcome {
-                    input,
-                    center_state: None,
-                    intercepted: true,
-                })
-            }
-            V3ReasoningStopDecision::Continue => {
-                let consecutive_stop_count = next_stopless_consecutive_stop_count(profile);
-                let state = V3StoplessCenterState::new(
-                    consecutive_stop_count,
-                    stopless_max_natural_stops(profile),
-                    V3StoplessCenterSteering::Continue,
-                )
-                .with_last_request_id(profile.stopless_transition_request_id())
-                .with_last_response_id(stopless_response_id(input.provider_payload()))
-                .with_last_transition_reason("reasoning_stop_continue_cli_projected")
-                .with_last_provider_stopless_call_id(Some(tool_call.call_id))
-                .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0));
-                if state.guard_exhausted() {
-                    let projected =
-                        build_stopless_guard_passthrough_visible_payload(input.provider_payload());
-                    *input.provider_payload_mut() = Arc::new(projected);
-                    return Ok(V3StoplessResponseHookOutcome {
-                        input,
-                        center_state: None,
-                        intercepted: true,
-                    });
-                }
-                let projected =
-                    build_stopless_guard_passthrough_visible_payload(input.provider_payload());
-                *input.provider_payload_mut() = Arc::new(projected);
-                Ok(V3StoplessResponseHookOutcome {
-                    input,
-                    center_state: Some(state),
-                    intercepted: true,
-                })
-            }
-            V3ReasoningStopDecision::NeedsEvidence => {
-                let consecutive_stop_count = next_stopless_consecutive_stop_count(profile);
-                let state = V3StoplessCenterState::new(
-                    consecutive_stop_count,
-                    stopless_max_natural_stops(profile),
-                    V3StoplessCenterSteering::ReasoningStopNeedsEvidence,
-                )
-                .with_last_request_id(profile.stopless_transition_request_id())
-                .with_last_response_id(stopless_response_id(input.provider_payload()))
-                .with_last_transition_reason("reasoning_stop_needs_evidence_cli_projected")
-                .with_last_provider_stopless_call_id(Some(tool_call.call_id))
-                .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0));
-                if state.guard_exhausted() {
-                    let projected =
-                        build_stopless_guard_passthrough_visible_payload(input.provider_payload());
-                    *input.provider_payload_mut() = Arc::new(projected);
-                    return Ok(V3StoplessResponseHookOutcome {
-                        input,
-                        center_state: None,
-                        intercepted: true,
-                    });
-                }
-                let projected =
-                    build_stopless_guard_passthrough_visible_payload(input.provider_payload());
-                *input.provider_payload_mut() = Arc::new(projected);
-                Ok(V3StoplessResponseHookOutcome {
-                    input,
-                    center_state: Some(state),
-                    intercepted: true,
-                })
-            }
-        };
+    let Some(stop_call) = first_reasoning_stop_tool_call(input.provider_payload().as_ref())? else {
+        return Ok(V3StoplessResponseHookOutcome {
+            input,
+            center_state: None,
+            web_search_state: None,
+            intercepted: false,
+        });
+    };
+    let visible = strip_current_stopless_response_artifacts(
+        input.provider_payload().as_ref(),
+        &stop_call.call_id,
+        stop_call.evidence.as_deref(),
+    );
+    *input.provider_payload_mut() = Arc::new(visible);
+    let state = match stop_call.decision {
+        StoplessResponseDecision::Terminal | StoplessResponseDecision::Blocked => None,
+        StoplessResponseDecision::Continue | StoplessResponseDecision::NeedsEvidence => {
+            let steering = if stop_call.decision == StoplessResponseDecision::NeedsEvidence {
+                V3StoplessCenterSteering::ReasoningStopNeedsEvidence
+            } else {
+                V3StoplessCenterSteering::Continue
+            };
+            let transition_reason = if stop_call.decision == StoplessResponseDecision::NeedsEvidence
+            {
+                "reasoning_stop_needs_evidence_cli_projected"
+            } else {
+                "reasoning_stop_continue_projected"
+            };
+            let state = V3StoplessCenterState::new(
+                next_stopless_consecutive_stop_count(profile),
+                stopless_max_natural_stops(profile),
+                steering,
+            )
+            .with_last_request_id(profile.stopless_transition_request_id())
+            .with_last_response_id(stopless_response_id(input.provider_payload()))
+            .with_last_transition_reason(transition_reason)
+            .with_last_provider_stopless_call_id(Some(stop_call.call_id))
+            .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0));
+            (!state.guard_exhausted()).then_some(state)
+        }
+    };
+    if state.is_none()
+        && matches!(
+            stop_call.decision,
+            StoplessResponseDecision::Continue | StoplessResponseDecision::NeedsEvidence
+        )
+    {
+        let mut visible = input.provider_payload().as_ref().clone();
+        finalize_current_stopless_response(&mut visible);
+        *input.provider_payload_mut() = Arc::new(visible);
     }
-    let cleaned = build_stopless_control_echo_cleaned_payload(input.provider_payload());
-    *input.provider_payload_mut() = Arc::new(cleaned);
     Ok(V3StoplessResponseHookOutcome {
         input,
-        center_state: None,
-        intercepted: false,
+        center_state: state,
+        web_search_state: None,
+        intercepted: true,
     })
 }
 
-pub fn apply_v3_stop_servertool_hook_at_resp03(
+fn project_registered_servertool_calls_to_client_exec(
+    input: &mut V3HubRespInbound02Normalized,
+    profile: &V3HubRelayResponseHookProfile,
+) -> Result<bool, V3HubRelayResponseError> {
+    let mut payload = input.provider_payload().as_ref().clone();
+    let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
+        return Ok(false);
+    };
+    let mut changed = false;
+    for (index, item) in output.iter_mut().enumerate() {
+        let Some(object) = item.as_object_mut() else {
+            continue;
+        };
+        if !matches!(
+            object.get("type").and_then(Value::as_str),
+            Some("function_call" | "tool_call" | "custom_tool_call")
+        ) {
+            continue;
+        }
+        let Some(name) = object
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                object
+                    .get("function")
+                    .and_then(Value::as_object)
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+            })
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        if !profile.is_servertool_name(&name) {
+            continue;
+        }
+        if !is_client_exec_cli_projection(&name) {
+            continue;
+        }
+        let arguments = object
+            .get("arguments")
+            .or_else(|| {
+                object
+                    .get("function")
+                    .and_then(Value::as_object)
+                    .and_then(|function| function.get("arguments"))
+            })
+            .and_then(Value::as_str)
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "registered servertool call missing arguments",
+            })?;
+        let parsed = parse_servertool_cli_projection_tool_arguments(
+            ServertoolCliProjectionToolArgumentsInput {
+                arguments: arguments.to_string(),
+            },
+        )
+        .map_err(|_| V3HubRelayResponseError::MalformedToolCall {
+            index,
+            reason: "registered servertool call arguments must be a JSON object",
+        })?;
+        let projection =
+            build_client_exec_cli_projection_output(&name, &format!("{name}_flow"), parsed, 0, 0)
+                .map_err(|_| V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "registered servertool CLI projection failed",
+            })?;
+        let command = projection
+            .get("execCommand")
+            .and_then(Value::as_str)
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "registered servertool CLI projection missing execCommand",
+            })?;
+        object.insert(
+            "type".to_string(),
+            Value::String("function_call".to_string()),
+        );
+        object.insert(
+            "name".to_string(),
+            Value::String("exec_command".to_string()),
+        );
+        object.insert(
+            "arguments".to_string(),
+            Value::String(
+                serde_json::to_string(&json!({"cmd": command})).map_err(|_| {
+                    V3HubRelayResponseError::MalformedToolCall {
+                        index,
+                        reason: "registered servertool exec_command arguments failed",
+                    }
+                })?,
+            ),
+        );
+        object.remove("function");
+        changed = true;
+    }
+    if changed {
+        *input.provider_payload_mut() = Arc::new(payload);
+    }
+    Ok(changed)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StoplessResponseDecision {
+    Terminal,
+    Blocked,
+    Continue,
+    NeedsEvidence,
+}
+
+struct V3ReasoningStopToolCall {
+    call_id: String,
+    decision: StoplessResponseDecision,
+    evidence: Option<String>,
+}
+
+#[derive(Debug)]
+struct V3LocalWebSearchToolCall {
+    call_id: String,
+    query: String,
+    count: Option<u32>,
+    recency: Option<String>,
+    content_types: Vec<String>,
+}
+
+/// 提取 provider 响应中的第一个本地 `websearch` function call 并做参数校验
+/// （query 必填非空；count/recency/content_types 可选）。Mode B 同轮激活
+/// 校验由调用方用 profile.web_search_local_surface_active() 完成。
+fn first_local_websearch_tool_call(
+    payload: &Value,
+) -> Result<Option<V3LocalWebSearchToolCall>, V3HubRelayResponseError> {
+    let Some(output) = payload.get("output").and_then(Value::as_array) else {
+        return Ok(None);
+    };
+    for (index, item) in output.iter().enumerate() {
+        let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+        if !matches!(item_type, "function_call" | "tool_call" | "custom_tool_call") {
+            continue;
+        }
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| item.pointer("/function/name").and_then(Value::as_str));
+        if !name.is_some_and(|value| value.trim().eq_ignore_ascii_case("websearch")) {
+            continue;
+        }
+        let call_id = item
+            .get("call_id")
+            .or_else(|| item.get("id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "websearch tool call missing call_id",
+            })?
+            .to_string();
+        let raw_arguments = item
+            .get("arguments")
+            .or_else(|| item.get("input"))
+            .or_else(|| item.pointer("/function/arguments"))
+            .and_then(Value::as_str)
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "websearch tool call missing arguments",
+            })?;
+        let arguments = raw_arguments.parse::<Value>().map_err(|_| {
+            V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "websearch tool call arguments must be valid JSON",
+            }
+        })?;
+        let query = arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "websearch tool call requires a non-empty query",
+            })?
+            .to_string();
+        let count = arguments
+            .get("count")
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok());
+        let recency = arguments
+            .get("recency")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let content_types = arguments
+            .get("content_types")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        return Ok(Some(V3LocalWebSearchToolCall {
+            call_id,
+            query,
+            count,
+            recency,
+            content_types,
+        }));
+    }
+    Ok(None)
+}
+
+/// 从 provider 响应剥离已拦截的本地 websearch call（不移除相邻普通工具
+/// 与消息；websearch 结果由 ServerToolCenter 承载，不注入可见 payload）。
+fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
+    let mut projected = payload.clone();
+    if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
+        output.retain(|item| {
+            let item_call_id = item
+                .get("call_id")
+                .or_else(|| item.get("id"))
+                .and_then(Value::as_str);
+            !(item_call_id == Some(call_id)
+                && item
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| {
+                        matches!(kind, "function_call" | "tool_call" | "custom_tool_call")
+                    }))
+        });
+    }
+    projected
+}
+
+/// Mode B Resp03 拦截：同轮激活校验 + 提取实际 websearch call + 参数校验 +
+/// 剥离 + 状态机迁移 LocalToolSurfaceActive -> ToolCallObserved（携带
+/// original call_id / query / count / recency / content_types）。
+fn intercept_local_web_search_call(
     mut input: V3HubRespInbound02Normalized,
+    profile: &V3HubRelayResponseHookProfile,
+) -> Result<Option<V3StoplessResponseHookOutcome>, V3HubRelayResponseError> {
+    let Some(call) = first_local_websearch_tool_call(input.provider_payload().as_ref())? else {
+        return Ok(None);
+    };
+    let visible = strip_local_websearch_tool_call(input.provider_payload().as_ref(), &call.call_id);
+    *input.provider_payload_mut() = Arc::new(visible);
+    let center_state = profile
+        .web_search_center_state()
+        .ok_or(V3HubRelayResponseError::MissingWebSearchActivation)?
+        .clone();
+    let observed = center_state
+        .transition_to(
+            V3WebSearchCenterPhase::ToolCallObserved,
+            "resp03_websearch_call_observed",
+        )
+        .map_err(|reason| V3HubRelayResponseError::WebSearchStateTransitionFailed { reason })?
+        .with_original_call_id(Some(call.call_id.clone()))
+        .with_query(Some(call.query.clone()))
+        .with_count(call.count)
+        .with_recency(call.recency)
+        .with_content_types(call.content_types);
+    Ok(Some(V3StoplessResponseHookOutcome {
+        input,
+        center_state: None,
+        web_search_state: Some(observed),
+        intercepted: true,
+    }))
+}
+
+fn first_reasoning_stop_tool_call(
+    payload: &Value,
+) -> Result<Option<V3ReasoningStopToolCall>, V3HubRelayResponseError> {
+    let Some(output) = payload.get("output").and_then(Value::as_array) else {
+        return Ok(None);
+    };
+    for (index, item) in output.iter().enumerate() {
+        let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+        if !matches!(
+            item_type,
+            "function_call" | "tool_call" | "custom_tool_call"
+        ) {
+            continue;
+        }
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| item.pointer("/function/name").and_then(Value::as_str));
+        if !name.is_some_and(|value| value.trim().eq_ignore_ascii_case("reasoningStop")) {
+            continue;
+        }
+        let call_id = item
+            .get("call_id")
+            .or_else(|| item.get("id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "reasoningStop tool call missing call_id",
+            })?
+            .to_string();
+        let raw_arguments = item
+            .get("arguments")
+            .or_else(|| item.get("input"))
+            .or_else(|| item.pointer("/function/arguments"))
+            .and_then(Value::as_str)
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "reasoningStop tool call missing arguments",
+            })?;
+        let arguments = raw_arguments.parse::<Value>().map_err(|_| {
+            V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "reasoningStop tool call arguments must be valid JSON",
+            }
+        })?;
+        let stopreason = arguments.get("stopreason").and_then(|value| {
+            value
+                .as_u64()
+                .and_then(|value| u8::try_from(value).ok())
+                .or_else(|| value.as_str()?.trim().parse().ok())
+        });
+        let evidence = arguments
+            .get("evidence")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let reason = arguments
+            .get("reason")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let (decision, visible) = match stopreason {
+            Some(0) => match evidence.as_deref() {
+                Some(evidence) => (
+                    StoplessResponseDecision::Terminal,
+                    Some(match reason.as_deref() {
+                        Some(reason) => format!("完成：{reason}\n证据：{evidence}"),
+                        None => format!("完成。\n证据：{evidence}"),
+                    }),
+                ),
+                None => (StoplessResponseDecision::NeedsEvidence, None),
+            },
+            Some(1) => match (reason.as_deref(), evidence.as_deref()) {
+                (Some(reason), Some(evidence)) => (
+                    StoplessResponseDecision::Blocked,
+                    Some(format!("阻塞：{reason}\n证据：{evidence}")),
+                ),
+                _ => (StoplessResponseDecision::NeedsEvidence, None),
+            },
+            Some(2) => (StoplessResponseDecision::Continue, None),
+            _ => (StoplessResponseDecision::NeedsEvidence, None),
+        };
+        return Ok(Some(V3ReasoningStopToolCall {
+            call_id,
+            decision,
+            evidence: visible,
+        }));
+    }
+    Ok(None)
+}
+
+fn strip_current_stopless_response_artifacts(
+    payload: &Value,
+    call_id: &str,
+    evidence: Option<&str>,
+) -> Value {    let mut projected = payload.clone();
+    if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
+        output.retain(|item| {
+            let item_call_id = item
+                .get("call_id")
+                .or_else(|| item.get("id"))
+                .and_then(Value::as_str);
+            !(item_call_id == Some(call_id)
+                && item
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| {
+                        matches!(kind, "function_call" | "tool_call" | "custom_tool_call")
+                    }))
+        });
+        if let Some(evidence) = evidence {
+            let has_visible_message = output.iter().any(|item| {
+                item.get("type").and_then(Value::as_str) == Some("message")
+                    && item.get("content").is_some()
+            });
+            if !has_visible_message {
+                output.push(json!({
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": evidence}]
+                }));
+            }
+        }
+    }
+    strip_current_stopless_instruction_echo(&mut projected);
+    strip_current_stopless_control_text(&mut projected);
+    finalize_current_stopless_response(&mut projected);
+    projected
+}
+
+fn finalize_current_stopless_response(payload: &mut Value) {
+    let Some(object) = payload.as_object_mut() else {
+        return;
+    };
+    object.insert("status".to_string(), Value::String("completed".to_string()));
+    for key in ["finish_reason", "finishReason", "stop_reason", "stopReason"] {
+        if object.contains_key(key) {
+            object.insert(key.to_string(), Value::String("stop".to_string()));
+        }
+    }
+}
+
+fn strip_current_stopless_instruction_echo(payload: &mut Value) {
+    if let Some(instructions) = payload
+        .get("instructions")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    {
+        if let Some((prefix, _)) = instructions.split_once("\n\n当前轮推进准则") {
+            payload["instructions"] = Value::String(prefix.to_string());
+        }
+    }
+    if let Some(object) = payload.as_object_mut() {
+        if let Some(output) = object.get_mut("output").and_then(Value::as_array_mut) {
+            for item in output {
+                if item.get("type").and_then(Value::as_str) != Some("reasoning") {
+                    continue;
+                }
+                if let Some(item) = item.as_object_mut() {
+                    item.remove("stop_schema");
+                    item.remove("stopSchema");
+                }
+            }
+        }
+        if let Some(tools) = object.get_mut("tools").and_then(Value::as_array_mut) {
+            tools.retain(|tool| {
+                tool.get("name")
+                    .and_then(Value::as_str)
+                    .is_none_or(|name| !name.eq_ignore_ascii_case("reasoningStop"))
+            });
+        }
+        let tools_empty = object
+            .get("tools")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty);
+        if tools_empty {
+            object.remove("tools");
+            if object.get("tool_choice").is_some_and(|choice| {
+                choice.as_str() == Some("required")
+                    || choice.get("type").and_then(Value::as_str) == Some("required")
+            }) {
+                object.remove("tool_choice");
+            }
+        }
+    }
+}
+
+fn strip_current_stopless_control_text(payload: &mut Value) {
+    if let Some(output_text) = payload.get_mut("output_text") {
+        strip_current_stopless_control_string(output_text);
+    }
+    let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in output {
+        if let Some(text) = item.get_mut("text") {
+            strip_current_stopless_control_string(text);
+        }
+        let Some(content) = item.get_mut("content").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for part in content {
+            let Some(text) = part.get_mut("text") else {
+                continue;
+            };
+            strip_current_stopless_control_string(text);
+        }
+    }
+}
+
+fn strip_current_stopless_control_string(value: &mut Value) {
+    let Some(text) = value.as_str() else {
+        return;
+    };
+    let cleaned = if let Some(start) = text.find("<rcc_stop_schema>") {
+        let mut cleaned = text[..start].trim_end().to_string();
+        if let Some(end) = text[start..].find("</rcc_stop_schema>") {
+            let suffix_start = start + end + "</rcc_stop_schema>".len();
+            let suffix = text[suffix_start..].trim_start();
+            if !suffix.is_empty() {
+                if !cleaned.is_empty() {
+                    cleaned.push('\n');
+                }
+                cleaned.push_str(suffix);
+            }
+        }
+        Some(cleaned)
+    } else {
+        serde_json::from_str::<Value>(text)
+            .ok()
+            .filter(is_stopless_control_object)
+            .map(|_| String::new())
+    };
+    if let Some(cleaned) = cleaned {
+        *value = Value::String(cleaned);
+    }
+}
+
+fn is_stopless_control_object(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.contains_key("stopreason")
+        && object.contains_key("current_goal")
+        && object.contains_key("next_step")
+}
+
+pub fn apply_v3_stop_servertool_hook_at_resp03(
+    input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
 ) -> Result<V3StoplessResponseHookOutcome, V3HubRelayResponseError> {
     if !profile.stopless_reasoning_stop_enabled() || !profile.stopless_schema_guidance_active() {
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
+            web_search_state: None,
             intercepted: false,
         });
     }
@@ -143,12 +681,11 @@ pub fn apply_v3_stop_servertool_hook_at_resp03(
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
         .unwrap_or_default();
-    let cleaned = build_stopless_control_echo_cleaned_payload(input.provider_payload());
-    *input.provider_payload_mut() = Arc::new(cleaned);
     if status != "completed" {
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
+            web_search_state: None,
             intercepted: false,
         });
     }
@@ -160,45 +697,7 @@ pub fn apply_v3_stop_servertool_hook_at_resp03(
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
-            intercepted: false,
-        });
-    }
-    if response_has_canonical_reasoning_summary(input.provider_payload().as_ref()) {
-        if let Some(decision) = response_summary_stop_schema_decision(input.provider_payload()) {
-            return match decision {
-                V3SummaryStopSchemaDecision::Finished => Ok(V3StoplessResponseHookOutcome {
-                    input,
-                    center_state: None,
-                    intercepted: false,
-                }),
-                V3SummaryStopSchemaDecision::Blocked { reason } => {
-                    let projected = build_summary_blocked_passthrough_payload(
-                        input.provider_payload(),
-                        &reason,
-                    );
-                    *input.provider_payload_mut() = Arc::new(projected);
-                    Ok(V3StoplessResponseHookOutcome {
-                        input,
-                        center_state: None,
-                        intercepted: true,
-                    })
-                }
-                V3SummaryStopSchemaDecision::Continue {
-                    next_step,
-                    transition_reason,
-                    steering,
-                } => project_stopless_noop_for_stop_candidate(
-                    input,
-                    profile,
-                    steering,
-                    transition_reason,
-                    next_step,
-                ),
-            };
-        }
-        return Ok(V3StoplessResponseHookOutcome {
-            input,
-            center_state: None,
+            web_search_state: None,
             intercepted: false,
         });
     }
@@ -220,15 +719,22 @@ fn project_stopless_noop_for_stop_candidate(
 ) -> Result<V3StoplessResponseHookOutcome, V3HubRelayResponseError> {
     let natural_stop_count = next_stopless_consecutive_stop_count(profile);
     let max_natural_stops = stopless_max_natural_stops(profile);
-    let cleaned = build_stopless_passthrough_visible_payload(input.provider_payload());
-    *input.provider_payload_mut() = Arc::new(cleaned);
     if natural_stop_count > max_natural_stops {
+        let mut visible = input.provider_payload().as_ref().clone();
+        strip_current_stopless_instruction_echo(&mut visible);
+        strip_current_stopless_control_text(&mut visible);
+        *input.provider_payload_mut() = Arc::new(visible);
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
-            intercepted: false,
+            web_search_state: None,
+            intercepted: true,
         });
     }
+    let mut visible = input.provider_payload().as_ref().clone();
+    strip_current_stopless_instruction_echo(&mut visible);
+    strip_current_stopless_control_text(&mut visible);
+    *input.provider_payload_mut() = Arc::new(visible);
     Ok(V3StoplessResponseHookOutcome {
         center_state: Some(
             V3StoplessCenterState::new(natural_stop_count, max_natural_stops, steering)
@@ -238,6 +744,7 @@ fn project_stopless_noop_for_stop_candidate(
                 .with_last_transition_reason(transition_reason)
                 .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0)),
         ),
+        web_search_state: None,
         input,
         intercepted: false,
     })
@@ -245,6 +752,7 @@ fn project_stopless_noop_for_stop_candidate(
 
 pub fn apply_v3_stopless_request_hook_at_req04(
     payload: &mut Value,
+    current_payload_start: usize,
     events: &mut Vec<V3HubRelayRequestHookEvent>,
     restored_stopless_center_state: Option<&V3StoplessCenterState>,
     transition_request_id: Option<&str>,
@@ -255,6 +763,7 @@ pub fn apply_v3_stopless_request_hook_at_req04(
     {
         return apply_v3_stopless_chat_request_hook_at_req04(
             payload,
+            current_payload_start,
             events,
             restored_stopless_center_state,
             transition_request_id,
@@ -268,15 +777,27 @@ pub fn apply_v3_stopless_request_hook_at_req04(
             transition_updated_at,
         ));
     };
-    let Some((index, _output)) = active_stopless_cli_output(input) else {
-        strip_stopless_cli_artifacts(input);
-        strip_stopless_generated_system_guidance_items(input);
+    let current_input = input.get(current_payload_start..).ok_or(
+        V3HubRelayRequestError::CurrentPayloadBoundaryInvalid {
+            start: current_payload_start,
+            len: input.len(),
+        },
+    )?;
+    if restored_stopless_center_state.is_none() {
+        return Ok(initial_stopless_provider_turn_state(
+            restored_stopless_center_state,
+            transition_request_id,
+            transition_updated_at,
+        ));
+    }
+    let Some((index, output)) = active_stopless_cli_output(current_input) else {
         return Ok(initial_stopless_provider_turn_state(
             restored_stopless_center_state,
             transition_request_id,
             transition_updated_at,
         ));
     };
+    let output = output.clone();
     let had_restored_state = restored_stopless_center_state.is_some();
     let state = restored_stopless_center_state
         .cloned()
@@ -294,8 +815,7 @@ pub fn apply_v3_stopless_request_hook_at_req04(
     if state.is_some() {
         events.push(V3HubRelayRequestHookEvent::Req04StoplessCliNoopObserved);
     }
-    strip_active_stopless_pair_and_stale(input, index);
-    strip_stopless_generated_system_guidance_items(input);
+    remove_current_stopless_cli_pair(input, current_payload_start + index, &output);
     events.push(V3HubRelayRequestHookEvent::Req04StoplessResultParsed);
     Ok(state
         .map(|state| state.provider_turn_in_flight(transition_request_id, transition_updated_at)))
@@ -303,6 +823,7 @@ pub fn apply_v3_stopless_request_hook_at_req04(
 
 fn apply_v3_stopless_chat_request_hook_at_req04(
     payload: &mut Value,
+    current_payload_start: usize,
     events: &mut Vec<V3HubRelayRequestHookEvent>,
     restored_stopless_center_state: Option<&V3StoplessCenterState>,
     transition_request_id: Option<&str>,
@@ -315,9 +836,20 @@ fn apply_v3_stopless_chat_request_hook_at_req04(
             transition_updated_at,
         ));
     };
-    let Some(index) = active_stopless_chat_cli_output(messages) else {
-        strip_stopless_chat_cli_artifacts(messages);
-        strip_stopless_generated_system_guidance_items(messages);
+    let current_messages = messages.get(current_payload_start..).ok_or(
+        V3HubRelayRequestError::CurrentPayloadBoundaryInvalid {
+            start: current_payload_start,
+            len: messages.len(),
+        },
+    )?;
+    if restored_stopless_center_state.is_none() {
+        return Ok(initial_stopless_provider_turn_state(
+            restored_stopless_center_state,
+            transition_request_id,
+            transition_updated_at,
+        ));
+    }
+    let Some(index) = active_stopless_chat_cli_output(current_messages) else {
         return Ok(initial_stopless_provider_turn_state(
             restored_stopless_center_state,
             transition_request_id,
@@ -341,11 +873,62 @@ fn apply_v3_stopless_chat_request_hook_at_req04(
     if state.is_some() {
         events.push(V3HubRelayRequestHookEvent::Req04StoplessCliNoopObserved);
     }
-    strip_active_stopless_chat_pair_and_stale(messages, index);
-    strip_stopless_generated_system_guidance_items(messages);
+    remove_current_stopless_chat_pair(messages, current_payload_start + index);
     events.push(V3HubRelayRequestHookEvent::Req04StoplessResultParsed);
     Ok(state
         .map(|state| state.provider_turn_in_flight(transition_request_id, transition_updated_at)))
+}
+
+fn remove_current_stopless_cli_pair(input: &mut Vec<Value>, call_index: usize, output: &Value) {
+    let Some(call_id) = output
+        .get("call_id")
+        .or_else(|| output.get("tool_call_id"))
+        .and_then(Value::as_str)
+    else {
+        return;
+    };
+    if call_index == 0 {
+        return;
+    }
+    let call_index = call_index - 1;
+    if !is_stopless_cli_call(&input[call_index])
+        || input[call_index]
+            .get("call_id")
+            .or_else(|| input[call_index].get("id"))
+            .and_then(Value::as_str)
+            != Some(call_id)
+    {
+        return;
+    }
+    input.remove(call_index + 1);
+    input.remove(call_index);
+}
+
+fn remove_current_stopless_chat_pair(messages: &mut Vec<Value>, output_index: usize) {
+    if output_index == 0 || output_index >= messages.len() {
+        return;
+    }
+    let Some(call_id) = chat_tool_output_call_id(&messages[output_index]) else {
+        return;
+    };
+    let call_index = output_index - 1;
+    if chat_tool_call_is_stopless_cli(
+        messages[call_index]
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .and_then(|calls| {
+                calls.iter().find(|call| {
+                    call.get("id")
+                        .or_else(|| call.get("call_id"))
+                        .and_then(Value::as_str)
+                        == Some(call_id)
+                })
+            })
+            .unwrap_or(&Value::Null),
+    ) {
+        messages.remove(output_index);
+        messages.remove(call_index);
+    }
 }
 
 fn initial_stopless_provider_turn_state(
@@ -366,165 +949,6 @@ fn initial_stopless_provider_turn_state(
         )
         .provider_turn_in_flight(Some(request_id), transition_updated_at),
     )
-}
-
-struct V3ReasoningStopToolCall<'a> {
-    call_id: &'a str,
-    arguments: &'a str,
-}
-
-fn first_reasoning_stop_tool_call(
-    output: Option<&Value>,
-) -> Result<Option<V3ReasoningStopToolCall<'_>>, V3HubRelayResponseError> {
-    let Some(output) = output.and_then(Value::as_array) else {
-        return Ok(None);
-    };
-    for (index, item) in output.iter().enumerate() {
-        let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
-        if !matches!(
-            item_type,
-            "function_call" | "tool_call" | "custom_tool_call"
-        ) {
-            continue;
-        }
-        let Some(name) = item.get("name").and_then(Value::as_str).or_else(|| {
-            item.get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| function.get("name"))
-                .and_then(Value::as_str)
-        }) else {
-            continue;
-        };
-        if !name.trim().eq_ignore_ascii_case("reasoningStop") {
-            continue;
-        }
-        let call_id = item
-            .get("call_id")
-            .or_else(|| item.get("id"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or(V3HubRelayResponseError::MalformedToolCall {
-                index,
-                reason: "reasoningStop tool call missing call_id",
-            })?;
-        let arguments = item
-            .get("arguments")
-            .or_else(|| item.get("input"))
-            .and_then(Value::as_str)
-            .or_else(|| {
-                item.get("function")
-                    .and_then(Value::as_object)
-                    .and_then(|function| function.get("arguments"))
-                    .and_then(Value::as_str)
-            })
-            .ok_or(V3HubRelayResponseError::MalformedToolCall {
-                index,
-                reason: "reasoningStop tool call missing arguments",
-            })?;
-        return Ok(Some(V3ReasoningStopToolCall { call_id, arguments }));
-    }
-    Ok(None)
-}
-
-fn response_has_canonical_reasoning_summary(response: &Value) -> bool {
-    let response = response.get("response").unwrap_or(response);
-    response
-        .get("output")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("reasoning"))
-        .any(reasoning_item_has_non_empty_summary_text)
-}
-
-fn reasoning_item_has_non_empty_summary_text(item: &Value) -> bool {
-    item.get("summary")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .any(|entry| {
-            entry
-                .get("text")
-                .and_then(Value::as_str)
-                .is_some_and(|text| !text.trim().is_empty())
-        })
-}
-
-enum V3SummaryStopSchemaDecision {
-    Finished,
-    Continue {
-        next_step: Option<String>,
-        transition_reason: &'static str,
-        steering: V3StoplessCenterSteering,
-    },
-    Blocked {
-        reason: String,
-    },
-}
-
-fn response_summary_stop_schema_decision(response: &Value) -> Option<V3SummaryStopSchemaDecision> {
-    let response = response.get("response").unwrap_or(response);
-    response
-        .get("output")
-        .and_then(Value::as_array)?
-        .iter()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("reasoning"))
-        .filter(|item| reasoning_item_has_non_empty_summary_text(item))
-        .find_map(reasoning_item_stop_schema_decision)
-}
-
-fn reasoning_item_stop_schema_decision(item: &Value) -> Option<V3SummaryStopSchemaDecision> {
-    let schema = item
-        .get("stop_schema")
-        .or_else(|| item.get("stopSchema"))?
-        .as_object()?;
-    let finished = read_stop_schema_bool(schema, "finished");
-    let blocked = read_stop_schema_bool(schema, "blocked");
-    let next_step = read_first_stop_schema_text(schema, &["nextStep", "next_step"]);
-    let has_recognized_field = finished.is_some() || blocked.is_some() || next_step.is_some();
-    if !has_recognized_field {
-        return None;
-    }
-    if finished == Some(true) {
-        return Some(V3SummaryStopSchemaDecision::Finished);
-    }
-    if blocked == Some(true) {
-        if let Some(reason) =
-            read_first_stop_schema_text(schema, &["blockedReason", "blocked_reason", "reason"])
-        {
-            return Some(V3SummaryStopSchemaDecision::Blocked { reason });
-        }
-        return Some(V3SummaryStopSchemaDecision::Continue {
-            next_step,
-            transition_reason: "summary_stop_schema_blocked_reason_missing_cli_projected",
-            steering: V3StoplessCenterSteering::ReasoningStopNeedsEvidence,
-        });
-    }
-    Some(V3SummaryStopSchemaDecision::Continue {
-        transition_reason: if next_step.is_some() {
-            "summary_stop_schema_next_step_cli_projected"
-        } else {
-            "summary_stop_schema_continue_cli_projected"
-        },
-        next_step,
-        steering: V3StoplessCenterSteering::Continue,
-    })
-}
-
-fn read_stop_schema_bool(object: &Map<String, Value>, key: &str) -> Option<bool> {
-    object.get(key).and_then(Value::as_bool)
-}
-
-fn read_first_stop_schema_text(object: &Map<String, Value>, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        object
-            .get(*key)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    })
 }
 
 fn response_has_stopless_stop_trigger(response: &Value) -> bool {
@@ -599,67 +1023,6 @@ fn response_string_path(value: &Value, path: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
-enum V3ReasoningStopDecision {
-    Continue,
-    NeedsEvidence,
-    Terminal { prefix: String },
-}
-
-fn classify_reasoning_stop_arguments(arguments: &str) -> V3ReasoningStopDecision {
-    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(arguments.trim()) else {
-        return V3ReasoningStopDecision::NeedsEvidence;
-    };
-    let Some(stopreason) = read_reasoning_stop_u8(&object, "stopreason") else {
-        return V3ReasoningStopDecision::NeedsEvidence;
-    };
-    match stopreason {
-        0 => {
-            let evidence = read_reasoning_stop_text(&object, "evidence");
-            if evidence.is_empty() {
-                return V3ReasoningStopDecision::NeedsEvidence;
-            }
-            let reason = read_reasoning_stop_text(&object, "reason");
-            let prefix = if reason.is_empty() {
-                format!("完成。\n证据：{evidence}")
-            } else {
-                format!("完成：{reason}\n证据：{evidence}")
-            };
-            V3ReasoningStopDecision::Terminal { prefix }
-        }
-        1 => {
-            let reason = read_reasoning_stop_text(&object, "reason");
-            let evidence = read_reasoning_stop_text(&object, "evidence");
-            if reason.is_empty() || evidence.is_empty() {
-                return V3ReasoningStopDecision::NeedsEvidence;
-            }
-            V3ReasoningStopDecision::Terminal {
-                prefix: format!("阻塞：{reason}\n证据：{evidence}"),
-            }
-        }
-        2 => V3ReasoningStopDecision::Continue,
-        _ => V3ReasoningStopDecision::NeedsEvidence,
-    }
-}
-
-fn read_reasoning_stop_u8(object: &Map<String, Value>, key: &str) -> Option<u8> {
-    object.get(key).and_then(|value| {
-        value
-            .as_u64()
-            .and_then(|value| u8::try_from(value).ok())
-            .or_else(|| value.as_str()?.trim().parse().ok())
-    })
-}
-
-fn read_reasoning_stop_text(object: &Map<String, Value>, key: &str) -> String {
-    object
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or_default()
-        .to_string()
-}
-
 fn stopless_max_natural_stops(profile: &V3HubRelayResponseHookProfile) -> u32 {
     profile
         .stopless_center_state()
@@ -682,257 +1045,6 @@ fn stopless_response_id(payload: &Value) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
-}
-
-fn build_stopless_terminal_visible_payload_from_reasoning_stop_prefix(
-    payload: &Value,
-    prefix: String,
-) -> Value {
-    let mut payload =
-        build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
-            payload: payload.clone(),
-            mode: Some("replace".to_string()),
-            prefix: Some(prefix),
-        })
-        .payload;
-    finalize_stopless_terminal_responses_payload(&mut payload);
-    payload
-}
-
-fn build_stopless_control_echo_cleaned_payload(payload: &Value) -> Value {
-    let mut payload = payload.clone();
-    strip_stopless_internal_control_echo_from_payload(&mut payload);
-    payload
-}
-
-fn strip_stopless_internal_control_echo_from_payload(payload: &mut Value) {
-    if let Some(response) = payload.get_mut("response") {
-        strip_stopless_internal_control_echo_from_payload(response);
-    }
-    if let Some(object) = payload.as_object_mut() {
-        strip_stopless_internal_control_echo_from_object(object);
-        strip_stopless_internal_tools_from_object(object);
-    }
-}
-
-fn finalize_stopless_terminal_responses_payload(payload: &mut Value) {
-    let Some(object) = payload.as_object_mut() else {
-        return;
-    };
-    if let Some("requires_action" | "in_progress" | "queued") =
-        object.get("status").and_then(Value::as_str)
-    {
-        object.insert("status".to_string(), Value::String("completed".to_string()));
-    }
-    object.remove("required_action");
-    object.remove("requiredAction");
-    object
-        .entry("finish_reason".to_string())
-        .or_insert_with(|| Value::String("stop".to_string()));
-    object
-        .entry("finishReason".to_string())
-        .or_insert_with(|| Value::String("stop".to_string()));
-    strip_stopless_internal_control_echo_from_object(object);
-    strip_stopless_internal_tools_from_object(object);
-    if let Some(output) = object.get_mut("output").and_then(Value::as_array_mut) {
-        for item in output {
-            if item.get("type").and_then(Value::as_str) == Some("message") {
-                if let Some(row) = item.as_object_mut() {
-                    row.entry("status".to_string())
-                        .or_insert_with(|| Value::String("completed".to_string()));
-                    row.entry("role".to_string())
-                        .or_insert_with(|| Value::String("assistant".to_string()));
-                }
-            }
-        }
-    }
-}
-
-fn strip_stopless_internal_control_echo_from_object(object: &mut Map<String, Value>) {
-    if let Some(cleaned) = object
-        .get("instructions")
-        .and_then(Value::as_str)
-        .map(strip_legacy_stopless_instruction)
-    {
-        if cleaned.trim().is_empty() {
-            object.remove("instructions");
-        } else {
-            object.insert("instructions".to_string(), Value::String(cleaned));
-        }
-    }
-    let only_stopless_tools = object
-        .get("tools")
-        .and_then(Value::as_array)
-        .is_some_and(|tools| !tools.is_empty() && tools.iter().all(tool_name_is_stopless_internal));
-    let stopless_required_choice = matches!(
-        object.get("tool_choice"),
-        Some(Value::String(choice)) if choice.trim().eq_ignore_ascii_case("required")
-    ) || matches!(
-        object.get("tool_choice"),
-        Some(Value::Object(choice))
-            if choice
-                .get("type")
-                .and_then(Value::as_str)
-                .is_some_and(|value| value.trim().eq_ignore_ascii_case("required"))
-    );
-    if only_stopless_tools && stopless_required_choice {
-        object.remove("tool_choice");
-    }
-}
-
-fn strip_stopless_internal_tools_from_object(object: &mut Map<String, Value>) {
-    let Some(tools) = object.get_mut("tools").and_then(Value::as_array_mut) else {
-        return;
-    };
-    tools.retain(|tool| !tool_name_is_stopless_internal(tool));
-    if tools.is_empty() {
-        object.remove("tools");
-    }
-}
-
-fn tool_name_is_stopless_internal(tool: &Value) -> bool {
-    read_tool_name(tool).is_some_and(is_stopless_internal_tool_name)
-}
-
-fn is_stopless_internal_tool_name(name: &str) -> bool {
-    let normalized = name.trim().to_ascii_lowercase();
-    matches!(
-        normalized.as_str(),
-        "reasoningstop" | "reasoning_stop" | "stop_message_auto"
-    )
-}
-
-fn read_tool_name(tool: &Value) -> Option<&str> {
-    tool.get("name").and_then(Value::as_str).or_else(|| {
-        tool.get("function")
-            .and_then(Value::as_object)
-            .and_then(|function| function.get("name"))
-            .and_then(Value::as_str)
-    })
-}
-
-fn build_stopless_passthrough_visible_payload(payload: &Value) -> Value {
-    let mut payload =
-        build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
-            payload: payload.clone(),
-            mode: Some("strip".to_string()),
-            prefix: None,
-        })
-        .payload;
-    strip_canonical_stop_schema_fields(&mut payload);
-    strip_empty_responses_visible_messages(&mut payload);
-    payload
-}
-
-fn build_summary_blocked_passthrough_payload(payload: &Value, reason: &str) -> Value {
-    let mut payload = payload.clone();
-    append_blocked_reason_to_canonical_reasoning_summary(&mut payload, reason);
-    payload
-}
-
-fn append_blocked_reason_to_canonical_reasoning_summary(payload: &mut Value, reason: &str) {
-    let reason = reason.trim();
-    if reason.is_empty() {
-        return;
-    }
-    if let Some(response) = payload.get_mut("response") {
-        append_blocked_reason_to_canonical_reasoning_summary(response, reason);
-    }
-    let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for item in output {
-        if item.get("type").and_then(Value::as_str) != Some("reasoning") {
-            continue;
-        }
-        if !reasoning_item_has_non_empty_summary_text(item) {
-            continue;
-        }
-        let Some(summary) = item.get_mut("summary").and_then(Value::as_array_mut) else {
-            continue;
-        };
-        if summary.iter().any(|entry| {
-            entry
-                .get("text")
-                .and_then(Value::as_str)
-                .is_some_and(|text| text.contains(reason))
-        }) {
-            return;
-        }
-        summary.push(json!({
-            "type": "summary_text",
-            "text": format!("阻塞：{reason}")
-        }));
-        return;
-    }
-}
-
-fn strip_canonical_stop_schema_fields(payload: &mut Value) {
-    if let Some(response) = payload.get_mut("response") {
-        strip_canonical_stop_schema_fields(response);
-    }
-    let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for item in output {
-        if item.get("type").and_then(Value::as_str) != Some("reasoning") {
-            continue;
-        }
-        let Some(object) = item.as_object_mut() else {
-            continue;
-        };
-        object.remove("stop_schema");
-        object.remove("stopSchema");
-    }
-}
-
-fn build_stopless_guard_passthrough_visible_payload(payload: &Value) -> Value {
-    let mut payload = build_stopless_passthrough_visible_payload(payload);
-    finalize_stopless_terminal_responses_payload(&mut payload);
-    payload
-}
-
-fn strip_empty_responses_visible_messages(payload: &mut Value) {
-    let Some(object) = payload.as_object_mut() else {
-        return;
-    };
-    if object
-        .get("output_text")
-        .and_then(Value::as_str)
-        .is_some_and(|text| text.trim().is_empty())
-    {
-        object.remove("output_text");
-    }
-    let Some(output) = object.get_mut("output").and_then(Value::as_array_mut) else {
-        return;
-    };
-    output.retain(|item| {
-        item.get("type").and_then(Value::as_str) != Some("message")
-            || responses_message_item_has_visible_text(item)
-    });
-}
-
-fn responses_message_item_has_visible_text(item: &Value) -> bool {
-    item.get("text")
-        .or_else(|| item.get("output_text"))
-        .is_some_and(value_has_non_empty_text)
-        || item
-            .get("content")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .any(|part| {
-                part.get("text")
-                    .or_else(|| part.get("output_text"))
-                    .is_some_and(value_has_non_empty_text)
-            })
-}
-
-fn value_has_non_empty_text(value: &Value) -> bool {
-    value
-        .as_str()
-        .map(str::trim)
-        .is_some_and(|text| !text.is_empty())
 }
 
 fn is_stopless_cli_output(item: &Value) -> bool {
@@ -1138,7 +1250,7 @@ fn chat_message_is_stopless_reset_boundary(item: &Value) -> bool {
 }
 
 fn is_stopless_reset_boundary_item(item: &Value) -> bool {
-    if is_stopless_cli_artifact(item) {
+    if is_stopless_cli_call(item) || is_stopless_cli_output(item) {
         return false;
     }
     let role = item.get("role").and_then(Value::as_str).unwrap_or_default();
@@ -1157,230 +1269,6 @@ fn is_stopless_reset_boundary_item(item: &Value) -> bool {
     }
 }
 
-fn strip_active_stopless_pair_and_stale(input: &mut Vec<Value>, output_index: usize) {
-    let call_index = output_index
-        .checked_sub(1)
-        .filter(|index| input.get(*index).is_some_and(is_stopless_cli_call));
-    let mut next = Vec::with_capacity(input.len());
-    let original = std::mem::take(input);
-    for (index, item) in original.iter().enumerate() {
-        if input_item_is_stopless_cli_projection_message_before_call(item, original.get(index + 1))
-        {
-            continue;
-        }
-        if Some(index) == call_index {
-            continue;
-        }
-        if index == output_index {
-            continue;
-        }
-        if output_pairs_immediately_after_stopless_cli_call(
-            item,
-            index.checked_sub(1).and_then(|index| original.get(index)),
-        ) {
-            continue;
-        }
-        if is_stopless_cli_artifact(item) {
-            continue;
-        }
-        if is_stopless_generated_continuation_item(item) {
-            continue;
-        }
-        next.push(item.clone());
-    }
-    *input = next;
-}
-
-fn strip_active_stopless_chat_pair_and_stale(messages: &mut Vec<Value>, output_index: usize) {
-    let call_index = output_index
-        .checked_sub(1)
-        .filter(|index| messages.get(*index).is_some_and(is_stopless_chat_cli_call));
-    let original = std::mem::take(messages);
-    for (index, item) in original.iter().enumerate() {
-        if Some(index) == call_index || index == output_index {
-            continue;
-        }
-        if chat_output_pairs_immediately_after_stopless_cli_call(
-            item,
-            index.checked_sub(1).and_then(|index| original.get(index)),
-        ) {
-            continue;
-        }
-        if is_stopless_chat_cli_call(item) || is_stopless_chat_cli_output(item) {
-            continue;
-        }
-        if is_stopless_generated_continuation_item(item) {
-            continue;
-        }
-        messages.push(item.clone());
-    }
-}
-
-fn strip_stopless_cli_artifacts(input: &mut Vec<Value>) {
-    let original = std::mem::take(input);
-    for (index, item) in original.iter().enumerate() {
-        if input_item_is_stopless_cli_projection_message_before_call(item, original.get(index + 1))
-        {
-            continue;
-        }
-        if output_pairs_immediately_after_stopless_cli_call(
-            item,
-            index.checked_sub(1).and_then(|index| original.get(index)),
-        ) {
-            continue;
-        }
-        if is_stopless_cli_artifact(item) {
-            continue;
-        }
-        if is_stopless_generated_continuation_item(item) {
-            continue;
-        }
-        input.push(item.clone());
-    }
-}
-
-fn strip_stopless_chat_cli_artifacts(messages: &mut Vec<Value>) {
-    let original = std::mem::take(messages);
-    for (index, item) in original.iter().enumerate() {
-        if chat_output_pairs_immediately_after_stopless_cli_call(
-            item,
-            index.checked_sub(1).and_then(|index| original.get(index)),
-        ) {
-            continue;
-        }
-        if is_stopless_chat_cli_call(&item) || is_stopless_chat_cli_output(&item) {
-            continue;
-        }
-        if is_stopless_generated_continuation_item(&item) {
-            continue;
-        }
-        messages.push(item.clone());
-    }
-}
-
-fn strip_stopless_generated_system_guidance_items(items: &mut Vec<Value>) {
-    let original = std::mem::take(items);
-    for mut item in original {
-        if strip_stopless_generated_system_guidance_item(&mut item) {
-            continue;
-        }
-        items.push(item);
-    }
-}
-
-fn strip_stopless_generated_system_guidance_item(item: &mut Value) -> bool {
-    let Some(object) = item.as_object_mut() else {
-        return false;
-    };
-    let role = object
-        .get("role")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if !matches!(role, "system" | "developer") {
-        return false;
-    }
-    let mut changed = false;
-    if let Some(content) = object.get_mut("content") {
-        changed = strip_stopless_generated_guidance_from_content(content);
-    }
-    changed && stopless_generated_guidance_item_is_empty(object)
-}
-
-fn strip_stopless_generated_guidance_from_content(content: &mut Value) -> bool {
-    match content {
-        Value::String(text) => {
-            let cleaned = strip_legacy_stopless_instruction(text);
-            if cleaned == *text {
-                return false;
-            }
-            if cleaned.trim().is_empty() {
-                *content = Value::Null;
-            } else {
-                *text = cleaned;
-            }
-            true
-        }
-        Value::Array(parts) => {
-            let mut changed = false;
-            let original = std::mem::take(parts);
-            for mut part in original {
-                let original_text = part.get("text").and_then(Value::as_str).map(str::to_string);
-                if let Some(text) = original_text {
-                    let cleaned = strip_legacy_stopless_instruction(&text);
-                    if cleaned != text {
-                        changed = true;
-                        if cleaned.trim().is_empty() {
-                            continue;
-                        }
-                        if let Some(object) = part.as_object_mut() {
-                            object.insert("text".to_string(), Value::String(cleaned));
-                        }
-                    }
-                }
-                parts.push(part);
-            }
-            if parts.is_empty() {
-                *content = Value::Null;
-            }
-            changed
-        }
-        _ => false,
-    }
-}
-
-fn stopless_generated_guidance_item_is_empty(object: &Map<String, Value>) -> bool {
-    object.iter().all(|(key, value)| match key.as_str() {
-        "role" => true,
-        "type" => value.as_str().is_some_and(|value| value == "message"),
-        "content" => match value {
-            Value::Null => true,
-            Value::String(text) => text.trim().is_empty(),
-            Value::Array(parts) => parts.is_empty(),
-            _ => false,
-        },
-        _ => false,
-    })
-}
-
-fn is_stopless_cli_artifact(item: &Value) -> bool {
-    is_stopless_cli_call(item) || is_stopless_cli_output(item)
-}
-
-fn is_stopless_generated_continuation_item(item: &Value) -> bool {
-    if item.get("role").and_then(Value::as_str) != Some("user") {
-        return false;
-    }
-    let Some(content) = item.get("content").and_then(Value::as_str) else {
-        return false;
-    };
-    is_stopless_generated_continuation_content(content)
-}
-
-fn is_stopless_generated_continuation_content(content: &str) -> bool {
-    let content = content.trim_start();
-    content.starts_with("继续当前目标。")
-        && content.contains("基于已经恢复的完整上下文")
-        && (content.contains("复核当前目标") || content.contains("当前目标的缺口"))
-        && content.contains("reasoningStop")
-        && content.contains("needs_user_input")
-}
-
-fn input_item_is_stopless_cli_projection_message_before_call(
-    item: &Value,
-    next_item: Option<&Value>,
-) -> bool {
-    next_item.is_some_and(is_stopless_cli_call) && is_stopless_cli_projection_message(item)
-}
-
-fn is_stopless_cli_projection_message(item: &Value) -> bool {
-    item.get("type").and_then(Value::as_str) == Some("message")
-        && item
-            .get("role")
-            .and_then(Value::as_str)
-            .is_some_and(|role| role == "assistant")
-        && responses_message_item_has_visible_text(item)
-}
-
 fn is_stopless_cli_call(item: &Value) -> bool {
     matches!(
         item.get("type").and_then(Value::as_str),
@@ -1392,33 +1280,10 @@ fn is_stopless_cli_call(item: &Value) -> bool {
         || item_is_exact_stopless_cli_command_call(item))
 }
 
-fn strip_legacy_stopless_instruction(existing: &str) -> String {
-    let mut cleaned = existing.to_string();
-    for marker in [
-        "当前轮推进准则",
-        "当前轮继续推进准则",
-        "请基于已经恢复的完整上下文继续推理",
-        "正常执行当前任务，不要因为 stop schema 合同",
-        "上一轮 stop 响应缺少 stop schema",
-        "继续完成当前目标；基于现有上下文推理并按需调用工具。停止时调用 reasoningStop",
-        "继续推进当前目标；不要把 no-op 工具轮当作完成。",
-        "RouteCodex stopless guideline",
-        "RouteCodex stopless continuation",
-        "上一轮 reasoningStop CLI no-op",
-        "继续完成当前目标；如果认为已完成或阻塞，必须调用 reasoningStop",
-        "如果确实阻塞，调用 reasoningStop",
-        "<rcc_stop_schema>",
-    ] {
-        if let Some(index) = cleaned.find(marker) {
-            cleaned.truncate(index);
-        }
-    }
-    cleaned.trim_end().to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     const CMD_ARGS: &str = "{\"cmd\":\"routecodex hook run reasoningStop\"}";
 
@@ -1464,32 +1329,119 @@ mod tests {
     }
 
     #[test]
-    fn active_strip_removes_stale_dynamic_stopless_outputs() {
-        let mut input = vec![
-            json!({"type":"message","role":"user","content":[{"type":"input_text","text":"go"}]}),
-            response_call("call-old", CMD_ARGS),
-            response_output("call-old"),
-            response_call("call-new", CMD_ARGS),
-            response_output("call-new"),
-        ];
-        let index = active_stopless_cli_output(&input).unwrap().0;
-        strip_active_stopless_pair_and_stale(&mut input, index);
-        let serialized = serde_json::to_string(&input).unwrap();
-        assert!(!serialized.contains("call-old"));
-        assert!(!serialized.contains("call-new"));
-        assert!(!serialized.contains(STOPLESS_CLI_COMMAND));
-        let mut messages = vec![
-            json!({"role":"user","content":"go"}),
-            chat_call("chat-old", CMD_ARGS),
-            chat_output("chat-old"),
-            chat_call("chat-new", CMD_ARGS),
-            chat_output("chat-new"),
-        ];
-        let index = active_stopless_chat_cli_output(&messages).unwrap();
-        strip_active_stopless_chat_pair_and_stale(&mut messages, index);
-        let serialized = serde_json::to_string(&messages).unwrap();
-        assert!(!serialized.contains("chat-old"));
-        assert!(!serialized.contains("chat-new"));
-        assert!(!serialized.contains(STOPLESS_CLI_COMMAND));
+    fn web_search_request_hook_activates_local_surface_for_declared_tool() {
+        let mut payload = json!({
+            "model": "local-model",
+            "input": [{"type":"message","role":"user","content":"search the web"}],
+            "tools": [
+                {"type": "web_search", "external_web_access": true, "search_content_types": ["text"]}
+            ]
+        });
+        let state = apply_v3_web_search_request_hook_at_req04(&mut payload)
+            .expect("hook must not fail")
+            .expect("web_search declaration must activate the websearch instance");
+        assert_eq!(state.phase(), V3WebSearchCenterPhase::LocalToolSurfaceActive);
+        assert_eq!(state.transition_reason(), Some("req04_web_search_surface_active"));
+    }
+
+    #[test]
+    fn web_search_request_hook_activates_for_web_search_preview_declaration() {
+        let mut payload = json!({
+            "model": "local-model",
+            "input": "search",
+            "tools": [{"type": "web_search_preview", "search_context_size": "medium"}]
+        });
+        let state = apply_v3_web_search_request_hook_at_req04(&mut payload)
+            .expect("hook must not fail")
+            .expect("web_search_preview declaration must activate the websearch instance");
+        assert_eq!(state.phase(), V3WebSearchCenterPhase::LocalToolSurfaceActive);
+    }
+
+    #[test]
+    fn web_search_request_hook_stays_idle_without_declaration() {
+        let mut payload = json!({
+            "model": "local-model",
+            "input": "hello",
+            "tools": [
+                {"type": "function", "name": "read_file", "description": "read", "parameters": {"type":"object","properties":{}}}
+            ]
+        });
+        let state = apply_v3_web_search_request_hook_at_req04(&mut payload)
+            .expect("hook must not fail");
+        assert!(state.is_none(), "ordinary tools must not activate websearch");
+    }
+
+    #[test]
+    fn web_search_request_hook_ignores_tools_missing() {
+        let mut payload = json!({"model": "local-model", "input": "hello"});
+        let state = apply_v3_web_search_request_hook_at_req04(&mut payload)
+            .expect("hook must not fail");
+        assert!(state.is_none());
+    }
+
+    #[test]
+    fn first_local_websearch_tool_call_extracts_and_validates() {
+        let payload = json!({
+            "output": [
+                {"type":"function_call","call_id":"call_ws_1","name":"websearch","arguments":"{\"query\":\"routecodex v3\",\"count\":5}"},
+                {"type":"function_call","call_id":"call_ws_2","name":"read_file","arguments":"{}"}
+            ]
+        });
+        let call = first_local_websearch_tool_call(&payload)
+            .expect("extract")
+            .expect("websearch call present");
+        assert_eq!(call.call_id, "call_ws_1");
+        assert_eq!(call.query, "routecodex v3");
+        assert_eq!(call.count, Some(5));
+        assert!(call.recency.is_none());
+    }
+
+    #[test]
+    fn first_local_websearch_tool_call_rejects_missing_query() {
+        let payload = json!({
+            "output": [
+                {"type":"function_call","call_id":"call_ws_1","name":"websearch","arguments":"{\"count\":5}"}
+            ]
+        });
+        let error = first_local_websearch_tool_call(&payload).expect_err("missing query must fail");
+        assert!(error.to_string().contains("requires a non-empty query"));
+    }
+
+    #[test]
+    fn first_local_websearch_tool_call_ignores_other_tools() {
+        let payload = json!({
+            "output": [
+                {"type":"function_call","call_id":"call_a","name":"exec_command","arguments":"{}"}
+            ]
+        });
+        assert!(first_local_websearch_tool_call(&payload)
+            .expect("extract")
+            .is_none());
+    }
+
+    #[test]
+    fn strip_local_websearch_tool_call_removes_only_matching_call() {
+        let payload = json!({
+            "output": [
+                {"type":"message","role":"assistant","content":[{"type":"output_text","text":"searching"}]},
+                {"type":"function_call","call_id":"call_ws_1","name":"websearch","arguments":"{\"query\":\"x\"}"},
+                {"type":"function_call","call_id":"call_ws_2","name":"read_file","arguments":"{}"}
+            ]
+        });
+        let stripped = strip_local_websearch_tool_call(&payload, "call_ws_1");
+        let output = stripped["output"].as_array().expect("output array");
+        assert_eq!(output.len(), 2);
+        assert!(
+            output
+                .iter()
+                .all(|item| item.get("call_id").and_then(Value::as_str) != Some("call_ws_1")),
+            "websearch call must be stripped"
+        );
+        assert!(
+            output
+                .iter()
+                .any(|item| item.get("call_id").and_then(Value::as_str) == Some("call_ws_2")),
+            "adjacent ordinary tool must remain"
+        );
     }
 }

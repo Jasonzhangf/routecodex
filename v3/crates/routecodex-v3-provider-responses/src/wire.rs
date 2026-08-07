@@ -3,8 +3,6 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
 use serde_json::Value;
 
-const V3_HISTORICAL_TOOL_IMAGE_PLACEHOLDER_TEXT: &str = "[Image omitted]";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3ProviderAuthSecretHandle {
     Environment(String),
@@ -77,7 +75,7 @@ impl V3Provider12ResponsesWirePayload {
 pub fn build_v3_provider_12_responses_wire_payload(
     request_id: impl Into<String>,
     target: V3ResponsesProviderTarget,
-    mut current_request_body: Value,
+    current_request_body: Value,
 ) -> Result<V3Provider12ResponsesWirePayload, V3ProviderError> {
     let request_id = request_id.into();
     let stream_intent = match current_request_body
@@ -98,11 +96,6 @@ pub fn build_v3_provider_12_responses_wire_payload(
     if let Some(field) = find_v3_routecodex_control_payload_key(&current_request_body) {
         return Err(V3ProviderError::ControlFieldInWireBody { request_id, field });
     }
-    replace_historical_responses_tool_output_data_images(&mut current_request_body);
-    remove_configured_historical_response_fields(
-        &mut current_request_body,
-        &target.provider_request_cleanup.historical_fields,
-    );
     validate_current_responses_data_images(&request_id, &current_request_body)?;
     let actual_model = current_request_body
         .get("model")
@@ -124,169 +117,6 @@ pub fn build_v3_provider_12_responses_wire_payload(
     })
 }
 
-fn replace_historical_responses_tool_output_data_images(body: &mut Value) {
-    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
-        return;
-    };
-    let Some(latest_user_index) = input.iter().rposition(is_responses_user_input_item) else {
-        return;
-    };
-    for item in input.iter_mut().take(latest_user_index) {
-        replace_historical_function_call_output_data_images(item);
-    }
-}
-
-fn is_responses_user_input_item(item: &Value) -> bool {
-    item.as_object()
-        .and_then(|object| object.get("role"))
-        .and_then(Value::as_str)
-        == Some("user")
-}
-
-fn replace_historical_function_call_output_data_images(item: &mut Value) {
-    let Some(object) = item.as_object_mut() else {
-        return;
-    };
-    if object.get("type").and_then(Value::as_str) != Some("function_call_output") {
-        return;
-    }
-    let Some(output) = object.get_mut("output").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for output_part in output {
-        if is_historical_tool_output_data_image_part(output_part) {
-            *output_part = historical_tool_image_placeholder_part();
-        }
-    }
-}
-
-fn is_historical_tool_output_data_image_part(part: &Value) -> bool {
-    let Some(object) = part.as_object() else {
-        return false;
-    };
-    if object.get("type").and_then(Value::as_str) != Some("input_image") {
-        return false;
-    }
-    object
-        .get("image_url")
-        .and_then(image_url_as_str)
-        .map(|image_url| image_url.starts_with("data:image"))
-        .unwrap_or(false)
-}
-
-fn historical_tool_image_placeholder_part() -> Value {
-    let mut object = serde_json::Map::new();
-    object.insert("type".to_string(), Value::String("input_text".to_string()));
-    object.insert(
-        "text".to_string(),
-        Value::String(V3_HISTORICAL_TOOL_IMAGE_PLACEHOLDER_TEXT.to_string()),
-    );
-    Value::Object(object)
-}
-
-fn remove_configured_historical_response_fields(body: &mut Value, fields: &[String]) {
-    if fields.is_empty() {
-        return;
-    }
-    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
-        return;
-    };
-    let Some(latest_user_index) = input.iter().rposition(is_responses_user_input_item) else {
-        return;
-    };
-    let selectors = fields
-        .iter()
-        .filter_map(|field| V3HistoricalFieldCleanupSelector::parse(field))
-        .collect::<Vec<_>>();
-    if selectors.is_empty() {
-        return;
-    }
-    for item in input.iter_mut().take(latest_user_index) {
-        remove_configured_fields_from_value(item, &selectors);
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct V3HistoricalFieldCleanupSelector {
-    type_name: Option<String>,
-    field_path: Vec<String>,
-}
-
-impl V3HistoricalFieldCleanupSelector {
-    fn parse(field: &str) -> Option<Self> {
-        let parts = field
-            .split('.')
-            .map(str::trim)
-            .filter(|part| !part.is_empty())
-            .map(ToOwned::to_owned)
-            .collect::<Vec<_>>();
-        if parts.is_empty() {
-            return None;
-        }
-        if parts.len() >= 2 {
-            return Some(Self {
-                type_name: Some(parts[0].clone()),
-                field_path: parts[1..].to_vec(),
-            });
-        }
-        Some(Self {
-            type_name: None,
-            field_path: parts,
-        })
-    }
-}
-
-fn remove_configured_fields_from_value(
-    value: &mut Value,
-    selectors: &[V3HistoricalFieldCleanupSelector],
-) {
-    match value {
-        Value::Object(object) => {
-            for selector in selectors {
-                if selector.type_name.as_deref().is_none_or(|type_name| {
-                    object.get("type").and_then(Value::as_str) == Some(type_name)
-                }) {
-                    remove_field_path_from_object(object, &selector.field_path);
-                }
-            }
-            for child in object.values_mut() {
-                remove_configured_fields_from_value(child, selectors);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                remove_configured_fields_from_value(item, selectors);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn remove_field_path_from_object(object: &mut serde_json::Map<String, Value>, path: &[String]) {
-    let Some((head, tail)) = path.split_first() else {
-        return;
-    };
-    if tail.is_empty() {
-        object.remove(head);
-        return;
-    }
-    if let Some(child) = object.get_mut(head) {
-        remove_field_path_from_value(child, tail);
-    }
-}
-
-fn remove_field_path_from_value(value: &mut Value, path: &[String]) {
-    match value {
-        Value::Object(object) => remove_field_path_from_object(object, path),
-        Value::Array(items) => {
-            for item in items {
-                remove_field_path_from_value(item, path);
-            }
-        }
-        _ => {}
-    }
-}
-
 fn validate_current_responses_data_images(
     request_id: &str,
     body: &Value,
@@ -301,6 +131,13 @@ fn validate_current_responses_data_images(
         validate_data_image_urls_in_value(request_id, item)?;
     }
     Ok(())
+}
+
+fn is_responses_user_input_item(item: &Value) -> bool {
+    item.as_object()
+        .and_then(|object| object.get("role"))
+        .and_then(Value::as_str)
+        == Some("user")
 }
 
 fn validate_data_image_urls_in_value(
@@ -522,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_replaces_only_historical_tool_output_data_images_before_latest_user() {
+    fn wire_preserves_historical_tool_output_data_images_byte_for_byte() {
         let current_user_image = VALID_PNG_DATA_URL;
         let current_tool_image = VALID_PNG_DATA_URL;
         let body = json!({
@@ -566,23 +403,10 @@ mod tests {
                 }
             ]
         });
+        let expected = body.clone();
         let wire =
             build_v3_provider_12_responses_wire_payload("req-images", target(), body).unwrap();
-        let input = wire.body()["input"].as_array().unwrap();
-        assert_eq!(
-            input[2]["output"][0],
-            json!({"type": "input_text", "text": "[Image omitted]"})
-        );
-        assert_eq!(
-            input[2]["output"][1],
-            json!({"type": "input_text", "text": "[Image omitted]"})
-        );
-        assert_eq!(
-            input[2]["output"][2],
-            json!({"type": "input_text", "text": "tool text stays"})
-        );
-        assert_eq!(input[3]["content"][1]["image_url"], current_user_image);
-        assert_eq!(input[4]["output"][0]["image_url"], current_tool_image);
+        assert_eq!(wire.body(), &expected);
         assert_eq!(wire.stream_intent(), V3ResponsesStreamIntent::Sse);
     }
 
@@ -625,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_removes_configured_historical_reasoning_encrypted_content_only_before_latest_user() {
+    fn wire_preserves_historical_reasoning_even_when_legacy_cleanup_is_configured() {
         let body = json!({
             "model": "upstream-model",
             "input": [
@@ -648,17 +472,14 @@ mod tests {
                 }
             ]
         });
+        let expected = body.clone();
         let wire = build_v3_provider_12_responses_wire_payload(
             "req-encrypted-history",
             cleanup_target(&["reasoning.encrypted_content"]),
             body,
         )
         .unwrap();
-        let input = wire.body()["input"].as_array().unwrap();
-        assert!(input[1].get("encrypted_content").is_none());
-        assert_eq!(input[1]["summary"][0]["text"], "old summary");
-        assert_eq!(input[2]["content"][0]["text"], "literal rsn_text_stays");
-        assert_eq!(input[4]["encrypted_content"], "rsn_current_same_turn");
+        assert_eq!(wire.body(), &expected);
     }
 
     #[test]

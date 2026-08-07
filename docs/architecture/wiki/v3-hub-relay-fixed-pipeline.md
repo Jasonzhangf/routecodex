@@ -197,8 +197,8 @@ Relay is borrow-first and move-at-boundary:
 - Machine lifecycle: `v3.hub_relay.tool_servertool_multiturn_parity`.
 - Manifest:
   [v3.hub_relay.tool_servertool_multiturn_parity](../manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml).
-- Edges: `v3-relay-tool-parity-01` through `v3-relay-tool-parity-06`.
-- Owner boundary: Req04 request Chat Process governs tool outputs, attachment history placeholders,
+- Edges: `v3-relay-tool-parity-01`, `v3-relay-tool-parity-02`, and `v3-relay-tool-parity-04` through `v3-relay-tool-parity-06`.
+- Owner boundary: Req04 request Chat Process governs current-turn tool outputs and preserves restored history,
   and servertool request hook profile; Resp03 response Chat Process harvests tool calls and
   classifies servertool/apply_patch/MCP/native/custom/function tools before Resp04 continuation
   commit.

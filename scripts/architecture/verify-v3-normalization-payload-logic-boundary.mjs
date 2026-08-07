@@ -283,8 +283,8 @@ for (const boundary of protocolMappingBoundaries) {
 const requestRun = functionBody(relayRequest, 'fn run_from_normalized_with_events');
 requireAll(requestRun, 'ReqChatProcess tool governance owner', [
   'restore_local_context_at_req04',
+  'current_payload_start',
   'govern_tool_outputs_at_req04',
-  'govern_attachment_history_at_req04',
   'run_servertool_profile',
   'build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03',
 ]);

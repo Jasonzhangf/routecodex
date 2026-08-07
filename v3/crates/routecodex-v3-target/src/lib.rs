@@ -1,7 +1,7 @@
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ForwarderTargetManifest,
     V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3RouteGroupManifest,
-    V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
+    V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy, V3WebSearchExecutionMode,
 };
 use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
 use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTargetHitOnce};
@@ -25,6 +25,7 @@ pub struct V3TargetCandidate {
     pub wire_model: String,
     pub visible_model_ids: Vec<String>,
     pub model_capabilities: Vec<String>,
+    pub web_search_execution_mode: V3WebSearchExecutionMode,
     pub max_context_tokens: Option<u64>,
     pub base_url: String,
     pub responses_process: Option<String>,
@@ -479,6 +480,7 @@ impl V3TargetInterpreter {
                 wire_model: model.wire_name.clone(),
                 visible_model_ids: visible_model_ids.clone(),
                 model_capabilities: model.capabilities.clone(),
+                web_search_execution_mode: model.web_search_execution_mode,
                 max_context_tokens: model.max_context_tokens,
                 base_url: provider.base_url.clone(),
                 responses_process: provider

@@ -13,9 +13,11 @@ pub use common::{
     V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayToolKind,
     V3HubRequestSemanticProtocol, V3HubResponseNormalizedKind, V3HubResponseTerminality,
     V3HubServertoolResponseAction, V3HubTargetResolution, V3HubTransportIntent,
-    V3ProviderCompatError, V3ProviderCompatProfileId, V3StoplessCenterNextRequestPolicy,
-    V3StoplessCenterPhase, V3StoplessCenterState, V3StoplessCenterSteering,
-    V3StoplessCenterStopKind,
+    V3ProviderCompatError, V3ProviderCompatProfileId, V3ServerToolCenter,
+    V3ServerToolCenterKey, V3ServerToolCenterPoisoned, V3ServerToolInstanceState,
+    V3ServerToolName, V3StoplessCenterNextRequestPolicy, V3StoplessCenterPhase,
+    V3StoplessCenterState, V3StoplessCenterSteering, V3StoplessCenterStopKind,
+    V3WebSearchCenterPhase, V3WebSearchCenterState,
 };
 
 mod side_channel;
@@ -35,9 +37,11 @@ mod request_outbound_builtin_tool_projection;
 mod request_outbound_format;
 mod request_outbound_metadata;
 mod request_outbound_tool_id;
+#[cfg(test)]
+pub(crate) use request_outbound_format::build_v3_openai_chat_standard_request_from_chat_canonical;
 pub(crate) use request_outbound_format::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,
-    build_v3_openai_chat_standard_request_from_chat_canonical,
+    build_v3_openai_chat_standard_request_for_selected_web_search_mode,
     build_v3_openai_responses_standard_request_from_chat_canonical,
 };
 mod anthropic_codec_tool_projection;
@@ -103,6 +107,11 @@ pub use gemini_relay_runtime::*;
 mod openai_chat_relay_runtime;
 pub use openai_chat_relay_runtime::*;
 mod responses_relay_runtime;
+mod web_search_hop;
+pub(crate) use web_search_hop::{
+    execute_local_web_search_hop, project_web_search_result_into_finalized,
+    resolve_request_web_search_backend_binding, resolve_web_search_mode_and_backend,
+};
 pub use responses_relay_runtime::*;
 mod anthropic_relay_hooks;
 pub use anthropic_relay_hooks::*;

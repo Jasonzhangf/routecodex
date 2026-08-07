@@ -11,6 +11,49 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
     Ok(payload)
 }
 
+pub(crate) fn apply_response_compat(payload: Value) -> Value {
+    strip_minimax_provider_sentinel_recursive(payload)
+}
+
+fn strip_minimax_provider_sentinel_recursive(value: Value) -> Value {
+    match value {
+        Value::String(text) => match strip_minimax_provider_sentinel_text(&text) {
+            Some(stripped) => Value::String(stripped),
+            None => Value::String(text),
+        },
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(strip_minimax_provider_sentinel_recursive)
+                .collect(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| (key, strip_minimax_provider_sentinel_recursive(value)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn strip_minimax_provider_sentinel_text(text: &str) -> Option<String> {
+    if !text.contains("]<]minimax[>[") {
+        return None;
+    }
+    let mut next = text.replace("]<]minimax[>[", "");
+    for marker in ["<think\n", "<think\r\n", "<think"] {
+        if next.starts_with(marker) {
+            next = next[marker.len()..].to_string();
+            break;
+        }
+    }
+    let trimmed_start = next.trim_start_matches(['\r', '\n', ' ', '\t']);
+    if let Some(rest) = trimmed_start.strip_prefix("<continue") {
+        next = rest.to_string();
+    }
+    Some(next)
+}
+
 fn project_web_search_tools(root: &mut Map<String, Value>) -> Result<(), String> {
     let tools = match root.get_mut("tools") {
         None => return Ok(()),

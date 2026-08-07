@@ -865,7 +865,8 @@ fn transform_direct_sse_stopless_control_frame(
     };
     let outcome = run_v3_responses_direct_stopless_response_hooks(
         response_payload,
-        request_state,
+        Some(request_state),
+        None,
         &policy.transition_request_id,
         policy.transition_updated_at,
         V3HubTransportIntent::Sse,

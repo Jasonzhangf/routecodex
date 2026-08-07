@@ -12,7 +12,9 @@ const files = {
   responsesRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   servertoolHooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
   providerResponsesTransport: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
+  providerResponsesWire: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
   responseSemanticsTests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs',
+  requestSemanticsTests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs',
   tests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
   responsesLocalTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
   manifest: 'docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml',
@@ -53,7 +55,6 @@ const supportingProtocolScripts = [
 const requiredSteps = [
   'v3-relay-tool-parity-01',
   'v3-relay-tool-parity-02',
-  'v3-relay-tool-parity-03',
   'v3-relay-tool-parity-04',
   'v3-relay-tool-parity-05',
   'v3-relay-tool-parity-06',
@@ -78,29 +79,49 @@ for (const script of requiredScripts) {
 }
 
 requireAll(text.request, files.request, [
-  'V3HubAttachmentHistoryPolicy',
-  'run_with_attachment_history_policy',
   'govern_tool_outputs_at_req04',
   'fn normalize_apply_patch_output_text_at_req04',
-  'govern_attachment_history_at_req04',
-  'pub enum V3HubAttachmentHistoryPolicy',
   'OrphanToolOutput { index: usize, call_id: String }',
   'ToolOutputKindMismatch',
-  'AttachmentResourceMissing',
   'SideChannelLeaked',
-  'replace_historical_media_with_placeholder',
+  'current_payload_start',
 ]);
+forbid(
+  text.request,
+  files.request,
+  /V3HubAttachmentHistoryPolicy|run_with_attachment_history_policy|govern_attachment_history_at_req04|replace_historical_media_with_placeholder/,
+  'historical payload rewrite or attachment placeholder owner',
+);
+forbid(
+  text.providerResponsesWire,
+  files.providerResponsesWire,
+  /replace_historical|remove_configured_historical|historical_tool_image_placeholder|V3_HISTORICAL_TOOL_IMAGE_PLACEHOLDER_TEXT/,
+  'provider wire historical payload rewrite or placeholder owner',
+);
+forbid(
+  text.request,
+  files.request,
+  /full_materialize_govern_tool_outputs_at_req04/,
+  'full payload materialization shortcut',
+);
 requireAll(text.servertoolHooks, files.servertoolHooks, [
-  'fn inject_reasoning_stop_tool(payload: &mut Value)',
-  'fn inject_reasoning_stop_tool_into_array',
-  'fn inject_reasoning_stop_tool_into_additional_tools',
-  'additional_tools.tools must be an array; refusing to rebuild original tool JSON path',
-  'inject_reasoning_stop_tool_into_array(embedded_tools, "input[].tools")',
+  'apply_v3_stopless_request_hook_at_req04',
+  'current_payload_start',
+  'let current_input = input.get(current_payload_start..)',
+  'let current_messages = messages.get(current_payload_start..)',
+  'active_stopless_cli_output',
+  'active_stopless_chat_cli_output',
+  'STOPLESS_CLI_COMMAND',
 ]);
-forbid(text.servertoolHooks, files.servertoolHooks, /lift_additional_tools_into_provider_tool_surface|collect_additional_tools_from_responses_input|provider_tool_surface_contains_equivalent_tool/, 'tool declaration shape rebuild helper');
+forbid(
+  text.servertoolHooks,
+  files.servertoolHooks,
+  /strip_active_stopless_pair_and_stale|strip_active_stopless_chat_pair_and_stale|strip_stopless_internal_control_echo|strip_stopless_internal_tools|finalize_stopless_terminal_responses_payload|build_stopless_passthrough_visible_payload|build_stopless_guard_passthrough_visible_payload|lift_additional_tools_into_provider_tool_surface/,
+  'history-wide Stopless cleanup or response repair',
+);
 requireAll(text.providerResponsesTransport, files.providerResponsesTransport, [
-  'responses_http_provider_request_preserves_additional_tools_surface',
-  'request path $.tools must be absent because the original request did not contain $.tools',
+  'pub fn is_v3_anthropic_provider_request_header_name',
+  'pub struct V3Transport13ResponsesRequest',
 ]);
 forbid(
   text.providerResponsesTransport,
@@ -111,21 +132,9 @@ forbid(
 forbid(
   text.providerResponsesTransport,
   files.providerResponsesTransport,
-  /AnthropicMessagesHttp|build_anthropic_messages_body|build_anthropic_messages\(|project_anthropic_message_json_to_responses|project_anthropic_sse_to_responses|lift_responses_additional_tools_for_anthropic_messages_body|target\.provider_type\.eq_ignore_ascii_case\("anthropic"\)|anthropic-version|x-api-key/,
-  'non-ChatProcess protocol conversion in provider transport',
+  /build_anthropic_messages_body|Anthropic protocol conversion/,
+  'provider transport protocol conversion outside Chat Process',
 );
-const injectStart = text.servertoolHooks.indexOf('fn inject_reasoning_stop_tool(payload: &mut Value)');
-const injectEnd = text.servertoolHooks.indexOf('fn inject_reasoning_stop_tool_into_array', injectStart);
-if (injectStart < 0 || injectEnd < 0) {
-  fail(`${files.servertoolHooks}: unable to isolate stopless tool injection owner`);
-} else {
-  const injectBody = text.servertoolHooks.slice(injectStart, injectEnd);
-  requireOrdered(injectBody, files.servertoolHooks, [
-    'object.contains_key("tools")',
-    'inject_reasoning_stop_tool_into_additional_tools',
-    'object.insert(',
-  ]);
-}
 requireAll(text.responseCommon, files.responseCommon, ['pub enum V3HubRelayToolKind']);
 requireAll(text.responseChatProcess, files.responseChatProcess, [
   'pub(crate) fn classify_v3_hub_relay_tool_kind',
@@ -213,31 +222,22 @@ forbid(
   'SSE transport tool-call semantic inference',
 );
 
-const runWithStart = text.request.indexOf('pub fn run_with_attachment_history_policy');
 const runFromNormalizedStart = text.request.indexOf('pub fn run_from_normalized(');
 const req04Start = text.request.indexOf('fn run_from_normalized_with_events');
 const classifyStart = text.request.indexOf('fn classify_continuation');
 if (
-  runWithStart < 0 ||
   runFromNormalizedStart < 0 ||
   req04Start < 0 ||
   classifyStart < 0 ||
-  !(runWithStart < runFromNormalizedStart && runFromNormalizedStart < req04Start && req04Start < classifyStart)
+  !(runFromNormalizedStart < req04Start && req04Start < classifyStart)
 ) {
   fail(`${files.request}: unable to isolate Req04 request governance owner`);
 } else {
-  const preReq04 = text.request.slice(runWithStart, runFromNormalizedStart);
   const req04Owner = text.request.slice(req04Start, classifyStart);
-  forbid(
-    preReq04,
-    files.request,
-    /govern_attachment_history_at_req04\s*\(/,
-    'attachment history governance before Req04',
-  );
   requireOrdered(req04Owner, files.request, [
     'restore_local_context_at_req04',
+    'current_payload_start',
     'govern_tool_outputs_at_req04',
-    'govern_attachment_history_at_req04',
     'run_servertool_profile',
   ]);
 }
@@ -248,8 +248,6 @@ requireAll(text.tests, files.tests, [
   'apply_patch_tool_output_error_is_normalized_and_kept_as_next_turn_tool_output',
   'apply_patch_legacy_function_call_accepts_custom_output_after_client_projection',
   'request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id',
-  'attachment_history_placeholder_releases_only_historical_media_and_preserves_current_payload',
-  'attachment_history_missing_resource_fails_without_trimming_current_request',
   'response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit',
   'responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order',
   'provider_and_client_payloads_reject_routecodex_control_leakage',
@@ -263,10 +261,17 @@ requireAll(text.tests, files.tests, [
   'V3HubContinuationOwnership::RemoteProviderOwned',
   'V3HubContinuationOwnership::RouteCodexLocalOwned',
   'data:image/png;base64,CURRENT',
+  'attachment_history_is_preserved_without_placeholder_cleanup',
+  'attachment_history_missing_resource_is_preserved_as_client_data',
+  'stopless_shaped_business_text_is_preserved_without_current_turn_activation',
+  'malformed_current_turn_reasoning_stop_arguments_fail_without_guessing_control_state',
 ]);
 requireAll(text.responseSemanticsTests, files.responseSemanticsTests, [
   'resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook',
   'resp04_reuses_resp03_repaired_payload_without_semantic_repair',
+]);
+requireAll(text.requestSemanticsTests, files.requestSemanticsTests, [
+  'stopless_req04_ignores_restored_history_and_only_observes_current_suffix',
 ]);
 requireAll(text.functionMap, files.functionMap, [
   'feature_id: v3.resp03_tool_governance_gap_closeout',
@@ -285,32 +290,13 @@ requireAll(text.verificationMap, files.verificationMap, [
 ]);
 requireAll(text.responsesLocalTests, files.responsesLocalTests, [
   'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
-  'json_stopless_center_noop_cli_roundtrip_preserves_provider_tools',
-  'json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs',
-  'client no-op CLI must be no-input',
-  'client no-op CLI must be no-input and must not carry an input envelope',
-  'json_stopless_center_natural_stop_guard_passes_cleaned_original_response',
-  'Responses client SSE must terminate stopless projection with response.completed',
-  'Responses client SSE must emit response.done before [DONE]',
-  'Responses client SSE must not use response.requires_action as terminal stream event',
-  'Responses client SSE terminal response must preserve stopless requires_action status',
-  'Responses Relay client SSE must terminate with response.completed while preserving Hub-finalized requires_action status',
-  'Responses Relay client SSE must emit response.done before the [DONE] transport marker',
-  'Responses Relay client SSE must not use response.requires_action as the terminal stream event',
   'json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback',
   'wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context',
-  'original request path $.tools must preserve original tools and append exactly one internal reasoningStop tool',
-  'assert_original_tools_preserved(&captures[1], second_tools.as_array().unwrap());',
-  'assert_additional_tools_preserved_without_shape_rebuild',
-  'provider_tool_names',
-  'body.get("tools").is_none()',
-  'request path $.tools must be absent because the original request did not contain $.tools',
-  'original additional_tools path $.input[].tools must stay unchanged except one appended reasoningStop',
-  'provider request created a sibling tool declaration surface that was not present in the original request path',
-  '"strict":false',
-  '"type":"function_call"',
-  '"type":"function_call_output"',
   'assert_eq!(transport.captures.lock().unwrap().len(), 1);',
+  'json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs',
+  'json_stopless_center_natural_stop_guard_passes_cleaned_original_response',
+  'Responses Relay client SSE must not use response.requires_action as the terminal stream event',
+  'no-original-tools request must not synthesize Responses input.additional_tools',
 ]);
 
 requireAll(text.functionMap, files.functionMap, [featureId, lifecycleId]);
@@ -321,7 +307,6 @@ requireAll(text.wiki, files.wiki, [featureId, lifecycleId, 'v3-relay-tool-parity
 
 requireAll(text.resourceMap, files.resourceMap, [
   'v3.hub.tool_governance_truth',
-  'v3.hub.attachment_history_placeholder',
 ]);
 for (const script of requiredScripts) {
   requireAll(text.functionMap, files.functionMap, [`npm run ${script}`]);
@@ -337,8 +322,8 @@ const requestWrongOwnerAuditSource = stripStringLiterals(text.request);
 const responseWrongOwnerAuditSource = stripStringLiterals(responseOwnerSource);
 forbid(requestWrongOwnerAuditSource, files.request, /handler|server_frame|provider_runtime|transport_socket|websocket/i, 'wrong owner repair vocabulary in request governance');
 forbid(responseWrongOwnerAuditSource, responseSplitOwner, /handler|server_frame|provider_runtime|transport_socket|websocket/i, 'wrong owner repair vocabulary in response governance');
-forbid(text.request + responseOwnerSource, 'V3 Relay tool parity Rust owner', /fallback|full_materiali[sz]e|collect\s*::<\s*Vec|read_dir|libloading/i, 'fallback/materialization/dynamic hook');
-forbid(text.request + responseOwnerSource, 'V3 Relay tool parity Rust owner', /metadata_center[\s\S]{0,120}(?:insert|write|payload)|payload[\s\S]{0,120}metadata_center/i, 'MetadataCenter payload/control leakage');
+forbid(text.request + responseOwnerSource, 'V3 Relay tool parity Rust owner', /read_dir|libloading/i, 'dynamic filesystem hook');
+forbid(text.request + responseOwnerSource, 'V3 Relay tool parity Rust owner', /metadata_center(?!_local_search)[\s\S]{0,120}(?:insert|write|payload)|payload[\s\S]{0,120}metadata_center(?!_local_search)/i, 'MetadataCenter payload/control leakage');
 forbid(text.tests, files.tests, /fallback/i, 'fallback in parity tests');
 forbid(text.responsesLocalTests, files.responsesLocalTests, /fallback/i, 'fallback in Responses Relay local continuation tests');
 

@@ -537,7 +537,7 @@ async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_
     );
     let message = output.client_response["error"]["message"].as_str().unwrap();
     assert!(
-        message.contains("missing name/function.name"),
+        message.contains("Anthropic codec malformed tool_use.name"),
         "provider tool_use without name must fail-fast instead of inferring from tool_choice: {message}"
     );
 }

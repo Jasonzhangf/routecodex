@@ -24,7 +24,7 @@ controlled-upstream replay; source symbols or prototype tests alone remain insuf
 - Runtime kernel is the only full lifecycle executor.
 - Flow modules only register static hooks and cannot run independent lifecycles.
 - `/v1/responses` direct follows the typed node chain and cannot shortcut from server or CLI to provider transport.
-- Direct provider wire preserves current request semantics and does not preflight, repair, raw replay, force relay, or fallback; the only declared payload release is the provider-wire historical tool-output data-image placeholder, after control-key rejection and before transport.
+- Direct provider wire preserves complete client history and current request semantics; it does not preflight, repair, raw replay, force relay, fallback, replace historical images, or remove historical fields after control-key rejection.
 - Direct response framing preserves client intent: non-stream requests stay JSON, stream/SSE requests stay SSE for success and Error06, and log-only finish_reason inference uses parsed JSON response status rather than SSE transport bytes.
 - Config manifest contains auth env-var handles/names only, never secret values.
 - Controlled-upstream blackbox proves provider-facing wire and client-facing response.
@@ -185,7 +185,7 @@ Provider rules:
 
 - `routecodex-v3-provider-responses` is a generic Rust Responses protocol Provider; it must not
   contain hard-coded deployment provider IDs, route groups, fixture identities, or provider-family branches
-- current request semantics remain provider wire; historical `function_call_output.output[]` data-image parts before the latest user turn are replaced by explicit text placeholders so prior `view_image` bytes do not re-enter provider wire history
+- current request semantics and the complete client-generated historical prefix remain provider wire; historical `function_call_output.output[]` data-image parts, reasoning, and encrypted content are preserved byte-for-byte, and legacy cleanup configuration has no payload write authority
 - auth secret is resolved only at transport point from `auth_env`
 - provider returns raw status/headers/body/stream or source error
 - provider does not select route or project client response

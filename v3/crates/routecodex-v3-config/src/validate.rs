@@ -932,8 +932,7 @@ fn compile_models(
                 return Err(validation(format!(
                     "provider {provider_id} model {id} capability streaming is a transport intent, not a model capability; use supports_streaming"
                 )));
-            }
-            if !matches!(
+            }            if !matches!(
                 capability.as_str(),
                 "text"
                     | "reasoning"
@@ -957,6 +956,22 @@ fn compile_models(
                 )));
             }
         }
+        match (model.web_search_execution_mode, model.web_search_backend.as_deref()) {
+            (mode, binding) if mode.is_metadata_center_local_search()
+                && binding.is_none_or(|value| value.trim().is_empty()) =>
+            {
+                return Err(validation(format!(
+                    "provider {provider_id} model {id} metadata_center_local_search requires exactly one web_search_backend binding"
+                )));
+            }
+            (mode, Some(_)) if !mode.is_metadata_center_local_search() => {
+                return Err(validation(format!(
+                    "provider {provider_id} model {id} declares web_search_backend but execution mode {} does not use a local search backend",
+                    mode.as_str()
+                )));
+            }
+            _ => {}
+        }
         models.insert(
             id.clone(),
             V3ProviderModelManifest {
@@ -964,6 +979,8 @@ fn compile_models(
                 id,
                 aliases: model.aliases,
                 capabilities: model.capabilities,
+                web_search_execution_mode: model.web_search_execution_mode,
+                web_search_backend_binding: model.web_search_backend,
                 supports_streaming: model.supports_streaming,
                 supports_thinking: model.supports_thinking,
                 thinking: model.thinking,

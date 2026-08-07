@@ -22,6 +22,8 @@ const paths = {
   directStopless: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_stopless.rs',
   directHelpers: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
   hooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
+  reqInbound: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
+  reqOutbound: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs',
   respChatProcess:
     'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
   respContinuation:
@@ -54,6 +56,8 @@ const directRuntimeSource = [
   readText(paths.directHelpers),
 ].join('\n');
 const hookSource = readText(paths.hooks);
+const reqInboundSource = readText(paths.reqInbound);
+const reqOutboundSource = readText(paths.reqOutbound);
 const respChatProcessSource = readText(paths.respChatProcess);
 const respContinuationSource = readText(paths.respContinuation);
 const packageJson = readJson(paths.packageJson);
@@ -186,6 +190,26 @@ function verifyResourceOwner() {
   }
   requireEqual(resource.data_control_separation, 'required', `${resourceId}.data_control_separation`);
   requireEqual(resource.normal_payload_state, 'forbidden', `${resourceId}.normal_payload_state`);
+  requireEqual(
+    resource.current_turn_protocol_projection?.req04_injection,
+    'allowed_registered_only',
+    `${resourceId}.current_turn_protocol_projection.req04_injection`,
+  );
+  requireEqual(
+    resource.current_turn_protocol_projection?.resp03_stripping,
+    'allowed_matching_provenance_only',
+    `${resourceId}.current_turn_protocol_projection.resp03_stripping`,
+  );
+  requireEqual(
+    resource.current_turn_protocol_projection?.history_mutation,
+    'forbidden',
+    `${resourceId}.current_turn_protocol_projection.history_mutation`,
+  );
+  requireEqual(
+    resource.current_turn_protocol_projection?.continuation_immutable_interval_semantics,
+    'forbidden',
+    `${resourceId}.current_turn_protocol_projection.continuation_immutable_interval_semantics`,
+  );
   requireEqual(resource.may_enter_provider_body, false, `${resourceId}.may_enter_provider_body`);
   requireEqual(resource.may_enter_client_body, false, `${resourceId}.may_enter_client_body`);
 
@@ -291,6 +315,39 @@ function verifyLifecycleManifest() {
   }
   requireEqual(owner.data_control_separation, 'required', `${paths.manifest}.control_owner.data_control_separation`);
   requireEqual(owner.normal_payload_state, 'forbidden', `${paths.manifest}.control_owner.normal_payload_state`);
+  const currentTurnProjection = manifest.current_turn_protocol_projection ?? {};
+  requireEqual(
+    currentTurnProjection.req04_injection,
+    'allowed_registered_only',
+    `${paths.manifest}.current_turn_protocol_projection.req04_injection`,
+  );
+  requireEqual(
+    currentTurnProjection.resp03_stripping,
+    'allowed_matching_provenance_only',
+    `${paths.manifest}.current_turn_protocol_projection.resp03_stripping`,
+  );
+  for (const key of ['request_id', 'scope', 'registered_declaration', 'call_identity']) {
+    requireArrayIncludes(
+      currentTurnProjection.provenance_keys,
+      key,
+      `${paths.manifest}.current_turn_protocol_projection.provenance_keys`,
+    );
+  }
+  requireEqual(
+    currentTurnProjection.history_mutation,
+    'forbidden',
+    `${paths.manifest}.current_turn_protocol_projection.history_mutation`,
+  );
+  requireEqual(
+    currentTurnProjection.continuation_immutable_interval_semantics,
+    'forbidden',
+    `${paths.manifest}.current_turn_protocol_projection.continuation_immutable_interval_semantics`,
+  );
+  requireEqual(
+    currentTurnProjection.stopless_center_state_in_payload,
+    'forbidden',
+    `${paths.manifest}.current_turn_protocol_projection.stopless_center_state_in_payload`,
+  );
   requireEqual(owner.cli_contract?.carries_scope, false, `${paths.manifest}.control_owner.cli_contract.carries_scope`);
   requireEqual(owner.cli_contract?.carries_state, false, `${paths.manifest}.control_owner.cli_contract.carries_state`);
   requireEqual(owner.cli_contract?.parameters, 'none', `${paths.manifest}.control_owner.cli_contract.parameters`);
@@ -686,11 +743,7 @@ function verifyCliProjection() {
 }
 
 function verifyStoplessGuideline() {
-  const injectionOwner = abs('v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks/stopless_injection.rs');
-  if (fs.existsSync(injectionOwner)) {
-    fail(`${paths.hooks}: stopless payload injection owner must remain physically absent`);
-  }
-  for (const forbidden of [
+  for (const token of [
     'inject_stopless_guidance(',
     'append_stopless_noop_continuation(',
     'stopless_continuation_prompt_for_state(',
@@ -698,8 +751,14 @@ function verifyStoplessGuideline() {
     'STOPLESS_BASE_INSTRUCTION',
     'STOPLESS_NOOP_CONTINUATION_GUIDELINE',
   ]) {
-    if (hookSource.includes(forbidden)) {
-      fail(`${paths.hooks}: stopless control guidance/tool/prompt must not enter business payload via ${forbidden}`);
+    for (const [rel, source] of [
+      [paths.reqInbound, reqInboundSource],
+      [paths.reqOutbound, reqOutboundSource],
+      [paths.respContinuation, respContinuationSource],
+    ]) {
+      if (source.includes(token)) {
+        fail(`${rel}: Stopless current-turn projection must remain owned by Req04/Resp03, found ${token}`);
+      }
     }
   }
 }

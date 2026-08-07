@@ -1,4 +1,9 @@
 use super::*;
+use super::web_search_hop::{
+    apply_v3_responses_relay_web_search_control_completion, execute_local_web_search_hop,
+    project_web_search_result_into_finalized, resolve_request_web_search_backend_binding,
+    resolve_web_search_mode_and_backend,
+};
 #[cfg(test)]
 use crate::local_continuation::{
     V3LocalContinuationResp04SaveInput, V3LocalContinuationTerminalOutcome,
@@ -510,11 +515,11 @@ impl V3ResponsesRelayLocalContinuationState {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct V3ResponsesRelayStoplessControlScope {
-    entry_endpoint: String,
-    session_id: String,
-    conversation_id: String,
-    port: u16,
-    routing_group: String,
+    pub(crate) entry_endpoint: String,
+    pub(crate) session_id: String,
+    pub(crate) conversation_id: String,
+    pub(crate) port: u16,
+    pub(crate) routing_group: String,
 }
 
 impl V3ResponsesRelayStoplessControlScope {
@@ -534,7 +539,7 @@ impl V3ResponsesRelayStoplessControlScope {
         }
     }
 
-    fn has_client_session_scope(&self) -> bool {
+    pub(crate) fn has_client_session_scope(&self) -> bool {
         let session_id = self.session_id.trim();
         let conversation_id = self.conversation_id.trim();
         if session_id.is_empty() || conversation_id.is_empty() {
@@ -556,49 +561,51 @@ impl From<&V3ResponsesRelayLocalContinuationScope> for V3ResponsesRelayStoplessC
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct V3ResponsesRelayStoplessControlKey {
-    entry_endpoint: String,
-    session_id: String,
-    conversation_id: String,
-    port: u16,
-    routing_group: String,
-}
-
-impl From<&V3ResponsesRelayStoplessControlScope> for V3ResponsesRelayStoplessControlKey {
-    fn from(scope: &V3ResponsesRelayStoplessControlScope) -> Self {
-        Self {
-            entry_endpoint: scope.entry_endpoint.clone(),
-            session_id: scope.session_id.clone(),
-            conversation_id: scope.conversation_id.clone(),
-            port: scope.port,
-            routing_group: scope.routing_group.clone(),
-        }
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct V3ResponsesRelayStoplessControlState {
-    store: Mutex<BTreeMap<V3ResponsesRelayStoplessControlKey, V3StoplessCenterState>>,
+    pub(crate) center: V3ServerToolCenter,
 }
 
 impl V3ResponsesRelayStoplessControlState {
+    fn center_key(scope: &V3ResponsesRelayStoplessControlScope) -> V3ServerToolCenterKey {
+        V3ServerToolCenterKey {
+            tool_name: V3ServerToolName::Stopless,
+            scope_key: format!(
+                "{}|{}|{}|{}|{}",
+                scope.entry_endpoint,
+                scope.port,
+                scope.routing_group,
+                scope.session_id,
+                scope.conversation_id
+            ),
+        }
+    }
+
     pub fn len(&self) -> Result<usize, V3ResponsesRelayRuntimeError> {
-        Ok(self.lock_store()?.len())
+        self.center
+            .len()
+            .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)
     }
 
     pub fn is_empty(&self) -> Result<bool, V3ResponsesRelayRuntimeError> {
-        Ok(self.lock_store()?.is_empty())
+        self.center
+            .is_empty()
+            .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)
     }
 
     pub fn load_for_scope(
         &self,
         scope: &V3ResponsesRelayStoplessControlScope,
     ) -> Result<Option<V3StoplessCenterState>, V3ResponsesRelayRuntimeError> {
-        Ok(self
-            .lock_store()?
-            .get(&V3ResponsesRelayStoplessControlKey::from(scope))
-            .cloned())
+        match self
+            .center
+            .load(&Self::center_key(scope))
+            .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)?
+        {
+            Some(V3ServerToolInstanceState::Stopless(state)) => Ok(Some(state)),
+            Some(_) => Err(V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned),
+            None => Ok(None),
+        }
     }
 
     pub fn store_for_scope(
@@ -606,30 +613,23 @@ impl V3ResponsesRelayStoplessControlState {
         scope: &V3ResponsesRelayStoplessControlScope,
         state: V3StoplessCenterState,
     ) -> Result<(), V3ResponsesRelayRuntimeError> {
-        self.lock_store()?
-            .insert(V3ResponsesRelayStoplessControlKey::from(scope), state);
-        Ok(())
+        self.center
+            .store(
+                Self::center_key(scope),
+                V3ServerToolInstanceState::Stopless(state),
+            )
+            .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)
     }
 
     pub fn clear_for_scope(
         &self,
         scope: &V3ResponsesRelayStoplessControlScope,
     ) -> Result<(), V3ResponsesRelayRuntimeError> {
-        self.lock_store()?
-            .remove(&V3ResponsesRelayStoplessControlKey::from(scope));
-        Ok(())
-    }
-
-    fn lock_store(
-        &self,
-    ) -> Result<
-        MutexGuard<'_, BTreeMap<V3ResponsesRelayStoplessControlKey, V3StoplessCenterState>>,
-        V3ResponsesRelayRuntimeError,
-    > {
-        self.store
-            .lock()
+        self.center
+            .clear(&Self::center_key(scope))
             .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)
     }
+
 }
 
 #[derive(Clone)]
@@ -1117,6 +1117,12 @@ pub enum V3ResponsesRelayRuntimeError {
     ProviderHealth(String),
     #[error("V3 Responses Relay JSON provider body is malformed: {0}")]
     ProviderJson(#[from] serde_json::Error),
+    #[error("web_search Mode B requires exactly one backend binding at runtime: {0}")]
+    WebSearchBackendBindingMissing(String),
+    #[error("web_search local search hop failed: {0}")]
+    WebSearchDispatchFailed(String),
+    #[error("web_search local search hop returned no usable result: {0}")]
+    WebSearchResultUnavailable(String),
     #[error("V3 Responses Relay provider SSE transport failed: {0}")]
     ProviderSseTransport(String),
     #[error("V3 Responses Relay provider response event codec failed: {0}")]
@@ -1517,10 +1523,10 @@ struct V3ResponsesRelayLocalContinuationExecution<'state> {
     commit_resp04_effects: bool,
 }
 
-struct V3ResponsesRelayStoplessControlExecution<'state> {
-    control: &'state V3ResponsesRelayStoplessControlState,
-    scope: V3ResponsesRelayStoplessControlScope,
-    commit_effects: bool,
+pub(crate) struct V3ResponsesRelayStoplessControlExecution<'state> {
+    pub(crate) control: &'state V3ResponsesRelayStoplessControlState,
+    pub(crate) scope: V3ResponsesRelayStoplessControlScope,
+    pub(crate) commit_effects: bool,
 }
 
 async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
@@ -1559,6 +1565,22 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     let local_tool_output_ids = find_responses_tool_output_ids(&input.payload)?;
     let protocol_switch_allowed =
         responses_relay_protocol_switch_allowed(&input.payload, &local_tool_output_ids);
+    // 下一轮 Req04 配对验证：搜索 hop 结果已投影返回客户端后，客户端回传
+    // 的 function_call_output 与原 call_id 配对即收尾状态机（Completed）。
+    apply_v3_responses_relay_web_search_control_completion(
+        manifest,
+        &input.server_id,
+        stopless_control.as_ref(),
+        &input.payload,
+    )?;
+    // Mode B 判定用请求声明的 model 的编译期 mode（Req04 在 route 之前，
+    // 无法感知最终 selected target；Resp03 侧再用 selected target mode 双校验）。
+    let request_web_search_execution_mode =
+        resolve_request_web_search_execution_mode(manifest, &input.payload);
+    // Mode B 的编译期唯一 backend binding（"provider.model"），搜索 hop 时
+    // direct pin 到搜索目标；缺失在配置编译期已 fail-fast，这里仅透传。
+    let request_web_search_backend_binding =
+        resolve_request_web_search_backend_binding(manifest, &input.payload);
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
         V3HubEntryProtocol::Responses,
@@ -1588,6 +1610,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         stopless_control_has_client_session_scope,
         &transition_request_id,
         transition_updated_at,
+        request_web_search_execution_mode,
     );
     let request_outcome = {
         let local_store_guard = if let (Some(local), Some(_)) =
@@ -1636,6 +1659,13 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         stopless_control.as_ref(),
         request_stopless_control_state.is_some(),
         stopless_state.as_ref(),
+    )?;
+    let web_search_state = request_outcome.web_search_state().cloned();
+    apply_v3_responses_relay_web_search_control_request_transition(
+        manifest,
+        &input.server_id,
+        stopless_control.as_ref(),
+        web_search_state.as_ref(),
     )?;
     macro_rules! handle_error_before_resp03 {
         ($expr:expr) => {
@@ -2159,7 +2189,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         continue;
                     }
                 }
-                let (action, finalized_provider_value, response_stopless_state) =
+                let (action, mut finalized_provider_value, response_stopless_state, response_web_search_state) =
                     match run_json_response_hooks(
                         V3ResponsesRelayJsonResponseHookInput {
                             provider_value: &hook_provider_value,
@@ -2173,6 +2203,16 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                                 .candidate
                                 .compatibility_profile
                                 .as_deref(),
+                            web_search_execution_mode: selected.candidate.web_search_execution_mode,
+                            web_search_center_state: stopless_control
+                                .as_ref()
+                                .and_then(|execution| {
+                                    execution
+                                        .control
+                                        .web_search_load_for_scope(&execution.scope)
+                                        .ok()
+                                })
+                                .flatten(),
                             stopless_state: stopless_state.as_ref(),
                             stopless_control_has_client_session_scope,
                             transition_request_id: &transition_request_id,
@@ -2226,6 +2266,30 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     stopless_control.as_ref(),
                     response_stopless_state,
                 )?;
+                if let Some(web_search_state) = response_web_search_state {
+                    let captured = execute_local_web_search_hop(
+                        manifest,
+                        &input.server_id,
+                        &input.failure_session_scope,
+                        &provider_failure_health,
+                        request_web_search_backend_binding.as_deref(),
+                        &web_search_state,
+                        transport,
+                        &input.request_id,
+                    )
+                    .await?;
+                    project_web_search_result_into_finalized(
+                        &mut finalized_provider_value,
+                        &captured,
+                    )?;
+                    if let Some(execution) = stopless_control.as_ref() {
+                        if execution.commit_effects && execution.scope.has_client_session_scope() {
+                            execution
+                                .control
+                                .web_search_store_for_scope(&execution.scope, captured)?;
+                        }
+                    }
+                }
                 commit_or_release_responses_local_continuation(
                     local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
@@ -2384,7 +2448,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         continue;
                     }
                 }
-                let (action, finalized_provider_value, response_stopless_state) =
+                let (action, mut finalized_provider_value, response_stopless_state, response_web_search_state) =
                     match run_json_response_hooks(
                         V3ResponsesRelayJsonResponseHookInput {
                             provider_value: &provider_value,
@@ -2398,6 +2462,16 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                                 .candidate
                                 .compatibility_profile
                                 .as_deref(),
+                            web_search_execution_mode: selected.candidate.web_search_execution_mode,
+                            web_search_center_state: stopless_control
+                                .as_ref()
+                                .and_then(|execution| {
+                                    execution
+                                        .control
+                                        .web_search_load_for_scope(&execution.scope)
+                                        .ok()
+                                })
+                                .flatten(),
                             stopless_state: stopless_state.as_ref(),
                             stopless_control_has_client_session_scope,
                             transition_request_id: &transition_request_id,
@@ -2451,6 +2525,30 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     stopless_control.as_ref(),
                     response_stopless_state,
                 )?;
+                if let Some(web_search_state) = response_web_search_state {
+                    let captured = execute_local_web_search_hop(
+                        manifest,
+                        &input.server_id,
+                        &input.failure_session_scope,
+                        &provider_failure_health,
+                        request_web_search_backend_binding.as_deref(),
+                        &web_search_state,
+                        transport,
+                        &input.request_id,
+                    )
+                    .await?;
+                    project_web_search_result_into_finalized(
+                        &mut finalized_provider_value,
+                        &captured,
+                    )?;
+                    if let Some(execution) = stopless_control.as_ref() {
+                        if execution.commit_effects && execution.scope.has_client_session_scope() {
+                            execution
+                                .control
+                                .web_search_store_for_scope(&execution.scope, captured)?;
+                        }
+                    }
+                }
                 commit_or_release_responses_local_continuation(
                     local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
@@ -2543,14 +2641,14 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     }
 }
 
-fn provider_wire_protocol_for_selected_candidate(
+pub(crate) fn provider_wire_protocol_for_selected_candidate(
     selected: &routecodex_v3_target::V3TargetCandidate,
 ) -> Result<V3HubProviderWireProtocol, V3ResponsesRelayRuntimeError> {
     provider_wire_protocol_for_provider_type(&selected.provider_id, &selected.provider_type)
         .map_err(|error| V3ResponsesRelayRuntimeError::Target(format!("Responses relay {error}")))
 }
 
-fn build_v3_provider_transport_request_for_protocol(
+pub(crate) fn build_v3_provider_transport_request_for_protocol(
     provider_protocol: V3HubProviderWireProtocol,
     wire: V3Provider12ResponsesWirePayload,
 ) -> Result<V3Transport13ResponsesHttpRequest, V3ResponsesRelayRuntimeError> {
@@ -2592,12 +2690,12 @@ fn build_v3_openai_chat_transport_request_from_v3_provider_08(
 }
 
 #[derive(Debug, Default)]
-struct V3ResponsesRelayToolOutputIds {
+pub(crate) struct V3ResponsesRelayToolOutputIds {
     restore_ids: Vec<String>,
-    consumed_ids: Vec<String>,
+    pub(crate) consumed_ids: Vec<String>,
 }
 
-fn find_responses_tool_output_ids(
+pub(crate) fn find_responses_tool_output_ids(
     payload: &Value,
 ) -> Result<V3ResponsesRelayToolOutputIds, V3ResponsesRelayRuntimeError> {
     let paired_call_ids = payload_input_paired_call_ids(payload);
@@ -3139,6 +3237,8 @@ struct V3ResponsesRelayJsonResponseHookInput<'a> {
     provider_protocol: V3HubProviderWireProtocol,
     provider_response_transport_intent: V3HubTransportIntent,
     compatibility_profile: Option<&'a str>,
+    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
+    web_search_center_state: Option<V3WebSearchCenterState>,
     stopless_state: Option<&'a V3StoplessCenterState>,
     stopless_control_has_client_session_scope: bool,
     transition_request_id: &'a str,
@@ -3153,6 +3253,7 @@ fn run_json_response_hooks(
         V3HubContinuationCommit,
         Value,
         Option<V3StoplessCenterState>,
+        Option<V3WebSearchCenterState>,
     ),
     V3ResponsesRelayRuntimeError,
 > {
@@ -3191,21 +3292,58 @@ fn run_json_response_hooks(
         input.stopless_control_has_client_session_scope,
         input.transition_request_id,
         input.transition_updated_at,
+        input.web_search_execution_mode,
     );
+    let response_hook_profile = match input.web_search_center_state {
+        Some(state) => response_hook_profile.with_web_search_center_state(state),
+        None => response_hook_profile,
+    };
     let resp03 = hooks.govern(resp02, &response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
     let action = resp04.action();
     let finalized_payload = resp04.finalized_payload().clone();
     let response_stopless_state = resp04.control_transition().cloned();
+    let response_web_search_state = resp04.web_search_transition().cloned();
     trace.push("V3HubRespContinuation04Committed");
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04.into_data());
     trace.push("V3HubRespOutbound05ClientSemantic");
-    let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok((action, finalized_payload, response_stopless_state))
+    Ok((
+        action,
+        finalized_payload,
+        response_stopless_state,
+        response_web_search_state,
+    ))
 }
 
+/// 把搜索 hop 结果投影到客户端可见的 finalized 响应：追加 hosted
+/// `web_search_call`（completed、action.search、text_result）与原始
+/// call_id 配对的 `function_call_output`。控制状态不进入 payload——
+/// 这里投影的是协议等价结果（Codex hosted web_search 契约）。
+/// 从搜索 provider 响应提取文本结果：优先 Responses `output[].message
+/// .content[].output_text.text`，其次 Chat `choices[].message.content`。
+/// Req04 阶段（route 之前）的 Mode B 判定：按请求声明的 model 的编译期
+/// `web_search_execution_mode` 解析。请求 model 无法解析时按 `None`（不激活
+/// 本地搜索）。selected target 的 mode 由 Resp03 侧 response profile 再校验。
+fn resolve_request_web_search_execution_mode(
+    manifest: &V3Config05ManifestPublished,
+    payload: &Value,
+) -> routecodex_v3_config::V3WebSearchExecutionMode {
+    let Some(model) = payload
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return routecodex_v3_config::V3WebSearchExecutionMode::None;
+    };
+    resolve_web_search_mode_and_backend(manifest, model).0
+}
+
+/// Mode B 的编译期 backend binding（`provider.model`）：请求 model 的 manifest
+/// `web_search_backend_binding`。搜索 hop 用它 direct pin 搜索目标；Mode B 配置
+/// 编译期已保证 exactly one binding，这里仅透传（解析失败按 None，由搜索 hop
+/// fail-fast）。
 fn responses_relay_request_hook_profile(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
@@ -3213,14 +3351,26 @@ fn responses_relay_request_hook_profile(
     stopless_control_has_client_session_scope: bool,
     transition_request_id: &str,
     transition_updated_at: u64,
+    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
 ) -> V3HubServertoolRequestProfile {
+    let base = if web_search_execution_mode.is_metadata_center_local_search() {
+        // Mode B：Req04 需在工具面含标准 web_search 声明时激活 websearch
+        // ServerTool 实例（LocalToolSurfaceActive），供 Resp03 同轮拦截。
+        V3HubServertoolRequestProfile::enabled(["servertool.request"])
+            .with_web_search_execution_mode(web_search_execution_mode)
+    } else {
+        V3HubServertoolRequestProfile::disabled()
+    };
     if !v3_stopless_center_enabled_for_server(manifest, server_id)
         || !stopless_control_has_client_session_scope
     {
-        return V3HubServertoolRequestProfile::disabled();
+        return base;
     }
-    let profile = V3HubServertoolRequestProfile::stopless_reasoning_stop()
+    let mut profile = V3HubServertoolRequestProfile::stopless_reasoning_stop()
         .with_stopless_transition_context(transition_request_id, transition_updated_at);
+    if web_search_execution_mode.is_metadata_center_local_search() {
+        profile = profile.with_web_search_execution_mode(web_search_execution_mode);
+    }
     match stopless_state {
         Some(state) => profile.with_stopless_center_state(state.clone()),
         None => profile,
@@ -3234,13 +3384,26 @@ fn responses_relay_response_hook_profile(
     stopless_control_has_client_session_scope: bool,
     transition_request_id: &str,
     transition_updated_at: u64,
+    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
 ) -> V3HubRelayResponseHookProfile {
+    let profile = if web_search_execution_mode
+        == routecodex_v3_config::V3WebSearchExecutionMode::NativeRemoteSearchToolMix
+        || web_search_execution_mode.is_metadata_center_local_search()
+    {
+        // Mode A（原生搜索）与 Mode B（本地 ServerToolCenter 治理）都不走
+        // 客户端 exec_command 投影；Resp03 按 profile.mode 分别处理。
+        V3HubRelayResponseHookProfile::empty()
+            .with_web_search_execution_mode(web_search_execution_mode)
+    } else {
+        // 未声明 web_search 执行模式的兼容路径：保持既有 exec_command 投影。
+        V3HubRelayResponseHookProfile::empty().with_servertool_name("web_search")
+    };
     if !v3_stopless_center_enabled_for_server(manifest, server_id)
         || !stopless_control_has_client_session_scope
     {
-        return V3HubRelayResponseHookProfile::empty();
+        return profile;
     }
-    let profile = V3HubRelayResponseHookProfile::empty()
+    let profile = profile
         .with_stopless_reasoning_stop()
         .with_stopless_transition_context(transition_request_id, transition_updated_at);
     match stopless_state {
@@ -3351,6 +3514,35 @@ fn apply_v3_responses_relay_stopless_control_request_transition(
         }
         None => Ok(()),
     }
+}
+
+/// Mode B：Req04 激活的 websearch ServerTool 实例（LocalToolSurfaceActive）
+/// 存入 relay ServerToolCenter websearch 桶，供 Resp03 同轮拦截判定。
+/// 未激活时不做任何写（不存在"清除未激活状态"的语义）。
+fn apply_v3_responses_relay_web_search_control_request_transition(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+    stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
+    request_web_search_state: Option<&V3WebSearchCenterState>,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(state) = request_web_search_state else {
+        return Ok(());
+    };
+    if !v3_stopless_center_enabled_for_server(manifest, server_id) {
+        return Ok(());
+    }
+    let Some(stopless_control) = stopless_control else {
+        return Ok(());
+    };
+    if !stopless_control.commit_effects {
+        return Ok(());
+    }
+    if !stopless_control.scope.has_client_session_scope() {
+        return Ok(());
+    }
+    stopless_control
+        .control
+        .web_search_store_for_scope(&stopless_control.scope, state.clone())
 }
 
 fn clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
@@ -4020,15 +4212,6 @@ fn build_v3_responses_function_call_from_openai_chat_tool_call(
             "arguments":arguments
         }));
     }
-    if name == "web_search" {
-        let action = build_v3_responses_web_search_action_from_openai_chat_arguments(arguments)?;
-        return Ok(json!({
-            "type":"web_search_call",
-            "id":call_id,
-            "status":"completed",
-            "action":action
-        }));
-    }
     Ok(json!({
         "type":"function_call",
         "call_id":call_id,
@@ -4059,59 +4242,6 @@ fn parse_v3_openai_chat_tool_call_arguments_object(
             "OpenAI Chat tool_call {name} arguments must be a JSON object before Responses projection"
         ),
     ))
-}
-
-fn build_v3_responses_web_search_action_from_openai_chat_arguments(
-    arguments: &str,
-) -> Result<Value, V3ResponsesRelayRuntimeError> {
-    let parsed = parse_v3_openai_chat_tool_call_arguments_object("web_search", arguments)?;
-    let object = parsed.as_object().ok_or_else(|| {
-        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            "OpenAI Chat web_search arguments must be a JSON object before Responses projection"
-                .to_string(),
-        )
-    })?;
-    let action = object
-        .get("action")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| {
-            if object.get("url").and_then(Value::as_str).is_some() {
-                if object.get("pattern").and_then(Value::as_str).is_some() {
-                    "find_in_page"
-                } else {
-                    "open_page"
-                }
-            } else {
-                "search"
-            }
-        });
-    match action {
-        "open_page" => Ok(json!({
-            "type":"open_page",
-            "url": object.get("url").and_then(Value::as_str).unwrap_or_default()
-        })),
-        "find_in_page" => Ok(json!({
-            "type":"find_in_page",
-            "url": object.get("url").and_then(Value::as_str).unwrap_or_default(),
-            "pattern": object.get("pattern").and_then(Value::as_str).unwrap_or_default()
-        })),
-        _ => {
-            let query = object
-                .get("query")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let mut action = Map::from_iter([
-                ("type".to_string(), Value::String("search".to_string())),
-                ("query".to_string(), Value::String(query.to_string())),
-            ]);
-            if let Some(queries) = object.get("queries").and_then(Value::as_array) {
-                action.insert("queries".to_string(), Value::Array(queries.clone()));
-            }
-            Ok(Value::Object(action))
-        }
-    }
 }
 
 fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeSet<String> {
@@ -4383,12 +4513,7 @@ fn read_v3_usage_u64(value: &Value, path: &[&str]) -> Option<u64> {
 
 fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
     let data = serde_json::to_string(payload)
-        .unwrap_or_else(|_| {
-            format!(
-                "{{\"type\":\"response.failed\",\"response\":{{\"status\":\"failed\",\"error\":{{\"code\":\"provider_response_sse_stream\",\"message\":\"{}\",\"type\":\"provider_error\"}}}}}}",
-                V3_RESPONSES_RELAY_PROVIDER_EVENT_FAILED_MESSAGE
-            )
-        });
+        .expect("serde_json::Value serialization must not fail");
     format!("event: {event}\ndata: {data}\n\n").into_bytes()
 }
 
@@ -4559,7 +4684,7 @@ fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Valu
     projected
 }
 
-fn provider_target(
+pub(crate) fn provider_target(
     manifest: &V3Config05ManifestPublished,
     selected: &routecodex_v3_target::V3TargetCandidate,
 ) -> Result<V3ResponsesProviderTarget, V3ResponsesRelayRuntimeError> {
@@ -5037,6 +5162,11 @@ targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
                 .lock()
                 .expect("provider id recorder")
                 .push(request.provider_id().to_string());
+            let response = if request.provider_id() == "openai_second" {
+                br#"{"id":"chatcmpl_static_projection","object":"chat.completion","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#.to_vec()
+            } else {
+                br#"{"id":"msg_static_projection","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"#.to_vec()
+            };
             Ok(V3ProviderResp14Raw::from_json(
                 request.request_id(),
                 request.provider_id(),
@@ -5045,13 +5175,13 @@ targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
                     name: "content-type".to_string(),
                     value: b"application/json".to_vec(),
                 }],
-                br#"{"id":"msg_static_projection","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"#.to_vec(),
+                response,
             ))
         }
     }
 
     #[tokio::test]
-    async fn target_protocol_unmapped_field_fails_without_provider_switch_or_transport() {
+    async fn target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider() {
         std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
         std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
         let manifest = anthropic_then_openai_chat_manifest();
@@ -5062,7 +5192,7 @@ targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
             provider_ids: Mutex::new(Vec::new()),
         };
 
-        let error = execute_v3_responses_relay_runtime_inner(
+        let output = execute_v3_responses_relay_runtime_inner(
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: "test".to_string(),
@@ -5087,16 +5217,24 @@ targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
             None,
         )
         .await
-        .expect_err("unmapped target field must fail before provider transport");
+        .expect("unmapped target field must skip the incompatible candidate and continue");
 
-        assert!(error.to_string().contains("$.request.store"), "{error:?}");
+        assert_eq!(output.status, 200);
         assert!(
+            output
+                .node_trace
+                .iter()
+                .any(|node| *node == "V3TargetLocalReselected"),
+            "target protocol projection failure must enter the typed provider-switch path"
+        );
+        assert_eq!(
             transport
                 .provider_ids
                 .lock()
                 .expect("provider ids")
-                .is_empty(),
-            "target protocol projection failure must not switch provider or enter transport"
+                .as_slice(),
+            ["openai_second"],
+            "the incompatible Anthropic candidate must receive no wire request"
         );
     }
 
@@ -5534,7 +5672,7 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
     }
 
     #[test]
-    fn openai_chat_web_search_function_call_projects_to_responses_web_search_call() {
+    fn openai_chat_web_search_function_call_remains_pending_local_servertool_call() {
         let response = build_v3_responses_provider_response_from_openai_chat_payload(
             &json!({
                 "id":"chatcmpl_web_search_call",
@@ -5556,13 +5694,17 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
             }),
             &json!({"tools":[{"type":"function","function":{"name":"web_search"}}]}),
         )
-        .expect("OpenAI Chat function web_search must project back to Responses web_search_call");
+        .expect("OpenAI Chat function web_search must remain pending for Resp03 ServerTool interception");
 
-        assert_eq!(response["output"][0]["type"], "web_search_call");
-        assert_eq!(response["output"][0]["id"], "call_web_search");
-        assert_eq!(response["output"][0]["status"], "completed");
-        assert_eq!(response["output"][0]["action"]["type"], "search");
-        assert_eq!(response["output"][0]["action"]["query"], "RouteCodex docs");
+        assert_eq!(response["status"], "requires_action");
+        assert_eq!(response["output"][0]["type"], "function_call");
+        assert_eq!(response["output"][0]["call_id"], "call_web_search");
+        assert_eq!(response["output"][0]["name"], "web_search");
+        assert_eq!(
+            response["output"][0]["arguments"],
+            "{\"query\":\"RouteCodex docs\"}"
+        );
+        assert!(response["output"][0].get("status").is_none());
     }
 
     #[test]
@@ -7000,5 +7142,50 @@ data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_dup_
         .unwrap_err();
 
         assert!(error.to_string().contains("input_json_delta is malformed"));
+    }
+
+    #[test]
+    fn web_search_state_machine_advances_to_search_result_captured_via_hop() {
+        // 搜索 hop 的状态迁移契约：ToolCallObserved -> SearchResultCaptured
+        // 携带归一化结果；非相邻迁移必须被拒绝。
+        let observed = V3WebSearchCenterState::new()
+            .transition_to(
+                V3WebSearchCenterPhase::LocalToolSurfaceActive,
+                "req04_web_search_surface_active",
+            )
+            .expect("idle -> local_tool_surface_active")
+            .with_original_call_id(Some("call_ws_1"))
+            .with_query(Some("routecodex v3"))
+            .transition_to(
+                V3WebSearchCenterPhase::ToolCallObserved,
+                "resp03_websearch_call_observed",
+            )
+            .expect("local_tool_surface_active -> tool_call_observed");
+        let prepared = observed
+            .transition_to(
+                V3WebSearchCenterPhase::SearchDispatchPrepared,
+                "search_hop_dispatch_prepared",
+            )
+            .expect("tool_call_observed -> search_dispatch_prepared");
+        let in_flight = prepared
+            .transition_to(
+                V3WebSearchCenterPhase::SearchInFlight,
+                "search_hop_in_flight",
+            )
+            .expect("search_dispatch_prepared -> search_in_flight");
+        let captured = in_flight
+            .transition_to(
+                V3WebSearchCenterPhase::SearchResultCaptured,
+                "search_hop_result_captured",
+            )
+            .expect("search_in_flight -> search_result_captured");
+        assert_eq!(captured.phase(), V3WebSearchCenterPhase::SearchResultCaptured);
+        assert_eq!(captured.original_call_id(), Some("call_ws_1"));
+        assert_eq!(captured.query(), Some("routecodex v3"));
+        // 非法迁移：SearchResultCaptured -> SearchInFlight 必须拒绝
+        let error = captured
+            .transition_to(V3WebSearchCenterPhase::SearchInFlight, "backwards")
+            .expect_err("terminal captured must not move backwards");
+        assert!(error.contains("invalid web_search ServerTool transition"));
     }
 }

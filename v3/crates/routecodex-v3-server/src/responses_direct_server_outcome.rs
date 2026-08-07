@@ -80,13 +80,9 @@ pub(super) async fn execute_responses_direct_server_outcome(
             );
         }
     };
-    let provider_failure_session_scope = get_failure_session_scope(
-        &state.server,
-        request_headers,
-        "responses",
-        &request_id,
-    )
-    .expect("responses continuation requires session-id for failure scope");
+    let provider_failure_session_scope =
+        get_failure_session_scope(&state.server, request_headers, "responses", &request_id)
+            .expect("responses continuation requires session-id for failure scope");
     let raw = build_v3_server_03_http_request_raw(
         state.server.id.clone(),
         provider_failure_session_scope.clone(),

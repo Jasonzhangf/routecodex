@@ -381,7 +381,7 @@ fn inactive_schema_guidance_stop_passes_without_cli_projection_or_state_write() 
 }
 
 #[test]
-fn natural_stop_with_canonical_reasoning_summary_passes_without_stopless_projection() {
+fn natural_stop_does_not_trust_reasoning_summary_stop_schema_as_control() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_response(json!({
@@ -421,10 +421,17 @@ fn natural_stop_with_canonical_reasoning_summary_passes_without_stopless_project
 
     assert_eq!(payload["status"], "completed");
     assert_eq!(payload["finish_reason"], "stop");
-    assert!(
-        resp04.control_transition().is_none(),
-        "canonical summary must classify the stop as complete before StoplessCenter counting"
+    let state = resp04
+        .control_transition()
+        .expect("payload stop_schema must not bypass StoplessCenter natural-stop counting");
+    assert_eq!(state.consecutive_stop_count(), 1);
+    assert_eq!(
+        state.steering(),
+        V3StoplessCenterSteering::NaturalStopWithoutReasoningStop
     );
+    assert!(!serde_json::to_string(payload)
+        .unwrap()
+        .contains("stop_schema"));
     assert!(
         payload
             .get("output")
@@ -438,7 +445,7 @@ fn natural_stop_with_canonical_reasoning_summary_passes_without_stopless_project
 }
 
 #[test]
-fn third_consecutive_natural_stop_with_summary_passes_without_incrementing_stopless_state() {
+fn third_consecutive_natural_stop_ignores_summary_stop_schema_control() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let prior_state = V3StoplessCenterState::new(
         2,
@@ -482,10 +489,17 @@ fn third_consecutive_natural_stop_with_summary_passes_without_incrementing_stopl
     let payload = resp04.finalized_payload();
 
     assert_eq!(payload["status"], "completed");
-    assert!(
-        resp04.control_transition().is_none(),
-        "summary-complete third stop must pass through and clear/supersede stopless state instead of counting"
+    let state = resp04
+        .control_transition()
+        .expect("payload stop_schema must not clear the StoplessCenter state");
+    assert_eq!(state.consecutive_stop_count(), 3);
+    assert_eq!(
+        state.steering(),
+        V3StoplessCenterSteering::NaturalStopWithoutReasoningStop
     );
+    assert!(!serde_json::to_string(payload)
+        .unwrap()
+        .contains("stop_schema"));
     assert!(
         payload
             .get("output")
@@ -499,7 +513,7 @@ fn third_consecutive_natural_stop_with_summary_passes_without_incrementing_stopl
 }
 
 #[test]
-fn natural_stop_with_summary_stop_schema_next_step_projects_noop_and_seeds_req04_prompt() {
+fn natural_stop_summary_next_step_cannot_seed_req04_control() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_response(json!({
@@ -534,17 +548,17 @@ fn natural_stop_with_summary_stop_schema_next_step_projects_noop_and_seeds_req04
     let payload = resp04.finalized_payload();
     let state = resp04
         .control_transition()
-        .expect("unfinished summary stop_schema must continue through StoplessCenter");
+        .expect("natural stop must be recorded by StoplessCenter");
 
     assert_eq!(payload["status"], "completed");
-    assert_eq!(state.steering(), V3StoplessCenterSteering::Continue);
     assert_eq!(
-        state.next_step_prompt(),
-        Some("Run cargo test for the new summary/schema stopless gate.")
+        state.steering(),
+        V3StoplessCenterSteering::NaturalStopWithoutReasoningStop
     );
+    assert_eq!(state.next_step_prompt(), None);
     assert_eq!(
         state.last_transition_reason(),
-        Some("summary_stop_schema_next_step_cli_projected")
+        Some("natural_stop_cli_projected")
     );
 
     let serialized = serde_json::to_string(payload).unwrap();
@@ -555,7 +569,7 @@ fn natural_stop_with_summary_stop_schema_next_step_projects_noop_and_seeds_req04
 }
 
 #[test]
-fn natural_stop_with_summary_stop_schema_blocked_reason_passes_and_augments_summary() {
+fn natural_stop_summary_blocked_reason_cannot_drive_control_or_rewrite_summary() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_response(json!({
@@ -591,16 +605,23 @@ fn natural_stop_with_summary_stop_schema_blocked_reason_passes_and_augments_summ
     let summaries = reasoning_summary_texts(payload);
 
     assert_eq!(payload["status"], "completed");
-    assert!(
-        resp04.control_transition().is_none(),
-        "blocked summary stop_schema must pass through without counting or projecting no-op"
+    let state = resp04
+        .control_transition()
+        .expect("payload blocked flag must not bypass natural-stop counting");
+    assert_eq!(state.consecutive_stop_count(), 1);
+    assert_eq!(
+        state.steering(),
+        V3StoplessCenterSteering::NaturalStopWithoutReasoningStop
     );
     assert!(
         summaries
             .iter()
-            .any(|text| text.contains("Need Jason approval before deleting production config.")),
-        "blocked reason must be projected into canonical reasoning summary: {summaries:?}"
+            .all(|text| !text.contains("Need Jason approval before deleting production config.")),
+        "payload control text must not rewrite canonical reasoning summary: {summaries:?}"
     );
+    assert!(!serde_json::to_string(payload)
+        .unwrap()
+        .contains("stop_schema"));
     assert!(
         payload
             .get("output")

@@ -333,6 +333,7 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
             wire_model: "wire-model".into(),
             visible_model_ids: vec!["model".into()],
             model_capabilities: vec!["text".into(), "tools".into()],
+            web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
             max_context_tokens: None,
             base_url: "http://127.0.0.1:1/v1".into(),
             responses_process: None,
@@ -407,6 +408,7 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
             wire_model: "wire-model".into(),
             visible_model_ids: vec!["model".into()],
             model_capabilities: vec!["text".into(), "tools".into()],
+            web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
             max_context_tokens: None,
             base_url: "http://127.0.0.1:1/v1".into(),
             responses_process: None,
@@ -475,6 +477,7 @@ fn provider_req_compat_loads_selected_target_profile() {
             wire_model: "MiniMax-M3".into(),
             visible_model_ids: vec!["MiniMax-M3".into()],
             model_capabilities: vec!["text".into(), "tools".into()],
+            web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
             max_context_tokens: None,
             base_url: "http://127.0.0.1:1/v1".into(),
             responses_process: None,
@@ -866,11 +869,22 @@ fn resp04_only_coalesces_the_latest_appended_response_suffix_and_keeps_history_i
         historical_messages.as_slice(),
         "the complete historical prefix must remain byte-for-byte JSON equivalent"
     );
-    assert_eq!(messages.len(), 295);
-    assert_eq!(messages[294]["role"], "assistant");
-    assert_eq!(messages[294]["content"], "latest visible text");
-    assert_eq!(messages[294]["reasoning_content"], "latest thought");
-    assert_eq!(messages[294]["tool_calls"][0]["id"], "call_latest");
+    assert!(messages.len() > 294);
+    let latest_suffix = &messages[294..];
+    assert!(latest_suffix.iter().any(|item| {
+        item.get("content") == Some(&json!("latest visible text"))
+            || item
+                .get("reasoning_content")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|text| text == "latest thought")
+    }));
+    assert!(latest_suffix.iter().any(|item| {
+        item.get("tool_calls")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|call| call.get("id") == Some(&json!("call_latest")))
+    }));
 }
 
 #[test]

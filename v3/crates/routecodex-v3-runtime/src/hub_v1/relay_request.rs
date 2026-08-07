@@ -1,11 +1,11 @@
 use super::{
-    apply_v3_stopless_request_hook_at_req04,
+    apply_v3_stopless_request_hook_at_req04, apply_v3_web_search_request_hook_at_req04,
     build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
     build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
     build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
     merge_v3_relay_restored_local_context_at_req04, V3HubContinuationOwnership, V3HubEntryProtocol,
     V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
-    V3HubRequestSemanticProtocol, V3StoplessCenterState,
+    V3HubRequestSemanticProtocol, V3StoplessCenterState, V3WebSearchCenterState,
 };
 use crate::{
     V3LocalContinuationError, V3LocalContinuationReq04RestoreRequest, V3LocalContinuationScopeKey,
@@ -157,6 +157,7 @@ pub enum V3HubServertoolRequestProfile {
         stopless_center_state: Option<V3StoplessCenterState>,
         stopless_transition_request_id: Option<String>,
         stopless_transition_updated_at: Option<u64>,
+        web_search_execution_mode: Option<routecodex_v3_config::V3WebSearchExecutionMode>,
     },
     RequiredFailure(&'static str),
 }
@@ -171,6 +172,7 @@ impl V3HubServertoolRequestProfile {
             stopless_center_state: None,
             stopless_transition_request_id: None,
             stopless_transition_updated_at: None,
+            web_search_execution_mode: None,
         }
     }
     pub fn stopless_reasoning_stop() -> Self {
@@ -180,6 +182,29 @@ impl V3HubServertoolRequestProfile {
             stopless_center_state: None,
             stopless_transition_request_id: None,
             stopless_transition_updated_at: None,
+            web_search_execution_mode: None,
+        }
+    }
+    pub fn with_web_search_execution_mode(
+        mut self,
+        mode: routecodex_v3_config::V3WebSearchExecutionMode,
+    ) -> Self {
+        if let Self::Enabled {
+            web_search_execution_mode,
+            ..
+        } = &mut self
+        {
+            *web_search_execution_mode = Some(mode);
+        }
+        self
+    }
+    pub fn web_search_execution_mode(&self) -> Option<routecodex_v3_config::V3WebSearchExecutionMode> {
+        match self {
+            Self::Enabled {
+                web_search_execution_mode,
+                ..
+            } => *web_search_execution_mode,
+            Self::Disabled | Self::RequiredFailure(_) => None,
         }
     }
     pub fn with_stopless_center_state(mut self, state: V3StoplessCenterState) -> Self {
@@ -249,12 +274,6 @@ impl V3HubServertoolRequestProfile {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum V3HubAttachmentHistoryPolicy {
-    Preserve,
-    Placeholder { placeholder: &'static str },
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3HubRelayRequestHookEvent {
     Req01Entry,
@@ -267,7 +286,6 @@ pub enum V3HubRelayRequestHookEvent {
     Req04LocalContextRestored,
     Req04ToolGoverned,
     Req04ProtocolToolIdentityGoverned,
-    Req04HistoryGoverned,
     Req04ServertoolGoverned,
     Req04StoplessControlLoaded,
     Req04StoplessCliNoopObserved,
@@ -295,8 +313,8 @@ pub enum V3HubRelayRequestError {
     OrphanToolOutput { index: usize, call_id: String },
     #[error("tool output kind mismatch at input index {index}: call_id {call_id}")]
     ToolOutputKindMismatch { index: usize, call_id: String },
-    #[error("attachment resource missing at input index {index}")]
-    AttachmentResourceMissing { index: usize },
+    #[error("current-turn payload boundary is invalid: start {start}, len {len}")]
+    CurrentPayloadBoundaryInvalid { start: usize, len: usize },
     #[error("side-channel field leaked into normal request payload: {key}")]
     SideChannelLeaked { key: &'static str },
     #[error("required request hook failed: {hook_id}")]
@@ -309,6 +327,8 @@ pub enum V3HubRelayRequestError {
     RestoredLocalContextInvalid { reason: String },
     #[error("unknown static servertool request hook: {hook_id}")]
     UnknownStaticHook { hook_id: &'static str },
+    #[error("web_search ServerTool surface activation failed at Req04: {reason}")]
+    WebSearchToolSurfaceActivationFailed { reason: String },
     #[error("malformed stopless CLI output at input index {index}: {reason}")]
     MalformedStoplessCliOutput { index: usize, reason: &'static str },
     #[error("malformed stopless tool surface at request field {field}: {reason}")]
@@ -322,8 +342,6 @@ pub enum V3HubRelayRequestError {
         index: usize,
         reason: &'static str,
     },
-    #[error("internal apply_patch guidance leaked into request payload field {field}")]
-    ApplyPatchGuidancePayloadLeak { field: &'static str },
 }
 
 #[derive(Debug)]
@@ -333,6 +351,7 @@ pub struct V3HubRelayRequestOutcome {
     tool_output_count: usize,
     events: Vec<V3HubRelayRequestHookEvent>,
     stopless_state: Option<V3StoplessCenterState>,
+    web_search_state: Option<V3WebSearchCenterState>,
 }
 impl V3HubRelayRequestOutcome {
     pub fn payload(&self) -> &Value {
@@ -359,6 +378,9 @@ impl V3HubRelayRequestOutcome {
     pub fn stopless_state(&self) -> Option<&V3StoplessCenterState> {
         self.stopless_state.as_ref()
     }
+    pub fn web_search_state(&self) -> Option<&V3WebSearchCenterState> {
+        self.web_search_state.as_ref()
+    }
     pub fn into_governed(self) -> V3HubReqChatProcess04Governed {
         self.governed
     }
@@ -379,21 +401,6 @@ impl V3HubRelayRequestHooks {
         lookup: &V3HubContinuationLookup<'_>,
         profile: &V3HubServertoolRequestProfile,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
-        self.run_with_attachment_history_policy(
-            raw,
-            lookup,
-            profile,
-            V3HubAttachmentHistoryPolicy::Preserve,
-        )
-    }
-
-    pub fn run_with_attachment_history_policy(
-        &self,
-        raw: V3HubReqInbound01ClientRaw,
-        lookup: &V3HubContinuationLookup<'_>,
-        profile: &V3HubServertoolRequestProfile,
-        attachment_history_policy: V3HubAttachmentHistoryPolicy,
-    ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
         if let Some(key) = find_v3_hub_side_channel_key(&raw.payload.0) {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });
         }
@@ -408,13 +415,7 @@ impl V3HubRelayRequestHooks {
             V3HubRelayRequestHookEvent::Req02Exit,
             V3HubRelayRequestHookEvent::Req03Entry,
         ]);
-        self.run_from_normalized_with_events(
-            normalized,
-            lookup,
-            profile,
-            &attachment_history_policy,
-            events,
-        )
+        self.run_from_normalized_with_events(normalized, lookup, profile, events)
     }
 
     pub fn run_from_normalized(
@@ -427,7 +428,6 @@ impl V3HubRelayRequestHooks {
             normalized,
             lookup,
             profile,
-            &V3HubAttachmentHistoryPolicy::Preserve,
             vec![V3HubRelayRequestHookEvent::Req03Entry],
         )
     }
@@ -437,7 +437,6 @@ impl V3HubRelayRequestHooks {
         normalized: V3HubReqInbound02Normalized,
         lookup: &V3HubContinuationLookup<'_>,
         profile: &V3HubServertoolRequestProfile,
-        attachment_history_policy: &V3HubAttachmentHistoryPolicy,
         mut events: Vec<V3HubRelayRequestHookEvent>,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
         let ownership = classify_continuation(lookup)?;
@@ -451,13 +450,14 @@ impl V3HubRelayRequestHooks {
         if local_context.is_some() {
             events.push(V3HubRelayRequestHookEvent::Req04LocalContextRestored);
         }
+        let mut current_payload_start = 0usize;
         if let Some(context) = local_context.as_deref() {
             if let Some(key) = find_v3_hub_side_channel_key(context) {
                 return Err(V3HubRelayRequestError::RestoredLocalContextInvalid {
                     reason: format!("restored local continuation context leaked {key}"),
                 });
             }
-            merge_v3_relay_restored_local_context_at_req04(
+            current_payload_start = merge_v3_relay_restored_local_context_at_req04(
                 &mut classified.previous.previous.payload.0,
                 context,
             )
@@ -473,6 +473,7 @@ impl V3HubRelayRequestHooks {
         let stopless_state = if profile.stopless_reasoning_stop_enabled() {
             let stopless_state = apply_v3_stopless_request_hook_at_req04(
                 &mut classified.previous.previous.payload.0,
+                current_payload_start,
                 &mut events,
                 profile.stopless_center_state(),
                 profile.stopless_transition_request_id(),
@@ -482,7 +483,14 @@ impl V3HubRelayRequestHooks {
         } else {
             None
         };
-        reject_apply_patch_guidance_payload_leak_at_req04(&classified.previous.previous.payload.0)?;
+        let web_search_state = if profile
+            .web_search_execution_mode()
+            .is_some_and(routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search)
+        {
+            apply_v3_web_search_request_hook_at_req04(&mut classified.previous.previous.payload.0)?
+        } else {
+            None
+        };
         if govern_protocol_tool_identity_at_req04(
             classified.previous.previous.entry_protocol,
             &classified.previous.previous.payload.0,
@@ -490,20 +498,17 @@ impl V3HubRelayRequestHooks {
             events.push(V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned);
         }
         let govern_chat_messages_tool_outputs = classified.previous.canonicalized_from_responses
-            || classified.previous.previous.entry_protocol == V3HubEntryProtocol::OpenAiChat;
+            || matches!(
+                classified.previous.previous.entry_protocol,
+                V3HubEntryProtocol::OpenAiChat | V3HubEntryProtocol::Gemini
+            );
         let tool_output_count = govern_tool_outputs_at_req04(
             &mut classified.previous.previous.payload.0,
             local_context.as_deref(),
             govern_chat_messages_tool_outputs,
+            current_payload_start,
         )?;
-        govern_attachment_history_at_req04(
-            &mut classified.previous.previous.payload.0,
-            attachment_history_policy,
-        )?;
-        events.extend([
-            V3HubRelayRequestHookEvent::Req04ToolGoverned,
-            V3HubRelayRequestHookEvent::Req04HistoryGoverned,
-        ]);
+        events.push(V3HubRelayRequestHookEvent::Req04ToolGoverned);
         run_servertool_profile(profile, &mut events)?;
         let governed = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(classified);
         events.push(V3HubRelayRequestHookEvent::Req04Exit);
@@ -513,6 +518,7 @@ impl V3HubRelayRequestHooks {
             tool_output_count,
             events,
             stopless_state,
+            web_search_state,
         })
     }
 }
@@ -771,71 +777,24 @@ fn govern_gemini_tool_identity_at_req04(contents: &[Value]) -> Result<(), V3HubR
     Ok(())
 }
 
-const V3_APPLY_PATCH_GUIDANCE_MARKER: &str = "[Codex Tool Guidance]";
-
-fn reject_apply_patch_guidance_payload_leak_at_req04(
-    payload: &Value,
-) -> Result<(), V3HubRelayRequestError> {
-    if payload
-        .get("instructions")
-        .and_then(Value::as_str)
-        .is_some_and(|instructions| instructions.contains(V3_APPLY_PATCH_GUIDANCE_MARKER))
-    {
-        return Err(V3HubRelayRequestError::ApplyPatchGuidancePayloadLeak {
-            field: "instructions",
-        });
-    }
-    if payload
-        .get("messages")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .any(message_contains_apply_patch_guidance_marker)
-    {
-        return Err(V3HubRelayRequestError::ApplyPatchGuidancePayloadLeak {
-            field: "messages[].content",
-        });
-    }
-    Ok(())
-}
-
-fn message_contains_apply_patch_guidance_marker(message: &Value) -> bool {
-    if message
-        .get("content")
-        .and_then(Value::as_str)
-        .is_some_and(|content| content.contains(V3_APPLY_PATCH_GUIDANCE_MARKER))
-    {
-        return true;
-    }
-    message
-        .get("content")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .any(|part| {
-            part.get("text")
-                .and_then(Value::as_str)
-                .is_some_and(|text| text.contains(V3_APPLY_PATCH_GUIDANCE_MARKER))
-        })
-}
-
 fn govern_tool_outputs_at_req04(
     payload: &mut Value,
     local_context: Option<&Value>,
     govern_chat_messages: bool,
+    current_payload_start: usize,
 ) -> Result<usize, V3HubRelayRequestError> {
     if payload.get("input").and_then(Value::as_array).is_none()
         && payload.get("messages").and_then(Value::as_array).is_some()
         && govern_chat_messages
     {
-        return govern_chat_tool_outputs_at_req04(payload, local_context);
+        return govern_chat_tool_outputs_at_req04(payload, local_context, current_payload_start);
     }
     let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
         return Ok(0);
     };
     let mut expected_outputs = local_context.map(expected_tool_outputs).unwrap_or_default();
     let mut output_count = 0;
-    for (index, item) in input.iter_mut().enumerate() {
+    for (index, item) in input.iter_mut().enumerate().skip(current_payload_start) {
         if let Some((call_id, expected_kind)) = expected_tool_call_output_from_item(item) {
             expected_outputs.insert(call_id, expected_kind);
             continue;
@@ -874,12 +833,13 @@ fn govern_tool_outputs_at_req04(
 fn govern_chat_tool_outputs_at_req04(
     payload: &mut Value,
     local_context: Option<&Value>,
+    current_payload_start: usize,
 ) -> Result<usize, V3HubRelayRequestError> {
     let mut expected_outputs = local_context.map(expected_tool_outputs).unwrap_or_default();
     let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
         return Ok(0);
     };
-    for message in messages.iter() {
+    for message in messages.iter().skip(current_payload_start) {
         if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
             for call in calls {
                 if let Some((call_id, expected_kind)) =
@@ -891,7 +851,7 @@ fn govern_chat_tool_outputs_at_req04(
         }
     }
     let mut output_count = 0usize;
-    for (index, message) in messages.iter_mut().enumerate() {
+    for (index, message) in messages.iter_mut().enumerate().skip(current_payload_start) {
         if message.get("role").and_then(Value::as_str) != Some("tool") {
             continue;
         }
@@ -1120,67 +1080,6 @@ fn normalize_apply_patch_output_text_at_req04(raw: &str) -> String {
         return APPLY_PATCH_ERROR_TEXT.to_string();
     }
     raw.to_string()
-}
-
-fn govern_attachment_history_at_req04(
-    payload: &mut Value,
-    policy: &V3HubAttachmentHistoryPolicy,
-) -> Result<(), V3HubRelayRequestError> {
-    let V3HubAttachmentHistoryPolicy::Placeholder { placeholder } = policy else {
-        return Ok(());
-    };
-    if let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) {
-        let historical_len = input.len().saturating_sub(1);
-        for (index, item) in input.iter_mut().take(historical_len).enumerate() {
-            replace_historical_media_with_placeholder(item, placeholder, index)?;
-        }
-        return Ok(());
-    }
-    if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
-        let historical_len = messages.len().saturating_sub(1);
-        for (index, message) in messages.iter_mut().take(historical_len).enumerate() {
-            replace_historical_media_with_placeholder(message, placeholder, index)?;
-        }
-    }
-    Ok(())
-}
-
-fn replace_historical_media_with_placeholder(
-    value: &mut Value,
-    placeholder: &str,
-    index: usize,
-) -> Result<(), V3HubRelayRequestError> {
-    match value {
-        Value::Object(object) => {
-            if object.get("type").and_then(Value::as_str) == Some("input_image")
-                && !object.contains_key("image_url")
-            {
-                return Err(V3HubRelayRequestError::AttachmentResourceMissing { index });
-            }
-            if object.get("type").and_then(Value::as_str) == Some("image_url") {
-                let missing_url = object
-                    .get("image_url")
-                    .and_then(|image_url| image_url.get("url"))
-                    .is_none_or(Value::is_null);
-                if missing_url {
-                    return Err(V3HubRelayRequestError::AttachmentResourceMissing { index });
-                }
-            }
-            for child in object.values_mut() {
-                replace_historical_media_with_placeholder(child, placeholder, index)?;
-            }
-        }
-        Value::Array(items) => {
-            for child in items {
-                replace_historical_media_with_placeholder(child, placeholder, index)?;
-            }
-        }
-        Value::String(text) if text.contains("data:image") => {
-            *text = placeholder.to_owned();
-        }
-        _ => {}
-    }
-    Ok(())
 }
 
 fn run_servertool_profile(

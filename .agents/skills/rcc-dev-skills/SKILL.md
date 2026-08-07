@@ -1,15 +1,21 @@
 ---
 name: rcc-dev-skills
-description: RouteCodex 调试/开发入口；开发前必须先读 AGENTS、V3 架构 skill、resource/function/mainline/verification maps，禁止控制语义进业务 payload、禁止脚本批量替换、禁止不查 owner 直接改代码。
+description: P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script 做跨文件或同一文件多位置语义批量替换；逐文件读取核实上下文后用 apply_patch hunk，formatter/canonical generator 只生成声明的机械产物，不得语义改写。P0 Architecture Guard：typed carrier / MetadataCenter 控制资源绝不能进入 payload，payload must not reconstruct control，必须 fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound 补偿。模块定义、owner、allowed/forbidden paths、相邻调用边、资源关系和方案越界审查先行，写完审 diff 越界，功能验证后最后 code review。
 ---
 
 # RCC Dev Skills
 
 ## 概要硬规则（Agent 列表阶段也必须看到）
 
+- P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script，对跨文件或同一文件多位置做语义批量替换；逐文件读取核实上下文后，只能用明确、可审查的 `apply_patch` hunk 手工修改。formatter/canonical generator 只可生成其声明的机械产物，不得语义改写。
+- P0 控制面与业务 payload 物理隔离：routing、switching、continuation、retry、provider selection、health、debug、snapshot、error、scope、Stopless/servertool 状态只能走 typed carrier / MetadataCenter 控制资源 / Error 链，绝不能进入 request/response payload；payload 不得重建控制状态；发现泄漏必须 fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound/transport 补偿。
+- 模块边界流程不可跳过：先读模块定义、allowed/forbidden paths、相邻调用边、资源关系并审方案越界；写完后审实际 diff 越界，再做功能验证，最后才允许安装/重启/在线样本和 code review。
+- P0 Architecture Guard：typed side-channel / MetadataCenter 控制资源只能承载控制面，绝不能进入 payload；payload must not reconstruct control；泄漏必须 fail-fast。禁止 silent strip、请求侧 cleanup、handler/SSE/outbound/transport 补偿。
+- 客户端接入失败必须修当前 canonical protocol path：Chat Completions 失败就修 Chat/SSE 唯一 owner，禁止改走 Responses、加静态 scope header 或换 endpoint 掩盖坏链路。
+
 - 任何 RouteCodex 开发/调试/审计任务，先读本 skill 和 `.agents/skills/rcc-v3-architecture/SKILL.md`；不要只靠 grep、记忆或聊天摘要改代码。
 - 写代码前必须查 `v3-resource-operation-map.yml`、`v3-function-map.yml`、`v3-mainline-call-map.yml`、module registry、`v3-verification-map.yml`，锁定唯一 owner、允许路径、禁止路径、相邻边和必跑 gate。
-- 控制语义与业务 payload 物理隔离：routing/switching/continuation/retry/provider selection/health/debug/snapshot/error/scope/stopless/servertool 只能走 typed side-channel / MetadataCenter 控制资源 / Error 链，绝不能写入 provider/client normal payload 或协议 `metadata`。
+- 控制状态与业务 payload 物理隔离：routing/switching/continuation/retry/provider selection/health/debug/snapshot/error/scope/StoplessCenter/servertool 状态只能走 typed side-channel / MetadataCenter 控制资源 / Error 链。Stopless 当前轮协议投影是唯一登记例外：Req04 可注入当前轮透明 guidance/tool/action，Resp03 可按同轮 provenance 剥离对应内部动作；控制状态字段仍不得进入 normal payload 或协议 `metadata`，历史和 continuation 不可变区不得修改。
 - 每个阶段必须保持协议形态：Direct 同协议直连；Relay 只在相邻 inbound/outbound codec 做静态投影；Chat Process 不决定 provider wire shape。
 - 禁止静默丢弃、请求侧 cleanup、handler/SSE/outbound 补偿、fallback/降级、未登记近似投影；错误回唯一 owner 修。
 - 绝对禁止脚本批量替换；跨文件或同文件多位置语义修改只能逐文件读取后用明确、可审查的手工 hunk 修改。
@@ -17,7 +23,7 @@ description: RouteCodex 调试/开发入口；开发前必须先读 AGENTS、V3 
 ## P0 架构阻断（先于任何路由）
 
 - 禁止脚本批量替换：严禁用 Python / Node / Perl / `sed` / `awk`、临时脚本、shell loop、正则替换命令、编辑器宏或生成式 transformation script，对跨文件或同一文件多位置做语义批量替换。必须逐文件读取并核实上下文，再用明确、可审查的 `apply_patch` hunk 手工修改。既有 formatter / canonical generator 仅可生成其声明的机械或生成产物，绝不能用于语义改写。
-- RouteCodex 控制语义只能走 typed carrier / MetadataCenter 控制资源 / Error 链，绝不能进入、镜像到或借协议 `metadata` 混入 provider/client 正常 payload。
+- RouteCodex 控制状态只能走 typed carrier / MetadataCenter 控制资源 / Error 链，绝不能进入、镜像到或借协议 `metadata` 混入 provider/client 正常 payload。不要把登记的 Stopless 当前轮 Req04 注入/Resp03 剥离误判成控制状态泄漏。
 - normal payload 也不得重建 routing、switching、continuation、retry、provider selection、health、debug、snapshot、error、scope、stopless/servertool 状态。
 - 命中泄漏必须在 owning boundary fail-fast；禁止 silent strip，禁止请求侧 cleanup，禁止 handler/SSE/outbound 补偿。先执行本块，再查 map、路由或实现。
 - 强制顺序：读涉及模块定义 -> 审查方案是否越界 -> 写代码 -> 审实际 diff 是否越界 -> 验证功能 -> 运行时安装/重启/在线旧样本 -> code review。前一步未通过禁止进入下一步；review 必须逐模块检查 owner、owned/allowed/forbidden paths、相邻边和资源关系。

@@ -411,18 +411,23 @@ requireMatch(
 );
 requireMatch(
   source.serverTests,
-  /fn provider_failure_scope_rejects_missing_existing_session_header\(\)/u,
-  "Server must fail closed when the existing request session header is missing",
+  /fn provider_failure_scope_uses_internal_request_id_without_client_session_header\(\)/u,
+  "Server must isolate headerless requests with their existing internal request id",
 );
 requireMatch(
   source.serverBlackbox,
-  /async fn responses_direct_missing_failure_session_fails_before_any_provider_send\(\)/u,
-  "Server blackbox must prove missing existing session fails before provider send",
+  /async fn responses_direct_without_failure_session_header_reaches_provider\(\)/u,
+  "Server blackbox must prove a missing client session header does not block provider send",
 );
 requireMatch(
   source.packageJson,
-  /"test:v3-provider-session-cooldown":[^\n]*-p routecodex-v3-provider-responses --lib health::tests[^\n]*responses_direct_missing_failure_session_fails_before_any_provider_send/u,
-  "Provider session cooldown gate must avoid unrelated integration binaries and run the missing-session blackbox",
+  /"test:v3-provider-session-cooldown":[^\n]*-p routecodex-v3-provider-responses --lib health::tests[^\n]*responses_direct_without_failure_session_header_reaches_provider/u,
+  "Provider session cooldown gate must avoid unrelated integration binaries and run the headerless-request blackbox",
+);
+const serverFailureSessionScopeResolver = extractBracedBlock(
+  source.server,
+  "fn get_failure_session_scope",
+  "Server provider failure session scope resolver",
 );
 const serverFailureSessionScopeBuilder = extractBracedBlock(
   source.server,
@@ -448,6 +453,16 @@ forbidMatch(
   serverFailureSessionScopeBuilder,
   /request_id|parse_codex_turn_metadata|TURN_METADATA_SESSION_PATHS|BODY_SESSION_PATHS|client_metadata|metadata|conversation_id|unwrap_or/u,
   "Server failure scope builder must not derive control identity from request identity or payload metadata",
+);
+requireMatch(
+  serverFailureSessionScopeResolver,
+  /V3ProviderFailureSessionScope::new\([\s\S]*&server\.id,[\s\S]*&server\.routing_group,[\s\S]*format!\("request-local-\{request_id\}"\)/u,
+  "Server must build a headerless request-local control scope without changing client headers or payload",
+);
+forbidMatch(
+  serverFailureSessionScopeResolver,
+  /headers\.insert|payload|client_metadata|metadata/u,
+  "Headerless failure-scope isolation must not synthesize headers or rebuild control from payload",
 );
 requireMatch(
   `${source.kernel}\n${source.directSse}\n${source.responses}\n${source.openaiChat}\n${source.anthropic}\n${source.gemini}`,

@@ -749,7 +749,17 @@ fn enqueue_sse_client_chunks(
         let payload: Value = serde_json::from_str(&data).map_err(|error| error.to_string())?;
         let client_payload =
             project_sse_event_payload(payload, state.compatibility_profile.as_deref())?;
-        state.terminal = openai_chat_sse_payload_has_terminal_finish_reason(&client_payload)?;
+        let choices = client_payload
+            .get("choices")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "OpenAI Chat SSE choices are missing".to_string())?;
+        if state.terminal && !choices.is_empty() {
+            return Err(
+                "OpenAI Chat SSE emitted a non-usage frame after terminal finish_reason".into(),
+            );
+        }
+        state.terminal =
+            state.terminal || openai_chat_sse_payload_has_terminal_finish_reason(&client_payload)?;
         state
             .pending
             .push_back(Ok(format!("data: {client_payload}\n\n").into_bytes()));

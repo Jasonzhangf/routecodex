@@ -132,11 +132,11 @@ chains:
       guard, port-scoped listener release for start/stop, and the final
       PortRegistry removal edge.
   - chain_id: stopless.session.mainline
-    expected_total_edges: 8
-    min_anchored_edges: 8
+    expected_total_edges: 7
+    min_anchored_edges: 7
     max_partial_edges: 0
     max_binding_pending_edges: 0
-    note: Stopless session chain is fully anchored and locked.
+    note: Stopless session chain is fully anchored after retiring the deleted TS CLI/servertool binary execution edge.
   - chain_id: error.provider_action_gate.mainline
     expected_total_edges: 8
     min_anchored_edges: 8

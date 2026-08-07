@@ -149,7 +149,7 @@ Source-level completion requires:
 1. compile-fail tests proving forbidden imports/constructors fail
 2. unit tests for config/server/runtime/provider crates
 3. provider-facing blackbox proving final wire request
-4. provider wire unit tests proving historical tool-output data-image placeholders before the latest user turn, plus negative coverage that current-turn images, text mentioning `data:image`, and non-data image URLs are not broadly replaced
+4. provider wire unit tests proving historical tool-output images and reasoning encrypted content remain byte-for-byte unchanged, plus current-turn image validation coverage
 5. direct response observability gate proving JSON status-only finish_reason inference, provider JSON/SSE response-kind compatibility, and stream-request SSE Error06 projection
 6. client-facing blackbox proving no internal leak
 7. architecture gates for V3 map parse/sync

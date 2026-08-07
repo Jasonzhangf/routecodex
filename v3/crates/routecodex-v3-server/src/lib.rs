@@ -27,10 +27,10 @@ use routecodex_v3_debug::{
 use routecodex_v3_error::{
     project_v3_http_boundary_error, project_v3_post_commit_sse_source,
     project_v3_server_invalid_request, project_v3_server_runtime_failure,
-    project_v3_server_websocket_error,
-    raise_v3_debug_artifact_failure, raise_v3_runtime_observability_contract_failure,
-    raise_v3_sse_client_disconnect, raise_v3_sse_provider_failure, V3Error01SourceRaised,
-    V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
+    project_v3_server_websocket_error, raise_v3_debug_artifact_failure,
+    raise_v3_runtime_observability_contract_failure, raise_v3_sse_client_disconnect,
+    raise_v3_sse_provider_failure, V3Error01SourceRaised, V3HttpBoundaryErrorKind,
+    V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw,
@@ -3248,7 +3248,11 @@ fn capture_v3_responses_relay_provider_snapshots(
     }
     let snapshots = output.provider_snapshots.as_mut()?;
     if let Some(provider_request) = snapshots.provider_request.take() {
-        if force_error_evidence || state.debug.should_capture_snapshot_stage("provider-request") {
+        if force_error_evidence
+            || state
+                .debug
+                .should_capture_snapshot_stage("provider-request")
+        {
             let provider_request = state
                 .debug
                 .redact_payload_for_side_channel(provider_request);
@@ -3268,7 +3272,11 @@ fn capture_v3_responses_relay_provider_snapshots(
         }
     }
     if let Some(provider_response) = snapshots.provider_response.take() {
-        if force_error_evidence || state.debug.should_capture_snapshot_stage("provider-response") {
+        if force_error_evidence
+            || state
+                .debug
+                .should_capture_snapshot_stage("provider-response")
+        {
             let provider_response = state
                 .debug
                 .redact_payload_for_side_channel(provider_response);
@@ -3314,7 +3322,9 @@ fn finalize_v3_responses_relay_server_output(
             endpoint,
             request_id,
             "request.json",
-            &state.debug.redact_payload_for_side_channel(raw_request_payload.clone()),
+            &state
+                .debug
+                .redact_payload_for_side_channel(raw_request_payload.clone()),
         );
         let _ = persist_v3_error_evidence_payload(
             state,
@@ -6136,21 +6146,26 @@ fn build_v3_provider_failure_session_scope_for_request(
         })
 }
 
-/// Get failure session scope.
-/// For Responses requests: requires session-id header (returns error if missing).
-/// For other requests: falls back to anonymous scope if session-id is missing.
+/// Get the provider-failure control scope without changing the client request.
+///
+/// A client session header is optional request data. It is useful when present,
+/// but it is not a prerequisite for an ordinary request and must never be
+/// synthesized into headers or payload. Requests without one use their already
+/// allocated internal request id as a request-local control-scope key.
 fn get_failure_session_scope(
     server: &V3ServerManifest,
     headers: &HeaderMap,
     _entry_protocol: &str,
-    _request_id: &str,
+    request_id: &str,
 ) -> Result<V3ProviderFailureSessionScope, String> {
-    // All entry protocols require session-id header for failure isolation.
-    // If missing, this is a server-side bug - not a client error to tolerate.
     if let Some(scope) = build_v3_provider_failure_session_scope_for_request(server, headers) {
         return Ok(scope);
     }
-    Err("provider failure isolation requires the existing request session-id header".to_string())
+    V3ProviderFailureSessionScope::new(
+        &server.id,
+        &server.routing_group,
+        format!("request-local-{request_id}"),
+    )
 }
 
 fn provider_failure_session_id_from_request_headers(

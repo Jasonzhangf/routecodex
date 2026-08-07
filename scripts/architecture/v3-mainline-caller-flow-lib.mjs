@@ -234,7 +234,7 @@ const CONTRACT_NODE_NOTES = new Map([
   ['V3StoplessReq03GuidanceToolInjected', ['注入 stop schema', '追加 exactly-one reasoningStop 和当前轮 guidance']],
   ['V3StoplessResp01ReasoningStopInspected', ['检查 reasoningStop', '判断模型是否显式选择停止 schema']],
   ['V3StoplessResp02RuntimeControlUpdated', ['更新 stopless 状态', '三轮 guard / pass-through 状态迁移']],
-  ['V3StoplessResp03NoopCliOrTerminalProjected', ['投影 no-op 或终态', '对 client 透明投影，不污染 provider payload']],
+  ['V3StoplessResp03BusinessPayloadPreserved', ['保留当前轮业务响应', '控制状态只走 MetadataCenter，不改写历史或业务 payload']],
   ['V3ProviderHealthStateMutated', ['Provider health 更新', 'provider-runtime health owner 写入；Error chain 可触发，VR/Target 只读可用性']],
 
   ['V3Error01SourceRaised', ['Error source', '错误唯一入口；记录 source/stage/code，不在 Server/provider 本地分叉']],

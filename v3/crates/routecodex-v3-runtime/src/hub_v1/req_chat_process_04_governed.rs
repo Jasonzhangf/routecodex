@@ -16,7 +16,7 @@ pub fn build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(
 pub(crate) fn merge_v3_relay_restored_local_context_at_req04(
     current: &mut Value,
     restored: &Value,
-) -> Result<(), V3LocalContinuationError> {
+) -> Result<usize, V3LocalContinuationError> {
     let current_object =
         current
             .as_object_mut()
@@ -38,6 +38,7 @@ pub(crate) fn merge_v3_relay_restored_local_context_at_req04(
         .ok_or_else(|| V3LocalContinuationError::Codec {
             message: "Req04 current request must contain Chat canonical messages".to_string(),
         })?;
+    let restored_len = restored_messages.len();
     let mut merged = restored_messages;
     merged.extend(current_messages);
     current_object.insert("messages".to_string(), Value::Array(merged));
@@ -45,7 +46,7 @@ pub(crate) fn merge_v3_relay_restored_local_context_at_req04(
     copy_restored_protocol_field_if_missing(current_object, restored, "tool_choice");
     copy_restored_protocol_field_if_missing(current_object, restored, "parallel_tool_calls");
     copy_restored_protocol_field_if_missing(current_object, restored, "instructions");
-    Ok(())
+    Ok(restored_len)
 }
 
 fn copy_restored_protocol_field_if_missing(

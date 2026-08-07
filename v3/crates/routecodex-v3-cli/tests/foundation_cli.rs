@@ -190,3 +190,52 @@ fn cli_without_explicit_config_or_home_fails_fast() {
         .unwrap()
         .contains("HOME is required to resolve config.v3.toml"));
 }
+
+#[test]
+fn servertool_run_web_search_accepts_canonical_json_input() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rccv3"))
+        .args([
+            "servertool",
+            "run",
+            "web_search",
+            "--input-json",
+            r#"{"query":"RouteCodex","search_content_types":["text","image"]}"#,
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stdout["toolName"], "web_search");
+    assert_eq!(stdout["routeHint"], "web_search");
+    assert_eq!(stdout["input"]["query"], "RouteCodex");
+    assert_eq!(
+        stdout["input"]["search_content_types"],
+        serde_json::json!(["text", "image"])
+    );
+}
+
+#[test]
+fn servertool_run_web_search_rejects_non_object_input() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rccv3"))
+        .args([
+            "servertool",
+            "run",
+            "web_search",
+            "--input-json",
+            r#"["not-an-object"]"#,
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("SERVERTOOL_CLI_INVALID_FIELD"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

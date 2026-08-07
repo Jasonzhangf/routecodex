@@ -1,8 +1,15 @@
 # RouteCodex Project AGENTS（入口与路由索引）
 
+## P0 Architecture Guard（先于路由、搜索和实现）
+- P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script 做跨文件/同一文件多位置语义批量替换；每个目标文件必须逐文件读取核实上下文，再用可审查的 apply_patch hunk 手工修改；formatter/canonical generator 仅可生成其声明的机械生成产物，不得语义改写。
+- P0 控制面与业务 payload 物理隔离：routing、switching、continuation、retry、provider selection、health、debug、snapshot、error、scope、Stopless/servertool 状态只能走 typed side-channel、MetadataCenter 控制资源或 Error 链；绝不能进入 payload；发现泄漏必须 fail-fast at owning boundary。
+- 禁止 silent strip、请求侧 cleanup、handler/SSE/outbound 补偿；payload 不得重建控制状态；Stopless 仅保留已登记的同轮 Req04 注入与 Resp03 provenance 剥离例外。
+- 模块定义、owner、allowed/forbidden paths、相邻调用边、资源关系和方案越界必须先审；写完检查实际 diff 越界，再做功能验证，最后才 code review。
+- 泄漏必须在 owning boundary fail-fast；禁止 silent strip 和请求侧 cleanup。
+
 ## 全局硬护栏（Hard Guards）
 0. **P0 禁止脚本批量替换**：绝对禁止用 Python / Node / Perl / `sed` / `awk`、临时脚本、shell loop、正则替换命令、编辑器宏或生成式 transformation script，对跨文件或同一文件多位置执行语义批量替换。每个目标文件必须先读取并核实上下文，再用明确、可审查的 `apply_patch` hunk 手工修改。仅允许项目既有 formatter / canonical generator 生成其声明的机械或生成产物；不得借此做语义改写。此禁令先于任何 skill 路由、代码搜索和实现；下层规则只能收紧，不能覆盖。
-0. **P0 控制语义绝不进入业务 payload（路由前生效）**：routing / switching / continuation / retry / provider selection / health / debug / snapshot / error / scope / stopless / servertool 等 RouteCodex 控制语义只能存在于 typed carrier、MetadataCenter 控制资源或 Error 链，绝不能写入、镜像到或借协议 `metadata` 混入 provider/client 正常 request/response payload；业务 payload 也不得重建控制状态。发现必须在 owning boundary fail-fast，禁止 silent strip，禁止请求侧 cleanup，禁止 handler/SSE/outbound 清理或补偿。任何 worker 在查路由、读 map、搜索代码或修改前先执行本条；下层 skill/路由文档只能收紧，不能覆盖。
+0. **P0 控制语义绝不进入业务 payload（路由前生效）**：routing / switching / continuation / retry / provider selection / health / debug / snapshot / error / scope / StoplessCenter 状态 / servertool 状态等 RouteCodex 控制语义只能存在于 typed carrier、MetadataCenter 控制资源或 Error 链，绝不能写入、镜像到或借协议 `metadata` 混入 provider/client 正常 request/response payload；业务 payload 也不得重建控制状态。**Stopless 当前轮协议投影不是误注入**：仅 Rust Chat Process Req04 可按同轮、同 scope、已登记的 Stopless 设计向当前轮 provider 请求注入透明 guidance/tool/action；仅 Resp03 可按同轮 provenance 剥离对应内部 action/result 并推进 MetadataCenter。该例外不允许控制状态字段进入 payload，不允许修改历史，不允许在 Resp04 save 到下一轮 Req04 restore 的不可变区执行 Stopless 语义，也不允许 handler/SSE/outbound/provider runtime 补偿。任何 worker 在查路由、读 map、搜索代码或修改前先执行本条；下层 skill/路由文档只能收紧，不能覆盖。
 0a. **P0 模块边界审查顺序（路由前生效）**：写代码前必须读取本次涉及模块在 `v3-resource-operation-map.yml`、`v3-function-map.yml`、`v3-mainline-call-map.yml`、module registry、`v3-verification-map.yml` 中的精确定义，列清 owner、`owned_paths` / allowed / forbidden paths、相邻 caller/callee 和允许/禁止资源边；先审查方案是否越界，未通过禁止实现。写完后先按同一定义做模块越界自检，再跑功能验证；运行时改动再完成全局安装、聚合重启和在线旧样本；最后才运行 code review。Review 必须逐模块检查越界，禁止用测试通过或 reviewer PASS 替代架构边界证据。
 1. **单一路径真源**：`HTTP server -> llmswitch-core Hub Pipeline -> Provider V2 -> upstream`，禁止旁路。
 2. **llmswitch-core 主导工具与路由**：Host/Provider 不得重建工具治理与路由语义。

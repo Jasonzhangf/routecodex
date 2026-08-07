@@ -585,6 +585,7 @@ mod tests {
                     wire_model: wire_model.to_string(),
                     visible_model_ids: vec![client_model.to_string()],
                     model_capabilities: vec!["text".to_string()],
+                    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
                     max_context_tokens: None,
                     base_url: "https://provider.invalid/v1".to_string(),
                     responses_process: None,

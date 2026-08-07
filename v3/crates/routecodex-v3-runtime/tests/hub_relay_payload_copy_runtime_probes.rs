@@ -73,7 +73,10 @@ fn relay_json_moves_one_business_payload_through_req04() {
         V3HubRequestSemanticProtocol::Chat
     );
     assert_eq!(observed["model"], json!("client-alias"));
-    assert_eq!(observed["metadata"], json!({"client_owned": true}));
+    assert_eq!(
+        observed["routecodex_chat_extension"]["responses_request"]["metadata"],
+        json!({"client_owned": true})
+    );
     assert!(
         observed.get("input").is_none(),
         "ReqInbound02 must move Responses input into Chat canonical messages before Req04"
@@ -134,14 +137,25 @@ fn relay_sse_keeps_one_canonical_payload_without_materializing_stream() {
 
 #[test]
 fn local_context_is_retained_until_req04_outcome_release() {
+    let restored = compile_v3_hub_relay_request_hooks()
+        .run(
+            request_raw(large_input("local-context")),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .expect("build Chat canonical continuation context")
+        .payload()
+        .clone();
     let lookup = V3HubContinuationLookup::new(Some("rcc_copy_probe"), scope()).with_local_context(
         "rcc_copy_probe",
         scope(),
-        large_input("local-context"),
+        restored,
     );
     let outcome = compile_v3_hub_relay_request_hooks()
         .run(
-            request_raw(json!({"input": []})),
+            request_raw(json!({
+                "input": [{"role":"user","content":"continue"}]
+            })),
             &lookup,
             &V3HubServertoolRequestProfile::disabled(),
         )
@@ -150,7 +164,7 @@ fn local_context_is_retained_until_req04_outcome_release() {
     drop(lookup);
     assert!(outcome.restored_local_context());
     assert_eq!(
-        outcome.local_context().unwrap()["input"][127]["role"],
+        outcome.local_context().unwrap()["messages"][127]["role"],
         "user"
     );
     assert!(outcome
@@ -198,13 +212,17 @@ fn servertool_roundtrip_uses_one_resp04_context_and_restores_before_req04_hook()
             "rcc_servertool_copy_probe",
             scope(),
             json!({
-                "id": "resp_servertool_copy_probe",
-                "status": "requires_action",
-                "output": [{
-                    "type": "function_call",
-                    "call_id": "call_servertool_copy_probe",
-                    "name": "servertool.exec",
-                    "arguments": "{\"path\":\"/tmp/probe\"}"
+                "messages": [{
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_servertool_copy_probe",
+                        "type": "function",
+                        "function": {
+                            "name": "servertool.exec",
+                            "arguments": "{\"path\":\"/tmp/probe\"}"
+                        }
+                    }]
                 }]
             }),
         );

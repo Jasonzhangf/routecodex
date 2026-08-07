@@ -1136,6 +1136,7 @@ dependencies = [
  "routecodex-v3-lifecycle",
  "routecodex-v3-server",
  "serde_json",
+ "servertool-core",
  "tempfile",
  "tokio",
 ]

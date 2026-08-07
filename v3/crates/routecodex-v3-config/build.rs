@@ -5,7 +5,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=ROUTECODEX_BUILD_VERSION");
 
     let version = explicit_build_version().unwrap_or_else(source_package_version);
-    println!("cargo:rustc-env=ROUTECODEX_EMBEDDED_BUILD_VERSION={version}");
+    println!("cargo:rustc-env=ROUTECODEX_BUILD_VERSION={version}");
 }
 
 fn explicit_build_version() -> Option<String> {

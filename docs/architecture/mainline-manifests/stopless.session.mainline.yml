@@ -20,16 +20,15 @@ step_ids:
   - stl-01
   - stl-02
   - stl-03
-  - stl-04
   - stl-05
   - stl-06
   - stl-07
   - stl-08
 edge_status_counts:
-  anchored: 8
+  anchored: 7
   partial: 0
   binding_pending: 0
-  total: 8
+  total: 7
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml
   function_map: docs/architecture/function-map.yml

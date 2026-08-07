@@ -44,6 +44,8 @@ Hub hooks.
 
 - Positive: JSON and SSE complete the single request/response lifecycle; SSE first frame remains
   observable while provider terminal is still delayed.
+- Positive: a provider using `chat:deepseek-max` preserves the live DS4 terminal
+  `delta: {}` plus `finish_reason: stop` frame and the following `[DONE]` marker.
 - Negative: 429 never enters Resp01; `[DONE]` before terminal fails; stream end without terminal
   fails; `metadata_center` never reaches provider transport.
 

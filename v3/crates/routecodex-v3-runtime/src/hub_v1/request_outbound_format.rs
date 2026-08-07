@@ -2,7 +2,8 @@ use super::V3HubEntryProtocol;
 use serde_json::{json, Map, Value};
 
 use super::request_outbound_builtin_tool_projection::{
-    normalize_json_schema_redaction_placeholders, project_openai_chat_provider_tools,
+    normalize_json_schema_redaction_placeholders,
+    project_openai_chat_provider_tools_for_web_search_mode,
 };
 use super::request_outbound_metadata::{
     project_openai_chat_reasoning_summary_policy, project_openai_client_metadata_to_metadata,
@@ -11,13 +12,27 @@ use super::request_outbound_metadata::{
 use super::request_outbound_tool_id::compact_tool_id;
 use std::collections::BTreeSet;
 
+#[cfg(test)]
 pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
     payload: &Value,
 ) -> Result<Value, String> {
     if payload.get("messages").and_then(Value::as_array).is_none() {
         return Err("OpenAI Chat provider wire requires Chat canonical messages".to_string());
     }
-    normalize_openai_chat_messages_payload(payload)
+    normalize_openai_chat_messages_payload(
+        payload,
+        routecodex_v3_config::V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+    )
+}
+
+pub(crate) fn build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+    payload: &Value,
+    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
+) -> Result<Value, String> {
+    if payload.get("messages").and_then(Value::as_array).is_none() {
+        return Err("OpenAI Chat provider wire requires Chat canonical messages".to_string());
+    }
+    normalize_openai_chat_messages_payload(payload, web_search_execution_mode)
 }
 
 pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
@@ -1311,7 +1326,10 @@ fn normalize_openai_chat_message_content_part(part: &Value) -> Result<Value, Str
     Ok(normalized)
 }
 
-fn normalize_openai_chat_messages_payload(payload: &Value) -> Result<Value, String> {
+fn normalize_openai_chat_messages_payload(
+    payload: &Value,
+    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
+) -> Result<Value, String> {
     let mut normalized = project_outbound_payload_for_target_protocol(
         payload,
         V3OutboundTargetProtocol::OpenAiChat,
@@ -1389,7 +1407,10 @@ fn normalize_openai_chat_messages_payload(payload: &Value) -> Result<Value, Stri
             *content = Value::Array(normalized_parts);
         }
     }
-    project_openai_chat_provider_tools(&mut normalized)?;
+    project_openai_chat_provider_tools_for_web_search_mode(
+        &mut normalized,
+        web_search_execution_mode,
+    )?;
     ensure_openai_chat_stream_usage_option(&mut normalized);
     Ok(normalized)
 }

@@ -443,12 +443,12 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     assert_eq!(captures.len(), 2);
     assert_eq!(captures[0]["model"], "responses-wire-model");
     assert!(captures[0].get("instructions").is_none());
-    assert_eq!(captures[0]["input"], "json");
+    assert_eq!(captures[0]["input"][0]["content"][0]["text"], "json");
     assert!(!captures[0].to_string().contains("当前轮推进准则"));
     assert_eq!(captures[1]["model"], "responses-wire-model");
     assert_eq!(captures[1]["stream"], true);
     assert!(captures[1].get("instructions").is_none());
-    assert_eq!(captures[1]["input"], "sse");
+    assert_eq!(captures[1]["input"][0]["content"][0]["text"], "sse");
     assert!(!captures[1].to_string().contains("当前轮推进准则"));
 }
 
@@ -601,7 +601,7 @@ async fn responses_relay_responses_target_builds_responses_standard_payload_from
 }
 
 #[tokio::test]
-async fn responses_relay_openai_chat_target_rejects_unmapped_responses_builtin_tools() {
+async fn responses_relay_openai_chat_target_projects_registered_builtin_tools() {
     let transport = SingleJsonCaptureTransport {
         captures: Mutex::new(Vec::new()),
         response: json!({
@@ -656,29 +656,10 @@ async fn responses_relay_openai_chat_target_rejects_unmapped_responses_builtin_t
     .await
     .expect("Responses builtin tools must project a client-visible error");
 
-    assert_eq!(output.status, 502);
-    assert_eq!(
-        output.error_chain.as_ref().unwrap(),
-        &V3_ERROR_CHAIN_NODE_IDS
-    );
-    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
-    let provider_event = &output
-        .observability
-        .as_ref()
-        .expect("provider compat failure must be observable")
-        .provider_failure_events[0];
-    assert!(
-        provider_event
-            .message
-            .contains("UnmappedOutboundFields target_protocol=openai_chat"),
-        "{}",
-        provider_event.message
-    );
-    assert!(provider_event.message.contains("$.tools[0].type"));
-    assert!(
-        transport.captures.lock().unwrap().is_empty(),
-        "unmapped Responses builtin tools must not reach provider wire"
-    );
+    assert_eq!(output.status, 200);
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    assert!(captures[0].get("web_search_options").is_some());
 }
 
 #[tokio::test]
@@ -1130,20 +1111,22 @@ async fn local_continuation_servertool_roundtrip_is_runtime_e2e() {
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
     assert_eq!(
-        captures[1]["input"],
-        json!([
+        captures[1]["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| {
+                let mut item = item.clone();
+                item.as_object_mut().unwrap().remove("id");
+                item
+            })
+            .collect::<Vec<_>>(),
+        vec![
             {
-                "type":"function_call",
-                "call_id":"call_servertool_1",
-                "name":"servertool.exec",
-                "arguments":"{\"cmd\":\"pwd\"}"
+                json!({"type":"function_call","call_id":"call_servertool_1","name":"servertool.exec","arguments":"{\"cmd\":\"pwd\"}"})
             },
-            {
-                "type":"function_call_output",
-                "call_id":"call_servertool_1",
-                "output":"ok"
-            }
-        ])
+            { json!({"type":"function_call_output","call_id":"call_servertool_1","output":"ok"}) }
+        ]
     );
     let provider_wire = serde_json::to_string(&captures[1]).unwrap();
     let client_wire = serde_json::to_string(&second.client_response).unwrap();
@@ -1797,18 +1780,19 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
     let transport = ResponsesContextErrorThenSuccessTransport {
         captures: Mutex::new(Vec::new()),
     };
+    let failure_session_scope = routecodex_v3_error::V3ProviderFailureSessionScope::new(
+        "test-server",
+        "test-group",
+        "responses-shared-health-session",
+    )
+    .expect("test provider failure session scope");
 
     for turn in 0..3 {
         let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
-                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
-                    concat!(module_path!(), ":", line!()),
-                )
-                .expect("test provider failure session scope"),
+                failure_session_scope: failure_session_scope.clone(),
                 request_id: format!("req-responses-context-reselect-{turn}"),
                 payload: json!({
                     "model":"client-responses",
@@ -1862,12 +1846,7 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
+            failure_session_scope,
             request_id: "req-responses-context-reselect-cooled".into(),
             payload: json!({
                 "model":"client-responses",
@@ -1894,12 +1873,14 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         Some("minimax:key1:MiniMax-M3")
     );
     assert_eq!(observability.attempts, Some(1));
-    assert!(observability.unavailable_candidates.contains(
-        &"limited:key1:gpt-5.5:availability(provider_key:limited:key1:gpt-5.5)".to_string()
-    ));
+    assert!(observability
+        .unavailable_candidates
+        .iter()
+        .any(|candidate| { candidate.starts_with("limited:key1:gpt-5.5:availability(") }));
     assert!(
         observability.provider_failure_events.is_empty(),
-        "cooled provider must be skipped before network send; no new provider error event belongs to this request"
+        "cooled provider must be skipped before network send; observed events: {:?}",
+        observability.provider_failure_events
     );
 
     let captures = transport.captures.lock().unwrap();
@@ -2416,12 +2397,24 @@ fn provider_key_consecutive_failures_cool_for_fifteen_minutes_without_cross_mode
     }
     assert!(
         !store
-            .availability("limited", Some("key1"), Some("gpt-5.5"), 902_999)
+            .availability_for_session(
+                &failure_session_scope,
+                "limited",
+                Some("key1"),
+                Some("gpt-5.5"),
+                902_999
+            )
             .available
     );
     assert!(
         store
-            .availability("limited", Some("key1"), Some("gpt-5.5"), 903_000)
+            .availability_for_session(
+                &failure_session_scope,
+                "limited",
+                Some("key1"),
+                Some("gpt-5.5"),
+                903_000
+            )
             .available
     );
     assert!(

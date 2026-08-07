@@ -6,13 +6,11 @@ import { verifyResponsesContinuationImmutableBoundary } from '../architecture/ve
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const requiredFiles = [
-  'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-  'src/modules/llmswitch/bridge/runtime-integrations.ts',
-  'src/modules/llmswitch/bridge/responses-conversation-store-host.ts',
-  'src/modules/llmswitch/bridge/provider-response-effects.ts',
-  'src/server/handlers/responses-handler.ts',
-  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs',
-  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs',
   'docs/architecture/verification-map.yml',
 ];
 
@@ -27,53 +25,59 @@ function copyFixtureRoot() {
   return tmp;
 }
 
-function mutate(root, relativePath, replacement) {
+function mutate(root, relativePath, marker, replacement) {
   const target = path.join(root, relativePath);
-  fs.writeFileSync(target, replacement(fs.readFileSync(target, 'utf8')));
+  const source = fs.readFileSync(target, 'utf8');
+  if (!source.includes(marker)) throw new Error(relativePath + ': mutation marker missing');
+  fs.writeFileSync(target, source.replace(marker, replacement));
 }
 
 function expectFailure(name, mutateFixture, expectedText) {
   const root = copyFixtureRoot();
-  mutateFixture(root);
-  const failures = verifyResponsesContinuationImmutableBoundary(root);
-  if (!failures.some((failure) => failure.includes(expectedText))) {
-    console.error(name + ': expected failure containing ' + expectedText);
-    console.error(failures.join('\n'));
-    process.exit(1);
+  try {
+    mutateFixture(root);
+    const failures = verifyResponsesContinuationImmutableBoundary(root);
+    if (!failures.some((failure) => failure.includes(expectedText))) {
+      console.error(name + ': expected failure containing ' + expectedText);
+      console.error(failures.join('\n'));
+      process.exit(1);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 }
 
 expectFailure(
-  'handler cannot use saved origin request to rebuild context',
-  (root) => {
-    mutate(root, 'src/server/handlers/responses-handler.ts', (source) => source + '\nconst illegal = entryOriginRequest;\n');
-  },
-  'entryOriginRequest'
+  'ReqInbound cannot rebuild saved history',
+  (root) => mutate(
+    root,
+    'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
+    'previous: input,',
+    'let _ = capturedChatRequest;\n        previous: input,',
+  ),
+  'capturedChatRequest',
 );
 
 expectFailure(
-  'release interval cannot repair tool outputs',
-  (root) => {
-    mutate(
-      root,
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs',
-      (source) => source.replace('"input": [],', '"input": [],\n        "tool_outputs": [],')
-    );
-  },
-  'tool_outputs'
+  'RespOutbound cannot repair tool output history',
+  (root) => mutate(
+    root,
+    'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs',
+    'previous: input,',
+    'let _ = function_call_output;\n        previous: input,',
+  ),
+  'function_call_output',
 );
 
 expectFailure(
-  'runtime integration cannot rebuild submit payload',
-  (root) => {
-    mutate(root, 'src/modules/llmswitch/bridge/runtime-integrations.ts', (source) =>
-      source.replace(
-        'recordResponsesResponse(args);',
-        'const payload = { input: [], previous_response_id: args.requestId }; recordResponsesResponse({ ...args, payload });'
-      )
-    );
-  },
-  'recordResponsesResponseForRequest'
+  'Server frame cannot restore continuation context',
+  (root) => mutate(
+    root,
+    'v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs',
+    'V3ServerRespOutbound06ClientFrame { previous: input }',
+    '{ let _ = restore_local_context; V3ServerRespOutbound06ClientFrame { previous: input } }',
+  ),
+  'restore_local_context',
 );
 
-console.log('Responses continuation immutable boundary red fixtures passed.');
+console.log('Responses continuation immutable boundary red fixtures passed (3 mutations rejected).');

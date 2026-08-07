@@ -96,6 +96,13 @@ const cases = [
     replacement: '  history_persistence: allowed\n',
     diagnostic: /guidance_rewrite\.history_persistence must be forbidden/u,
   },
+  {
+    name: 'manifest revives broad historical stopless guideline cleanup',
+    path: 'docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml',
+    marker: '  stale_generated_guideline_cleanup: current_turn_exact_provenance_only\n',
+    replacement: '  stale_generated_guideline_cleanup: required\n',
+    diagnostic: /guidance_rewrite\.stale_generated_guideline_cleanup must be current_turn_exact_provenance_only/u,
+  },
 ];
 
 const failures = [];

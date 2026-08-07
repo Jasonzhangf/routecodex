@@ -1,6 +1,19 @@
 use serde_json::{Map, Value};
 
+use routecodex_v3_config::V3WebSearchExecutionMode;
+
+#[cfg(test)]
 pub(super) fn project_openai_chat_provider_tools(payload: &mut Value) -> Result<(), String> {
+    project_openai_chat_provider_tools_for_web_search_mode(
+        payload,
+        V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+    )
+}
+
+pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
+    payload: &mut Value,
+    web_search_execution_mode: V3WebSearchExecutionMode,
+) -> Result<(), String> {
     let Some(root) = payload.as_object_mut() else {
         return Ok(());
     };
@@ -16,12 +29,28 @@ pub(super) fn project_openai_chat_provider_tools(payload: &mut Value) -> Result<
     for (index, tool) in tools.iter().enumerate() {
         let tool_type = tool.get("type").and_then(Value::as_str);
         if matches!(tool_type, Some("web_search" | "web_search_preview")) {
-            has_web_search = true;
-            merge_openai_chat_web_search_options(
-                &mut web_search_options,
-                tool,
-                &format!("$.tools[{index}]"),
-            )?;
+            if web_search_execution_mode == V3WebSearchExecutionMode::NativeRemoteSearchToolMix {
+                has_web_search = true;
+                merge_openai_chat_web_search_options(
+                    &mut web_search_options,
+                    tool,
+                    &format!("$.tools[{index}]"),
+                )?;
+            } else if web_search_execution_mode.is_metadata_center_local_search() {
+                // Mode B：标准 web_search 声明投影为本地 websearch function tool
+                //（单一工具名 websearch，供 Resp03 同轮拦截本地执行）。
+                normalized_tools
+                    .push(build_local_web_search_function_tool(tool, index, "websearch")?);
+            } else {
+                // None / 未声明模式：保持既有 hosted web_search_options 投影
+                //（与 HEAD 行为一致，不改动普通目标的 options 透传）。
+                has_web_search = true;
+                merge_openai_chat_web_search_options(
+                    &mut web_search_options,
+                    tool,
+                    &format!("$.tools[{index}]"),
+                )?;
+            }
         } else {
             normalized_tools.push(normalize_openai_chat_provider_tool(tool, index)?);
         }
@@ -40,6 +69,94 @@ pub(super) fn project_openai_chat_provider_tools(payload: &mut Value) -> Result<
         root.insert("web_search_options".to_string(), projected);
     }
     Ok(())
+}
+
+fn build_local_web_search_function_tool(
+    tool: &Value,
+    index: usize,
+    local_tool_name: &str,
+) -> Result<Value, String> {
+    let path = format!("$.tools[{index}]");
+    let row = tool
+        .as_object()
+        .ok_or_else(|| format!("MalformedOutboundField target_protocol=openai_chat path={path}"))?;
+    for key in row.keys() {
+        if !matches!(
+            key.as_str(),
+            "type"
+                | "search_context_size"
+                | "user_location"
+                | "external_web_access"
+                | "search_content_types"
+        ) {
+            return Err(format!(
+                "UnmappedOutboundFields target_protocol=openai_chat paths={path}.{key}"
+            ));
+        }
+    }
+    let content_types = row
+        .get("search_content_types")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(vec![Value::String("text".to_string())]));
+    if !content_types
+        .as_array()
+        .is_some_and(|values| !values.is_empty() && values.iter().all(Value::is_string))
+    {
+        return Err(format!(
+            "MalformedOutboundField target_protocol=openai_chat path={path}.search_content_types"
+        ));
+    }
+    let mut properties = Map::new();
+    properties.insert(
+        "query".to_string(),
+        serde_json::json!({"type":"string","description":"Search query"}),
+    );
+    properties.insert(
+        "search_content_types".to_string(),
+        serde_json::json!({
+            "type":"array",
+            "items":{"type":"string","enum":content_types},
+            "default":content_types
+        }),
+    );
+    if let Some(value) = row.get("search_context_size") {
+        properties.insert(
+            "search_context_size".to_string(),
+            serde_json::json!({"type":"string","default":value}),
+        );
+    }
+    if let Some(value) = row.get("user_location") {
+        properties.insert(
+            "user_location".to_string(),
+            serde_json::json!({"type":"object","default":value}),
+        );
+    }
+    normalize_openai_chat_function_tool(
+        &Map::from_iter([
+            ("type".to_string(), Value::String("function".to_string())),
+            ("name".to_string(), Value::String(local_tool_name.to_string())),
+            (
+                "description".to_string(),
+                Value::String(
+                    "Search the web through the RouteCodex local Web Search ServerTool."
+                        .to_string(),
+                ),
+            ),
+            (
+                "parameters".to_string(),
+                Value::Object(Map::from_iter([
+                    ("type".to_string(), Value::String("object".to_string())),
+                    ("properties".to_string(), Value::Object(properties)),
+                    (
+                        "required".to_string(),
+                        Value::Array(vec![Value::String("query".to_string())]),
+                    ),
+                    ("additionalProperties".to_string(), Value::Bool(false)),
+                ])),
+            ),
+        ]),
+        &path,
+    )
 }
 
 fn merge_openai_chat_web_search_options(

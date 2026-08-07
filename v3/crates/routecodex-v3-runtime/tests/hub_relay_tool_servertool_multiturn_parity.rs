@@ -4,16 +4,14 @@ use routecodex_v3_runtime::{
     build_v3_provider_resp_inbound_01_raw,
     build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05,
     compile_v3_hub_relay_request_hooks, compile_v3_hub_relay_response_hooks,
-    V3HubAttachmentHistoryPolicy, V3HubContinuationCommit, V3HubContinuationLookup,
-    V3HubContinuationOwnership, V3HubContinuationScope, V3HubEntryProtocol, V3HubExecutionMode,
-    V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayRequestError,
+    V3HubContinuationCommit, V3HubContinuationLookup, V3HubContinuationOwnership,
+    V3HubContinuationScope, V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource,
+    V3HubProviderWireProtocol, V3HubRelayRequestError, V3HubRelayRequestHookEvent,
     V3HubRelayResponseError, V3HubRelayResponseHookProfile, V3HubRelayToolKind,
     V3HubServertoolRequestProfile, V3HubServertoolResponseAction, V3HubTransportIntent,
     V3StoplessCenterState, V3StoplessCenterSteering,
 };
 use serde_json::{json, Value};
-
-const HISTORICAL_IMAGE_PLACEHOLDER: &str = "[routecodex historical media released]";
 
 fn scope() -> V3HubContinuationScope {
     scope_for(V3HubEntryProtocol::Responses)
@@ -89,6 +87,10 @@ fn active_stopless_response_profile(
         )
 }
 
+fn web_search_response_profile() -> V3HubRelayResponseHookProfile {
+    V3HubRelayResponseHookProfile::empty().with_servertool_name("web_search")
+}
+
 fn provider_protocol_for_entry(entry_protocol: V3HubEntryProtocol) -> V3HubProviderWireProtocol {
     match entry_protocol {
         V3HubEntryProtocol::Responses => V3HubProviderWireProtocol::Responses,
@@ -109,6 +111,21 @@ fn restored_multitool_context() -> Value {
             {"type":"function_call","call_id":"call_apply_patch","name":"apply_patch","arguments":"{}"},
             {"type":"function_call","call_id":"call_mcp","name":"mcp.read_file","arguments":"{}"},
             {"type":"function_call","call_id":"call_native","name":"native.exec_command","arguments":"{}"}
+        ]
+    })
+}
+
+fn restored_multitool_chat_context() -> Value {
+    json!({
+        "messages": [
+            {"role":"assistant","tool_calls":[
+                {"id":"call_function","type":"function","function":{"name":"lookup","arguments":"{}"}},
+                {"id":"call_custom","type":"function","function":{"name":"custom.render","arguments":"{}"},"routecodex_chat_extension":{"responses_tool_call_type":"custom_tool_call"}},
+                {"id":"call_servertool","type":"function","function":{"name":"servertool.exec","arguments":"{}"}},
+                {"id":"call_apply_patch","type":"function","function":{"name":"apply_patch","arguments":"{}"}},
+                {"id":"call_mcp","type":"function","function":{"name":"mcp.read_file","arguments":"{}"}},
+                {"id":"call_native","type":"function","function":{"name":"native.exec_command","arguments":"{}"}}
+            ]}
         ]
     })
 }
@@ -191,6 +208,35 @@ fn current_tool_round_payload() -> Value {
     })
 }
 
+fn restored_tool_output_payload_for_entry(entry: V3HubEntryProtocol) -> Value {
+    match entry {
+        V3HubEntryProtocol::Responses => json!({
+            "input":[{
+                "type":"function_call_output",
+                "call_id":"call_function",
+                "output":"restored ok"
+            }]
+        }),
+        V3HubEntryProtocol::Anthropic => json!({
+            "messages":[{
+                "role":"user",
+                "content":[{
+                    "type":"tool_result",
+                    "tool_use_id":"call_function",
+                    "content":"restored ok"
+                }]
+            }]
+        }),
+        V3HubEntryProtocol::OpenAiChat | V3HubEntryProtocol::Gemini => json!({
+            "messages":[{
+                "role":"tool",
+                "tool_call_id":"call_function",
+                "content":"restored ok"
+            }]
+        }),
+    }
+}
+
 #[test]
 fn protocol_transport_continuation_matrix_uses_one_chat_process_governance_path() {
     let request_hooks = compile_v3_hub_relay_request_hooks();
@@ -207,11 +253,10 @@ fn protocol_transport_continuation_matrix_uses_one_chat_process_governance_path(
         for transport in transports {
             let matrix_scope = scope_for(entry);
             let new_outcome = request_hooks
-                .run_with_attachment_history_policy(
+                .run(
                     raw_request_for(current_tool_round_payload(), entry, transport),
                     &V3HubContinuationLookup::new(None, matrix_scope.clone()),
                     &V3HubServertoolRequestProfile::disabled(),
-                    V3HubAttachmentHistoryPolicy::Preserve,
                 )
                 .expect("new/current-history tool output must be governed at Req04");
             assert_eq!(new_outcome.continuation(), V3HubContinuationOwnership::New);
@@ -222,18 +267,17 @@ fn protocol_transport_continuation_matrix_uses_one_chat_process_governance_path(
                     .with_local_context(
                         "ctx_tool_parity",
                         matrix_scope.clone(),
-                        restored_multitool_context(),
+                        restored_multitool_chat_context(),
                     );
             let local_outcome = request_hooks
-                .run_with_attachment_history_policy(
+                .run(
                     raw_request_for(
-                        json!({"input":[{"type":"function_call_output","call_id":"call_function","output":"restored ok"}]}),
+                        restored_tool_output_payload_for_entry(entry),
                         entry,
                         transport,
                     ),
                     &local_lookup,
                     &V3HubServertoolRequestProfile::enabled(["servertool.request"]),
-                    V3HubAttachmentHistoryPolicy::Preserve,
                 )
                 .expect("restored continuation tool output must be governed at Req04");
             assert_eq!(
@@ -291,10 +335,10 @@ fn request_governance_matches_function_custom_servertool_and_internal_tool_outpu
     let lookup = V3HubContinuationLookup::new(Some("ctx_tool_parity"), scope()).with_local_context(
         "ctx_tool_parity",
         scope(),
-        restored_multitool_context(),
+        restored_multitool_chat_context(),
     );
     let outcome = hooks
-        .run_with_attachment_history_policy(
+        .run(
             raw_request(json!({
                 "input": [
                     {"type":"function_call_output","call_id":"call_function","output":"function ok"},
@@ -307,7 +351,6 @@ fn request_governance_matches_function_custom_servertool_and_internal_tool_outpu
             })),
             &lookup,
             &V3HubServertoolRequestProfile::enabled(["servertool.request"]),
-            V3HubAttachmentHistoryPolicy::Preserve,
         )
         .expect("Req04 tool governance accepts only outputs backed by restored tool calls");
 
@@ -357,13 +400,16 @@ fn apply_patch_tool_output_error_is_normalized_and_kept_as_next_turn_tool_output
         "ctx_apply_patch",
         scope(),
         json!({
-            "id": "resp_apply_patch",
-            "status": "requires_action",
-            "output": [{
-                "type": "custom_tool_call",
-                "call_id": "call_apply_patch_freeform",
-                "name": "apply_patch",
-                "input": "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch"
+            "messages": [{
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_apply_patch_freeform",
+                    "type": "function",
+                    "function": {
+                        "name": "apply_patch",
+                        "arguments": "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch"
+                    }
+                }]
             }]
         }),
     );
@@ -396,13 +442,13 @@ fn apply_patch_legacy_function_call_accepts_custom_output_after_client_projectio
             "ctx_apply_patch_legacy",
             scope(),
             json!({
-                "id": "resp_apply_patch_legacy",
-                "status": "requires_action",
-                "output": [{
-                    "type": "function_call",
-                    "call_id": "call_apply_patch_legacy",
-                    "name": "apply_patch",
-                    "arguments": "{}"
+                "messages": [{
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_apply_patch_legacy",
+                        "type": "function",
+                        "function": {"name": "apply_patch", "arguments": "{}"}
+                    }]
                 }]
             }),
         );
@@ -742,7 +788,7 @@ fn stopless_hook_blackbox_terminal_reasoning_stop_skips_cli_roundtrip() {
 }
 
 #[test]
-fn stopless_hook_blackbox_terminal_summary_strips_internal_control_echo_without_cli_roundtrip() {
+fn stopless_hook_blackbox_natural_stop_strips_internal_control_echo_before_followup() {
     let response_hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = response_hooks
         .normalize(relay_response(
@@ -777,9 +823,10 @@ fn stopless_hook_blackbox_terminal_summary_strips_internal_control_echo_without_
         .unwrap();
     assert_eq!(
         resp03.terminality(),
-        routecodex_v3_runtime::V3HubResponseTerminality::Terminal
+        routecodex_v3_runtime::V3HubResponseTerminality::NonTerminal
     );
     let resp04 = response_hooks.commit(resp03).unwrap();
+    assert!(resp04.control_transition().is_some());
     assert_eq!(resp04.action(), V3HubContinuationCommit::None);
     let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
     assert!(serialized.contains("summary proof"));
@@ -845,6 +892,72 @@ fn stopless_guard_terminal_strips_raw_stop_schema_text_without_cli_roundtrip() {
 }
 
 #[test]
+fn stopless_shaped_business_text_is_preserved_without_current_turn_activation() {
+    let response_hooks = compile_v3_hub_relay_response_hooks();
+    let control_shaped_text = "{\"stopreason\":2,\"current_goal\":\"business data\",\"reason\":\"record\",\"evidence\":\"visible\",\"next_step\":\"none\",\"needs_user_input\":false}";
+    let resp02 = response_hooks
+        .normalize(relay_response(
+            json!({
+                "id":"resp_business_json",
+                "object":"response",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":control_shaped_text}]
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = response_hooks
+        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
+        .unwrap();
+    let resp04 = response_hooks.commit(resp03).unwrap();
+
+    assert_eq!(
+        resp04.finalized_payload()["output"][0]["content"][0]["text"],
+        control_shaped_text
+    );
+}
+
+#[test]
+fn malformed_current_turn_reasoning_stop_arguments_fail_without_guessing_control_state() {
+    let response_hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = response_hooks
+        .normalize(relay_response(
+            json!({
+                "id":"resp_malformed_reasoning_stop",
+                "object":"response",
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_malformed_reasoning_stop",
+                    "name":"reasoningStop",
+                    "arguments":"{not-json"
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let error = response_hooks
+        .govern(
+            resp02,
+            &active_stopless_response_profile(0, "req-malformed-reasoning-stop"),
+        )
+        .expect_err("malformed current-turn reasoningStop arguments must fail explicitly");
+
+    assert!(matches!(
+        error,
+        V3HubRelayResponseError::MalformedToolCall {
+            reason: "reasoningStop tool call arguments must be valid JSON",
+            ..
+        }
+    ));
+}
+
+#[test]
 fn stopless_hook_blackbox_disabled_request_profile_keeps_cli_result_as_tool_output() {
     let request_hooks = compile_v3_hub_relay_request_hooks();
     let lookup = V3HubContinuationLookup::new(Some("ctx-stopless-disabled"), scope())
@@ -881,7 +994,7 @@ fn stopless_hook_blackbox_disabled_request_profile_keeps_cli_result_as_tool_outp
 }
 
 #[test]
-fn stopless_hook_blackbox_noop_cli_without_runtime_control_state_is_stripped_not_failed() {
+fn stopless_hook_blackbox_noop_cli_without_runtime_control_state_is_preserved() {
     let request_hooks = compile_v3_hub_relay_request_hooks();
     let lookup = V3HubContinuationLookup::new(Some("ctx-stopless-missing-state"), scope())
         .with_local_context(
@@ -915,8 +1028,11 @@ fn stopless_hook_blackbox_noop_cli_without_runtime_control_state_is_stripped_not
         .unwrap();
     assert!(governed.stopless_state().is_none());
     let serialized = serde_json::to_string(governed.payload()).unwrap();
-    assert!(!serialized.contains("call_stopless_reasoning"));
-    assert!(!serialized.contains("routecodex hook run reasoningStop"));
+    assert!(serialized.contains("call_stopless_reasoning"));
+    assert!(serialized.contains("routecodex hook run reasoningStop"));
+    assert!(!governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04StoplessResultParsed));
 }
 
 #[test]
@@ -925,7 +1041,7 @@ fn request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id() {
     let lookup = V3HubContinuationLookup::new(Some("ctx_tool_parity"), scope()).with_local_context(
         "ctx_tool_parity",
         scope(),
-        restored_multitool_context(),
+        restored_multitool_chat_context(),
     );
 
     assert!(matches!(
@@ -970,10 +1086,10 @@ fn request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id() {
 }
 
 #[test]
-fn attachment_history_placeholder_releases_only_historical_media_and_preserves_current_payload() {
+fn attachment_history_is_preserved_without_placeholder_cleanup() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let outcome = hooks
-        .run_with_attachment_history_policy(
+        .run(
             raw_request(json!({
                 "input": [
                     {"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,HISTORY"}]},
@@ -984,23 +1100,19 @@ fn attachment_history_placeholder_releases_only_historical_media_and_preserves_c
             })),
             &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
-            V3HubAttachmentHistoryPolicy::Placeholder {
-                placeholder: HISTORICAL_IMAGE_PLACEHOLDER,
-            },
         )
         .expect("Req04 attachment history governance");
     let serialized = serde_json::to_string(outcome.payload()).unwrap();
 
-    assert!(!serialized.contains("HISTORY"));
-    assert!(serialized.contains(HISTORICAL_IMAGE_PLACEHOLDER));
+    assert!(serialized.contains("HISTORY"));
     assert!(serialized.contains("data:image/png;base64,CURRENT"));
 }
 
 #[test]
-fn attachment_history_missing_resource_fails_without_trimming_current_request() {
+fn attachment_history_missing_resource_is_preserved_as_client_data() {
     let hooks = compile_v3_hub_relay_request_hooks();
-    assert!(matches!(
-        hooks.run_with_attachment_history_policy(
+    let outcome = hooks
+        .run(
             raw_request(json!({
                 "input": [
                     {"role":"user","content":[{"type":"input_image"}]},
@@ -1009,12 +1121,11 @@ fn attachment_history_missing_resource_fails_without_trimming_current_request() 
             })),
             &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
-            V3HubAttachmentHistoryPolicy::Placeholder {
-                placeholder: HISTORICAL_IMAGE_PLACEHOLDER,
-            },
-        ),
-        Err(V3HubRelayRequestError::AttachmentResourceMissing { .. })
-    ));
+        )
+        .expect("missing attachment metadata must not trigger history cleanup");
+    let serialized = serde_json::to_string(outcome.payload()).unwrap();
+    assert!(serialized.contains("image_url"));
+    assert!(serialized.contains("data:image/png;base64,CURRENT"));
 }
 
 #[test]
@@ -1061,6 +1172,83 @@ fn response_governance_classifies_function_custom_servertool_and_internal_tools_
             V3HubRelayToolKind::Native,
         ]
     );
+}
+
+#[test]
+fn response_governance_projects_web_search_to_client_exec_with_original_call_id() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_response(
+            json!({
+                "id":"resp_web_search_servertool",
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_web_search_original",
+                    "name":"web_search",
+                    "arguments":"{\"query\":\"RouteCodex docs\",\"search_content_types\":[\"text\",\"image\"]}"
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+
+    let resp03 = hooks
+        .govern(resp02, &web_search_response_profile())
+        .unwrap();
+    assert_eq!(
+        resp03.servertool_action(),
+        V3HubServertoolResponseAction::None
+    );
+    assert_eq!(resp03.tool_call_count(), 1);
+    assert_eq!(resp03.tool_call_kinds(), vec![V3HubRelayToolKind::Function]);
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.finalized_payload();
+    assert_eq!(payload["output"][0]["call_id"], "call_web_search_original");
+    assert_eq!(payload["output"][0]["name"], "exec_command");
+    let arguments: Value = serde_json::from_str(
+        payload["output"][0]["arguments"]
+            .as_str()
+            .expect("exec_command arguments"),
+    )
+    .unwrap();
+    let command = arguments["cmd"].as_str().expect("cmd");
+    assert!(command.starts_with("routecodex servertool run web_search --input-json "));
+    assert!(command.contains("RouteCodex docs"));
+    assert!(command.contains("search_content_types"));
+    assert!(command.contains("image"));
+    let serialized = payload.to_string();
+    assert!(!serialized.contains("routeHint"));
+    assert!(!serialized.contains("flowId"));
+}
+
+#[test]
+fn response_governance_leaves_unregistered_function_call_untouched() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_response(
+            json!({
+                "id":"resp_regular_function",
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_regular",
+                    "name":"lookup",
+                    "arguments":"{\"key\":\"value\"}"
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+
+    let resp03 = hooks
+        .govern(resp02, &web_search_response_profile())
+        .unwrap();
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.finalized_payload();
+    assert_eq!(payload["output"][0]["call_id"], "call_regular");
+    assert_eq!(payload["output"][0]["name"], "lookup");
+    assert_eq!(payload["output"][0]["arguments"], "{\"key\":\"value\"}");
 }
 
 #[test]

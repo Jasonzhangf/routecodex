@@ -1258,17 +1258,14 @@ fn provider_failure_scope_uses_existing_session_header() {
 }
 
 #[test]
-fn provider_failure_scope_rejects_missing_existing_session_header() {
+fn provider_failure_scope_uses_internal_request_id_without_client_session_header() {
     let log_file = test_v3_console_log_file("provider-failure-session-header-missing");
     let state = test_v3_listener_state(&log_file, 5555);
-    let error =
-        build_v3_provider_failure_session_scope_for_request(&state.server, &HeaderMap::new())
-            .expect_err("missing existing session header must fail closed");
+    let scope =
+        get_failure_session_scope(&state.server, &HeaderMap::new(), "responses", "request-123")
+            .expect("ordinary requests do not require a client session header");
 
-    assert_eq!(
-        error,
-        "provider failure isolation requires the existing request session-id header"
-    );
+    assert_eq!(scope.session_id(), "request-local-request-123");
     let _ = fs::remove_file(log_file);
 }
 

@@ -978,12 +978,7 @@ fn project_v3_server_boundary_error(
     detail: impl Into<String>,
     status: u16,
 ) -> V3Error06ClientProjected {
-    let source = build_v3_error_01_source_raised(
-        source_kind,
-        source_stage,
-        code,
-        detail,
-    );
+    let source = build_v3_error_01_source_raised(source_kind, source_stage, code, detail);
     V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
         source,
         action_scope: V3ErrorActionScope::None,
@@ -1034,12 +1029,7 @@ pub fn project_v3_server_websocket_error(
             400,
         );
     }
-    project_v3_server_runtime_failure(
-        "V3ServerRespOutbound06ClientFrame",
-        code,
-        detail,
-        500,
-    )
+    project_v3_server_runtime_failure("V3ServerRespOutbound06ClientFrame", code, detail, 500)
 }
 
 pub fn raise_v3_sse_provider_failure(

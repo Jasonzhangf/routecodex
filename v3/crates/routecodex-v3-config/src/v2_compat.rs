@@ -10,6 +10,7 @@ use crate::{
     V3ResponsesTransportKind, V3RouteGroupAuthoringConfig, V3RoutePoolAuthoringConfig,
     V3RoutePoolMatchAuthoringConfig, V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind,
     V3SelectionPolicy, V3SelectionStrategy, V3ServerAuthoringConfig, V3StreamingPolicy,
+    V3WebSearchExecutionMode,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -592,12 +593,15 @@ fn compile_v2_provider_models(
             referenced_models.is_none_or(|referenced_models| referenced_models.contains(id))
         })
         .map(|(id, model)| {
+            let web_search_execution_mode = model.web_search_execution_mode();
             (
                 id.clone(),
                 V3ProviderModelAuthoringConfig {
                     wire_name: model.wire_name.or_else(|| Some(id)),
                     aliases: model.aliases,
                     capabilities: normalize_v2_capabilities(model.capabilities),
+                    web_search_execution_mode,
+                    web_search_backend: None,
                     supports_streaming: model.supports_streaming.unwrap_or(false),
                     supports_thinking: model.supports_thinking.unwrap_or(false),
                     thinking: model.thinking,
@@ -618,6 +622,7 @@ fn normalize_v2_capabilities(capabilities: Vec<String>) -> Vec<String> {
     for capability in capabilities {
         let mapped = match capability.as_str() {
             "thinking" => "reasoning",
+            "web_search_direct" => "web_search",
             value => value,
         };
         result.insert(mapped.to_string());
@@ -821,4 +826,18 @@ struct V2ProviderModelConfig {
     context_window: Option<u64>,
     #[serde(default)]
     features: BTreeMap<String, bool>,
+}
+
+impl V2ProviderModelConfig {
+    fn web_search_execution_mode(&self) -> V3WebSearchExecutionMode {
+        if self
+            .capabilities
+            .iter()
+            .any(|capability| capability == "web_search_direct")
+        {
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix
+        } else {
+            V3WebSearchExecutionMode::None
+        }
+    }
 }

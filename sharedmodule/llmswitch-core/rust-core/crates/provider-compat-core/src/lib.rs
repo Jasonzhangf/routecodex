@@ -233,6 +233,7 @@ pub fn run_resp_inbound_stage3_compat(
     }
 
     if is_minimax_profile(profile_id) {
+        let payload = minimax_anthropic::apply_response_compat(input.payload);
         if provider_protocol_matches(
             input.adapter_context.provider_protocol.as_ref(),
             "openai-responses",
@@ -241,12 +242,16 @@ pub fn run_resp_inbound_stage3_compat(
             "openai-chat",
         ) {
             return Ok(CompatResult {
-                payload: harvest_text_tool_calls(input.payload)?,
+                payload: harvest_text_tool_calls(payload)?,
                 applied_profile: Some(profile_id.to_string()),
                 native_applied: true,
             });
         }
-        return Ok(build_compat_result(input.payload, None));
+        return Ok(CompatResult {
+            payload,
+            applied_profile: Some(profile_id.to_string()),
+            native_applied: true,
+        });
     }
 
     if is_lmstudio_profile(profile_id) {
@@ -1863,6 +1868,37 @@ mod tests {
                 .unwrap_or(""),
             "{\"cmd\":\"pwd\"}"
         );
+    }
+
+    #[test]
+    fn minimax_response_profile_strips_provider_sentinel_from_anthropic_text() {
+        let input = ReqOutboundCompatInput {
+            payload: json!({
+                "id": "msg_minimax_sentinel",
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": "<think]<]minimax[>[\n<continue继续。检查所有 tshirt-heavy / polo-classic 依赖"
+                }],
+                "stop_reason": "end_turn"
+            }),
+            adapter_context: AdapterContext {
+                compatibility_profile: Some("chat:minimax".to_string()),
+                provider_protocol: Some("anthropic-messages".to_string()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        };
+        let result = run_resp_inbound_stage3_compat(input).unwrap();
+        assert!(result.native_applied);
+        assert_eq!(result.applied_profile.as_deref(), Some("chat:minimax"));
+        assert_eq!(
+            result.payload["content"][0]["text"],
+            "继续。检查所有 tshirt-heavy / polo-classic 依赖"
+        );
+        let serialized = serde_json::to_string(&result.payload).unwrap();
+        assert!(!serialized.contains("]<]minimax[>["));
     }
 
     #[test]

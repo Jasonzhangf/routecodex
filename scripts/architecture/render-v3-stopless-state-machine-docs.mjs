@@ -139,7 +139,7 @@ function validateManifest(doc) {
   requireValue(doc?.edge_flow_docs?.generated_html === htmlPath, `${manifestPath}: edge_flow_docs.generated_html mismatch`);
   requireValue(arrayOf(doc?.guidance_rewrite?.forbidden_model_visible).includes('guard exhausted'), `${manifestPath}: guidance_rewrite.forbidden_model_visible must include guard exhausted`);
   requireValue(doc?.guidance_rewrite?.history_persistence === 'forbidden', `${manifestPath}: guidance_rewrite.history_persistence must be forbidden`);
-  requireValue(doc?.guidance_rewrite?.stale_generated_guideline_cleanup === 'required', `${manifestPath}: guidance_rewrite.stale_generated_guideline_cleanup must be required`);
+  requireValue(doc?.guidance_rewrite?.stale_generated_guideline_cleanup === 'current_turn_exact_provenance_only', `${manifestPath}: guidance_rewrite.stale_generated_guideline_cleanup must be current_turn_exact_provenance_only`);
   requireValue(doc?.dry_run_contract?.provider_request_dry_run_writes_stopless_control === 'forbidden', `${manifestPath}: dry_run_contract.provider_request_dry_run_writes_stopless_control must be forbidden`);
   requireValue(doc?.dry_run_contract?.provider_request_dry_run_clears_stopless_control === 'forbidden', `${manifestPath}: dry_run_contract.provider_request_dry_run_clears_stopless_control must be forbidden`);
   requireValue(doc?.dry_run_contract?.repeated_dry_run_same_state_provider_request === 'identical', `${manifestPath}: dry_run_contract.repeated_dry_run_same_state_provider_request must be identical`);
@@ -287,7 +287,7 @@ function renderMarkdown(doc, mainlineMapDoc) {
     '## Provider/Client Transparency Checklist',
     '',
     '- Provider-visible continuation guidance must not mention no-op, CLI, client tool round, `routecodex hook run reasoningStop`, `finish_reason=stop`, consecutive stop count, stop budget, or guard exhaustion.',
-    '- Provider-visible continuation guidance is current-turn only: Req04 must remove earlier generated stopless continuation guidelines before appending the current one, so restored provider history never accumulates repeated stopless prompts.',
+    '- Provider-visible continuation guidance is current-turn only: Req04 may consume only the exact registered current-turn artifact with same-turn provenance before appending the current guideline; it must never scan, rewrite, or remove restored historical guidance.',
     '- Client-visible no-op command is exactly `routecodex hook run reasoningStop` and carries no input JSON, session, conversation, scope, counter, or state.',
     '- Provider request after no-op must remove `call_stopless_reasoning`, CLI stdout, `--input-json`, `repeatCount`, `schemaFeedback`, `runtime_control`, `metadata_center`, and other control/debug fields while preserving real tools and real history.',
     '- Provider-request dry-run must be observational: the same live StoplessCenter state and same local continuation state must produce identical provider requests across repeated dry-runs, and dry-run must not write or clear StoplessCenter.',
@@ -308,7 +308,7 @@ function renderMarkdown(doc, mainlineMapDoc) {
     '',
     '- Resp03 projects no-input CLI only when StoplessCenter `schema_guidance_active` state exists and stop/end_turn lacks accepted summary/schema; otherwise it transparently passes terminal evidence or inactive-state stops before Resp04 continuation commit.',
     '- Req04 runs only after continuation/local context restore; it consumes no-op output only as evidence and loads StoplessCenter from MetadataCenter/runtime_control.',
-    '- Req04 removes stale generated stopless continuation guidelines before appending one current-turn guideline.',
+    '- Req04 consumes only the exact registered current-turn stopless artifact before appending one current-turn guideline; historical guidance remains immutable.',
     '- Provider-request dry-run reads StoplessCenter for projection only and does not commit StoplessCenter transitions.',
     '- The state diagram includes both normal and abnormal terminal/reset edges.',
     '- The HTML page is generated from this Markdown and contains both the lifecycle flowchart and the state transition diagram.',

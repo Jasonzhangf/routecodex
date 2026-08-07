@@ -2,13 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const requiredFiles = {
-  requestBridge: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-  runtimeIntegrations: 'src/modules/llmswitch/bridge/runtime-integrations.ts',
-  storeHost: 'src/modules/llmswitch/bridge/responses-conversation-store-host.ts',
-  responseEffects: 'src/modules/llmswitch/bridge/provider-response-effects.ts',
-  handler: 'src/server/handlers/responses-handler.ts',
-  rustStore: 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs',
-  rustReqInbound: 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs',
+  reqInbound: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
+  reqRestore: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
+  respCommit: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
+  respOutbound: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs',
+  serverFrame: 'v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs',
   verificationMap: 'docs/architecture/verification-map.yml',
 };
 
@@ -55,139 +53,70 @@ function functionBody(source, signature) {
   return '';
 }
 
-function sourceBeforeRustTests(source) {
-  const marker = '#[cfg(test)]';
-  const index = source.indexOf(marker);
-  return index === -1 ? source : source.slice(0, index);
-}
-
-function exportedFunctionBlock(source, signature) {
-  const start = source.indexOf(signature);
-  if (start === -1) return '';
-  const next = source.indexOf(String.fromCharCode(10) + 'export ', start + signature.length);
-  return source.slice(start, next === -1 ? source.length : next);
-}
-
-function verifyPassThroughFunction(source, signature, requiredCall, forbiddenTokens, fileLabel, failures) {
-  const body = exportedFunctionBlock(source, signature);
-  if (!body) {
-    failures.push(fileLabel + ': missing ' + signature);
-    return;
-  }
-  requireText(body, requiredCall, fileLabel + ': ' + signature + ' must remain a narrow pass-through', failures);
-  for (const token of forbiddenTokens) {
-    forbidText(body, token, fileLabel + ': ' + signature + ' must not perform continuation/history logic: ' + token, failures);
-  }
-}
-
 export function verifyResponsesContinuationImmutableBoundary(root) {
   const failures = [];
   const sources = Object.fromEntries(
-    Object.entries(requiredFiles).map(([key, relativePath]) => [key, readRequired(root, relativePath, failures)])
+    Object.entries(requiredFiles).map(([key, relativePath]) => [key, readRequired(root, relativePath, failures)]),
   );
 
-  const productionRustStore = sourceBeforeRustTests(sources.rustStore);
-  const productionRustReqInbound = sourceBeforeRustTests(sources.rustReqInbound);
-
-  for (const [key, source] of Object.entries({
-    requestBridge: sources.requestBridge,
-    runtimeIntegrations: sources.runtimeIntegrations,
-    storeHost: sources.storeHost,
-    responseEffects: sources.responseEffects,
-    handler: sources.handler,
-    rustStore: productionRustStore,
-    rustReqInbound: productionRustReqInbound,
-  })) {
-    for (const forbidden of ['entryOriginRequest', 'capturedChatRequest', 'requestSemantics']) {
-      forbidText(
-        source,
-        forbidden,
-        requiredFiles[key] + ': immutable save->restore interval must not use ' + forbidden + ' to rebuild history/context',
-        failures
-      );
-    }
-  }
-
-  verifyPassThroughFunction(
-    sources.runtimeIntegrations,
-    'export async function recordResponsesResponseForRequest',
-    'recordResponsesResponse(args);',
-    ['input:', 'tool_outputs', 'previous_response_id', 'entryOriginRequest', 'capturedChatRequest', 'requestSemantics'],
-    requiredFiles.runtimeIntegrations,
-    failures
+  const reqInbound = functionBody(
+    sources.reqInbound,
+    'pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
   );
-  verifyPassThroughFunction(
-    sources.runtimeIntegrations,
-    'export async function resumeResponsesConversation',
-    'return resumeResponsesConversationHost(responseId, submitPayload, options);',
-    ['input:', 'tool_outputs', 'previous_response_id', 'entryOriginRequest', 'capturedChatRequest', 'requestSemantics'],
-    requiredFiles.runtimeIntegrations,
-    failures
-  );
+  requireText(reqInbound, 'previous: input', requiredFiles.reqInbound + ': ReqInbound02 must remain an adjacent normalization node', failures);
 
-  requireText(
-    sources.responseEffects,
-    'executeResponsesContinuationStoreEffects(plan.continuationStoreEffects);',
-    requiredFiles.responseEffects + ': response save must execute Rust-planned store effects unchanged',
-    failures
-  );
-  requireText(
-    sources.storeHost,
-    'executeStoreOperation<unknown>(effect.operation, effect.payload);',
-    requiredFiles.storeHost + ': store host must pass Rust operation/payload unchanged',
-    failures
-  );
+  const restore = functionBody(sources.reqRestore, 'fn restore_local_context_at_req04');
+  requireText(restore, 'restore_local_context_from_store_at_req04', requiredFiles.reqRestore + ': Req04 must remain the local continuation restore owner', failures);
+  requireText(sources.reqRestore, 'current_payload_start', requiredFiles.reqRestore + ': Req04 must retain the immutable-history/current-suffix boundary', failures);
 
-  const releaseBody = functionBody(productionRustStore, 'fn plan_responses_release_request_payload');
-  if (!releaseBody) {
-    failures.push(requiredFiles.rustStore + ': missing plan_responses_release_request_payload');
-  } else {
-    for (const required of [
-      'strip_responses_stored_context_input_media',
-      'collect_responses_pending_tool_call_ids',
-      '"releasedInputPrefix"',
-      '"releasedPendingToolCallIds"',
-      '"input": []',
-    ]) {
-      requireText(
-        releaseBody,
-        required,
-        requiredFiles.rustStore + ': release plan must retain only semantic shrink/normalization contract ' + required,
-        failures
-      );
-    }
+  const commit = functionBody(
+    sources.respCommit,
+    'pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04',
+  );
+  requireText(commit, 'commit_at_resp04', requiredFiles.respCommit + ': Resp04 must remain the local continuation save owner', failures);
+
+  const respOutbound = functionBody(
+    sources.respOutbound,
+    'pub fn build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04',
+  );
+  requireText(respOutbound, 'previous: input', requiredFiles.respOutbound + ': Resp05 must remain an adjacent client projection node', failures);
+
+  const serverFrame = functionBody(
+    sources.serverFrame,
+    'pub fn build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05',
+  );
+  requireText(serverFrame, 'previous: input', requiredFiles.serverFrame + ': Server06 must remain an adjacent transport frame node', failures);
+
+  const immutableInterval = [
+    [requiredFiles.reqInbound, reqInbound],
+    [requiredFiles.respOutbound, respOutbound],
+    [requiredFiles.serverFrame, serverFrame],
+  ];
+  for (const [file, source] of immutableInterval) {
     for (const forbidden of [
-      'convert_responses_output_to_input_items',
-      'normalize_responses_input_items',
-      'capture_req_inbound_responses_context_snapshot',
-      'plan_responses_request_context',
-      'plan_responses_continuation_request_action',
+      'entryOriginRequest',
+      'capturedChatRequest',
+      'requestSemantics',
+      'restore_local_context',
+      'commit_at_resp04',
+      'stopless',
+      'servertool',
       'tool_outputs',
       'function_call_output',
       'custom_tool_call_output',
+      'required_action',
+      'history',
+      'sanitize',
+      'cleanup',
+      'repair',
     ]) {
-      forbidText(
-        releaseBody,
-        forbidden,
-        requiredFiles.rustStore + ': release plan must not rebuild/repair tool history in immutable interval: ' + forbidden,
-        failures
-      );
+      forbidText(source, forbidden, file + ': immutable save->restore interval must not own semantic operation ' + forbidden, failures);
     }
   }
 
   const continuationFeature = featureSection(sources.verificationMap, 'hub.chat_process_responses_continuation');
-  requireText(
-    continuationFeature,
-    'npm run verify:responses-continuation-immutable-boundary',
-    requiredFiles.verificationMap + ': continuation feature must require immutable boundary gate',
-    failures
-  );
-  requireText(
-    continuationFeature,
-    'save->restore interval is immutable',
-    requiredFiles.verificationMap + ': continuation feature must document immutable interval evidence',
-    failures
-  );
+  requireText(continuationFeature, 'npm run verify:responses-continuation-immutable-boundary', requiredFiles.verificationMap + ': continuation feature must require immutable boundary gate', failures);
+  requireText(continuationFeature, 'save->restore interval is immutable', requiredFiles.verificationMap + ': continuation feature must document immutable interval evidence', failures);
 
   return failures;
 }

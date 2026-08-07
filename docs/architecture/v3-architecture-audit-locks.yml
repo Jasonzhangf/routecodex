@@ -69,8 +69,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:2a5ca1c00c3fc8b3296236a8810d425f38b01c499113490de879e99f65659933
-    last_manual_authorization_id: auth-20260801-v3-responses-direct-protocol-context-lock-refresh
+    fingerprint: sha256:748b132377095dbcb9c2740867cf099296d207c54ae6cac37ff3237572b70e00
+    last_manual_authorization_id: auth-20260806-v3-responses-direct-history-immutability
   - item_id: chain:v3.hub_pipeline.v1.request
     chain_id: v3.hub_pipeline.v1.request
     status: audited_locked
@@ -95,8 +95,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:24b682e409307794a85561e66efa8e32e401a516f9c9de8416deed58ab0d74a2
-    last_manual_authorization_id: auth-20260803-v3-stopless-response-control-payload-isolation
+    fingerprint: sha256:99d045db07dc7885fbfdfa29127d968fddd293fd8a34f7f3ad71d6d2f3a90689
+    last_manual_authorization_id: auth-20260806-v3-history-payload-control-audit
   - item_id: chain:v3.debug_error_foundation.mainline
     chain_id: v3.debug_error_foundation.mainline
     status: audited_locked
@@ -115,6 +115,20 @@ locked_items:
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md#sse-edge-sop
     fingerprint: sha256:ee58da7eca3b82d7e16b0cff456968919d023c8c8bb5fcf8766b9465d2b275ed
 manual_authorizations:
+  - authorization_id: auth-20260806-v3-responses-direct-history-immutability
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-06T22:01:34+08:00'
+    reason: "Jason authorized only the corrective Responses Direct lock refresh after auditing the complete chain delta. The sole change removes v3.provider.responses_history_tool_image_placeholder from v3-rd-10 because provider wire must preserve client-generated history byte-for-byte and must not replace historical tool-output images or recursively delete configured historical fields. No caller, callee, edge, owner, or other resource changes are authorized."
+    fingerprint_before: sha256:2a5ca1c00c3fc8b3296236a8810d425f38b01c499113490de879e99f65659933
+    fingerprint_after: sha256:748b132377095dbcb9c2740867cf099296d207c54ae6cac37ff3237572b70e00
+  - authorization_id: auth-20260806-v3-history-payload-control-audit
+    item_id: chain:v3.servertool_hook_skeleton_lifecycle
+    approved_by: Jason
+    approved_at: '2026-08-06T18:53:09+08:00'
+    reason: "Jason explicitly requested a whole-pipeline audit and repair of historical-record mutation and control-plane payload leakage. This refresh removes dead history-wide Stopless cleanup bindings, limits Req04 observation to the current suffix, preserves the business response at Resp03, and keeps StoplessCenter state on the typed side-channel."
+    fingerprint_before: sha256:24b682e409307794a85561e66efa8e32e401a516f9c9de8416deed58ab0d74a2
+    fingerprint_after: sha256:99d045db07dc7885fbfdfa29127d968fddd293fd8a34f7f3ad71d6d2f3a90689
   - authorization_id: auth-20260803-v3-stopless-response-control-payload-isolation
     item_id: chain:v3.servertool_hook_skeleton_lifecycle
     approved_by: Jason

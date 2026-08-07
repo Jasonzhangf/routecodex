@@ -3352,7 +3352,7 @@ async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projecti
 }
 
 #[tokio::test]
-async fn responses_direct_missing_failure_session_fails_before_any_provider_send() {
+async fn responses_direct_without_failure_session_header_reaches_provider() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-key");
@@ -3363,21 +3363,20 @@ async fn responses_direct_missing_failure_session_fails_before_any_provider_send
 
     let response = reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
-        .json(&json!({"model":"client-test","input":"missing session must fail closed"}))
+        .json(&json!({"model":"client-test","input":"missing session header reaches provider"}))
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), 400);
+    assert_ne!(response.status(), 400);
     let body: Value = response.json().await.unwrap();
-    assert_eq!(body["error"]["code"], "malformed_json");
-    assert!(body["error"]["message"]
-        .as_str()
-        .is_some_and(|message| message.contains("existing request session-id header")));
-    assert!(
-        timeout(Duration::from_millis(100), captures.recv())
-            .await
-            .is_err(),
-        "missing existing session header must fail before provider send"
+    assert_ne!(body["error"]["code"], "malformed_json");
+    let capture = timeout(Duration::from_millis(100), captures.recv())
+        .await
+        .expect("provider must receive the request")
+        .expect("provider capture channel must remain open");
+    assert_eq!(
+        capture.body["input"][0]["content"][0]["text"],
+        "missing session header reaches provider"
     );
 
     std::env::remove_var("V3_P6_TEST_KEY");

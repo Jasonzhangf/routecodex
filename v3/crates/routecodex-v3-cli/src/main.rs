@@ -7,6 +7,9 @@ use routecodex_v3_lifecycle::{
     V3ManagedLifecycle, V3ManagedLifecycleObservation, V3ManagedListenerDeclaration,
     V3ManagedStatusRecord,
 };
+use servertool_core::cli_contract::{
+    build_servertool_cli_binary_run_command_from_client_exec_result, ServertoolCliRunInput,
+};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -60,10 +63,29 @@ enum Command {
         #[arg(long, default_value_t = 15_000)]
         timeout_ms: u64,
     },
+    Servertool {
+        #[command(subcommand)]
+        command: ServertoolCommand,
+    },
     #[command(hide = true)]
     Server {
         #[command(subcommand)]
         command: ServerCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServertoolCommand {
+    Run {
+        tool_name: String,
+        #[arg(long = "input-json")]
+        input_json: String,
+        #[arg(long = "flow")]
+        flow: Option<String>,
+        #[arg(long = "session-id")]
+        session_id: Option<String>,
+        #[arg(long = "request-id")]
+        request_id: Option<String>,
     },
 }
 
@@ -160,6 +182,31 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 manifest.version,
                 manifest.servers.len()
             );
+        }
+        Command::Servertool {
+            command:
+                ServertoolCommand::Run {
+                    tool_name,
+                    input_json,
+                    flow,
+                    session_id,
+                    request_id,
+                },
+        } => {
+            let input = serde_json::from_str(&input_json)
+                .map_err(|error| format!("SERVERTOOL_CLI_INVALID_JSON: {error}"))?;
+            let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+                ServertoolCliRunInput {
+                    tool_name,
+                    input,
+                    flow_id: flow,
+                    repeat_count: None,
+                    max_repeats: None,
+                    session_id,
+                    request_id,
+                },
+            )?;
+            println!("{}", serde_json::to_string(&output)?);
         }
         Command::Start {
             config,

@@ -1,4 +1,5 @@
 use super::*;
+use routecodex_v3_config::V3WebSearchExecutionMode;
 
 #[test]
 fn responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids() {
@@ -1018,4 +1019,79 @@ fn gemini_wire_rejects_malformed_stream_transport_intent() {
             .expect_err("Gemini stream transport intent must remain boolean");
 
     assert!(error.contains("$.request.stream"), "{error}");
+}
+
+#[test]
+fn openai_chat_wire_projects_local_websearch_tool_for_metadata_center_local_search() {
+    let payload = json!({
+        "model": "local-model",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [
+            {
+                "type": "function",
+                "name": "read_file",
+                "description": "Read one file",
+                "parameters": {"type":"object","properties":{}}
+            },
+            {
+                "type": "web_search",
+                "external_web_access": true,
+                "search_content_types": ["text"],
+                "search_context_size": "medium"
+            }
+        ]
+    });
+    let request =
+        build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+            &payload,
+            V3WebSearchExecutionMode::MetadataCenterLocalSearch,
+        )
+        .expect("Mode B local websearch projection must compile");
+    let tools = request["tools"].as_array().expect("tools array");
+    assert_eq!(tools.len(), 2, "ordinary tools must remain unchanged");
+    assert_eq!(tools[0]["function"]["name"], "read_file");
+    assert_eq!(tools[0]["function"]["parameters"]["type"], "object");
+    assert_eq!(tools[1]["type"], "function");
+    assert_eq!(
+        tools[1]["function"]["name"],
+        "websearch",
+        "Mode B must use the single local tool name websearch"
+    );
+    assert_eq!(
+        tools[1]["function"]["parameters"]["required"][0],
+        "query",
+        "local websearch must require the query argument"
+    );
+    assert!(
+        request.get("web_search_options").is_none(),
+        "Mode B must not emit hosted web_search_options"
+    );
+}
+
+#[test]
+fn openai_chat_wire_keeps_hosted_options_for_unspecified_mode() {
+    let payload = json!({
+        "model": "plain-model",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [
+            {
+                "type": "web_search",
+                "external_web_access": true,
+                "search_content_types": ["text"]
+            }
+        ]
+    });
+    let request = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &payload,
+        V3WebSearchExecutionMode::None,
+    )
+    .expect("unspecified mode keeps the hosted options projection");
+    assert!(
+        request.get("tools").is_none(),
+        "web_search declaration must be consumed by options (no residual tools)"
+    );
+    assert!(
+        request.get("web_search_options").is_some_and(Value::is_object),
+        "unspecified mode must keep the hosted web_search_options projection"
+    );
 }

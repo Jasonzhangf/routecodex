@@ -34633,3 +34633,11 @@ Hard guards observed:
 - 新测试 `apply_patch_guidance_text_is_preserved_as_business_payload_at_req04` 锁定 marker 文本作为业务 payload 原样保留；Req04 apply_patch 请求仍不注入 guidance。
 - 验证：定向 2/2 PASS；完整 `hub_relay_request_semantics` 22/22 PASS；`verify:v3-architecture-docs`、`verify:v3-module-boundaries`、`verify:v3-relay-request-semantics` PASS；owner files rustfmt check、`git diff --check` PASS。全 workspace `cargo fmt --check` 被无关 dirty/conflict 文件的既有格式漂移阻塞，未修改这些文件。
 - 当前工作树含他人改动和两个 unmerged 文件，禁止覆盖/清理。
+
+## 2026-08-06 - V3 全流水线历史不可变与控制/payload 隔离审计
+- 按 resource/function/mainline/module/verification maps 审计 Server -> ReqInbound -> Req04 -> Provider wire -> Resp03/Resp04 -> RespOutbound/SSE。控制键写入扫描在 V3 Server/Runtime/Provider production source 中为 0；Stopless 只在 Req04 当前 suffix 注入/消费并在 Resp03 按同轮 provenance 剥离，`current_payload_start` 锁住 restored history。
+- 确认并删除两个 Provider wire 历史改写 owner：`replace_historical_responses_tool_output_data_images` 把旧工具图片替换成 `[Image omitted]`，`remove_configured_historical_response_fields` 按 provider 配置递归删除旧 reasoning 字段。两者都违反客户端历史不可改，且位于 Provider wire，不属于必要协议投影。
+- Provider wire 现在只做控制键拒绝、当前轮 data-image 校验和 wire model binding；历史图片对象、历史 reasoning、历史 `encrypted_content` 保持完整。旧 `provider_request_cleanup.historical_fields` 配置载体仍可解析但没有 payload 写权；`/Volumes/extension/.rcc` 与 `~/.rcc` 各有 cc/55ai/asxs-grok/asxs 四个旧引用，未获配置变更授权，未修改。
+- Gate 缺口修复：Relay parity gate 新增 Provider wire 历史 rewrite denylist 与红夹具；失效的 continuation immutable gate 从已删除 TS owner 迁到当前 V3 Rust Req04/Resp04/Resp05/Server06；两组正反门禁均接入 `verify:v3-architecture-ci`。
+- 验证：provider crate 24/24 PASS；hub request 23/23、tool/servertool parity 21/21、local continuation 31/31 PASS；protocol parity 109、stopless 42、normalization 18、relay parity 28、immutable interval 3 条反向变异均红；resource/module/format/diff gates PASS。
+- 阻塞：`v3.responses_direct.required_mainline` 因移除历史图片占位资源产生预期 fingerprint 变化，现行 gate 要求 Jason 明确授权后才能刷新。未刷新、未安装、未重启、未线上重放、未 review/commit。

@@ -48,6 +48,7 @@ impl V3HubRespChatProcess03Governed {
 pub struct V3HubRespChatProcess03Outcome {
     data: V3HubRespChatProcess03Governed,
     control_transition: Option<V3StoplessCenterState>,
+    web_search_transition: Option<V3WebSearchCenterState>,
 }
 
 impl V3HubRespChatProcess03Outcome {
@@ -56,8 +57,17 @@ impl V3HubRespChatProcess03Outcome {
     ) -> (
         V3HubRespChatProcess03Governed,
         Option<V3StoplessCenterState>,
+        Option<V3WebSearchCenterState>,
     ) {
-        (self.data, self.control_transition)
+        (
+            self.data,
+            self.control_transition,
+            self.web_search_transition,
+        )
+    }
+
+    pub fn web_search_transition(&self) -> Option<&V3WebSearchCenterState> {
+        self.web_search_transition.as_ref()
     }
 }
 
@@ -69,9 +79,11 @@ impl Deref for V3HubRespChatProcess03Outcome {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRelayResponseHookProfile {
     servertool_names: BTreeSet<String>,
+    web_search_execution_mode: Option<routecodex_v3_config::V3WebSearchExecutionMode>,
+    web_search_center_state: Option<V3WebSearchCenterState>,
     stopless_reasoning_stop: bool,
     stopless_center_state: Option<V3StoplessCenterState>,
     stopless_transition_request_id: Option<String>,
@@ -89,6 +101,8 @@ impl V3HubRelayResponseHookProfile {
                 .into_iter()
                 .map(|name| name.as_ref().to_owned())
                 .collect(),
+            web_search_execution_mode: None,
+            web_search_center_state: None,
             stopless_reasoning_stop: false,
             stopless_center_state: None,
             stopless_transition_request_id: None,
@@ -98,6 +112,46 @@ impl V3HubRelayResponseHookProfile {
 
     pub fn empty() -> Self {
         Self::new(std::iter::empty::<&'static str>())
+    }
+
+    pub fn with_servertool_name(mut self, name: impl Into<String>) -> Self {
+        self.servertool_names.insert(name.into());
+        self
+    }
+
+    pub(crate) fn is_servertool_name(&self, name: &str) -> bool {
+        self.servertool_names.contains(name)
+    }
+
+    pub fn with_web_search_execution_mode(
+        mut self,
+        mode: routecodex_v3_config::V3WebSearchExecutionMode,
+    ) -> Self {
+        self.web_search_execution_mode = Some(mode);
+        self
+    }
+
+    pub fn web_search_execution_mode(&self) -> Option<routecodex_v3_config::V3WebSearchExecutionMode> {
+        self.web_search_execution_mode
+    }
+
+    pub fn with_web_search_center_state(mut self, state: V3WebSearchCenterState) -> Self {
+        self.web_search_center_state = Some(state);
+        self
+    }
+
+    pub fn web_search_center_state(&self) -> Option<&V3WebSearchCenterState> {
+        self.web_search_center_state.as_ref()
+    }
+
+    /// Mode B：本地 ServerToolCenter 治理的 web_search 需在 Resp03 拦截并
+    /// 本地执行，而不是投影为客户端 exec_command。
+    pub fn web_search_local_surface_active(&self) -> bool {
+        self.web_search_execution_mode
+            .is_some_and(routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search)
+            && self.web_search_center_state.as_ref().is_some_and(|state| {
+                state.phase() == V3WebSearchCenterPhase::LocalToolSurfaceActive
+            })
     }
 
     pub fn with_stopless_reasoning_stop(mut self) -> Self {
@@ -155,6 +209,10 @@ pub enum V3HubRelayResponseError {
     ProviderResponseOutputNotArray,
     #[error("malformed tool call at output index {index}: {reason}")]
     MalformedToolCall { index: usize, reason: &'static str },
+    #[error("web_search ServerTool activation missing at Resp03 interception")]
+    MissingWebSearchActivation,
+    #[error("web_search ServerTool state transition failed at Resp03: {reason}")]
+    WebSearchStateTransitionFailed { reason: String },
     #[error("provider response status is required")]
     MissingStatus,
     #[error("unsupported provider response status: {status}")]
@@ -248,10 +306,12 @@ fn govern_v3_hub_relay_response(
     let governance = build_v3_resp03_protocol_governance(&input)?;
     let branch = inspect_v3_resp03_finish_reason(&input, &governance);
     let mut stopless_center_state = None;
+    let mut web_search_center_state = None;
     let (input, governance) = match branch {
         V3Resp03FinishReasonBranch::ToolCall => {
             let tool_call_hook = apply_v3_tool_call_servertool_hook_at_resp03(input, profile)?;
             stopless_center_state = tool_call_hook.center_state;
+            web_search_center_state = tool_call_hook.web_search_state;
             let input = if tool_call_hook.intercepted {
                 tool_call_hook.input
             } else {
@@ -271,7 +331,7 @@ fn govern_v3_hub_relay_response(
     let servertool_tool_call_followup = governance
         .tool_calls
         .iter()
-        .any(|tool_call| profile.servertool_names.contains(&tool_call.name));
+        .any(|tool_call| profile.is_servertool_name(&tool_call.name));
     let stopless_control_followup = stopless_center_state
         .as_ref()
         .is_some_and(V3StoplessCenterState::need_continue);
@@ -293,6 +353,7 @@ fn govern_v3_hub_relay_response(
             servertool_action,
         },
         control_transition: stopless_center_state,
+        web_search_transition: web_search_center_state,
     })
 }
 
@@ -667,11 +728,10 @@ struct V3ThinkHarvest {
 }
 
 fn harvest_v3_think_text(text: &str) -> V3ThinkHarvest {
-    let (text, provider_sentinel_changed) = strip_v3_resp03_minimax_provider_sentinel_text(text);
     let mut output = String::new();
     let mut reasoning_segments = Vec::new();
     let mut cursor = 0usize;
-    let mut changed = provider_sentinel_changed;
+    let mut changed = false;
     while let Some(relative_start) = text[cursor..].find("<think>") {
         let start = cursor + relative_start;
         output.push_str(&text[cursor..start]);
@@ -697,26 +757,6 @@ fn harvest_v3_think_text(text: &str) -> V3ThinkHarvest {
         reasoning_segments,
         changed,
     }
-}
-
-fn strip_v3_resp03_minimax_provider_sentinel_text(text: &str) -> (String, bool) {
-    if !text.contains("]<]minimax[>[") {
-        return (text.to_string(), false);
-    }
-    let mut next = text.replace("]<]minimax[>[", "");
-    let mut changed = true;
-    for marker in ["<think\n", "<think\r\n", "<think"] {
-        if next.starts_with(marker) {
-            next = next[marker.len()..].to_string();
-            break;
-        }
-    }
-    let trimmed_start = next.trim_start_matches(['\r', '\n', ' ', '\t']);
-    if let Some(rest) = trimmed_start.strip_prefix("<continue") {
-        next = rest.to_string();
-        changed = true;
-    }
-    (next, changed)
 }
 
 fn read_v3_resp03_trimmed_owned(text: &str) -> Option<String> {
@@ -1168,19 +1208,5 @@ mod tests {
         assert!(harvest.changed);
         assert_eq!(harvest.visible_text, "  before\n after  ");
         assert_eq!(harvest.reasoning_segments, vec!["private".to_string()]);
-    }
-
-    #[test]
-    fn resp03_strips_minimax_provider_sentinel_prefix_without_dropping_visible_text() {
-        let harvest = harvest_v3_think_text(
-            "<think]<]minimax[>[\n<continue继续。检查所有 tshirt-heavy / polo-classic 依赖",
-        );
-
-        assert!(harvest.changed);
-        assert_eq!(
-            harvest.visible_text,
-            "继续。检查所有 tshirt-heavy / polo-classic 依赖"
-        );
-        assert!(harvest.reasoning_segments.is_empty());
     }
 }

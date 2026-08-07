@@ -286,7 +286,7 @@ async fn direct_json_stopless_metadata_center_projects_noop_and_continues_on_rem
     assert_eq!(first.client_payload.status, 200, "{first:#?}");
     assert!(first
         .node_trace
-        .contains(&"V3DirectStoplessReq03GuidanceToolInjected"));
+        .contains(&"V3DirectStoplessReq03ControlStateUpdated"));
     assert!(first
         .node_trace
         .contains(&"V3DirectStoplessResp02RuntimeControlUpdated"));

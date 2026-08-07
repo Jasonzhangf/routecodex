@@ -14,7 +14,9 @@ const copyPaths = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
   'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
+  'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
   'v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs',
+  'v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs',
   'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
   'docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml',
@@ -28,6 +30,13 @@ const copyPaths = [
 
 const cases = [
   {
+    name: 'provider wire historical placeholder revived',
+    file: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
+    marker: 'use serde_json::Value;\n',
+    mutation: 'fn replace_historical_responses_tool_output_data_images() {}\nuse serde_json::Value;\n',
+    diagnostic: /provider wire historical payload rewrite or placeholder owner/,
+  },
+  {
     name: 'orphan tool output fail-fast removed',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
     marker: 'OrphanToolOutput { index: usize, call_id: String }',
@@ -35,19 +44,18 @@ const cases = [
     diagnostic: /OrphanToolOutput/,
   },
   {
-    name: 'attachment history policy removed',
+    name: 'attachment history placeholder policy revived',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'pub enum V3HubAttachmentHistoryPolicy',
-    mutation: 'pub enum V3HubAttachmentPolicyRemoved',
-    diagnostic: /V3HubAttachmentHistoryPolicy/,
+    marker: 'use serde_json::Value;\n',
+    mutation: 'enum V3HubAttachmentHistoryPolicy { Placeholder }\nuse serde_json::Value;\n',
+    diagnostic: /historical payload rewrite or attachment placeholder owner/,
   },
   {
     name: 'attachment history governance moved before Req04',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: '        let mut events = vec![\n',
-    mutation:
-      '        govern_attachment_history_at_req04(&mut serde_json::Value::Null, &attachment_history_policy)?;\n        let mut events = vec![\n',
-    diagnostic: /attachment history governance before Req04/,
+    marker: 'merge_v3_relay_restored_local_context_at_req04(',
+    mutation: 'govern_attachment_history_at_req04(&mut serde_json::Value::Null);\nmerge_v3_relay_restored_local_context_at_req04(',
+    diagnostic: /historical payload rewrite or attachment placeholder owner/,
   },
   {
     name: 'tool kind classifier removed',
@@ -149,15 +157,15 @@ const cases = [
   {
     name: 'Responses Relay provider tools preservation removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'assert_original_tools_preserved(&captures[1], second_tools.as_array().unwrap());',
-    mutation: '',
-    diagnostic: /assert_original_tools_preserved/,
+    marker: 'json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs',
+    mutation: 'json_two_turn_additional_tools_surface_test_removed',
+    diagnostic: /json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs/,
   },
   {
     name: 'Codex additional_tools shape blackbox removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
     marker: 'json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs',
-    mutation: 'json_stopless_additional_tools_shape_test_removed',
+    mutation: 'json_two_turn_additional_tools_shape_test_removed',
     diagnostic: /json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs/,
   },
   {
@@ -177,9 +185,9 @@ const cases = [
   {
     name: 'Codex additional_tools original JSON path assertion removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'request path $.tools must be absent because the original request did not contain $.tools',
+    marker: 'no-original-tools request must not synthesize Responses input.additional_tools',
     mutation: 'request path check removed',
-    diagnostic: /request path \$\.tools must be absent/,
+    diagnostic: /no-original-tools request must not synthesize Responses input\.additional_tools/,
   },
   {
     name: 'stopless additional_tools lift helper revived',
@@ -191,9 +199,9 @@ const cases = [
   {
     name: 'Responses HTTP additional_tools transport lift revived',
     file: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
-    marker: 'responses_http_provider_request_preserves_additional_tools_surface',
-    mutation: 'responses_http_provider_request_lifts_additional_tools_to_protocol_tools',
-    diagnostic: /responses_http_provider_request_preserves_additional_tools_surface|Responses HTTP additional_tools global lift/,
+    marker: 'pub struct V3Transport13ResponsesRequest',
+    mutation: 'fn responses_http_provider_request_lifts_additional_tools_to_protocol_tools() {}\npub struct V3Transport13ResponsesRequest',
+    diagnostic: /Responses HTTP additional_tools global lift|responses_http_provider_request_lifts_additional_tools_to_protocol_tools/,
   },
   {
     name: 'provider transport Anthropic protocol conversion revived',
@@ -201,7 +209,7 @@ const cases = [
     marker: 'pub fn build_v3_transport_13_responses_request_from_v3_provider_12(',
     mutation:
       'fn build_anthropic_messages_body() {}\npub fn build_v3_transport_13_responses_request_from_v3_provider_12(',
-    diagnostic: /non-ChatProcess protocol conversion in provider transport|build_anthropic_messages_body/,
+    diagnostic: /provider transport protocol conversion outside Chat Process|build_anthropic_messages_body/,
   },
   {
     name: 'mainline edge owner drift',
@@ -222,7 +230,7 @@ const cases = [
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
     marker: 'fn govern_tool_outputs_at_req04',
     mutation: 'fn full_materialize_govern_tool_outputs_at_req04',
-    diagnostic: /fallback\/materialization|full_materialize/,
+    diagnostic: /full payload materialization shortcut|full_materialize/,
   },
 ];
 

@@ -50,8 +50,7 @@ impl ResponsesTransport for CaptureAnthropicTransport {
 }
 
 #[tokio::test]
-async fn responses_direct_to_relay_req04_strips_all_historical_stopless_pairs_before_anthropic_wire(
-) {
+async fn responses_direct_to_relay_req04_preserves_historical_stopless_pairs_on_anthropic_wire() {
     let manifest = manifest();
     let transport = CaptureAnthropicTransport {
         captures: Mutex::new(Vec::new()),
@@ -85,10 +84,10 @@ async fn responses_direct_to_relay_req04_strips_all_historical_stopless_pairs_be
                     {"type":"message","role":"user","content":[{"type":"input_text","text":"继续真实目标"}]},
                     {"type":"function_call","call_id":"call_real_history","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"},
                     {"type":"function_call_output","call_id":"call_real_history","output":"/workspace"},
-                    {"type":"function_call","id":"fc_stopless_old_1","call_id":"call_stopless_reasoning","name":"exec_command","arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"},
-                    {"type":"function_call_output","id":"fco_stopless_old_1","call_id":"call_stopless_reasoning","output":"Chunk ID: old-1\nProcess exited with code 0"},
-                    {"type":"function_call","id":"fc_stopless_old_2","call_id":"call_stopless_reasoning","name":"exec_command","arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"},
-                    {"type":"function_call_output","id":"fco_stopless_old_2","call_id":"call_stopless_reasoning","output":"Chunk ID: old-2\nProcess exited with code 0"}
+                    {"type":"function_call","id":"fc_stopless_old_1","call_id":"call_stopless_reasoning_old_1","name":"exec_command","arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"},
+                    {"type":"function_call_output","id":"fco_stopless_old_1","call_id":"call_stopless_reasoning_old_1","output":"Chunk ID: old-1\nProcess exited with code 0"},
+                    {"type":"function_call","id":"fc_stopless_old_2","call_id":"call_stopless_reasoning_old_2","name":"exec_command","arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"},
+                    {"type":"function_call_output","id":"fco_stopless_old_2","call_id":"call_stopless_reasoning_old_2","output":"Chunk ID: old-2\nProcess exited with code 0"}
                 ]
             }),
         },
@@ -103,9 +102,7 @@ async fn responses_direct_to_relay_req04_strips_all_historical_stopless_pairs_be
     )
     .await;
 
-    let output = result.expect(
-        "Req04 must remove stale stopless pairs before Anthropic provider compatibility validation",
-    );
+    let output = result.expect("historical Stopless pairs must remain valid protocol history");
     assert!(
         output.node_trace.contains(&"V3HubReqChatProcess04Governed"),
         "Direct-to-Relay handoff must pass through Req04: {:?}",
@@ -115,24 +112,25 @@ async fn responses_direct_to_relay_req04_strips_all_historical_stopless_pairs_be
     assert_eq!(captures.len(), 1, "Anthropic provider must be sent once");
     let provider_body = captures[0].get("body").expect("provider projection body");
     let serialized = serde_json::to_string(provider_body).unwrap();
-    for forbidden in [
-        "call_stopless_reasoning",
+    for historical in [
+        "call_stopless_reasoning_old_1",
+        "call_stopless_reasoning_old_2",
         "routecodex hook run reasoningStop",
         "Chunk ID: old-1",
         "Chunk ID: old-2",
     ] {
         assert!(
-            !serialized.contains(forbidden),
-            "Req04 leaked historical stopless artifact {forbidden} to Anthropic wire: {serialized}"
+            serialized.contains(historical),
+            "Req04 modified or dropped historical Stopless item {historical}: {serialized}"
         );
     }
     assert!(
         serialized.contains("call_real_history"),
-        "Req04 cleanup must preserve real tool history: {serialized}"
+        "Req04 must preserve real tool history: {serialized}"
     );
     assert!(
         serialized.contains("/workspace"),
-        "Req04 cleanup must preserve real tool output: {serialized}"
+        "Req04 must preserve real tool output: {serialized}"
     );
 }
 

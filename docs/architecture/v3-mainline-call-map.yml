@@ -830,7 +830,6 @@ chains:
       - v3.target.concrete_provider
       produces:
       - v3.provider.responses_wire_payload
-      - v3.provider.responses_history_tool_image_placeholder
       side_channel_reads:
       - v3.responses_direct.policy
       - v3.target.concrete_provider
@@ -1224,7 +1223,7 @@ chains:
     to_node: V3HubReqInbound02Normalized
     caller_symbol: V3HubRelayRequestHooks::run
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01
+    callee_symbol: build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
     status: anchored
     binding_kind: relay_request_source_slice
@@ -4276,6 +4275,7 @@ chains:
 - chain_id: v3.servertool_hook_skeleton_lifecycle
   owner_feature_id: v3.servertool_hook_skeleton_lifecycle
   summary: StoplessCenter Metadata Center control-signal state-machine lifecycle inside declared Chat Process stopless SOP only. Server entry and generic relay closeout are aggregate routing edges; StoplessCenter read/write ownership is bound to Req04/Resp03 StoplessCenter nodes; CLI is no-input no-op evidence only.
+  current_turn_protocol_projection: Req04 injects registered provider-visible current-turn guidance/tool/action; Resp03 strips only the matching current-response internal action/result. StoplessCenter state remains side-channel-only; history and the Resp04-save to next-Req04-restore interval are immutable.
   manifest: docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml
   edges:
   - step_id: v3-servertool-stopless-req-01
@@ -4318,17 +4318,17 @@ chains:
     to_node: V3StoplessReq02NoopCliConsumed
     caller_symbol: apply_v3_stopless_request_hook_at_req04
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    callee_symbol: strip_active_stopless_pair_and_stale
+    callee_symbol: active_stopless_cli_output
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
     status: anchored
     owner_feature_id: v3.servertool_hook_skeleton_lifecycle
     resource_flow:
       consumes:
       - v3.request.normal_payload
-      produces:
-      - v3.request.normal_payload
+      produces: []
       side_channel_reads: []
       side_channel_writes: []
+    semantic_contract: Consume only exact current-turn Stopless artifacts with same request/scope/declaration/call provenance; historical payload is immutable.
   - step_id: v3-servertool-stopless-req-04
     from_node: V3StoplessReq02NoopCliConsumed
     to_node: V3StoplessReq03ControlTransitioned
@@ -4348,9 +4348,9 @@ chains:
   - step_id: v3-servertool-stopless-resp-01
     from_node: V3HubRespChatProcess03Governed
     to_node: V3StoplessResp01ReasoningStopInspected
-    caller_symbol: apply_v3_tool_call_servertool_hook_at_resp03
+    caller_symbol: apply_v3_stop_servertool_hook_at_resp03
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    callee_symbol: first_reasoning_stop_tool_call
+    callee_symbol: response_has_stopless_stop_trigger
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
     status: anchored
     owner_feature_id: v3.servertool_hook_skeleton_lifecycle
@@ -4382,9 +4382,9 @@ chains:
   - step_id: v3-servertool-stopless-resp-03
     from_node: V3StoplessResp02RuntimeControlUpdated
     to_node: V3StoplessResp03BusinessPayloadPreserved
-    caller_symbol: apply_v3_tool_call_servertool_hook_at_resp03
+    caller_symbol: apply_v3_stop_servertool_hook_at_resp03
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    callee_symbol: build_stopless_guard_passthrough_visible_payload
+    callee_symbol: project_stopless_noop_for_stop_candidate
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
     status: anchored
     owner_feature_id: v3.servertool_hook_skeleton_lifecycle
@@ -4545,7 +4545,7 @@ chains:
       - v3.continuation.remote_binding
 - chain_id: v3.hub_relay.tool_servertool_multiturn_parity
   owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-  summary: Controlled Hub Relay tool/servertool multiturn parity over Rust Chat Process tool governance, Req04 apply_patch feedback normalization, attachment history placeholder, response tool harvest, Resp03 apply_patch freeform client projection, continuation commit, SSE ordering, and single response exit.
+  summary: Controlled Hub Relay tool/servertool multiturn parity over Rust Chat Process current-turn tool governance with immutable restored history, Req04 apply_patch feedback normalization, response tool harvest, Resp03 apply_patch freeform client projection, continuation commit, SSE ordering, and single response exit.
   manifest: docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml
   edges:
   - step_id: v3-relay-tool-parity-01
@@ -4553,7 +4553,7 @@ chains:
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: request_governance_matches_function_custom_servertool_and_internal_tool_outputs_to_restored_context
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-    callee_symbol: run_with_attachment_history_policy
+    callee_symbol: run_from_normalized
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
     status: anchored
     owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
@@ -4584,22 +4584,6 @@ chains:
       - v3.continuation.local_context_truth
       side_channel_writes:
       - v3.hub.tool_governance_truth
-  - step_id: v3-relay-tool-parity-03
-    from_node: V3HubReqContinuation03Classified
-    to_node: V3HubReqChatProcess04Governed
-    caller_symbol: attachment_history_placeholder_releases_only_historical_media_and_preserves_current_payload
-    caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-    callee_symbol: govern_attachment_history_at_req04
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    status: anchored
-    owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-    resource_flow:
-      consumes:
-      - v3.request.normal_payload
-      produces:
-      - v3.hub.attachment_history_placeholder
-      side_channel_reads: []
-      side_channel_writes: []
   - step_id: v3-relay-tool-parity-04
     from_node: V3HubRespInbound02Normalized
     to_node: V3HubRespChatProcess03Governed
@@ -5174,11 +5158,13 @@ chains:
       consumes:
       - v3.servertool.state_machine_control
       - v3.web_search.execution_mode
+      - v3.web_search.backend_binding
       produces:
       - v3.request.normal_payload
       side_channel_reads:
       - v3.servertool.state_machine_control
       - v3.web_search.execution_mode
+      - v3.web_search.backend_binding
       side_channel_writes: []
     status: binding_pending
   - step_id: v3-web-search-sm-05
@@ -6856,3 +6842,37 @@ chains:
         produces: []
         side_channel_reads: []
         side_channel_writes: []
+- chain_id: v3.route_classifier.facts_classification
+  owner_feature_id: v3.route_classifier_local_owner
+  summary: Route facts classification stays local to the route-classifier crate; Virtual Router and runtime request-facts builders consume classification decisions, never payload patches.
+  edges:
+  - step_id: v3-route-classifier-facts-01
+    from_node: V3RouterRequestFacts
+    to_node: V3RouteClassification
+    caller_symbol: build_v3_router_request_facts_for_entry_with_control
+    caller_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+    callee_symbol: classify_route
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/route.rs
+    status: anchored
+    binding_kind: v3_route_classifier_facts
+    owner_feature_id: v3.route_classifier_local_owner
+    resource_flow:
+      consumes: [v3.request.normal_payload]
+      produces: [v3.route.request_facts]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-route-classifier-facts-02
+    from_node: V3RouterRequestFacts
+    to_node: V3RouteActiveTurnSignals
+    caller_symbol: build_v3_router_request_facts_for_entry_with_control
+    caller_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+    callee_symbol: extract_active_turn_signals
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+    status: anchored
+    binding_kind: v3_route_classifier_facts
+    owner_feature_id: v3.route_classifier_local_owner
+    resource_flow:
+      consumes: [v3.request.normal_payload]
+      produces: [v3.route.request_facts]
+      side_channel_reads: []
+      side_channel_writes: []

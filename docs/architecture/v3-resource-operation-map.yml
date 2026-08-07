@@ -287,19 +287,6 @@ resources:
     may_enter_provider_body: true
     may_enter_client_body: false
     binding_status: anchored
-  - resource_id: v3.provider.responses_history_tool_image_placeholder
-    resource_kind: normal_payload
-    lifecycle: v3.responses_direct.mainline
-    owner_feature_id: v3.responses_provider_runtime
-    owner_crate: routecodex-v3-provider-responses
-    owner_node: V3Provider12ResponsesWirePayload
-    identity: [requestId, providerId, modelId, inputIndex, callId]
-    allowed_writers: [replace_historical_responses_tool_output_data_images, V3Provider12ResponsesWirePayload]
-    allowed_readers: [V3Provider12ResponsesWirePayload, V3Transport13ResponsesHttpRequest]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-debug, response_projector, sse_framer]
-    may_enter_provider_body: true
-    may_enter_client_body: false
-    binding_status: anchored
   - resource_id: v3.provider.transport_request
     resource_kind: transport
     lifecycle: v3.responses_direct.mainline
@@ -680,6 +667,7 @@ resources:
     state_fields: [phase, consecutive_stop_count, max_stop_budget, last_stop_kind, need_continue, blocked, terminal, guard_exhausted, next_request_policy, next_step_prompt, last_request_id, last_response_id, last_transition_reason, updated_at]
     data_control_separation: required
     normal_payload_state: forbidden
+    current_turn_protocol_projection: { req04_injection: allowed_registered_only, resp03_stripping: allowed_matching_provenance_only, history_mutation: forbidden, continuation_immutable_interval_semantics: forbidden }
     identity: [entryEndpoint, sessionId, conversationId, port, routingGroup]
     implementation_handles: [V3ResponsesRelayStoplessControlState(adapter_runtime_handle), V3ResponsesRelayStoplessControlScope(identity_projection), V3ResponsesDirectStoplessControlState(adapter_runtime_handle), V3ResponsesDirectStoplessControlScope(identity_projection)]
     allowed_writers: [StoplessCenterMetadataControl::store_for_scope, StoplessCenterMetadataControl::clear_for_scope, V3ResponsesRelayStoplessControlState::store_for_scope, V3ResponsesRelayStoplessControlState::clear_for_scope, apply_v3_responses_relay_stopless_control_transition, apply_v3_responses_relay_stopless_control_request_transition, clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal, V3StoplessResp02RuntimeControlUpdated, V3ResponsesDirectStoplessControlState::store_for_scope, V3ResponsesDirectStoplessControlState::clear_for_scope, prepare_v3_responses_direct_stopless_control_request, apply_v3_responses_direct_stopless_control_request_transition, apply_v3_responses_direct_stopless_json_response_control, apply_v3_responses_direct_stopless_control_response_transition, wrap_direct_sse_stopless_control_stream, V3DirectStoplessResp02RuntimeControlUpdated]
@@ -702,19 +690,6 @@ resources:
     allowed_readers: [V3HubReqChatProcess04Governed, V3HubRespContinuation04Committed, V3HubReqOutbound07ProviderSemantic]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-debug, response_projector, sse_framer]
     may_enter_provider_body: false
-    may_enter_client_body: false
-    binding_status: anchored
-  - resource_id: v3.hub.attachment_history_placeholder
-    resource_kind: normal_payload
-    lifecycle: v3.hub_relay.tool_servertool_multiturn_parity
-    owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-    owner_crate: routecodex-v3-runtime
-    owner_node: V3HubReqChatProcess04Governed
-    identity: [entryProtocol, requestId, inputIndex, mediaResourceKind]
-    allowed_writers: [govern_attachment_history_at_req04, V3HubReqChatProcess04Governed]
-    allowed_readers: [V3HubReqChatProcess04Governed, V3HubReqOutbound07ProviderSemantic]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-debug, response_projector, sse_framer]
-    may_enter_provider_body: true
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v3.hub.static_hook_registry
@@ -1109,13 +1084,19 @@ resources:
     owner_feature_id: v3.web_search_servertool_state_machine
     owner_crate: routecodex-v3-runtime
     owner_node: V3ServerToolState01ControlScope
-    identity: [entryProtocol, endpoint, serverId, port, routingGroup, sessionId, conversationId, requestId, toolRunId]
+    identity: [entryProtocol, endpoint, serverId, port, routingGroup, sessionId, conversationId, toolName, toolRunId]
+    implementation_handles: [V3ServerToolCenter(generic_registry), V3ServerToolCenterKey(toolName+scope_key), V3ServerToolInstanceState(typed_per_tool), V3ServerToolName(stopless|websearch), V3ResponsesRelayStoplessControlState(stopless_bucket_relay), V3ResponsesDirectStoplessControlState(stopless_bucket_direct)]
     allowed_writers:
       - V3ServerToolStateManager
+      - V3ServerToolCenter::register
+      - V3ServerToolCenter::store
+      - V3ServerToolCenter::transition
+      - V3ServerToolCenter::clear
       - HubReqChatProcess03Governed
       - HubRespChatProcess03Governed
     allowed_readers:
       - V3ServerToolStateManager
+      - V3ServerToolCenter::load
       - HubReqChatProcess03Governed
       - HubRespChatProcess03Governed
     forbidden_writers:
@@ -1128,6 +1109,7 @@ resources:
       - v3.response.client_payload
       - v3.debug.payload_budget
       - v3.continuation.local_context_truth
+    isolation_contract: { tool_name: hard_isolation_boundary, session_id: hard_session_boundary, cross_tool_access: fail_fast, cross_session_access: fail_fast, per_tool_typed_state: required, generic_untyped_state: forbidden }
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: true
@@ -1160,6 +1142,42 @@ resources:
       - v3.response.client_payload
       - v3.debug.payload_budget
       - v3.continuation.local_context_truth
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    may_enter_continuation_state: false
+    binding_status: design
+    required_gates:
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-mainline-caller-flow
+      - npm run verify:v3-architecture-docs
+
+  - resource_id: v3.web_search.backend_binding
+    resource_kind: compiled_backend_binding
+    lifecycle: v3.web_search_servertool_state_machine
+    owner_feature_id: v3.web_search_servertool_state_machine
+    owner_crate: routecodex-v3-config
+    owner_node: V3WebSearchBackendBindingCompiled
+    identity: [providerId, modelId, backendBindingId, executionMode]
+    allowed_writers:
+      - V3ConfigStore
+      - V3Config05ManifestPublished
+    allowed_readers:
+      - V3ServerToolStateManager
+      - V3WebSearchDispatcher
+      - HubReqChatProcess03Governed
+      - HubRespChatProcess03Governed
+    forbidden_writers:
+      - routecodex-v3-server
+      - routecodex-v3-sse
+      - routecodex-v3-virtual-router
+      - routecodex-v3-target
+      - routecodex-v3-provider-responses
+      - v3.hub.provider_wire_payload
+      - v3.response.client_payload
+      - v3.debug.payload_budget
+      - v3.continuation.local_context_truth
+    binding_rules: { exactly_one_backend: required_before_dispatch, fallback_engine_iteration: forbidden, ambiguous_binding: fail_before_transport, unsupported_content_types: fail_explicitly }
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false

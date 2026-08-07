@@ -15,13 +15,18 @@ const files = [
 ];
 const cases = [
   ['project Agent loses batch replacement ban', 'AGENTS.md', 'P0 禁止脚本批量替换', 'P0 修改工具建议'],
-  ['dev skill loses explicit apply_patch requirement', '.agents/skills/rcc-dev-skills/SKILL.md', '`apply_patch` hunk', 'manual edit'],
+  ['dev skill loses explicit apply_patch requirement', '.agents/skills/rcc-dev-skills/SKILL.md', '逐文件读取核实上下文后用 apply_patch hunk', '逐文件读取核实上下文后手工修改'],
   ['architecture skill permits ad hoc script replacement', '.agents/skills/rcc-v3-architecture/SKILL.md', '严禁用 Python / Node / Perl', '允许用 Python / Node / Perl'],
-  ['project Agent loses fail-fast', 'AGENTS.md', 'owning boundary fail-fast', 'owning boundary fail closed'],
+  [
+    'project Agent loses fail-fast',
+    'AGENTS.md',
+    '发现泄漏必须 fail-fast at owning boundary。\n- 禁止 silent strip、请求侧 cleanup、handler/SSE/outbound 补偿；payload 不得重建控制状态；Stopless 仅保留已登记的同轮 Req04 注入与 Resp03 provenance 剥离例外。\n- 模块定义、owner、allowed/forbidden paths、相邻调用边、资源关系和方案越界必须先审；写完检查实际 diff 越界，再做功能验证，最后才 code review。\n- 泄漏必须在 owning boundary fail-fast',
+    '发现泄漏必须 fail closed at owning boundary。\n- 禁止 silent strip、请求侧 cleanup、handler/SSE/outbound 补偿；payload 不得重建控制状态；Stopless 仅保留已登记的同轮 Req04 注入与 Resp03 provenance 剥离例外。\n- 模块定义、owner、allowed/forbidden paths、相邻调用边、资源关系和方案越界必须先审；写完检查实际 diff 越界，再做功能验证，最后才 code review。\n- 泄漏必须在 owning boundary fail closed',
+  ],
   ['dev skill permits silent strip', '.agents/skills/rcc-dev-skills/SKILL.md', '禁止 silent strip', '允许 silent cleanup'],
   ['architecture skill loses reverse rebuild ban', '.agents/skills/rcc-v3-architecture/SKILL.md', 'normal payload 也不得重建', 'normal payload 可以重建'],
   ['architecture skill runs code review before functional verification', '.agents/skills/rcc-v3-architecture/SKILL.md', '功能验证 -> live 闭环 -> code review', 'code review -> 功能验证 -> live 闭环'],
-  ['dev skill loses module forbidden paths review', '.agents/skills/rcc-dev-skills/SKILL.md', 'owned/allowed/forbidden paths', 'owned paths'],
+  ['dev skill loses module forbidden paths review', '.agents/skills/rcc-dev-skills/SKILL.md', 'allowed/forbidden paths', 'owned paths'],
   ['architecture CI drops the P0 entry guard', 'scripts/architecture/verify-v3-architecture-ci.mjs', "  ['verify:agent-p0-payload-control-guard', 'Agent and RouteCodex skill entry surfaces expose the P0 payload/control isolation guard before routing'],\n", ''],
 ];
 

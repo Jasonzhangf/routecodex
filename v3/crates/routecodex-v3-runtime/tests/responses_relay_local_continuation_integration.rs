@@ -3090,7 +3090,7 @@ async fn responses_openai_chat_natural_stopless_submit_restores_additional_tools
 }
 
 #[tokio::test]
-async fn responses_openai_chat_stopless_submit_restores_additional_tools_for_provider_wire() {
+async fn responses_openai_chat_legacy_cli_submit_preserves_history_and_additional_tools() {
     let original_tools = json!([
         {
             "type":"custom",
@@ -3244,7 +3244,13 @@ async fn responses_openai_chat_stopless_submit_restores_additional_tools_for_pro
             body,
             original_tools.as_array().unwrap(),
         );
-        assert_provider_chat_stopless_guidance(body);
+        if index == 0 {
+            assert_provider_chat_stopless_guidance(body);
+        } else {
+            let serialized = serde_json::to_string(body).unwrap();
+            assert!(serialized.contains("call_stopless_reasoning"));
+            assert!(serialized.contains("routecodex hook run reasoningStop"));
+        }
         assert_no_structured_stopless_control_fields(body, "provider.chat.stopless.submit");
     }
 }
@@ -4129,7 +4135,7 @@ async fn responses_openai_chat_field_parity_response_matrix() {
 }
 
 #[tokio::test]
-async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop_cli_pair() {
+async fn responses_relay_openai_chat_provider_wire_preserves_unprovenanced_stopless_shaped_pair() {
     let transport = ProviderProjectionJsonTransport {
         captures: Mutex::new(Vec::new()),
         responses: Mutex::new(VecDeque::from([json!({
@@ -4194,27 +4200,21 @@ async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop
     let body = provider_projection_body(&captures[0]);
     assert_eq!(body["tool_choice"], json!("auto"));
     let serialized = serde_json::to_string(body).unwrap();
-    for forbidden in [
-        "call_stopless_reasoning",
+    for preserved in [
         "call-f0aa5f2d-b09f-4565-a4cc-cb78855d2e36-15",
         "routecodex hook run reasoningStop",
         "Chunk ID",
         "unrecognized subcommand 'hook'",
-        "__routecodex_stopless_center",
-        "stoplessCenter",
-        "runtime_control",
-        "metadata_center",
     ] {
         assert!(
-            !serialized.contains(forbidden),
-            "OpenAI Chat provider wire leaked replayed stopless no-op CLI artifact {forbidden}: {serialized}"
+            serialized.contains(preserved),
+            "OpenAI Chat provider wire modified unprovenanced history {preserved}: {serialized}"
         );
     }
     match result.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "completed");
             let serialized = serde_json::to_string(&body).unwrap();
-            assert!(!serialized.contains("call_stopless_reasoning"));
             assert!(!serialized.contains("call-f0aa5f2d-b09f-4565-a4cc-cb78855d2e36-15"));
             assert!(!serialized.contains("routecodex hook run reasoningStop"));
         }

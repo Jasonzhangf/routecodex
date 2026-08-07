@@ -1130,11 +1130,15 @@ fn build_client_exec_command(
     request_id: Option<&str>,
 ) -> String {
     let quoted_input = quote_posix_single_argument(&input_json);
-    let mut cmd = format!(
-        "routecodex hook run {} --input-json {}",
-        public_cli_tool_name(tool_name),
-        quoted_input
-    );
+    let mut cmd = if tool_name == STOP_MESSAGE_AUTO_TOOL_NAME {
+        format!(
+            "routecodex hook run {} --input-json {}",
+            public_cli_tool_name(tool_name),
+            quoted_input
+        )
+    } else {
+        format!("routecodex servertool run {tool_name} --input-json {quoted_input}")
+    };
     if let Some(session_id) = session_id.and_then(read_optional_trimmed) {
         cmd.push_str(" --session-id ");
         cmd.push_str(&quote_posix_single_argument(&session_id));

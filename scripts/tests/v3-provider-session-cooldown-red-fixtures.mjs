@@ -227,24 +227,24 @@ const cases = [
     diagnostic: /Server must lock the existing request session header/u,
   },
   {
-    name: "Server drops missing typed session-header rejection test",
+    name: "Server drops headerless request-local scope test",
     path: copied[13],
     mutate: (source) =>
       source.replace(
-        "fn provider_failure_scope_rejects_missing_existing_session_header()",
-        "fn provider_failure_scope_accepts_missing_existing_session_header()",
+        "fn provider_failure_scope_uses_internal_request_id_without_client_session_header()",
+        "fn provider_failure_scope_drops_headerless_request_scope()",
       ),
-    diagnostic: /Server must fail closed when the existing request session header is missing/u,
+    diagnostic: /Server must isolate headerless requests with their existing internal request id/u,
   },
   {
-    name: "Server drops missing-session no-send blackbox",
+    name: "Server drops headerless provider-send blackbox",
     path: copied[18],
     mutate: (source) =>
       source.replace(
-        "async fn responses_direct_missing_failure_session_fails_before_any_provider_send()",
-        "async fn responses_direct_missing_failure_session_can_send_provider()",
+        "async fn responses_direct_without_failure_session_header_reaches_provider()",
+        "async fn responses_direct_without_failure_session_header_stops_before_provider()",
       ),
-    diagnostic: /Server blackbox must prove missing existing session fails before provider send/u,
+    diagnostic: /Server blackbox must prove a missing client session header does not block provider send/u,
   },
   {
     name: "Session cooldown gate restores broad provider integration binary execution",
@@ -268,8 +268,8 @@ const cases = [
     path: copied[12],
     mutate: (source) =>
       source.replace(
-        "provider_failure_session_id_from_request_headers(headers)?.ok_or_else(|| {",
-        "provider_failure_session_id_from_request_headers(headers)?\n            .or_else(|| Some(request_id.to_string()))\n            .ok_or_else(|| {",
+        "provider_failure_session_id_from_request_headers(headers)",
+        "provider_failure_session_id_from_request_headers(headers).or_else(|| Some(request_id.to_string()))",
       ),
     diagnostic: /must not derive control identity from request identity/u,
   },

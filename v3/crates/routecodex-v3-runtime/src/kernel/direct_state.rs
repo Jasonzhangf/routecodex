@@ -1,3 +1,7 @@
+use crate::hub_v1::{
+    V3ServerToolCenter, V3ServerToolCenterKey, V3ServerToolInstanceState, V3ServerToolName,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ResponsesDirectContinuationScope {
     key: V3RemoteContinuationScopeKey,
@@ -65,37 +69,41 @@ impl From<&V3ResponsesDirectContinuationScope> for V3ResponsesDirectStoplessCont
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct V3ResponsesDirectStoplessControlKey {
-    key: V3RemoteContinuationScopeKey,
-}
-
-impl From<&V3ResponsesDirectStoplessControlScope> for V3ResponsesDirectStoplessControlKey {
-    fn from(scope: &V3ResponsesDirectStoplessControlScope) -> Self {
-        Self {
-            key: scope.key.clone(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct V3ResponsesDirectStoplessControlState {
-    store: Arc<Mutex<BTreeMap<V3ResponsesDirectStoplessControlKey, V3StoplessCenterState>>>,
+    center: V3ServerToolCenter,
 }
 
 impl V3ResponsesDirectStoplessControlState {
+    fn center_key(scope: &V3ResponsesDirectStoplessControlScope) -> V3ServerToolCenterKey {
+        let key = &scope.key;
+        V3ServerToolCenterKey {
+            tool_name: V3ServerToolName::Stopless,
+            scope_key: format!(
+                "{:?}|{}|{}|{}|{}|{}",
+                key.entry_protocol,
+                key.entry_endpoint,
+                key.port,
+                key.routing_group,
+                key.session_id,
+                key.conversation_id
+            ),
+        }
+    }
+
     pub fn load_for_scope(
         &self,
         scope: &V3ResponsesDirectStoplessControlScope,
     ) -> Result<Option<V3StoplessCenterState>, String> {
-        self.store
-            .lock()
-            .map_err(|error| error.to_string())
-            .map(|store| {
-                store
-                    .get(&V3ResponsesDirectStoplessControlKey::from(scope))
-                    .cloned()
-            })
+        match self
+            .center
+            .load(&Self::center_key(scope))
+            .map_err(|error| error.to_string())?
+        {
+            Some(V3ServerToolInstanceState::Stopless(state)) => Ok(Some(state)),
+            Some(_) => Err("cross-tool direct stopless load rejected".to_string()),
+            None => Ok(None),
+        }
     }
 
     pub fn store_for_scope(
@@ -103,33 +111,84 @@ impl V3ResponsesDirectStoplessControlState {
         scope: &V3ResponsesDirectStoplessControlScope,
         state: V3StoplessCenterState,
     ) -> Result<(), String> {
-        self.store
-            .lock()
-            .map_err(|error| error.to_string())?
-            .insert(V3ResponsesDirectStoplessControlKey::from(scope), state);
-        Ok(())
+        self.center
+            .store(
+                Self::center_key(scope),
+                V3ServerToolInstanceState::Stopless(state),
+            )
+            .map_err(|error| error.to_string())
     }
 
     pub fn clear_for_scope(
         &self,
         scope: &V3ResponsesDirectStoplessControlScope,
     ) -> Result<(), String> {
-        self.store
-            .lock()
-            .map_err(|error| error.to_string())?
-            .remove(&V3ResponsesDirectStoplessControlKey::from(scope));
-        Ok(())
-    }
-
-    pub fn len(&self) -> Result<usize, String> {
-        self.store
-            .lock()
-            .map(|store| store.len())
+        self.center
+            .clear(&Self::center_key(scope))
             .map_err(|error| error.to_string())
     }
 
+    fn web_search_center_key(scope: &V3ResponsesDirectStoplessControlScope) -> V3ServerToolCenterKey {
+        let key = &scope.key;
+        V3ServerToolCenterKey {
+            tool_name: V3ServerToolName::WebSearch,
+            scope_key: format!(
+                "{:?}|{}|{}|{}|{}|{}",
+                key.entry_protocol,
+                key.entry_endpoint,
+                key.port,
+                key.routing_group,
+                key.session_id,
+                key.conversation_id
+            ),
+        }
+    }
+
+    pub fn web_search_load_for_scope(
+        &self,
+        scope: &V3ResponsesDirectStoplessControlScope,
+    ) -> Result<Option<V3WebSearchCenterState>, String> {
+        match self
+            .center
+            .load(&Self::web_search_center_key(scope))
+            .map_err(|error| error.to_string())?
+        {
+            Some(V3ServerToolInstanceState::WebSearch(state)) => Ok(Some(state)),
+            Some(_) => Err("cross-tool direct web search load rejected".to_string()),
+            None => Ok(None),
+        }
+    }
+
+    pub fn web_search_store_for_scope(
+        &self,
+        scope: &V3ResponsesDirectStoplessControlScope,
+        state: V3WebSearchCenterState,
+    ) -> Result<(), String> {
+        self.center
+            .store(
+                Self::web_search_center_key(scope),
+                V3ServerToolInstanceState::WebSearch(state),
+            )
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn web_search_clear_for_scope(
+        &self,
+        scope: &V3ResponsesDirectStoplessControlScope,
+    ) -> Result<(), String> {
+        self.center
+            .clear(&Self::web_search_center_key(scope))
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn len(&self) -> Result<usize, String> {
+        self.center.len().map_err(|error| error.to_string())
+    }
+
     pub fn is_empty(&self) -> Result<bool, String> {
-        self.len().map(|len| len == 0)
+        self.center
+            .is_empty()
+            .map_err(|error| error.to_string())
     }
 }
 

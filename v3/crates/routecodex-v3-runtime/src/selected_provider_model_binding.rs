@@ -44,7 +44,9 @@ pub(crate) fn bind_v3_selected_provider_model(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
+    use routecodex_v3_config::{
+        V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3WebSearchExecutionMode,
+    };
     use serde_json::json;
 
     fn selected() -> V3TargetCandidate {
@@ -56,6 +58,7 @@ mod tests {
             wire_model: "provider-wire-model".to_string(),
             visible_model_ids: vec!["client-route-alias".to_string()],
             model_capabilities: vec!["text".to_string()],
+            web_search_execution_mode: V3WebSearchExecutionMode::None,
             max_context_tokens: None,
             base_url: "https://provider.invalid/v1".to_string(),
             responses_process: None,

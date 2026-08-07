@@ -574,6 +574,64 @@ data: [DONE]
     assert_eq!(events[2], "data: [DONE]\n\n");
 }
 
+#[tokio::test]
+async fn deepseek_max_sse_preserves_empty_delta_terminal_and_done() {
+    use futures_util::StreamExt;
+    let transport = StaticSseTransport {
+        chunks: Mutex::new(Some(vec![br#"data: {"id":"chatcmpl-live-ds4","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-live-ds4","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-live-ds4","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":1,"total_tokens":8}}
+
+data: [DONE]
+
+"#
+        .to_vec()])),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest_with_deepseek_max_profile(),
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-sse-live-ds4-terminal".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"reply OK"}],
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    let stream = match output.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
+    };
+    let events = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(Result::unwrap)
+        .map(|bytes| String::from_utf8(bytes).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 4);
+    let terminal: Value =
+        serde_json::from_str(events[1].trim_start_matches("data: ").trim()).unwrap();
+    assert_eq!(terminal["choices"][0]["delta"], json!({}));
+    assert_eq!(terminal["choices"][0]["finish_reason"], "stop");
+    let usage: Value = serde_json::from_str(events[2].trim_start_matches("data: ").trim()).unwrap();
+    assert_eq!(usage["choices"], json!([]));
+    assert_eq!(usage["usage"]["total_tokens"], 8);
+    assert_eq!(events[3], "data: [DONE]\n\n");
+}
+
 type ControlledSseReceiver = tokio::sync::mpsc::Receiver<Result<Vec<u8>, V3ProviderError>>;
 
 struct ControlledSseTransport {
@@ -726,6 +784,19 @@ async fn sse_done_before_terminal_and_terminal_without_done_fail_explicitly() {
 "#
             .to_vec()],
             "or [DONE]",
+        ),
+        (
+            vec![
+                br#"data: {"id":"bad","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+"#
+                .to_vec(),
+                br#"data: {"id":"bad","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"late"},"finish_reason":null}]}
+
+"#
+                .to_vec(),
+            ],
+            "after terminal finish_reason",
         ),
     ];
     for (chunks, expected) in cases {
@@ -1236,6 +1307,40 @@ endpoints = ["openai_chat"]
 type = "openai_chat"
 base_url = "http://controlled.invalid/v1"
 default_model = "chat-wire-model"
+auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_KEY" }] }
+[providers.controlled.models.chat-wire-model]
+wire_name = "chat-wire-model"
+supports_streaming = true
+capabilities = ["text", "tools", "web_search"]
+[route_groups.controlled.pools.chat_client]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "openai_chat", models = ["chat-client-alias"] }
+targets = [{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "controlled", priority = 1 }]
+[route_groups.controlled.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "controlled", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn manifest_with_deepseek_max_profile() -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.controlled]
+bind = "127.0.0.1"
+port = 1
+routing_group = "controlled"
+endpoints = ["openai_chat"]
+[providers.controlled]
+type = "openai_chat"
+base_url = "http://controlled.invalid/v1"
+default_model = "chat-wire-model"
+compatibility_profile = "chat:deepseek-max"
 auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_KEY" }] }
 [providers.controlled.models.chat-wire-model]
 wire_name = "chat-wire-model"

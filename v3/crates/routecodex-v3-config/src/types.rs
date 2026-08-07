@@ -556,6 +556,13 @@ pub struct V3ProviderModelAuthoringConfig {
     #[serde(default)]
     pub capabilities: Vec<String>,
     #[serde(default)]
+    pub web_search_execution_mode: V3WebSearchExecutionMode,
+    /// Mode B（metadata_center_local_search / servertool_search_backend）的
+    /// 编译期唯一搜索后端引用（例如 search provider 池目标 "provider.model"）。
+    /// 缺失或歧义在 manifest 编译期 fail-fast。
+    #[serde(default)]
+    pub web_search_backend: Option<String>,
+    #[serde(default)]
     pub supports_streaming: bool,
     #[serde(default)]
     pub supports_thinking: bool,
@@ -567,6 +574,42 @@ pub struct V3ProviderModelAuthoringConfig {
     pub max_context_tokens: Option<u64>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3WebSearchExecutionMode {
+    #[default]
+    None,
+    NativeRemoteSearchToolMix,
+    NativeRemoteSearchSearchOnly,
+    /// Proposal `metadata_center_local_search`: local ServerToolCenter
+    /// governed search with exactly one compiled backend binding.
+    MetadataCenterLocalSearch,
+    /// Legacy alias for `MetadataCenterLocalSearch`; kept for config
+    /// compatibility and maps to the same Mode B semantics.
+    ServertoolSearchBackend,
+}
+
+impl V3WebSearchExecutionMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::NativeRemoteSearchToolMix => "native_remote_search_tool_mix",
+            Self::NativeRemoteSearchSearchOnly => "native_remote_search_search_only",
+            Self::MetadataCenterLocalSearch => "metadata_center_local_search",
+            Self::ServertoolSearchBackend => "servertool_search_backend",
+        }
+    }
+
+    /// Mode B: local ServerToolCenter governed search requires exactly one
+    /// compiled backend binding.
+    pub const fn is_metadata_center_local_search(self) -> bool {
+        matches!(
+            self,
+            Self::MetadataCenterLocalSearch | Self::ServertoolSearchBackend
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -958,6 +1001,8 @@ pub struct V3ProviderModelManifest {
     pub wire_name: String,
     pub aliases: Vec<String>,
     pub capabilities: Vec<String>,
+    pub web_search_execution_mode: V3WebSearchExecutionMode,
+    pub web_search_backend_binding: Option<String>,
     pub supports_streaming: bool,
     pub supports_thinking: bool,
     pub thinking: Option<String>,
