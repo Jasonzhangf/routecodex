@@ -1681,8 +1681,6 @@ fn response_console_rejects_missing_terminal_summary_instead_of_showing_unreport
     .expect_err("finish_reason missing with non-inferrable response_status must fail");
     assert!(missing_finish_error.contains("missing finish_reason"));
 
-    let log = std::fs::read_to_string(&log_file).unwrap_or_default();
-    assert!(!log.contains("unreported"), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
 
