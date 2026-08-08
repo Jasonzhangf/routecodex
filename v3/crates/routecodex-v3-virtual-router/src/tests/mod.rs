@@ -1039,6 +1039,16 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
     );
     assert_eq!(implicit.targets.len(), 1);
 
+    // 红测：隐式能力池是 synthetic pool（无 manifest 池声明），opaque
+    // target plan 的 entry 必须携带 direct_provider_model，否则 Target
+    // expand 查 group.pools 找不到 implicit:* 池 → SelectedPoolMissing。
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(
+        hit.target_plan[0].direct_provider_model,
+        Some(("mm".to_string(), "MiniMax-M3".to_string())),
+        "implicit capability pool entry must carry direct provider/model"
+    );
+
     // web_search 请求（web_search 声明）：web_search 隐式池优先级高于 multimodal。
     classified = router
         .classify_request_with_facts(
