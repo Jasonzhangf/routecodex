@@ -650,6 +650,9 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             false,
         );
         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
+        if let Ok(summary) = runtime_timing.finish_runtime() {
+            observability.timing = Some(summary);
+        }
         return V3ResponsesDirectRuntimeOutput {
             client_payload: response_projection.client_payload,
             node_trace: trace,
