@@ -396,7 +396,23 @@ impl V3VirtualRouter {
                     target_index,
                     target_kind: target.kind.clone(),
                     target_id: target.id.clone(),
-                    direct_provider_model: tier.direct_provider_model.clone(),
+                    direct_provider_model: tier.direct_provider_model.clone().or_else(|| {
+                        // 隐式能力池（implicit:*）是 synthetic pool，无 manifest
+                        // 池声明；Target 展开时必须直接按 provider/model 解析，
+                        // 否则 expand 查 group.pools 找不到 implicit:* 池。
+                        if tier.pool_id.starts_with("implicit:")
+                            && target.kind == V3RouteTargetKind::ProviderModel
+                        {
+                            match (&target.provider, &target.model) {
+                                (Some(provider), Some(model)) => {
+                                    Some((provider.clone(), model.clone()))
+                                }
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    }),
                 });
             }
         }
