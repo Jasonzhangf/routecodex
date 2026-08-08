@@ -420,7 +420,110 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
 }
 
+#[tokio::test]
+async fn malformed_anthropic_response_enters_typed_error_chain_not_panic() {
+        // 红测：malformed Anthropic 响应（content 缺 type / 非法 type）经
+        // RespInbound02 归一化失败时必须走 typed Error01-06 链（ErrorErr06
+        // 投影），禁止 .expect() stack panic 绕过错误链。
+        struct MalformedAnthropicTransport;
+        #[async_trait]
+        impl ResponsesTransport for MalformedAnthropicTransport {
+            async fn send(
+                &self,
+                request: V3Transport13ResponsesHttpRequest,
+            ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+                Ok(V3ProviderResp14Raw::from_json(
+                    request.request_id().to_string(),
+                    request.provider_id().to_string(),
+                    200,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"application/json".to_vec(),
+                    }],
+                    serde_json::to_vec(&json!({
+                        "id": "msg_malformed",
+                        "type": "message",
+                        "role": "assistant",
+                        "model": "MiniMax-M3",
+                        "content": [{"type": "bogus", "text": "x"}],
+                        "stop_reason": "end_turn",
+                        "usage": {"input_tokens": 1, "output_tokens": 1}
+                    }))
+                    .unwrap(),
+                ))
+            }
+        }
+
+        let manifest = compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(
+                r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+endpoints = ["openai_chat"]
+[providers.mm]
+type = "anthropic"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
+[providers.mm.models."MiniMax-M3"]
+wire_name = "MiniMax-M3"
+capabilities = ["text", "tools"]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
+"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let output = execute_v3_openai_chat_relay_runtime(
+            &manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: "s".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    "openai-chat-malformed-anthropic",
+                )
+                .expect("scope"),
+                request_id: "openai-chat-malformed-anthropic-1".into(),
+                payload: json!({
+                    "model": "MiniMax-M3",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "stream": false
+                }),
+            },
+            &MalformedAnthropicTransport,
+        )
+        .await
+        .expect("malformed provider response must project a typed terminal, not panic");
+        assert_eq!(output.status, 502);
+        assert_eq!(
+            output.error_chain.as_ref().unwrap().len(),
+            6,
+            "malformed Anthropic response must travel the typed Error01-06 chain"
+        );
+        assert_eq!(
+            output.node_trace.last(),
+            Some(&"V3Error06ClientProjected"),
+            "terminal node must be Error06 projection, not a panic"
+        );
+        let client_response = match output.client_body {
+            V3OpenAiChatRelayClientBody::Json(value) => value,
+            V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON error body"),
+        };
+        assert_eq!(
+            client_response["error"]["error_node"],
+            "V3Error06ClientProjected"
+        );
+    }
+
 struct SseTransport;
+
 
 #[async_trait]
 impl ResponsesTransport for SseTransport {
@@ -1475,4 +1578,1163 @@ targets = [
 "#
     .replace("__SCOPE__", scope);
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+struct AnthropicWireCaptureTransport {
+    captured_url: Mutex<Option<String>>,
+}
+
+struct AnthropicSseTransport {
+    captured_url: Mutex<Option<String>>,
+    chunks: Mutex<Option<Vec<Vec<u8>>>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicWireCaptureTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        *self.captured_url.lock().unwrap() = Some(request.url().to_string());
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id": "msg_mm_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "MiniMax-M3",
+                "content": [
+                    {"type": "text", "text": "the image is blue"}
+                ],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 11, "output_tokens": 5}
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        *self.captured_url.lock().unwrap() = Some(request.url().to_string());
+        let chunks = self.chunks.lock().unwrap().take().unwrap();
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter(chunks.into_iter().map(Ok))),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn openai_chat_anthropic_sse_emits_first_delta_before_message_stop() {
+    use futures_util::StreamExt;
+    let transport = AnthropicSseTransport {
+        captured_url: Mutex::new(None),
+        chunks: Mutex::new(Some(vec![
+            br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg-chat-sse","type":"message","role":"assistant","model":"MiniMax-M3","content":[],"usage":{"input_tokens":11}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"early"}}
+
+"#.to_vec(),
+        ])),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest_with_anthropic_multimodal(),
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "cross_protocol".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "chat-anthropic-sse",
+            )
+            .expect("scope"),
+            request_id: "chat-anthropic-sse-1".into(),
+            payload: json!({
+                "model": "deepseek-v4-flash",
+                "messages": [{"role":"user","content":[
+                    {"type":"text","text":"stream"},
+                    {"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}
+                ]}],
+                "stream": true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("Anthropic SSE relay must return a lazy client stream");
+    let url = transport
+        .captured_url
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("provider request must be captured");
+    assert!(url.contains("/v1/messages"));
+    let mut stream = match output.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
+    };
+    let first = tokio::time::timeout(Duration::from_millis(100), stream.next())
+        .await
+        .expect("first frame must not wait for message_stop")
+        .unwrap()
+        .unwrap();
+    let first = String::from_utf8(first).unwrap();
+    assert!(first.contains("chat.completion.chunk"));
+    assert!(first.contains("assistant"));
+}
+
+#[tokio::test]
+async fn openai_chat_anthropic_sse_requires_message_stop_and_done() {
+    use futures_util::StreamExt;
+    let transport = AnthropicSseTransport {
+        captured_url: Mutex::new(None),
+        chunks: Mutex::new(Some(vec![br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg-incomplete","type":"message","role":"assistant","model":"MiniMax-M3","content":[]}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}
+
+"#.to_vec()])),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest_with_anthropic_multimodal(),
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "cross_protocol".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "chat-anthropic-sse-incomplete",
+            )
+            .expect("scope"),
+            request_id: "chat-anthropic-sse-incomplete-1".into(),
+            payload: json!({
+                "model": "deepseek-v4-flash",
+                "messages": [{"role":"user","content":[
+                    {"type":"text","text":"stream"},
+                    {"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}
+                ]}],
+                "stream": true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("the lazy stream owns terminal validation");
+    let stream = match output.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
+    };
+    let events = stream.collect::<Vec<_>>().await;
+    assert!(events
+        .first()
+        .expect("role frame")
+        .as_ref()
+        .unwrap()
+        .starts_with(b"data: "));
+    assert!(events
+        .last()
+        .expect("terminal error")
+        .as_ref()
+        .expect_err("incomplete Anthropic stream must fail")
+        .contains("message_stop"));
+}
+
+#[tokio::test]
+async fn openai_chat_anthropic_sse_complete_stream_emits_client_done_without_provider_done() {
+    // 正向回归：Anthropic Messages wire 无 [DONE] 定义（标准流以 message_stop
+    // 结束）。完整流（message_stop→EOF）必须成功，网关在客户端侧补发 [DONE]
+    // sentinel，且缺失 [DONE] 不记录 provider-health 失败。
+    use futures_util::StreamExt;
+    let manifest = manifest_with_anthropic_multimodal();
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let transport = AnthropicSseTransport {
+        captured_url: Mutex::new(None),
+        chunks: Mutex::new(Some(vec![br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg-complete","type":"message","role":"assistant","model":"MiniMax-M3","content":[],"usage":{"input_tokens":5}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"complete"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+"#.to_vec()])),
+    };
+    let output = execute_v3_openai_chat_relay_runtime_with_provider_health(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "cross_protocol".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "chat-anthropic-sse-complete",
+            )
+            .expect("scope"),
+            request_id: "chat-anthropic-sse-complete-1".into(),
+            payload: json!({
+                "model": "deepseek-v4-flash",
+                "messages": [{"role":"user","content":[
+                    {"type":"text","text":"stream"},
+                    {"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}
+                ]}],
+                "stream": true
+            }),
+        },
+        &transport,
+        provider_health.runtime_health(),
+    )
+    .await
+    .expect("complete Anthropic stream must project lazily and succeed");
+    let stream = match output.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
+    };
+    let events = stream.collect::<Vec<_>>().await;
+    assert!(
+        events.iter().all(Result::is_ok),
+        "complete Anthropic stream must not error; events={events:?}"
+    );
+    let frames: Vec<String> = events
+        .into_iter()
+        .map(|item| String::from_utf8_lossy(&item.expect("frame")).to_string())
+        .collect();
+    let joined = frames.concat();
+    assert!(
+        joined.contains("data: [DONE]\n\n"),
+        "gateway must emit client-side [DONE] sentinel at message_stop closeout: {joined:?}"
+    );
+    assert!(
+        joined.contains("\"content\":\"complete\"")
+            && joined.contains("\"finish_reason\":\"stop\""),
+        "client frames must carry text and terminal finish_reason: {joined:?}"
+    );
+    let availability = provider_health.store().availability(
+        "mm",
+        Some("key1"),
+        Some("MiniMax-M3"),
+        u64::MAX,
+    );
+    assert!(
+        availability.available && availability.blocked_scopes.is_empty(),
+        "missing provider [DONE] must not record provider-health failure: {availability:?}"
+    );
+}
+
+#[tokio::test]
+async fn openai_chat_entry_serves_anthropic_wire_multimodal_provider_via_standard_outbound() {
+    let manifest = manifest_with_anthropic_multimodal();
+    let transport = AnthropicWireCaptureTransport {
+        captured_url: Mutex::new(None),
+    };
+    let payload = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what color is this image"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+            ]
+        }],
+        "stream": false
+    });
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "cross_protocol".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "cross-protocol-image",
+            )
+            .expect("scope"),
+            request_id: "cross-protocol-image-1".into(),
+            payload,
+        },
+        &transport,
+    )
+    .await
+    .expect("relay must complete");
+    let url = transport
+        .captured_url
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("provider request must be captured");
+    assert!(
+        url.contains("/v1/messages"),
+        "anthropic wire provider must use the standard anthropic messages outbound, got {url}"
+    );
+    assert_eq!(output.status, 200);
+    let V3OpenAiChatRelayClientBody::Json(client) = output.client_body else {
+        panic!("expected JSON client body for stream=false");
+    };
+    assert_eq!(
+        client["choices"][0]["message"]["content"],
+        "the image is blue"
+    );
+    assert_eq!(client["choices"][0]["finish_reason"], "stop");
+    assert_eq!(client["usage"]["prompt_tokens"], 11);
+    assert_eq!(client["usage"]["completion_tokens"], 5);
+}
+
+fn manifest_with_anthropic_multimodal() -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.cross_protocol]
+bind = "127.0.0.1"
+port = 1
+routing_group = "cross_protocol"
+endpoints = ["openai_chat", "responses"]
+[providers.mm]
+type = "anthropic"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
+[providers.mm.models.MiniMax-M3]
+wire_name = "MiniMax-M3"
+capabilities = ["text", "tools", "multimodal", "vision"]
+[providers.text]
+type = "openai_chat"
+base_url = "http://text.invalid/v1"
+default_model = "deepseek-v4-flash"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "TXT_KEY" }] }
+[providers.text.models.deepseek-v4-flash]
+wire_name = "deepseek-v4-flash"
+capabilities = ["text", "tools"]
+[route_groups.cross_protocol.pools.multimodal]
+selection = { strategy = "priority" }
+match = { precedence = 0, required_capabilities = ["multimodal"] }
+targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
+[route_groups.cross_protocol.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "text", model = "deepseek-v4-flash", key = "key1", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn model_pool_wins_over_default_even_with_custom_tool_declaration() {
+    let manifest = manifest_with_model_pool_and_custom_tools();
+    let transport = AnthropicWireCaptureTransport {
+        captured_url: Mutex::new(None),
+    };
+    let payload = json!({
+        "model": "MiniMax-M3",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [{
+            "type": "custom",
+            "name": "apply_patch",
+            "description": "edit files",
+            "format": {"type": "grammar", "syntax": "lark", "definition": "start: patch"}
+        }],
+        "stream": false
+    });
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "model_pool".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "model-pool-custom-tool",
+            )
+            .expect("scope"),
+            request_id: "model-pool-custom-tool-1".into(),
+            payload,
+        },
+        &transport,
+    )
+    .await
+    .expect("relay must complete");
+    let url = transport
+        .captured_url
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("provider request must be captured");
+    assert!(
+        url.contains("/v1/messages"),
+        "client model pool must win over default pool, got {url}"
+    );
+    assert_eq!(output.status, 200);
+    let V3OpenAiChatRelayClientBody::Json(client) = output.client_body else {
+        panic!("expected JSON client body for stream=false");
+    };
+    assert_eq!(
+        client["choices"][0]["message"]["content"],
+        "the image is blue"
+    );
+}
+
+fn manifest_with_model_pool_and_custom_tools() -> routecodex_v3_config::V3Config05ManifestPublished
+{
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.model_pool]
+bind = "127.0.0.1"
+port = 1
+routing_group = "model_pool"
+endpoints = ["openai_chat", "responses"]
+[providers.mm]
+type = "anthropic"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
+[providers.mm.models.MiniMax-M3]
+wire_name = "MiniMax-M3"
+capabilities = ["text", "tools", "multimodal", "vision"]
+[providers.text]
+type = "openai_chat"
+base_url = "http://text.invalid/v1"
+default_model = "deepseek-v4-flash"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "TXT_KEY" }] }
+[providers.text.models.deepseek-v4-flash]
+wire_name = "deepseek-v4-flash"
+capabilities = ["text", "tools"]
+[route_groups.model_pool.pools.minimax_m3]
+selection = { strategy = "priority" }
+match = { precedence = 15, models = ["MiniMax-M3"] }
+targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
+[route_groups.model_pool.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "text", model = "deepseek-v4-flash", key = "key1", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn manifest_with_anthropic_mode_b_websearch() -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.cross_protocol]
+bind = "127.0.0.1"
+port = 1
+routing_group = "cross_protocol"
+endpoints = ["openai_chat", "responses"]
+[providers.mm]
+type = "anthropic"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
+[providers.mm.models.MiniMax-M3]
+wire_name = "MiniMax-M3"
+capabilities = ["text", "tools", "multimodal", "vision", "web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "MiniMax-M3"
+[route_groups.cross_protocol.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
+[route_groups.cross_protocol.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+struct AnthropicWebSearchWireTransport {
+    captured_request: Mutex<Option<Value>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicWebSearchWireTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        *self.captured_request.lock().unwrap() = Some(request.body().clone());
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id": "msg_mm_ws_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "MiniMax-M3",
+                "content": [
+                    {"type": "tool_use", "id": "call_ws_1", "name": "web_search",
+                     "input": {"query": "routecodex"}}
+                ],
+                "stop_reason": "tool_use",
+                "usage": {"input_tokens": 11, "output_tokens": 5}
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn openai_chat_entry_mode_b_web_search_intercepted_must_fail_fast_not_silently_strip() {
+    // 红测：chat 入口 + Mode B web_search 拦截后无结果投影路径，
+    // 必须显式 WebSearchInterceptedUnprojected，禁止静默剥离成普通文本。
+    let manifest = manifest_with_anthropic_mode_b_websearch();
+    let payload = json!({
+        "model": "MiniMax-M3",
+        "messages": [{"role": "user", "content": "search routecodex"}],
+        "tools": [{"type": "function", "function": {"name": "websearch", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}],
+        "stream": false
+    });
+    let transport = AnthropicWebSearchWireTransport {
+        captured_request: Mutex::new(None),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "cross_protocol".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "openai-chat-mode-b-ws",
+            )
+            .expect("scope"),
+            request_id: "openai-chat-mode-b-ws-1".into(),
+            payload,
+        },
+        &transport,
+    )
+    .await;
+    // 请求 wire 必须保留 web_search 工具（Mode B outbound 投影）。
+    let wire = transport
+        .captured_request
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("provider request wire must be captured");
+    let tool_names: Vec<&str> = wire["tools"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| {
+            tool.get("name")
+                .and_then(Value::as_str)
+                .or_else(|| tool.pointer("/function/name").and_then(Value::as_str))
+        })
+        .collect();
+    assert!(
+        tool_names.iter().any(|name| *name == "web_search"),
+        "provider wire must keep web_search server tool, got: {tool_names:?}"
+    );
+    let err =
+        output.expect_err("Mode B web_search interception must fail fast, not silently strip");
+    match err {
+        routecodex_v3_runtime::V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {}
+        other => panic!("expected WebSearchInterceptedUnprojected, got: {other:?}"),
+    }
+}
+
+#[test]
+fn routing_image_attachment_is_current_turn_only_not_history() {
+    let chat_history_image_then_text = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [
+            {"role": "user", "content": [
+                {"type": "text", "text": "look"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+            ]},
+            {"role": "assistant", "content": "I see the image"},
+            {"role": "user", "content": "now explain it"}
+        ]
+    });
+    let chat_current_turn_image = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+            {"role": "user", "content": [
+                {"type": "text", "text": "what is this"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,BBBB"}}
+            ]}
+        ]
+    });
+    let responses_history_image_then_text = json!({
+        "model": "deepseek-v4-flash",
+        "input": [
+            {"role": "user", "content": [
+                {"type": "input_text", "text": "look"},
+                {"type": "input_image", "image_url": {"url": "data:image/png;base64,AAAA"}}
+            ]},
+            {"role": "assistant", "output_text": "I see the image"},
+            {"role": "user", "content": [{"type": "input_text", "text": "now explain it"}]}
+        ]
+    });
+    let cases = [
+        (
+            "chat history image + current text",
+            &chat_history_image_then_text,
+            "openai_chat",
+            false,
+        ),
+        (
+            "chat current turn image",
+            &chat_current_turn_image,
+            "openai_chat",
+            true,
+        ),
+        (
+            "responses history image + current text",
+            &responses_history_image_then_text,
+            "responses",
+            false,
+        ),
+    ];
+    for (label, body, entry, expect_multimodal) in cases {
+        let facts =
+            routecodex_v3_runtime::build_v3_router_request_facts_for_entry(body, entry, None);
+        assert_eq!(
+            facts.capabilities.contains("multimodal"),
+            expect_multimodal,
+            "{label}: multimodal capability mismatch; caps={:?}",
+            facts.capabilities
+        );
+        assert_eq!(
+            facts.route_classification.route_name,
+            if expect_multimodal {
+                "multimodal"
+            } else {
+                "thinking"
+            },
+            "{label}: route mismatch"
+        );
+    }
+}
+
+#[tokio::test]
+async fn openai_chat_sse_mode_b_web_search_rejects_stream_before_silent_passthrough() {
+    // 红测：OpenAiChat wire SSE + Mode B 激活时，流式帧无法逐 chunk 拦截，
+    // 必须 fail-fast（WebSearchInterceptedUnprojected），禁止静默透传。
+    use futures_util::StreamExt;
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.ws]
+bind = "127.0.0.1"
+port = 1
+routing_group = "ws"
+endpoints = ["openai_chat"]
+[providers.wschat]
+type = "openai_chat"
+base_url = "http://wschat.invalid/v1"
+default_model = "ws-wire-model"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "WS_KEY" }] }
+[providers.wschat.models.ws-wire-model]
+wire_name = "ws-wire-model"
+supports_streaming = true
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "MiniMax-M3"
+[route_groups.ws.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
+[route_groups.ws.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    struct SseWsTransport;
+    #[async_trait]
+    impl ResponsesTransport for SseWsTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            let stream = futures_util::stream::iter([
+                Ok(b"data: {\"id\":\"chatcmpl-sse-ws\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_ws\",\"type\":\"function\",\"function\":{\"name\":\"websearch\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n".to_vec()),
+                Ok(b"data: {\"id\":\"chatcmpl-sse-ws\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}}]},\"finish_reason\":null}]}\n\n".to_vec()),
+                Ok(b"data: {\"id\":\"chatcmpl-sse-ws\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n".to_vec()),
+            ]);
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream),
+            ))
+        }
+    }
+
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "ws".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "openai-chat-sse-mode-b-ws",
+            )
+            .expect("scope"),
+            request_id: "openai-chat-sse-mode-b-ws-1".into(),
+            payload: json!({
+                "model": "ws-wire-model",
+                "messages": [{"role": "user", "content": "search the web for x"}],
+                "tools": [{"type": "function", "function": {"name": "websearch",
+                 "description": "Search the web", "parameters": {"type":"object","properties":{}}}}],
+                "stream": true
+            }),
+        },
+        &SseWsTransport,
+    )
+    .await
+    .expect("SSE stream is projected lazily; fail-fast happens per-frame in the stream");
+    assert_eq!(output.status, 200);
+    let stream = match output.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
+    };
+    let events = stream.collect::<Vec<_>>().await;
+    let errors: Vec<_> = events
+        .iter()
+        .filter_map(|item| item.as_ref().err())
+        .collect();
+    assert!(
+        !errors.is_empty(),
+        "Mode B SSE web_search must fail fast inside the stream, not silently pass through; events={events:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("ROUTECODEX_GOVERNANCE_REJECTED")),
+        "stream failure must be the governance rejection signal, got: {errors:?}"
+    );
+}
+
+#[tokio::test]
+async fn openai_chat_sse_mode_b_plain_text_stream_passes_through_without_websearch_call() {
+    // 防误伤：Mode B 激活 + OpenAiChat wire SSE 纯文本流（无 websearch tool call）
+    // 必须正常透传（逐帧判定只在出现本地 websearch tool call 时 fail-fast）。
+    use futures_util::StreamExt;
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.ws]
+bind = "127.0.0.1"
+port = 1
+routing_group = "ws"
+endpoints = ["openai_chat"]
+[providers.wschat]
+type = "openai_chat"
+base_url = "http://wschat.invalid/v1"
+default_model = "ws-wire-model"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "WS_KEY" }] }
+[providers.wschat.models.ws-wire-model]
+wire_name = "ws-wire-model"
+supports_streaming = true
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "MiniMax-M3"
+[route_groups.ws.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
+[route_groups.ws.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    struct SseWsTextTransport;
+    #[async_trait]
+    impl ResponsesTransport for SseWsTextTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            let stream = futures_util::stream::iter([
+                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-text\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"plain text\"},\"finish_reason\":null}]}\n\n".to_vec()),
+                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-text\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".to_vec()),
+            ]);
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream),
+            ))
+        }
+    }
+
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "ws".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "openai-chat-sse-mode-b-ws-text",
+            )
+            .expect("scope"),
+            request_id: "openai-chat-sse-mode-b-ws-text-1".into(),
+            payload: json!({
+                "model": "ws-wire-model",
+                "messages": [{"role": "user", "content": "hello"}],
+                "stream": true
+            }),
+        },
+        &SseWsTextTransport,
+    )
+    .await
+    .expect("plain text SSE stream must succeed under Mode B");
+    assert_eq!(output.status, 200);
+    let stream = match output.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
+    };
+    let events = stream.collect::<Vec<_>>().await;
+    let errors: Vec<_> = events
+        .iter()
+        .filter_map(|item| item.as_ref().err())
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "Mode B plain-text SSE stream must not be rejected; errors={errors:?} events={events:?}"
+    );
+    let frames: Vec<_> = events
+        .into_iter()
+        .map(|item| item.expect("frame"))
+        .collect();
+    let text = String::from_utf8_lossy(&frames.concat()).to_string();
+    assert!(
+        text.contains("plain text") && text.contains("[DONE]"),
+        "client frames must carry plain text and [DONE]: {text:?}"
+    );
+}
+
+#[tokio::test]
+async fn openai_chat_mode_b_mismatch_without_request_activation_fails_fast_on_websearch_call() {
+    // 候选 Mode B（pool 直连）但请求侧未激活 websearch surface（model 缺失
+    // 导致 Req04 不激活）。provider 返回 hosted `web_search` server tool →
+    // 按 2026-08-08 语义透传为 chat tool_calls（客户端执行搜索，MEMORY 4241）；
+    // 仅本地 `websearch` function tool call 才 fail-fast。
+    let manifest = manifest_with_anthropic_mode_b_websearch();
+    let transport = AnthropicWebSearchWireTransport {
+        captured_request: Mutex::new(None),
+    };
+    let payload = json!({
+        "messages": [{"role": "user", "content": "search routecodex"}],
+        "tools": [{"type": "function", "function": {"name": "websearch", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}],
+        "stream": false
+    });
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "cross_protocol".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "openai-chat-mode-b-mismatch",
+            )
+            .expect("scope"),
+            request_id: "openai-chat-mode-b-mismatch-1".into(),
+            payload,
+        },
+        &transport,
+    )
+    .await
+    .expect("hosted web_search tool_use must pass through as chat tool_calls");
+    assert_eq!(output.status, 200);
+    let client_response = match output.client_body {
+        V3OpenAiChatRelayClientBody::Json(value) => value,
+        V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+    };
+    let tool_calls = client_response["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .expect("hosted web_search must project to chat tool_calls");
+    assert_eq!(
+        tool_calls[0]["function"]["name"],
+        "web_search",
+        "hosted web_search server tool must be transparent to the client: {client_response}"
+    );
+}
+
+#[tokio::test]
+async fn openai_chat_sse_mode_b_mismatch_fails_fast_on_delta_websearch_tool_call() {
+    // 红测：OpenAiChat wire SSE + 候选 Mode B + 请求侧未激活（无 model）时，
+    // provider 在 delta.tool_calls 里返回 websearch call 必须 fail-fast，
+    // 禁止静默透传。
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.ws]
+bind = "127.0.0.1"
+port = 1
+routing_group = "ws"
+endpoints = ["openai_chat"]
+[providers.wschat]
+type = "openai_chat"
+base_url = "http://wschat.invalid/v1"
+default_model = "ws-wire-model"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "WS_KEY" }] }
+[providers.wschat.models.ws-wire-model]
+wire_name = "ws-wire-model"
+supports_streaming = true
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "MiniMax-M3"
+[route_groups.ws.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
+[route_groups.ws.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    struct SseWsMismatchTransport;
+    #[async_trait]
+    impl ResponsesTransport for SseWsMismatchTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            let stream = futures_util::stream::iter([
+                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_ws\",\"type\":\"function\",\"function\":{\"name\":\"websearch\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n".to_vec()),
+                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}}]},\"finish_reason\":null}]}\n\n".to_vec()),
+                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n".to_vec()),
+            ]);
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream),
+            ))
+        }
+    }
+
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "ws".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "openai-chat-sse-mode-b-mismatch",
+            )
+            .expect("scope"),
+            request_id: "openai-chat-sse-mode-b-mismatch-1".into(),
+            payload: json!({
+                "messages": [{"role": "user", "content": "search the web for x"}],
+                "tools": [{"type": "function", "function": {"name": "websearch",
+                 "description": "Search the web", "parameters": {"type":"object","properties":{}}}}],
+                "stream": true
+            }),
+        },
+        &SseWsMismatchTransport,
+    )
+    .await
+    .expect("relay runtime must return an output");
+    // SSE stream 是 lazy 的：guard 错误在 stream 消费时触发，必须消费流断言。
+    use futures_util::StreamExt;
+    match output.client_body {
+        routecodex_v3_runtime::V3OpenAiChatRelayClientBody::Sse(stream) => {
+            let events = stream.collect::<Vec<_>>().await;
+            let first = events.first().expect("stream must emit an error event");
+            let err = first
+                .as_ref()
+                .expect_err("Mode B SSE mismatch must fail fast");
+            assert!(
+                err.contains("ROUTECODEX_GOVERNANCE_REJECTED"),
+                "expected governance rejection, got: {err}"
+            );
+        }
+        _ => panic!("expected SSE client body"),
+    }
+}
+
+#[tokio::test]
+async fn openai_chat_mode_b_mismatch_with_non_mode_b_forwarder_model_fails_fast() {
+    // 复现生产：请求 model 是存在的 forwarder（gpt-5.5 -> cc-sol 非 Mode B），
+    // 但 VR 因 web_search 意图路由到 Mode B pool（minimax_anthropic）。
+    // 候选 Mode B + 请求侧未激活（forwarder 非 Mode B）→ provider 返回 hosted
+    // `web_search` server tool（anthropic wire）→ 按 2026-08-08 语义透传为
+    // chat tool_calls 由客户端执行（MEMORY 4241：Chat function calls named
+    // web_search project back to web_search_call）；仅本地 `websearch` function
+    // tool call 才 fail-fast。
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+endpoints = ["openai_chat"]
+[providers.mm]
+type = "anthropic"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
+[providers.mm.models."MiniMax-M3"]
+wire_name = "MiniMax-M3"
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "MiniMax-M3"
+[providers.text]
+type = "openai_chat"
+base_url = "http://text.invalid/v1"
+default_model = "plain-model"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "TXT_KEY" }] }
+[providers.text.models.plain-model]
+wire_name = "plain-model"
+capabilities = ["text", "tools"]
+[forwarders."fwd.gpt"]
+model = "gpt-5.5"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "text", model = "plain-model", key = "key1", priority = 1 }]
+[route_groups.g.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "text", model = "plain-model", key = "key1", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    struct WsWireTransport;
+    #[async_trait]
+    impl ResponsesTransport for WsWireTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                serde_json::to_vec(&json!({
+                    "id": "msg_ws_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "MiniMax-M3",
+                    "content": [
+                        {"type": "tool_use", "id": "call_ws_1", "name": "web_search",
+                         "input": {"query": "RouteCodex release"}}
+                    ],
+                    "stop_reason": "tool_use",
+                    "usage": {"input_tokens": 11, "output_tokens": 5}
+                }))
+                .unwrap(),
+            ))
+        }
+    }
+
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "s".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "openai-chat-mode-b-fwd-mismatch",
+            )
+            .expect("scope"),
+            request_id: "openai-chat-mode-b-fwd-mismatch-1".into(),
+            payload: json!({
+                "model": "gpt-5.5",
+                "messages": [{"role": "user", "content": "search the web for RouteCodex release"}],
+                "tools": [{"type": "function", "function": {"name": "websearch",
+                 "description": "Search the web", "parameters": {"type":"object","properties":{}}}}],
+                "stream": false
+            }),
+        },
+        &WsWireTransport,
+    )
+    .await
+    .expect("hosted web_search tool_use must pass through as chat tool_calls");
+    assert_eq!(output.status, 200);
+    let client_response = match output.client_body {
+        V3OpenAiChatRelayClientBody::Json(value) => value,
+        V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+    };
+    let tool_calls = client_response["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .expect("hosted web_search must project to chat tool_calls");
+    assert_eq!(
+        tool_calls[0]["function"]["name"],
+        "web_search",
+        "hosted web_search server tool must be transparent to the client: {client_response}"
+    );
 }

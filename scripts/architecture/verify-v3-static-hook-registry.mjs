@@ -85,10 +85,10 @@ const builders = [
   'build_v3_provider_resp_inbound_01_raw_from_sse_chunks',
   'build_provider_resp_compat_02_from_v3_provider_resp_inbound_01',
   'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02',
+  'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request',
   'build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02',
   'build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03',
   'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04',
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload',
   'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05',
 ];
 for (const builder of builders) {

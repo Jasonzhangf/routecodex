@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "protocol_tables.schema.json",
+  "title": "RouteCodex V3 Protocol Conversion Tables",
+  "description": "协议转换查表基础设施的 JSON Schema。所有 inbound（归一化：协议->hub）与 outbound（反向投影：hub->协议）字段/类型/角色/finish_reason 映射必须以 JSON 表为真源；禁止在 codec 中手写未入表的新映射。",
+  "type": "object",
+  "required": ["table_id", "kind", "protocols"],
+  "properties": {
+    "table_id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "kind": { "enum": ["protocol_value_map", "bidi_field_map", "field_whitelist_map"] },
+    "protocols": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true },
+    "whitelists": {
+      "type": "object",
+      "description": "field_whitelist_map 行：protocol -> 允许透传的顶层字段名数组。字段名在协议内必须唯一（BTreeSet 去重）；协议 key 必须出现在 protocols 声明中。",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 1
+      }
+    },
+    "values": {
+      "type": "array",
+      "description": "protocol_value_map 行：hub 为 canonical 轴值；每个协议列是该协议下的等价值；direction 限定方向（缺省=双向）。同一 (protocol, value, direction) 必须唯一映射到一个 hub（inbound 唯一性）；hub 可对应多个协议值（outbound 折叠允许）。",
+      "items": {
+        "type": "object",
+        "required": ["hub"],
+        "properties": {
+          "hub": { "type": "string" },
+          "direction": { "enum": ["inbound", "outbound"] },
+          "responses": { "type": "string" },
+          "openai_chat": { "type": "string" },
+          "anthropic": { "type": "string" },
+          "gemini": { "type": "string" },
+          "transform": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "description": "bidi_field_map 行：hub_field 与给定协议下的 protocol_field 成对等价（互逆）。同一 (protocol, protocol_field) 必须唯一（inbound 唯一性）。",
+      "items": {
+        "type": "object",
+        "required": ["hub_field", "protocol", "protocol_field"],
+        "properties": {
+          "hub_field": { "type": "string" },
+          "protocol": { "type": "string" },
+          "protocol_field": { "type": "string" },
+          "transform": { "type": ["string", "null"] }
+        }
+      }
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "protocol_value_map" } } }, "then": { "required": ["values"] } },
+    { "if": { "properties": { "kind": { "const": "bidi_field_map" } } }, "then": { "required": ["entries"] } },
+    { "if": { "properties": { "kind": { "const": "field_whitelist_map" } } }, "then": { "required": ["whitelists"] } }
+  ]
+}

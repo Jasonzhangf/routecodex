@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
-import YAML from 'yaml';
+import { readFileSync } from 'node:fs';import YAML from 'yaml';
 import {
   renderV3ProtocolSemanticFieldMatrix,
   renderV3ProtocolSemanticFieldMatrixHtml,
@@ -455,17 +454,20 @@ const openaiChatCustomToolProjection = functionSlice(
   'fn normalize_openai_chat_custom_tool(',
   'fn normalize_openai_chat_tool_search(',
 );
+// 现状契约（opencode-go 兼容）：custom -> function 扁平化（parameters 最小
+// {"type":"object"}），format(grammar) 按协议收窄丢弃，未知字段必须拒绝
+// （UnmappedOutboundFields），禁止静默降级丢失。
 for (const phrase of [
-  '("type".to_string(), Value::String("custom".to_string()))',
-  '("custom".to_string(), Value::Object(custom))',
-  'serde_json::json!({"type":"text"})',
-  'serde_json::json!({"type":"grammar","grammar":{"syntax":syntax,"definition":definition}})',
+  'Value::String("function".to_string())',
+  'UnmappedOutboundFields',
+  '"type":"object"',
 ]) requireText(openaiChatCustomToolProjection, `${paths.requestOutboundToolProjection}::native_openai_chat_custom_tool`, phrase);
-forbid(openaiChatCustomToolProjection, `${paths.requestOutboundToolProjection}::native_openai_chat_custom_tool`, [/"function"/, /parameters/, /arguments/]);
+forbid(openaiChatCustomToolProjection, `${paths.requestOutboundToolProjection}::native_openai_chat_custom_tool`, [/Value::String\("custom"\.to_string\(\)/]);
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::responses_web_search_projection`, 'openai_chat_wire_projects_responses_web_search_tool_to_options');
 for (const testName of [
   'openai_chat_wire_projects_complete_codex_tool_declaration_matrix',
-  'openai_chat_wire_projects_custom_grammar_to_native_chat_custom_tool',
+  // grammar 投影行为已移除（chat wire 无法表达 format，按协议收窄丢弃），
+  // 仅保留拒绝未知格式（openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade）。
   'openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade',
 ]) requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::native_openai_chat_custom_tool_tests`, testName);
 for (const testName of [
@@ -652,22 +654,22 @@ const outboundAllowedFields = functionSlice(
   'fn allowed_top_level_outbound_fields',
   'fn normalize_responses_content_part_for_role',
 );
-const openAiChatAllowedFields = sectionSlice(
-  outboundAllowedFields,
-  'V3OutboundTargetProtocol::OpenAiChat => &[',
-  'V3OutboundTargetProtocol::OpenAiResponses => &[',
-);
+// 出站顶层字段白名单真源已收敛为查表（request_field_map.json，allowed_top_level_outbound_fields
+// 只做协议名查表）；openai_chat 允许字段改为校验 JSON 表，不再扫描源码数组字面量。
+const requestFieldMapRel = 'v3/crates/routecodex-v3-runtime/tables/request_field_map.json';
+const requestFieldMap = JSON.parse(readFileSync(requestFieldMapRel, 'utf8'));
+const openAiChatAllowedFields = (requestFieldMap?.whitelists?.openai_chat ?? []).join('\n');
 for (const field of [
-  '"audio"',
-  '"modalities"',
-  '"prediction"',
-  '"prompt_cache_key"',
-  '"prompt_cache_options"',
-  '"prompt_cache_retention"',
-  '"service_tier"',
-  '"store"',
-  '"web_search_options"',
-]) requireText(openAiChatAllowedFields, `${paths.requestOutboundFormat}::openai_chat_same_protocol_fields`, field);
+  'audio',
+  'modalities',
+  'prediction',
+  'prompt_cache_key',
+  'prompt_cache_options',
+  'prompt_cache_retention',
+  'service_tier',
+  'store',
+  'web_search_options',
+]) requireText(openAiChatAllowedFields, `${requestFieldMapRel}::whitelists.openai_chat`, field);
 const responsesAllowedFields = sectionSlice(
   outboundAllowedFields,
   'V3OutboundTargetProtocol::OpenAiResponses => &[',

@@ -906,3 +906,102 @@ async fn anthropic_unknown_direct_provider_model_returns_model_not_found() {
         "anthropic provider.model absence must surface ModelNotFound: {error}"
     );
 }
+
+#[tokio::test]
+async fn anthropic_entry_mode_b_web_search_intercepted_must_fail_fast_not_silently_strip() {
+    // 红测：anthropic 入口 + Mode B web_search 拦截后无结果投影路径，
+    // 必须显式 WebSearchInterceptedUnprojected，禁止静默剥离成普通文本。
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.ws]
+bind = "127.0.0.1"
+port = 1
+routing_group = "ws"
+endpoints = ["anthropic"]
+[providers.mm]
+type = "anthropic"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
+[providers.mm.models."MiniMax-M3"]
+wire_name = "MiniMax-M3"
+supports_streaming = true
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "MiniMax-M3"
+[route_groups.ws.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
+[route_groups.ws.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    struct WebSearchTransport;
+    #[async_trait]
+    impl ResponsesTransport for WebSearchTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                serde_json::to_vec(&json!({
+                    "id": "msg_ws_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "MiniMax-M3",
+                    "content": [
+                        {"type": "tool_use", "id": "call_ws_1", "name": "websearch",
+                         "input": {"query": "routecodex"}}
+                    ],
+                    "stop_reason": "tool_use",
+                    "usage": {"input_tokens": 11, "output_tokens": 5}
+                }))
+                .unwrap(),
+            ))
+        }
+    }
+
+    let payload = json!({
+        "model": "MiniMax-M3",
+        "max_tokens": 128,
+        "messages": [{"role": "user", "content": "search routecodex"}],
+        "tools": [{"name": "web_search", "description": "Search the web"}],
+        "stream": false
+    });
+    let error = execute_v3_anthropic_relay_runtime(
+        &manifest,
+        V3AnthropicRelayRuntimeInput {
+            server_id: "ws".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "anthropic-mode-b-ws",
+            )
+            .expect("scope"),
+            request_id: "anthropic-mode-b-ws-1".into(),
+            payload,
+        },
+        &WebSearchTransport,
+    )
+    .await
+    .expect_err("Mode B web_search interception must fail fast, not silently strip");
+    match error {
+        routecodex_v3_runtime::V3AnthropicRelayRuntimeError::WebSearchInterceptedUnprojected => {}
+        other => panic!("expected WebSearchInterceptedUnprojected, got: {other:?}"),
+    }
+}

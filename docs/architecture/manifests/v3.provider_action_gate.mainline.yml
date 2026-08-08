@@ -152,8 +152,8 @@ edges:
     to: V3ProviderActionGateAdmission
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_openai_chat_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    caller_symbol: execute_v3_relay_runtime_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-13
@@ -161,8 +161,8 @@ edges:
     to: V3ProviderActionGateAdmission
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_gemini_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+    caller_symbol: execute_v3_relay_runtime_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-14
@@ -189,25 +189,7 @@ edges:
     status: anchored
     owner_feature_id: v3.provider_action_gate
     caller_symbol: handle_provider_failure
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: run_v3_relay_provider_failure_policy
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - step_id: v3-provider-action-gate-17
-    from: V3Error01SourceRaised
-    to: V3Error05ExecutionDecision
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: handle_provider_failure
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-    callee_symbol: run_v3_relay_provider_failure_policy
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - step_id: v3-provider-action-gate-18
-    from: V3Error01SourceRaised
-    to: V3Error05ExecutionDecision
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: handle_provider_failure
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
     callee_symbol: run_v3_relay_provider_failure_policy
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-19
@@ -242,8 +224,8 @@ edges:
     to: V3ProviderActionPermitInFlight
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_openai_chat_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    caller_symbol: execute_v3_relay_runtime_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
     callee_symbol: V3ProviderActionAdmission::take_permit
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
   - step_id: v3-provider-action-gate-23
@@ -251,8 +233,8 @@ edges:
     to: V3ProviderActionPermitInFlight
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_gemini_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+    caller_symbol: execute_v3_anthropic_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
     callee_symbol: V3ProviderActionAdmission::take_permit
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
   - step_id: v3-provider-action-gate-24
@@ -287,8 +269,8 @@ edges:
     to: V3ProviderActionPermitAbandonRequested
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_openai_chat_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    caller_symbol: execute_v3_relay_runtime_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
     callee_symbol: V3ProviderActionPermit::drop
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
   - step_id: v3-provider-action-gate-28
@@ -296,8 +278,8 @@ edges:
     to: V3ProviderActionPermitAbandonRequested
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_gemini_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+    caller_symbol: execute_v3_anthropic_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
     callee_symbol: V3ProviderActionPermit::drop
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
   - step_id: v3-provider-action-gate-29

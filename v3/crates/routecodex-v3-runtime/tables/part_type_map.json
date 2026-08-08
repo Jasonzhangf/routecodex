@@ -1,0 +1,15 @@
+{
+  "table_id": "part_type_map",
+  "kind": "protocol_value_map",
+  "protocols": ["responses", "openai_chat", "anthropic"],
+  "description": "content part type 双向别名映射。数据来源：anthropic_codec.rs:823-835/1297-1332（text->output_text、thinking->reasoning、tool_use->function_call）、responses_openai_codec.rs:628-700/1059-1155、request_outbound_format.rs:992-1021/1317-1318。direction 区分请求侧归一化（inbound）与响应侧投影（outbound）。",
+  "values": [
+    { "hub": "text", "direction": "outbound", "responses": "output_text", "openai_chat": "text", "anthropic": "text" },
+    { "hub": "input_text", "direction": "inbound", "responses": "input_text", "openai_chat": "text", "anthropic": "text" },
+    { "hub": "input_image", "direction": "inbound", "responses": "input_image", "openai_chat": "image_url", "anthropic": "image" },
+    { "hub": "reasoning", "direction": "outbound", "responses": "reasoning", "anthropic": "thinking" },
+    { "hub": "function_call", "direction": "outbound", "responses": "function_call", "openai_chat": "tool_calls", "anthropic": "tool_use" },
+    { "hub": "function_call_output", "direction": "inbound", "responses": "function_call_output", "openai_chat": "tool", "anthropic": "tool_result" },
+    { "hub": "refusal", "direction": "outbound", "responses": "refusal", "openai_chat": "text", "anthropic": "text" }
+  ]
+}

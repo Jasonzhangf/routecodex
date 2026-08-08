@@ -34649,9 +34649,100 @@ Hard guards observed:
 - Config evidence: `~/.rcc/provider/routecodex/config.v2.toml` model `deepseek-v4-flash` has no `web_search_execution_mode` or `web_search_backend`; compiler therefore emits default `None`. Current route selected this model, so Request Chat Process never activates local `websearch`; changing OpenAI Chat codec to consume image would violate target protocol truth.
 - Root cause: missing active compiled web-search execution contract for routecodex deepseek target, not provider compat field omission. Unique owner candidate is `v3.web_search_servertool_state_machine` config/Req04 activation; feature is design-only and requires map/resource activation before implementation.
 
+## 2026-08-07 V3 entry/exit/VR decoupling architecture review
+- Architecture review verdict before implementation: FAIL. The request-side selected-target provider protocol derivation is directionally correct, but its shared helper remains owned by `responses_relay_runtime.rs`, coupling OpenAI Chat entry execution to another entry runtime.
+- Response contract violations are confirmed: OpenAI Chat orchestration hard-codes `OpenAiChat` at Resp01; Anthropic JSON is converted to final client shape before Resp01; ProviderRespCompat02 SSE materializes and relabels provider wire as Responses; RespInbound02 only wraps instead of implementing the registered provider-wire to canonical-Chat conversion; Anthropic cross-protocol SSE materializes the complete stream before producing client frames.
+- The implementation contract and mandatory pre/post architecture review record are in `docs/goals/v3-entry-exit-vr-decoupling-architecture-remediation-plan.md`. No formal remediation code has been approved or implemented by this review task; source/live/review closure remains pending.
+
 # 2026-08-07 V3 history/payload isolation audit closeout (final)
 - Root: wire.rs had two forbidden history rewrites (replace_historical_responses_tool_output_data_images, remove_configured_historical_response_fields); both physically removed; positive preservation tests cover historical tool images/reasoning/encrypted content incl. legacy cleanup config.
 - Review iterations (cc/asxs/tcm): 7 FAIL rounds caught gate gaps -> added SSE helper surface scan, server handler + WebSocket handlers, post-commit projections, store transport, Direct kernel interval, owner non-empty guards, metadata_center identifier-strip precision, v3-verification-map binding, payload-inference revival rejection (response_has_stopless_activation removed; observability now uses Resp04 typed control_transition).
 - Concurrent workers committed 5bd01e5ca (checkpoint incl. wire.rs) and 90f6a4c70 (runtime Arc + stopless typed state); my gate diff committed as 3dd740b71.
 - tcm review r13 VERDICT: PASS. cc/asxs persistently rate-limited (429/503) during final rounds.
 - Remaining risk: verify:v3-architecture-ci overall run blocked by concurrent uncommitted web-search map indent drift + session-cooldown half-applied rename (HEAD baseline also fails red fixtures pre-existing); task gates individually PASS. 502s in log are concurrent web_search tools[13].search_content_types compat, not history cleanup.
+
+## 2026-08-07 V3 entry/exit decoupling design/test binding correction
+- Re-read the active attachment and existing test designs. The remediation must reuse `v3-openai-chat-relay-runtime-integration-test-design.md` for lifecycle/first-frame/error/isolation and `v3-protocol-conversion-field-parity-test-design.md` for field-level codec semantics; adding a runtime-local second conversion owner would violate both designs.
+- Current `v3.openai_chat_relay_runtime_integration` map still names only `openai_chat_relay_runtime.rs` and server as owner files, while the requested repair necessarily adds provider compat and RespInbound02 adjacent owners. This is a contract delta that must be synchronized before those source edits are treated as active architecture truth.
+- The current worktree now also contains unrelated `kernel.rs` dirty state; it remains outside this task and must not be touched or included.
+
+## 2026-08-07 10000 opencode-go 多 key 配置（config_id:v3_10000_opencode_go_pools）
+- V3 multi-key 语义（已验证源码）：target.key 解析 provider.auth.entries alias；target 不写 key = 该 provider 全部 key 成为候选；多 key 轮询 = selection strategy weighted(SWRR)/round_robin（同 priority 同 weight 自动轮询）；priority = 分级 failover（key1 p1 失败 → key2 p1/p2 → p99 兜底），weighted 不会跨 tier 提前打开高 priority。
+- 入口执行模式：/v1/responses = direct(默认, 同协议) + relay；/v1/chat/completions = 仅 relay（V3 无 openai_chat direct runtime）；anthropic/gemini = 仅 relay。responses 入口 + openai-wire provider 时 relay/或 direct 转换到 provider wire。
+- 10000 新配置：endpoints=[anthropic,responses,openai_chat]；default=weighted [opencode-go deepseek-v4-flash key1 p1 w1, routecodex 本地 deepseek p99 w1 兜底]；multimodal/web_search pools（无 entry_protocol 限制，双入口生效）→ minimax_anthropic MiniMax-M3 key1。
+- 新 provider：~/.rcc/provider/opencode-go/config.v2.toml (type=openai, baseURL=https://opencode.ai/zen/go/v1, tokenFile=~/.rcc/secrets/v3/opencode-go.token)；Go key 来自 opencode auth.json。
+- 验证证据：chat 文本 → opencode.ai TCP (198.18.132.234:443)；responses dry-run providerId=opencode-go url=.../zen/go/v1/chat/completions + live 200 completed；chat 图 → api.minimaxi.com (8.153.111.26)；chat web_search → api.minimaxi.com (101.132.45.96)；responses web_search dry-run → minimax_anthropic /anthropic/v1/messages。
+- 注意：dry-run (x-routecodex-dry-run: provider-request) 只支持 responses 入口（direct/relay），chat 入口无 dry-run。
+- 未验证：tier99 本地兜底未做诱导失败 live 测试（会破坏 Go key）；语义由代码路径 + 单测保证。
+
+## 2026-08-07 收尾：openai_chat relay 跨协议 + task3 根因（config_id:v3_10000_opencode_go_pools 续）
+- task2 chat 入口图片路由修复：openai_chat_relay_runtime req07 wire 从硬编码 OpenAiChat 改为 provider_wire_protocol_for_selected_candidate（mainline-07 定义 side_channel_reads=v3.hub.provider_protocol）；transport 用 build_v3_provider_transport_request_for_protocol（anthropic→/v1/messages）；响应侧新增 anthropic raw→responses canonical（共享 codec project_v3_anthropic_message_as_responses_response）→openai chat client 投影（RespOutbound05 对 OpenAiChat 入口缺失能力）。死函数 build_v3_openai_chat_transport_09_from_v3_provider_08 已删 + function map 同步。
+- task3 根因（MiniMax-M3+custom tool 落 default→Go 400）：10000 缺模型池 → 新增 minimax_m3 池（match.models=["MiniMax-M3"]→minimax_anthropic）。迷惑点：无 format 的 custom tool（{"type":"custom","name":...}）被 anthropic codec fail-fast（malformed tools[].format）——是合法行为；真实 opencode custom tool 自带 format（apply_patch grammar，captured 样本实证）。resolve 选中 mm 但 compat 失败→failure policy 重选 text 的链路已用探针确认，非 VR 选池问题。
+- 清理：3 处调试探针删除；预存在死代码 resolve_v3_relay_target（未调用）+ 2 处 unused import + kernel.rs VecDeque import 物理删除；测试瘦身（保留 hermetic 回归：openai_chat_entry_serves_anthropic_wire_multimodal_provider_via_standard_outbound、model_pool_wins_over_default_even_with_custom_tool_declaration、openai_chat_image_url_request_selects_multimodal_pool、v3_routing_facts_openai_chat_image_url_is_multimodal_signal）。
+- 验证：cargo check 零警告；integration 19 + lib 307 全绿；0.90.4198 安装重启 4 端口 health OK；live：chat 图片→MiniMax-M3 正常、MiniMax-M3+custom tool→/v1/messages、default 文本→opencode-go、responses 图片回归正常。
+- 注意：worktree 含其他 worker 改动（anthropic_relay_runtime/servertool_hooks/web_search_hop/package.json 等），未动；我的改动范围 = openai_chat_relay_runtime.rs、provider_failure_runtime_policy.rs(+tests)、nodes.rs、kernel.rs、integration tests、v3-function-map.yml、config.v3.toml(10000 池+endpoints)。
+
+## 2026-08-08 chat 入口 web_search/multimodal 路由与工具治理（VR/入口耦合审查）
+- 根因1（VR 路由层）：4444 multimodal/web_search pool 原 `entry_protocol="responses"` 绑定——VR `pool_matches` 精确比较 entry_protocol，chat 入口注入 "openai_chat"/"anthropic" 永不命中 → 静默落 default（deepseek）。能力信号与入口无关，去绑定（对齐 10000 已验证做法）。`rccv3 config check` + 在线验证 chat 图片/web_search → MiniMax-M3。
+- 根因2（工具治理层，多节点耦合）：(a) `apply_v3_web_search_request_hook_at_req04` 只识别 Responses 形态 `{"type":"web_search"}` 声明，chat 入口 function 形态（websearch/web_search）不激活 Mode B；(b) `resolve_web_search_mode_and_backend` 只解析 forwarder/direct，4444 pool 直连 provider_model 解析不到 Mode B；(c) `responses_tool_as_anthropic_tool` 把 chat 入口 `websearch` function 保留原名 → MiniMax 收不到 web_search server tool（"wasn't included in my available functions"）。
+- 修复（全 Rust hub 内）：Req04 三协议形态声明识别；pool 直连 mode 解析；websearch→Anthropic web_search_20250305 映射；响应侧 Mode B 拦截 fail-fast `WebSearchInterceptedUnprojected`（JSON/SSE/Anthropic-wire/OpenAI-wire 四路径统一，治理拒绝不记 provider-health，不静默剥离、不进 provider 重试链）；SSE delta.tool_calls 形态识别（首帧空 arguments/query 容忍）；mismatch corner（候选 Mode B + 请求侧未激活）按 payload 内容兜底 fail-fast。
+- 红测：openai_chat/anthropic Mode B 拦截 fail-fast、SSE 守卫、SSE mismatch、forwarder mismatch、Req04 三形态激活、pool 直连解析、codec 映射。
+- 验证：lib 312 + integration（anthropic 14/openai_chat 25/web_search 2）绿；0.90.4209 安装重启 4 端口 OK；live：chat multimodal/web_search → MiniMax-M3，普通文本/流式正常。剩余：worker 的 responses_relay_runtime 2 测试（provider-wire 迁移中间态，非本改动）。
+## 2026-08-08 OpenAI Chat SSE terminal semantics correction
+- Jason corrected the terminal contract: OpenAI Chat semantic completion is `choices[].finish_reason=stop`; `data: [DONE]` is only the following transport sentinel. Do not describe `[DONE]` as the terminal event or use it to infer semantic success.
+- The cross-protocol Anthropic path must map Anthropic `message_delta.stop_reason` to OpenAI Chat `finish_reason`, emit that terminal chunk when `message_stop` closes the message, then emit client `[DONE]`. EOF without `message_stop` remains an error.
+- Revision of the design report: `v3-openai-chat-anthropic-sse-terminal-closeout-20260808-r3`. Any implementation/test wording must preserve semantic terminal versus transport close distinction.
+
+## 2026-08-08 历史图片统一占位清理 v5（方案确认 → 实施 → live 验证）
+- 方案 v5（Jason 确认）：历史轮（最后一个 user carrier 之外）图片 part 原位替换为统一固定占位符 `[Image]`（chat wire `{"type":"text","text":"[Image]"}` / responses wire `{"type":"input_text","text":"[Image]"}` / gemini parts `{"text":"[Image]"}`），无编号、无前缀、同位置同 token；只有图片的消息变 `["[Image]"]` 非空；当前轮图片必须保留（驱动 multimodal 路由）；缓存规则=固定占位符保证同会话同位置 token 逐字节一致。
+- 实现：`hub_v1/history_image_cleanup.rs` 新文件（纯函数 `normalize_v3_history_image_placeholders`）；唯一调用点=relay ReqInbound02（`build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01` 三个 canonical 分支对最终 payload 各执行一次，chat 默认分支 `Arc::get_mut` + clone 兜底）+ direct `build_v3_req_04_standardized_responses_from_v3_server_03`（previous_response_id 提取后）。放 hub_v1 而非 nodes.rs 的原因：nodes.rs 是 hub_v1 的父模块，反向依赖会循环。
+- 关键坑（当前轮判定）：初始实现 `unwrap_or(true)` 会把无 role 的 function_call_output 当 user carrier → 尾部 tool output 会让真实当前轮图片被误清理。修正为与 Virtual Router `extract_active_turn_signals`/`is_user_carrier` 对齐：role=="user" 或 responses 无 role 的 input_text/text/output_text 类型；gemini 按 role=="user"。
+- 验证：lib 319 过 + 新增 9 单测（含 tool-output 尾随、gemini、顶层 input_image）；3 个失败（target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider、responses_relay_routes_current_user_thinking_after_chat_canonicalization、anthropic_relay_anthropic_provider_sse_reaches_client_sse_events）经"撤我改动复测仍失败"证实为并发 worker（goal_id:v3_entry_exit_vr_decoupling_20260807）未完成重构的既有失败，与本次无关。
+- 0.90.4215 安装重启 4 端口 health OK。live：①5555 direct dry-run 历史图→input_text "[Image]" 当前文本保留；②10000 relay dry-run 历史图→anthropic text "[Image]"、当前轮图→anthropic image part 保留→MiniMax-M3；③5555 real 请求（历史图+assistant+当前文本）→HTTP 200 正确返回。
+- 边界/既有问题（非本功能）：5555 direct 当前轮图片 400（仅当前图无历史图也 400，cleanup no-op → pre-existing，direct+multimodal+forwarder 路径）；10000 real 请求挂起/502（纯文本也挂——opencode-go/deepseek 与本地 ds4 上游整体故障，pre-existing，dry-run 已证 wire body 正确）；架构文档已登记例外 §3.2.1。
+- 剩余：安装/合并需按 .agent-collab 协议与 worker 协调；worker 3 个失败测试待其收尾。
+
+## 2026-08-08 10000 挂起真源：semantic_protocol 快照失配（非上游问题，Jason 纠偏）
+- 我之前误判"上游问题"；Jason 指示先查路由配置 + 直连上游。证据：opencode-go key1/key2、本地 ds4(8000) 直连全部 200（stream/非 stream）；ds4 日志实证网关请求被完整处理（finish=stop 2.3s）；路由配置正常。
+- 真源1（10000 全部 openai_chat-wire relay 502/hang）：worker 未提交改动把 Resp03 分派键从 `provider_raw().provider_protocol` 改为 `semantic_protocol()`（resp_chat_process_03_governed.rs 3 处），但 `semantic_protocol` 在 Resp02 normalize 时快照；relay 的 openai_chat→responses 转换（responses_relay_runtime.rs run_json_response_hooks，已提交代码）只改 raw protocol 不改 semantic → Resp03 按 OpenAiChat 解析 Responses 形状 → "choices must be an array" → 合成 502 → 全候选失败 → 重试挂起。
+- 真源2（anthropic relay SSE 502）：worker 在 provider_resp_compat_02 删了 `provider_protocol=Responses` 行（SSE 物化恒产出 responses canonical），Resp02 新 builder 只对 Json+Anthropic 投影设 semantic=Responses，SSE 保持 Anthropic → Resp03 拒绝。
+- 修复（架构合规，raw 保留 wire 事实、semantic 标记 canonical）：
+  1. `resp_inbound_02_normalized.rs` 新增原子方法 `set_responses_semantic_payload`（payload+semantic 一起设，杜绝失配）；relay 转换处改调它，删除不合规的 `provider_raw_mut().provider_protocol = Responses`。
+  2. Resp02 builder：Anthropic+SSE 时 semantic=Responses（SSE 已在 compat 物化阶段投影）。
+- 验证：原 3 个失败测试全转绿（target_protocol_unmapped...、thinking 路由、anthropic SSE 集成）；lib 321 + 全集成绿；HEAD 基线 worktree 复测证明 2 个 stopless 并行 flake 与本次无关；0.90.4219 安装重启 4 端口 OK；live：10000 文本/历史图/流式/当前轮图（有效 PNG→minimax 视觉回答）全 200。
+- 注意：config.v3.toml 08:31 被外部改动（内容未对比）；worker 的 route.rs 编辑（route 优先级重排、去 background、web_search 仅 tool-intent）08:33-08:34 完成并已编译通过。
+
+## 2026-08-08 context 536141 根因边界复核
+- 本地 `routecodex` DeepSeek provider `maxContext` / `maxContextTokens` 均为 `262144`，不是配置小于 256k；`rccv3 config check` PASS。
+- 失败样本 `openai-responses-router-MiniMax-M3-20260808T064618603-715172-1380` 的 `input[3].content[1]` 是 `input_image`，此前路由实际为 `anthropic_v3_10000/default -> routecodex/deepseek-v4-flash`；上游先报 `image_url` 反序列化错误，随后本地 DeepSeek 报 `Prompt has 536141 tokens`，证实图片未在该旧请求路径中完成正确的媒体/历史投影。
+- 当前源码的 tiktoken media test `v3_token_estimate_omits_media_payload_bytes` PASS；当前在线 10000/4444 对该已脱敏样本 dry-run 估算 `6286` tokens，说明脱敏后的图片没有进入 estimator，当前不是“estimator 把 placeholder 计成 536141”。
+- 并行 worker 已拥有历史图片占位清理 owner；本轮不重复修改 `history_image_cleanup.rs` / ReqInbound 调用链。需等该 owner 完成后，以旧样本在线重放确认真实图片不会进入 DeepSeek wire prompt；只有在线仍显示超限，才继续追 provider wire/context owner。
+- 当前在线四端口均为 `0.90.4219`、`/health` PASS；未从未完成的并行 dirty source 做新的安装/重启。
+
+## 2026-08-08 续写式合规验证 + 沉淀（Jason 指令）
+- Jason 硬规则：占位/流水线修改必须续写式合规；已沉淀 MEMORY.md + AGENTS.md 护栏 25 + rcc-dev-skills references/97-continuation-cache-compliance.md。
+- ds4 缓存机制（源码 ds4_server.c）：memory-token（token 精确前缀 common==old_pos）→ thinking-visible → memory-text（渲染字节 vs 解码 checkpoint）→ disk-text；部分前缀一律 miss。DSML：assistant 带 reasoning 渲染 `<think>推理</think>`，不带渲染 `</think>` 立即闭合；live checkpoint 含生成 thinking → 续写必须回传完整推理。
+- 决定性证据（ds4 --trace）：①不带 reasoning 回传的续写 miss，失配点 token 34 `<think>` vs `</think>`；②带 reasoning 回传命中 `cache_source=thinking-visible cached_tokens=125`；③camo 真实会话每次命中 ~114k tokens（memory-text）；④占位符同位置字节一致（dry-run 双请求）。
+- 修复/锁定：新增 2 个回归测试（continuation_history_prefix_renders_byte_identical_across_requests、continuation_assistant_reasoning_round_trips_to_wire_reasoning_content）；lib 322 全绿。
+- 透传链确认：responses input reasoning item → canonical reasoning_content（responses_openai_codec build_v3_openai_chat_assistant_reasoning_message）→ wire reasoning_content（request_outbound_format 透传）→ ds4 <think> 渲染。
+- 教训：续写缓存验证必须带 reasoning 回传构造；不带回传的 miss 是测试构造错误。ds4 trace（--trace 参数）是缓存失配定位的权威工具（first_mismatch_token + token_window）。
+
+# 2026-08-08T10:25+08:00 V3 Responses Relay custom_tool_call_input SSE codec fix (live 5555)
+
+- Live 5555 failed `response.custom_tool_call_input.delta is unsupported` → provider_error 502 → retry/switch/cross_session_revive (req 715766-1974, asxs-grok[cc-tt] composer-2.5 / grok-4.5, longcontext pool).
+- Root: `responses_provider_event_codec.rs` allowlist only covered function_call_arguments; OpenAI Responses protocol events `response.custom_tool_call_input.delta/.done` (stream the `input` of custom_tool_call output items; confirmed in openai-openapi spec `ResponseCustomToolCallInputDeltaEvent/DoneEvent`, payload = output_index + item_id + delta|input) were treated as unknown `response.*` → fail-fast.
+- Fix (resp-side inbound provider-wire codec only; no req fields, no Chat Process, no outbound table change): allowlist both events; `.delta` appends to item `input`, `.done` sets item `input`, reusing `find_v3_runtime_responses_event_function_item_mut` (matches custom_tool_call/tool_call).
+- Source gates: red test first (exact live error), green after; lib suite 324 passed; fmt clean; clippy exit 0; verify:v3-relay-response-semantics ok.
+- Install/restart: RUSTUP_TOOLCHAIN=stable npm run install:v3 sha256=8fd8211bd3d86909903dc5882544454c91bc3842157fe33dc855b2f2d1f5581e; rccv3 config check ok (servers=4); rccv3 restart -c ~/.rcc/config.v3.toml; 10000/5520/5555/4444 health ok version=0.90.4220.
+- Live replay: POST /v1/responses model=gpt-5.5 stream=true, tools=[function exec_command, custom apply_patch], input=call apply_patch → tools pool → cc-sol[key1].gpt-5.6-sol (same asxs gateway family) → upstream emitted response.custom_tool_call_input.delta/.done → HTTP 201, output_item.done custom_tool_call input="*** Begin Patch\n*** End Patch", response.completed. No unsupported errors in log.
+- Pre-existing gate failures NOT from this fix (other worker r4-sse-route in-progress dirty worktree): verify:v3-hub-relay-runtime-closeout (transport builder symbol moved out of responses_relay_runtime.rs), verify:v3-relay-payload-copy-budget (servertool_hooks.rs), verify:v3-provider-action-gate (map bindings), verify:v3-protocol-conversion-field-parity (request_outbound_builtin_tool_projection.rs). All in other worker's dirty files.
+
+## 2026-08-08 统一解决：custom tool 请求问题 + key2 优先级 + chat direct 动态绑定
+- 问题集（Jason）：①zterm(chat/relay) custom tools 报错 ②10000 key2 优先级丢失 ③错误处理中心 console 打印 ④chat 入口 chatProvider 应 direct（同协议）⑤无任何硬编码执行模式，动态绑定 ⑥relay/direct 共用大骨架只有 codec 不同。
+- 根因：openai_chat wire 发出 Responses 形状 `{"type":"custom","custom":{...}}`，go 上游 enum 只认 function（`unknown variant 'custom'`）→ key2 400 → 切换 key1 → routecodex，错误冒泡到客户端。
+- 修复1（请求问题）：`normalize_openai_chat_custom_tool` 扁平化 custom→function（parameters 必须 `{"type":"object"}`——go 实证空对象 `{}` 被拒 "schema must be JSON Schema of type object"）；format(grammar) 按 chat wire 协议收窄丢弃（ds4 源码实证无 grammar 引擎，等价透传，无损）。响应侧 `build_v3_responses_function_call_from_openai_chat_tool_call` 按 custom 声明名把 function tool_call 归类回 custom_tool_call（客户端契约保持）。
+- 修复2（动态绑定）：validate.rs `expected_entry_protocol_execution_modes` 移除协议硬编码（全协议允许 Direct|Relay）；defaults.rs openai_chat 绑定改 Direct。
+- 修复3（统一骨架）：`kernel/v3_direct_protocol_codec.rs` V3DirectProtocolCodec trait（Standardized/Policy/Control + 访问器 + 控制面钩子 pinned/prepare/commit/release）+ `kernel/v3_direct_core.rs` `execute_v3_direct_runtime_kernel_core<C>` 泛型骨架（standardize→route→select→decision→policy→wire→transport→send→resp→client frame + 统一 failure policy 循环）；Responses 与 Chat 都是 codec 实例。失败策略 context 的 hook_registry 字段改为 ErrorDecisionFn。
+- server：openai_chat+Direct 分支 → `execute_v3_openai_chat_direct_server_outcome`（骨架 + ChatCodec；异协议由骨架 RelayHandoff 转 chat relay runtime）。
+- 验证：lib 324 全绿；integration 全绿（2 个失败为 worker 新测试与其中间态不一致，HEAD 基线该二进制仅 17 测试，证明非我改动）；0.90.4222 安装重启 4 端口 OK；live：chat 入口 execution_mode=direct、trace 含 V3Req04StandardizedChat/V3ChatDirect11Policy、custom tool 200（go 接受）、responses custom tool 请求稳定 key2 零切换。
+- 遗留：responses kernel core 尚未迁移到泛型骨架（其 continuation/stopless 控制面需 codec 化，作为下一步）；anthropic/gemini direct codec 未建（bindings 默认仍 Relay，validate 已不拦 Direct 配置）。

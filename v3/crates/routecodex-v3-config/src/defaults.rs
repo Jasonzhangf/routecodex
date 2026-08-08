@@ -59,17 +59,17 @@ pub(crate) fn default_hub_v1_authoring() -> V3HubV1AuthoringConfig {
             V3EntryProtocolBindingAuthoringConfig {
                 entry_protocol: "openai_chat".to_string(),
                 endpoint_patterns: vec!["/v1/chat/completions".to_string()],
-                execution_mode: V3EntryProtocolExecutionMode::Relay,
+                execution_mode: V3EntryProtocolExecutionMode::Direct,
                 protocol_profile_owner: "v3.entry_protocol_registry_contract".to_string(),
                 implemented: true,
                 forbidden_reentry_behavior:
                     "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime."
                         .to_string(),
                 runtime_owner_symbol: Some(
-                    "execute_v3_openai_chat_relay_runtime_with_default_transport".to_string(),
+                    "execute_v3_openai_chat_direct_server_outcome".to_string(),
                 ),
                 runtime_owner_path: Some(
-                    "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs"
+                    "v3/crates/routecodex-v3-server/src/lib.rs"
                         .to_string(),
                 ),
                 pending_owner_symbol: None,

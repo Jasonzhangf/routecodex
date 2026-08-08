@@ -155,7 +155,7 @@ enum ServerCommand {
 #[tokio::main]
 async fn main() {
     if let Err(error) = run_cli().await {
-        eprintln!("[RouteCodexV3] command failed: {error} ({error:?})");
+        eprintln!("[RouteCodexV3] command failed: {error}");
         std::process::exit(1);
     }
 }

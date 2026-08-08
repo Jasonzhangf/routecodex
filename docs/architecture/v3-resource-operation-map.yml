@@ -1060,6 +1060,36 @@ resources:
     release_point: V3ServerRespOutbound06ClientFrame
     binding_status: anchored
 
+  - resource_id: v3.route.current_turn_facts
+    resource_kind: typed_route_fact_carrier
+    lifecycle: v3.hub_pipeline.v1
+    owner_crate: routecodex-v3-route-classifier
+    owner_node: V3HubReqExecution05Planned
+    identity: [requestId, entryProtocol, currentTurnId]
+    payload_contract: explicit_typed_facts_only
+    allowed_writers: [build_v3_current_turn_route_facts]
+    allowed_readers: [classify_route, V3HubReqTarget06Resolved]
+    forbidden_writers: [V3HubReqInbound02Normalized, V3HubReqChatProcess04Governed, routecodex-v3-sse, routecodex-v3-server, routecodex-v3-provider-responses]
+    forbidden_readers: [request.normal_payload, response.provider_raw, response.client_payload, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+
+  - resource_id: v3.sse.protocol_semantic_projection
+    resource_kind: protocol_projection_resource
+    lifecycle: v3.hub_pipeline.v1
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubRespInbound02Normalized
+    identity: [requestId, providerProtocol, entryProtocol, frameSequence]
+    payload_contract: standard_protocol_codec_owned
+    allowed_writers: [build_v3_hub_resp_inbound_02_from_provider_resp_compat_02, build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload]
+    allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespOutbound05ClientSemantic]
+    forbidden_writers: [routecodex-v3-sse, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter]
+    forbidden_readers: [routecodex-v3-sse, routecodex-v3-server]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+
   - resource_id: v3.request.selected_provider_model_bound
     resource_kind: provider_semantic_projection
     lifecycle: v3.selected_provider_model_binding

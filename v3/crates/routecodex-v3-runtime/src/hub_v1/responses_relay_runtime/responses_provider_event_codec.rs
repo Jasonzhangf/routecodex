@@ -122,6 +122,8 @@ fn apply_v3_runtime_responses_semantic_event(
             | "response.output_text.done"
             | "response.function_call_arguments.delta"
             | "response.function_call_arguments.done"
+            | "response.custom_tool_call_input.delta"
+            | "response.custom_tool_call_input.done"
             | "response.requires_action"
             | "response.done",
         ) => Ok(None),
@@ -286,6 +288,16 @@ fn collect_v3_runtime_responses_event_payload_evidence(
         Some("response.function_call_arguments.done") => {
             if let Some(arguments) = event.get("arguments").and_then(Value::as_str) {
                 set_v3_runtime_responses_event_function_arguments(output_items, event, arguments);
+            }
+        }
+        Some("response.custom_tool_call_input.delta") => {
+            if let Some(delta) = event.get("delta").and_then(Value::as_str) {
+                append_v3_runtime_responses_event_custom_tool_call_input(output_items, event, delta);
+            }
+        }
+        Some("response.custom_tool_call_input.done") => {
+            if let Some(input) = event.get("input").and_then(Value::as_str) {
+                set_v3_runtime_responses_event_custom_tool_call_input(output_items, event, input);
             }
         }
         Some("response.reasoning_summary_part.added") => {
@@ -699,6 +711,32 @@ fn set_v3_runtime_responses_event_function_arguments(
 ) {
     if let Some(item) = find_v3_runtime_responses_event_function_item_mut(output_items, event) {
         item["arguments"] = Value::String(arguments.to_string());
+    }
+}
+
+fn append_v3_runtime_responses_event_custom_tool_call_input(
+    output_items: &mut [Value],
+    event: &Value,
+    delta: &str,
+) {
+    let Some(item) = find_v3_runtime_responses_event_function_item_mut(output_items, event) else {
+        return;
+    };
+    let current = item
+        .get("input")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    item["input"] = Value::String(format!("{current}{delta}"));
+}
+
+fn set_v3_runtime_responses_event_custom_tool_call_input(
+    output_items: &mut [Value],
+    event: &Value,
+    input: &str,
+) {
+    if let Some(item) = find_v3_runtime_responses_event_function_item_mut(output_items, event) {
+        item["input"] = Value::String(input.to_string());
     }
 }
 

@@ -190,6 +190,53 @@ targets = [{ kind = "provider_model", provider = "direct-provider", model = "dir
 }
 
 #[test]
+fn provider_directory_snake_case_web_search_mode_parses_to_manifest() {
+    // 生产 provider 目录 config.v2.toml 使用 snake_case 的
+    // `web_search_execution_mode` / `web_search_backend`（历史写法），
+    // 必须解析进 manifest（Mode B 判定真源）——否则真实请求
+    // resolve_web_search_mode_and_backend 返回 None → web_search 声明不
+    // 贡献路由能力 → 落 default → openai_chat 出站不支持 web_search part
+    // → 500（真实故障 20260808）。
+    let root = temp_root("snake-mode");
+    let token = write_token(&root, "external");
+    let provider_path = write_provider(
+        &root,
+        "external",
+        "anthropic",
+        "MiniMax-M3",
+        &token,
+        "",
+    );
+    // 在 model 段内注入 snake_case 的 Mode B 字段（生产 provider config 写法）。
+    let content = fs::read_to_string(&provider_path)
+        .unwrap()
+        .replace(
+            "maxContextTokens = 200000",
+            "maxContextTokens = 200000\nweb_search_execution_mode = \"metadata_center_local_search\"\nweb_search_backend = \"MiniMax-M3\"",
+        );
+    fs::write(&provider_path, content).unwrap();
+    let config_path = root.join("config.v3.toml");
+    fs::write(&config_path, directory_root_config("external", "MiniMax-M3")).unwrap();
+
+    let snapshot = V3ConfigStore::new(&config_path)
+        .load_snapshot_with_source_identity()
+        .unwrap();
+    let model = &snapshot.manifest.providers["external"].models["MiniMax-M3"];
+    assert_eq!(
+        model.web_search_execution_mode.as_str(),
+        "metadata_center_local_search",
+        "snake_case web_search_execution_mode must parse into manifest (found {:?})",
+        model.web_search_execution_mode.as_str()
+    );
+    assert_eq!(
+        model.web_search_backend_binding.as_deref(),
+        Some("MiniMax-M3"),
+        "snake_case web_search_backend must parse into manifest"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn missing_referenced_provider_file_fails_before_manifest_publication() {
     let root = temp_root("missing");
     let config_path = root.join("config.v3.toml");

@@ -31,6 +31,7 @@ pub(crate) fn build_resource_registry(
     let hub_v1 = compile_hub_v1(authoring.pipelines.hub_v1)?;
     let compiled_providers = compile_providers(authoring.providers)?;
     let providers = compiled_providers.providers;
+    validate_cross_provider_model_web_search_mode_uniqueness(&providers)?;
     let provider_error_action_policies = compiled_providers.provider_error_action_policies;
     let forwarders = compile_forwarders(authoring.forwarders, &providers)?;
     validate_client_aliases(&providers, &forwarders)?;
@@ -93,16 +94,14 @@ fn expected_entry_protocol_endpoint_patterns(protocol: &str) -> Option<&'static 
 }
 
 fn expected_entry_protocol_execution_modes(
-    protocol: &str,
+    _protocol: &str,
 ) -> Option<&'static [V3EntryProtocolExecutionMode]> {
-    match protocol {
-        "responses" => Some(&[
-            V3EntryProtocolExecutionMode::Direct,
-            V3EntryProtocolExecutionMode::Relay,
-        ]),
-        "anthropic" | "openai_chat" | "gemini" => Some(&[V3EntryProtocolExecutionMode::Relay]),
-        _ => None,
-    }
+    // 执行模式不按入口协议硬编码：direct/relay 由运行时按
+    // “入口协议 == 出口 provider 协议”动态决定（Jason 2026-08-08）。
+    Some(&[
+        V3EntryProtocolExecutionMode::Direct,
+        V3EntryProtocolExecutionMode::Relay,
+    ])
 }
 
 fn compile_hub_v1(
@@ -527,6 +526,7 @@ fn compile_servers(
                     features: server.features,
                     execution,
                     http_sse_keepalive_ms,
+                    expose_models: server.expose_models,
                 },
             ))
         })
@@ -991,6 +991,34 @@ fn compile_models(
         );
     }
     Ok(models)
+}
+
+/// 跨 provider 唯一性：同名 model 在多个 provider 声明时必须解析到相同的
+/// `web_search_execution_mode`（Req04 的 Mode B 判定按请求 model 名解析，
+/// pool 直连扫描按第一个命中；若同名 model 在不同 provider 有不同 mode，
+/// 与 VR 实际选择可能不一致——配置即真源，必须在编译期 fail-fast）。
+fn validate_cross_provider_model_web_search_mode_uniqueness(
+    providers: &BTreeMap<String, V3ProviderManifest>,
+) -> Result<(), V3ConfigError> {
+    let mut model_modes: BTreeMap<String, (V3WebSearchExecutionMode, &str)> = BTreeMap::new();
+    for (provider_id, provider) in providers {
+        for (model_id, model) in &provider.models {
+            if let Some((existing_mode, existing_provider)) = model_modes.get(model_id) {
+                if existing_mode != &model.web_search_execution_mode {
+                    return Err(validation(format!(
+                        "model {model_id} is declared by providers {existing_provider} and {provider_id} with conflicting web_search_execution_mode ({:?} vs {:?}); the same model name must resolve to the same execution mode",
+                        existing_mode, model.web_search_execution_mode
+                    )));
+                }
+            } else {
+                model_modes.insert(
+                    model_id.clone(),
+                    (model.web_search_execution_mode, provider_id),
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 fn compile_forwarders(

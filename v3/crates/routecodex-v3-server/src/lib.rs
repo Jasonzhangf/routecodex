@@ -47,7 +47,7 @@ use routecodex_v3_runtime::{
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
     execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control,
-    execute_v3_responses_relay_runtime_with_default_transport,
+    execute_v3_responses_relay_runtime_with_default_transport, V3ChatDirectCodec,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input,
@@ -647,7 +647,11 @@ async fn health(State(state): State<Arc<V3ListenerState>>) -> Json<serde_json::V
 async fn models_endpoint(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
     json_response(
         200,
-        build_v3_models_catalog(&state.manifest, &state.server.routing_group),
+        build_v3_models_catalog(
+            &state.manifest,
+            &state.server.routing_group,
+            &state.server.expose_models,
+        ),
     )
 }
 
@@ -1357,6 +1361,22 @@ async fn pending_endpoint_after_responses_admission(
         }
         return foundation_output_response(output);
     }
+    if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Direct {
+        return execute_v3_openai_chat_direct_server_outcome(
+            &state,
+            method,
+            path.clone(),
+            request_id.clone(),
+            execution_id,
+            payload,
+            provider_failure_session_scope.clone(),
+            &request_headers,
+            &request_identity,
+            started_at,
+            request_console_project_path.as_deref(),
+        )
+        .await;
+    }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let output =
             match execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
@@ -1374,21 +1394,17 @@ async fn pending_endpoint_after_responses_admission(
                 Ok(output) => output,
                 Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
             };
-        if let Some(error_chain) = output.error_chain.as_deref() {
-            if let Some(response) = record_and_emit_v3_error_projection(
-                &state,
-                &trace_scope,
-                V3ErrorProjectionConsoleInput {
-                    endpoint: &path,
-                    request_id: &request_id,
-                    status: output.status,
-                    error_chain,
-                    body: openai_chat_error_body_for_console(&output.client_body),
-                    project_path: request_console_project_path.as_deref(),
-                },
-            ) {
-                return response;
-            }
+        if let Some(response) = emit_relay_error_chain_if_any(
+            &state,
+            &trace_scope,
+            &path,
+            &request_id,
+            output.status,
+            output.error_chain.as_deref(),
+            openai_chat_error_body_for_console(&output.client_body),
+            request_console_project_path.as_deref(),
+        ) {
+            return response;
         }
         return openai_chat_relay_output_response(output);
     }
@@ -1422,21 +1438,17 @@ async fn pending_endpoint_after_responses_admission(
             Ok(output) => output,
             Err(error) => project_v3_anthropic_relay_runtime_failure(error),
         };
-        if let Some(error_chain) = output.error_chain.as_deref() {
-            if let Some(response) = record_and_emit_v3_error_projection(
-                &state,
-                &trace_scope,
-                V3ErrorProjectionConsoleInput {
-                    endpoint: &path,
-                    request_id: &request_id,
-                    status: output.status,
-                    error_chain,
-                    body: Some(&output.client_response),
-                    project_path: request_console_project_path.as_deref(),
-                },
-            ) {
-                return response;
-            }
+        if let Some(response) = emit_relay_error_chain_if_any(
+            &state,
+            &trace_scope,
+            &path,
+            &request_id,
+            output.status,
+            output.error_chain.as_deref(),
+            Some(&output.client_response),
+            request_console_project_path.as_deref(),
+        ) {
+            return response;
         }
         return anthropic_relay_output_response(output, stream);
     }
@@ -1457,21 +1469,17 @@ async fn pending_endpoint_after_responses_admission(
             Ok(output) => output,
             Err(error) => project_v3_gemini_relay_runtime_failure(error),
         };
-        if let Some(error_chain) = output.error_chain.as_deref() {
-            if let Some(response) = record_and_emit_v3_error_projection(
-                &state,
-                &trace_scope,
-                V3ErrorProjectionConsoleInput {
-                    endpoint: &path,
-                    request_id: &request_id,
-                    status: output.status,
-                    error_chain,
-                    body: gemini_error_body_for_console(&output.client_body),
-                    project_path: request_console_project_path.as_deref(),
-                },
-            ) {
-                return response;
-            }
+        if let Some(response) = emit_relay_error_chain_if_any(
+            &state,
+            &trace_scope,
+            &path,
+            &request_id,
+            output.status,
+            output.error_chain.as_deref(),
+            gemini_error_body_for_console(&output.client_body),
+            request_console_project_path.as_deref(),
+        ) {
+            return response;
         }
         return gemini_relay_output_response(output);
     }
@@ -2738,6 +2746,32 @@ struct V3ErrorProjectionConsoleInput<'input> {
     error_chain: &'input [&'static str],
     body: Option<&'input Value>,
     project_path: Option<&'input str>,
+}
+
+/// relay 分支共享：error_chain 存在时做 console 投影（4 个 relay 分支同构样板收敛）。
+fn emit_relay_error_chain_if_any(
+    state: &Arc<V3ListenerState>,
+    trace_scope: &V3DebugTraceScope,
+    path: &str,
+    request_id: &str,
+    status: u16,
+    error_chain: Option<&[&'static str]>,
+    body: Option<&Value>,
+    request_console_project_path: Option<&str>,
+) -> Option<Response<Body>> {
+    let error_chain = error_chain?;
+    record_and_emit_v3_error_projection(
+        state,
+        trace_scope,
+        V3ErrorProjectionConsoleInput {
+            endpoint: path,
+            request_id,
+            status,
+            error_chain,
+            body,
+            project_path: request_console_project_path,
+        },
+    )
 }
 
 fn record_and_emit_v3_error_projection(
@@ -4302,6 +4336,8 @@ fn emit_v3_request_complete_console_line(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| infer_v3_console_finish_reason_from_response_status(Some(response_status)))
         .ok_or_else(|| {
             "successful V3 Runtime observability is missing finish_reason".to_string()
         })?;
@@ -4316,7 +4352,7 @@ fn emit_v3_request_complete_console_line(
         endpoint: &context.endpoint,
         status,
         response_status,
-        finish_reason,
+        finish_reason: finish_reason.as_str(),
         elapsed_ms,
         reason: &route.reason,
         usage: human_usage.as_deref(),
@@ -5388,7 +5424,7 @@ fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSummary>) -> Str
     let Some(usage) = usage else {
         return "usage=unreported".to_string();
     };
-    let input_tokens = usage.input_tokens;
+    let input_tokens = v3_console_effective_input_tokens(usage);
     let input = input_tokens
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unreported".to_string());
@@ -5396,8 +5432,7 @@ fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSummary>) -> Str
         .output_tokens
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unreported".to_string());
-    let total = usage
-        .total_tokens
+    let total = v3_console_effective_total_tokens(usage)
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unreported".to_string());
     let cache = match (usage.cached_tokens, input_tokens) {
@@ -5416,14 +5451,15 @@ fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSummary>) -> Str
 fn format_v3_console_human_usage_summary(usage: Option<&V3RuntimeUsageSummary>) -> Option<String> {
     let usage = usage?;
     let mut fields = Vec::new();
-    if let Some(input) = usage.input_tokens {
+    let input_tokens = v3_console_effective_input_tokens(usage);
+    if let Some(input) = input_tokens {
         fields.push(format!("usage_in={input}"));
     }
     if let Some(output) = usage.output_tokens {
         fields.push(format!("usage_out={output}"));
     }
     if let Some(cached) = usage.cached_tokens {
-        let cache = match usage.input_tokens {
+        let cache = match input_tokens {
             Some(input) if input > 0 => {
                 format!(
                     "{cached}/{input}({:.1}%)",
@@ -5434,10 +5470,25 @@ fn format_v3_console_human_usage_summary(usage: Option<&V3RuntimeUsageSummary>) 
         };
         fields.push(format!("usage_cache={cache}"));
     }
-    if let Some(total) = usage.total_tokens {
+    if let Some(total) = v3_console_effective_total_tokens(usage) {
         fields.push(format!("usage_total={total}"));
     }
     (!fields.is_empty()).then(|| fields.join(" "))
+}
+
+fn v3_console_effective_input_tokens(usage: &V3RuntimeUsageSummary) -> Option<u64> {
+    match (usage.input_tokens, usage.cached_tokens) {
+        // Anthropic reports an uncached increment plus a separate cache-read count.
+        (Some(input), Some(cached)) if cached > input => input.checked_add(cached),
+        (input, _) => input,
+    }
+}
+
+fn v3_console_effective_total_tokens(usage: &V3RuntimeUsageSummary) -> Option<u64> {
+    match (usage.total_tokens, usage.input_tokens, usage.cached_tokens) {
+        (Some(total), Some(input), Some(cached)) if cached > input => total.checked_add(cached),
+        (total, _, _) => total,
+    }
 }
 
 fn read_v3_console_response_status(value: &Value) -> Option<String> {
@@ -6858,6 +6909,98 @@ fn openai_chat_relay_output_response(output: V3OpenAiChatRelayRuntimeOutput) -> 
         .expect("typed V3 OpenAI Chat Relay response")
 }
 
+/// OpenAI Chat 入口动态绑定：入口协议与出口 provider 同协议（chat wire）
+/// 走统一 direct 骨架（`execute_v3_direct_runtime_kernel_core` + ChatCodec）；
+/// 异协议由骨架返回 RelayHandoff，转 chat relay runtime（入口已归一化到 chat）。
+async fn execute_v3_openai_chat_direct_server_outcome(
+    state: &Arc<V3ListenerState>,
+    method: String,
+    path: String,
+    request_id: String,
+    execution_id: String,
+    payload: Value,
+    provider_failure_session_scope: V3ProviderFailureSessionScope,
+    request_headers: &HeaderMap,
+    request_identity: &V3AllocatedRequestIdentity,
+    started_at: Instant,
+    _project_path: Option<&str>,
+) -> Response<Body> {
+    let console_payload = payload.clone();
+    let console_context = build_v3_console_emission_context(
+        state,
+        "openai_chat",
+        &path,
+        request_identity,
+        request_headers,
+        &console_payload,
+    );
+    let provider_failure_event_sink = build_v3_provider_failure_event_sink(&console_context);
+    let route_selection_event_sink = build_v3_route_selection_event_sink(&console_context);
+    let raw = build_v3_server_03_http_request_raw(
+        state.server.id.clone(),
+        provider_failure_session_scope.clone(),
+        request_id.clone(),
+        execution_id,
+        method,
+        path.clone(),
+        payload.clone(),
+    );
+    let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration) => duration.as_millis() as u64,
+        Err(_) => 0,
+    };
+    let output = routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<
+        V3ChatDirectCodec,
+        _,
+    >(
+        (),
+        &state.manifest,
+        raw,
+        routecodex_v3_runtime::default_responses_transport(),
+        state.provider_health.runtime_health(),
+        now_epoch_ms,
+        Some(&provider_failure_event_sink),
+        Some(&route_selection_event_sink),
+    )
+    .await;
+    if let Some(handoff) = output.protocol_relay_handoff {
+        let relay_trace = handoff.node_trace;
+        let relay_result = execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
+            &state.manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: state.server.id.clone(),
+                failure_session_scope: provider_failure_session_scope,
+                request_id: request_id.clone(),
+                payload,
+            },
+            state.provider_health.runtime_health(),
+        )
+        .await;
+        let mut relay_output = match relay_result {
+            Ok(output) => output,
+            Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
+        };
+        let mut trace = relay_trace;
+        trace.extend(relay_output.node_trace);
+        relay_output.node_trace = trace;
+        return openai_chat_relay_output_response(relay_output);
+    }
+    let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(
+        output.client_payload,
+        output.node_trace,
+        output.error_chain,
+    );
+    frame.observability = output.observability;
+    frame.stream_observation = output.stream_observation;
+    let stream_console_finalizer =
+        emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
+    responses_direct_output_response_with_console(
+        frame,
+        stream_console_finalizer,
+        Duration::from_millis(state.server.http_sse_keepalive_ms),
+    )
+}
+
 fn gemini_relay_output_response(output: V3GeminiRelayRuntimeOutput) -> Response<Body> {
     let content_type = match &output.client_body {
         V3GeminiRelayClientBody::Json(_) => "application/json",
@@ -7328,9 +7471,14 @@ pub fn build_v3_server_16_http_frame_from_v3_resp_15(
 fn build_v3_models_catalog(
     manifest: &V3Config05ManifestPublished,
     routing_group: &str,
+    expose_models: &[String],
 ) -> serde_json::Value {
     let mut data = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
+    // expose_models 白名单（visible_id）；空 = 全量暴露（兼容现有）。
+    let is_exposed = |visible_id: &str| -> bool {
+        expose_models.is_empty() || expose_models.iter().any(|id| id == visible_id)
+    };
     let scoped_models = collect_v3_route_group_catalog_model_refs(manifest, routing_group);
     if scoped_models
         .values()
@@ -7357,13 +7505,18 @@ fn build_v3_models_catalog(
         );
         item.insert("owned_by".to_string(), json!("openai"));
         seen.insert(builtin_model_id.to_string());
-        data.push(Value::Object(item));
+        if is_exposed(builtin_model_id) {
+            data.push(Value::Object(item));
+        }
     }
     for model_ref in scoped_models.values() {
         if is_v3_hidden_codex_future_model(&model_ref.visible_id)
             || is_v3_hidden_codex_future_model(&model_ref.model_id)
             || seen.contains(&model_ref.visible_id)
         {
+            continue;
+        }
+        if !is_exposed(&model_ref.visible_id) {
             continue;
         }
         let Some(provider) = manifest.providers.get(&model_ref.provider_id) else {
@@ -7420,7 +7573,10 @@ fn build_v3_models_catalog(
         }
         for model in provider.models.values() {
             let direct_id = format!("{}.{}", provider.id, model.id);
-            if seen.contains(&direct_id) || is_v3_hidden_codex_future_model(&model.id) {
+            if seen.contains(&direct_id)
+                || is_v3_hidden_codex_future_model(&model.id)
+                || !is_exposed(&direct_id)
+            {
                 continue;
             }
             let capabilities = model.capabilities.iter().cloned().collect::<BTreeSet<_>>();

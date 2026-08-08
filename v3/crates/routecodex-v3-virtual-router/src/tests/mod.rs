@@ -29,6 +29,7 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
                 features: BTreeMap::new(),
                 execution: None,
                 http_sse_keepalive_ms: 3_000,
+                expose_models: Vec::new(),
             },
         )]),
         providers: BTreeMap::new(),
@@ -722,6 +723,7 @@ fn weighted_and_round_robin_are_deterministic_and_listener_scoped() {
             features: BTreeMap::new(),
             execution: None,
             http_sse_keepalive_ms: 3_000,
+            expose_models: Vec::new(),
         },
     );
     let plan = |server_id: &str| {
@@ -948,5 +950,127 @@ fn missing_or_empty_explicit_default_pool_is_rejected() {
     assert_eq!(
         router.resolve_route_pool_plan(&empty, classified),
         Err(V3VirtualRouterError::DefaultPoolEmpty("g".into()))
+    );
+}
+
+#[test]
+fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
+    // 红测：无显式 multimodal/web_search 池时，具备能力的模型默认进
+    // 隐式能力池（RoundRobin 轮询）；web_search 池优先级高于 multimodal。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest.providers.insert(
+        "mm".into(),
+        V3ProviderManifest {
+            id: "mm".into(),
+            enabled: true,
+            provider_type: "anthropic".into(),
+            base_url: "http://127.0.0.1:9/v1".into(),
+            default_model: "MiniMax-M3".into(),
+            auth: V3ProviderAuthManifest {
+                auth_type: V3ProviderAuthType::ApiKey,
+                entries: vec![V3ProviderAuthEntryManifest {
+                    alias: "key1".into(),
+                    env: Some("MM_KEY".into()),
+                    token_file: None,
+                    api_key: None,
+                }],
+            },
+            models: BTreeMap::from([(
+                "MiniMax-M3".into(),
+                V3ProviderModelManifest {
+                    id: "MiniMax-M3".into(),
+                    wire_name: "MiniMax-M3".into(),
+                    aliases: vec![],
+                    capabilities: vec![
+                        "text".into(),
+                        "multimodal".into(),
+                        "web_search".into(),
+                    ],
+                    web_search_execution_mode: V3WebSearchExecutionMode::None,
+                    web_search_backend_binding: None,
+                    supports_streaming: true,
+                    supports_thinking: false,
+                    thinking: None,
+                    max_tokens: None,
+                    max_context_tokens: None,
+                    features: BTreeMap::new(),
+                },
+            )]),
+            responses: None,
+            concurrency: None,
+            health: None,
+            provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
+            compatibility_profile: None,
+            features: BTreeMap::new(),
+        },
+    );
+    let mut classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("MiniMax-M3".into()),
+                capabilities: BTreeSet::from(["multimodal".into()]),
+                input_tokens: 10,
+                route_classification: test_route("multimodal", &["multimodal", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let tier_ids: Vec<&str> = plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect();
+    assert!(
+        tier_ids.iter().any(|id| *id == "implicit:multimodal"),
+        "implicit multimodal pool tier must exist when no explicit pool: {tier_ids:?}"
+    );
+    let implicit = plan
+        .tiers
+        .iter()
+        .find(|tier| tier.pool_id == "implicit:multimodal")
+        .expect("implicit multimodal tier");
+    assert_eq!(
+        implicit.selection,
+        V3SelectionStrategy::RoundRobin,
+        "implicit capability pool must round-robin"
+    );
+    assert_eq!(implicit.targets.len(), 1);
+
+    // web_search 请求（web_search 声明）：web_search 隐式池优先级高于 multimodal。
+    classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("MiniMax-M3".into()),
+                capabilities: BTreeSet::from(["web_search".into(), "multimodal".into()]),
+                input_tokens: 10,
+                route_classification: test_route(
+                    "web_search",
+                    &["web_search", "multimodal", "default"],
+                ),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let tier_ids: Vec<&str> = plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect();
+    let web_index = tier_ids
+        .iter()
+        .position(|id| *id == "implicit:web_search")
+        .expect("implicit web_search tier");
+    let multi_index = tier_ids
+        .iter()
+        .position(|id| *id == "implicit:multimodal")
+        .expect("implicit multimodal tier");
+    assert!(
+        web_index < multi_index,
+        "web_search implicit pool must precede multimodal: {tier_ids:?}"
     );
 }

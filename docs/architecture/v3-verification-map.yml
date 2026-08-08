@@ -1835,6 +1835,79 @@ features:
       not claimed.
     forbidden_claim: Do not claim Responses Direct, Anthropic continuation, Provider
       WebSocket, live config, install, restart, release, or production cutover.
+- feature_id: v3.sse_protocol_codec_projection_boundary
+  status: design
+  change_risk: critical
+  owner_kind: rust_v3_protocol_codec_boundary
+  owner_scope: Provider/client SSE semantics in adjacent protocol codecs; opaque
+    SSE transport and server lifecycle only for framing/outcomes.
+  design:
+  - docs/goals/v3-openai-chat-anthropic-sse-terminal-closeout-fix-design.md
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_unit:
+  - OpenAI Chat finish_reason=stop is the semantic terminal.
+  - "[DONE] and EOF do not create semantic terminality or success."
+  - provider event parsing stays in the selected provider codec.
+  - runtime and SSE transport do not parse business/control semantics.
+  required_reverse:
+  - EOF without semantic terminal fails explicitly at the codec/lifecycle owner.
+  - "[DONE] before semantic terminal fails without being treated as success."
+  - malformed provider event fails at provider codec, not transport/server.
+  required_gates:
+  - npm run verify:sse-architecture-boundary
+  - npm run test:v3-openai-chat-relay-runtime-integration
+  - npm run verify:v3-openai-chat-relay-runtime-integration
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_rule:
+    source: Complete only when the transport boundary, codec owner, and runtime
+      call edges are map-locked and positive/reverse tests pass.
+    runtime: Requires build, global install, aggregate restart, all-port health,
+      and exact same-entry live replay before delivery.
+    forbidden_claim: Do not claim completion from transport tests alone.
+- feature_id: vr.current_turn_typed_route_facts
+  status: design_not_implemented
+  change_risk: critical
+  owner_kind: rust_v3_route_fact_boundary
+  owner_scope: Explicit typed current-turn facts only; no request-message or
+    historical payload reverse inference of routing/control state.
+  owner: route-classifier owner（v3-route-classifier crate）
+  implementation_plan:
+    phase: 1
+    steps:
+    - P1: 定义 `V3CurrentTurnRouteFacts` typed carrier（与 RouteClassification 同 crate）。
+    - P2: `build_v3_current_turn_route_facts` 提取 typed 字段，classify_route 只消费 typed facts。
+    - P3: nodes.rs / 测试迁移到 typed carrier；物理删除 payload-scanning 推断（硬护栏 12）。
+    - P4: VR 消费方只读 typed current-turn facts，禁止重建。
+    status_note: 未实现前保持 status=design_not_implemented（不冒充 active）；
+      canonical_builders 符号未实现，红测/verify 未锚定；进度以符号存在为准。
+  design:
+  - docs/goals/v3-openai-chat-anthropic-sse-terminal-closeout-fix-design.md
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_unit:
+  - current-turn typed facts classify deterministically.
+  - historical messages and prior tool content cannot alter route facts.
+  - business text and tool arguments cannot create routing/control state.
+  required_reverse:
+  - changing only history leaves route classification unchanged.
+  - changing only request prose leaves route/control facts unchanged.
+  required_gates:
+  - npm run test:route-classifier-semantics
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_rule:
+    source: Complete only when raw payload inference is physically removed and
+      all callers consume the typed current-turn carrier.
+    runtime: Requires exact current-turn live replay and negative historical/text
+      replay after install and aggregate restart.
 - feature_id: v3.protocol_conversion_field_parity
   status: runtime_active_live_verified_5520
   change_risk: high
@@ -3271,8 +3344,6 @@ features:
   - v3-provider-action-gate-14
   - v3-provider-action-gate-15
   - v3-provider-action-gate-16
-  - v3-provider-action-gate-17
-  - v3-provider-action-gate-18
   - v3-provider-action-gate-19
   - v3-provider-action-gate-20
   - v3-provider-action-gate-21
@@ -3473,3 +3544,93 @@ features:
     source: Route classifier unit tests, module boundary gate, and diff check pass.
     runtime: No install or live replay is required because classification is consumed
       before provider transport and cannot enter payload paths.
+
+- feature_id: v3.relay_runtime_core
+  status: active_skeleton
+  change_risk: critical
+  owner_kind: rust_project_v3_runtime_skeleton
+  owner_scope: Unified relay main-loop skeleton (VR retry / provider action
+    recovery / error policy loop); per-protocol V3RelayProtocolCodec impls.
+  owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - npm run verify:v3-architecture-ci
+  - npm run verify:v3-provider-action-gate
+  red_tests:
+  - npm run test:v3-provider-action-gate-red-fixtures
+  completion_rule:
+    source: Relay runtime lib tests, architecture CI 35/35, and provider action
+      gate (edges re-anchored to relay_runtime_core) pass.
+    runtime: gemini/openai_chat already run through the skeleton in live replay;
+      anthropic/responses remain on entry-level local skeletons by design.
+
+- feature_id: v3.relay_runtime_shared
+  status: active_shared_helpers
+  change_risk: critical
+  owner_kind: rust_project_v3_runtime_shared_helpers
+  owner_scope: Shared relay failure strategy and helpers; anthropic keeps
+    protocol-shaped local failure helpers (body shape differs), others converge.
+  owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - npm run verify:v3-architecture-ci
+  - npm run verify:v3-hub-relay-runtime-closeout
+  completion_rule:
+    source: Relay runtime lib tests and closeout gate pass with shared helpers.
+
+- feature_id: v3.protocol_tables
+  status: active_table_source
+  change_risk: medium
+  owner_kind: rust_project_v3_protocol_table_source
+  owner_scope: JSON table infrastructure for inbound/outbound protocol
+    conversion; tables are the source of truth; protocol_tables.rs loads,
+    validates fail-fast and executes transforms via a Rust registry.
+  owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/protocol_tables.rs
+  - v3/crates/routecodex-v3-runtime/tables
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib protocol_tables
+  - npm run verify:v3-architecture-ci
+  completion_rule:
+    source: protocol_tables unit tests and architecture CI pass; tables fail-fast
+      on schema violation and never enter provider/client payload.
+
+- feature_id: v3.history_image_cleanup
+  status: active_normalization
+  change_risk: medium
+  owner_kind: rust_project_v3_req_inbound_normalization
+  owner_scope: ReqInbound semantic-equivalent normalization of history-turn image
+    placeholders (allowed inside continuation immutable interval; no repair).
+  owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - npm run verify:responses-continuation-immutable-boundary
+  completion_rule:
+    source: Relay runtime lib tests and continuation immutable-boundary gate pass
+      (normalize_v3_history_image_placeholders explicitly exempted as semantic
+      normalization, not history repair).
+
+- feature_id: v3.direct_runtime_kernel_core
+  status: active_skeleton
+  change_risk: critical
+  owner_kind: rust_project_v3_runtime_direct_skeleton
+  owner_scope: Unified direct main-loop skeleton (same_protocol passthrough);
+    per-protocol V3DirectProtocolCodec impls (responses/chat); hooks thin shell.
+  owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - npm run verify:v3-architecture-ci
+  - npm run verify:v3-stage-protocol-shapes
+  completion_rule:
+    source: Runtime lib tests, architecture CI 35/35, and stage-protocol-shapes
+      (direct same_protocol, shared codec allowed) pass.
+    runtime: 'responses/chat direct live entries replayed (200 with content); known gap: openai_chat direct success response timing observability (V3E3) tracked in handoff H3 for the parallel direct claim.'

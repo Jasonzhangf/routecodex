@@ -5252,3 +5252,22 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 ## 2026-08-06 - Req04 guidance leak guard was reverse inference
 - In V3 Req04, a guard that scans `instructions` or `messages[].content` for `[Codex Tool Guidance]` is architecturally invalid: business text cannot reconstruct MetadataCenter/control state, and client-owned history must remain immutable. Positive control writers/carriers are the only source of control truth.
 - Remove such guards physically rather than silently stripping or rewriting payload. The correct regression is exact preservation of marker text as business content plus the positive no-injection behavior for current apply_patch handling.
+
+## 2026-08-08 - OpenAI Chat SSE semantic terminal versus transport sentinel
+- OpenAI Chat semantic terminality is `choices[].finish_reason` (for normal completion, `finish_reason=stop`). `data: [DONE]` is only the subsequent client transport sentinel; it must never be treated as semantic completion evidence or used to replace `finish_reason`.
+- For OpenAI Chat entry to Anthropic wire SSE, the adjacent codec maps Anthropic `message_delta.stop_reason` to OpenAI Chat `finish_reason`, `message_stop` closes the semantic message and flushes the terminal Chat chunk, then the client projection emits `[DONE]`. EOF without `message_stop` remains an explicit error.
+- Design correction is recorded as `v3-openai-chat-anthropic-sse-terminal-closeout-20260808-r3`; do not implement or test the previous wording that called `[DONE]` the terminal event.
+
+## 2026-08-08 - 占位/流水线修改必须续写式合规（continuation-mode conversion compliance）
+- Jason 硬规则：所有占位修改（如历史图片 `[Image]`）与流水线转换修改，必须符合续写式（continuation）转换要求：请求 N+1 渲染给 provider 的字节序列必须是 [请求 N 渲染字节] + [assistant 回复] + [新轮次] 的精确扩展（token 级或渲染字节级），否则 provider 续写缓存（prefix/continuation cache）永远 miss，每轮全量 prefill。
+- ds4（antirez，routecodex provider 127.0.0.1:8000）缓存机制（源码 ds4_server.c ~11000 行）：解析顺序 memory-token（token 精确前缀，需 common==old_pos 且 prompt>=old_pos）→ thinking-visible（visible 文本字节前缀，thinking 回传场景）→ memory-text（渲染字节与解码 checkpoint 字节前缀比较）→ disk-text（SHA1 渲染字节前缀）。所有路径都要新 prompt 覆盖旧 live checkpoint 并继续延伸；部分前缀（common<old_pos）一律 miss。
+- ds4 DSML 渲染关键事实：assistant 消息带 reasoning 渲染为 `<|Assistant|><think>推理</think>文本`；不带 reasoning 渲染为 `<|Assistant|></think>文本`（立即闭合）。live checkpoint 含生成 thinking token——续写请求若不回传完整推理（reasoning_content），在 thinking 边界字节失配 → 全路径 miss。这是"续写式"测试的必备前提：不带 reasoning 回传的续写测试 miss 属测试构造错误，不是网关缺陷。
+- 已实证（live + ds4 trace）：①历史图占位符同位置渲染字节逐字节一致（dry-run 对比）；②真实客户端（camo 4444 会话）续写每次命中 ~114k tokens（cache_source=memory-text）；③带 reasoning 回传的续写请求命中 cache_source=thinking-visible cached_tokens=125；④不带 reasoning 回传 miss（失配点 token 34 `<think>` vs `</think>`）。
+- 本网关续写透传链已确认合规：responses input `reasoning` item → canonical chat `reasoning_content`（responses_openai_codec.rs build_v3_openai_chat_assistant_reasoning_message）→ openai_chat wire `reasoning_content`（request_outbound_format normalize_openai_chat_messages_payload 透传）→ ds4 `<think>` 渲染。占位符清理（hub_v1/history_image_cleanup.rs）是确定性纯函数，同位置永远同字节。
+- go 网关（opencode.ai/zen/go）不暴露 prefix cache（prompt_cache_hit_tokens 恒 0，字节相同前缀也 0），不可作为缓存验证面；minimax anthropic wire 报 cache_read_input_tokens=128（同历史双请求均读缓存）。
+
+## 2026-08-08 - Responses Relay custom_tool_call_input SSE 事件是协议真源，不是 provider failure
+- Live 5555 asxs-grok[cc-tt]（composer-2.5/grok-4.5）在 custom 工具（apply_patch）输出时发出 `response.custom_tool_call_input.delta/.done`（OpenAI Responses 官方事件，openai-openapi spec `ResponseCustomToolCallInputDeltaEvent/DoneEvent`：payload 为 output_index + item_id + delta|input，语义是 custom_tool_call item 的 `input` 增量流），旧 codec 当未知 `response.*` fail-fast → 502 → retry/switch。
+- 唯一 owner：`responses_provider_event_codec.rs` 响应侧 provider-wire inbound 码流（查表物化，.delta 追加 item `input`、.done 设置完整 `input`，复用 find_v3_runtime_responses_event_function_item_mut）。不允许在 SSE/handler/outbound/Error06 补偿，不允许改 VR/provider 配置，不允许把 Responses req 字段带进 provider 请求。
+- 反模式判定同 L93-reasoning-summary：上游网关发 `custom_tool_call_input.*` 时先查 OpenAI Responses 官方事件表再判 provider 故障；未知 `response.*` 仍保持 fail-fast。
+- 实证：red 测试先红（错误文案与线上一致）→ codec 修复转绿 → lib 324 全绿 → install:v3 sha256=8fd8211bd3d86909903dc5882544454c91bc3842157fe33dc855b2f2d1f5581e → rccv3 restart → 4 端口 health ok（0.90.4220）→ live 回放（model=gpt-5.5 + custom apply_patch，tools 池 → cc-sol[key1].gpt-5.6-sol 同 asxs 网关族）上游真实发出 `.delta/.done`，HTTP 201，`custom_tool_call.input` 正确物化。

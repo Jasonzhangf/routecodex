@@ -253,6 +253,12 @@ fn normalize_openai_chat_custom_tool(
     row: &Map<String, Value>,
     path: &str,
 ) -> Result<Value, String> {
+    // OpenAI Chat completions wire 只定义 function 工具（custom 是 Responses
+    // 协议形状，opencode-go 等上游以 `unknown variant 'custom'` 拒绝）。
+    // custom -> function 扁平化：name/description 保留，parameters 用
+    // `{"type":"object"}`（go 要求 parameters 必须是 type:object 的 JSON
+    // Schema，空对象会被拒）；format（grammar）是 Responses/扩展形状，chat
+    // wire 无法表达，按协议收窄丢弃（ds4 源码无 grammar 引擎，等价透传）。
     for key in row.keys() {
         if !matches!(key.as_str(), "type" | "name" | "description" | "format") {
             return Err(format!(
@@ -267,59 +273,21 @@ fn normalize_openai_chat_custom_tool(
         .ok_or_else(|| {
             format!("MalformedOutboundField target_protocol=openai_chat path={path}.name")
         })?;
-    let mut custom = Map::from_iter([("name".to_string(), Value::String(name.to_string()))]);
+    let mut function = Map::from_iter([
+        ("name".to_string(), Value::String(name.to_string())),
+        ("parameters".to_string(), serde_json::json!({"type":"object"})),
+    ]);
     if let Some(description) = row.get("description") {
         if !description.is_string() {
             return Err(format!(
                 "MalformedOutboundField target_protocol=openai_chat path={path}.description"
             ));
         }
-        custom.insert("description".to_string(), description.clone());
-    }
-    if let Some(format) = row.get("format") {
-        let format = format.as_object().ok_or_else(|| {
-            format!("MalformedOutboundField target_protocol=openai_chat path={path}.format")
-        })?;
-        let format_type = format.get("type").and_then(Value::as_str).ok_or_else(|| {
-            format!("MalformedOutboundField target_protocol=openai_chat path={path}.format.type")
-        })?;
-        let projected_format = match format_type {
-            "text" => {
-                if format.len() != 1 {
-                    return Err(format!(
-                        "UnmappedOutboundFields target_protocol=openai_chat paths={path}.format"
-                    ));
-                }
-                serde_json::json!({"type":"text"})
-            }
-            "grammar" => {
-                let syntax = format.get("syntax").and_then(Value::as_str).ok_or_else(|| {
-                    format!("MalformedOutboundField target_protocol=openai_chat path={path}.format.syntax")
-                })?;
-                let definition = format
-                    .get("definition")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        format!("MalformedOutboundField target_protocol=openai_chat path={path}.format.definition")
-                    })?;
-                if !matches!(syntax, "lark" | "regex") || format.len() != 3 {
-                    return Err(format!(
-                        "UnmappedOutboundFields target_protocol=openai_chat paths={path}.format"
-                    ));
-                }
-                serde_json::json!({"type":"grammar","grammar":{"syntax":syntax,"definition":definition}})
-            }
-            _ => {
-                return Err(format!(
-                    "UnmappedOutboundFields target_protocol=openai_chat paths={path}.format.type"
-                ));
-            }
-        };
-        custom.insert("format".to_string(), projected_format);
+        function.insert("description".to_string(), description.clone());
     }
     Ok(Value::Object(Map::from_iter([
-        ("type".to_string(), Value::String("custom".to_string())),
-        ("custom".to_string(), Value::Object(custom)),
+        ("type".to_string(), Value::String("function".to_string())),
+        ("function".to_string(), Value::Object(function)),
     ])))
 }
 

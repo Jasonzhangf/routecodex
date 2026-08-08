@@ -211,6 +211,20 @@ fn responses_wire_preserves_custom_tool_item_ids() {
 }
 
 #[test]
+fn openai_chat_wire_passes_through_same_protocol_thinking_field() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "thinking": {"type": "enabled", "budget_tokens": 1024}
+    });
+
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("same-protocol OpenAI Chat wire must pass through client thinking field");
+    assert_eq!(request["thinking"]["type"], "enabled");
+    assert_eq!(request["thinking"]["budget_tokens"], 1024);
+}
+
+#[test]
 fn responses_openai_chat_field_parity_include_is_rejected_from_chat_wire() {
     let payload = json!({
         "model": "gpt-test",
@@ -450,17 +464,42 @@ fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
     let tools = request["tools"].as_array().expect("Chat tools array");
     assert_eq!(tools.len(), 3);
     assert_eq!(tools[0]["function"]["name"], "exec_command");
-    assert_eq!(tools[1]["type"], "custom");
-    assert_eq!(tools[1]["custom"]["name"], "apply_patch");
-    assert_eq!(tools[1]["custom"]["description"], "Apply a patch");
-    assert_eq!(tools[1]["custom"]["format"], json!({"type":"text"}));
-    assert!(tools[1].get("function").is_none(), "{tools:?}");
+    assert_eq!(tools[1]["type"], "function");
+    assert_eq!(tools[1]["function"]["name"], "apply_patch");
+    assert_eq!(tools[1]["function"]["description"], "Apply a patch");
+    assert_eq!(tools[1]["function"]["parameters"], json!({"type":"object"}));
+    assert!(tools[1].get("custom").is_none(), "{tools:?}");
     assert_eq!(tools[2]["function"]["name"], "tool_search");
     assert_eq!(
         request["web_search_options"]["search_context_size"],
         "medium"
     );
-    assert!(request.to_string().contains("\"type\":\"custom\""));
+    assert!(!request.to_string().contains("\"type\":\"custom\""));
+}
+
+#[test]
+fn openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade() {
+    // custom 工具含非 type/name/description/format 字段：拒绝（UnmappedOutboundFields），
+    // 禁止降级为 function 静默丢失（opencode-go 等上游以 unknown variant 'custom' 拒绝）。
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "apply"}],
+        "tools": [{
+            "type": "custom",
+            "name": "apply_patch",
+            "description": "Apply a patch",
+            "format": {"type":"text"},
+            "schema": {"type": "object"}
+        }]
+    });
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("custom tool with unmapped field must be rejected, not downgraded");
+    let message = error.to_string();
+    assert!(
+        message.contains("UnmappedOutboundFields") && message.contains("schema"),
+        "unexpected rejection: {message}"
+    );
+    assert!(!message.contains("function"), "must not fall back to function: {message}");
 }
 
 #[test]
@@ -483,34 +522,34 @@ fn openai_chat_wire_rejects_unknown_web_search_content_type() {
 }
 
 #[test]
-fn openai_chat_wire_projects_custom_grammar_to_native_chat_custom_tool() {
+fn openai_chat_wire_flattens_custom_grammar_to_function_tool() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "patch"}],
         "tools": [{
             "type": "custom",
             "name": "apply_patch",
+            "description": "Apply a patch",
             "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}
         }]
     });
 
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect("custom grammar must use the native OpenAI Chat custom tool shape");
+        .expect("custom grammar must flatten to the legal OpenAI Chat function tool shape");
 
-    assert_eq!(request["tools"][0]["type"], "custom");
-    assert_eq!(request["tools"][0]["custom"]["name"], "apply_patch");
+    assert_eq!(request["tools"][0]["type"], "function");
+    assert_eq!(request["tools"][0]["function"]["name"], "apply_patch");
+    assert_eq!(request["tools"][0]["function"]["description"], "Apply a patch");
     assert_eq!(
-        request["tools"][0]["custom"]["format"],
-        json!({
-            "type":"grammar",
-            "grammar":{"syntax":"lark","definition":"start: patch"}
-        })
+        request["tools"][0]["function"]["parameters"],
+        json!({"type":"object"}),
+        "go requires parameters to be a JSON Schema with type object"
     );
-    assert!(request["tools"][0].get("function").is_none(), "{request}");
+    assert!(request["tools"][0].get("custom").is_none(), "{request}");
 }
 
 #[test]
-fn openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade() {
+fn openai_chat_wire_flattens_any_custom_format_to_function_tool() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "patch"}],
@@ -521,11 +560,14 @@ fn openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade() {
         }]
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("unknown custom format must fail instead of becoming a function tool");
-
-    assert!(error.contains("UnmappedOutboundFields"), "{error}");
-    assert!(error.contains("$.tools[0].format.type"), "{error}");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("the chat wire cannot express custom formats; every custom tool flattens to function");
+    assert_eq!(request["tools"][0]["type"], "function");
+    assert_eq!(request["tools"][0]["function"]["name"], "apply_patch");
+    assert_eq!(
+        request["tools"][0]["function"]["parameters"],
+        json!({"type":"object"})
+    );
 }
 
 #[test]
@@ -1204,4 +1246,53 @@ fn openai_chat_wire_projects_local_websearch_for_non_gpt_without_mode() {
         2,
         "read_file + local websearch must both remain"
     );
+}
+
+#[test]
+fn continuation_history_prefix_renders_byte_identical_across_requests() {
+    let history = vec![
+        json!({"role": "user", "content": [
+            {"type": "text", "text": "The history question with a screenshot attached"},
+            {"type": "text", "text": "[Image]"}
+        ]}),
+        json!({"role": "assistant", "content": "I can see the image in the history."}),
+    ];
+    let build_wire = |current: &str| {
+        let mut messages = history.clone();
+        messages.push(json!({"role": "user", "content": current}));
+        build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+            "model": "deepseek-v4-flash",
+            "messages": messages
+        }))
+        .expect("OpenAI Chat wire build")
+    };
+    let wire_a = build_wire("Reply with exactly: CONTINUE_A");
+    let wire_b = build_wire("Reply with exactly: CONTINUE_B");
+    assert_eq!(
+        wire_a["messages"].as_array().unwrap()[..2],
+        wire_b["messages"].as_array().unwrap()[..2],
+        "history prefix must render byte-identical for the continuation cache"
+    );
+    assert_ne!(wire_a["messages"][2], wire_b["messages"][2]);
+}
+
+#[test]
+fn continuation_assistant_reasoning_round_trips_to_wire_reasoning_content() {
+    let reasoning = "1. The user asks to reply with exactly CONTINUE_B. No other content is needed.";
+    let payload = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [
+            {"role": "user", "content": "Reply with exactly: CONTINUE_A"},
+            {"role": "assistant", "content": "CONTINUE_A", "reasoning_content": reasoning},
+            {"role": "user", "content": "Reply with exactly: CONTINUE_B"}
+        ]
+    });
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("OpenAI Chat wire build");
+    assert_eq!(
+        request["messages"][1]["reasoning_content"],
+        reasoning,
+        "client-echoed assistant reasoning must pass to wire reasoning_content untouched"
+    );
+    assert_eq!(request["messages"][1]["content"], "CONTINUE_A");
 }

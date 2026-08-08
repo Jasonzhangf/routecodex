@@ -182,6 +182,11 @@ pub enum V3AnthropicRelayRuntimeError {
     LocalContinuationClockOverflow,
     #[error("V3 Anthropic local continuation state lock is poisoned")]
     LocalContinuationStatePoisoned,
+    #[error(
+        "V3 Anthropic web_search Mode B intercepted a websearch call but the chat-entry response \
+         has no result projection path yet; refusing silent strip"
+    )]
+    WebSearchInterceptedUnprojected,
 }
 
 pub async fn execute_v3_anthropic_relay_runtime_with_default_transport(
@@ -466,6 +471,20 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     } else {
         V3HubTransportIntent::Json
     };
+    // Mode B 判定用请求声明的 model 的编译期 mode（Req04 在 route 之前，
+    // 无法感知最终 selected target；Resp03 侧再用 selected target mode 校验）。
+    let request_web_search_execution_mode = {
+        let model = input
+            .payload
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        match model {
+            Some(model) => resolve_web_search_mode_and_backend(manifest, model).0,
+            None => routecodex_v3_config::V3WebSearchExecutionMode::None,
+        }
+    };
     let requested_local_ids = find_anthropic_tool_result_ids(&input.payload)?;
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
@@ -510,14 +529,32 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         } else {
             V3HubContinuationLookup::new(None, base_hub_scope)
         };
+        let request_hook_profile =
+            if request_web_search_execution_mode.is_metadata_center_local_search() {
+                // Mode B：Req04 需在工具面含标准 web_search 声明时激活 websearch
+                // ServerTool 实例（LocalToolSurfaceActive），供 Resp03 同轮拦截。
+                V3HubServertoolRequestProfile::enabled(["servertool.request"])
+                    .with_web_search_execution_mode(request_web_search_execution_mode)
+            } else {
+                V3HubServertoolRequestProfile::disabled()
+            };
         compile_v3_hub_relay_request_hooks().run_from_normalized(
             req02,
             &lookup,
-            &V3HubServertoolRequestProfile::disabled(),
+            &request_hook_profile,
         )?
     };
     trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
+    let request_web_search_state = request_outcome.web_search_state().cloned();
+    let mut response_hook_profile = response_hook_profile;
+    if request_web_search_execution_mode.is_metadata_center_local_search() {
+        response_hook_profile =
+            response_hook_profile.with_web_search_execution_mode(request_web_search_execution_mode);
+        if let Some(state) = request_web_search_state.as_ref() {
+            response_hook_profile = response_hook_profile.with_web_search_center_state(state.clone());
+        }
+    }
     let req04 = request_outcome.into_governed();
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
@@ -597,7 +634,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let req07 =
             build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
         trace.push("V3HubReqOutbound07ProviderSemantic");
-        let target = provider_target(manifest, req07.selected_target())?;
+        let target = provider_target(manifest, req07.selected_target(), None)?;
         macro_rules! handle_provider_request_failure {
             ($stage:expr, $kind:expr, $error:expr) => {{
                 let terminal_failure = handle_provider_failure(
@@ -812,6 +849,14 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     {
                         Ok(closeout) => closeout,
                         Err(error) => {
+                            // 治理层拦截（web_search Mode B 已剥离但 chat 类入口
+                            // 无投影路径）：不是 provider 响应失败，禁止进入
+                            // provider failure 重试/降级链，直接 fail-fast。
+                            if let V3AnthropicRelayRuntimeError::WebSearchInterceptedUnprojected =
+                                &error
+                            {
+                                return Err(error);
+                            }
                             let failure = provider_runtime_failure(
                                 V3ProviderError::ResponseBody {
                                     request_id: input.request_id.clone(),
@@ -962,6 +1007,14 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     ) {
                         Ok(closeout) => closeout,
                         Err(error) => {
+                            // 治理层拦截（web_search Mode B 已剥离但 chat 类入口
+                            // 无投影路径）：不是 provider 响应失败，禁止进入
+                            // provider failure 重试/降级链，直接 fail-fast。
+                            if let V3AnthropicRelayRuntimeError::WebSearchInterceptedUnprojected =
+                                &error
+                            {
+                                return Err(error);
+                            }
                             let failure = provider_runtime_failure(
                                 V3ProviderError::ResponseBody {
                                     request_id: input.request_id.clone(),
@@ -1073,7 +1126,8 @@ where
     trace.push("V3ProviderRespInbound01Raw");
     let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(resp01).await?;
     trace.push("ProviderRespCompat02ProviderCompat");
-    let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat);
+    let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat)
+        .map_err(|error| V3AnthropicRelayRuntimeError::Target(error))?;
     trace.push("V3HubRespInbound02Normalized");
     closeout_anthropic_relay_normalized_response(
         resp02,
@@ -1123,12 +1177,38 @@ where
     F: FnOnce(&Value) -> Result<Value, V3AnthropicRelayRuntimeError>,
 {
     let hooks = compile_v3_hub_relay_response_hooks();
+    // 在 resp02 被 govern move 前克隆归一化 payload（含原始 tool_use——
+    // Mode B hosted web_search 透传分支需要未剥离的 web_search tool_use）。
+    let resp02_payload = resp02.provider_raw().payload.0.clone();
     let resp03 = hooks.govern(resp02, response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
     trace.push("V3HubRespContinuation04Committed");
     let servertool_followup_required =
         resp04.previous.servertool_action() == V3HubServertoolResponseAction::FollowupRequired;
+    // Mode B 拦截：websearch call 已由 Resp03 剥离（web_search_transition 存在）。
+    // 区分两种形状：
+    // - hosted `web_search`（anthropic wire server tool `web_search_20250305`，
+    //   模型调用 name=web_search）——标准 Anthropic 工具调用协议，透传 tool_use
+    //   给客户端（claude code 等）执行搜索并回传结果；
+    // - 本地 `websearch`（function name=websearch，无客户端投影路径）——
+    //   禁止静默剥离，fail-fast。
+    if resp04.web_search_transition().is_some() {
+        // 区分两种形状：
+        // - hosted `web_search`（anthropic wire server tool `web_search_20250305`，
+        //   模型调用 name=web_search）——标准 Anthropic 工具调用协议，透传 tool_use
+        //   给客户端（claude code 等）执行搜索并回传结果；
+        // - 本地 `websearch`（function name=websearch，无客户端投影路径）——
+        //   禁止静默剥离，fail-fast。
+        let is_hosted_web_search = first_local_websearch_tool_call(&resp02_payload)?
+            .as_ref()
+            .is_some_and(|call| call.name.eq_ignore_ascii_case("web_search"));
+        if !is_hosted_web_search {
+            return Err(V3AnthropicRelayRuntimeError::WebSearchInterceptedUnprojected);
+        }
+        let client_payload = project_client_response(resp02_payload.as_ref())?;
+        return Ok((client_payload, servertool_followup_required));
+    }
     commit_or_release_local_continuation(
         local,
         requested_local_ids,
@@ -1237,137 +1317,21 @@ pub fn project_v3_anthropic_relay_runtime_failure(
             error.to_string(),
         ),
     };
-    error_output(
-        source,
-        500,
-        json!({"type":"error","error":{"type":"runtime_error","message":display}}),
-        "none",
-        Vec::new(),
-    )
-}
-
-fn server_routing_group<'a>(
-    manifest: &'a V3Config05ManifestPublished,
-    server_id: &str,
-) -> Result<&'a str, V3AnthropicRelayRuntimeError> {
-    manifest
-        .servers
-        .get(server_id)
-        .map(|server| server.routing_group.as_str())
-        .ok_or_else(|| V3AnthropicRelayRuntimeError::Target(format!("server {server_id} missing")))
-}
-
-fn provider_target(
-    manifest: &V3Config05ManifestPublished,
-    selected: &routecodex_v3_target::V3TargetCandidate,
-) -> Result<V3ResponsesProviderTarget, V3AnthropicRelayRuntimeError> {
-    let provider = manifest
-        .providers
-        .get(&selected.provider_id)
-        .ok_or_else(|| {
-            V3AnthropicRelayRuntimeError::Target("selected provider missing".to_string())
-        })?;
-    let auth = provider
-        .auth
-        .entries
-        .iter()
-        .find(|entry| entry.alias == selected.auth_alias)
-        .ok_or_else(|| {
-            V3AnthropicRelayRuntimeError::Target("selected auth handle missing".to_string())
-        })?;
-    let secret = match (&auth.env, &auth.token_file, &auth.api_key) {
-        (Some(env), None, None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
-        (None, Some(path), None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
-        (None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
-        _ => {
-            return Err(V3AnthropicRelayRuntimeError::Target(
-                "selected auth handle is invalid".to_string(),
-            ));
-        }
-    };
-    Ok(V3ResponsesProviderTarget {
-        provider_id: selected.provider_id.clone(),
-        provider_type: selected.provider_type.clone(),
-        base_url: selected.base_url.clone(),
-        canonical_model_id: selected.model_id.clone(),
-        wire_model: selected.wire_model.clone(),
-        auth: V3ProviderAuthHandle {
-            alias: selected.auth_alias.clone(),
-            secret,
-        },
-        responses_transport: selected.responses_transport,
-        websocket_v2_url: selected.websocket_v2_url.clone(),
-        provider_request_cleanup: selected.provider_request_cleanup.clone(),
-    })
-}
-
-struct V3AnthropicRelayProviderFailure {
-    status: u16,
-    client_response: Value,
-    source_stage: &'static str,
-    terminal_projection: Option<routecodex_v3_error::V3Error06ClientProjected>,
-}
-
-async fn handle_provider_failure(
-    context: &V3RelayProviderFailurePolicyContext<'_>,
-    selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    mut failure: V3AnthropicRelayProviderFailure,
-    state: &mut V3RelayProviderFailurePolicyState<'_>,
-    retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
-) -> Result<Option<V3AnthropicRelayProviderFailure>, V3AnthropicRelayRuntimeError> {
-    if failure.terminal_projection.is_some() {
-        return Ok(Some(failure));
-    }
-    let result = run_v3_relay_provider_failure_policy(
-        context,
-        selected,
-        failure.source_stage,
-        failure.status,
-        failure_error_type(&failure),
-        provider_failure_message(&failure),
-        state,
-    )
-    .await
-    .map_err(V3AnthropicRelayRuntimeError::Target)?;
-    match result.decision.action {
-        V3Error05ExecutionAction::WaitThenReselect { recovery } => {
-            *retry_selected = result.retry_selected.map(|selected| *selected);
-            if result.event.wait_ms.is_some() {
-                *pending_recovery = Some(recovery);
-            } else {
-                *pending_recovery = None;
-            }
-            Ok(None)
-        }
-        V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
-            *retry_selected = result.retry_selected.map(|selected| *selected);
-            *pending_recovery = Some(recovery);
-            Ok(None)
-        }
-        V3Error05ExecutionAction::ProjectTerminal => {
-            failure.terminal_projection = result.terminal_projection;
-            Ok(Some(failure))
-        }
-        V3Error05ExecutionAction::ClientDisconnected
-        | V3Error05ExecutionAction::RejectNonProviderError => {
-            Err(V3AnthropicRelayRuntimeError::Target(
-                "provider failure entered a non-provider Error05 lane".to_string(),
-            ))
-        }
-    }
+    error_output(source, 500, "none", Vec::new())
 }
 
 fn provider_http_failure(
     status: u16,
     body: &[u8],
     _provider_id: &str,
-) -> V3AnthropicRelayProviderFailure {
-    V3AnthropicRelayProviderFailure {
+) -> V3RelayProviderFailure {
+    V3RelayProviderFailure {
         status,
         client_response: project_v3_responses_error_as_anthropic_error(body),
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
+        error_type_fn: extract_error_type_style,
+        error_message_fn: extract_message_type_style,
     }
 }
 
@@ -1375,19 +1339,21 @@ fn provider_request_failure(
     source_stage: &'static str,
     error_type: &'static str,
     error: impl std::fmt::Display,
-) -> V3AnthropicRelayProviderFailure {
-    V3AnthropicRelayProviderFailure {
+) -> V3RelayProviderFailure {
+    V3RelayProviderFailure {
         status: 502,
         client_response: json!({"type":"error","error":{"type":error_type,"message":error.to_string()}}),
         source_stage,
         terminal_projection: None,
+        error_type_fn: extract_error_type_style,
+        error_message_fn: extract_message_type_style,
     }
 }
 
 fn provider_runtime_failure(
     error: V3ProviderError,
     provider_id: &str,
-) -> V3AnthropicRelayProviderFailure {
+) -> V3RelayProviderFailure {
     let terminal_projection =
         matches!(&error, V3ProviderError::ClientDisconnect { .. }).then(|| {
             project_v3_client_disconnect(
@@ -1396,7 +1362,7 @@ fn provider_runtime_failure(
                 error.to_string(),
             )
         });
-    V3AnthropicRelayProviderFailure {
+    V3RelayProviderFailure {
         status: if terminal_projection.is_some() {
             499
         } else {
@@ -1405,36 +1371,13 @@ fn provider_runtime_failure(
         client_response: json!({"type":"error","error":{"type":"provider_error","message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),
         terminal_projection,
+        error_type_fn: extract_error_type_style,
+        error_message_fn: extract_message_type_style,
     }
 }
 
-fn failure_error_type(failure: &V3AnthropicRelayProviderFailure) -> Option<String> {
-    failure
-        .client_response
-        .pointer("/error/type")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(str::to_string)
-}
-
-fn provider_failure_message(failure: &V3AnthropicRelayProviderFailure) -> String {
-    failure
-        .client_response
-        .pointer("/error/message")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            failure
-                .client_response
-                .pointer("/error/type")
-                .and_then(Value::as_str)
-        })
-        .filter(|value| !value.trim().is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("provider returned HTTP {}", failure.status))
-}
-
 fn provider_failure_output(
-    failure: V3AnthropicRelayProviderFailure,
+    failure: V3RelayProviderFailure,
     mut trace: Vec<&'static str>,
 ) -> V3AnthropicRelayRuntimeOutput {
     let projected = failure
@@ -1472,20 +1415,10 @@ fn record_provider_success_after_resp04(
 fn error_output(
     source: routecodex_v3_error::V3Error01SourceRaised,
     status: u16,
-    client_response: Value,
     provider_id: &str,
     mut trace: Vec<&'static str>,
 ) -> V3AnthropicRelayRuntimeOutput {
-    let _ = client_response;
-    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-        source,
-        action_scope: V3ErrorActionScope::ProviderInstance {
-            provider_id: provider_id.to_string(),
-        },
-        candidates_remaining: 0,
-        source_status: Some(status),
-    });
-    trace.extend(V3_ERROR_CHAIN_NODE_IDS);
+    let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
     V3AnthropicRelayRuntimeOutput {
         status: projected.status,
         client_response: projected.body,

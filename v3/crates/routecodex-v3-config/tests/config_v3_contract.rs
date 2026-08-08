@@ -413,6 +413,54 @@ targets = [
 }
 
 #[test]
+fn same_model_name_across_providers_must_resolve_to_same_web_search_mode() {
+    // 红测：同名 model 在两个 provider 声明不同 web_search_execution_mode 时
+    // 编译期 fail-fast（Req04 Mode B 判定按请求 model 名解析，pool 直连扫描
+    // 按第一个命中——配置即真源，冲突必须在编译期暴露，禁止运行时按字典序
+    // 误命中与 VR 实际选择不一致）。
+    let source = r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+
+[providers.alpha]
+type = "openai_chat"
+base_url = "http://alpha.invalid/v1"
+default_model = "shared-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "ALPHA_KEY" }] }
+[providers.alpha.models.shared-model]
+capabilities = ["text", "tools", "web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "alpha.search"
+
+[providers.beta]
+type = "openai_chat"
+base_url = "http://beta.invalid/v1"
+default_model = "shared-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "BETA_KEY" }] }
+[providers.beta.models.shared-model]
+capabilities = ["text", "tools"]
+web_search_execution_mode = "native_remote_search_tool_mix"
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "alpha", model = "shared-model", priority = 1 },
+  { kind = "provider_model", provider = "beta", model = "shared-model", priority = 2 }
+]
+"#;
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect_err("same model name with conflicting web_search_execution_mode must fail");
+    assert!(
+        error.to_string().contains("conflicting web_search_execution_mode"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn omitted_snapshot_direct_preserves_config_compatibility() {
     let source = FULL_CONFIG.replace("snapshot_direct = false\n", "");
     let authoring = parse_v3_config_02_authoring(&source).unwrap();
@@ -955,7 +1003,7 @@ fn rejects_invalid_hub_v1_entry_protocol_bindings_fail_fast() {
         ),
         (
             HUB_V1_DECLARATION.replace("execution_mode = \"relay\", protocol_profile_owner = \"v3.gemini_relay_runtime_integration\"", "execution_mode = \"pending_not_implemented\", protocol_profile_owner = \"v3.gemini_relay_runtime_integration\""),
-            "gemini entry protocol must be relay",
+            "gemini entry protocol must be direct or relay",
         ),
         (
             HUB_V1_DECLARATION.replace("runtime_owner_symbol = \"execute_v3_anthropic_relay_runtime_with_default_transport\", runtime_owner_path = \"v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs\"", "runtime_owner_path = \"v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs\""),

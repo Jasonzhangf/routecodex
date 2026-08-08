@@ -85,8 +85,18 @@ verify_direct_v3_install() {
         exit 1
     fi
     if [ "$(command -v rccv3)" != "$expected_bin" ]; then
-        echo "❌ rccv3 未解析到直接安装路径: $(command -v rccv3)"
-        exit 1
+        local actual_rccv3
+        actual_rccv3="$(command -v rccv3)"
+        local actual_version
+        actual_version="$("$actual_rccv3" --version 2>/dev/null || true)"
+        local expected_version
+        expected_version="$("$expected_bin" --version 2>/dev/null || true)"
+        if [ -n "$actual_version" ] && { [ -z "$expected_version" ] || [ "$actual_version" = "$expected_version" ]; }; then
+            echo "⚠️  rccv3 解析到其他同版本入口: $actual_rccv3（PATH 顺序；$expected_version）"
+        else
+            echo "❌ rccv3 未解析到直接安装路径: $actual_rccv3 ($actual_version)"
+            exit 1
+        fi
     fi
     if [ "$(command -v routecodex)" != "$expected_routecodex" ]; then
         echo "❌ routecodex 未解析到直接安装路径: $(command -v routecodex)"

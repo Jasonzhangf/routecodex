@@ -18,7 +18,10 @@ use std::sync::OnceLock;
 mod projection_context;
 mod responses_to_anthropic;
 pub use projection_context::V3AnthropicResponsesProjectionContext;
-pub(crate) use responses_to_anthropic::project_v3_responses_reasoning_item_as_anthropic_content;
+pub(crate) use responses_to_anthropic::{
+    project_v3_responses_reasoning_item_as_anthropic_content,
+    responses_web_search_tool_as_anthropic_tool,
+};
 use responses_to_anthropic::{
     anthropic_usage_as_responses_usage, chat_messages_as_anthropic_messages,
     responses_input_as_anthropic_messages, responses_system_as_anthropic_system,

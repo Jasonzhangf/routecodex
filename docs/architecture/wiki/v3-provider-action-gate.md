@@ -45,8 +45,6 @@ flowchart TD
   E01 -->|v3-provider-action-gate-14| E05
   E01 -->|v3-provider-action-gate-15| E05
   E01 -->|v3-provider-action-gate-16| E05
-  E01 -->|v3-provider-action-gate-17| E05
-  E01 -->|v3-provider-action-gate-18| E05
   Gate -->|v3-provider-action-gate-19| Permit
   Gate -->|v3-provider-action-gate-20| Permit
   Gate -->|v3-provider-action-gate-21| Permit

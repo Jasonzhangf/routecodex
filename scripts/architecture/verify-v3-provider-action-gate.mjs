@@ -21,6 +21,8 @@ const files = {
   openaiChat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs',
   anthropic: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
   gemini: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs',
+  relayShared: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+  relayCore: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs',
   server: 'v3/crates/routecodex-v3-server/src/lib.rs',
   serverTests: 'v3/crates/routecodex-v3-server/src/tests/mod.rs',
   gateTests: 'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs',
@@ -412,8 +414,9 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-12',
     from_node: 'V3Error05RecoveryWitness',
     to_node: 'V3ProviderActionGateAdmission',
-    caller_symbol: 'execute_v3_openai_chat_relay_runtime_inner',
-    caller_file: files.openaiChat,
+    // openai_chat/gemini 已收敛到统一 relay 骨架：wait_for_error05_recovery 在骨架内。
+    caller_symbol: 'execute_v3_relay_runtime_core',
+    caller_file: files.relayCore,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::wait_for_error05_recovery',
     callee_file: files.policy,
     call_witness: /\bprovider_health\s*\.\s*wait_for_error05_recovery\s*\(/u,
@@ -424,8 +427,9 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-13',
     from_node: 'V3Error05RecoveryWitness',
     to_node: 'V3ProviderActionGateAdmission',
-    caller_symbol: 'execute_v3_gemini_relay_runtime_inner',
-    caller_file: files.gemini,
+    // gemini 已收敛到统一 relay 骨架（见 12）。
+    caller_symbol: 'execute_v3_relay_runtime_core',
+    caller_file: files.relayCore,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::wait_for_error05_recovery',
     callee_file: files.policy,
     call_witness: /\bprovider_health\s*\.\s*wait_for_error05_recovery\s*\(/u,
@@ -460,32 +464,9 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-16',
     from_node: 'V3Error01SourceRaised',
     to_node: 'V3Error05ExecutionDecision',
+    // 共享 relay 失败处理（gemini/anthropic/openai_chat 收敛后统一在 relay_runtime_shared）。
     caller_symbol: 'handle_provider_failure',
-    caller_file: files.anthropic,
-    callee_symbol: 'run_v3_relay_provider_failure_policy',
-    callee_file: files.policy,
-    call_witness: /\brun_v3_relay_provider_failure_policy\s*\(/u,
-    status: 'anchored',
-    owner_feature_id: 'v3.provider_action_gate',
-  },
-  {
-    step_id: 'v3-provider-action-gate-17',
-    from_node: 'V3Error01SourceRaised',
-    to_node: 'V3Error05ExecutionDecision',
-    caller_symbol: 'handle_provider_failure',
-    caller_file: files.openaiChat,
-    callee_symbol: 'run_v3_relay_provider_failure_policy',
-    callee_file: files.policy,
-    call_witness: /\brun_v3_relay_provider_failure_policy\s*\(/u,
-    status: 'anchored',
-    owner_feature_id: 'v3.provider_action_gate',
-  },
-  {
-    step_id: 'v3-provider-action-gate-18',
-    from_node: 'V3Error01SourceRaised',
-    to_node: 'V3Error05ExecutionDecision',
-    caller_symbol: 'handle_provider_failure',
-    caller_file: files.gemini,
+    caller_file: files.relayShared,
     callee_symbol: 'run_v3_relay_provider_failure_policy',
     callee_file: files.policy,
     call_witness: /\brun_v3_relay_provider_failure_policy\s*\(/u,
@@ -532,8 +513,9 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-22',
     from_node: 'V3ProviderActionGateAdmission',
     to_node: 'V3ProviderActionPermitInFlight',
-    caller_symbol: 'execute_v3_openai_chat_relay_runtime_inner',
-    caller_file: files.openaiChat,
+    // openai_chat/gemini 已收敛到统一 relay 骨架：admission.take_permit 在骨架内。
+    caller_symbol: 'execute_v3_relay_runtime_core',
+    caller_file: files.relayCore,
     callee_symbol: 'V3ProviderActionAdmission::take_permit',
     callee_file: files.gate,
     call_witness: /\badmission\s*\.\s*take_permit\s*\(/u,
@@ -544,8 +526,8 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-23',
     from_node: 'V3ProviderActionGateAdmission',
     to_node: 'V3ProviderActionPermitInFlight',
-    caller_symbol: 'execute_v3_gemini_relay_runtime_inner',
-    caller_file: files.gemini,
+    caller_symbol: 'execute_v3_anthropic_relay_runtime_inner',
+    caller_file: files.anthropic,
     callee_symbol: 'V3ProviderActionAdmission::take_permit',
     callee_file: files.gate,
     call_witness: /\badmission\s*\.\s*take_permit\s*\(/u,
@@ -592,8 +574,9 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-27',
     from_node: 'V3ProviderActionPermitInFlight',
     to_node: 'V3ProviderActionPermitAbandonRequested',
-    caller_symbol: 'execute_v3_openai_chat_relay_runtime_inner',
-    caller_file: files.openaiChat,
+    // openai_chat/gemini 已收敛到统一 relay 骨架：permit drop 在骨架内。
+    caller_symbol: 'execute_v3_relay_runtime_core',
+    caller_file: files.relayCore,
     callee_symbol: 'V3ProviderActionPermit::drop',
     callee_file: files.gate,
     call_witness: /\bdrop\s*\(\s*provider_action_permit\.take\(\)\s*\)/u,
@@ -604,11 +587,11 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-28',
     from_node: 'V3ProviderActionPermitInFlight',
     to_node: 'V3ProviderActionPermitAbandonRequested',
-    caller_symbol: 'execute_v3_gemini_relay_runtime_inner',
-    caller_file: files.gemini,
+    caller_symbol: 'execute_v3_anthropic_relay_runtime_inner',
+    caller_file: files.anthropic,
     callee_symbol: 'V3ProviderActionPermit::drop',
     callee_file: files.gate,
-    call_witness: /\bdrop\s*\(\s*provider_action_permit\.take\(\)\s*\)/u,
+    call_witness: /\bdrop\s*\(\s*_?provider_action_permit\.take\(\)\s*\)/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -1153,10 +1136,43 @@ if (
 for (const [name, source, rel] of [
   ['Direct', text.direct, files.direct],
   ['Responses Relay', text.responses, files.responses],
-  ['OpenAI Chat Relay', text.openaiChat, files.openaiChat],
   ['Anthropic Relay', text.anthropic, files.anthropic],
-  ['Gemini Relay', text.gemini, files.gemini],
 ]) {
+  requireText(source, rel, 'wait_for_error05_recovery');
+  requireText(source, rel, 'V3ProviderActionGateAdmission');
+  requireText(source, rel, 'V3ProviderActionRecoveryTransition::Superseded');
+  requireText(source, rel, 'V3ProviderActionRecoveryTransition::ReleasedBySuccess');
+  requireText(source, rel, 'V3ProviderActionGateTerminalReevaluation');
+  const successReleaseRearm =
+    /V3ProviderActionRecoveryTransition::ReleasedBySuccess\(ticket\)[\s\S]{0,80}?=>\s*\{[\s\S]{0,480}?pending_provider_action_recovery\s*=[\s\S]{0,220}?ticket[\s\S]{0,120}?recovery_witness\(\)/u;
+  if (!successReleaseRearm.test(source)) {
+    failures.push(
+      `${rel}: ${name} must re-arm the exact retained recovery ticket after provider success releases a queued waiter`,
+    );
+  }
+  if (!source.includes('V3Error05ExecutionAction')) {
+    failures.push(`${rel}: ${name} must consume typed Error05 actions`);
+  }
+  requireText(source, rel, 'let mut pending_provider_action_recovery = None;');
+  const recoveryOnlyWait = /if\s+let\s+Some\(recovery\)\s*=\s*pending_provider_action_recovery\.take\(\)\s*\{[\s\S]{0,700}?wait_for_error05_recovery/u;
+  if (!recoveryOnlyWait.test(source)) {
+    failures.push(
+      `${rel}: ${name} must wait on the provider action gate only after the current request enters Error05 recovery`,
+    );
+  }
+  if (source.includes('pending_provider_action_gate')) {
+    failures.push(`${rel}: ${name} must not retain bool-only provider action recovery state`);
+  }
+  if (source.includes('wait_for_selected_provider_action')) {
+    failures.push(`${rel}: ${name} must not select a recovery lane by latest routing-group state`);
+  }
+}
+// openai_chat/gemini 已收敛到统一 relay 骨架：完整 provider action gate 语义
+// 分布在骨架（recovery 等待/重试循环）与共享失败策略（Error05 action 消费）中。
+{
+  const source = `${text.relayCore}\n${text.relayShared}`;
+  const rel = `${files.relayCore} + ${files.relayShared}`;
+  const name = 'Relay Skeleton';
   requireText(source, rel, 'wait_for_error05_recovery');
   requireText(source, rel, 'V3ProviderActionGateAdmission');
   requireText(source, rel, 'V3ProviderActionRecoveryTransition::Superseded');
@@ -1244,9 +1260,10 @@ requireOccurrenceCount(
   'drop(_provider_action_permit.take());',
   9,
 );
+// openai_chat/gemini 的局部变量 permit drop（每协议 4 处）已收敛到统一 relay 骨架。
 requireOccurrenceCount(
-  text.openaiChat,
-  files.openaiChat,
+  text.relayCore,
+  files.relayCore,
   'drop(provider_action_permit.take());',
   4,
 );
@@ -1265,24 +1282,27 @@ requireOccurrenceCount(
 requireOccurrenceCount(
   text.gemini,
   files.gemini,
-  'drop(provider_action_permit.take());',
-  4,
-);
-requireOccurrenceCount(
-  text.gemini,
-  files.gemini,
   'drop(self._provider_action_permit.take());',
   1,
 );
 for (const [name, source, rel] of [
-  ['OpenAI Chat Relay', text.openaiChat, files.openaiChat],
   ['Anthropic Relay', text.anthropic, files.anthropic],
-  ['Gemini Relay', text.gemini, files.gemini],
 ]) {
   requireText(source, rel, 'provider_request_failure');
   requireText(source, rel, 'handle_provider_request_failure');
   if (/build_provider_req_compat_06_from_v3_hub_req_outbound_07\(req07\)\?/u.test(source)) {
     failures.push(`${rel}: ${name} provider compat failure bypasses typed Error05`);
+  }
+}
+// openai_chat/gemini 已收敛到统一 relay 骨架：request 失败语义（provider_request_failure /
+// handle_provider_request_failure）在骨架内，由骨架统一持有。
+{
+  const source = text.relayCore;
+  const rel = files.relayCore;
+  requireText(source, rel, 'provider_request_failure');
+  requireText(source, rel, 'handle_provider_request_failure');
+  if (/build_provider_req_compat_06_from_v3_hub_req_outbound_07\(req07\)\?/u.test(source)) {
+    failures.push(`${rel}: Relay Skeleton provider compat failure bypasses typed Error05`);
   }
 }
 for (const token of [
@@ -1615,8 +1635,6 @@ for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-14', 'E01', 'E05'],
   ['v3-provider-action-gate-15', 'E01', 'E05'],
   ['v3-provider-action-gate-16', 'E01', 'E05'],
-  ['v3-provider-action-gate-17', 'E01', 'E05'],
-  ['v3-provider-action-gate-18', 'E01', 'E05'],
   ['v3-provider-action-gate-19', 'Gate', 'Permit'],
   ['v3-provider-action-gate-20', 'Gate', 'Permit'],
   ['v3-provider-action-gate-21', 'Gate', 'Permit'],

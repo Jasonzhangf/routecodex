@@ -1,0 +1,10 @@
+{
+  "table_id": "usage_map",
+  "kind": "protocol_value_map",
+  "protocols": ["responses", "anthropic"],
+  "description": "usage 字段双向映射（第一批：同名直接映射）。数据来源：responses_to_anthropic.rs:1049-1076。cache_creation/cache_read 等双语义字段（responses cached_tokens 对应 anthropic 两个字段）会造成 inbound 歧义，留待 transform 兜底，不写入本表。",
+  "values": [
+    { "hub": "input_tokens", "responses": "input_tokens", "anthropic": "input_tokens" },
+    { "hub": "output_tokens", "responses": "output_tokens", "anthropic": "output_tokens" }
+  ]
+}

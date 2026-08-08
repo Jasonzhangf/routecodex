@@ -1555,7 +1555,7 @@ auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TES
 supports_streaming = true
 web_search_execution_mode = "metadata_center_local_search"
 web_search_backend = "openai.gpt-search"
-capabilities = ["text"]
+capabilities = ["text", "web_search"]
 
 [providers.openai.models.gpt-search]
 supports_streaming = true

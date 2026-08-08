@@ -6,6 +6,7 @@ use crate::{classify_tool_call, RouteToolCallClassification};
 pub struct RouteActiveTurnSignals {
     pub latest_message_from_user: bool,
     pub has_current_turn_tool_output: bool,
+    pub has_current_turn_web_search: bool,
     pub last_assistant_tool: Option<RouteToolCallClassification>,
     pub current_user_text: String,
 }
@@ -86,11 +87,13 @@ fn extract_message_signals(messages: &[Value]) -> RouteActiveTurnSignals {
     let Some(segment) = active_segment(messages, latest_user_index, latest_role.as_deref()) else {
         return RouteActiveTurnSignals {
             latest_message_from_user: latest_role.as_deref() == Some("user"),
+            has_current_turn_web_search: messages_contain_web_search(messages),
             current_user_text,
             ..Default::default()
         };
     };
     let mut has_current_turn_tool_output = false;
+    let mut has_current_turn_web_search = messages_contain_web_search(messages);
     let mut last_assistant_tool = None;
     for message in segment {
         match message_role(message).as_deref() {
@@ -108,11 +111,23 @@ fn extract_message_signals(messages: &[Value]) -> RouteActiveTurnSignals {
                 }
                 if let Some(content) = message.get("content").and_then(Value::as_array) {
                     for item in content {
+                        if entry_type(item).as_str() == "web_search" {
+                            has_current_turn_web_search = true;
+                        }
                         if is_tool_call_type(entry_type(item).as_str()) {
                             has_current_turn_tool_output = true;
                             if let Some(classification) = classify_call_value(item) {
                                 last_assistant_tool = Some(classification);
                             }
+                        }
+                    }
+                }
+            }
+            Some("user") => {
+                if let Some(content) = message.get("content").and_then(Value::as_array) {
+                    for item in content {
+                        if entry_type(item).as_str() == "web_search" {
+                            has_current_turn_web_search = true;
                         }
                     }
                 }
@@ -123,6 +138,7 @@ fn extract_message_signals(messages: &[Value]) -> RouteActiveTurnSignals {
     RouteActiveTurnSignals {
         latest_message_from_user: latest_role.as_deref() == Some("user"),
         has_current_turn_tool_output,
+        has_current_turn_web_search,
         last_assistant_tool,
         current_user_text,
     }
@@ -138,11 +154,13 @@ fn extract_responses_signals(entries: &[Value]) -> RouteActiveTurnSignals {
     let Some(segment) = active_segment(entries, latest_user_index, latest_role.as_deref()) else {
         return RouteActiveTurnSignals {
             latest_message_from_user: latest_role.as_deref() == Some("user"),
+            has_current_turn_web_search: entries_contain_web_search(entries),
             current_user_text,
             ..Default::default()
         };
     };
     let mut has_current_turn_tool_output = false;
+    let mut has_current_turn_web_search = entries_contain_web_search(entries);
     let mut last_assistant_tool = None;
     for entry in segment {
         let kind = entry_type(entry);
@@ -184,6 +202,7 @@ fn extract_responses_signals(entries: &[Value]) -> RouteActiveTurnSignals {
     RouteActiveTurnSignals {
         latest_message_from_user: latest_role.as_deref() == Some("user"),
         has_current_turn_tool_output,
+        has_current_turn_web_search,
         last_assistant_tool,
         current_user_text,
     }
@@ -225,6 +244,25 @@ fn response_entry_role(entry: &Value) -> Option<String> {
 
 fn is_user_carrier(entry: &Value) -> bool {
     response_entry_role(entry).as_deref() == Some("user")
+}
+
+fn messages_contain_web_search(messages: &[Value]) -> bool {
+    messages.iter().any(|message| {
+        message
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(|content| {
+                content
+                    .iter()
+                    .any(|item| entry_type(item).as_str() == "web_search")
+            })
+    })
+}
+
+fn entries_contain_web_search(entries: &[Value]) -> bool {
+    entries
+        .iter()
+        .any(|entry| entry_type(entry).as_str() == "web_search")
 }
 
 fn entry_type(entry: &Value) -> String {

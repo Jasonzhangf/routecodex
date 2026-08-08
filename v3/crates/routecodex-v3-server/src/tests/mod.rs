@@ -121,6 +121,7 @@ fn test_v3_listener_state_with_debug(
         features: BTreeMap::new(),
         execution: None,
         http_sse_keepalive_ms: 3_000,
+        expose_models: Vec::new(),
     };
     servers.insert(server.id.clone(), server.clone());
     let manifest = Arc::new(V3Config05ManifestPublished {
@@ -700,6 +701,54 @@ fn usage_summary_prints_cache_hit_rate() {
         format_v3_console_usage_summary(Some(&summary)),
         "usage_in=59842 usage_out=822 usage_cache=41984/59842(70.2%) usage_total=60664"
     );
+}
+
+#[test]
+fn usage_summary_adds_separately_reported_cache_reads_to_input_and_total() {
+    let summary = V3RuntimeUsageSummary {
+        input_tokens: Some(184),
+        output_tokens: Some(448),
+        total_tokens: Some(632),
+        cached_tokens: Some(147_840),
+    };
+    assert_eq!(
+        format_v3_console_usage_summary(Some(&summary)),
+        "usage_in=148024 usage_out=448 usage_cache=147840/148024(99.9%) usage_total=148472"
+    );
+    assert_eq!(
+        format_v3_console_human_usage_summary(Some(&summary)).as_deref(),
+        Some("usage_in=148024 usage_out=448 usage_cache=147840/148024(99.9%) usage_total=148472")
+    );
+}
+
+#[test]
+fn usage_summary_does_not_add_cache_already_in_input_tokens() {
+    let summary = V3RuntimeUsageSummary {
+        input_tokens: Some(59_842),
+        output_tokens: Some(822),
+        total_tokens: Some(60_664),
+        cached_tokens: Some(41_984),
+    };
+    assert_eq!(
+        format_v3_console_usage_summary(Some(&summary)),
+        "usage_in=59842 usage_out=822 usage_cache=41984/59842(70.2%) usage_total=60664"
+    );
+}
+
+#[test]
+fn usage_summary_preserves_no_cache_and_missing_usage_fields() {
+    let no_cache = V3RuntimeUsageSummary {
+        input_tokens: Some(12),
+        output_tokens: Some(3),
+        total_tokens: Some(15),
+        cached_tokens: None,
+    };
+    assert_eq!(
+        format_v3_console_usage_summary(Some(&no_cache)),
+        "usage_in=12 usage_out=3 usage_cache=0 usage_total=15"
+    );
+    assert_eq!(format_v3_console_usage_summary(None), "usage=unreported");
+    assert_eq!(format_v3_console_human_usage_summary(None), None);
 }
 
 #[test]
@@ -1608,6 +1657,20 @@ fn response_console_rejects_missing_terminal_summary_instead_of_showing_unreport
     assert!(missing_status_error.contains("missing response_status"));
 
     observability.response_status = Some("completed".to_string());
+    let completed_result = emit_v3_request_complete_console_line(
+        &context,
+        200,
+        &["V3Resp15ClientPayload"],
+        &observability,
+        std::time::Duration::from_millis(1),
+    );
+    assert!(
+        completed_result.is_ok(),
+        "finish_reason missing with response_status=completed must infer stop, not fail: {:?}",
+        completed_result
+    );
+
+    observability.response_status = Some("in_progress".to_string());
     let missing_finish_error = emit_v3_request_complete_console_line(
         &context,
         200,
@@ -1615,11 +1678,10 @@ fn response_console_rejects_missing_terminal_summary_instead_of_showing_unreport
         &observability,
         std::time::Duration::from_millis(1),
     )
-    .expect_err("missing finish_reason must fail the success projection");
+    .expect_err("finish_reason missing with non-inferrable response_status must fail");
     assert!(missing_finish_error.contains("missing finish_reason"));
 
     let log = std::fs::read_to_string(&log_file).unwrap_or_default();
-    assert!(!log.contains("✅ [/v1/responses]"), "{log}");
     assert!(!log.contains("unreported"), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
@@ -2462,6 +2524,7 @@ fn error_projection_appends_human_console_failure_line() {
         features: BTreeMap::new(),
         execution: None,
         http_sse_keepalive_ms: 3_000,
+        expose_models: Vec::new(),
     };
     servers.insert(server.id.clone(), server.clone());
     let manifest = Arc::new(V3Config05ManifestPublished {
@@ -2956,5 +3019,42 @@ async fn relay_sse_closeout_treats_drop_after_semantic_terminal_frame_as_transpo
     assert_eq!(
         *events.lock().unwrap(),
         vec![V3SseConsoleStreamTerminal::Dropped]
+    );
+}
+
+#[test]
+fn console_finish_reason_inferred_when_missing_on_completed_response() {
+    let log_file = test_v3_console_log_file("console-finish-reason-infer");
+    let state = test_v3_listener_state(&log_file, 1);
+    let context = test_v3_console_emission_context(
+        &state,
+        "openai_chat",
+        "/v1/chat/completions",
+        "req-console-finish-reason-infer",
+        &HeaderMap::new(),
+        &serde_json::Value::Null,
+    );
+    let observability = V3RuntimeObservability {
+        routing_group_id: Some("controlled".to_string()),
+        pool_id: Some("default".to_string()),
+        response_status: Some("completed".to_string()),
+        finish_reason: None,
+        timing: Some(V3RuntimeTimingSummary {
+            runtime_total: std::time::Duration::from_millis(2),
+            external: std::time::Duration::from_millis(1),
+            internal: std::time::Duration::from_millis(1),
+        }),
+        ..V3RuntimeObservability::default()
+    };
+    let result = emit_v3_request_complete_console_line(
+        &context,
+        200,
+        &["HubRespOutbound04ClientSemantic"],
+        &observability,
+        std::time::Duration::from_millis(1),
+    );
+    assert!(
+        result.is_ok(),
+        "finish_reason missing with response_status=completed must infer stop, not fail: {result:?}"
     );
 }

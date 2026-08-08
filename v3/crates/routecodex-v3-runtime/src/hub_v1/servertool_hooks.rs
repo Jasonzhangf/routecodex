@@ -118,15 +118,31 @@ pub(crate) fn govern_v3_servertool_request_at_req04(
 pub fn apply_v3_web_search_request_hook_at_req04(
     payload: &mut Value,
 ) -> Result<Option<V3WebSearchCenterState>, V3HubRelayRequestError> {
+    // web_search 工具声明跨协议泛化：Responses `{"type":"web_search"}`、
+    // OpenAI Chat `{"type":"function","function":{"name":"websearch"}}`、
+    // Anthropic `{"name":"web_search"}`。入口协议只决定请求 payload 形态，
+    // Mode B 治理激活（Req04 LocalToolSurfaceActive）对所有入口一致。
     let has_declaration = payload
         .get("tools")
         .and_then(Value::as_array)
         .is_some_and(|tools| {
             tools.iter().any(|tool| {
-                matches!(
+                if matches!(
                     tool.get("type").and_then(Value::as_str),
                     Some("web_search" | "web_search_preview")
-                )
+                ) {
+                    return true;
+                }
+                // OpenAI Chat / Anthropic 形态：工具名 websearch / web_search。
+                let name = tool
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .or_else(|| tool.pointer("/function/name").and_then(Value::as_str));
+                name.is_some_and(|value| {
+                    let value = value.trim();
+                    value.eq_ignore_ascii_case("websearch")
+                        || value.eq_ignore_ascii_case("web_search")
+                })
             })
         });
     if !has_declaration {
@@ -362,7 +378,9 @@ struct V3ReasoningStopToolCall {
 
 /// 从 provider 响应剥离已拦截的本地 websearch call 与同轮 hosted
 /// `web_search_tool_result`（MiniMax hosted search 结果项；结果由
-/// ServerToolCenter 承载，不注入可见 payload）。
+/// ServerToolCenter 承载，不注入可见 payload）。支持 Responses `output[]` /
+/// OpenAI Chat `choices[].message.tool_calls[]` / Anthropic `content[].tool_use`
+/// 三种 provider payload 形态（入口协议决定形态，拦截剥离语义一致）。
 fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
     let mut projected = payload.clone();
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
@@ -387,6 +405,30 @@ fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
                     .and_then(Value::as_str)
                     == Some(call_id);
             !(is_web_search_call || is_hosted_result)
+        });
+    }
+    // OpenAI Chat：choices[].message.tool_calls[] 剥离匹配 call_id 的 function call。
+    if let Some(choices) = projected.get_mut("choices").and_then(Value::as_array_mut) {
+        for choice in choices {
+            let Some(message) = choice.get_mut("message") else {
+                continue;
+            };
+            let Some(tool_calls) = message
+                .get_mut("tool_calls")
+                .and_then(Value::as_array_mut)
+            else {
+                continue;
+            };
+            tool_calls.retain(|item| {
+                item.get("id").and_then(Value::as_str) != Some(call_id)
+            });
+        }
+    }
+    // Anthropic：content[].tool_use 剥离匹配 call_id 的工具调用。
+    if let Some(content) = projected.get_mut("content").and_then(Value::as_array_mut) {
+        content.retain(|item| {
+            !(item.get("type").and_then(Value::as_str) == Some("tool_use")
+                && item.get("id").and_then(Value::as_str) == Some(call_id))
         });
     }
     projected
@@ -1577,6 +1619,60 @@ mod tests {
     }
 
     #[test]
+    fn web_search_request_hook_activates_for_openai_chat_function_declaration() {
+        // chat 入口：client 用 OpenAI Chat 形态 function tool 声明 websearch。
+        let mut payload = json!({
+            "model": "local-model",
+            "messages": [{"role":"user","content":"search the web"}],
+            "tools": [
+                {"type": "function", "function": {"name": "websearch",
+                 "description": "Search the web", "parameters": {"type":"object","properties":{}}}}
+            ]
+        });
+        let state = apply_v3_web_search_request_hook_at_req04(&mut payload)
+            .expect("hook must not fail")
+            .expect("chat websearch function declaration must activate the websearch instance");
+        assert_eq!(
+            state.phase(),
+            V3WebSearchCenterPhase::LocalToolSurfaceActive
+        );
+    }
+
+    #[test]
+    fn web_search_request_hook_activates_for_anthropic_server_tool_declaration() {
+        // anthropic 入口：client 用 Anthropic server tool 声明 web_search。
+        let mut payload = json!({
+            "model": "local-model",
+            "messages": [{"role":"user","content":"search the web"}],
+            "tools": [
+                {"name": "web_search", "description": "Search the web"}
+            ]
+        });
+        let state = apply_v3_web_search_request_hook_at_req04(&mut payload)
+            .expect("hook must not fail")
+            .expect("anthropic web_search declaration must activate the websearch instance");
+        assert_eq!(
+            state.phase(),
+            V3WebSearchCenterPhase::LocalToolSurfaceActive
+        );
+    }
+
+    #[test]
+    fn web_search_request_hook_keeps_idle_for_other_chat_function_names() {
+        // 非 websearch 的普通 function 声明不得误激活。
+        let mut payload = json!({
+            "model": "local-model",
+            "messages": [{"role":"user","content":"hi"}],
+            "tools": [
+                {"type": "function", "function": {"name": "read_file", "parameters": {"type":"object","properties":{}}}}
+            ]
+        });
+        let state =
+            apply_v3_web_search_request_hook_at_req04(&mut payload).expect("hook must not fail");
+        assert!(state.is_none());
+    }
+
+    #[test]
     fn first_local_websearch_tool_call_extracts_and_validates() {
         let payload = json!({
             "output": [
@@ -1640,5 +1736,61 @@ mod tests {
                 .any(|item| item.get("call_id").and_then(Value::as_str) == Some("call_ws_2")),
             "adjacent ordinary tool must remain"
         );
+    }
+
+    #[test]
+    fn strip_local_websearch_tool_call_removes_openai_chat_choices_tool_call() {
+        let payload = json!({
+            "id": "chatcmpl_ws",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "searching",
+                    "tool_calls": [
+                        {
+                            "id": "call_ws_chat",
+                            "type": "function",
+                            "function": {"name": "websearch", "arguments": "{\"query\":\"x\"}"}
+                        },
+                        {
+                            "id": "call_other",
+                            "type": "function",
+                            "function": {"name": "read_file", "arguments": "{}"}
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        });
+        let stripped = strip_local_websearch_tool_call(&payload, "call_ws_chat");
+        let tool_calls = stripped["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .expect("tool_calls array");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0]["id"], "call_other");
+    }
+
+    #[test]
+    fn strip_local_websearch_tool_call_removes_anthropic_tool_use() {
+        let payload = json!({
+            "id": "msg_ws",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "searching"},
+                {
+                    "type": "tool_use",
+                    "id": "call_ws_anthropic",
+                    "name": "web_search",
+                    "input": {"query": "x"}
+                }
+            ],
+            "stop_reason": "tool_use"
+        });
+        let stripped = strip_local_websearch_tool_call(&payload, "call_ws_anthropic");
+        let content = stripped["content"].as_array().expect("content array");
+        assert_eq!(content.len(), 1);
+        assert!(content.iter().all(|item| item.get("type") != Some(&Value::String("tool_use".into()))));
     }
 }

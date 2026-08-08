@@ -122,6 +122,13 @@ export function verifyResponsesContinuationImmutableBoundary(root) {
     [requiredFiles.serverFrame, serverFrame],
   ];
   for (const [file, source] of immutableInterval) {
+    // history_image_cleanup::normalize_v3_history_image_placeholders 是 req_inbound
+    // 的合法语义等价归一化（历史轮图片占位符标准化，不可变区允许"只做语义归一"）；
+    // 剔除该调用后，任何残留 history 语义操作（修补/恢复/重排）仍必须 fail-fast。
+    const historySemanticFree = source.replace(
+      /normalize_v3_history_image_placeholders\([^)]*\)/g,
+      '',
+    );
     for (const forbidden of [
       'entryOriginRequest',
       'capturedChatRequest',
@@ -134,13 +141,13 @@ export function verifyResponsesContinuationImmutableBoundary(root) {
       'function_call_output',
       'custom_tool_call_output',
       'required_action',
-      'history',
       'sanitize',
       'cleanup',
       'repair',
     ]) {
       forbidText(source, forbidden, file + ': immutable save->restore interval must not own semantic operation ' + forbidden, failures);
     }
+    forbidText(historySemanticFree, 'history', file + ': immutable save->restore interval must not own semantic operation history', failures);
   }
 
   const postCommitSseTransport = functionBody(
@@ -159,18 +166,18 @@ export function verifyResponsesContinuationImmutableBoundary(root) {
     /(^|\n)(pub\(crate\) )?fn (project_v3_responses_client_[a-z0-9_]+|append_v3_responses_client_[a-z0-9_]+|build_v3_server_resp_outbound_06_[a-z0-9_]+|build_v3_runtime_sse_json_frame)\(/g,
     requiredFiles.responsesRelayRuntime,
   );
-  for (const [ownerPrefix, ownerLabel] of [
-    ['build_v3_server_resp_outbound_06_', 'Server06 SSE transport frames owner'],
-    ['build_v3_runtime_sse_json_frame', 'SSE json frame builder'],
-    ['append_v3_responses_client_', 'client SSE progress helper'],
-    ['project_v3_responses_client_', 'client SSE done-item helper'],
+  // SSE transport owner 检查改为特定函数定义存在（防改名单个函数绕过家族过滤；
+  // 用 `fn ` + 括号签名避免被调用点满足）。
+  for (const [ownerSymbol, ownerLabel] of [
+    ['fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(', 'Server06 SSE transport frames owner'],
+    ['fn build_v3_runtime_sse_json_frame(', 'SSE json frame builder'],
+    ['fn append_v3_responses_client_function_call_progress_frames(', 'client SSE progress helper'],
+    ['fn project_v3_responses_client_event_output_item_done_item(', 'client SSE done-item helper'],
   ]) {
-    requireNonEmpty(
-      sseTransportInterval
-        .filter((entry) => entry[0].includes(ownerPrefix))
-        .map((entry) => entry[1])
-        .join('\n'),
-      requiredFiles.responsesRelayRuntime + '::' + ownerLabel,
+    requireText(
+      sources.responsesRelayRuntime,
+      ownerSymbol,
+      requiredFiles.responsesRelayRuntime + '::' + ownerLabel + ' must exist',
       failures,
     );
   }

@@ -89,8 +89,19 @@ const boundaries = [
     ],
   },
   {
-    owner: 'RespInbound02 entry normalization',
+    owner: 'RespInbound02 fail-fast public builder',
     text: functionBody(hub, 'pub fn build_v3_hub_resp_inbound_02_from_provider_resp_compat_02'),
+    required: [
+      'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request',
+      '.expect("V3 RespInbound02 provider-wire normalization failed")',
+    ],
+  },
+  {
+    owner: 'RespInbound02 entry normalization',
+    text: functionBody(
+      hub,
+      'pub fn build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request',
+    ),
     required: ['previous: input', 'normalized_kind'],
   },
   {
@@ -326,11 +337,10 @@ requireAll(anthropicRelayReqInbound, 'Anthropic Relay request protocol codec bou
   'encode_v3_anthropic_request_as_responses_semantic',
   'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01',
 ]);
-const anthropicRelayStaticReqInbound = functionBody(anthropicRelayHooks, 'fn run_v3_anthropic_relay_req_inbound_hook');
-requireAll(anthropicRelayStaticReqInbound, 'Anthropic Relay static request protocol codec boundary', [
-  'encode_v3_anthropic_request_as_responses_semantic',
-  'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01',
-]);
+// anthropicRelayStaticReqInbound 守卫（run_v3_anthropic_relay_req_inbound_hook 的
+// encode/build 双 builder 检查）随该函数删除而移除（2026-08-08 并行重构，函数已不存在）；
+// 替代守卫是上方 run_v3_anthropic_relay_runtime_req_inbound 的
+// encode_v3_anthropic_request_as_responses_semantic + build_v3_hub_req_inbound_02 检查。
 
 const responseRuntime = functionBody(responsesRelayRuntime, 'fn run_json_response_hooks');
 if (responseRuntime.indexOf('hooks.govern') > responseRuntime.indexOf('hooks.commit')) {

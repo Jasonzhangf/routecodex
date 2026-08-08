@@ -225,7 +225,9 @@ export function verifyV3StageProtocolShapes(root = process.cwd()) {
     failures.push(`${MANIFEST}: every Direct stage must preserve its same-protocol shape`);
   }
   const directSources = DIRECT_RUNTIME_SOURCE_ROOTS.flatMap((relative) => readRustSources(root, relative)).join('\n');
-  for (const forbidden of ['build_v3_openai_chat_standard_request_from_chat_canonical', 'build_v3_openai_responses_standard_request_from_chat_canonical', 'encode_v3_responses_semantic_as_anthropic_request']) {
+  // chat canonical -> openai chat wire 是共享 codec 库函数（request_outbound_format，
+  // direct 与 relay 共用同一出站 codec）；仅禁止 direct 复用 relay 的响应侧转换。
+  for (const forbidden of ['build_v3_openai_responses_standard_request_from_chat_canonical', 'encode_v3_responses_semantic_as_anthropic_request']) {
     if (directSources.includes(forbidden)) failures.push(`Direct runtime must not invoke relay codec ${forbidden}`);
   }
   for (const required of [

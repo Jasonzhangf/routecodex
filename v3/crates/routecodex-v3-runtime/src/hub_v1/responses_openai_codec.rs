@@ -1,3 +1,4 @@
+use crate::protocol_tables::{map_field as table_map_field, V3TableDirection};
 use serde_json::{json, Map, Value};
 
 pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
@@ -59,6 +60,28 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 for tool in embedded {
                     tools.push(tool.clone());
                 }
+            }
+            "web_search" => {
+                // 当前轮显式 hosted search 声明（Responses input item）→ 并入
+                // canonical tools 数组的 web_search 工具声明（仅保留 openai_chat
+                // 白名单字段；name/query 由模型在推理时构造，不投影——语义等价：
+                // "执行 web 搜索"由出站 Mode B / gpt hosted 投影处理）。
+                let mut tool = Map::new();
+                tool.insert(
+                    "type".to_string(),
+                    Value::String("web_search".to_string()),
+                );
+                for key in [
+                    "search_context_size",
+                    "user_location",
+                    "external_web_access",
+                    "search_content_types",
+                ] {
+                    if let Some(value) = item.get(key) {
+                        tool.insert(key.to_string(), value.clone());
+                    }
+                }
+                tools.push(Value::Object(tool));
             }
             "message" => {
                 let is_assistant_message = item
@@ -294,17 +317,16 @@ fn project_responses_reasoning_to_chat_fields(
         let effort = effort
             .as_str()
             .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_ascii_lowercase)
             .filter(|value| {
                 matches!(
-                    *value,
+                    value.as_str(),
                     "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
                 )
             })
             .ok_or_else(|| "Responses reasoning.effort has an invalid value".to_string())?;
-        request.insert(
-            "reasoning_effort".to_string(),
-            Value::String(effort.to_string()),
-        );
+        request.insert("reasoning_effort".to_string(), Value::String(effort));
     }
     let summary = match (reasoning.get("summary"), reasoning.get("generate_summary")) {
         (Some(summary), Some(generate_summary)) if summary != generate_summary => {
@@ -978,13 +1000,16 @@ fn copy_v3_responses_item_extension_fields(
     item: &Map<String, Value>,
     extension: &mut Map<String, Value>,
 ) {
-    for (source, target) in [
-        ("id", "responses_item_id"),
-        ("status", "responses_status"),
-        ("execution", "responses_execution"),
-    ] {
+    // openai_chat 字段 -> hub 字段（互逆字段对查表；与原手写数组一致）
+    for source in ["id", "status", "execution"] {
         if let Some(value) = item.get(source) {
-            extension.insert(target.to_string(), value.clone());
+            if let Some(target) =
+                table_map_field("openai_chat", source, V3TableDirection::Inbound)
+                    .ok()
+                    .flatten()
+            {
+                extension.insert(target.to_string(), value.clone());
+            }
         }
     }
 }
@@ -1197,8 +1222,19 @@ mod tests {
     use serde_json::{json, Value};
 
     #[test]
-    fn responses_input_image_url_maps_to_openai_chat_image_url_url() {
+    fn responses_reasoning_effort_normalizes_whitespace_and_case_like_chat_side() {
+        // 与 chat 侧一致：effort 大小写/空白不敏感（旧样本 " XHIGH " -> "xhigh"）。
         let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "deepseek-v4-flash",
+            "input": "hi",
+            "reasoning": {"effort": " XHIGH ", "summary": "detailed"}
+        }))
+        .expect("whitespace/case-variant effort must be normalized, not rejected");
+        assert_eq!(request["reasoning_effort"], "xhigh");
+    }
+
+    #[test]
+    fn responses_input_image_url_maps_to_openai_chat_image_url_url() {        let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
             "model": "gpt-5.5",
             "input": [{
                 "type": "message",
@@ -1219,6 +1255,33 @@ mod tests {
             json!({"url":"data:image/png;base64,AAAA","detail":"high"}),
             "OpenAI Chat provider wire must not emit bare string image_url: {request}"
         );
+    }
+
+    #[test]
+    fn responses_web_search_current_turn_item_projects_to_canonical_tools() {
+        // 当前轮显式 web_search 声明（Responses input item）必须并入 canonical
+        // tools（web_search 工具声明）而非拒绝：此前 other 分支报
+        // "unsupported Responses input item type ... web_search" → 真实请求 500
+        // （20260808，4444/5555 /v1/responses + input web_search part）。
+        let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [
+                {"type": "web_search", "query": "latest OpenAI news"},
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "search the web for latest OpenAI news"}]
+                }
+            ]
+        }))
+        .expect("responses web_search current-turn item must project to canonical");
+        let tools = canonical
+            .get("tools")
+            .and_then(Value::as_array)
+            .expect("canonical tools");
+        assert!(tools.iter().any(|tool| {
+            tool.get("type").and_then(Value::as_str) == Some("web_search")
+        }));
     }
 
     #[test]

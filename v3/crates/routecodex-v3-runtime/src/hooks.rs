@@ -1,6 +1,6 @@
 use crate::nodes::{
-    build_v3_responses_direct_11_policy_from_v3_target_10, V3Req04StandardizedResponses,
-    V3ResponsesDirect11Policy,
+    build_v3_responses_direct_11_policy_from_v3_target_10,
+    V3ChatDirect11Policy, V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
 };
 use crate::shared::{project_provider_raw_to_client_payload, V3ProviderResponseProjection};
 use routecodex_v3_error::{
@@ -189,7 +189,7 @@ fn responses_direct_route_hook(
     build_v3_responses_direct_11_policy_from_v3_target_10(selected, standardized)
 }
 
-fn responses_direct_request_projection_hook(
+pub(crate) fn responses_direct_request_projection_hook(
     policy: &V3ResponsesDirect11Policy,
 ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
     let candidate = &policy.target.candidate;
@@ -276,7 +276,7 @@ fn responses_direct_request_projection_hook(
     .map_err(provider_error_source("V3Provider12ResponsesWirePayload"))
 }
 
-fn responses_direct_provider_transport_hook(
+pub(crate) fn responses_direct_provider_transport_hook(
     wire: V3Provider12ResponsesWirePayload,
 ) -> Result<V3Transport13ResponsesHttpRequest, V3Error01SourceRaised> {
     build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)
@@ -291,6 +291,96 @@ fn provider_error_source(
     stage: &'static str,
 ) -> impl FnOnce(V3ProviderError) -> V3Error01SourceRaised {
     move |error| build_v3_provider_error_source(stage, error)
+}
+
+pub(crate) fn chat_direct_request_projection_hook(
+    policy: &V3ChatDirect11Policy,
+) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+    let candidate = &policy.target.candidate;
+    let request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
+        policy.request_body.clone(),
+        candidate,
+    )
+    .map(crate::selected_provider_model_binding::V3SelectedProviderModelBinding::into_payload)
+    .map_err(|reason| {
+        build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ChatDirect11Policy",
+            "selected_provider_model_binding_failed",
+            reason,
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+        )
+    })?;
+    let wire_body = crate::hub_v1::build_v3_openai_chat_standard_request_from_chat_canonical(
+        &request_body,
+    )
+    .map_err(|error| {
+        build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ChatDirect11Policy",
+            "chat_wire_projection_failed",
+            error,
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+        )
+    })?;
+    let secret = match (
+        &candidate.env_name,
+        &candidate.token_file,
+        &candidate.api_key,
+    ) {
+        (Some(name), None, None) => V3ProviderAuthSecretHandle::Environment(name.clone()),
+        (None, Some(path), None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
+        (None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
+        _ => {
+            return Err(build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Provider12ResponsesWirePayload",
+                "provider_auth_handle_missing",
+                format!(
+                    "provider {} selected without auth handle",
+                    candidate.provider_id
+                ),
+                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            ))
+        }
+    };
+    build_v3_provider_12_responses_wire_payload(
+        policy.request_id.clone(),
+        V3ResponsesProviderTarget {
+            provider_id: candidate.provider_id.clone(),
+            provider_type: candidate.provider_type.clone(),
+            base_url: candidate.base_url.clone(),
+            canonical_model_id: candidate.model_id.clone(),
+            wire_model: candidate.wire_model.clone(),
+            auth: V3ProviderAuthHandle {
+                alias: candidate.auth_alias.clone(),
+                secret,
+            },
+            responses_transport: candidate.responses_transport,
+            websocket_v2_url: candidate.websocket_v2_url.clone(),
+            provider_request_cleanup: candidate.provider_request_cleanup.clone(),
+        },
+        wire_body,
+    )
+    .map_err(provider_error_source("V3Provider12ResponsesWirePayload"))
+}
+
+pub(crate) fn chat_direct_provider_transport_hook(
+    wire: V3Provider12ResponsesWirePayload,
+) -> Result<V3Transport13ResponsesHttpRequest, V3Error01SourceRaised> {
+    crate::hub_v1::build_v3_provider_transport_request_for_protocol(
+        crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+        wire,
+    )
+    .map_err(|error| {
+        build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Transport13ResponsesHttpRequest",
+            "chat_provider_transport_error",
+            error,
+            internal_error_code_for_stage("V3Transport13ResponsesHttpRequest"),
+        )
+    })
 }
 
 pub(crate) fn build_v3_provider_error_source(
@@ -524,7 +614,7 @@ fn upstream_request_id_from_headers(
         .map(ToOwned::to_owned)
 }
 
-fn responses_direct_error_hook(
+pub(crate) fn responses_direct_error_hook(
     source: V3Error01SourceRaised,
     scope: V3ErrorActionScope,
     candidates_remaining: usize,

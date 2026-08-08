@@ -145,8 +145,8 @@ const fixtures = [
   {
     name: 'Anthropic Relay inbound codec removed',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs',
-    from: 'let semantic = encode_v3_anthropic_request_as_responses_semantic(payload)?;',
-    to: 'let semantic = payload;',
+    from: 'let payload = encode_v3_anthropic_request_as_responses_semantic(payload)?;',
+    to: 'let payload = payload;',
     diagnostic: /Anthropic Relay request protocol codec boundary|missing encode_v3_anthropic_request_as_responses_semantic/,
   },
 ];

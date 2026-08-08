@@ -36,6 +36,7 @@
 22. **live 聚合重启/验证命令锁**：restart identity 是聚合 RouteCodex server instance/process，端口只是 locator 与健康检查入口。live 验证只允许使用全局安装版本 `routecodex restart --port <locator-port>`，同一 listener PID 集合只请求一次重启，随后验证配置中的全部成员端口 `/health`；禁止逐端口循环 restart，禁止把 repo-local `node dist/cli.js start ...`、`routecodex start ...` 或其他 start/node-dist 口径当作交付验证真相。
 23. **多 worker 协作协议入口**：RouteCodex 项目本地协作真源为 `.agent-collab/PROTOCOL.md`。代码/配置/长 gate/合并前先按该协议刷新 runs、claims、handoff、merge-queue 与 kill switch；细节留在协议和 `.agents/skills/rcc-dev-skills/SKILL.md`，不在本入口展开。
 24. **V2 样本/生成物退役锁**：`samples/` 不得作为版本化测试真源或 runtime 输入。迁移旧 golden/regression 时必须把必跑 fixture 放到 git 可跟踪的 `tests/resources/`（不得放入被 `**/fixtures/` 忽略的路径），gate 缺 fixture 或零样本必须 fail-fast；诊断扫描只读 `~/.routecodex/codex-samples` / `golden_samples`，禁止同步回 repo `samples/`。mainline/wiki/manifest 是 canonical generator 产物时，链级不变量必须在 generator owner 中生成；禁止手工修生成物后留下下一次 render 会复发的漂移。
+25. **占位/流水线修改续写式合规锁**：所有占位修改（如历史图片 `[Image]`）与请求/响应转换链修改，必须满足续写式转换要求——请求 N+1 渲染给 provider 的字节序列必须是 [请求 N 渲染字节] + [assistant 回复] + [新轮次] 的精确扩展；转换链必须确定性、同位置字节稳定、客户端回传的 assistant reasoning 必须原样透传 wire `reasoning_content` 不得裁剪。续写缓存验证必须带 reasoning 回传构造（不带回传的 miss 是测试构造错误）；ds4 缓存机制与验证清单见 `.agents/skills/rcc-dev-skills/references/97-continuation-cache-compliance.md`。
 
 ## Metadata 生命周期硬边界（醒目）
 1. **入口可读**：req_inbound / adapter 可从当前请求读取 metadata，并绑定 requestId、pipelineId、port/serverId、session/conversation scope。

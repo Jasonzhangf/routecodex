@@ -1,14 +1,13 @@
 pub const DEFAULT_ROUTE: &str = "default";
 
-pub const ROUTE_PRIORITY: [&str; 9] = [
+pub const ROUTE_PRIORITY: [&str; 8] = [
     "multimodal",
-    "coding",
-    "longcontext",
     "web_search",
+    "longcontext",
     "thinking",
+    "coding",
     "search",
     "tools",
-    "background",
     DEFAULT_ROUTE,
 ];
 
@@ -19,6 +18,7 @@ pub struct RouteClassifierInput {
     pub latest_message_from_user: bool,
     pub stopless_followup: bool,
     pub has_current_turn_tool_output: bool,
+    pub has_current_turn_web_search: bool,
     pub last_assistant_tool_category: Option<String>,
     pub current_user_text: String,
     pub has_background_keyword: bool,
@@ -60,11 +60,7 @@ pub fn classify_route(input: &RouteClassifierInput) -> RouteClassification {
     let web_search_tool_intent = continuation && last_tool_category == "websearch";
     let other_tool_continuation = continuation && last_tool_category == "other";
     let unknown_tool_continuation = continuation && last_tool_category.is_empty();
-    let current_user_web_search_intent = input.latest_message_from_user
-        && !input.has_current_turn_tool_output
-        && crate::has_web_search_intent(&input.current_user_text);
-    let web_search =
-        web_search_tool_intent || (!input.has_image_attachment && current_user_web_search_intent);
+    let web_search = web_search_tool_intent || input.has_current_turn_web_search;
 
     let evaluation = vec![
         (
@@ -105,11 +101,6 @@ pub fn classify_route(input: &RouteClassifierInput) -> RouteClassification {
             } else {
                 "tools:tool-request-detected"
             },
-        ),
-        (
-            "background",
-            input.has_background_keyword,
-            "background:keywords",
         ),
     ];
 

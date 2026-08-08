@@ -43,13 +43,15 @@ for (const phrase of [
   'build_provider_req_compat_06_from_v3_hub_req_outbound_07',
   'build_v3_provider_req_outbound_08_from_provider_req_compat_06',
   'build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08',
-  'build_v3_openai_chat_transport_09_from_v3_provider_08',
+  'provider_wire_protocol_for_selected_candidate',
+  'build_v3_provider_transport_request_for_protocol',
   'transport.send(transport_request).await',
   'build_v3_provider_resp_inbound_01_raw',
-  'hooks.normalize(resp01)',
+  'build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)',
+  'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request',
   'hooks.govern(resp02',
   'hooks.commit(resp03)',
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04',
+  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload',
   'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05',
   'V3_ERROR_CHAIN_NODE_IDS',
   'SseIncrementalDecoder',
@@ -112,7 +114,8 @@ forbid(runtime, runtimePath, [
   /dynamic[_ -]?hook|libloading|read_dir/i,
   /serde_json::(?:to_value|from_value|to_string)\([^)]*payload/i,
   /into_body_bytes|collect::<Vec<u8>>|bodyText|sse_frames/i,
-  /debug_snapshot|metadata_center|resource_handle|continuation_owner/,
+  /debug_snapshot|resource_handle|continuation_owner/,
+  /["']metadata_center["']\s*:/,
 ]);
 
 if (failures.length) {

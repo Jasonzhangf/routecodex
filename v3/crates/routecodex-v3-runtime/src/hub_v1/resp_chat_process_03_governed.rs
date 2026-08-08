@@ -295,9 +295,9 @@ fn normalize_v3_hub_relay_response(
                 reason: error.to_string(),
             }
         })?;
-    Ok(build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(
-        compat,
-    ))
+    Ok(build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat).map_err(|error| {
+        V3HubRelayResponseError::ProviderCompatFailed { reason: error }
+    })?)
 }
 
 fn govern_v3_hub_relay_response(
@@ -377,7 +377,7 @@ struct V3Resp03ProtocolGovernance {
 fn complete_or_repair_v3_resp03_tool_frames(
     mut input: V3HubRespInbound02Normalized,
 ) -> V3HubRespInbound02Normalized {
-    if input.provider_raw().provider_protocol != V3HubProviderWireProtocol::Responses {
+    if input.semantic_protocol() != V3HubProviderWireProtocol::Responses {
         return input;
     }
     let mut next = input.provider_payload().as_ref().clone();
@@ -509,7 +509,7 @@ fn v3_resp03_string_path(value: &Value, path: &[&str]) -> Option<String> {
 fn build_v3_resp03_protocol_governance(
     input: &V3HubRespInbound02Normalized,
 ) -> Result<V3Resp03ProtocolGovernance, V3HubRelayResponseError> {
-    match input.provider_raw().provider_protocol {
+    match input.semantic_protocol() {
         V3HubProviderWireProtocol::Responses => {
             build_v3_responses_resp03_protocol_governance(input.provider_payload().as_ref())
         }
@@ -713,7 +713,7 @@ fn harvest_v3_think_blocks_at_resp03(
     mut input: V3HubRespInbound02Normalized,
 ) -> V3HubRespInbound02Normalized {
     let mut next = input.provider_payload().as_ref().clone();
-    let changed = match input.provider_raw().provider_protocol {
+    let changed = match input.semantic_protocol() {
         V3HubProviderWireProtocol::Responses => harvest_v3_responses_think_blocks(&mut next),
         V3HubProviderWireProtocol::OpenAiChat => harvest_v3_openai_chat_think_blocks(&mut next),
         V3HubProviderWireProtocol::Gemini => harvest_v3_gemini_think_blocks(&mut next),

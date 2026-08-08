@@ -44,23 +44,32 @@ fn v3_direct_selected_available_for_send(
                 .available)
 }
 
-struct V3DirectProviderFailurePolicyResult {
+pub(crate) struct V3DirectProviderFailurePolicyResult {
     decision: V3Error05ExecutionDecision,
     retry_selected: Option<Box<routecodex_v3_target::V3Target10ConcreteProviderSelected>>,
     event: Option<V3RuntimeProviderFailureObservation>,
 }
 
-struct V3DirectProviderFailurePolicyContext<'ctx, R: V3ProviderAvailabilityReader + ?Sized> {
+pub(crate) struct V3DirectProviderFailurePolicyContext<'ctx, R: V3ProviderAvailabilityReader + ?Sized> {
     failure_session_scope: &'ctx V3ProviderFailureSessionScope,
     provider_health: &'ctx V3ProviderFailureRuntimeHealth,
-    hook_registry: &'ctx V3HookRegistry,
+    run_error: ErrorDecisionFn,
     availability: &'ctx R,
     expanded: Option<&'ctx routecodex_v3_target::V3Target09CandidateSetExpanded>,
     provider_pinned: bool,
     now_epoch_ms: u64,
 }
 
-struct V3DirectProviderFailurePolicyState<'state> {
+pub(crate) type ErrorDecisionFn = fn(
+    V3Error01SourceRaised,
+    V3ErrorActionScope,
+    usize,
+    bool,
+    bool,
+    Option<routecodex_v3_error::V3Error05RecoveryAdmissionWitness>,
+) -> V3Error05ExecutionDecision;
+
+pub(crate) struct V3DirectProviderFailurePolicyState<'state> {
     failed_candidates: &'state mut BTreeSet<String>,
     same_candidate_retries: &'state mut BTreeMap<String, usize>,
     trace: &'state mut Vec<&'static str>,
@@ -102,7 +111,7 @@ fn record_v3_direct_provider_success(
         .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))
 }
 
-async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
+pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
     context: &V3DirectProviderFailurePolicyContext<'_, R>,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     source: V3Error01SourceRaised,
@@ -110,7 +119,7 @@ async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
     state: &mut V3DirectProviderFailurePolicyState<'_>,
 ) -> Result<V3DirectProviderFailurePolicyResult, V3Error01SourceRaised> {
     if matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect) {
-        let decision = context.hook_registry.run_error(
+        let decision = (context.run_error)(
             source,
             V3ErrorActionScope::ProviderInstance {
                 provider_id: selected.candidate.provider_id.clone(),
@@ -236,7 +245,7 @@ async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
     } else {
         None
     };
-    let decision = context.hook_registry.run_error(
+    let decision = (context.run_error)(
         source.clone(),
         provider_scope,
         remaining,
@@ -407,7 +416,7 @@ fn build_v3_direct_provider_failure_observation(
     }
 }
 
-fn publish_v3_direct_provider_failure_event(
+pub(crate) fn publish_v3_direct_provider_failure_event(
     sink: Option<&V3RuntimeProviderFailureEventSink>,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     transport: &str,
@@ -439,7 +448,7 @@ fn external_kind_label(kind: &V3ExternalErrorKind) -> &'static str {
     }
 }
 
-fn build_v3_direct_runtime_observability(
+pub(crate) fn build_v3_direct_runtime_observability(
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     transport: &str,
     provider_status: Option<u16>,
@@ -774,7 +783,7 @@ fn capability_revision_for_pin(
     ))
 }
 
-fn runtime_source(stage: &'static str, error: impl std::fmt::Display) -> V3Error01SourceRaised {
+pub(crate) fn runtime_source(stage: &'static str, error: impl std::fmt::Display) -> V3Error01SourceRaised {
     build_v3_error_01_source_raised(
         V3ErrorSourceKind::RuntimeFailure,
         stage,
@@ -903,7 +912,7 @@ async fn exact_pin_unavailable_output(
     )
 }
 
-fn error_output(
+pub(crate) fn error_output(
     source: V3Error01SourceRaised,
     node_trace: Vec<&'static str>,
     hook_registry: &V3HookRegistry,
@@ -925,7 +934,7 @@ fn projected_error_output(
     projected_error_output_with_observability(projected, node_trace, None)
 }
 
-fn projected_error_output_with_observability(
+pub(crate) fn projected_error_output_with_observability(
     projected: routecodex_v3_error::V3Error06ClientProjected,
     node_trace: Vec<&'static str>,
     observability: Option<V3RuntimeObservability>,
@@ -944,7 +953,7 @@ fn projected_error_output_with_observability(
     }
 }
 
-fn relay_handoff_output(
+pub(crate) fn relay_handoff_output(
     target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: BTreeSet<String>,
@@ -1117,7 +1126,7 @@ fn require_static_hooks(hook_registry: &V3HookRegistry) {
     }
 }
 
-fn direct_runtime_allowed_execution_modes(
+pub(crate) fn direct_runtime_allowed_execution_modes(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
 ) -> Vec<String> {

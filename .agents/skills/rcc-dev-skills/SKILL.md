@@ -158,6 +158,7 @@ description: P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl�
 | 2026-06 lessons | `references/92-lessons-2026-06.md` | 6 月沉淀 |
 | 2026-07 lessons | `references/93-lessons-2026-07.md` | 7 月沉淀 |
 | V3 stopless SOP | `references/95-v3-stopless-sop.md` | V3 stopless 三轮合同、节点检查、provider/client 黑盒、live closeout |
+| 续写式转换合规 | `references/97-continuation-cache-compliance.md` | 占位/流水线修改必须续写式合规：字节稳定、reasoning 回传透传、ds4 缓存机制与验证清单 |
 
 ## 最小使用法
 

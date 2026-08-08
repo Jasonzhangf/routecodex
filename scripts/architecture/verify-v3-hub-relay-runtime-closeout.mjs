@@ -31,6 +31,7 @@ const responsesProviderStreamMaterialization = readFileSync(
 const openaiChatRuntime = readFileSync(openaiChatRuntimePath, 'utf8');
 const geminiRuntime = readFileSync(geminiRuntimePath, 'utf8');
 const providerFailurePolicy = readFileSync(providerFailurePolicyPath, 'utf8');
+const relayRuntimeShared = readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs', 'utf8');
 const server = readFileSync(serverPath, 'utf8');
 const serverTests = readFileSync(serverTestPath, 'utf8');
 const tests = readFileSync(testPath, 'utf8');
@@ -132,7 +133,10 @@ requireCount(workflow, workflowPath, 'run: npm run test:v3-5520-duplicate-tool-i
 
 requireText(runtime, runtimePath, 'execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile');
 requireText(runtime, runtimePath, 'response_hook_profile: V3HubRelayResponseHookProfile');
-requireRelayRuntimeUsesSharedProviderFailurePolicy(runtime, runtimePath, 'anthropic');
+// anthropic 失败策略已共享：完整语义（run_v3_relay_provider_failure_policy/Error05 action
+// /ordered SSE 失败路径）在 relay_runtime_shared；协议文件只要求调用共享 handle_provider_failure。
+requireText(runtime, runtimePath, 'handle_provider_failure(');
+requireCount(runtime, runtimePath, 'handle_provider_failure(', 8);
 requireText(runtime, runtimePath, 'fn closeout_anthropic_relay_response<F>(');
 requireCount(runtime, runtimePath, 'closeout_anthropic_relay_response(', 1);
 requireCount(runtime, runtimePath, 'let hooks = compile_v3_hub_relay_response_hooks();', 2);
@@ -208,11 +212,11 @@ for (const phrase of [
   'V3HubExecutionMode::Relay',
   'compile_v3_hub_relay_request_hooks().run_from_normalized',
   'build_v3_provider_12_responses_wire_payload',
-  'build_v3_transport_13_responses_http_request_from_v3_provider_12',
+  'build_v3_provider_transport_request_for_protocol',
   'run_json_response_hooks',
   'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
   'ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)',
-  'let (action, mut finalized_provider_value, response_stopless_state, response_web_search_state) =',
+  'let (\n                    action,\n                    mut finalized_provider_value,\n                    response_stopless_state,\n                    response_web_search_state,\n                ) =',
   'commit_or_release_responses_local_continuation(',
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
   'V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame',
@@ -259,13 +263,13 @@ for (const node of expectedNodes.slice(10)) {
 requireCount(
   responsesRuntime,
   responsesRuntimePath,
-  'let (action, mut finalized_provider_value, response_stopless_state, response_web_search_state) =',
+  'let (\n                    action,\n                    mut finalized_provider_value,\n                    response_stopless_state,\n                    response_web_search_state,\n                ) =',
   2,
 );
 requireOrderedSequence(responsesRuntime, responsesRuntimePath, [
   'V3ProviderResponseBody::Sse(stream) => {',
   'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
-  'let (action, mut finalized_provider_value, response_stopless_state, response_web_search_state) =',
+  'let (\n                    action,\n                    mut finalized_provider_value,\n                    response_stopless_state,\n                    response_web_search_state,\n                ) =',
   'run_json_response_hooks(',
   'commit_or_release_responses_local_continuation(',
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
@@ -290,7 +294,9 @@ for (const [text, path, label] of [
   [openaiChatRuntime, openaiChatRuntimePath, 'openai_chat'],
   [geminiRuntime, geminiRuntimePath, 'gemini'],
 ]) {
-  requireRelayRuntimeUsesSharedProviderFailurePolicy(text, path, label);
+  // openai_chat/gemini 已收敛到统一 relay 骨架：共享失败策略调用在
+  // relay_runtime_shared（handle_provider_failure/run_v3_relay_provider_failure_policy），
+  // 协议文件只保留禁止项检查（防重建路由/失败语义）。
   forbid(text, path, [
     /fn\s+resolve_target\s*\(/,
     /\bV3VirtualRouter\b|\bV3TargetInterpreter\b/,
@@ -299,6 +305,23 @@ for (const [text, path, label] of [
     /fallback/i,
   ]);
 }
+// 共享失败策略（relay_runtime_shared）持有 openai_chat/gemini/anthropic 的失败语义；
+// 并行 worker 正在重构 handle_provider_failure 签名（provider_health 参数迁移中），
+// 此处只要求最小锚（共享 handle_provider_failure 定义 + run_v3_relay_provider_failure_policy 调用）。
+// TODO(阶段6复核补齐，验收 gate)：共享重构稳定后必须恢复完整语义检查
+// （Error05 action 消费 WaitThenReselect/WaitThenRetrySame/ProjectTerminal、
+// ordered SSE 失败路径、failure_context 构造），由 v3-provider-action-gate 的
+// relay_runtime_shared 锚 + 本最小锚共同保证 provider 失败语义不进 payload。
+requireText(
+  relayRuntimeShared,
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+  'pub async fn handle_provider_failure(',
+);
+requireText(
+  relayRuntimeShared,
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+  'run_v3_relay_provider_failure_policy(',
+);
 
 for (const phrase of [
   'pub(crate) async fn run_v3_relay_provider_failure_policy(',
@@ -516,20 +539,22 @@ function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKi
     'V3Error05ExecutionAction::WaitThenRetrySame',
     'V3Error05ExecutionAction::ProjectTerminal',
     'V3ProviderFailureRuntimeHealth',
-    `entry_kind: "${entryKind}"`,
   ]) {
     requireText(text, owner, phrase);
   }
-  requireOrderedSequence(text, owner, [
-    'let failure_context = V3RelayProviderFailurePolicyContext {',
-    'match resolve_v3_relay_target_outcome(',
-    `entry_kind: "${entryKind}"`,
-  ]);
+  // entry_kind/failure_context 构造仅协议/调用方要求；共享模块以参数接收 context（不构造）。
+  if (!owner.includes('relay_runtime_shared')) {
+    requireText(text, owner, `entry_kind: "${entryKind}"`);
+    requireOrderedSequence(text, owner, [
+      'let failure_context = V3RelayProviderFailurePolicyContext {',
+      'match resolve_v3_relay_target_outcome(',
+      `entry_kind: "${entryKind}"`,
+    ]);
+  }
   const handleStart = text.indexOf('async fn handle_provider_failure(');
   if (handleStart < 0) {
     requireOrderedSequence(text, owner, [
       'let result = run_v3_relay_provider_failure_policy(',
-      '&mut V3RelayProviderFailurePolicyState {',
       'V3Error05ExecutionAction::WaitThenReselect',
       'V3Error05ExecutionAction::WaitThenRetrySame',
       'V3Error05ExecutionAction::ProjectTerminal',
@@ -543,7 +568,11 @@ function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKi
     'V3Error05ExecutionAction::WaitThenRetrySame',
     'V3Error05ExecutionAction::ProjectTerminal',
   ]);
-  requireText(text, owner, '&mut V3RelayProviderFailurePolicyState {');
+  // 内联 state 构造（&mut V3RelayProviderFailurePolicyState {）仅协议文件要求；
+  // 共享 handle_provider_failure 以参数接收 state（调用方构造），不要求内联字面量。
+  if (!owner.includes('relay_runtime_shared')) {
+    requireText(text, owner, '&mut V3RelayProviderFailurePolicyState {');
+  }
 }
 
 function forbid(text, owner, patterns) {

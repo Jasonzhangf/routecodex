@@ -49,16 +49,18 @@ use routecodex_v3_sse::{
 use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
 mod direct_sse_provider_outcome;
 use direct_sse_provider_outcome::{
     wrap_direct_sse_provider_outcome_stream, V3DirectSseProviderOutcome,
 };
+mod v3_direct_protocol_codec;
+pub use v3_direct_protocol_codec::{V3ChatDirectCodec, V3DirectProtocolCodec, V3ResponsesDirectCodec};
 const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
 static DEFAULT_RESPONSES_TRANSPORT: OnceLock<ReqwestResponsesTransport> = OnceLock::new();
-fn default_responses_transport() -> &'static ReqwestResponsesTransport {
+pub fn default_responses_transport() -> &'static ReqwestResponsesTransport {
     DEFAULT_RESPONSES_TRANSPORT.get_or_init(ReqwestResponsesTransport::default)
 }
 include!("kernel/direct_state.rs");
@@ -737,7 +739,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 &V3DirectProviderFailurePolicyContext {
                     failure_session_scope: &direct_failure_session_scope,
                     provider_health: &provider_health,
-                    hook_registry: &hook_registry,
+                    run_error: crate::hooks::responses_direct_error_hook,
                     availability: &availability,
                     expanded: expanded.as_ref(),
                     provider_pinned: previous_response_id.is_some(),
@@ -994,7 +996,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     &V3DirectProviderFailurePolicyContext {
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
-                        hook_registry: &hook_registry,
+                        run_error: crate::hooks::responses_direct_error_hook,
                         availability: &availability,
                         expanded: expanded.as_ref(),
                         provider_pinned: previous_response_id.is_some(),
@@ -1135,7 +1137,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         &V3DirectProviderFailurePolicyContext {
                             failure_session_scope: &direct_failure_session_scope,
                             provider_health: &provider_health,
-                            hook_registry: &hook_registry,
+                            run_error: crate::hooks::responses_direct_error_hook,
                             availability: &availability,
                             expanded: expanded.as_ref(),
                             provider_pinned: previous_response_id.is_some(),
@@ -1576,5 +1578,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
 
 include!("kernel/direct_stopless.rs");
 include!("kernel/direct_runtime_helpers.rs");
+include!("kernel/v3_direct_core.rs");
 #[cfg(test)]
 mod tests;

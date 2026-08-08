@@ -1,0 +1,13 @@
+{
+  "table_id": "role_map",
+  "kind": "protocol_value_map",
+  "protocols": ["responses", "openai_chat", "anthropic"],
+  "description": "消息 role 双向映射。数据来源：responses_to_anthropic.rs:57-100/276-327（system/developer 折叠语义）、request_outbound_format.rs:184/220/992-1021、responses_openai_codec.rs:1182 (v3_openai_chat_wire_role)。缺列 = 该协议原生不支持此 hub role（出站需 transform 折叠；入站不存在）。",
+  "values": [
+    { "hub": "system", "responses": "system", "openai_chat": "system", "anthropic": "system" },
+    { "hub": "developer", "responses": "developer", "openai_chat": "developer" },
+    { "hub": "user", "responses": "user", "openai_chat": "user", "anthropic": "user" },
+    { "hub": "assistant", "responses": "assistant", "openai_chat": "assistant", "anthropic": "assistant" },
+    { "hub": "tool", "responses": "tool", "openai_chat": "tool", "anthropic": "tool" }
+  ]
+}

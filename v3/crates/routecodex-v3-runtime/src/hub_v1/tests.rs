@@ -369,7 +369,7 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
     );
     let resp_compat =
         build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).unwrap();
-    let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(resp_compat);
+    let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(resp_compat).unwrap();
     let resp03 = build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(resp02);
     let resp04 = build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
         resp03,

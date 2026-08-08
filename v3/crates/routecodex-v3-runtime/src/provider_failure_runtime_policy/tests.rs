@@ -591,3 +591,82 @@ fn captured_relay_protocol_admission_does_not_truncate_failure_reselection() {
         selected_key
     );
 }
+
+#[test]
+fn openai_chat_image_url_request_selects_multimodal_pool() {
+    let scope = "chat_image_multimodal";
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "__SCOPE__"
+endpoints = ["openai_chat", "responses"]
+[providers.multimodal]
+type = "anthropic"
+base_url = "http://multimodal.invalid/v1"
+default_model = "mini-m3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
+[providers.multimodal.models.mini-m3]
+wire_name = "mini-m3"
+capabilities = ["text", "tools", "multimodal", "vision"]
+[providers.text]
+type = "openai_chat"
+base_url = "http://text.invalid/v1"
+default_model = "ds-flash"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "TXT_KEY" }] }
+[providers.text.models.ds-flash]
+wire_name = "ds-flash"
+capabilities = ["text", "tools"]
+[route_groups.__SCOPE__.pools.multimodal]
+selection = { strategy = "priority" }
+match = { precedence = 0, required_capabilities = ["multimodal"] }
+targets = [
+  { kind = "provider_model", provider = "multimodal", model = "mini-m3", key = "key1", priority = 1 }
+]
+[route_groups.__SCOPE__.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "text", model = "ds-flash", key = "key1", priority = 1 }
+]
+"#
+    .replace("__SCOPE__", scope);
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&source).expect("chat image multimodal authoring"),
+    )
+    .expect("chat image multimodal manifest");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure_session_scope = V3ProviderFailureSessionScope::new(scope, scope, "image-session")
+        .expect("image session scope");
+    let body = json!({
+        "model": "ds-flash",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what is this?"},
+                {"type": "image_url", "image_url": {"url": "https://example.com/cat.jpg"}}
+            ]
+        }]
+    });
+    let resolution = resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
+        manifest: &manifest,
+        server_id: scope,
+        failure_session_scope: &failure_session_scope,
+        entry_kind: "openai_chat",
+        endpoint_path: "/v1/chat/completions",
+        body: &body,
+        request_local_excluded_candidates: &BTreeSet::new(),
+        provider_health: &health,
+        now_ms: 1,
+        deterministic_sample: 0,
+    });
+    match resolution {
+        V3RelayProviderTargetResolution::Selected(selected) => {
+            assert_eq!(
+                selected.candidate.provider_id, "multimodal",
+                "openai_chat image_url request must select the multimodal pool target"
+            );
+        }
+        _other => panic!("openai_chat image_url request must resolve to a target"),
+    }
+}

@@ -7,6 +7,7 @@ pub mod local_continuation;
 pub mod nodes;
 mod provider_action_gate;
 mod provider_failure_runtime_policy;
+pub mod protocol_tables;
 pub mod remote_continuation;
 pub mod responses_continuation_owner;
 mod runtime_timing;
@@ -22,6 +23,7 @@ pub use foundation::{
 pub use hooks::{register_responses_direct_hooks, V3HookPoint, V3HookRegistry, V3RegisteredHook};
 pub use hub_v1::*;
 pub use kernel::{
+    default_responses_transport, execute_v3_direct_runtime_kernel_core,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel,
@@ -31,11 +33,12 @@ pub use kernel::{
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
     plan_v3_responses_protocol_execution_with_provider_health,
-    project_v3_protocol_execution_plan_failure, V3ResponsesDirectContinuationScope,
-    V3ResponsesDirectContinuationState, V3ResponsesDirectRuntimeOutput,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlScope,
-    V3ResponsesDirectStoplessControlState, V3ResponsesProtocolExecutionPlan,
-    V3ResponsesProtocolExecutionPlanFailure, V3ResponsesProtocolRelayHandoff,
+    project_v3_protocol_execution_plan_failure, V3ChatDirectCodec, V3DirectProtocolCodec,
+    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3ResponsesDirectRuntimeOutput, V3ResponsesDirectRuntimeSharedState,
+    V3ResponsesDirectStoplessControlScope, V3ResponsesDirectStoplessControlState,
+    V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure,
+    V3ResponsesProtocolRelayHandoff,
 };
 pub use local_continuation::*;
 pub use nodes::*;

@@ -301,6 +301,34 @@ function verifyServerSource(server, parsedManifest) {
   for (const endpoint of manifestEndpoints) {
     if (!businessRoutes.has(endpoint)) failures.push(`${files.server}: manifest endpoint ${endpoint} is not exposed by Server`);
   }
+  // runtime_owner_symbol 空洞校验：implemented binding 的 symbol 必须在
+  // runtime_owner_path 文件中真实定义（防 defaults/validate 声明不存在的函数，
+  // 如 openai_chat Direct 曾指向不存在的 execute_v3_openai_chat_direct_server_outcome）。
+  for (const binding of array(parsedManifest?.entry_protocol_bindings)) {
+    if (
+      binding.implementation_status === 'implemented' &&
+      binding.runtime_owner_symbol &&
+      binding.runtime_owner_path
+    ) {
+      const ownerSource = read(binding.runtime_owner_path);
+      if (!ownerSource) {
+        failures.push(
+          `${files.manifest}: ${binding.entry_protocol} runtime_owner_path ${binding.runtime_owner_path} is unreadable`,
+        );
+        continue;
+      }
+      const escaped = binding.runtime_owner_symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const symbolPattern = new RegExp(
+        `(pub\\s+)?(async\\s+)?fn\\s+${escaped}\\s*[<(]`,
+        'u',
+      );
+      if (!symbolPattern.test(ownerSource)) {
+        failures.push(
+          `${files.manifest}: ${binding.entry_protocol} runtime_owner_symbol ${binding.runtime_owner_symbol} is not defined in ${binding.runtime_owner_path}`,
+        );
+      }
+    }
+  }
   requireAnyText(server, files.server, ['entry_protocol_binding_for_endpoint', 'lookup_v3_entry_protocol_binding'], 'binding registry consumer');
   requireAnyText(server, files.server, ['PendingNotImplemented', 'pending_not_implemented'], 'explicit pending_not_implemented status');
   requireText(server, files.server, 'v3.protocol.pending_projection');

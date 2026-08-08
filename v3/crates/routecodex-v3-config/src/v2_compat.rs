@@ -170,6 +170,7 @@ fn compile_v2_servers(
                     endpoints,
                     features: BTreeMap::new(),
                     execution: Some(crate::defaults::default_server_execution()),
+                    expose_models: Vec::new(),
                 },
             ))
         })
@@ -827,9 +828,12 @@ struct V2ProviderModelConfig {
     /// Mode B 显式声明（v2 配置可选；缺省时按 `web_search_direct`
     /// capability 兼容推断 Mode A）。生产 v2 配置通过此字段启用
     /// `metadata_center_local_search` 与编译期 backend binding。
-    #[serde(default)]
+    ///
+    /// 兼容两种写法：`rename_all = "camelCase"` 的 `webSearchExecutionMode`
+    /// 与生产 v2 配置实际使用的 `web_search_execution_mode`（snake_case）。
+    #[serde(default, alias = "web_search_execution_mode")]
     web_search_execution_mode: Option<V3WebSearchExecutionMode>,
-    #[serde(default)]
+    #[serde(default, alias = "web_search_backend")]
     web_search_backend: Option<String>,
     #[serde(default)]
     features: BTreeMap<String, bool>,
@@ -848,5 +852,47 @@ impl V2ProviderModelConfig {
                 V3WebSearchExecutionMode::None
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snake_case_web_search_mode_parses_via_alias() {
+        let parsed: V2ProviderModelConfig = toml::from_str(
+            r#"
+wireName = "MiniMax-M3"
+capabilities = ["web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "MiniMax-M3"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            parsed.web_search_execution_mode().as_str(),
+            "metadata_center_local_search",
+            "snake_case web_search_execution_mode must parse (found {:?})",
+            parsed.web_search_execution_mode()
+        );
+        assert_eq!(
+            parsed.web_search_backend.as_deref(),
+            Some("MiniMax-M3")
+        );
+    }
+
+    #[test]
+    fn camel_case_web_search_mode_still_parses() {
+        let parsed: V2ProviderModelConfig = toml::from_str(
+            r#"
+wireName = "MiniMax-M3"
+webSearchExecutionMode = "metadata_center_local_search"
+webSearchBackend = "MiniMax-M3"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(parsed.web_search_execution_mode().as_str(), "metadata_center_local_search");
+        assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
     }
 }

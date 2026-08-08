@@ -1,0 +1,18 @@
+{
+  "table_id": "finish_reason_map",
+  "kind": "protocol_value_map",
+  "protocols": ["responses", "openai_chat", "anthropic"],
+  "description": "finish_reason / stop_reason 双向映射。数据来源：anthropic_relay_runtime_codec.rs:305-322、openai_chat_codec.rs:217-226/467-474、anthropic_codec.rs:876-900。折叠说明：openai_chat 入站 'stop' 无法区分 hub stop / stop_sequence，故 openai_chat 的 stop_sequence 折叠拆为独立 outbound-only 行；responses 'length'/'stop'/'tool_use'/'tool_calls' 为代码防御性接受的入站值（与原手写 match 兜底一致）。",
+  "values": [
+    { "hub": "stop", "responses": "end_turn", "openai_chat": "stop", "anthropic": "end_turn" },
+    { "hub": "max_tokens", "responses": "max_tokens", "openai_chat": "length", "anthropic": "max_tokens" },
+    { "hub": "tool_calls", "responses": "requires_action", "openai_chat": "tool_calls", "anthropic": "tool_use" },
+    { "hub": "stop_sequence", "responses": "stop_sequence", "anthropic": "stop_sequence" },
+    { "hub": "stop_sequence", "direction": "outbound", "openai_chat": "stop" },
+    { "hub": "content_filter", "responses": "content_filter", "openai_chat": "content_filter", "anthropic": "content_filter" },
+    { "hub": "stop", "direction": "inbound", "responses": "stop" },
+    { "hub": "max_tokens", "direction": "inbound", "responses": "length" },
+    { "hub": "tool_calls", "direction": "inbound", "responses": "tool_use" },
+    { "hub": "tool_calls", "direction": "inbound", "responses": "tool_calls" }
+  ]
+}

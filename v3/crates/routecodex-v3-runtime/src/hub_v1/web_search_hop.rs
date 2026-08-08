@@ -10,11 +10,12 @@
 //! 不重建 entry payload、不重入主模型、不做第二套 VR。
 
 use super::responses_relay_runtime::{
-    build_v3_provider_transport_request_for_protocol, find_responses_tool_output_ids,
-    provider_target, provider_wire_protocol_for_selected_candidate, V3ResponsesRelayRuntimeError,
+    find_responses_tool_output_ids, provider_target, V3ResponsesRelayRuntimeError,
     V3ResponsesRelayStoplessControlExecution, V3ResponsesRelayStoplessControlScope,
     V3ResponsesRelayStoplessControlState,
 };
+use super::{build_v3_provider_transport_request_for_protocol,
+    provider_wire_protocol_for_selected_candidate};
 use super::V3HubRelayResponseError;
 use super::{
     build_provider_req_compat_06_from_v3_hub_req_outbound_07,
@@ -33,9 +34,9 @@ use super::{
     V3WebSearchCenterState,
 };
 use crate::provider_failure_runtime_policy::{
-    resolve_v3_relay_target, resolve_v3_relay_target_outcome,
-    v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
+    resolve_v3_relay_target_outcome, v3_relay_provider_policy_now_epoch_ms,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderTargetResolution,
+    V3RelayProviderTargetResolutionInput,
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{V3ErrorSourceKind, V3ProviderFailureSessionScope};
@@ -436,6 +437,34 @@ pub(crate) fn resolve_web_search_mode_and_backend(
             }
         }
     }
+    // route_group pool 直连（provider_model target，无 forwarder）也按 model
+    // 解析：VR 配置把 multimodal / web_search 能力 pool 直连 MiniMax-M3 时，
+    // Req04 的 Mode B 判定不能依赖 forwarder 存在。能力信号与入口协议无关，
+    // pool 的 match 谓词不含 entry_protocol 时 chat 入口同样命中。
+    for group in manifest.route_groups.values() {
+        for pool in group.pools.values() {
+            for target in &pool.targets {
+                let (Some(provider_id), Some(model_id)) =
+                    (target.provider.as_deref(), target.model.as_deref())
+                else {
+                    continue;
+                };
+                if model_id != model {
+                    continue;
+                }
+                if let Some(model_manifest) = manifest
+                    .providers
+                    .get(provider_id)
+                    .and_then(|provider| provider.models.get(model_id))
+                {
+                    return (
+                        model_manifest.web_search_execution_mode,
+                        model_manifest.web_search_backend_binding.clone(),
+                    );
+                }
+            }
+        }
+    }
     (routecodex_v3_config::V3WebSearchExecutionMode::None, None)
 }
 
@@ -535,6 +564,94 @@ mod web_search_hop_tests {
     }
 
     #[test]
+    fn first_local_websearch_tool_call_detects_openai_chat_choices_shape() {
+        // chat 入口（openai_chat relay）的 provider payload 是 OpenAI Chat 形态
+        // `choices[].message.tool_calls`，web_search 声明经 outbound 投影为本地
+        // websearch function tool；Resp03 拦截必须能识别该形态（当前只识别
+        // Responses `output[]`，此测试为红测，期望绿后拦截生效）。
+        let payload = json!({
+            "id": "chatcmpl_ws",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_ws_chat",
+                        "type": "function",
+                        "function": {
+                            "name": "websearch",
+                            "arguments": "{\"query\":\"RouteCodex docs\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        });
+        let call = first_local_websearch_tool_call(&payload)
+            .expect("OpenAI Chat choices shape must parse");
+        let call = call.expect("OpenAI Chat websearch function call must be detected");
+        assert_eq!(call.call_id, "call_ws_chat");
+        assert_eq!(call.query, "RouteCodex docs");
+    }
+
+    #[test]
+    fn first_local_websearch_tool_call_detects_anthropic_tool_use_shape() {
+        // anthropic 入口（anthropic relay）的 provider payload 是 Anthropic
+        // Messages 形态 `content[].tool_use`，hosted web_search 声明以
+        // name=web_search 的 tool_use 返回；Resp03 拦截必须能识别该形态。
+        let payload = json!({
+            "id": "msg_ws",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": ""},
+                {
+                    "type": "tool_use",
+                    "id": "call_ws_anthropic",
+                    "name": "web_search",
+                    "input": {"query": "RouteCodex docs", "count": 5}
+                }
+            ],
+            "stop_reason": "tool_use"
+        });
+        let call = first_local_websearch_tool_call(&payload)
+            .expect("Anthropic tool_use shape must parse");
+        let call = call.expect("Anthropic web_search tool_use must be detected");
+        assert_eq!(call.call_id, "call_ws_anthropic");
+        assert_eq!(call.query, "RouteCodex docs");
+        assert_eq!(call.count, Some(5));
+    }
+
+    #[test]
+    fn first_local_websearch_tool_call_detects_openai_chat_sse_delta_shape() {
+        // OpenAI-wire SSE chunk 形态：choices[].delta.tool_calls（名称首帧出现，
+        // arguments 跨帧增量）。Mode B 逐帧拦截必须能识别该形态。
+        let payload = json!({
+            "id": "chatcmpl-chunk-1",
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_delta_ws",
+                        "type": "function",
+                        "function": {"name": "websearch", "arguments": ""}
+                    }]
+                },
+                "finish_reason": null
+            }]
+        });
+        let call = first_local_websearch_tool_call(&payload)
+            .expect("SSE delta shape must parse");
+        let call = call.expect("SSE delta websearch tool call must be detected");
+        assert_eq!(call.call_id, "call_delta_ws");
+        assert_eq!(call.query, "");
+    }
+
+    #[test]
     fn extract_web_search_text_result_chat_format() {
         let provider_value = json!({
             "choices": [{"index": 0, "message": {"role": "assistant", "content": "搜索结果摘要"}}]
@@ -623,12 +740,59 @@ mod web_search_hop_tests {
             .expect_err("missing text_result must fail");
         assert!(error.to_string().contains("text_result missing"));
     }
+
+    #[test]
+    fn resolve_web_search_mode_and_backend_matches_route_group_pool_direct_target() {
+        // 4444 真实配置形态：route_group pool 直连 provider_model（无 forwarder）。
+        // Req04 Mode B 判定必须能按 model 解析出 metadata_center_local_search。
+        let manifest = routecodex_v3_config::compile_v3_config_05_manifest(
+            routecodex_v3_config::parse_v3_config_02_authoring(
+                r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+endpoints = ["openai_chat", "responses", "anthropic"]
+[providers.mm]
+type = "anthropic"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
+[providers.mm.models."MiniMax-M3"]
+wire_name = "MiniMax-M3"
+capabilities = ["text", "tools", "multimodal", "vision", "web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "MiniMax-M3"
+[route_groups.g.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
+"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let (mode, backend) = resolve_web_search_mode_and_backend(&manifest, "MiniMax-M3");
+        assert!(
+            mode.is_metadata_center_local_search(),
+            "pool 直连 model 必须解析出 Mode B，got: {mode:?}"
+        );
+        assert_eq!(backend.as_deref(), Some("MiniMax-M3"));
+    }
 }
 
 /// 本地 `websearch` / hosted `web_search` 工具调用（Resp03 拦截提取）。
 #[derive(Debug)]
 pub(crate) struct V3LocalWebSearchToolCall {
     pub(crate) call_id: String,
+    /// 实际匹配的工具名：本地 `websearch`（Mode B 出站 function）或
+    /// hosted `web_search`（anthropic wire server tool）。入口 codec 据此
+    /// 区分"必须本地 hop/拦截"与"可透传客户端执行"。
+    pub(crate) name: String,
     pub(crate) query: String,
     pub(crate) count: Option<u32>,
     pub(crate) recency: Option<String>,
@@ -642,27 +806,67 @@ pub(crate) struct V3LocalWebSearchToolCall {
 pub(crate) fn first_local_websearch_tool_call(
     payload: &Value,
 ) -> Result<Option<V3LocalWebSearchToolCall>, V3HubRelayResponseError> {
-    let Some(output) = payload.get("output").and_then(Value::as_array) else {
-        return Ok(None);
-    };
-    for (index, item) in output.iter().enumerate() {
-        let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
-        if !matches!(
-            item_type,
-            "function_call" | "tool_call" | "custom_tool_call"
-        ) {
-            continue;
+    // 候选 tool call 项跨协议泛化：Responses `output[]`（function_call /
+    // tool_call / custom_tool_call）、OpenAI Chat `choices[].message.tool_calls[]`
+    // （function）、Anthropic `content[].tool_use`。入口协议只决定 provider
+    // payload 形态，web_search 拦截语义（Resp03 Mode B）对所有入口一致。
+    let mut candidates: Vec<(usize, &Value)> = Vec::new();
+    if let Some(output) = payload.get("output").and_then(Value::as_array) {
+        for (index, item) in output.iter().enumerate() {
+            let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+            if matches!(
+                item_type,
+                "function_call" | "tool_call" | "custom_tool_call"
+            ) {
+                candidates.push((index, item));
+            }
         }
+    }
+    if candidates.is_empty() {
+        if let Some(choices) = payload.get("choices").and_then(Value::as_array) {
+            for (choice_index, choice) in choices.iter().enumerate() {
+                // JSON 完成形态：choices[].message.tool_calls。
+                if let Some(tool_calls) = choice
+                    .pointer("/message/tool_calls")
+                    .and_then(Value::as_array)
+                {
+                    for (index, item) in tool_calls.iter().enumerate() {
+                        candidates.push((choice_index * 1000 + index, item));
+                    }
+                }
+                // SSE chunk 形态：choices[].delta.tool_calls（OpenAI wire 逐帧
+                // 事件）。名称通常在首帧出现，arguments 跨帧增量——按 name
+                // 判定即可拦截（call_id 缺失时由校验报错）。
+                if let Some(tool_calls) = choice
+                    .pointer("/delta/tool_calls")
+                    .and_then(Value::as_array)
+                {
+                    for (index, item) in tool_calls.iter().enumerate() {
+                        candidates.push((choice_index * 1000 + index, item));
+                    }
+                }
+            }
+        }
+    }
+    if candidates.is_empty() {
+        if let Some(content) = payload.get("content").and_then(Value::as_array) {
+            for (index, item) in content.iter().enumerate() {
+                if item.get("type").and_then(Value::as_str) == Some("tool_use") {
+                    candidates.push((index, item));
+                }
+            }
+        }
+    }
+    for (index, item) in candidates {
         let name = item
             .get("name")
             .and_then(Value::as_str)
             .or_else(|| item.pointer("/function/name").and_then(Value::as_str));
-        if !name.is_some_and(|value| {
-            let value = value.trim();
-            value.eq_ignore_ascii_case("websearch") || value.eq_ignore_ascii_case("web_search")
-        }) {
-            continue;
-        }
+        let matched_name = match name.map(str::trim) {
+            Some(value) if value.eq_ignore_ascii_case("websearch") => "websearch",
+            Some(value) if value.eq_ignore_ascii_case("web_search") => "web_search",
+            _ => continue,
+        };
         let call_id = item
             .get("call_id")
             .or_else(|| item.get("id"))
@@ -674,26 +878,40 @@ pub(crate) fn first_local_websearch_tool_call(
                 reason: "websearch tool call missing call_id",
             })?
             .to_string();
-        let raw_arguments = item
+        let arguments = match item
             .get("arguments")
             .or_else(|| item.get("input"))
             .or_else(|| item.pointer("/function/arguments"))
-            .and_then(Value::as_str)
-            .ok_or(V3HubRelayResponseError::MalformedToolCall {
-                index,
-                reason: "websearch tool call missing arguments",
-            })?;
-        let arguments = raw_arguments.parse::<Value>().map_err(|_| {
-            V3HubRelayResponseError::MalformedToolCall {
-                index,
-                reason: "websearch tool call arguments must be valid JSON",
+        {
+            // Responses / OpenAI Chat：arguments 是 JSON 字符串。SSE chunk
+            // 首帧 arguments 常为空串（跨帧增量），按空对象处理——拦截判定
+            // 只依赖 name + call_id，不要求首帧已含完整参数。
+            Some(Value::String(raw)) if raw.trim().is_empty() => json!({}),
+            Some(Value::String(raw)) => raw.parse::<Value>().map_err(|_| {
+                V3HubRelayResponseError::MalformedToolCall {
+                    index,
+                    reason: "websearch tool call arguments must be valid JSON",
+                }
+            })?,
+            // Anthropic tool_use：input 是结构化对象。
+            Some(value @ (Value::Object(_) | Value::Array(_))) => value.clone(),
+            _ => {
+                return Err(V3HubRelayResponseError::MalformedToolCall {
+                    index,
+                    reason: "websearch tool call missing arguments",
+                })
             }
-        })?;
+        };
         let query = arguments
             .get("query")
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
+            // SSE chunk 首帧可无 query（arguments 空对象，跨帧增量）；此时
+            // 仅完成 name 拦截判定，query 由后续帧补齐。
+            .or_else(|| {
+                (arguments.as_object().is_some_and(|row| row.is_empty())).then_some("")
+            })
             .ok_or(V3HubRelayResponseError::MalformedToolCall {
                 index,
                 reason: "websearch tool call requires a non-empty query",
@@ -720,6 +938,7 @@ pub(crate) fn first_local_websearch_tool_call(
             .unwrap_or_default();
         return Ok(Some(V3LocalWebSearchToolCall {
             call_id,
+            name: matched_name.to_string(),
             query,
             count,
             recency,

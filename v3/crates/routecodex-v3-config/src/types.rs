@@ -446,6 +446,9 @@ pub struct V3ServerAuthoringConfig {
     pub features: BTreeMap<String, bool>,
     #[serde(default)]
     pub execution: Option<V3ServerExecutionAuthoringConfig>,
+    /// 对外 /v1/models 暴露白名单（visible_id）；空 = 全量暴露（兼容现有）。
+    #[serde(default)]
+    pub expose_models: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -846,6 +849,17 @@ pub enum V3DirectModelResolution {
     },
 }
 
+/// An opaque capability candidate: a provider/model pair whose model
+/// declaration lists `capability`. Extracted by the Config layer so the
+/// Virtual Router can build implicit capability pools without interpreting
+/// provider internals (base URLs, auth, wire names) itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3CapabilityModelCandidate {
+    pub provider: String,
+    pub model: String,
+    pub aliases: Vec<String>,
+}
+
 impl V3Config05ManifestPublished {
     /// Splits `requested` on its first `.` and resolves the leading segment
     /// against enabled providers, mapping model aliases to the canonical id.
@@ -877,6 +891,34 @@ impl V3Config05ManifestPublished {
                 model_id: model_part.to_string(),
             },
         }
+    }
+
+    /// Builds an opaque capability → model-candidate index from enabled
+    /// provider model declarations. The Virtual Router consumes this index to
+    /// construct implicit capability pools without interpreting provider
+    /// internals itself.
+    pub fn capability_model_candidates(
+        &self,
+    ) -> BTreeMap<String, Vec<V3CapabilityModelCandidate>> {
+        let mut index: BTreeMap<String, Vec<V3CapabilityModelCandidate>> = BTreeMap::new();
+        for provider in self.providers.values() {
+            if !provider.enabled {
+                continue;
+            }
+            for (model_id, model) in &provider.models {
+                for capability in &model.capabilities {
+                    index
+                        .entry(capability.clone())
+                        .or_default()
+                        .push(V3CapabilityModelCandidate {
+                            provider: provider.id.clone(),
+                            model: model_id.clone(),
+                            aliases: model.aliases.clone(),
+                        });
+                }
+            }
+        }
+        index
     }
 }
 
@@ -937,6 +979,8 @@ pub struct V3ServerManifest {
     pub features: BTreeMap<String, bool>,
     pub execution: Option<V3ServerExecutionManifest>,
     pub http_sse_keepalive_ms: u64,
+    /// 对外 /v1/models 暴露白名单（visible_id）；空 = 全量暴露。
+    pub expose_models: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -54,7 +54,6 @@ pub async fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(
             reason: error.to_string(),
         })?;
     input.payload = V3HubResponsePayload(Arc::new(payload));
-    input.provider_protocol = super::V3HubProviderWireProtocol::Responses;
     build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(input)
 }
 

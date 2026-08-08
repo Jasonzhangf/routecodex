@@ -115,6 +115,8 @@ function checkRootLayout() {
     'CACHE.md',
     'bin',
     'lib',
+    '.reasonix',
+    'reasonix.toml',
   ]);
   const temporaryLegacyRoots = new Set([]);
   const allowed = new Set([

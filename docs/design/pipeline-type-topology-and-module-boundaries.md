@@ -177,6 +177,18 @@ ServerReqInbound01ClientRaw
 - owning module：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs`。
 - 禁止：吞非法工具顺序、伪造工具结果、跨请求恢复上下文。
 
+### 3.2.1 历史图片统一占位清理（已登记唯一 payload 清理例外）
+
+- 规则（v5，2026-08-08 登记）：仅允许把**历史轮次**（最后一个 user carrier 之外）的图片 part 原位替换为统一固定占位符 `[Image]`——chat wire `{"type":"text","text":"[Image]"}` / responses wire `{"type":"input_text","text":"[Image]"}` / gemini parts `{"text":"[Image]"}`；无编号、无前缀、同位置永远同 token；**当前轮图片必须保留**（驱动 multimodal 路由）。
+- 唯一实现：`v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs` 的 `normalize_v3_history_image_placeholders`（纯函数、无状态）。
+- 唯一调用点（各入口标准化路径各一处 + route facts 幂等清理，禁止再新增）：
+  1. Relay（responses/anthropic/gemini/openai_chat 入口共享）：`build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01`（ReqInbound02 各 canonical 分支对最终 payload 执行一次）；
+  2. Direct（responses 入口）：`build_v3_req_04_standardized_responses_from_v3_server_03`（`previous_response_id` 提取后对 body 执行一次）；
+  3. Direct（openai_chat 入口）：`build_v3_chat_req_04_standardized_from_v3_server_03`（chat 直通标准化后对 body 执行一次，与 responses direct 对齐）；
+  4. Route facts builder（诊断/dry-run/测试入口）：`build_v3_router_request_facts_for_entry` 对 body 做幂等清理后再判定（与 live 路径 cleaned payload 保持一致，禁止 dry-run/tests 与真实路由发散）。
+- 当前轮判定与 Virtual Router `extract_active_turn_signals` 对齐：最后一个 `role=="user"`（responses 无 role 时按 `input_text`/`text`/`output_text` 类型判定；gemini 按 `role=="user"` content）；`function_call_output`/tool 结果不是 user carrier，不得把真实当前轮误判为历史。
+- 边界：Responses continuation 恢复发生在 ReqChatProcess restore（本清理在其之前），恢复的已保存上下文若含历史图片不覆盖，属已记录边界。
+
 ### 3.3 HubReqChatProcess03Governed
 
 - 作用：请求侧工具治理唯一入口，包括工具声明、tool result 顺序、servertool / MCP / apply_patch 治理。

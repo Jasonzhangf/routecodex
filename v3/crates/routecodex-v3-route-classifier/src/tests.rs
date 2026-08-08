@@ -155,10 +155,10 @@ fn shared_route_priority_matches_v2() {
         last_assistant_tool_category: Some("coding".into()),
         ..Default::default()
     });
-    assert_eq!(coding_long.route_name, "coding");
+    assert_eq!(coding_long.route_name, "longcontext");
     assert_eq!(
         coding_long.candidates,
-        vec!["coding", "longcontext", "default"]
+        vec!["longcontext", "default"]
     );
 
     for category in ["thinking", "search", "other"] {
@@ -174,7 +174,7 @@ fn shared_route_priority_matches_v2() {
 }
 
 #[test]
-fn metadata_attachment_wins_and_web_search_current_evidence_is_route() {
+fn metadata_attachment_wins_and_web_search_tool_evidence_is_route() {
     let multimodal = classify_route(&RouteClassifierInput {
         has_image_attachment: true,
         latest_message_from_user: true,
@@ -183,14 +183,13 @@ fn metadata_attachment_wins_and_web_search_current_evidence_is_route() {
     });
     assert_eq!(multimodal.route_name, "multimodal");
 
-    let web = classify_route(&RouteClassifierInput {
+    let prose_only = classify_route(&RouteClassifierInput {
         latest_message_from_user: true,
         current_user_text: "search the web for current docs".into(),
         ..Default::default()
     });
-    assert_eq!(web.route_name, "web_search");
-    assert_eq!(web.candidates, vec!["web_search", "default"]);
-    assert_eq!(web.required_capabilities, vec!["web_search"]);
+    assert_eq!(prose_only.route_name, "thinking");
+    assert!(prose_only.required_capabilities.is_empty());
 
     let web_call = classify_route(&RouteClassifierInput {
         has_current_turn_tool_output: true,
@@ -200,6 +199,23 @@ fn metadata_attachment_wins_and_web_search_current_evidence_is_route() {
     assert_eq!(web_call.route_name, "web_search");
     assert_eq!(web_call.candidates, vec!["web_search", "default"]);
     assert_eq!(web_call.required_capabilities, vec!["web_search"]);
+}
+
+#[test]
+fn explicit_web_search_part_in_current_user_turn_is_routed_to_web_search() {
+    // 用户轮显式 web_search part（Responses input 数组 / chat content part）必须产生
+    // web_search 能力。此前只在 continuation（websearch 工具延续）判定——用户轮
+    // 显式 web_search 请求落 default（openai_chat）→ openai_chat encoding 不支持
+    // web_search part → 500（真实故障 20260808）。
+    let classified = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        has_current_turn_web_search: true,
+        ..Default::default()
+    });
+    assert_eq!(classified.route_name, "web_search");
+    assert!(classified
+        .required_capabilities
+        .contains(&"web_search".to_string()));
 }
 
 #[test]

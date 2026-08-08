@@ -823,6 +823,19 @@ pub(super) fn responses_tool_as_anthropic_tool(
     ) {
         return responses_web_search_tool_as_anthropic_tool(tool);
     }
+    // Mode B 本地 websearch function（chat 入口 client 声明
+    // `{"type":"function","function":{"name":"websearch"}}`，outbound 投影保留
+    // 为本地 function tool）在 Anthropic wire 上必须以官方 server tool 名
+    // `web_search` 编码——MiniMax 等 Anthropic provider 不识别 `websearch`，
+    // 否则 provider 收不到搜索工具（表现为"我没有 websearch 工具"纯文本回答）。
+    if tool
+        .get("name")
+        .or_else(|| tool.get("function").and_then(|f| f.get("name")))
+        .and_then(Value::as_str)
+        .is_some_and(|name| name.trim().eq_ignore_ascii_case("websearch"))
+    {
+        return responses_web_search_tool_as_anthropic_tool(tool);
+    }
     let mut output = Map::new();
     let name = tool
         .get("name")
@@ -947,7 +960,7 @@ fn responses_custom_tool_as_anthropic_compatibility_tool(
     }))
 }
 
-pub(super) fn responses_web_search_tool_as_anthropic_tool(
+pub(crate) fn responses_web_search_tool_as_anthropic_tool(
     tool: &Map<String, Value>,
 ) -> Result<Value, V3AnthropicCodecError> {
     let mut output = Map::from_iter([
@@ -984,11 +997,30 @@ pub(super) fn responses_web_search_tool_as_anthropic_tool(
 pub(super) fn responses_tool_choice_as_anthropic_tool_choice(
     value: &Value,
 ) -> Result<Value, V3AnthropicCodecError> {
+    // responses tool_choice type -> hub -> anthropic type（查表；未命中与原 match 一致报错/透传）
+    let responses_to_anthropic_type = |responses_type: &str| -> Option<&'static str> {
+        let hub =
+            crate::protocol_tables::map_value(
+                crate::protocol_tables::V3TableKind::ToolChoice,
+                "responses",
+                responses_type,
+                crate::protocol_tables::V3TableDirection::Inbound,
+            )
+            .ok()
+            .flatten()?;
+        crate::protocol_tables::map_value(
+            crate::protocol_tables::V3TableKind::ToolChoice,
+            "anthropic",
+            hub,
+            crate::protocol_tables::V3TableDirection::Outbound,
+        )
+        .ok()
+        .flatten()
+    };
     if let Some(choice) = value.as_str() {
-        return match choice {
-            "auto" | "none" => Ok(json!({"type":choice})),
-            "required" => Ok(json!({"type":"any"})),
-            _ => Err(V3AnthropicCodecError::MalformedField {
+        return match responses_to_anthropic_type(choice) {
+            Some(anthropic_type) => Ok(json!({"type": anthropic_type})),
+            None => Err(V3AnthropicCodecError::MalformedField {
                 field: "tool_choice",
             }),
         };
@@ -1007,14 +1039,16 @@ pub(super) fn responses_tool_choice_as_anthropic_tool_choice(
                     .and_then(|function| function.get("name"))
             })
             .cloned()
-            .map(|name| json!({"type":"tool","name":name}))
+            .map(|name| {
+                json!({"type": responses_to_anthropic_type("tool").unwrap_or("tool"), "name": name})
+            })
             .ok_or(V3AnthropicCodecError::MalformedField {
                 field: "tool_choice.name",
             })?,
         Some("auto") | Some("any") | Some("none") => json!({
             "type": object.get("type").cloned().unwrap_or(Value::Null)
         }),
-        Some("required") => json!({"type":"any"}),
+        Some("required") => json!({"type": responses_to_anthropic_type("required").unwrap_or("any")}),
         _ => {
             return Err(V3AnthropicCodecError::MalformedField {
                 field: "tool_choice",
@@ -1093,3 +1127,33 @@ mod tests {
         assert_eq!(input, json!({"input":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"}));
     }
 }
+
+    #[test]
+    fn websearch_function_tool_maps_to_anthropic_hosted_web_search_server_tool() {
+        // chat 入口 client 声明 `{"type":"function","function":{"name":"websearch"}}`，
+        // Anthropic wire 必须以官方 hosted server tool（web_search_20250305）编码，
+        // 否则 MiniMax 等 provider 收不到搜索工具。
+        let tool = json!({
+            "type": "function",
+            "function": {
+                "name": "websearch",
+                "description": "Search the web",
+                "parameters": {"type":"object","properties":{"query":{"type":"string"}}}
+            }
+        });
+        let anthropic =
+            responses_tool_as_anthropic_tool(tool.as_object().unwrap()).expect("map must succeed");
+        assert_eq!(anthropic["type"], "web_search_20250305");
+        assert_eq!(anthropic["name"], "web_search");
+        // 大小写不敏感：WebSearch / WEBSEARCH 同样映射。
+        let upper = json!({"type":"function","function":{"name":"WEBSEARCH"}});
+        let mapped =
+            responses_tool_as_anthropic_tool(upper.as_object().unwrap()).expect("map must succeed");
+        assert_eq!(mapped["name"], "web_search");
+        // web_search 名（hosted 语义）保持官方 server tool。
+        let hosted = json!({"type":"web_search"});
+        let mapped =
+            responses_tool_as_anthropic_tool(hosted.as_object().unwrap()).expect("map must succeed");
+        assert_eq!(mapped["name"], "web_search");
+        assert_eq!(mapped["type"], "web_search_20250305");
+    }

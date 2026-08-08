@@ -1,4 +1,5 @@
 use super::{project_v3_responses_reasoning_item_as_anthropic_content, V3AnthropicCodecError};
+use crate::protocol_tables::{map_value as table_map_value, V3TableDirection, V3TableKind};
 use serde_json::{json, Value};
 
 pub fn project_v3_responses_json_as_anthropic_message(
@@ -309,15 +310,33 @@ fn responses_stop_reason_as_anthropic_stop_reason(
     if has_tool {
         return "tool_use";
     }
-    match object.get("finish_reason").and_then(Value::as_str) {
-        Some("max_tokens" | "length") => "max_tokens",
-        Some("stop_sequence") => "stop_sequence",
-        Some("tool_calls" | "requires_action") => "tool_use",
-        Some("stop" | "end_turn") => "end_turn",
-        _ => match object.get("status").and_then(Value::as_str) {
-            Some("incomplete") => "max_tokens",
-            _ => "end_turn",
-        },
+    // responses finish_reason -> hub -> anthropic（查表；未命中走 status 分支，与原 match 兜底一致）
+    if let Some(value) = object.get("finish_reason").and_then(Value::as_str) {
+        if let Some(hub) = table_map_value(
+            V3TableKind::FinishReason,
+            "responses",
+            value,
+            V3TableDirection::Inbound,
+        )
+        .ok()
+        .flatten()
+        {
+            if let Some(anthropic_value) = table_map_value(
+                V3TableKind::FinishReason,
+                "anthropic",
+                hub,
+                V3TableDirection::Outbound,
+            )
+            .ok()
+            .flatten()
+            {
+                return anthropic_value;
+            }
+        }
+    }
+    match object.get("status").and_then(Value::as_str) {
+        Some("incomplete") => "max_tokens",
+        _ => "end_turn",
     }
 }
 

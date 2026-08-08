@@ -49,9 +49,9 @@ const mutations = [
     mutateSource: (tmp) => {
       const helperPath = path.join(tmp, 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs');
       const source = fs.readFileSync(helperPath, 'utf8');
-      fs.writeFileSync(helperPath, `${source}\n// build_v3_openai_chat_standard_request_from_chat_canonical\n`);
+      fs.writeFileSync(helperPath, `${source}\n// encode_v3_responses_semantic_as_anthropic_request\n`);
     },
-    expected: /Direct runtime must not invoke relay codec build_v3_openai_chat_standard_request_from_chat_canonical/,
+    expected: /Direct runtime must not invoke relay codec encode_v3_responses_semantic_as_anthropic_request/,
   },
   {
     name: 'direct-relay-handoff-drops-request-local-exclusions',

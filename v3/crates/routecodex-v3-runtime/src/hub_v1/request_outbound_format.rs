@@ -1,4 +1,7 @@
 use super::V3HubEntryProtocol;
+use crate::protocol_tables::{
+    map_field as table_map_field, map_value as table_map_value, V3TableDirection, V3TableKind,
+};
 use serde_json::{json, Map, Value};
 
 use super::request_outbound_builtin_tool_projection::{
@@ -12,7 +15,6 @@ use super::request_outbound_metadata::{
 use super::request_outbound_tool_id::compact_tool_id;
 use std::collections::BTreeSet;
 
-#[cfg(test)]
 pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
     payload: &Value,
 ) -> Result<Value, String> {
@@ -372,9 +374,52 @@ fn apply_outbound_projection_transforms(
             validate_openai_metadata(projected, "openai_chat")?;
             project_openai_chat_reasoning_summary_policy(projected)?;
         }
-        V3OutboundTargetProtocol::Anthropic => {}
+        V3OutboundTargetProtocol::Anthropic => {
+            project_chat_canonical_web_search_tools_to_anthropic_wire(projected)?;
+        }
         V3OutboundTargetProtocol::Gemini => {
             consume_gemini_transport_intent(projected)?;
+        }
+    }
+    Ok(())
+}
+
+/// chat canonical → Anthropic wire 的 web_search 工具投影：
+/// canonical tools 中的标准 hosted search 声明（`{"type":"web_search"}`，
+/// 含 responses web_search item 转换形状）与 Mode B 本地 websearch function
+/// （name=websearch）必须编码为 Anthropic 官方 hosted server tool
+/// `{"type":"web_search_20250305","name":"web_search"}`——否则 MiniMax 等
+/// Anthropic provider 不识别（表现为"我没有 web search 工具"纯文本回答，
+/// 真实故障 20260808）。复用 responses_to_anthropic 的既有投影。
+fn project_chat_canonical_web_search_tools_to_anthropic_wire(
+    projected: &mut Value,
+) -> Result<(), String> {
+    let Some(root) = projected.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(tools) = root.get_mut("tools") else {
+        return Ok(());
+    };
+    let Some(tools) = tools.as_array_mut() else {
+        return Ok(());
+    };
+    for tool in tools.iter_mut() {
+        let Some(row) = tool.as_object_mut() else {
+            continue;
+        };
+        let kind = row.get("type").and_then(Value::as_str).unwrap_or("");
+        let name = row
+            .get("name")
+            .or_else(|| row.get("function").and_then(|f| f.get("name")))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let is_web_search_declaration = matches!(kind, "web_search" | "web_search_preview")
+            || name.trim().eq_ignore_ascii_case("websearch")
+            || name.trim().eq_ignore_ascii_case("web_search");
+        if is_web_search_declaration {
+            let converted = super::anthropic_codec::responses_web_search_tool_as_anthropic_tool(row)
+                .map_err(|error| format!("anthropic web_search tool projection failed: {error}"))?;
+            *tool = converted;
         }
     }
     Ok(())
@@ -839,149 +884,15 @@ fn collect_unmapped_outbound_field_paths(
 fn allowed_top_level_outbound_fields(
     target_protocol: V3OutboundTargetProtocol,
 ) -> BTreeSet<&'static str> {
-    let fields: &[&str] = match target_protocol {
-        V3OutboundTargetProtocol::OpenAiChat => &[
-            "model",
-            "messages",
-            "tools",
-            "tool_choice",
-            "instructions",
-            "temperature",
-            "top_p",
-            "top_k",
-            "max_completion_tokens",
-            "max_tokens",
-            "max_output_tokens",
-            "logprobs",
-            "top_logprobs",
-            "stream",
-            "stream_options",
-            "parallel_tool_calls",
-            "user",
-            "logit_bias",
-            "seed",
-            "response_format",
-            "metadata",
-            "client_metadata",
-            "stop",
-            "n",
-            "frequency_penalty",
-            "presence_penalty",
-            "reasoning_effort",
-            "reasoning_summary_policy",
-            "audio",
-            "modalities",
-            "moderation",
-            "prediction",
-            "prompt_cache_key",
-            "prompt_cache_options",
-            "prompt_cache_retention",
-            "safety_identifier",
-            "service_tier",
-            "store",
-            "verbosity",
-            "web_search_options",
-            "routecodex_chat_extension",
-            "function_call",
-            "functions",
-        ],
-        V3OutboundTargetProtocol::OpenAiResponses => &[
-            "model",
-            "input",
-            "messages",
-            "tools",
-            "tool_choice",
-            "instructions",
-            "temperature",
-            "top_p",
-            "top_k",
-            "max_output_tokens",
-            "max_completion_tokens",
-            "max_tokens",
-            "top_logprobs",
-            "logprobs",
-            "stream",
-            "stream_options",
-            "parallel_tool_calls",
-            "user",
-            "logit_bias",
-            "seed",
-            "response_format",
-            "include",
-            "reasoning",
-            "metadata",
-            "stop",
-            "safety_identifier",
-            "moderation",
-            "client_metadata",
-            "reasoning_effort",
-            "reasoning_summary_policy",
-            "reasoning_context_policy",
-            "reasoning_mode",
-            "service_tier",
-            "prompt_cache_key",
-            "prompt_cache_retention",
-            "store",
-            "background",
-            "conversation",
-            "max_tool_calls",
-            "prompt",
-            "text",
-            "truncation",
-            "web_search_options",
-            "routecodex_chat_extension",
-        ],
-        V3OutboundTargetProtocol::Anthropic => &[
-            "model",
-            "messages",
-            "input",
-            "system",
-            "instructions",
-            "user",
-            "tools",
-            "tool_choice",
-            "temperature",
-            "top_p",
-            "top_k",
-            "max_tokens",
-            "max_completion_tokens",
-            "max_output_tokens",
-            "stream",
-            "stop",
-            "stop_sequences",
-            "metadata",
-            "user",
-            "reasoning_effort",
-            "reasoning_budget_tokens",
-            "reasoning_summary_policy",
-            "reasoning_context_policy",
-            "reasoning_mode",
-            "reasoning_include_thoughts",
-            "reasoning_display_policy",
-            "reasoning_thinking_mode",
-            "client_metadata",
-            "parallel_tool_calls",
-            "response_format",
-            "context_management",
-            "output_config",
-            "routecodex_chat_extension",
-        ],
-        V3OutboundTargetProtocol::Gemini => &[
-            "model",
-            "messages",
-            "input",
-            "contents",
-            "systemInstruction",
-            "tools",
-            "toolConfig",
-            "generationConfig",
-            "safetySettings",
-            "cachedContent",
-            "labels",
-            "stream",
-        ],
+    // 出站顶层字段白名单以 request_field_map.json 为真源（查表；表缺失时 fail-fast）。
+    let protocol = match target_protocol {
+        V3OutboundTargetProtocol::OpenAiChat => "openai_chat",
+        V3OutboundTargetProtocol::OpenAiResponses => "responses",
+        V3OutboundTargetProtocol::Anthropic => "anthropic",
+        V3OutboundTargetProtocol::Gemini => "gemini",
     };
-    fields.iter().copied().collect()
+    crate::protocol_tables::whitelisted_fields(protocol)
+        .unwrap_or_else(|error| panic!("request_field_map lookup failed for {protocol}: {error}"))
 }
 
 fn normalize_responses_content_part_for_role(part: &Value, role: &str) -> Result<Value, String> {
@@ -992,12 +903,33 @@ fn normalize_responses_content_part_for_role(part: &Value, role: &str) -> Result
     let is_assistant = role.eq_ignore_ascii_case("assistant");
     if let Some(row) = normalized.as_object_mut() {
         let part_type = row.get("type").and_then(Value::as_str).unwrap_or("").trim();
+        // chat part type -> responses part type（查表；未命中时保留原字面量，行为零变化）
+        let responses_part_type = |hub_type: &'static str| -> &'static str {
+            table_map_value(
+                V3TableKind::PartType,
+                "responses",
+                hub_type,
+                V3TableDirection::Outbound,
+            )
+            .ok()
+            .flatten()
+            .unwrap_or(hub_type)
+        };
         if part_type == "text" || (!is_assistant && part_type.is_empty()) {
-            row.insert("type".to_string(), Value::String("input_text".to_string()));
+            row.insert(
+                "type".to_string(),
+                Value::String(responses_part_type("input_text").to_string()),
+            );
         } else if is_assistant && (part_type.is_empty() || part_type == "input_text") {
-            row.insert("type".to_string(), Value::String("output_text".to_string()));
+            row.insert(
+                "type".to_string(),
+                Value::String(responses_part_type("text").to_string()),
+            );
         } else if part_type == "image_url" {
-            row.insert("type".to_string(), Value::String("input_image".to_string()));
+            row.insert(
+                "type".to_string(),
+                Value::String(responses_part_type("input_image").to_string()),
+            );
         }
         if row.get("type").and_then(Value::as_str) == Some("input_image") {
             if let Some(url) = row
@@ -1015,10 +947,22 @@ fn normalize_responses_content_part_for_role(part: &Value, role: &str) -> Result
 }
 
 fn chat_content_to_responses_content(content: &Value, role: &str) -> Result<Value, String> {
+    // chat text -> responses part type（查表；未命中时保留原字面量，行为零变化）
+    let responses_part_type = |hub_type: &'static str| -> &'static str {
+        table_map_value(
+            V3TableKind::PartType,
+            "responses",
+            hub_type,
+            V3TableDirection::Outbound,
+        )
+        .ok()
+        .flatten()
+        .unwrap_or(hub_type)
+    };
     let text_type = if role.eq_ignore_ascii_case("assistant") {
-        "output_text"
+        responses_part_type("text")
     } else {
-        "input_text"
+        responses_part_type("input_text")
     };
     match content {
         Value::String(text) => Ok(Value::Array(vec![json!({"type": text_type, "text": text})])),
@@ -1221,13 +1165,15 @@ fn project_responses_item_extension_fields(
     else {
         return;
     };
-    for (source, target) in [
-        ("responses_item_id", "id"),
-        ("responses_status", "status"),
-        ("responses_execution", "execution"),
-    ] {
+    // hub 字段 -> openai_chat 字段（互逆字段对查表；与原手写数组一致）
+    for source in ["responses_item_id", "responses_status", "responses_execution"] {
         if let Some(value) = extension.get(source) {
-            responses_item.insert(target.to_string(), value.clone());
+            if let Some(target) = table_map_field("openai_chat", source, V3TableDirection::Outbound)
+                .ok()
+                .flatten()
+            {
+                responses_item.insert(target.to_string(), value.clone());
+            }
         }
     }
 }

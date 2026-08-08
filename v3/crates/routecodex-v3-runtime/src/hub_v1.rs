@@ -26,25 +26,35 @@ mod provider_request_dry_run;
 pub(crate) use provider_request_dry_run::V3ProviderRequestDryRunNoNetworkTransport;
 mod provider_compat_shared;
 pub(crate) use provider_compat_shared::{
-    build_v3_anthropic_messages_transport_request_from_v3_provider_08,
     build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers,
+    build_v3_provider_transport_request_for_protocol, provider_wire_protocol_for_selected_candidate,
     provider_protocol_compat_id, provider_wire_protocol_for_provider_type,
+};
+mod relay_runtime_shared;
+pub(crate) use relay_runtime_shared::{
+    error_output, extract_error_type_style, extract_message_type_style, handle_provider_failure,
+    provider_request_failure, provider_runtime_failure, provider_target,
+    push_sse_response_chain_trace, server_routing_group, V3RelayProviderFailure,
+};
+mod relay_runtime_core;
+pub(crate) use relay_runtime_core::{
+    execute_v3_relay_runtime_core, V3RelayCoreError, V3RelayProtocolCodec,
 };
 mod responses_openai_codec;
 pub(crate) use responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound;
 mod client_metadata_projection;
+mod history_image_cleanup;
+pub(crate) use history_image_cleanup::normalize_v3_history_image_placeholders;
 mod request_outbound_builtin_tool_projection;
 mod request_outbound_format;
 mod request_outbound_metadata;
 mod request_outbound_tool_id;
-#[cfg(test)]
-pub(crate) use request_outbound_format::build_v3_openai_chat_standard_request_from_chat_canonical;
 pub(crate) use request_outbound_format::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode,
     build_v3_openai_responses_standard_request_from_chat_canonical,
-};
-mod anthropic_codec_tool_projection;
+    build_v3_openai_chat_standard_request_from_chat_canonical,
+}; mod anthropic_codec_tool_projection;
 mod anthropic_request_field_projection;
 
 mod req_inbound_01_client_raw;
@@ -107,11 +117,12 @@ pub use gemini_relay_runtime::*;
 mod openai_chat_relay_runtime;
 pub use openai_chat_relay_runtime::*;
 mod responses_relay_runtime;
-mod web_search_hop;
+pub(crate) mod web_search_hop;
 pub use responses_relay_runtime::*;
 pub(crate) use web_search_hop::{
-    execute_local_web_search_hop, project_web_search_result_into_finalized,
-    resolve_request_web_search_backend_binding, resolve_web_search_mode_and_backend,
+    execute_local_web_search_hop, first_local_websearch_tool_call,
+    project_web_search_result_into_finalized, resolve_request_web_search_backend_binding,
+    resolve_web_search_mode_and_backend,
 };
 mod anthropic_relay_hooks;
 pub use anthropic_relay_hooks::*;

@@ -2,6 +2,7 @@ use super::V3HubProviderWireProtocol;
 use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_parts,
     build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
+    build_v3_transport_13_responses_http_request_from_v3_provider_12,
     V3Provider12ResponsesWirePayload, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
 };
 
@@ -37,6 +38,12 @@ pub(crate) fn provider_wire_protocol_for_provider_type(
             "selected unsupported provider wire protocol: provider={provider_id} type={other}"
         )),
     }
+}
+
+pub(crate) fn provider_wire_protocol_for_selected_candidate(
+    selected: &routecodex_v3_target::V3TargetCandidate,
+) -> Result<V3HubProviderWireProtocol, String> {
+    provider_wire_protocol_for_provider_type(&selected.provider_id, &selected.provider_type)
 }
 
 pub(crate) fn anthropic_messages_url(base_url: &str) -> String {
@@ -80,6 +87,48 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
         stream_intent,
         body,
         provider_headers,
+    )
+    .map_err(|error| error.to_string())
+}
+
+pub(crate) fn build_v3_provider_transport_request_for_protocol(
+    provider_protocol: V3HubProviderWireProtocol,
+    wire: V3Provider12ResponsesWirePayload,
+) -> Result<V3Transport13ResponsesHttpRequest, String> {
+    match provider_protocol {
+        V3HubProviderWireProtocol::Responses => {
+            build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)
+                .map_err(|error| error.to_string())
+        }
+        V3HubProviderWireProtocol::OpenAiChat => {
+            build_v3_openai_chat_transport_request_from_v3_provider_08(wire)
+        }
+        V3HubProviderWireProtocol::Anthropic => {
+            build_v3_anthropic_messages_transport_request_from_v3_provider_08(wire)
+                .map_err(|error| error.to_string())
+        }
+        V3HubProviderWireProtocol::Gemini => Err(
+            "selected provider wire protocol gemini has no registered HTTP transport builder"
+                .to_string(),
+        ),
+    }
+}
+
+fn build_v3_openai_chat_transport_request_from_v3_provider_08(
+    wire: V3Provider12ResponsesWirePayload,
+) -> Result<V3Transport13ResponsesHttpRequest, String> {
+    let request_id = wire.request_id().to_string();
+    let target = wire.target().clone();
+    let stream_intent = wire.stream_intent();
+    let body = wire.body().clone();
+    let url_text = format!("{}/chat/completions", target.base_url.trim_end_matches('/'));
+    build_v3_transport_13_responses_http_request_from_parts(
+        request_id,
+        target.provider_id,
+        url_text,
+        target.auth,
+        stream_intent,
+        body,
     )
     .map_err(|error| error.to_string())
 }

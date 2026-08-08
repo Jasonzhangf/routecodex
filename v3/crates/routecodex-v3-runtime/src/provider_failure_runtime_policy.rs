@@ -1013,22 +1013,6 @@ fn build_v3_relay_provider_error_05_decision(
     )
 }
 
-pub(crate) fn resolve_v3_relay_target(
-    input: V3RelayProviderTargetResolutionInput<'_>,
-) -> Result<V3Target10ConcreteProviderSelected, String> {
-    match resolve_v3_relay_target_outcome(input) {
-        V3RelayProviderTargetResolution::Selected(selected) => Ok(selected),
-        V3RelayProviderTargetResolution::Exhausted {
-            attempted_candidates,
-        } => Err(format!(
-            "selected target exhausted after {attempted_candidates:?}"
-        )),
-        V3RelayProviderTargetResolution::Failed(source) => {
-            Err(format!("{}: {}", source.code, source.message))
-        }
-    }
-}
-
 pub(crate) fn expand_v3_relay_target_plan_for_selected(
     manifest: &V3Config05ManifestPublished,
     selected: &V3Target10ConcreteProviderSelected,
@@ -1044,10 +1028,11 @@ pub(crate) fn expand_v3_relay_target_plan_for_selected(
 pub(crate) fn resolve_v3_relay_target_outcome(
     input: V3RelayProviderTargetResolutionInput<'_>,
 ) -> V3RelayProviderTargetResolution {
-    let facts = crate::build_v3_router_request_facts_for_entry(
+    let facts = crate::build_v3_router_request_facts_for_entry_with_manifest(
         input.body,
         input.entry_kind,
         crate::configured_v3_longcontext_threshold_tokens(input.manifest, input.server_id),
+        input.manifest,
     );
     let router = V3VirtualRouter::process_shared();
     let classified = match router.classify_request_with_facts(

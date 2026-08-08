@@ -24,9 +24,19 @@ pub(super) fn anthropic_tool_choice_as_responses_tool_choice(value: &Value) -> V
     let Some(object) = value.as_object() else {
         return value.to_owned();
     };
+    // anthropic tool_choice type -> hub -> responses type（查表；未命中保持原样）
     if object.get("type").and_then(Value::as_str) == Some("tool") {
         if let Some(name) = object.get("name").and_then(Value::as_str) {
-            return json!({"type":"function","name":name});
+            let responses_type = crate::protocol_tables::map_value(
+                crate::protocol_tables::V3TableKind::ToolChoice,
+                "responses",
+                "tool",
+                crate::protocol_tables::V3TableDirection::Outbound,
+            )
+            .ok()
+            .flatten()
+            .unwrap_or("function");
+            return json!({"type": responses_type, "name": name});
         }
     }
     value.to_owned()

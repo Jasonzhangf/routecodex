@@ -247,7 +247,33 @@ impl V3VirtualRouter {
                 )?;
             }
         }
-        for candidate in &classified.facts.route_classification.candidates {
+        // candidates（请求意图）驱动能力池：web_search 优先级最高（gpt 这类
+        // 原生 hosted web search），multimodal 次之——候选迭代 web_search 先于
+        // multimodal；无显式池时构建隐式能力池（RoundRobin 轮询）。
+        let mut ordered_candidates: Vec<&str> = Vec::new();
+        for signal in ["web_search", "multimodal"] {
+            if classified
+                .facts
+                .route_classification
+                .candidates
+                .iter()
+                .any(|candidate| candidate == signal)
+            {
+                ordered_candidates.push(signal);
+            }
+        }
+        ordered_candidates.extend(
+            classified
+                .facts
+                .route_classification
+                .candidates
+                .iter()
+                .filter(|candidate| {
+                    candidate.as_str() != "web_search" && candidate.as_str() != "multimodal"
+                })
+                .map(|candidate| candidate.as_str()),
+        );
+        for candidate in ordered_candidates {
             if candidate == DEFAULT_ROUTE {
                 continue;
             }
@@ -263,6 +289,17 @@ impl V3VirtualRouter {
                     &mut selected_pool_ids,
                     &mut tiers,
                 )?;
+            } else if let Some(tier) = build_implicit_capability_pool_tier(
+                manifest,
+                candidate,
+                classified.facts.client_model.as_deref(),
+            ) {
+                // 无显式能力池时，从 manifest 推断具备该能力的模型构建
+                // 隐式能力池（RoundRobin 轮询）——配置简化：能力声明即路由。
+                let implicit_pool_id = format!("implicit:{candidate}");
+                if selected_pool_ids.insert(implicit_pool_id.clone()) {
+                    tiers.push(tier);
+                }
             }
         }
         for signal in capability_route_pool_signals(&classified.facts) {
@@ -391,8 +428,50 @@ fn build_plan_tier(pool: &V3RoutePoolManifest) -> V3Router06SelectionPlanTier {
     }
 }
 
-fn select_best_matching_pool<'a, F>(
-    group_id: &str,
+/// 构建隐式能力池 tier（无显式池时）：消费 Config 层预计算的能力 →
+/// 模型候选索引（opaque，不解释 provider internals）。client_model 指定时
+/// 只保留匹配该模型的 target（尊重显式指定）；未指定时全量能力模型参与
+/// RoundRobin 轮询（同优先级负载均衡）。返回 None 表示无能力模型。
+fn build_implicit_capability_pool_tier(
+    manifest: &V3Config05ManifestPublished,
+    signal: &str,
+    client_model: Option<&str>,
+) -> Option<V3Router06SelectionPlanTier> {
+    let candidates = manifest.capability_model_candidates();
+    let Some(models) = candidates.get(signal) else {
+        return None;
+    };
+    let mut targets = Vec::new();
+    for candidate in models {
+        if let Some(client) = client_model {
+            let matches = candidate.model == client
+                || candidate.aliases.iter().any(|alias| alias == client);
+            if !matches {
+                continue;
+            }
+        }
+        targets.push(V3RoutePoolTargetManifest {
+            kind: V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some(candidate.provider.clone()),
+            model: Some(candidate.model.clone()),
+            key: None,
+            priority: Some(1),
+            weight: Some(1),
+        });
+    }
+    if targets.is_empty() {
+        return None;
+    }
+    Some(V3Router06SelectionPlanTier {
+        pool_id: format!("implicit:{signal}"),
+        selection: V3SelectionStrategy::RoundRobin,
+        targets,
+        direct_provider_model: None,
+    })
+}
+
+fn select_best_matching_pool<'a, F>(    group_id: &str,
     pools: &'a BTreeMap<String, V3RoutePoolManifest>,
     facts: &V3RouterRequestFacts,
     mut candidate_matches: F,
@@ -560,6 +639,11 @@ fn pool_has_route_signal(pool_id: &str, rule: &V3RoutePoolMatchManifest) -> bool
 }
 
 fn capability_route_pool_signals(facts: &V3RouterRequestFacts) -> Vec<&str> {
+    // 仅非 hard 能力信号（longcontext 等）。web_search / multimodal 是
+    // hard 能力池信号，必须由 route_classification 的候选（请求意图）驱动
+    // （candidates 循环 + 隐式能力池），不能仅凭模型 capabilities 声明
+    // 触发——否则具备 web_search 能力的模型（如 gpt 系）会在普通请求上
+    // 被错误路由到 web_search 池。
     ROUTE_PRIORITY
         .iter()
         .copied()

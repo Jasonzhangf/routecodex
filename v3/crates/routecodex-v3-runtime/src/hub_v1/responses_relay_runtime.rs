@@ -36,13 +36,10 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload,
-    build_v3_transport_13_responses_http_request_from_parts,
-    build_v3_transport_13_responses_http_request_from_v3_provider_12, ReqwestResponsesTransport,
-    ResponsesTransport, V3Provider12ResponsesWirePayload, V3ProviderAuthHandle,
-    V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHealthStore, V3ProviderResp14Raw,
-    V3ProviderResponseBody, V3ProviderResponseHeader, V3ResponsesProviderTarget,
-    V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
+    build_v3_provider_12_responses_wire_payload, ReqwestResponsesTransport,
+    ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
+    V3ProviderHealthStore, V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
+    V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
@@ -1662,12 +1659,12 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         request_stopless_control_state.is_some(),
         stopless_state.as_ref(),
     )?;
-    let web_search_state = request_outcome.web_search_state().cloned();
+    let request_web_search_state = request_outcome.web_search_state().cloned();
     apply_v3_responses_relay_web_search_control_request_transition(
         manifest,
         &input.server_id,
         stopless_control.as_ref(),
-        web_search_state.as_ref(),
+        request_web_search_state.as_ref(),
     )?;
     macro_rules! handle_error_before_resp03 {
         ($expr:expr) => {
@@ -1934,7 +1931,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
             match build_v3_provider_transport_request_for_protocol(provider_wire_protocol, wire) {
                 Ok(transport_request) => transport_request,
                 Err(error) => {
-                    handle_provider_request_failure!(error);
+                    handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Target(error));
                 }
             };
         if let Err(error) = validate_v3_responses_relay_provider_request_transport_intent(
@@ -2235,15 +2232,24 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         provider_response_transport_intent: V3HubTransportIntent::Json,
                         compatibility_profile: selected.candidate.compatibility_profile.as_deref(),
                         web_search_execution_mode: selected.candidate.web_search_execution_mode,
-                        web_search_center_state: stopless_control
-                            .as_ref()
-                            .and_then(|execution| {
-                                execution
-                                    .control
-                                    .web_search_load_for_scope(&execution.scope)
-                                    .ok()
-                            })
-                            .flatten(),
+                        // web_search 与 stopless 解耦：当前轮拦截直接使用 Req04
+                        // 激活的 LocalToolSurfaceActive state（request_web_search_state），
+                        // 不依赖 stopless_control 桶（stopless feature / client session
+                        // scope 都不是 web_search 拦截的前置条件）。桶加载仅作
+                        // 下一轮配对场景的兼容回退。
+                        web_search_center_state: request_web_search_state.clone().or_else(
+                            || {
+                                stopless_control
+                                    .as_ref()
+                                    .and_then(|execution| {
+                                        execution
+                                            .control
+                                            .web_search_load_for_scope(&execution.scope)
+                                            .ok()
+                                    })
+                                    .flatten()
+                            },
+                        ),
                         stopless_state: stopless_state.as_ref(),
                         stopless_control_has_client_session_scope,
                         transition_request_id: &transition_request_id,
@@ -2506,15 +2512,22 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         provider_response_transport_intent: V3HubTransportIntent::Sse,
                         compatibility_profile: selected.candidate.compatibility_profile.as_deref(),
                         web_search_execution_mode: selected.candidate.web_search_execution_mode,
-                        web_search_center_state: stopless_control
-                            .as_ref()
-                            .and_then(|execution| {
-                                execution
-                                    .control
-                                    .web_search_load_for_scope(&execution.scope)
-                                    .ok()
-                            })
-                            .flatten(),
+                        // web_search 与 stopless 解耦：当前轮拦截直接使用 Req04
+                        // 激活的 LocalToolSurfaceActive state（request_web_search_state），
+                        // 不依赖 stopless_control 桶。
+                        web_search_center_state: request_web_search_state.clone().or_else(
+                            || {
+                                stopless_control
+                                    .as_ref()
+                                    .and_then(|execution| {
+                                        execution
+                                            .control
+                                            .web_search_load_for_scope(&execution.scope)
+                                            .ok()
+                                    })
+                                    .flatten()
+                            },
+                        ),
                         stopless_state: stopless_state.as_ref(),
                         stopless_control_has_client_session_scope,
                         transition_request_id: &transition_request_id,
@@ -2693,54 +2706,6 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
             }
         }
     }
-}
-
-pub(crate) fn provider_wire_protocol_for_selected_candidate(
-    selected: &routecodex_v3_target::V3TargetCandidate,
-) -> Result<V3HubProviderWireProtocol, V3ResponsesRelayRuntimeError> {
-    provider_wire_protocol_for_provider_type(&selected.provider_id, &selected.provider_type)
-        .map_err(|error| V3ResponsesRelayRuntimeError::Target(format!("Responses relay {error}")))
-}
-
-pub(crate) fn build_v3_provider_transport_request_for_protocol(
-    provider_protocol: V3HubProviderWireProtocol,
-    wire: V3Provider12ResponsesWirePayload,
-) -> Result<V3Transport13ResponsesHttpRequest, V3ResponsesRelayRuntimeError> {
-    match provider_protocol {
-        V3HubProviderWireProtocol::Responses => {
-            build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)
-                .map_err(V3ResponsesRelayRuntimeError::Provider)
-        }
-        V3HubProviderWireProtocol::OpenAiChat => {
-            build_v3_openai_chat_transport_request_from_v3_provider_08(wire)
-        }
-        V3HubProviderWireProtocol::Anthropic => {
-            build_v3_anthropic_messages_transport_request_from_v3_provider_08(wire)
-                .map_err(V3ResponsesRelayRuntimeError::ProviderWireEncoding)
-        }
-        other => Err(V3ResponsesRelayRuntimeError::Target(format!(
-            "Responses relay does not support provider transport protocol {other:?}"
-        ))),
-    }
-}
-
-fn build_v3_openai_chat_transport_request_from_v3_provider_08(
-    wire: V3Provider12ResponsesWirePayload,
-) -> Result<V3Transport13ResponsesHttpRequest, V3ResponsesRelayRuntimeError> {
-    let request_id = wire.request_id().to_string();
-    let target = wire.target().clone();
-    let stream_intent = wire.stream_intent();
-    let body = wire.body().clone();
-    let url_text = format!("{}/chat/completions", target.base_url.trim_end_matches('/'));
-    build_v3_transport_13_responses_http_request_from_parts(
-        request_id,
-        target.provider_id,
-        url_text,
-        target.auth,
-        stream_intent,
-        body,
-    )
-    .map_err(|error| V3ResponsesRelayRuntimeError::Target(error.to_string()))
 }
 
 #[derive(Debug, Default)]
@@ -3367,8 +3332,7 @@ fn run_json_response_hooks(
                 Some(input.manifest),
                 input.provider_id,
             )?;
-        *resp02.provider_payload_mut() = Arc::new(converted);
-        resp02.provider_raw_mut().provider_protocol = V3HubProviderWireProtocol::Responses;
+        resp02.set_responses_semantic_payload(converted);
     }
     trace.push("V3HubRespInbound02Normalized");
     let response_hook_profile = responses_relay_response_hook_profile(
@@ -3615,16 +3579,13 @@ fn apply_v3_responses_relay_web_search_control_request_transition(
     let Some(state) = request_web_search_state else {
         return Ok(());
     };
-    if !v3_stopless_center_enabled_for_server(manifest, server_id) {
-        return Ok(());
-    }
+    // web_search 与 stopless 解耦：web_search 配对状态存桶不依赖 stopless
+    // feature gate 或 client session scope（stopless 与 web_search 唯一关系是
+    // 都使用 servertool center 存储；web_search 自己的配对生命周期独立）。
     let Some(stopless_control) = stopless_control else {
         return Ok(());
     };
     if !stopless_control.commit_effects {
-        return Ok(());
-    }
-    if !stopless_control.scope.has_client_session_scope() {
         return Ok(());
     }
     stopless_control
@@ -4297,6 +4258,16 @@ fn build_v3_responses_function_call_from_openai_chat_tool_call(
             "call_id":call_id,
             "execution":"client",
             "arguments":arguments
+        }));
+    }
+    if custom_tool_names.contains(name) {
+        // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
+        // 按客户端声明的 custom 名归类回 custom_tool_call，保持客户端契约。
+        return Ok(json!({
+            "type":"custom_tool_call",
+            "call_id":call_id,
+            "name":name,
+            "input":arguments
         }));
     }
     Ok(json!({
@@ -5111,6 +5082,7 @@ mod tests {
     use super::*;
     use futures_util::{stream, StreamExt};
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+    use routecodex_v3_provider_responses::build_v3_transport_13_responses_http_request_from_parts;
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -6146,6 +6118,42 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         assert_eq!(
             response["output"][0]["input"],
             "*** Begin Patch\n*** End Patch"
+        );
+    }
+
+    #[test]
+    fn openai_chat_function_tool_call_with_custom_declared_name_round_trips_as_custom_call() {
+        let response = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id": "chatcmpl_apply_patch_flattened",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_apply_patch_2",
+                            "type": "function",
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": "{\"patch\":\"*** Begin Patch\\n*** End Patch\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }),
+            &json!({
+                "tools": [{"type":"custom","name":"apply_patch"}]
+            }),
+        )
+        .expect("flattened function tool_call must reverse to the declared Responses custom tool");
+
+        assert_eq!(response["status"], "requires_action");
+        assert_eq!(response["output"][0]["type"], "custom_tool_call");
+        assert_eq!(response["output"][0]["name"], "apply_patch");
+        assert_eq!(
+            response["output"][0]["input"],
+            "{\"patch\":\"*** Begin Patch\\n*** End Patch\"}"
         );
     }
 
@@ -7229,6 +7237,34 @@ data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_dup_
             response["output"][0]["summary"][0],
             json!({"type":"summary_text","text":"Need inspect"})
         );
+    }
+
+    #[tokio::test]
+    async fn responses_provider_sse_custom_tool_call_input_events_materialize_without_provider_failure(
+    ) {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_custom_tool_call_input\",\"model\":\"provider-model\",\"created_at\":123}}\n\n".to_vec()),
+            Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"custom_tool_call\",\"call_id\":\"call_ctc\",\"name\":\"exec_command\",\"input\":\"\"}}\n\n".to_vec()),
+            Ok(b"event: response.custom_tool_call_input.delta\ndata: {\"type\":\"response.custom_tool_call_input.delta\",\"output_index\":0,\"item_id\":\"ctc_1\",\"delta\":\"{\\\"cmd\\\":\\\"\"}\n\n".to_vec()),
+            Ok(b"event: response.custom_tool_call_input.delta\ndata: {\"type\":\"response.custom_tool_call_input.delta\",\"output_index\":0,\"item_id\":\"ctc_1\",\"delta\":\"pwd\\\"}\"}\n\n".to_vec()),
+            Ok(b"event: response.custom_tool_call_input.done\ndata: {\"type\":\"response.custom_tool_call_input.done\",\"output_index\":0,\"item_id\":\"ctc_1\",\"input\":\"{\\\"cmd\\\":\\\"pwd\\\"}\"}\n\n".to_vec()),
+            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}}}\n\n".to_vec()),
+            Ok(b"data: [DONE]\n\n".to_vec()),
+        ]));
+        let response = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["id"], "resp_custom_tool_call_input");
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["usage"]["total_tokens"], 5);
+        assert_eq!(response["output"][0]["type"], "custom_tool_call");
+        assert_eq!(response["output"][0]["call_id"], "call_ctc");
+        assert_eq!(response["output"][0]["input"], "{\"cmd\":\"pwd\"}");
     }
 
     #[tokio::test]
