@@ -650,6 +650,9 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             false,
         );
         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
+        // 成功路径从未结束 external 计时（错误路径才会 finish_external），
+        // 这里必须先收口 external，否则 finish_runtime 报 external active。
+        let _ = runtime_timing.finish_external();
         if let Ok(summary) = runtime_timing.finish_runtime() {
             observability.timing = Some(summary);
         }
