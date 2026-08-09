@@ -67,7 +67,7 @@ const cases = [
     name: "error SSE receives success keepalive",
     path: "v3/crates/routecodex-v3-server/src/lib.rs",
     mutate: (source) =>
-      source.replace(
+      source.replaceAll(
         "v3_client_sse_body(stream, None)",
         "v3_client_sse_body(stream, Some(Duration::from_millis(3_000)))",
       ),
