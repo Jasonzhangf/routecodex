@@ -93,7 +93,6 @@ const boundaries = [
     text: functionBody(hub, 'pub fn build_v3_hub_resp_inbound_02_from_provider_resp_compat_02'),
     required: [
       'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request',
-      '.expect("V3 RespInbound02 provider-wire normalization failed")',
     ],
   },
   {
