@@ -628,9 +628,17 @@ fn build_v3_openai_chat_assistant_output_text_message(item: &Map<String, Value>)
 }
 
 fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -> Option<Value> {
+    // 提取 reasoning 条目的明文段（text/content/summary/reasoning_content/thinking）。
+    // 无任何明文（如 Codex 只回传 encrypted_content 密文、密文在 wire 层已剥离）时
+    // 仍保留 reasoning 条目并以空 reasoning_content 呈现——opencode/DeepSeek 语义要求
+    // 每条 assistant 消息都必须带 reasoning 表示（transform.ts 对缺失轮补
+    // `{type:"reasoning", text:""}`；空 reasoning_content 是 DeepSeek 标准接受的回传形态）。
+    // 直接丢弃会让该轮 assistant 消息缺 reasoning，触发 "reasoning_content must be passed
+    // back" 400。
     let reasoning_content = join_v3_openai_chat_reasoning_segments(
         collect_v3_openai_chat_reasoning_segments(Some(&Value::Object(item.clone()))).as_slice(),
-    )?;
+    )
+    .unwrap_or_default();
     Some(json!({
         "role":"assistant",
         "content":"",

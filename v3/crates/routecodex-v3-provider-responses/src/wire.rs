@@ -141,9 +141,12 @@ fn is_v3_gpt_canonical_model(canonical_model_id: &str) -> bool {
 }
 
 /// 非 gpt 目标出站时剥离 responses input 中 reasoning 条目的 `encrypted_content`：
-/// 保留 summary/content/text 等明文（Codex 侧仍可回传明文 reasoning），仅删除密文字段；
-/// 若条目删除密文后没有任何明文内容，则整条丢弃（与 chat wire 转换对密文-only 条目的
-/// 处理语义一致）。
+/// 保留 summary/content/text 等明文（Codex 侧仍可回传明文 reasoning），仅删除密文字段。
+/// 若条目删除密文后没有任何明文内容，补成空 reasoning 条目（`{"type":"reasoning","text":""}`）
+/// 而非整条丢弃——opencode（DeepSeek 上游）要求每条 assistant 消息都必须带 reasoning 表示
+/// （transform.ts 对缺失轮补 `{type:"reasoning", text:""}`，空 reasoning_content 是 DeepSeek
+/// 标准接受的回传形态）；直接丢弃会让该轮 assistant 消息缺 reasoning，触发
+/// "reasoning_content must be passed back" 400。
 fn strip_v3_encrypted_reasoning_content(_request_id: &str, body: &mut Value) {
     let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
         return;
@@ -159,7 +162,10 @@ fn strip_v3_encrypted_reasoning_content(_request_id: &str, body: &mut Value) {
         let has_plain_content = ["summary", "content", "text", "reasoning_content"]
             .iter()
             .any(|key| obj.get(*key).is_some_and(|value| !value.is_null()));
-        has_plain_content
+        if !has_plain_content {
+            obj.insert("text".to_string(), Value::String(String::new()));
+        }
+        true
     });
 }
 
@@ -985,7 +991,11 @@ mod tests {
         });
         let wire = build_v3_provider_12_responses_wire_payload("req-1", target, body).unwrap();
         let input = wire.body()["input"].as_array().unwrap();
-        assert_eq!(input.len(), 2, "encrypted-only reasoning item must be dropped");
+        assert_eq!(
+            input.len(),
+            3,
+            "encrypted-only reasoning item is kept as empty-text placeholder (opencode DeepSeek requires reasoning on every assistant turn)"
+        );
         assert_eq!(input[0]["type"], "reasoning");
         assert_eq!(
             input[0]["summary"],
@@ -995,7 +1005,17 @@ mod tests {
             input[0].get("encrypted_content").is_none(),
             "encrypted_content must be stripped for non-gpt target"
         );
-        assert_eq!(input[1]["type"], "message");
+        assert_eq!(input[1]["type"], "reasoning");
+        assert_eq!(
+            input[1]["text"],
+            "",
+            "encrypted-only reasoning item becomes empty-text reasoning placeholder"
+        );
+        assert!(
+            input[1].get("encrypted_content").is_none(),
+            "placeholder must not carry encrypted_content"
+        );
+        assert_eq!(input[2]["type"], "message");
     }
 
     #[test]

@@ -208,3 +208,43 @@ fn responses_assistant_message_reasoning_function_call_coalesces_single_turn() {
     assert_eq!(messages[1]["role"], json!("tool"));
     assert_eq!(messages[2]["role"], json!("user"));
 }
+
+#[test]
+fn responses_encrypted_only_reasoning_item_keeps_empty_reasoning_content() {
+    // Codex 只回传 encrypted_content 密文（无 text/summary 明文）时，入口归一化
+    // 必须保留 reasoning 条目并以空 reasoning_content 呈现——opencode/DeepSeek 语义
+    // 要求每条 assistant 消息都必须带 reasoning 表示；直接丢弃会让该轮 assistant
+    // 消息缺 reasoning，触发上游 "reasoning_content must be passed back" 400。
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "deepseek-v4-flash",
+        "input": [
+            {
+                "type": "reasoning",
+                "id": "reasoning-enc-1",
+                "encrypted_content": "rsn_ENCRYPTED_MARKER"
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "previous answer"}]
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "continue"}]
+            }
+        ]
+    }))
+    .expect("encrypted-only reasoning must still project to Chat");
+
+    let messages = request["messages"].as_array().expect("messages");
+    assert_eq!(messages.len(), 2, "reasoning+assistant coalesce into one assistant, then user: {request}");
+    assert_eq!(messages[0]["role"], json!("assistant"));
+    assert_eq!(
+        messages[0]["reasoning_content"],
+        json!(""),
+        "encrypted-only reasoning must keep empty reasoning_content on the assistant turn"
+    );
+    assert_eq!(messages[0]["content"], json!("previous answer"));
+    assert_eq!(messages[1]["role"], json!("user"));
+}
