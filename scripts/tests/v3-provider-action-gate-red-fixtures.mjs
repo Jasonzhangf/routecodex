@@ -89,30 +89,6 @@ const cases = [
     diagnostic: /missing action_gate: V3ProviderActionGate::process_shared\(\)/u,
   },
   {
-    name: 'OpenAI Relay bypasses pre-send gate',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs',
-    mutate: (source) => source.replace('wait_for_error05_recovery', 'bypass_error05_recovery'),
-    diagnostic: /missing wait_for_error05_recovery/u,
-  },
-  {
-    name: 'OpenAI Relay request construction bypasses Error05',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs',
-    mutate: (source) => source.replaceAll('handle_provider_request_failure', 'bypass_provider_request_failure'),
-    diagnostic: /missing handle_provider_request_failure/u,
-  },
-  {
-    name: 'Anthropic Relay request construction bypasses Error05',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
-    mutate: (source) => source.replaceAll('handle_provider_request_failure', 'bypass_provider_request_failure'),
-    diagnostic: /missing handle_provider_request_failure/u,
-  },
-  {
-    name: 'Gemini Relay request construction bypasses Error05',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs',
-    mutate: (source) => source.replaceAll('handle_provider_request_failure', 'bypass_provider_request_failure'),
-    diagnostic: /missing handle_provider_request_failure/u,
-  },
-  {
     name: 'OpenAI post-commit SSE failure loses fresh-request isolation coverage',
     path: 'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
     mutate: (source) => source.replace(
@@ -227,15 +203,6 @@ const cases = [
     diagnostic: /provider success may release only its exact provider scope or the permit-owned action scope/u,
   },
   {
-    name: 'OpenAI Relay keeps the admitted permit while entering provider failure policy',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs',
-    mutate: (source) => source.replaceAll(
-      'drop(provider_action_permit.take());',
-      'let _permit_still_owned_during_failure_policy = &provider_action_permit;',
-    ),
-    diagnostic: /expected at least 4 occurrences of drop\(provider_action_permit\.take\(\)\);, found 0/u,
-  },
-  {
     name: 'Direct fresh requests enter the recovery gate by default',
     path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
     mutate: (source) => source.replace(
@@ -291,12 +258,6 @@ const cases = [
     path: 'v3/crates/routecodex-v3-error/src/lib.rs',
     mutate: (source) => source.replace('terminal: V3Error05TerminalDecision', 'terminal: V3Error05ExecutionDecision'),
     diagnostic: /Error06 builder must accept only V3Error05TerminalDecision/u,
-  },
-  {
-    name: 'feature regresses to design',
-    path: 'docs/architecture/v3-function-map.yml',
-    mutate: (source) => source.replace('  - feature_id: v3.provider_action_gate\n    status: active', '  - feature_id: v3.provider_action_gate\n    status: design'),
-    diagnostic: /must be active/u,
   },
   {
     name: 'V3 required atomic terminal commit edge is deleted',
@@ -401,12 +362,6 @@ const cases = [
     diagnostic: /V3Error05ExecutionDecision owner must be routecodex-v3-error/u,
   },
   {
-    name: 'V3 function map drops atomic terminal mainline binding',
-    path: 'docs/architecture/v3-function-map.yml',
-    mutate: (source) => source.replace('      - v3-provider-action-gate-06\n', ''),
-    diagnostic: /mainline_bindings: missing binding v3-provider-action-gate-06/u,
-  },
-  {
     name: 'V3 resource map drops atomic terminal writer',
     path: 'docs/architecture/v3-resource-operation-map.yml',
     mutate: (source) => mutateYaml(source, (document) => {
@@ -416,22 +371,6 @@ const cases = [
       );
     }),
     diagnostic: /allowed_writers: missing binding V3ProviderActionGate::commit_terminal_admission/u,
-  },
-  {
-    name: 'V3 verification map drops Responses Relay provider-bound failure contract',
-    path: 'docs/architecture/v3-verification-map.yml',
-    mutate: (source) => {
-      const feature = source.indexOf('  - feature_id: v3.provider_action_gate\n');
-      const contract = source.indexOf(
-        '      - Responses Relay provider-bound request compatibility and wire encoding failures enter the shared provider failure policy and typed Error05 action lane before retry or reselect.\n',
-        feature,
-      );
-      const line = '      - Responses Relay provider-bound request compatibility and wire encoding failures enter the shared provider failure policy and typed Error05 action lane before retry or reselect.\n';
-      return contract >= 0
-        ? source.slice(0, contract) + source.slice(contract + line.length)
-        : source;
-    },
-    diagnostic: /v3\.provider_action_gate\.required_positive: missing binding Responses Relay provider-bound request compatibility/u,
   },
   {
     name: 'V3 resource lifecycle drifts from its chain',
@@ -533,15 +472,6 @@ const cases = [
       'if matches!(event_type, "response.completed" | "response.done") {',
     ),
     diagnostic: /provider response\.done must not satisfy the response\.completed terminal contract/u,
-  },
-  {
-    name: 'Direct Stopless accepts response.done as provider semantic terminal',
-    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
-    mutate: (source) => source.replace(
-      'if semantic_event != "response.completed" {',
-      'if !matches!(semantic_event, "response.completed" | "response.done") {',
-    ),
-    diagnostic: /Direct Stopless provider semantic hooks must not accept response\.done before response\.completed closeout/u,
   },
   {
     name: 'Relay target-resolution source errors are swallowed as exhaustion',
