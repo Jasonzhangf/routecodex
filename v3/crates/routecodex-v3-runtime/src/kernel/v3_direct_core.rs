@@ -117,15 +117,36 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             ) {
                 Ok(value) => value,
                 Err(error) => {
-                    return error_output(
+                    // 可观测性：exhausted 时带全部候选明细（provider:alias:model:
+                    // 原因），否则 console 只有 "N candidates unavailable" 无法诊断
+                    // 哪个候选因何被冷却/排除。
+                    let detail = if error.attempted_candidates.is_empty() {
+                        "no candidates".to_string()
+                    } else {
+                        error.attempted_candidates.join(", ")
+                    };
+                    let exhausted_observability = V3RuntimeObservability {
+                        entry_protocol: C::ENTRY_PROTOCOL.to_string(),
+                        routing_group_id: Some(error.route.routing_group_id.clone()),
+                        pool_id: Some(error.route.pool_id.clone()),
+                        provider_status: None,
+                        response_status: Some("error".to_string()),
+                        unavailable_candidates: error.attempted_candidates.clone(),
+                        ..V3RuntimeObservability::default()
+                    };
+                    return error_output_with_observability(
                         build_v3_error_01_source_raised(
                             V3ErrorSourceKind::TargetPoolExhausted,
                             "V3Target10ConcreteProviderSelected",
                             "selected_target_exhausted",
-                            format!("{} candidates unavailable", error.attempted_candidates.len()),
+                            format!(
+                                "{} candidates unavailable: {detail}",
+                                error.attempted_candidates.len()
+                            ),
                         ),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
+                        Some(exhausted_observability),
                     )
                 }
             },

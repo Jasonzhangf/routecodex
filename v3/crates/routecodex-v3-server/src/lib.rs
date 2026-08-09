@@ -1776,6 +1776,41 @@ async fn pending_endpoint_after_responses_admission(
         .await;
         match outcome {
             V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
+                // 可观测性：direct 分支对齐 relay——status>=400 或 provider 失败时
+                // 无条件落盘 request.json + error.json（绕过 codex_samples 开关），
+                // 否则 direct 错误只在内存 trace，无法事后诊断。
+                let has_provider_failure = frame.observability.as_ref().is_some_and(
+                    |observability| !observability.provider_failure_events.is_empty(),
+                );
+                if frame.status >= 400 || has_provider_failure {
+                    let _ = persist_v3_error_evidence_payload(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        "request.json",
+                        &state
+                            .debug
+                            .redact_payload_for_side_channel(raw_request_payload.clone()),
+                    );
+                    let _ = persist_v3_error_evidence_payload(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        "error.json",
+                        &json!({
+                            "object": "routecodex.v3.error_evidence",
+                            "stage": "error",
+                            "status": frame.status,
+                            "request_id": request_id,
+                            "endpoint": path,
+                            "node_trace": frame.node_trace.clone(),
+                            "error_chain": frame.error_chain.clone(),
+                            "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
+                        }),
+                    );
+                }
                 if let Some(response) = capture_v3_responses_direct_response(
                     &state,
                     &entry_protocol,

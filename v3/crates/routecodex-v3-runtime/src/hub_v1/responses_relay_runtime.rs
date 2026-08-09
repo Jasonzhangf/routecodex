@@ -2890,9 +2890,13 @@ fn build_v3_runtime_provider_failure_observation_from_policy_event(
         model_id: event.candidate.model_id.clone(),
         status: event.status,
         error_type: event.error_type.clone(),
+        // 可观测性：relay policy 事件不携带外部错误码，但 status 与
+        // error_type（来自响应 body 的 error.type）是真实可用的；先填
+        // 这两项（external_error_status / external_error_code），kind 与
+        // internal_code 无准确源头时保持 None（不硬编码推断误导诊断）。
         external_error_kind: None,
-        external_error_code: None,
-        external_error_status: None,
+        external_error_code: event.error_type.clone(),
+        external_error_status: Some(event.status),
         internal_code: None,
         message: event.message.clone(),
         failure_count: event.health_record.failure_count,
@@ -3251,12 +3255,12 @@ pub fn project_v3_responses_relay_runtime_failure(
                 protocol_direct_handoff: None,
             };
         }
-        V3ResponsesRelayRuntimeError::Target(_) => {
+        V3ResponsesRelayRuntimeError::Target(message) => {
             let source = build_v3_error_01_source_raised(
                 V3ErrorSourceKind::TargetPoolExhausted,
                 "V3Target10ConcreteProviderSelected",
                 "selected_target_exhausted",
-                "all selected provider candidates are unavailable",
+                message,
             );
             let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
                 source: source.clone(),
@@ -6242,7 +6246,8 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
     fn explicit_target_exhaustion_projection_is_compact() {
         let output =
             project_v3_responses_relay_runtime_failure(V3ResponsesRelayRuntimeError::Target(
-                "V3TargetExhaustion { route: internal debug state }".to_string(),
+                "selected target exhausted after [\"routecodex:key1:deepseek-v4-flash:availability(cooldown)\"]"
+                    .to_string(),
             ));
 
         assert_eq!(output.status, 503);
@@ -6255,7 +6260,7 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         assert_eq!(body["error"]["target_exhausted"], true);
         assert_eq!(
             body["error"]["message"],
-            "all selected provider candidates are unavailable"
+            "selected target exhausted after [\"routecodex:key1:deepseek-v4-flash:availability(cooldown)\"]"
         );
         assert!(!body.to_string().contains("V3TargetExhaustion"));
         assert_eq!(
