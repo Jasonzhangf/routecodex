@@ -33,7 +33,7 @@ function runGate(policy) {
 
 const realPolicy = JSON.parse(fs.readFileSync(path.join(root, 'config', 'v3-file-size-policy.json'), 'utf8'));
 const whitelisted = Object.keys(realPolicy.ratchet_whitelist)[0];
-const snapshot = realPolicy.ratchet_whitelist[whitelisted];
+const currentLines = (fs.readFileSync(path.join(root, whitelisted), 'utf8').match(/\n/g) ?? []).length;
 
 // RED 1: un-whitelisted oversize file must fail (drop every whitelist entry).
 const red1 = runGate({ ...realPolicy, ratchet_whitelist: {} });
@@ -43,7 +43,7 @@ else if (!red1.output.includes('exceeds limit')) failures.push('red1: wrong fail
 // RED 2: whitelisted file above its ratchet snapshot must fail (shrink-only).
 const red2 = runGate({
   ...realPolicy,
-  ratchet_whitelist: { ...realPolicy.ratchet_whitelist, [whitelisted]: snapshot - 1 },
+  ratchet_whitelist: { ...realPolicy.ratchet_whitelist, [whitelisted]: currentLines - 1 },
 });
 if (red2.ok) failures.push('red2: gate passed when file exceeds its ratchet snapshot');
 else if (!red2.output.includes('exceeds ratchet snapshot')) failures.push('red2: wrong failure reason');

@@ -1564,20 +1564,14 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     let local_tool_output_ids = find_responses_tool_output_ids(&input.payload)?;
     let protocol_switch_allowed =
         responses_relay_protocol_switch_allowed(&input.payload, &local_tool_output_ids);
-    // 下一轮 Req04 配对验证：搜索 hop 结果已投影返回客户端后，客户端回传
-    // 的 function_call_output 与原 call_id 配对即收尾状态机（Completed）。
     apply_v3_responses_relay_web_search_control_completion(
         manifest,
         &input.server_id,
         stopless_control.as_ref(),
         &input.payload,
     )?;
-    // Mode B 判定用请求声明的 model 的编译期 mode（Req04 在 route 之前，
-    // 无法感知最终 selected target；Resp03 侧再用 selected target mode 双校验）。
     let request_web_search_execution_mode =
         resolve_request_web_search_execution_mode(manifest, &input.payload);
-    // Mode B 的编译期唯一 backend binding（"provider.model"），搜索 hop 时
-    // direct pin 到搜索目标；缺失在配置编译期已 fail-fast，这里仅透传。
     let request_web_search_backend_binding =
         resolve_request_web_search_backend_binding(manifest, &input.payload);
     let req01 = build_v3_hub_req_inbound_01_client_raw(
@@ -2232,11 +2226,6 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         provider_response_transport_intent: V3HubTransportIntent::Json,
                         compatibility_profile: selected.candidate.compatibility_profile.as_deref(),
                         web_search_execution_mode: selected.candidate.web_search_execution_mode,
-                        // web_search 与 stopless 解耦：当前轮拦截直接使用 Req04
-                        // 激活的 LocalToolSurfaceActive state（request_web_search_state），
-                        // 不依赖 stopless_control 桶（stopless feature / client session
-                        // scope 都不是 web_search 拦截的前置条件）。桶加载仅作
-                        // 下一轮配对场景的兼容回退。
                         web_search_center_state: request_web_search_state.clone().or_else(
                             || {
                                 stopless_control
@@ -2304,9 +2293,6 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     response_stopless_state.clone(),
                 )?;
                 if let Some(web_search_state) = response_web_search_state {
-                    // MiniMax hosted search：结果已随同一响应返回
-                    // （SearchResultCaptured）→ 跳过本地搜索 hop；否则走
-                    // backend direct pin 的搜索 hop。
                     let captured = if web_search_state.phase()
                         == V3WebSearchCenterPhase::SearchResultCaptured
                     {
@@ -2890,10 +2876,6 @@ fn build_v3_runtime_provider_failure_observation_from_policy_event(
         model_id: event.candidate.model_id.clone(),
         status: event.status,
         error_type: event.error_type.clone(),
-        // 可观测性：relay policy 事件不携带外部错误码，但 status 与
-        // error_type（来自响应 body 的 error.type）是真实可用的；先填
-        // 这两项（external_error_status / external_error_code），kind 与
-        // internal_code 无准确源头时保持 None（不硬编码推断误导诊断）。
         external_error_kind: None,
         external_error_code: event.error_type.clone(),
         external_error_status: Some(event.status),

@@ -19,14 +19,6 @@ pub(crate) fn is_v3_stopless_internal_call_id(call_id: &str) -> bool {
     call_id == STOPLESS_CALL_ID
 }
 
-/// Mode B 的 Req04 工具面激活：当前 canonical payload 声明了标准 hosted
-/// `web_search` / `web_search_preview` 工具时，返回 websearch ServerTool 实例的
-/// `LocalToolSurfaceActive` 状态。状态由调用方存入 relay/direct 的
-/// ServerToolCenter websearch 桶；本钩子只做同轮工具面判定，不持久化、不
-/// 修改历史与 continuation 不可变区。
-
-/// ServertoolCenter 工具识别（请求侧）：当前工具是哪一个（stopless 优先，
-/// 否则 web_search Mode B 本地搜索）。识别结果驱动固定 hook 分发。
 pub(crate) fn identify_v3_servertool_request_tool(
     payload: &Value,
     stopless_enabled: bool,
@@ -42,8 +34,6 @@ pub(crate) fn identify_v3_servertool_request_tool(
     None
 }
 
-/// ServertoolCenter 响应侧工具识别：从 provider 响应识别当前工具调用
-/// （reasoningStop / web_search / 已注册 servertool CLI）。
 pub(crate) fn inspect_v3_servertool_response_tool(payload: &Value) -> Option<V3ServerToolName> {
     let Some(output) = payload.get("output").and_then(Value::as_array) else {
         return None;
@@ -75,8 +65,6 @@ pub(crate) fn inspect_v3_servertool_response_tool(payload: &Value) -> Option<V3S
     None
 }
 
-/// ServertoolCenter 请求治理入口（固定 Req04 hook 挂载点）：工具识别 ->
-/// 状态判断（profile 条件）-> 固定 hook 分发（stopless / web_search）。
 pub(crate) fn govern_v3_servertool_request_at_req04(
     payload: &mut Value,
     current_payload_start: usize,
@@ -118,10 +106,6 @@ pub(crate) fn govern_v3_servertool_request_at_req04(
 pub fn apply_v3_web_search_request_hook_at_req04(
     payload: &mut Value,
 ) -> Result<Option<V3WebSearchCenterState>, V3HubRelayRequestError> {
-    // web_search 工具声明跨协议泛化：Responses `{"type":"web_search"}`、
-    // OpenAI Chat `{"type":"function","function":{"name":"websearch"}}`、
-    // Anthropic `{"name":"web_search"}`。入口协议只决定请求 payload 形态，
-    // Mode B 治理激活（Req04 LocalToolSurfaceActive）对所有入口一致。
     let has_declaration = payload
         .get("tools")
         .and_then(Value::as_array)
@@ -133,7 +117,6 @@ pub fn apply_v3_web_search_request_hook_at_req04(
                 ) {
                     return true;
                 }
-                // OpenAI Chat / Anthropic 形态：工具名 websearch / web_search。
                 let name = tool
                     .get("name")
                     .and_then(Value::as_str)
@@ -242,7 +225,6 @@ pub fn apply_v3_tool_call_servertool_hook_at_resp03(
             StoplessResponseDecision::Continue | StoplessResponseDecision::NeedsEvidence
         )
     {
-        // guard 终止：续杯被保护机制终止，回滚为剥离 noop 的纯文本 stop 响应。
         let visible = strip_current_stopless_response_artifacts(
             input.provider_payload().as_ref(),
             &stop_call.call_id,
@@ -376,11 +358,6 @@ struct V3ReasoningStopToolCall {
 }
 
 
-/// 从 provider 响应剥离已拦截的本地 websearch call 与同轮 hosted
-/// `web_search_tool_result`（MiniMax hosted search 结果项；结果由
-/// ServerToolCenter 承载，不注入可见 payload）。支持 Responses `output[]` /
-/// OpenAI Chat `choices[].message.tool_calls[]` / Anthropic `content[].tool_use`
-/// 三种 provider payload 形态（入口协议决定形态，拦截剥离语义一致）。
 fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
     let mut projected = payload.clone();
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
@@ -435,12 +412,6 @@ fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
 }
 
 
-/// Mode B Resp03 拦截：同轮激活校验 + 提取实际 websearch call + 参数校验 +
-/// 剥离 + 状态机迁移 LocalToolSurfaceActive -> ToolCallObserved（携带
-/// original call_id / query / count / recency / content_types）。
-/// MiniMax hosted search 场景：同一响应携带 `web_search_tool_result`，
-/// 结果已由搜索后端执行并返回 → 链式迁移至 SearchResultCaptured（调用方
-/// 据此跳过本地搜索 hop），携带归一化 text_result。
 fn intercept_local_web_search_call(
     mut input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
@@ -448,8 +419,6 @@ fn intercept_local_web_search_call(
     let Some(call) = first_local_websearch_tool_call(input.provider_payload().as_ref())? else {
         return Ok(None);
     };
-    // 先提取 hosted 结果（web_search_tool_result 与 call_id 配对），再剥离
-    // web_search call 与 hosted tool result（均不进入客户端可见 payload）。
     let hosted_text =
         hosted_web_search_result_text(input.provider_payload().as_ref(), &call.call_id);
     let visible = strip_local_websearch_tool_call(input.provider_payload().as_ref(), &call.call_id);
@@ -469,9 +438,6 @@ fn intercept_local_web_search_call(
         .with_count(call.count)
         .with_recency(call.recency)
         .with_content_types(call.content_types);
-    // MiniMax hosted search：搜索结果随同一响应返回（web_search_tool_result
-    // 与 call_id 配对）→ 链式迁移至 SearchResultCaptured 并携带结果，
-    // 调用方跳过本地搜索 hop。
     let web_search_state = match hosted_text {
         Some(text_result) => {
             let normalized = json!({

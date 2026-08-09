@@ -1,4 +1,5 @@
 mod defaults;
+mod entry_protocol_validation;
 mod provider_directory;
 mod store;
 mod types;

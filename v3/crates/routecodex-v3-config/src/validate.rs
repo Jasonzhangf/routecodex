@@ -23,7 +23,6 @@ pub(crate) fn validate_schema(
 
     Ok(V3Config03SchemaValidated { authoring })
 }
-
 pub(crate) fn build_resource_registry(
     validated: V3Config03SchemaValidated,
 ) -> Result<V3Config04ResourceRegistryBuilt, V3ConfigError> {
@@ -65,7 +64,6 @@ pub(crate) fn build_resource_registry(
         error: compile_error(authoring.error, provider_error_action_policies)?,
     })
 }
-
 pub(crate) fn publish_manifest(
     registry: V3Config04ResourceRegistryBuilt,
 ) -> Result<V3Config05ManifestPublished, V3ConfigError> {
@@ -81,28 +79,8 @@ pub(crate) fn publish_manifest(
         error: registry.error,
     })
 }
-
 const HUB_V1_ENTRY_PROTOCOLS: [&str; 4] = ["responses", "anthropic", "gemini", "openai_chat"];
-fn expected_entry_protocol_endpoint_patterns(protocol: &str) -> Option<&'static [&'static str]> {
-    match protocol {
-        "responses" => Some(&["/v1/responses"]),
-        "anthropic" => Some(&["/v1/messages"]),
-        "openai_chat" => Some(&["/v1/chat/completions"]),
-        "gemini" => Some(&["/v1beta/models/:model/generateContent"]),
-        _ => None,
-    }
-}
-
-fn expected_entry_protocol_execution_modes(
-    _protocol: &str,
-) -> Option<&'static [V3EntryProtocolExecutionMode]> {
-    // 执行模式不按入口协议硬编码：direct/relay 由运行时按
-    // “入口协议 == 出口 provider 协议”动态决定（Jason 2026-08-08）。
-    Some(&[
-        V3EntryProtocolExecutionMode::Direct,
-        V3EntryProtocolExecutionMode::Relay,
-    ])
-}
+use crate::entry_protocol_validation::{endpoint_patterns as expected_entry_protocol_endpoint_patterns, execution_modes as expected_entry_protocol_execution_modes};
 
 fn compile_hub_v1(
     authoring: Option<V3HubV1AuthoringConfig>,
@@ -993,10 +971,6 @@ fn compile_models(
     Ok(models)
 }
 
-/// 跨 provider 唯一性：同名 model 在多个 provider 声明时必须解析到相同的
-/// `web_search_execution_mode`（Req04 的 Mode B 判定按请求 model 名解析，
-/// pool 直连扫描按第一个命中；若同名 model 在不同 provider 有不同 mode，
-/// 与 VR 实际选择可能不一致——配置即真源，必须在编译期 fail-fast）。
 fn validate_cross_provider_model_web_search_mode_uniqueness(
     providers: &BTreeMap<String, V3ProviderManifest>,
 ) -> Result<(), V3ConfigError> {

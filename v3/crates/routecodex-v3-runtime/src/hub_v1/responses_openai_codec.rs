@@ -1,6 +1,5 @@
 use crate::protocol_tables::{map_field as table_map_field, V3TableDirection};
 use serde_json::{json, Map, Value};
-
 pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     payload: &Value,
 ) -> Result<Value, String> {
@@ -24,10 +23,6 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     let mut messages = Vec::new();
     let mut pending_tool_message_index: Option<usize> = None;
     let mut pending_tool_call_ids: Vec<String> = Vec::new();
-    // 同轮 assistant 输出尾部 index：由 `output_text`/`reasoning` item 生成的
-    // assistant 文本消息，后续同轮 `function_call` 必须合并进它（前缀缓存硬约束，
-    // 拆分会让 provider chat renderer 插入 EOS 破坏前缀缓存）。显式 assistant
-    // `message` item 属于独立历史轮次，不进入该尾部，禁止改写历史边界。
     let mut turn_assistant_tail_index: Option<usize> = None;
     if let Some(instructions) = root
         .get("instructions")
@@ -62,10 +57,6 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 }
             }
             "web_search" => {
-                // 当前轮显式 hosted search 声明（Responses input item）→ 并入
-                // canonical tools 数组的 web_search 工具声明（仅保留 openai_chat
-                // 白名单字段；name/query 由模型在推理时构造，不投影——语义等价：
-                // "执行 web 搜索"由出站 Mode B / gpt hosted 投影处理）。
                 let mut tool = Map::new();
                 tool.insert(
                     "type".to_string(),
@@ -99,12 +90,6 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     turn_assistant_tail_index,
                 )?;
                 if is_assistant_message {
-                    // 前缀缓存硬约束：Codex relay 输入中同轮 assistant 输出以
-                    // message(role=assistant) item 呈现（文本 + 紧随的 function_call）。
-                    // 必须允许后续 function_call 合并进它，否则相邻 assistant 消息
-                    // 让 provider chat renderer 插入 EOS，破坏所有 relay provider 的
-                    // 前缀缓存（如 DwarfStar usage_cache 0%）。仅 user/tool 类 message
-                    // 清空 tail。
                     turn_assistant_tail_index = Some(messages.len() - 1);
                 } else {
                     turn_assistant_tail_index = None;
@@ -289,7 +274,6 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     project_responses_reasoning_to_chat_fields(root, &mut request)?;
     Ok(Value::Object(request))
 }
-
 fn project_responses_reasoning_to_chat_fields(
     root: &Map<String, Value>,
     request: &mut Map<String, Value>,
@@ -363,7 +347,6 @@ fn project_responses_reasoning_to_chat_fields(
     }
     Ok(())
 }
-
 fn append_v3_openai_chat_message_preserving_tool_adjacency(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
@@ -393,12 +376,6 @@ fn append_v3_openai_chat_message_preserving_tool_adjacency(
             .and_then(Value::as_str)
             .unwrap_or("user")
             .trim();
-        // 前缀缓存硬约束：同一 assistant 轮的内容（message(assistant 文本) ->
-        // reasoning -> output_text -> function_call 连续 items，Codex relay 真实
-        // 形态）必须合并为单条 assistant 消息，禁止相邻 assistant 消息（provider
-        // chat renderer 会插入 EOS 破坏前缀缓存）。前一条或新消息任一 content
-        // 为空时合并是安全的（reasoning 类 content=""），不会改写历史或插入
-        // 新换行；两个非空文本 assistant 保持原消息边界。
         if role.eq_ignore_ascii_case("assistant")
             && messages.len() == tail_index + 1
             && (v3_openai_chat_content_is_empty(
@@ -414,7 +391,6 @@ fn append_v3_openai_chat_message_preserving_tool_adjacency(
     messages.push(message);
     Ok(())
 }
-
 fn append_v3_openai_chat_tool_call_message(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
@@ -430,13 +406,6 @@ fn append_v3_openai_chat_tool_call_message(
     if let Some(index) = *pending_tool_message_index {
         merge_v3_openai_chat_message_into_pending_tool_message(messages, index, &message)?;
     } else if let Some(tail_index) = turn_assistant_tail_index {
-        // 前缀缓存硬约束：Responses 同轮 `output_text`/`reasoning` item 生成的
-        // assistant 文本消息后紧邻的 `function_call` 必须合并进同一条 assistant
-        // 消息（content + tool_calls 同存）。若拆成两条相邻 assistant 消息，
-        // provider chat renderer 会在 tool-call 标记前插入 EOS，使下一轮请求的
-        // 前缀 token 与上一轮生成输出分叉，导致所有 relay provider 的前缀缓存
-        // （如 DwarfStar usage_cache）永久 miss、费用虚高。显式 assistant
-        // `message` item（历史轮次）不在此列，禁止改写历史边界。
         if messages.len() == tail_index + 1 {
             merge_v3_openai_chat_message_into_pending_tool_message(messages, tail_index, &message)?;
             *pending_tool_message_index = Some(tail_index);
@@ -455,7 +424,6 @@ fn append_v3_openai_chat_tool_call_message(
     }
     Ok(())
 }
-
 fn append_v3_openai_chat_tool_result_message(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
@@ -484,7 +452,6 @@ fn append_v3_openai_chat_tool_result_message(
     messages.push(message);
     Ok(())
 }
-
 fn merge_v3_openai_chat_message_into_pending_tool_message(
     messages: &mut [Value],
     index: usize,
@@ -1000,7 +967,6 @@ fn copy_v3_responses_item_extension_fields(
     item: &Map<String, Value>,
     extension: &mut Map<String, Value>,
 ) {
-    // openai_chat 字段 -> hub 字段（互逆字段对查表；与原手写数组一致）
     for source in ["id", "status", "execution"] {
         if let Some(value) = item.get(source) {
             if let Some(target) =
@@ -1223,7 +1189,6 @@ mod tests {
 
     #[test]
     fn responses_reasoning_effort_normalizes_whitespace_and_case_like_chat_side() {
-        // 与 chat 侧一致：effort 大小写/空白不敏感（旧样本 " XHIGH " -> "xhigh"）。
         let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
             "model": "deepseek-v4-flash",
             "input": "hi",
@@ -1232,7 +1197,6 @@ mod tests {
         .expect("whitespace/case-variant effort must be normalized, not rejected");
         assert_eq!(request["reasoning_effort"], "xhigh");
     }
-
     #[test]
     fn responses_input_image_url_maps_to_openai_chat_image_url_url() {        let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
             "model": "gpt-5.5",
@@ -1256,13 +1220,8 @@ mod tests {
             "OpenAI Chat provider wire must not emit bare string image_url: {request}"
         );
     }
-
     #[test]
     fn responses_web_search_current_turn_item_projects_to_canonical_tools() {
-        // 当前轮显式 web_search 声明（Responses input item）必须并入 canonical
-        // tools（web_search 工具声明）而非拒绝：此前 other 分支报
-        // "unsupported Responses input item type ... web_search" → 真实请求 500
-        // （20260808，4444/5555 /v1/responses + input web_search part）。
         let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
             "model": "gpt-5.5",
             "input": [
@@ -1283,7 +1242,6 @@ mod tests {
             tool.get("type").and_then(Value::as_str) == Some("web_search")
         }));
     }
-
     #[test]
     fn responses_web_search_call_projects_to_openai_chat_tool_pair_with_synthetic_id() {
         let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
@@ -1354,7 +1312,6 @@ mod tests {
         assert_eq!(result["action"], arguments);
         assert_eq!(messages[2], json!({"role": "user", "content": "继续"}));
     }
-
     #[test]
     fn responses_tool_search_call_and_output_normalize_as_adjacent_chat_extensions() {
         let discovered_tools = json!([{
@@ -1459,7 +1416,6 @@ mod tests {
             "OpenAI Chat messages must not embed native Responses tool_search_call items: {request}"
         );
     }
-
     #[test]
     fn responses_tool_search_output_without_matching_call_fails_in_inbound_owner() {
         let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
@@ -1479,7 +1435,6 @@ mod tests {
             "unexpected error: {error}"
         );
     }
-
     #[test]
     fn responses_function_call_item_id_enters_chat_extension() {
         let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
@@ -1501,7 +1456,6 @@ mod tests {
             "fc_original"
         );
     }
-
     #[test]
     fn responses_web_search_call_preserves_existing_id_for_tool_pair() {
         let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
@@ -1532,7 +1486,6 @@ mod tests {
         );
         assert_eq!(result["output"], json!("opened"));
     }
-
     #[test]
     fn responses_web_search_call_never_emits_unpaired_tool_call_or_native_item() {
         let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
@@ -1564,7 +1517,6 @@ mod tests {
             "provider Chat messages must not contain a native Responses input item object: {request}"
         );
     }
-
     #[test]
     fn responses_web_search_call_normalizes_to_chat_extension_at_req_inbound() {
         let payload = json!({
@@ -1588,7 +1540,6 @@ mod tests {
             messages[0]["tool_calls"][0]["id"]
         );
     }
-
     #[test]
     fn responses_web_search_call_rejects_side_channel_before_tool_result_stringification() {
         let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
