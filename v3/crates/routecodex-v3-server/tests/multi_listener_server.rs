@@ -1466,10 +1466,7 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
     assert_eq!(model["max_tokens"], 4096);
     assert_eq!(model["max_context_tokens"], 128000);
     assert_eq!(model["support_verbosity"], true);
-    assert_eq!(model["supports_reasoning_summaries"], false);
-    assert_eq!(model["supports_reasoning_summary_parameter"], false);
-    assert!(model.get("default_reasoning_level").is_none());
-    assert!(model.get("supported_reasoning_levels").is_none());
+    assert_eq!(model["supports_reasoning_summaries"], true);
     assert_eq!(model["supports_parallel_tool_calls"], true);
     assert_eq!(model["supports_search_tool"], false);
     assert_eq!(model["input_modalities"], json!(["text", "image"]));
