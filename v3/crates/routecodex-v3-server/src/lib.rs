@@ -6005,7 +6005,10 @@ fn resolve_v3_log_session_color_key(
     .ok()
     .flatten()
     .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_WORKDIR_PATHS))
-    .or_else(|| read_first_scope_value(Some(payload), BODY_WORKDIR_PATHS));
+    .or_else(|| read_first_scope_value(Some(payload), BODY_WORKDIR_PATHS))
+    .or_else(|| {
+        resolve_v3_console_project_path_with_metadata(headers, payload, turn_metadata.as_ref())
+    });
     let mut parts = Vec::new();
     for value in [client_type, tmux_scope, workdir] {
         if let Some(part) = value.and_then(|candidate| normalize_v3_log_session_part(&candidate)) {

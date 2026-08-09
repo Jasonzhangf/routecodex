@@ -1372,6 +1372,29 @@ fn console_color_identity_reads_reasonix_root_session_id() {
 }
 
 #[test]
+fn console_color_identity_uses_injected_project_when_session_is_absent() {
+    let payload = serde_json::json!({
+        "model": "deepseek-v4-flash",
+        "messages": [{
+            "role": "system",
+            "content": "Current workspace: \"/Users/fanzhang/github/routecodex\""
+        }]
+    });
+    let color_key = resolve_v3_log_session_color_key(
+        &HeaderMap::new(),
+        &payload,
+        "request-should-not-be-used",
+    );
+
+    assert!(color_key
+        .as_deref()
+        .is_some_and(|key| key.contains("routecodex")));
+    assert!(!color_key
+        .as_deref()
+        .is_some_and(|key| key.contains("request:")));
+}
+
+#[test]
 fn responses_continuation_scope_reads_codex_turn_metadata_header() {
     let mut headers = HeaderMap::new();
     headers.insert(
