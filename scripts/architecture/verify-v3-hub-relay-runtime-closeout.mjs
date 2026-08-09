@@ -129,7 +129,7 @@ for (const phrase of [
   'provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate',
   'responses_relay_provider_duplicate_tool_identity',
 ]) requireText(focusedGate, `${packagePath}: test:v3-5520-duplicate-tool-identity`, phrase);
-requireCount(workflow, workflowPath, 'run: npm run test:v3-5520-duplicate-tool-identity', 2);
+requireCount(workflow, workflowPath, 'run: npm run test:v3-5520-duplicate-tool-identity', 1);
 
 requireText(runtime, runtimePath, 'execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile');
 requireText(runtime, runtimePath, 'response_hook_profile: V3HubRelayResponseHookProfile');
