@@ -87,6 +87,7 @@ fn apply_v3_provider_req_compat(
             provider_id: Some(selected.provider_id.clone()),
             provider_key: Some(provider_key.clone()),
             runtime_key: Some(provider_key),
+            web_search_execution_mode: Some(selected.web_search_execution_mode.as_str().to_string()),
             ..Default::default()
         },
         explicit_profile: profile.as_optional_string(),

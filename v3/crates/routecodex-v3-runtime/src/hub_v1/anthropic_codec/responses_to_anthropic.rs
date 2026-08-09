@@ -824,16 +824,34 @@ pub(super) fn responses_tool_as_anthropic_tool(
     ) {
         return responses_web_search_tool_as_anthropic_tool(tool);
     }
+    // Anthropic hosted server-tool 实际类型为 `web_search_20250305`（或未来
+    // `_20990101` 等变体）：type 以 `web_search_` 开头即按 hosted 投影。
+    // Mode A 直通 minimax 必须保留 `type:"web_search_20250305"`，否则
+    // provider 把 tool 视作普通 function tool，model 返回 `function_call`
+    // 而非 hosted `server_tool_use`（实测 root cause：wire 缺 type）。
+    if tool
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind.starts_with("web_search_"))
+    {
+        return responses_web_search_tool_as_anthropic_tool(tool);
+    }
     // Mode B 本地 websearch function（chat 入口 client 声明
     // `{"type":"function","function":{"name":"websearch"}}`，outbound 投影保留
     // 为本地 function tool）在 Anthropic wire 上必须以官方 server tool 名
     // `web_search` 编码——MiniMax 等 Anthropic provider 不识别 `websearch`，
     // 否则 provider 收不到搜索工具（表现为"我没有 websearch 工具"纯文本回答）。
+    // Codex client 也可能声明 `name:"web_search"`（无 type），按 hosted
+    // 投影兼容处理。
     if tool
         .get("name")
         .or_else(|| tool.get("function").and_then(|f| f.get("name")))
         .and_then(Value::as_str)
-        .is_some_and(|name| name.trim().eq_ignore_ascii_case("websearch"))
+        .is_some_and(|name| {
+            let normalized = name.trim();
+            normalized.eq_ignore_ascii_case("websearch")
+                || normalized.eq_ignore_ascii_case("web_search")
+        })
     {
         return responses_web_search_tool_as_anthropic_tool(tool);
     }

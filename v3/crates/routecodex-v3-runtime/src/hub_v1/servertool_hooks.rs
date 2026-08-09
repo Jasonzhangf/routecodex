@@ -95,7 +95,12 @@ pub(crate) fn govern_v3_servertool_request_at_req04(
     } else {
         None
     };
-    let web_search_state = if identified == Some(V3ServerToolName::WebSearch) {
+    // web_search 与 stopless 是独立工具：stopless 激活不得吞掉 web_search
+    // 激活（否则 Mode B servertool 永不激活）。web_search_mode_b 为真且
+    // payload 含 web_search 声明时独立激活 LocalToolSurfaceActive。
+    let web_search_state = if web_search_mode_b
+        && payload_declares_web_search_tool(payload)
+    {
         apply_v3_web_search_request_hook_at_req04(payload)?
     } else {
         None
@@ -106,7 +111,21 @@ pub(crate) fn govern_v3_servertool_request_at_req04(
 pub fn apply_v3_web_search_request_hook_at_req04(
     payload: &mut Value,
 ) -> Result<Option<V3WebSearchCenterState>, V3HubRelayRequestError> {
-    let has_declaration = payload
+    let has_declaration = payload_declares_web_search_tool(payload);
+    if !has_declaration {
+        return Ok(None);
+    }
+    let state = V3WebSearchCenterState::new()
+        .transition_to(
+            V3WebSearchCenterPhase::LocalToolSurfaceActive,
+            "req04_web_search_surface_active",
+        )
+        .map_err(|reason| V3HubRelayRequestError::WebSearchToolSurfaceActivationFailed { reason })?;
+    Ok(Some(state))
+}
+
+fn payload_declares_web_search_tool(payload: &Value) -> bool {
+    payload
         .get("tools")
         .and_then(Value::as_array)
         .is_some_and(|tools| {
@@ -127,17 +146,7 @@ pub fn apply_v3_web_search_request_hook_at_req04(
                         || value.eq_ignore_ascii_case("web_search")
                 })
             })
-        });
-    if !has_declaration {
-        return Ok(None);
-    }
-    let state = V3WebSearchCenterState::new()
-        .transition_to(
-            V3WebSearchCenterPhase::LocalToolSurfaceActive,
-            "req04_web_search_surface_active",
-        )
-        .map_err(|reason| V3HubRelayRequestError::WebSearchToolSurfaceActivationFailed { reason })?;
-    Ok(Some(state))
+        })
 }
 
 pub struct V3StoplessResponseHookOutcome {

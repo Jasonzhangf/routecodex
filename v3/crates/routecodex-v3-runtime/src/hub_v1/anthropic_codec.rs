@@ -816,6 +816,32 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
     require_content_array(payload)?;
     let mut output_items = Vec::new();
     let mut message_content = Vec::new();
+    // MiniMax hosted web search（Mode A）：预收集同响应 web_search_tool_result
+    // 供 server_tool_use 投影消费（web_search_call results + 配对
+    // function_call_output）。先扫描一次 content，定位到 tool_use_id -> content 映射。
+    let mut hosted_results_by_call: std::collections::BTreeMap<String, Value> =
+        std::collections::BTreeMap::new();
+    for part in object
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if part.get("type").and_then(Value::as_str) != Some("web_search_tool_result") {
+            continue;
+        }
+        let Some(call_id) = part
+            .get("tool_use_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        hosted_results_by_call.insert(
+            call_id.to_string(),
+            part.get("content").cloned().unwrap_or(Value::Array(Vec::new())),
+        );
+    }
     for part in object
         .get("content")
         .and_then(Value::as_array)
@@ -838,21 +864,100 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
             Some("tool_use") => {
                 output_items.push(anthropic_tool_use_as_responses_call(part, context)?);
             }
+            Some("server_tool_use") => {
+                // MiniMax hosted web search（Mode A）：server_tool_use 投影为
+                // Codex hosted `web_search_call` + 配对 `function_call_output`
+                // （results 从预收集的 hosted_results_by_call 提取）。
+                let name = part.get("name").and_then(Value::as_str).unwrap_or("");
+                if name != "web_search" {
+                    return Err(V3AnthropicCodecError::MalformedField {
+                        field: "provider response server_tool_use name",
+                    });
+                }
+                let call_id = part
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("");
+                let query = part
+                    .get("input")
+                    .and_then(Value::as_object)
+                    .and_then(|input| input.get("query"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let hosted_results = hosted_results_by_call.get(call_id).cloned();
+                let results = hosted_results
+                    .and_then(|value| value.as_array().cloned())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|result| {
+                        let title = result
+                            .get("title")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty());
+                        let url = result
+                            .get("url")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty());
+                        let text = result
+                            .get("text")
+                            .or_else(|| result.get("content"))
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())?;
+                        Some(json!({
+                            "type": "text_result",
+                            "ref_id": call_id,
+                            "title": title,
+                            "url": url,
+                            "text": text
+                        }))
+                    })
+                    .collect::<Vec<_>>();
+                let status = if results.is_empty() {
+                    "started"
+                } else {
+                    "completed"
+                };
+                let mut call = Map::new();
+                call.insert("type".to_string(), Value::String("web_search_call".to_string()));
+                call.insert(
+                    "id".to_string(),
+                    Value::String(if call_id.is_empty() {
+                        "web_search_hosted".to_string()
+                    } else {
+                        format!("web_search_{call_id}")
+                    }),
+                );
+                call.insert("name".to_string(), Value::String("web_search".to_string()));
+                call.insert("status".to_string(), Value::String(status.to_string()));
+                call.insert(
+                    "action".to_string(),
+                    json!({"type":"search","query":query}),
+                );
+                call.insert("results".to_string(), Value::Array(results));
+                output_items.push(Value::Object(call));
+                // 配对 function_call_output（Codex hosted search 在 output
+                // 中必须紧跟 function_call_output，否则 client 端 web search
+                // tool 装配失败）。
+                if !call_id.is_empty() {
+                    let paired = json!({
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": json!({
+                            "type":"web_search_tool_result",
+                            "results": hosted_results_by_call.get(call_id).cloned().unwrap_or(Value::Array(Vec::new()))
+                        })
+                    });
+                    output_items.push(paired);
+                }
+            }
             Some("web_search_tool_result") => {
-                // MiniMax hosted web search：搜索结果随同一响应返回
-                // （server_tool_use + web_search_tool_result）。保留为
-                // responses 内部项，由 Mode B Resp03 拦截提取结果后剥离；
-                // 未启用 Mode B 时该场景不会出现（无 web_search 工具声明）。
-                let tool_use_id = part.get("tool_use_id").cloned().unwrap_or(Value::Null);
-                let content = part
-                    .get("content")
-                    .cloned()
-                    .unwrap_or(Value::Array(Vec::new()));
-                output_items.push(json!({
-                    "type":"web_search_tool_result",
-                    "tool_use_id":tool_use_id,
-                    "content":content
-                }));
+                // MiniMax hosted web search（Mode A）：已由 server_tool_use 分支
+                // 投影为 web_search_call + function_call_output 配对；这里跳过，
+                // 避免在 client output 中重复出现原始 web_search_tool_result。
             }
             Some(other) => {
                 return Err(V3AnthropicCodecError::MalformedField {
@@ -906,6 +1011,26 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
         response.insert("metadata".to_string(), metadata.clone());
     }
     Ok(Value::Object(response))
+}
+
+/// 从 hosted `web_search_tool_result.content` 提取第一个可读文本结果
+/// （MiniMax hosted search），供 web_search_call 配对补齐。
+fn hosted_web_search_result_text_value(content: Value) -> Option<String> {
+    for result in content.as_array().into_iter().flatten() {
+        if result.get("type").and_then(Value::as_str) != Some("web_search_result") {
+            continue;
+        }
+        let text = result
+            .get("text")
+            .or_else(|| result.get("content"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let Some(text) = text {
+            return Some(text.to_string());
+        }
+    }
+    None
 }
 
 fn anthropic_reasoning_part_as_responses_reasoning(

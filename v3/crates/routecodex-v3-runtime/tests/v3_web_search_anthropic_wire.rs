@@ -32,10 +32,49 @@ impl ResponsesTransport for WireCaptureTransport {
                 name: "content-type".to_string(),
                 value: b"application/json".to_vec(),
             }],
-            br#"{"id":"resp_hosted","type":"message","role":"assistant","model":"MiniMax-M3","content":[{"type":"text","text":"I searched."},{"type":"tool_use","id":"call_h1","name":"web_search","input":{"query":"routecodex"}},{"type":"web_search_tool_result","tool_use_id":"call_h1","content":[{"type":"web_search_result","title":"RouteCodex","url":"https://github.com/example/routecodex","page_age":"2026-07-07","content":"a routing gateway"}]}],"stop_reason":"tool_use"}"#
+            br#"{"id":"resp_hosted","type":"message","role":"assistant","model":"MiniMax-M3","content":[{"type":"text","text":"I searched."},{"type":"server_tool_use","id":"call_h1","name":"web_search","input":{"query":"routecodex"}},{"type":"web_search_tool_result","tool_use_id":"call_h1","content":[{"type":"web_search_result","title":"RouteCodex","url":"https://github.com/example/routecodex","page_age":"2026-07-07","content":"a routing gateway"}]}],"stop_reason":"tool_use"}"#
                 .to_vec(),
         ))
     }
+}
+
+fn anthropic_mode_a_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.chatwire]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "chatwire"
+endpoints = ["responses"]
+[servers.chatwire.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+[providers.minimax]
+type = "anthropic"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
+[providers.minimax.models."MiniMax-M3"]
+wire_name = "MiniMax-M3"
+supports_streaming = true
+web_search_execution_mode = "native_remote_search_tool_mix"
+capabilities = ["text", "tools", "web_search"]
+[forwarders.responses]
+model = "MiniMax-M3"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3", priority = 1 }]
+[route_groups.chatwire.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
 }
 
 fn anthropic_mode_b_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
@@ -80,7 +119,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
 
 #[tokio::test]
 async fn anthropic_wire_keeps_hosted_web_search_without_exec_command_and_projects_result() {
-    let manifest = anthropic_mode_b_manifest();
+    let manifest = anthropic_mode_a_manifest();
     let captures = Arc::new(Mutex::new(Vec::new()));
     let state = V3ResponsesRelayLocalContinuationState::default();
     let scope = V3ResponsesRelayLocalContinuationScope::responses(
