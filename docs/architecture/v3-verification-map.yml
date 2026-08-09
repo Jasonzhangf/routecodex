@@ -1879,10 +1879,10 @@ features:
   implementation_plan:
     phase: 1
     steps:
-    - P1: 定义 `V3CurrentTurnRouteFacts` typed carrier（与 RouteClassification 同 crate）。
-    - P2: `build_v3_current_turn_route_facts` 提取 typed 字段，classify_route 只消费 typed facts。
-    - P3: nodes.rs / 测试迁移到 typed carrier；物理删除 payload-scanning 推断（硬护栏 12）。
-    - P4: VR 消费方只读 typed current-turn facts，禁止重建。
+    - P1: '定义 V3CurrentTurnRouteFacts typed carrier（与 RouteClassification 同 crate）。'
+    - P2: 'build_v3_current_turn_route_facts 提取 typed 字段，classify_route 只消费 typed facts。'
+    - P3: 'nodes.rs / 测试迁移到 typed carrier；物理删除 payload-scanning 推断（硬护栏 12）。'
+    - P4: 'VR 消费方只读 typed current-turn facts，禁止重建。'
     status_note: 未实现前保持 status=design_not_implemented（不冒充 active）；
       canonical_builders 符号未实现，红测/verify 未锚定；进度以符号存在为准。
   design:

@@ -2236,17 +2236,11 @@ features:
   implementation_plan:
     phase: 1
     steps:
-    - P1: 定义 `V3CurrentTurnRouteFacts` typed carrier（current-turn 结构化字段，
-      与 `RouteClassification` 同 crate；禁止历史/自由文本/tool 参数/图片字节）。
-    - P2: `build_v3_current_turn_route_facts` 从现有
-      `build_v3_router_request_facts_for_entry_with_control` 的输入提取 typed 字段，
-      使 classify_route 只消费 typed facts（不再直接扫描原始 payload）。
-    - P3: nodes.rs / route-classifier 测试迁移到 typed carrier；物理删除
-      payload-scanning 推断路径（硬护栏 12）。
-    - P4: VR 消费方（provider-failure policy / route facts 使用者）改为只读
-      `v3.route.current_turn_facts@V3HubReqExecution05Planned`，禁止重建。
-    status: design_not_implemented（未落地前保持 status=design，禁止宣称 active；
-    canonical_builders 符号在代码中不存在，红测/verify 未锚定）
+    - P1: '定义 V3CurrentTurnRouteFacts typed carrier（current-turn 结构化字段，与 RouteClassification 同 crate；禁止历史/自由文本/tool 参数/图片字节）。'
+    - P2: 'build_v3_current_turn_route_facts 从现有 build_v3_router_request_facts_for_entry_with_control 的输入提取 typed 字段，使 classify_route 只消费 typed facts（不再直接扫描原始 payload）。'
+    - P3: 'nodes.rs / route-classifier 测试迁移到 typed carrier；物理删除 payload-scanning 推断路径（硬护栏 12）。'
+    - P4: 'VR 消费方（provider-failure policy / route facts 使用者）改为只读 v3.route.current_turn_facts@V3HubReqExecution05Planned，禁止重建。'
+    status: 'design_not_implemented（未落地前保持 status=design，禁止宣称 active；canonical_builders 符号在代码中不存在，红测/verify 未锚定）'
   notes:
   - Current-turn scope is an ownership boundary, not a license to scan historical payload.
   - Control state must arrive through typed side-channel facts; payload cannot rebuild it.
