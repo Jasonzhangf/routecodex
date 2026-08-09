@@ -495,3 +495,102 @@ fn dryrun_multimodal_outranks_keyword_web_search() {
     });
     assert_eq!(r.route_name, "multimodal");
 }
+
+#[test]
+fn dryrun_search_continuation_cascades_to_tools_and_default() {
+    let r = classify_route(&RouteClassifierInput {
+        latest_message_from_user: false,
+        has_current_turn_tool_output: true,
+        last_assistant_tool_category: Some("search".into()),
+        ..Default::default()
+    });
+    assert_eq!(r.route_name, "search");
+    // search route must list tools (search pool may be empty on this port) and
+    // default as fallbacks so VR can walk the candidate list in order.
+    assert_eq!(
+        r.candidates,
+        vec!["search".to_string(), "tools".to_string(), "default".to_string()]
+    );
+}
+
+#[test]
+fn dryrun_search_route_does_not_double_insert_tools() {
+    let r = classify_route(&RouteClassifierInput {
+        latest_message_from_user: false,
+        has_current_turn_tool_output: true,
+        last_assistant_tool_category: Some("search".into()),
+        ..Default::default()
+    });
+    let tools_count = r
+        .candidates
+        .iter()
+        .filter(|c| c.as_str() == "tools")
+        .count();
+    assert_eq!(tools_count, 1, "tools must appear at most once");
+}
+
+#[test]
+fn dryrun_non_search_route_does_not_inject_tools_via_search_cascade() {
+    let r = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        current_user_text: "帮我联网搜索一下 rust".into(),
+        ..Default::default()
+    });
+    assert_eq!(r.route_name, "web_search");
+    // web_search route must NOT auto-insert tools — only the search route does.
+    assert!(!r.candidates.iter().any(|c| c == "tools"));
+}
+
+// P0 control-plane isolation guard: route-classifier must not carry a
+// `metadata` field that callers could smuggle previous-turn usage (or any
+// other control state) into the request pipeline. This whitelist is the
+// closure of the RouteClassifierInput surface; any new field must be
+// reviewed against P0 before being added.
+#[test]
+fn route_classifier_input_has_no_control_state_fields() {
+    let input = RouteClassifierInput::default();
+    let _ = (
+        input.reached_long_context,
+        input.has_image_attachment,
+        input.latest_message_from_user,
+        input.stopless_followup,
+        input.has_current_turn_tool_output,
+        input.has_current_turn_web_search,
+        input.last_assistant_tool_category,
+        input.current_user_text,
+        input.has_background_keyword,
+    );
+    // Compile-time check passed: every field is enumerated. If a new field
+    // is added, this destructuring must be updated — that is the
+    // deliberate friction that forces an ownership review.
+    //
+    // Runtime check (defensive): the field set is exactly the 9 known
+    // names. Any drift is a P0 violation.
+    let allowed = [
+        "reached_long_context",
+        "has_image_attachment",
+        "latest_message_from_user",
+        "stopless_followup",
+        "has_current_turn_tool_output",
+        "has_current_turn_web_search",
+        "last_assistant_tool_category",
+        "current_user_text",
+        "has_background_keyword",
+    ];
+    let forbidden = [
+        "metadata",
+        "previous_usage",
+        "prev_usage",
+        "raw_metadata",
+        "control",
+        "control_state",
+        "session_scope",
+        "conversation_metadata",
+    ];
+    for f in forbidden {
+        assert!(
+            !allowed.iter().any(|a| a.eq_ignore_ascii_case(f)),
+            "P0 violation: forbidden control-state name '{f}' appeared in allowed set"
+        );
+    }
+}

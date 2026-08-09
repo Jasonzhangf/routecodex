@@ -13,6 +13,13 @@ pub const ROUTE_PRIORITY: [&str; 8] = [
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RouteClassifierInput {
+    /// Long-context threshold result. Caller is responsible for the token
+    /// estimate; this crate does NOT carry previous-turn usage in metadata
+    /// (P0 control-plane isolation forbids stuffing control state into the
+    /// request payload). If the caller wants better accuracy across many
+    /// turns, it must surface usage via a typed carrier — not by smuggling
+    /// it through `metadata` or any field the route-classifier would expose
+    /// to providers.
     pub reached_long_context: bool,
     pub has_image_attachment: bool,
     pub latest_message_from_user: bool,
@@ -149,6 +156,12 @@ pub fn classify_route(input: &RouteClassifierInput) -> RouteClassification {
         && !candidates.iter().any(|route| route == "longcontext")
     {
         candidates.push("longcontext".to_string());
+    }
+    // Search route must cascade to tools when the search pool is empty: VR walks
+    // candidates in order, so listing tools (and default) after search lets the
+    // request still serve when no search-capable upstream is available.
+    if route_name == "search" && !candidates.iter().any(|route| route == "tools") {
+        candidates.push("tools".to_string());
     }
     if !candidates.iter().any(|route| route == DEFAULT_ROUTE) {
         candidates.push(DEFAULT_ROUTE.to_string());
