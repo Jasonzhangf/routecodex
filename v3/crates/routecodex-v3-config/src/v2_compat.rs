@@ -907,6 +907,128 @@ webSearchBackend = "MiniMax-M3"
 
     #[test]
     fn provider_timeout_parses_into_manifest_request_timeout_ms() {
+        // 端到端：v2 provider 文件 `[provider].timeout` 经 V2→V3 兼容层必须写入
+        // `V3ProviderAuthoringConfig.request_timeout_ms`（曾因 serde 静默丢弃
+        // snake_case 字段导致 9 分钟超时永远不生效）。
+        // 三层验证：(1) V2 schema 解析 (2) compile_v2_provider_directory 端到点
+        // 写入 (3) 缺省字段 → DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS fallback。
+        use std::io::Write;
+
+        // (1) V2 schema 解析层：snake_case timeout 必须被接受
+        let parsed: V2ProviderConfigFile = toml::from_str(
+            r#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+timeout = 900000
+defaultModel = "model"
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(parsed.provider.timeout, Some(900_000), "snake_case timeout must parse");
+
+        // (2) 端到点：临时 provider 目录 → compile_v2_provider_directory →
+        //      manifest request_timeout_ms == 900_000
+        let tmp = std::env::temp_dir().join(format!(
+            "rccv3-timeout-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let provider_dir = tmp.join("provider").join("test-provider");
+        std::fs::create_dir_all(&provider_dir).expect("create provider dir");
+        let mut file = std::fs::File::create(provider_dir.join("config.v2.toml")).expect("file");
+        file.write_all(
+            br#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+timeout = 900000
+defaultModel = "model"
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+"#,
+        )
+        .expect("write");
+
+        let mut referenced_models: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        referenced_models.insert("test-provider".to_string(), BTreeSet::new());
+        let (providers, _sources) =
+            compile_v2_provider_directory(&tmp, &referenced_models).expect("compile v2 provider dir");
+        let authoring = providers
+            .get("test-provider")
+            .expect("provider compiled");
+        assert_eq!(
+            authoring.request_timeout_ms, 900_000,
+            "V2→V3 end-to-end: timeout=900_000 must land in request_timeout_ms (was silently dropped)"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+
+        // (2b) 缺省字段端到点：无 timeout 时，V2→V3 fallback 必须等于
+        //      DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS（300_000），不能为 0/默认
+        //      隐藏 bug。
+        let tmp_default = std::env::temp_dir().join(format!(
+            "rccv3-timeout-default-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let provider_dir_default = tmp_default.join("provider").join("test-provider");
+        std::fs::create_dir_all(&provider_dir_default).expect("create provider dir");
+        let mut file_default =
+            std::fs::File::create(provider_dir_default.join("config.v2.toml")).expect("file");
+        file_default
+            .write_all(
+                br#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "model"
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+"#,
+            )
+            .expect("write");
+        let (providers_default, _sources_default) = compile_v2_provider_directory(
+            &tmp_default,
+            &referenced_models,
+        )
+        .expect("compile v2 provider dir (absent timeout)");
+        let authoring_default = providers_default
+            .get("test-provider")
+            .expect("provider compiled");
+        assert_eq!(
+            authoring_default.request_timeout_ms,
+            DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+            "absent timeout must fall back to DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS (300_000)"
+        );
+        std::fs::remove_dir_all(&tmp_default).ok();
+
+        // (3) V2 schema 解析层：snake_case timeout 必须被接受；缺省字段 → None
         let parsed: V2ProviderConfigFile = toml::from_str(
             r#"
 providerId = "test-provider"
