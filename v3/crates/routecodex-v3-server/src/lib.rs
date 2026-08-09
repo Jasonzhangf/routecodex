@@ -5004,6 +5004,49 @@ fn resolve_v3_console_project_path_with_metadata(
     .or_else(|| read_first_scope_value(turn_metadata, TURN_METADATA_WORKDIR_PATHS))
     .or_else(|| read_first_scope_value(Some(payload), BODY_WORKDIR_PATHS))
     .or_else(|| read_v3_environment_context_cwd_from_payload(payload))
+    .or_else(|| read_v3_injected_workspace_cwd_from_payload(payload))
+}
+
+fn read_v3_injected_workspace_cwd_from_payload(payload: &Value) -> Option<String> {
+    for message in payload.get("messages").and_then(Value::as_array)? {
+        let Some(role) = message.get("role").and_then(Value::as_str) else {
+            continue;
+        };
+        if !role.eq_ignore_ascii_case("system") {
+            continue;
+        }
+        let content = match message.get("content") {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Array(parts)) => parts
+                .iter()
+                .filter_map(|p| p.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => continue,
+        };
+        if let Some(cwd) = read_v3_injected_workspace_cwd_from_text(&content) {
+            return Some(cwd);
+        }
+    }
+    None
+}
+
+fn read_v3_injected_workspace_cwd_from_text(text: &str) -> Option<String> {
+    for marker in ["Current workspace: ", "Working directory: "] {
+        let Some(idx) = text.find(marker) else {
+            continue;
+        };
+        let tail = &text[idx + marker.len()..];
+        let trimmed = tail.trim_start();
+        let quote_start = trimmed.find('"')? + 1;
+        let path = &trimmed[quote_start..];
+        let quote_end = path.find('"')?;
+        let cwd = path[..quote_end].trim();
+        if !cwd.is_empty() {
+            return Some(cwd.to_string());
+        }
+    }
+    None
 }
 
 fn read_v3_environment_context_cwd_from_payload(payload: &Value) -> Option<String> {

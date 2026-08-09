@@ -800,6 +800,44 @@ fn console_project_path_reads_codex_environment_context_cwd() {
 }
 
 #[test]
+fn console_project_path_reads_injected_workspace_cwd_from_chat_system() {
+    let payload = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [{
+            "role": "system",
+            "content": "You are a coding agent.\n\nCurrent workspace: \"/Users/fanzhang/github/routecodex\"\n\n## Environment\n\n- OS: darwin/arm64\n- Shell: bash"
+        }, {
+            "role": "user",
+            "content": "ping"
+        }]
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("/Users/fanzhang/github/routecodex")
+    );
+}
+
+#[test]
+fn console_project_path_prefers_header_over_injected_workspace_cwd() {
+    let mut headers = HeaderMap::new();
+    headers.insert("x-routecodex-workdir", HeaderValue::from_static("/from/header"));
+    let payload = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [{
+            "role": "system",
+            "content": "Current workspace: \"/from/injected\""
+        }]
+    });
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("/from/header")
+    );
+}
+
+#[test]
 fn request_id_tokens_are_stable_and_path_safe() {
     assert_eq!(
         format_v3_request_id_entry("/v1/responses"),
