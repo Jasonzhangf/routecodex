@@ -647,8 +647,10 @@ fn entry_protocol_wire_protocol(
 #[cfg(test)]
 mod tests {
     use super::{
+        build_v3_chat_req_04_standardized_from_v3_server_03,
         build_v3_req_04_standardized_responses_from_v3_server_03,
         build_v3_router_request_facts_for_entry, build_v3_router_request_facts_for_entry_with_control,
+        build_v3_router_request_facts_from_v3_req_04_chat,
         build_v3_server_03_http_request_raw,
     };
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
@@ -816,6 +818,49 @@ mod tests {
 
         assert!(facts.capabilities.contains("multimodal"));
         assert!(facts.capabilities.contains("vision"));
+    }
+
+    #[test]
+    fn v3_chat_direct_facts_current_turn_image_with_tool_history_routes_multimodal() {
+        // 用户 TUI（pocketcode）真实特征：多轮工具历史 + reasoning_content + 当前轮图。
+        // direct chat 路径 facts 必须仍识别当前轮图为 multimodal（曾落 default 打到
+        // opencode-go 上游 → 400 unknown variant image_url）。
+        let raw = build_v3_server_03_http_request_raw(
+            "server".to_string(),
+            V3ProviderFailureSessionScope::new("server", "default", "request")
+                .expect("failure scope"),
+            "request".to_string(),
+            "execution".to_string(),
+            "POST".to_string(),
+            "/v1/chat/completions".to_string(),
+            json!({
+                "model": "deepseek-v4-flash",
+                "messages": [
+                    {"role": "user", "content": "帮我看看当前仓库的改动"},
+                    {"role": "assistant", "content": null, "reasoning_content": "思考",
+                     "tool_calls": [{"id": "call_1", "type": "function",
+                                     "function": {"name": "bash", "arguments": "{}"}}]},
+                    {"role": "tool", "tool_call_id": "call_1", "content": " M package.json"},
+                    {"role": "user", "content": "好的，继续"},
+                    {"role": "assistant", "content": "已看到", "reasoning_content": "确认"},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": "这张截图里有什么？"},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+                    ]}
+                ]
+            }),
+        );
+        let normalized = build_v3_chat_req_04_standardized_from_v3_server_03(raw)
+            .expect("chat req04 normalize");
+        let facts = build_v3_router_request_facts_from_v3_req_04_chat(
+            &normalized,
+            &manifest_mode_b_websearch_for_routing_facts(),
+        );
+        assert!(
+            facts.capabilities.contains("multimodal"),
+            "current-turn image with tool history must route multimodal; caps={:?}",
+            facts.capabilities
+        );
     }
 
     #[test]

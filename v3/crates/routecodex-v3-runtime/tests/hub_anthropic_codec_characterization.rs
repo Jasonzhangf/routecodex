@@ -195,6 +195,64 @@ fn openai_chat_image_url_part_projects_to_anthropic_base64_image() {
 }
 
 #[test]
+fn multi_turn_tool_history_with_current_image_projects_full_anthropic_wire_shape() {
+    // 用户 TUI（pocketcode）真实特征：多轮工具历史 + reasoning_content + 当前轮图。
+    // wire body 必须是完整 anthropic 形状（tool_use / tool_result / image / text），
+    // 且 reasoning_content 不得泄漏进 wire。
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"claude-fable-5",
+        "stream": false,
+        "messages": [
+            {"role":"user","content":"看看仓库改动"},
+            {"role":"assistant","content":null,"reasoning_content":"需要运行 git status",
+             "tool_calls":[{"id":"call_1","type":"function",
+                            "function":{"name":"bash","arguments":"{\"command\":\"git status\"}"}}]},
+            {"role":"tool","tool_call_id":"call_1","content":" M package.json"},
+            {"role":"user","content":"继续"},
+            {"role":"assistant","content":"已看到","reasoning_content":"确认"},
+            {"role":"user","content":[
+                {"type":"text","text":"这张截图里有什么？"},
+                {"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}
+            ]}
+        ]
+    }))
+    .expect("multi-turn tool history with image must project to Anthropic wire");
+
+    let messages = provider_request["messages"].as_array().expect("messages array");
+    assert_eq!(messages.len(), 6, "6 条输入 → 6 条 anthropic 消息（1:1）");
+
+    // assistant 带 tool_use
+    let assistant = &messages[1];
+    assert_eq!(assistant["role"], "assistant");
+    assert_eq!(
+        assistant["content"][0],
+        json!({"type":"tool_use","id":"call_1","name":"bash","input":{"command":"git status"}})
+    );
+    // reasoning_content 不得泄漏
+    assert!(
+        serde_json::to_string(assistant).unwrap().contains("reasoning_content") == false,
+        "reasoning_content must not leak into Anthropic wire"
+    );
+
+    // tool → user tool_result
+    let tool_result = &messages[2];
+    assert_eq!(tool_result["role"], "user");
+    assert_eq!(tool_result["content"][0]["type"], "tool_result");
+    assert_eq!(tool_result["content"][0]["tool_use_id"], "call_1");
+
+    // 当前轮图 → anthropic image base64
+    let image_user = &messages[5];
+    assert_eq!(image_user["role"], "user");
+    assert_eq!(
+        image_user["content"][1],
+        json!({
+            "type":"image",
+            "source":{"type":"base64","media_type":"image/png","data":"AAAA"}
+        })
+    );
+}
+
+#[test]
 fn responses_custom_tool_call_raw_input_encodes_as_anthropic_tool_use_object() {
     let raw_patch = "*** Begin Patch\n*** Update File: project.private.config.json\n@@\n-}\n+}\n*** End Patch\n";
     let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({

@@ -660,6 +660,7 @@ pub(super) fn responses_content_as_anthropic_content(
         return Ok(Vec::new());
     };
     match value {
+        Value::Null => Ok(Vec::new()),
         Value::String(text) => Ok(vec![json!({"type":"text","text":text})]),
         Value::Array(parts) => parts
             .iter()
