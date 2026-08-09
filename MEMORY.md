@@ -5271,3 +5271,30 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 - 唯一 owner：`responses_provider_event_codec.rs` 响应侧 provider-wire inbound 码流（查表物化，.delta 追加 item `input`、.done 设置完整 `input`，复用 find_v3_runtime_responses_event_function_item_mut）。不允许在 SSE/handler/outbound/Error06 补偿，不允许改 VR/provider 配置，不允许把 Responses req 字段带进 provider 请求。
 - 反模式判定同 L93-reasoning-summary：上游网关发 `custom_tool_call_input.*` 时先查 OpenAI Responses 官方事件表再判 provider 故障；未知 `response.*` 仍保持 fail-fast。
 - 实证：red 测试先红（错误文案与线上一致）→ codec 修复转绿 → lib 324 全绿 → install:v3 sha256=8fd8211bd3d86909903dc5882544454c91bc3842157fe33dc855b2f2d1f5581e → rccv3 restart → 4 端口 health ok（0.90.4220）→ live 回放（model=gpt-5.5 + custom apply_patch，tools 池 → cc-sol[key1].gpt-5.6-sol 同 asxs 网关族）上游真实发出 `.delta/.done`，HTTP 201，`custom_tool_call.input` 正确物化。
+
+## 2026-08-09 - web_search 文本意图走加权评分+阈值门，路由路径闭环
+- V3 route-classifier `has_web_search_intent` 由"任一命中即 true"改为**加权评分模型**：Strong=1.0 / Medium=0.6 / BrandWeak=0.4，threshold=0.6 + strong override。单 strong/medium 即命中；单 brand-weak 0.4<阈值不命中（避免"google this"等口语误命中 web_search 池）；双 brand-weak 或 medium+brand-weak 叠加达阈值；negative context regex（中英反向 18 条）压制 strong。
+- V3 route.rs `classify_route` 补 `current_user_web_search_intent`：用户轮 + 无 image 附件 + 无当前轮 tool output + `has_web_search_intent` 真 → 触发 web_search 评估分支，reason=`web_search:user-text-intent`。多模态仍按优先级压过文本意图（dryrun 验证）。
+- 唯一真源：`v3/crates/routecodex-v3-route-classifier/src/tools.rs::has_web_search_intent` + `src/route.rs::classify_route` line 65-74。不允许在 SSE/handler/outbound/VR/provider runtime 二次实现意图检测；不允许把 `web_search` capability 旁路注入 provider payload。
+- 反模式：①把 `STRICT_TERMS` 当 list 任意追加会退化到 verb+noun 组合爆炸（V2 vendor 早期），保持 score 模型不变；②品牌词弱命中（"百度一下"）必须叠加另一弱词才进 web_search，否则会污染 coding 类请求；③补 longcontext 上一轮 usage hint 走 metadata 通道违反 P0 控制面隔离护栏，未解前不接入。
+- 实证：9 个 has_web_search_intent 单测（strong/medium/双弱叠加/单弱不命中/否定压制/大小写/不相关） + 6 个 dryrun（classify_route 端到端 strong→web_search / medium→web_search / 双弱→web_search / 单弱→非 web_search / 否定→非 web_search / multimodal 压过 keyword）→ 25/25 全绿（19 旧 + 6 新 dryrun）。commit b5709a462。
+
+## 2026-08-09 - V3 route-classifier search→tools→default 级联 + P0 控制面护栏（commit bb687e854）
+- **修复 3 闭合**：route.rs candidates 推导补 search 级联 —— `route_name == "search"` 时插入 tools 作为 fallback。VR 按 candidates 顺序取，搜索池空时仍可由 tools/default 兜底。对照既有 longcontext 级联模式（同位置扩展，避免破坏既有 9 项测试）。
+- **修复 2 方案 C 落地**：上一轮 usage hint 不进 route-classifier（与 P0 控制面隔离冲突）。`RouteClassifierInput.reached_long_context` 字段加 doc-comment 明确"caller 负责 token 估算；禁止 metadata/previous_usage 等控制字段塞进 RouteClassifierInput"。
+- **P0 护栏测试**（route_classifier_input_has_no_control_state_fields）：①编译期 destructure 强制罗列 9 字段——加字段必须改测试，刻意制造 friction；②运行时 blacklist 检查 forbidden names（metadata / previous_usage / prev_usage / session_scope / control / control_state / raw_metadata / conversation_metadata）——任何漂移即失败。这是控制语义边界"代码即文档"的最小化实现。
+- **唯一真源**：`v3/crates/routecodex-v3-route-classifier/src/route.rs` line 146-160（candidates 推导）。禁止 VR/provider runtime 重新实现级联逻辑。
+- **反模式**：①在 candidates 里硬编码所有 fallback 顺序——会让 web_search 也 cascade 到 tools，破坏 keyword → web_search 的语义；②用 metadata 携带上一轮 usage 满足"更准的 longcontext 估算"——违反 P0；③补字段绕过 destructure 测试（必须改测试但不改设计）——直接破坏护栏。
+- **实证**：3 个 search 级联 dryrun（search continuation → candidates = [search, tools, default] / tools 不重复插 / 非 search 路由不漏 tools） + 1 个 P0 护栏测试 → 29/29 全绿（25 旧 + 3 级联 + 1 护栏）。commit bb687e854。
+
+## 2026-08-09 晚 - Web Search 三种能力实测矩阵（常识沉淀，纠正 hosted/partial 误判）
+- **三种能力都是 Type A（完整能力：多工具并存 + 多轮 tool call）**，差异仅在"provider 是否自动执行 hosted search"：
+  - **GPT 系列**：✅ provider 自动跑（GPT native hosted search）
+  - **MiniMax (anthropic wire)**：✅ provider 自动跑（native server_tool_use + web_search_tool_result 自动拼接）
+  - **DeepSeek/opencode-go (openai compat)**：❌ provider 不自动跑——client 必须自己跑搜索 API，回传 `[{title,url,content}]` tool_result，模型综合作答（实测确认 web_search + exec_command 并存同时调）
+- **错误认知修正**：hosted/partial 不能靠配置声明判断（capabilities / web_search_execution_mode 都会骗人），必须实测行为。
+- **model 映射是路由设计**：5555/5520 的 `gpt-5.5` alias → forwarder → `cc-sol.gpt-5.6-sol`/`minimax_anthropic.MiniMax-M3`，响应 model 反映真实命中目标，不是 bug。
+- **provider.model 直接命中**：`cc-sol.gpt-5.6-sol` / `minimax_anthropic.MiniMax-M3` 可直接作请求 model。
+- **GPT 路由配置**：5555 web_search → `fwd.free.gpt-5.6` (cc-sol/gpt-5.6-sol) p1；5520 web_search → minimax_anthropic/MiniMax-M3 p1。
+- **待决策**：MiniMax-M3 当前标 `metadata_center_local_search`（Mode B），但实测是 anthropic native（Mode A 自动跑）——配置与能力不符。
+- V3 设计真源：`docs/goals/v3-web-search-servertool-state-machine-plan.md`（Mode A 原生透传 / Mode B 本地搜索自动续轮，proposal 已定稿）。

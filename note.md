@@ -34760,3 +34760,125 @@ Hard guards observed:
   - install gate 瞬时失败调查：v3-cli-distribution.spec 的 spawnSync --version status=null 为瞬时现象（当时二进制/环境繁忙），复测手动 + node --test 全过（5/5）后 install:v3 成功。
   - 上线：install:v3 → sha256=8f04cfd6ed63f1d50608a27d754055588631b6ab33e6b400815a4e2dbebba829，版本 0.90.4240；routecodex restart -c ~/.rcc/config.v3.toml 聚合重启 instance=v3-4c995b80ca3cb29e7dad；4444/10000/5520/5555 health 均 0.90.4240。
   - 在线验证（4444 anthropic 流式）：message_start usage {input_tokens:37,output_tokens:17,total_tokens:54}；message_delta usage {input_tokens:37,output_tokens:17,total_tokens:54}——input_tokens 不再为 0，修复生效。
+
+## 2026-08-09 - V3 route-classifier 三大缺口排查 + web_search 关键词路径修复（commit b5709a462）
+
+### 背景
+用户要求让 4444/5555 等端口的 V3 路由分类体现完整优先级语义：
+multimodal > web_search > longcontext > thinking > coding > search > tools > default。
+具体 3 个缺口：
+1. route.rs 只查 `web_search_tool_intent || has_current_turn_web_search`，未消费 `has_web_search_intent(current_user_text)`
+2. token_estimation 只算本轮，上一轮 usage 无 metadata 承载 → longcontext 阈值不准
+3. ordered_candidates 只用 [route_name, default]，search 池空不显式降级 tools
+
+### 行业 web search 命中策略调研
+- A. Tool-declaration-only（OpenAI/Anthropic 当前主推）：完全靠 tools=[{type:"web_search"}]，不做文本意图检测。优点：避免误判；缺点：口语化意图无工具声明时不调用。
+- B. Strict-terms 关键字匹配（V2 final）：维护白名单，contains 任一即命中。V2 final 12 个 term：英文 6 + 中文 6。V3 修复后采用并扩展。
+- C. Verb+noun 组合检测（V2 vendor 早期）：{search,find,lookup}∩{web,internet,online,google}。召回高但误报高，V2 final 已收敛到 B。
+
+### 实施方案
+第一轮（直接补 STRICT_TERMS 12→26）后用户回退要求更结构化方案。
+
+第二轮：加权评分+阈值门模型。
+- Strong (1.0)：核心短语 6 个（"search the web"/"web search"/"browse the web"/"联网搜索"/"请搜索"/"引用来源"/"with sources"）
+- Medium (0.6)：动词短语（"look it up"/"查一下"/"上网搜"/"查一查"/"搜一搜"等）
+- BrandWeak (0.4)：品牌词当动词（"google it"/"百度一下"/"bing 一下" 等 9 个）
+- threshold=0.6 + strong override
+- negative context regex 18 条（中英反向，含"不要联网"/"别搜"等）
+
+### 单字 weak 排除
+考虑过引入 `搜`/`查`/`上网` 单字 weak（0.3），但召回高/误报高（"搜文件"会被命中 web_search）。
+决议：单字 weak 不纳入，仅保留品牌词当动词。
+若未来需要召回更多口语词，应走 score 模型加 term，而非单字。
+
+### Dryrun 设计（classify_route 端到端 6 维）
+| 维度 | 输入 | 预期 |
+|---|---|---|
+| strong | "帮我联网搜索一下 rust 1.80 release notes" | web_search + user-text-intent |
+| medium | "查一下 巴黎今天天气" | web_search + user-text-intent |
+| 双 brand-weak | "百度一下 谷歌一下 rust 教程" | web_search |
+| 单 brand-weak | "google it" | 非 web_search（实际 thinking） |
+| 否定上下文 | "帮我联网搜索 但不需要联网" | 非 web_search |
+| multimodal 压过 | has_image=true + "联网搜索 这张图" | multimodal |
+
+### 单测期望的纠偏记录
+- 第一版 `BING 一下` 期望命中 → 实际 single brand-weak 不应命中 → 改 `!hit`
+- 第一版 `with sources` 在 Strong A 组 → 实现里归为 Strong → 通过
+- 第一版 `please include citations with sources` 期望命中 → 实现里"引用来源"是中文 strong，"with sources"是 strong 但本句不含 → 移除该用例
+
+### 未完成项 / 风险
+1. **修复 2（longcontext 上一轮 usage 元数据通道）**：与 P0 控制面隔离护栏冲突。
+   - 方案 A：metadata carrier（违反 P0，控制语义进 payload）
+   - 方案 B：req_inbound 扩字段（payload 上游 route 不会带 usage）
+   - 方案 C：退回本轮估算（user 真实需求：大上下文续写）
+   - 暂无合规方案，**未做**。需要用户进一步指示是否允许新设专用 carrier 类型（区别于 metadata）。
+2. **修复 3（search 池空显式降级 tools）**：route.rs candidates 已包含 default 但 ordered_candidates 的级联语义未做。**未做**。
+3. **4444 min live 在线复测**：本次提交未做 live 验证。已完成 unit + dryrun 但缺端到端真实流量复测。
+
+### 提交详情
+- commit b5709a462 "feat(route-classifier): keyword intent drives web_search route"
+- 3 files: tools.rs (+94/-17), tests.rs (+187/-1), route.rs (+13/-2)
+- cargo test -p routecodex-v3-route-classifier --lib：25/25 绿（19 旧 + 6 新 dryrun）
+
+### 工作区其他无关改动（未提交，留给对应任务）
+- package.json/package-lock.json/src/build-info.ts
+- v3-provider-responses/* (adaptive_concurrency.rs/lib.rs/transport.rs)
+- v3-runtime/src/diagnostics.rs/nodes.rs
+- v3-virtual-router/src/lib.rs/tests/mod.rs
+这些是其他任务的进行中改动，不属于本次 web_search 修复范围。
+
+### 2026-08-09 续 - 修复 3 + 修复 2 方案 C（commit bb687e854）
+
+#### 修复 3 search→tools→default 级联
+- 现状 route.rs candidates = [route_name, (longcontext?), default]
+- 缺：search 池空时无显式 fallback（VR 按顺序取，但 candidates 没列 tools → 直接落 default，跳过 tools）
+- 改动：在 longcontext 级联后插入 `route_name == "search" && !tools in candidates => push tools"`
+- 对照既有 longcontext 级联的位置（同 if 块），避免重排破坏既有顺序
+- dryrun 3 个：search continuation → [search, tools, default] / tools 不重复 / web_search 路由不漏 tools
+
+#### 修复 2 方案 C 决策
+- 三方案再评估：
+  - A. metadata carrier → ❌ 违反 P0 控制面隔离（用户在 task1 明令禁止）
+  - B. req_inbound 扩字段 → ❌ route-classifier 是 caller，不应在 caller 责任外推；且上游 provider 不会带 usage
+  - C. 退回本轮估算 + 护栏 → ✅ 无 P0 冲突；route-classifier 不算 token 是正确边界
+- 落地：RouteClassifierInput.reached_long_context 字段加 doc-comment；新增 P0 护栏测试
+- P0 护栏测试设计：
+  - 编译期：destructure 强制罗列所有字段（加字段必须改测试）
+  - 运行时：blacklist 检查 forbidden control-state 名称
+  - 这是"代码即文档"的最小化实现：护栏就是测试本身
+
+#### 用户原始需求的妥协说明
+- 用户要求"上一轮 usage hint" → 实际只能本轮估算（除非新建专用 typed carrier，超出本任务范围）
+- 在 RouteClassifierInput doc-comment + MEMORY 中明示此限制，避免未来 caller 偷偷塞 metadata
+
+#### 提交细节
+- commit bb687e854 "feat(route-classifier): search cascade to tools; P0 control-state guard"
+- 2 files: route.rs (+13), tests.rs (+99)
+- cargo test -p routecodex-v3-route-classifier --lib：29/29 绿
+
+## 2026-08-09 晚 - Web Search 能力实测（Jason 实测确认 + playground V2 复核）——沉淀为常识
+
+### 核心认知修正（纠正此前错误）
+1. **model 映射是路由设计，不是 bug**：5555/5520 里 `gpt-5.5` 这类 alias 经 forwarder 映射到实际 provider.model（`cc-sol.gpt-5.6-sol` / `minimax_anthropic.MiniMax-M3`），响应 `model` 字段如实反映实际命中目标。请求 model 与响应 model 不一致是**预期**（路由映射）。
+2. **provider.model 直接命中路由是支持的**：`cc-sol.gpt-5.6-sol` / `minimax_anthropic.MiniMax-M3` 可直接作为请求 model 走对应 forwarder/provider。
+3. **GPT 系列路由在 5555/5520 已有配置**：5555 web_search 池 target = `fwd.free.gpt-5.6`（cc-sol/gpt-5.6-sol）priority 1；5520 web_search 池 target = minimax_anthropic/MiniMax-M3 priority 1（+ claude-fable-5/glm/composer/grok/gpt-free 兜底）。
+4. **"hosted vs partial" 分类错误**：不能靠 provider 配置声明（capabilities / web_search_execution_mode）判断是否真 hosted——**必须实测行为**。
+
+### 三种能力的实测矩阵（Jason 实测 + 复核）
+
+| 能力 | GPT 系列 | MiniMax (anthropic wire) | DeepSeek/opencode-go (openai compat) |
+|---|---|---|---|
+| web_search + 其他工具并存 | ✅ | ✅ | ✅（实测确认，web_search + exec_command 可同时调） |
+| Provider 自动跑 hosted search | ✅ GPT native | ✅ MiniMax native（server_tool_use + web_search_tool_result 自动拼接） | ❌ 需要 client 自己跑搜索 API 并回传 tool_result |
+| 客户端回传 tool_result 格式 | openai function tool | anthropic tool_result block | openai tool message（`[{title, url, content}]` 实测被接受并综合作答） |
+
+**结论**：MiniMax 和 DeepSeek 都是 Type A（完整能力：多工具并存 + 多轮 tool call），与 GPT 系列等价。差异仅在 **"provider 是否自动执行 hosted search"**：
+- GPT / MiniMax = 自动跑（native hosted server tool）
+- DeepSeek/opencode-go = 不自动跑（client 必须自己跑搜索 API，回传 tool_result 后模型综合作答）
+
+### 关键实现启示（V3 架构对齐）
+- V3 已有设计真源：`docs/goals/v3-web-search-servertool-state-machine-plan.md`（proposal 已定稿，Jason 审批）
+  - Mode A 原生透传：GPT native-search 目标保留标准 `web_search`
+  - Mode B 本地搜索自动续轮：替换为本地 `websearch`，Resp03 拦截 → 强制 route=websearch → 重入 VR search-dispatch edge 一次额外 hop → 拦截搜索响应 → 投影 Responses `web_search_call` 等价结果
+- `V3WebSearchExecutionMode`（config types.rs:592）：`None` / `NativeRemoteSearchToolMix` / `NativeRemoteSearchSearchOnly` / `MetadataCenterLocalSearch` / `ServertoolSearchBackend`
+- **当前配置问题**：MiniMax-M3 标 `web_search_execution_mode = "metadata_center_local_search"`（Mode B），但实测 MiniMax 是 anthropic native server tool（Mode A 自动跑）——配置与真实能力不符，待 Jason 决策是否改为 native。
