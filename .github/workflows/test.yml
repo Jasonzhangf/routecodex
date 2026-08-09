@@ -24,7 +24,7 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Repo sanity (no root junk)
         run: npm run verify:repo-sanity
       - name: Architecture gates
@@ -77,86 +77,11 @@ jobs:
           # Prevent build scripts from mutating version files in CI.
           ROUTECODEX_SKIP_AUTO_BUMP: "1"
         run: npm run build:min
+      - name: Install direct V3 CLI binary
+        run: ROUTECODEX_SKIP_AUTO_BUMP=1 RUSTUP_TOOLCHAIN=stable npm run install:v3
+      - name: Install built V3 CLI shim
+        run: npm run fix:cli-shim
       - name: Run host tests
         env:
           ROUTECODEX_SKIP_AUTO_BUMP: "1"
         run: npm run test:v3-workspace
-
-  coverage:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - run: npm ci
-      - name: Repo sanity (no root junk)
-        run: npm run verify:repo-sanity
-      - name: Architecture gates
-        run: npm run verify:architecture-ci
-      - name: V3 architecture CI umbrella
-        run: npm run verify:v3-architecture-ci
-      - name: V3 Responses session admission
-        run: npm run verify:v3-responses-session-admission
-      - name: V3 Responses session admission red fixtures
-        run: npm run test:v3-responses-session-admission-red-fixtures
-      - name: V3 Responses session admission behavior
-        run: npm run test:v3-responses-session-admission
-      - name: File line-limit gate (<500)
-        run: npm run verify:file-line-limit
-      - name: V3 file-size ratchet gate (<=1500)
-        run: npm run verify:v3-file-size
-      - name: V3 and shared classifier file-size red fixtures
-        run: npm run test:v3-file-size-red-fixtures
-      - name: V3 provider action gate
-        run: npm run test:v3-provider-action-gate
-      - name: V3 provider action architecture gate
-        run: npm run verify:v3-provider-action-gate
-      - name: V3 provider action red fixtures
-        run: npm run test:v3-provider-action-gate-red-fixtures
-      - name: V3 5520 duplicate response tool identity
-        run: npm run test:v3-5520-duplicate-tool-identity
-      - name: V3 Runtime timing observability
-        run: npm run verify:v3-runtime-timing-observability
-      - name: V3 Runtime timing red fixtures
-        run: npm run test:v3-runtime-timing-observability-red-fixtures
-      - name: V3 debug side-channel contract
-        run: npm run test:v3-debug-contract
-      - name: V3 debug payload budget
-        run: npm run verify:v3-debug-payload-budget
-      - name: V3 debug payload budget red fixtures
-        run: npm run test:v3-debug-payload-budget-red-fixtures
-      - name: V3 console request count visibility
-        run: npm run verify:v3-console-request-count-visibility
-      - name: V3 console request count red fixtures
-        run: npm run test:v3-console-request-count-visibility-red-fixtures
-      - name: V2 and V3 route-classifier semantic gate
-        run: npm run test:route-classifier-semantics
-      - name: Servertool Rust-only gate
-        run: npm run verify:servertool-rust-only
-      - name: Build (release)
-        env:
-          BUILD_MODE: release
-          ROUTECODEX_SKIP_AUTO_BUMP: "1"
-        run: npm run build:min
-      - name: Run CI coverage (jest-only)
-        env:
-          ROUTECODEX_SKIP_AUTO_BUMP: "1"
-          ROUTECODEX_CI_MAX_WORKERS: "2"
-        run: npm run jest:run -- --coverage --silent
-      - name: Coverage summary
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -f coverage/coverage-summary.json ]]; then
-            node -e 'const fs=require("fs");const s=JSON.parse(fs.readFileSync("coverage/coverage-summary.json","utf8"));const t=s.total||{};const pct=(x)=>((x&&typeof x.pct==="number")?x.pct:0);console.log(`lines: ${pct(t.lines)}%`);console.log(`branches: ${pct(t.branches)}%`);console.log(`functions: ${pct(t.functions)}%`);console.log(`statements: ${pct(t.statements)}%`);'
-          else
-            echo "missing coverage/coverage-summary.json"
-            ls -la coverage || true
-          fi

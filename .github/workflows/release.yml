@@ -33,7 +33,7 @@ jobs:
           cache: npm
 
       - name: Install
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Repo sanity (no root junk)
         run: npm run verify:repo-sanity
