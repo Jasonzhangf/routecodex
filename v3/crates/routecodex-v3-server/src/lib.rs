@@ -4240,8 +4240,8 @@ fn format_v3_provider_switch_console_content(
     format_v3_console_timed_content(
         "[provider-switch]",
         &format!(
-            "req={} [switch to:{}] [switch from:{}] result={} reason=provider_failure",
-            request_id, target, from, event.action
+            "req={} [switch to:{}] [switch from:{}] result={} reason=provider_failure causeStatus={} failures={} health={} message={}",
+            request_id, target, from, event.action, event.status, event.failure_count, event.health_state, event.message
         ),
     )
 }

@@ -1498,6 +1498,11 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
             .unwrap()
             < switch_content.find("reason=provider_failure").unwrap()
     );
+    // switch 行必须自带错误详情，单行即可观测切换原因
+    assert!(switch_content.contains("causeStatus=502"));
+    assert!(switch_content.contains("failures=3"));
+    assert!(switch_content.contains("health=cooldown"));
+    assert!(switch_content.contains("message=provider response event codec failed"));
 
     let colored = colorize_v3_layered_console_line(
         V3ConsoleLayeredBlock::new("", &error_content, &error_content, ""),
