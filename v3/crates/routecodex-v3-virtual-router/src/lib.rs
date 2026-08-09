@@ -273,6 +273,7 @@ impl V3VirtualRouter {
                 })
                 .map(|candidate| candidate.as_str()),
         );
+        let mut implicit_tiers = Vec::new();
         for candidate in ordered_candidates {
             if candidate == DEFAULT_ROUTE {
                 continue;
@@ -296,10 +297,7 @@ impl V3VirtualRouter {
             ) {
                 // 无显式能力池时，从 manifest 推断具备该能力的模型构建
                 // 隐式能力池（RoundRobin 轮询）——配置简化：能力声明即路由。
-                let implicit_pool_id = format!("implicit:{candidate}");
-                if selected_pool_ids.insert(implicit_pool_id.clone()) {
-                    tiers.push(tier);
-                }
+                implicit_tiers.push((format!("implicit:{candidate}"), tier));
             }
         }
         for signal in capability_route_pool_signals(&classified.facts) {
@@ -315,6 +313,13 @@ impl V3VirtualRouter {
                     &mut selected_pool_ids,
                     &mut tiers,
                 )?;
+            }
+        }
+        if tiers.is_empty() {
+            for (implicit_pool_id, tier) in implicit_tiers {
+                if selected_pool_ids.insert(implicit_pool_id) {
+                    tiers.push(tier);
+                }
             }
         }
         if tiers.is_empty() {
