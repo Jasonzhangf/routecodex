@@ -208,7 +208,7 @@ try {
     cleanTestProfile: () => {
       cleaned = true;
       rmSync(dependency);
-      rmSync(deps, { recursive: true });
+      rmSync(fixture, { recursive: true });
     },
   });
   assert.equal(cleaned, true);
