@@ -3952,8 +3952,7 @@ struct V3ConsoleEmissionContext {
     entry_protocol: String,
     endpoint: String,
     request_identity: V3AllocatedRequestIdentity,
-    headers: HeaderMap,
-    payload: Value,
+    identity: V3ConsoleLogIdentity,
     realtime_provider_failure_event_keys: Arc<Mutex<BTreeSet<String>>>,
     realtime_route_selection_keys: Arc<Mutex<BTreeSet<String>>>,
 }
@@ -3966,13 +3965,17 @@ fn build_v3_console_emission_context(
     headers: &HeaderMap,
     payload: &Value,
 ) -> V3ConsoleEmissionContext {
+    let identity = resolve_v3_console_log_identity_from_parts(
+        headers,
+        payload,
+        &request_identity.request_id,
+    );
     V3ConsoleEmissionContext {
         state: Arc::clone(state),
         entry_protocol: entry_protocol.to_string(),
         endpoint: endpoint.to_string(),
         request_identity: request_identity.clone(),
-        headers: headers.clone(),
-        payload: payload.clone(),
+        identity,
         realtime_provider_failure_event_keys: Arc::new(Mutex::new(BTreeSet::new())),
         realtime_route_selection_keys: Arc::new(Mutex::new(BTreeSet::new())),
     }
@@ -3985,7 +3988,7 @@ fn emit_v3_provider_observability_console_lines(
     if !context.state.console_enabled {
         return;
     }
-    let identity = resolve_v3_console_log_identity(context);
+    let identity = context.identity.clone();
     let route = resolve_v3_console_route_projection(observability);
     for event in &observability.provider_failure_events {
         emit_v3_provider_failure_console_event(context, observability, event);
@@ -4079,7 +4082,7 @@ fn emit_v3_provider_failure_console_event(
     if !mark_v3_provider_failure_console_event_once(context, event) {
         return;
     }
-    let identity = resolve_v3_console_log_identity(context);
+    let identity = context.identity.clone();
     let route = resolve_v3_console_route_projection(observability);
     let event_observability =
         build_v3_console_provider_failure_event_observability(observability, event);
@@ -4316,7 +4319,7 @@ fn emit_v3_request_route_hit_console_line_for_observability(
     if !mark_v3_route_selection_console_event_once(context, observability) {
         return;
     }
-    let identity = resolve_v3_console_log_identity(context);
+    let identity = context.identity.clone();
     let route = resolve_v3_console_route_projection(observability);
     let provider_target = format_v3_console_provider_target(observability);
     let headline = render_v3_request_console_block(&V3ConsoleRequestHeadline {
@@ -4383,7 +4386,7 @@ fn emit_v3_request_complete_console_line(
     let (internal_timing, external_timing) =
         format_v3_console_runtime_timing(observability.timing.as_ref())?;
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
-    let identity = resolve_v3_console_log_identity(context);
+    let identity = context.identity.clone();
     let headline = render_v3_response_console_block(&V3ConsoleResponseHeadline {
         endpoint: &context.endpoint,
         status,
@@ -4467,7 +4470,7 @@ fn emit_v3_stopless_console_line(
         .finish_reason
         .as_deref()
         .expect("Stopless console activation requires a typed finish reason");
-    let identity = resolve_v3_console_log_identity(context);
+    let identity = context.identity.clone();
     let route = resolve_v3_console_route_projection(observability);
     let content = format_v3_console_timed_content(
         "🧭 [stopless]",
@@ -4576,7 +4579,7 @@ fn emit_v3_direct_frame_console_lines(
         enrich_v3_direct_observability_from_frame(observability, frame);
         emit_v3_frame_error_console_line_for_context(context, frame, observability);
     } else {
-        let identity = resolve_v3_console_log_identity(context);
+        let identity = context.identity.clone();
         emit_v3_frame_error_console_line_for_state(
             &context.state,
             &context.endpoint,
@@ -4927,14 +4930,6 @@ struct V3ConsoleLogIdentity {
     color_key: Option<String>,
     session_id: String,
     project_path: Option<String>,
-}
-
-fn resolve_v3_console_log_identity(context: &V3ConsoleEmissionContext) -> V3ConsoleLogIdentity {
-    resolve_v3_console_log_identity_from_parts(
-        &context.headers,
-        &context.payload,
-        &context.request_identity.request_id,
-    )
 }
 
 fn resolve_v3_console_log_identity_from_parts(
@@ -5632,7 +5627,7 @@ fn emit_v3_error_console_line_for_context(
     error_chain: &[&'static str],
     body: Option<&Value>,
 ) {
-    let identity = resolve_v3_console_log_identity(context);
+    let identity = context.identity.clone();
     let route = resolve_v3_console_route_projection(observability);
     let content = format_v3_error_console_content(
         &context.endpoint,
@@ -6489,6 +6484,11 @@ const TURN_METADATA_WORKDIR_PATHS: &[&[&str]] = &[
 ];
 
 const BODY_SESSION_PATHS: &[&[&str]] = &[
+    &["session_id"],
+    &["sessionId"],
+    &["sessionID"],
+    &["session-id"],
+    &["client_metadata", "sessionID"],
     &["client_metadata", "session_id"],
     &["client_metadata", "sessionId"],
     &["client_metadata", "session-id"],
@@ -6514,11 +6514,21 @@ const BODY_WORKDIR_PATHS: &[&[&str]] = &[
 ];
 
 const BODY_CONVERSATION_PATHS: &[&[&str]] = &[
+    &["thread_id"],
+    &["threadId"],
+    &["threadID"],
+    &["thread-id"],
+    &["conversation_id"],
+    &["conversationId"],
+    &["conversationID"],
+    &["conversation-id"],
+    &["client_metadata", "threadID"],
     &["client_metadata", "thread_id"],
     &["client_metadata", "threadId"],
     &["client_metadata", "thread-id"],
     &["client_metadata", "conversation_id"],
     &["client_metadata", "conversationId"],
+    &["client_metadata", "conversationID"],
     &["client_metadata", "conversation-id"],
     &["clientMetadata", "thread_id"],
     &["clientMetadata", "threadId"],

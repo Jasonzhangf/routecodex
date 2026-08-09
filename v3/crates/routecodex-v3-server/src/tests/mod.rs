@@ -1356,6 +1356,22 @@ fn provider_failure_scope_uses_internal_request_id_without_client_session_header
 }
 
 #[test]
+fn console_color_identity_reads_reasonix_root_session_id() {
+    let payload = serde_json::json!({
+        "sessionID": "reasonix-session-42",
+        "model": "deepseek-v4-flash",
+        "input": "hello"
+    });
+    let color_key = resolve_v3_log_session_color_key(
+        &HeaderMap::new(),
+        &payload,
+        "request-should-not-be-used",
+    );
+
+    assert_eq!(color_key.as_deref(), Some("reasonix-session-42"));
+}
+
+#[test]
 fn responses_continuation_scope_reads_codex_turn_metadata_header() {
     let mut headers = HeaderMap::new();
     headers.insert(
