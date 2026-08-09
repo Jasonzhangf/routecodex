@@ -506,12 +506,19 @@ impl V3OpenAiChatAnthropicSseTransducer {
                 .to_string(),
             );
         }
-        self.output_tokens = object
-            .get("usage")
-            .and_then(Value::as_object)
-            .and_then(|usage| usage.get("output_tokens"))
-            .and_then(Value::as_u64)
-            .or(self.output_tokens);
+        // MiniMax anthropic 兼容接口（线上抓包实证 2026-08-09）：message_start
+        // 的 usage.input_tokens 是占位 0，真实 input_tokens 与 output_tokens 一起
+        // 出现在 message_delta 的 usage 里。两个字段都必须在此覆盖更新（官方
+        // Anthropic 接口 message_delta 只带 output_tokens，input 已在 message_start
+        // 为真实值；覆盖语义对两者兼容：有值才覆盖，缺值保留已有）。
+        if let Some(usage) = object.get("usage").and_then(Value::as_object) {
+            if let Some(input) = usage.get("input_tokens").and_then(Value::as_u64) {
+                self.input_tokens = Some(input);
+            }
+            if let Some(output) = usage.get("output_tokens").and_then(Value::as_u64) {
+                self.output_tokens = Some(output);
+            }
+        }
         Ok(Vec::new())
     }
 

@@ -492,6 +492,14 @@ pub struct V3ProviderAuthoringConfig {
     pub compatibility_profile: Option<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+    /// per-request 总超时（毫秒）；默认 300_000（300s）。
+    #[serde(default = "default_provider_request_timeout_ms")]
+    pub request_timeout_ms: u64,
+}
+
+/// provider per-request 总超时默认值（毫秒）：300s。
+pub fn default_provider_request_timeout_ms() -> u64 {
+    300_000
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1012,6 +1020,8 @@ pub struct V3ProviderManifest {
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
     pub compatibility_profile: Option<String>,
     pub features: BTreeMap<String, bool>,
+    /// per-request 总超时（毫秒）
+    pub request_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

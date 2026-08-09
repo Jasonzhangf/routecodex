@@ -20,6 +20,8 @@ fn responses_http_target() -> V3ResponsesProviderTarget {
         responses_transport: V3ResponsesTransportKind::Http,
         websocket_v2_url: None,
         provider_request_cleanup: Default::default(),
+        request_timeout_ms: 300_000,
+        initial_concurrency_budget: 8,
     }
 }
 

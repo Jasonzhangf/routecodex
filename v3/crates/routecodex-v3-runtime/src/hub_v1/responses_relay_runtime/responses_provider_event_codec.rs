@@ -292,7 +292,11 @@ fn collect_v3_runtime_responses_event_payload_evidence(
         }
         Some("response.custom_tool_call_input.delta") => {
             if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                append_v3_runtime_responses_event_custom_tool_call_input(output_items, event, delta);
+                append_v3_runtime_responses_event_custom_tool_call_input(
+                    output_items,
+                    event,
+                    delta,
+                );
             }
         }
         Some("response.custom_tool_call_input.done") => {

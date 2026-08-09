@@ -666,6 +666,7 @@ fn compile_providers(
                 provider_request_cleanup,
                 compatibility_profile,
                 features: provider.features,
+                request_timeout_ms: provider.request_timeout_ms,
             },
         );
     }

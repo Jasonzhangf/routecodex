@@ -145,6 +145,8 @@ pub fn provider_target(
         responses_transport: selected.responses_transport,
         websocket_v2_url: selected.websocket_v2_url.clone(),
         provider_request_cleanup: selected.provider_request_cleanup.clone(),
+        request_timeout_ms: provider.request_timeout_ms,
+        initial_concurrency_budget: selected.initial_concurrency_budget,
     })
 }
 
@@ -171,7 +173,8 @@ pub async fn handle_provider_failure(
         failure_error_type(&failure),
         provider_failure_message(&failure),
         state,
-    )    .await
+    )
+    .await
     .map_err(|error| error.to_string())?;
     match result.decision.action {
         V3Error05ExecutionAction::WaitThenReselect { recovery } => {
@@ -193,9 +196,9 @@ pub async fn handle_provider_failure(
             Ok(Some(failure))
         }
         V3Error05ExecutionAction::ClientDisconnected
-        | V3Error05ExecutionAction::RejectNonProviderError => Err(
-            "provider failure entered a non-provider Error05 lane".to_string(),
-        ),
+        | V3Error05ExecutionAction::RejectNonProviderError => {
+            Err("provider failure entered a non-provider Error05 lane".to_string())
+        }
     }
 }
 
@@ -242,7 +245,10 @@ pub fn provider_request_failure(
 
 /// provider 运行时失败（共享版；gemini/openai/responses 形状；client_disconnect
 /// 仍 health-neutral 投影 499）。
-pub fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3RelayProviderFailure {
+pub fn provider_runtime_failure(
+    error: V3ProviderError,
+    provider_id: &str,
+) -> V3RelayProviderFailure {
     let terminal_projection =
         matches!(&error, V3ProviderError::ClientDisconnect { .. }).then(|| {
             project_v3_client_disconnect(

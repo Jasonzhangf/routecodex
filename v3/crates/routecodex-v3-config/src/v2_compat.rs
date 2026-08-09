@@ -19,6 +19,9 @@ use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
 
+/// provider per-request 总超时默认值（毫秒）：300s。
+pub(crate) const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 300_000;
+
 pub(crate) fn compile_v2_config_02_authoring_from_file(
     config_path: &Path,
     raw: &str,
@@ -469,6 +472,9 @@ pub(crate) fn compile_v2_provider_directory(
                 provider_request_cleanup: v3.provider_request_cleanup,
                 compatibility_profile,
                 features: v3.features,
+                request_timeout_ms: provider
+                    .timeout
+                    .unwrap_or(DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS),
             },
         );
         provider_sources.push(V3ProviderDirectorySource {
@@ -757,6 +763,9 @@ struct V2ProviderConfig {
     models: BTreeMap<String, V2ProviderModelConfig>,
     #[serde(default)]
     v3: Option<V2ProviderV3Config>,
+    /// per-request 总超时（毫秒）；默认 300_000（300s）。覆盖连接、响应头等待与 body 读取。
+    #[serde(default)]
+    timeout: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]

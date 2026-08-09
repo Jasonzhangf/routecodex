@@ -9,13 +9,15 @@ use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_transport_13_responses_http_request_from_parts, ReqwestResponsesTransport,
-    ResponsesTransport, V3ProviderError, V3ProviderRequestHeader, V3ProviderSseStream,
-    V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout,
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderError, V3ProviderRequestHeader,
+    V3ProviderSseStream, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
+    V3Transport13ResponsesHttpRequest,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::pin::Pin;
+use std::time::Duration;
 use std::sync::Arc;
 
 pub type V3GeminiRelayClientStream =
@@ -363,13 +365,15 @@ fn build_v3_gemini_transport_09(
             ""
         }
     );
-    build_v3_transport_13_responses_http_request_from_parts(
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout(
         request_id,
         target.provider_id,
         url_text,
         target.auth,
         stream_intent,
         body,
+        Vec::new(),
+        Some(Duration::from_millis(target.request_timeout_ms)),
     )
     .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))
 }

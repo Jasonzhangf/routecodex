@@ -45,6 +45,34 @@ fn active_turn_uses_actual_tool_calls_and_ignores_history() {
 }
 
 #[test]
+fn chat_historical_web_search_does_not_activate_current_turn() {
+    let request = json!({
+        "messages": [
+            {"role":"user","content":"old"},
+            {"role":"assistant","content":[{"type":"web_search","query":"old"}]},
+            {"role":"user","content":"current text only"}
+        ]
+    });
+    let signals = extract_active_turn_signals(&request);
+    assert!(signals.latest_message_from_user);
+    assert!(!signals.has_current_turn_web_search);
+}
+
+#[test]
+fn responses_historical_web_search_does_not_activate_current_turn() {
+    let request = json!({
+        "input": [
+            {"type":"message","role":"user","content":"old"},
+            {"type":"web_search_call","query":"old"},
+            {"type":"message","role":"user","content":"current text only"}
+        ]
+    });
+    let signals = extract_active_turn_signals(&request);
+    assert!(signals.latest_message_from_user);
+    assert!(!signals.has_current_turn_web_search);
+}
+
+#[test]
 fn chat_messages_use_only_current_turn_tool_calls() {
     let continuation = json!({
         "messages": [

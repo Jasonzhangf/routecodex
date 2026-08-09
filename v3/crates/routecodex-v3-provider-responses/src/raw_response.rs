@@ -117,6 +117,24 @@ impl V3ProviderResp14Raw {
         self.body
     }
 
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        String,
+        String,
+        u16,
+        Vec<V3ProviderResponseHeader>,
+        V3ProviderResponseBody,
+    ) {
+        (
+            self.request_id,
+            self.provider_id,
+            self.status,
+            self.headers,
+            self.body,
+        )
+    }
+
     pub async fn into_body_bytes(self) -> Result<Vec<u8>, V3ProviderError> {
         match self.body {
             V3ProviderResponseBody::Json(body) => Ok(body),

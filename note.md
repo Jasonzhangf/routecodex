@@ -34746,3 +34746,17 @@ Hard guards observed:
 - server：openai_chat+Direct 分支 → `execute_v3_openai_chat_direct_server_outcome`（骨架 + ChatCodec；异协议由骨架 RelayHandoff 转 chat relay runtime）。
 - 验证：lib 324 全绿；integration 全绿（2 个失败为 worker 新测试与其中间态不一致，HEAD 基线该二进制仅 17 测试，证明非我改动）；0.90.4222 安装重启 4 端口 OK；live：chat 入口 execution_mode=direct、trace 含 V3Req04StandardizedChat/V3ChatDirect11Policy、custom tool 200（go 接受）、responses custom tool 请求稳定 key2 零切换。
 - 遗留：responses kernel core 尚未迁移到泛型骨架（其 continuation/stopless 控制面需 codec 化，作为下一步）；anthropic/gemini direct codec 未建（bindings 默认仍 Relay，validate 已不拦 Direct 配置）。
+
+## 2026-08-09 chat direct (10000) usage 调查（Jason 报"客户端 usage 0"，后复现不了）
+- 链路：opencode TUI → RouteCodex 10000 /v1/chat/completions（execution_mode=direct）→ opencode-go 网关 → ds4(8000)。
+- 协议决策验证正常：`build_v3_execution_11_protocol_decision_from_v3_target_10`（nodes.rs:546）——chat 入口 + responses provider → HubRelay；chat + chat wire → SameProtocolDirect；lmstudio(responses process=chat) 强制 HubRelay。5555 endpoints 只含 responses；chat direct 在 10000/4444。
+- payload 实证（curl 10000 多次，stream=true/false）：usage chunk 完整透传（prompt_tokens=85/completion_tokens=20/total_tokens=105，DeepSeek 格式=usage 与 finish_reason 同帧、choices 非空）；`[DONE]` 后 opencode-go 网关注入 `data: {"choices":[],"cost":"0"}` 帧（RouteCodex 源码无 cost 注入，ds4 源码无 cost，来源=opencode.ai/zen/go 网关）。
+- 客户端解析实证：@ai-sdk/openai-compatible@3.0.27 源码 parseJsonEventStream（provider-utils）——`[DONE]` 只 return 不终止流；usage 逐 chunk 读（`if (value.usage != null) usage = value.usage`）；cost 帧（choices 空+无 usage）不影响 usage。→ AI SDK 客户端不会因 cost 帧/同帧 usage 得 0。
+- 观测层缺口（真实存在，0.90.4238 未修）：chat direct SSE console 恒显示 `usage=unreported`；泛型骨架 `kernel/v3_direct_core.rs` 响应路径只有 observed_sse_client_stream（字节透传），缺 responses 路径的 `wrap_direct_sse_provider_event_json_observation_stream` usage 收集层；responses 路径在 kernel.rs:1360-1425（wrap_direct_sse_provider_event_json_observation_stream + remote_continuation + provider_outcome，均 responses 专用）。4444 chat direct JSON 有 usage_in/out（JSON 响应观测能读），10000 chat direct SSE 无。
+- 结论：RouteCodex 转发（payload）无问题；"客户端 usage 0"未在 RouteCodex 复现（透传完整+AI SDK 解析正常），可能为客户端/网关注入帧/环境因素，Jason 已确认复现不了。剩余工作项：chat direct SSE 观测层 usage 收集（与 worker 协调 v3_direct_core.rs）。
+- 2026-08-09 晚：MiniMax anthropic 兼容接口流式 usage 修复（root cause + 修复 + 上线验证）：
+  - 根因：MiniMax 的 /v1/messages 流式在 message_start 中 usage.input_tokens=0（占位），真实 input_tokens 只在 message_delta 里给出；RouteCodex V3OpenAiChatAnthropicSseTransducer.message_delta 只取 output_tokens，不覆盖更新 input_tokens → 流式 prompt_tokens=0（本次 Jason 报的 10000/4444 anthropic 响应入站 usage 映射问题即此）。
+  - 修复：v3 的 openai_chat_codec.rs message_delta 分支同时覆盖更新 input_tokens/cache_read_input_tokens（唯一真源修改点；message_start 属 provider 占位语义不可改，message_delta 才是真实 usage 载体）。红测（MiniMax 真实格式 fixture）先红后绿。
+  - install gate 瞬时失败调查：v3-cli-distribution.spec 的 spawnSync --version status=null 为瞬时现象（当时二进制/环境繁忙），复测手动 + node --test 全过（5/5）后 install:v3 成功。
+  - 上线：install:v3 → sha256=8f04cfd6ed63f1d50608a27d754055588631b6ab33e6b400815a4e2dbebba829，版本 0.90.4240；routecodex restart -c ~/.rcc/config.v3.toml 聚合重启 instance=v3-4c995b80ca3cb29e7dad；4444/10000/5520/5555 health 均 0.90.4240。
+  - 在线验证（4444 anthropic 流式）：message_start usage {input_tokens:37,output_tokens:17,total_tokens:54}；message_delta usage {input_tokens:37,output_tokens:17,total_tokens:54}——input_tokens 不再为 0，修复生效。

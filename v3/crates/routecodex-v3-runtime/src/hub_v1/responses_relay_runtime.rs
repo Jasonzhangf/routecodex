@@ -36,9 +36,9 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload, ReqwestResponsesTransport,
-    ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
-    V3ProviderHealthStore, V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
+    build_v3_provider_12_responses_wire_payload, ReqwestResponsesTransport, ResponsesTransport,
+    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHealthStore,
+    V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
     V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
@@ -2226,19 +2226,17 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         provider_response_transport_intent: V3HubTransportIntent::Json,
                         compatibility_profile: selected.candidate.compatibility_profile.as_deref(),
                         web_search_execution_mode: selected.candidate.web_search_execution_mode,
-                        web_search_center_state: request_web_search_state.clone().or_else(
-                            || {
-                                stopless_control
-                                    .as_ref()
-                                    .and_then(|execution| {
-                                        execution
-                                            .control
-                                            .web_search_load_for_scope(&execution.scope)
-                                            .ok()
-                                    })
-                                    .flatten()
-                            },
-                        ),
+                        web_search_center_state: request_web_search_state.clone().or_else(|| {
+                            stopless_control
+                                .as_ref()
+                                .and_then(|execution| {
+                                    execution
+                                        .control
+                                        .web_search_load_for_scope(&execution.scope)
+                                        .ok()
+                                })
+                                .flatten()
+                        }),
                         stopless_state: stopless_state.as_ref(),
                         stopless_control_has_client_session_scope,
                         transition_request_id: &transition_request_id,
@@ -2501,19 +2499,17 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         // web_search 与 stopless 解耦：当前轮拦截直接使用 Req04
                         // 激活的 LocalToolSurfaceActive state（request_web_search_state），
                         // 不依赖 stopless_control 桶。
-                        web_search_center_state: request_web_search_state.clone().or_else(
-                            || {
-                                stopless_control
-                                    .as_ref()
-                                    .and_then(|execution| {
-                                        execution
-                                            .control
-                                            .web_search_load_for_scope(&execution.scope)
-                                            .ok()
-                                    })
-                                    .flatten()
-                            },
-                        ),
+                        web_search_center_state: request_web_search_state.clone().or_else(|| {
+                            stopless_control
+                                .as_ref()
+                                .and_then(|execution| {
+                                    execution
+                                        .control
+                                        .web_search_load_for_scope(&execution.scope)
+                                        .ok()
+                                })
+                                .flatten()
+                        }),
                         stopless_state: stopless_state.as_ref(),
                         stopless_control_has_client_session_scope,
                         transition_request_id: &transition_request_id,
@@ -4766,6 +4762,8 @@ pub(crate) fn provider_target(
         responses_transport: selected.responses_transport,
         websocket_v2_url: selected.websocket_v2_url.clone(),
         provider_request_cleanup: selected.provider_request_cleanup.clone(),
+        request_timeout_ms: provider.request_timeout_ms,
+        initial_concurrency_budget: selected.initial_concurrency_budget,
     })
 }
 

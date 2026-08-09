@@ -27,6 +27,9 @@ pub struct V3ResponsesProviderTarget {
     pub responses_transport: V3ResponsesTransportKind,
     pub websocket_v2_url: Option<String>,
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
+    /// per-request 总超时（毫秒）；用于覆盖连接、响应头等待与 body 读取
+    pub request_timeout_ms: u64,
+    pub initial_concurrency_budget: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -347,6 +350,8 @@ mod tests {
                 responses_transport: V3ResponsesTransportKind::Http,
                 websocket_v2_url: None,
                 provider_request_cleanup: Default::default(),
+                request_timeout_ms: 300_000,
+                initial_concurrency_budget: 8,
             },
             body,
         )
@@ -536,6 +541,8 @@ mod tests {
             responses_transport: V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: Default::default(),
+            request_timeout_ms: 300_000,
+            initial_concurrency_budget: 8,
         };
         assert!(matches!(
             build_v3_provider_12_responses_wire_payload("req-array", target.clone(), json!([])),
@@ -633,6 +640,8 @@ mod tests {
             responses_transport: V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: Default::default(),
+            request_timeout_ms: 300_000,
+            initial_concurrency_budget: 8,
         }
     }
 

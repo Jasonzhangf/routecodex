@@ -1,4 +1,8 @@
-use crate::raw_response::{V3ProviderResp14Raw, V3ProviderSseStream};
+use crate::adaptive_concurrency::{
+    V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyPermit, V3AdaptiveConcurrencyPermitGuard,
+    V3AdaptiveConcurrencyProbeResult,
+};
+use crate::raw_response::{V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream};
 use crate::shared::{collect_response_headers, content_type, validated_sse_stream};
 use crate::wire::{
     V3Provider12ResponsesWirePayload, V3ProviderAuthHandle, V3ProviderAuthSecretHandle,
@@ -13,6 +17,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_tungstenite::{
@@ -61,6 +66,8 @@ enum V3Transport13ResponsesRequestKind {
         stream_intent: V3ResponsesStreamIntent,
         body: Value,
         provider_headers: Vec<V3ProviderRequestHeader>,
+        timeout: Option<Duration>,
+        initial_concurrency_budget: u32,
         cancellation: Option<V3ProviderCancellation>,
     },
     WebSocketV2 {
@@ -71,6 +78,7 @@ enum V3Transport13ResponsesRequestKind {
         auth: V3ProviderAuthHandle,
         stream_intent: V3ResponsesStreamIntent,
         event: Value,
+        initial_concurrency_budget: u32,
         cancellation: Option<V3ProviderCancellation>,
     },
 }
@@ -129,6 +137,41 @@ pub struct V3Transport13ResponsesRequest {
 pub type V3Transport13ResponsesHttpRequest = V3Transport13ResponsesRequest;
 
 impl V3Transport13ResponsesRequest {
+    fn provider_key(&self) -> String {
+        match &self.kind {
+            V3Transport13ResponsesRequestKind::Http { auth, .. }
+            | V3Transport13ResponsesRequestKind::WebSocketV2 { auth, .. } => {
+                format!("{}:{}", self.provider_id(), auth.alias)
+            }
+        }
+    }
+
+    fn cancellation(&self) -> Option<V3ProviderCancellation> {
+        match &self.kind {
+            V3Transport13ResponsesRequestKind::Http { cancellation, .. }
+            | V3Transport13ResponsesRequestKind::WebSocketV2 { cancellation, .. } => {
+                cancellation.clone()
+            }
+        }
+    }
+}
+
+fn current_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            duration.as_millis().min(u64::MAX as u128) as u64
+        })
+}
+
+fn is_rate_limited(error: &V3ProviderError) -> bool {
+    matches!(
+        error,
+        V3ProviderError::HttpStatus { response } if response.status == 429
+    )
+}
+
+impl V3Transport13ResponsesRequest {
     pub fn request_id(&self) -> &str {
         match &self.kind {
             V3Transport13ResponsesRequestKind::Http { request_id, .. }
@@ -140,6 +183,19 @@ impl V3Transport13ResponsesRequest {
         match &self.kind {
             V3Transport13ResponsesRequestKind::Http { provider_id, .. }
             | V3Transport13ResponsesRequestKind::WebSocketV2 { provider_id, .. } => provider_id,
+        }
+    }
+
+    fn initial_concurrency_budget(&self) -> u32 {
+        match &self.kind {
+            V3Transport13ResponsesRequestKind::Http {
+                initial_concurrency_budget,
+                ..
+            }
+            | V3Transport13ResponsesRequestKind::WebSocketV2 {
+                initial_concurrency_budget,
+                ..
+            } => *initial_concurrency_budget,
         }
     }
 
@@ -315,6 +371,8 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
 ) -> Result<V3Transport13ResponsesRequest, V3ProviderError> {
     let (request_id, target, stream_intent, body) = wire.into_parts();
     let provider_id = target.provider_id;
+    let request_timeout_ms = target.request_timeout_ms;
+    let initial_concurrency_budget = target.initial_concurrency_budget;
     match target.responses_transport {
         V3ResponsesTransportKind::Http => {
             let mut body = body;
@@ -327,14 +385,24 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                     &response_id,
                 )?;
             }
-            build_v3_transport_13_responses_http_request_from_parts(
+            let mut request = build_v3_transport_13_responses_http_request_from_parts_with_timeout(
                 request_id,
                 provider_id,
                 url_text,
                 target.auth,
                 stream_intent,
                 body,
-            )
+                Vec::new(),
+                Some(Duration::from_millis(request_timeout_ms)),
+            )?;
+            if let V3Transport13ResponsesRequestKind::Http {
+                initial_concurrency_budget: budget,
+                ..
+            } = &mut request.kind
+            {
+                *budget = initial_concurrency_budget;
+            }
+            Ok(request)
         }
         V3ResponsesTransportKind::WebsocketV2 => {
             let url =
@@ -366,6 +434,7 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                     auth: target.auth,
                     stream_intent,
                     event: body,
+                    initial_concurrency_budget,
                     cancellation: None,
                 },
             ))
@@ -425,7 +494,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts(
     stream_intent: V3ResponsesStreamIntent,
     body: Value,
 ) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
-    build_v3_transport_13_responses_http_request_with_provider_headers_from_parts(
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout(
         request_id,
         provider_id,
         url_text,
@@ -433,6 +502,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts(
         stream_intent,
         body,
         Vec::new(),
+        None,
     )
 }
 
@@ -444,6 +514,30 @@ pub fn build_v3_transport_13_responses_http_request_with_provider_headers_from_p
     stream_intent: V3ResponsesStreamIntent,
     body: Value,
     provider_headers: Vec<V3ProviderRequestHeader>,
+) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+        request_id,
+        provider_id,
+        url_text,
+        auth,
+        stream_intent,
+        body,
+        provider_headers,
+        None,
+    )
+}
+
+/// 带 per-request 总超时（覆盖连接、响应头等待与 body 读取；None = 不设置，
+/// 仅由 client 级 `read_timeout` 兜底）的 transport request 构建。
+pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+    request_id: impl Into<String>,
+    provider_id: impl Into<String>,
+    url_text: impl AsRef<str>,
+    auth: V3ProviderAuthHandle,
+    stream_intent: V3ResponsesStreamIntent,
+    body: Value,
+    provider_headers: Vec<V3ProviderRequestHeader>,
+    timeout: Option<Duration>,
 ) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
     let request_id = request_id.into();
     let provider_id = provider_id.into();
@@ -463,6 +557,8 @@ pub fn build_v3_transport_13_responses_http_request_with_provider_headers_from_p
             stream_intent,
             body,
             provider_headers,
+            timeout,
+            initial_concurrency_budget: 8,
             cancellation: None,
         },
     ))
@@ -527,7 +623,36 @@ impl ResponsesTransport for ProviderResponsesTransport {
         &self,
         request: V3Transport13ResponsesRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        match request.kind {
+        let provider_key = request.provider_key();
+        let cancellation = request.cancellation();
+        let request_id = request.request_id().to_string();
+        let provider_id = request.provider_id().to_string();
+        let controller = V3AdaptiveConcurrencyController::process_shared();
+        controller
+            .ensure_initial_budget(&provider_key, request.initial_concurrency_budget())
+            .map_err(|reason| V3ProviderError::Transport {
+                request_id: request_id.clone(),
+                provider_id: provider_id.clone(),
+                reason,
+            })?;
+        let lease = if let Some(cancellation) = cancellation.clone() {
+            tokio::select! {
+                _ = cancellation.cancelled() => {
+                    return Err(V3ProviderError::ClientDisconnect {
+                        request_id: request.request_id().to_string(),
+                        provider_id: request.provider_id().to_string(),
+                    });
+                }
+                lease = controller.acquire_with_clock(provider_key.clone(), current_epoch_ms) => lease,
+            }
+        } else {
+            controller
+                .acquire_with_clock(provider_key.clone(), current_epoch_ms)
+                .await
+        };
+        let was_probe = lease.is_probe();
+        let permit = lease.into_permit();
+        let result = match request.kind {
             V3Transport13ResponsesRequestKind::Http {
                 request_id,
                 provider_id,
@@ -536,6 +661,8 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 stream_intent,
                 body,
                 provider_headers,
+                timeout,
+                initial_concurrency_budget: _,
                 cancellation,
             } => {
                 self.send_http(
@@ -546,6 +673,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     stream_intent,
                     body,
                     provider_headers,
+                    timeout,
                     cancellation,
                 )
                 .await
@@ -558,6 +686,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 auth,
                 stream_intent,
                 event,
+                initial_concurrency_budget: _,
                 cancellation,
             } => {
                 self.send_websocket_v2(
@@ -572,8 +701,91 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 )
                 .await
             }
+        };
+        let now_ms = current_epoch_ms();
+        match result {
+            Ok(raw) => {
+                if was_probe {
+                    controller
+                        .complete_probe(permit, V3AdaptiveConcurrencyProbeResult::Accepted, now_ms)
+                        .map_err(|reason| V3ProviderError::Transport {
+                            request_id: raw.request_id().to_string(),
+                            provider_id: raw.provider_id().to_string(),
+                            reason,
+                        })?;
+                } else if raw.body_kind() == crate::raw_response::V3ProviderResponseBodyKind::Sse {
+                    return Ok(hold_sse_lease(raw, controller.clone(), permit));
+                } else {
+                    controller
+                        .release(permit)
+                        .map_err(|reason| V3ProviderError::Transport {
+                            request_id: raw.request_id().to_string(),
+                            provider_id: raw.provider_id().to_string(),
+                            reason,
+                        })?;
+                }
+                Ok(raw)
+            }
+            Err(error) => {
+                if is_rate_limited(&error) {
+                    if was_probe {
+                        controller
+                            .complete_probe(
+                                permit,
+                                V3AdaptiveConcurrencyProbeResult::RateLimited,
+                                now_ms,
+                            )
+                            .map_err(|reason| V3ProviderError::Transport {
+                                request_id: request_id.clone(),
+                                provider_id: provider_id.clone(),
+                                reason,
+                            })?;
+                    } else {
+                        controller
+                            .observe_rate_limit(&provider_key, now_ms)
+                            .map_err(|reason| V3ProviderError::Transport {
+                                request_id: request_id.clone(),
+                                provider_id: provider_id.clone(),
+                                reason,
+                            })?;
+                        controller.release(permit).map_err(|reason| {
+                            V3ProviderError::Transport {
+                                request_id: request_id.clone(),
+                                provider_id: provider_id.clone(),
+                                reason,
+                            }
+                        })?;
+                    }
+                } else {
+                    controller
+                        .release(permit)
+                        .map_err(|reason| V3ProviderError::Transport {
+                            request_id: request_id.clone(),
+                            provider_id: provider_id.clone(),
+                            reason,
+                        })?;
+                }
+                Err(error)
+            }
         }
     }
+}
+
+fn hold_sse_lease(
+    raw: V3ProviderResp14Raw,
+    controller: V3AdaptiveConcurrencyController,
+    permit: V3AdaptiveConcurrencyPermit,
+) -> V3ProviderResp14Raw {
+    let (request_id, provider_id, status, headers, body) = raw.into_parts();
+    let V3ProviderResponseBody::Sse(stream) = body else {
+        unreachable!("SSE lease must only wrap an SSE response");
+    };
+    let guard = V3AdaptiveConcurrencyPermitGuard::new(controller, permit);
+    let stream = Box::pin(stream::unfold(
+        (stream, guard),
+        |(mut stream, guard)| async move { stream.next().await.map(|item| (item, (stream, guard))) },
+    ));
+    V3ProviderResp14Raw::from_sse(request_id, provider_id, status, headers, stream)
 }
 
 impl ProviderResponsesTransport {
@@ -587,6 +799,7 @@ impl ProviderResponsesTransport {
         stream_intent: V3ResponsesStreamIntent,
         body: Value,
         provider_headers: Vec<V3ProviderRequestHeader>,
+        timeout: Option<Duration>,
         cancellation: Option<V3ProviderCancellation>,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
@@ -602,6 +815,9 @@ impl ProviderResponsesTransport {
             .post(url)
             .header(reqwest::header::ACCEPT, accept)
             .bearer_auth(&secret);
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
         if anthropic_messages {
             request = apply_anthropic_messages_compat_headers(request, &secret, &provider_headers);
         }

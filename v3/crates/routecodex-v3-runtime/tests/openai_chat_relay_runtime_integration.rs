@@ -2738,3 +2738,89 @@ targets = [{ kind = "provider_model", provider = "text", model = "plain-model", 
         "hosted web_search server tool must be transparent to the client: {client_response}"
     );
 }
+
+#[tokio::test]
+async fn openai_chat_anthropic_sse_minimax_usage_input_tokens_from_message_delta() {
+    // MiniMax anthropic 兼容接口的真实流式格式（2026-08-09 线上抓包实证）：
+    // message_start 的 usage.input_tokens 是占位 0；真实 input_tokens 在
+    // message_delta 的 usage 里（同时带 output_tokens）。transducer 必须从
+    // message_delta 覆盖 input_tokens，否则客户端流式 usage prompt_tokens=0。
+    use futures_util::StreamExt;
+    let manifest = manifest_with_anthropic_multimodal();
+    let transport = AnthropicSseTransport {
+        captured_url: Mutex::new(None),
+        chunks: Mutex::new(Some(vec![br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg-mm-usage","type":"message","role":"assistant","model":"MiniMax-M3","content":[],"usage":{"input_tokens":0,"output_tokens":0,"service_tier":"standard"}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"answer"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":37,"output_tokens":10,"cache_read_input_tokens":128,"service_tier":"standard"}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+"#.to_vec()])),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "cross_protocol".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "chat-anthropic-sse-minimax-usage",
+            )
+            .expect("scope"),
+            request_id: "chat-anthropic-sse-minimax-usage-1".into(),
+            payload: json!({
+                "model": "deepseek-v4-flash",
+                "messages": [{"role":"user","content":[
+                    {"type":"text","text":"search news"},
+                    {"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}
+                ]}],
+                "stream": true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("MiniMax Anthropic SSE stream must project lazily and succeed");
+    let stream = match output.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
+    };
+    let events = stream.collect::<Vec<_>>().await;
+    assert!(
+        events.iter().all(Result::is_ok),
+        "MiniMax Anthropic stream must not error; events={events:?}"
+    );
+    let frames: Vec<String> = events
+        .into_iter()
+        .map(|item| String::from_utf8_lossy(&item.expect("frame")).to_string())
+        .collect();
+    let joined = frames.concat();
+    let usage_chunk = frames
+        .iter()
+        .find(|frame| frame.contains("\"usage\""))
+        .unwrap_or_else(|| panic!("client stream must emit a usage chunk: {joined:?}"));
+    assert!(
+        usage_chunk.contains("\"prompt_tokens\":37"),
+        "MiniMax message_delta input_tokens must override the message_start placeholder zero: {usage_chunk}"
+    );
+    assert!(
+        usage_chunk.contains("\"completion_tokens\":10"),
+        "MiniMax message_delta output_tokens must project: {usage_chunk}"
+    );
+    assert!(
+        usage_chunk.contains("\"total_tokens\":47"),
+        "MiniMax usage total must sum input+output: {usage_chunk}"
+    );
+}

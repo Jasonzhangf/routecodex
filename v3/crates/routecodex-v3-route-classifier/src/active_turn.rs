@@ -87,13 +87,15 @@ fn extract_message_signals(messages: &[Value]) -> RouteActiveTurnSignals {
     let Some(segment) = active_segment(messages, latest_user_index, latest_role.as_deref()) else {
         return RouteActiveTurnSignals {
             latest_message_from_user: latest_role.as_deref() == Some("user"),
-            has_current_turn_web_search: messages_contain_web_search(messages),
+            has_current_turn_web_search: latest_user_index
+                .and_then(|index| messages.get(index))
+                .is_some_and(message_contains_web_search),
             current_user_text,
             ..Default::default()
         };
     };
     let mut has_current_turn_tool_output = false;
-    let mut has_current_turn_web_search = messages_contain_web_search(messages);
+    let mut has_current_turn_web_search = false;
     let mut last_assistant_tool = None;
     for message in segment {
         match message_role(message).as_deref() {
@@ -152,18 +154,34 @@ fn extract_responses_signals(entries: &[Value]) -> RouteActiveTurnSignals {
         .map(extract_user_text)
         .unwrap_or_default();
     let Some(segment) = active_segment(entries, latest_user_index, latest_role.as_deref()) else {
+        let current_turn_start = latest_user_index
+            .map(|index| {
+                entries[..index]
+                    .iter()
+                    .rposition(is_user_carrier)
+                    .map(|previous| previous + 1)
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
         return RouteActiveTurnSignals {
             latest_message_from_user: latest_role.as_deref() == Some("user"),
-            has_current_turn_web_search: entries_contain_web_search(entries),
+            has_current_turn_web_search: latest_user_index.is_some_and(|index| {
+                entries[current_turn_start..=index]
+                    .iter()
+                    .any(entry_contains_web_search)
+            }),
             current_user_text,
             ..Default::default()
         };
     };
     let mut has_current_turn_tool_output = false;
-    let mut has_current_turn_web_search = entries_contain_web_search(entries);
+    let mut has_current_turn_web_search = false;
     let mut last_assistant_tool = None;
     for entry in segment {
         let kind = entry_type(entry);
+        if kind == "web_search" {
+            has_current_turn_web_search = true;
+        }
         if is_tool_call_type(&kind) {
             has_current_turn_tool_output = true;
             if let Some(classification) = classify_call_value(entry) {
@@ -246,23 +264,19 @@ fn is_user_carrier(entry: &Value) -> bool {
     response_entry_role(entry).as_deref() == Some("user")
 }
 
-fn messages_contain_web_search(messages: &[Value]) -> bool {
-    messages.iter().any(|message| {
-        message
-            .get("content")
-            .and_then(Value::as_array)
-            .is_some_and(|content| {
-                content
-                    .iter()
-                    .any(|item| entry_type(item).as_str() == "web_search")
-            })
-    })
+fn message_contains_web_search(message: &Value) -> bool {
+    message
+        .get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|content| {
+            content
+                .iter()
+                .any(|item| entry_type(item).as_str() == "web_search")
+        })
 }
 
-fn entries_contain_web_search(entries: &[Value]) -> bool {
-    entries
-        .iter()
-        .any(|entry| entry_type(entry).as_str() == "web_search")
+fn entry_contains_web_search(entry: &Value) -> bool {
+    entry_type(entry).as_str() == "web_search"
 }
 
 fn entry_type(entry: &Value) -> String {

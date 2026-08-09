@@ -33,6 +33,8 @@ pub struct V3TargetCandidate {
     pub responses_transport: V3ResponsesTransportKind,
     pub websocket_v2_url: Option<String>,
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
+    pub request_timeout_ms: u64,
+    pub initial_concurrency_budget: u32,
     pub compatibility_profile: Option<String>,
     pub env_name: Option<String>,
     pub token_file: Option<String>,
@@ -498,6 +500,11 @@ impl V3TargetInterpreter {
                     .as_ref()
                     .and_then(|responses| responses.websocket_v2_url.clone()),
                 provider_request_cleanup: provider.provider_request_cleanup.clone(),
+                request_timeout_ms: provider.request_timeout_ms,
+                initial_concurrency_budget: provider
+                    .concurrency
+                    .as_ref()
+                    .map_or(8, |concurrency| concurrency.max_in_flight),
                 compatibility_profile: provider.compatibility_profile.clone(),
                 env_name: entry.env.clone(),
                 token_file: entry.token_file.clone(),
@@ -618,7 +625,10 @@ fn pool_targets_route_model(
 ) -> bool {
     pool.targets.iter().any(|target| match target.kind {
         V3RouteTargetKind::ProviderModel => {
-            target.model.as_deref().is_some_and(|model| model.trim() == requested)
+            target
+                .model
+                .as_deref()
+                .is_some_and(|model| model.trim() == requested)
                 || target.provider.as_deref().is_some_and(|provider_id| {
                     manifest.providers.get(provider_id).is_some_and(|provider| {
                         provider
@@ -638,10 +648,12 @@ fn pool_targets_route_model(
                         .aliases
                         .iter()
                         .any(|alias| alias.trim() == requested)
-                    || forwarder
-                        .targets
-                        .iter()
-                        .any(|target| target.model.as_deref().is_some_and(|model| model.trim() == requested))
+                    || forwarder.targets.iter().any(|target| {
+                        target
+                            .model
+                            .as_deref()
+                            .is_some_and(|model| model.trim() == requested)
+                    })
             }),
     })
 }

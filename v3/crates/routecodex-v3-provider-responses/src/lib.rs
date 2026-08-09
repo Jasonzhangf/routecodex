@@ -1,4 +1,5 @@
 mod error;
+pub mod adaptive_concurrency;
 #[cfg_attr(not(test), allow(dead_code))]
 mod health;
 pub mod raw_response;
@@ -19,6 +20,7 @@ pub use raw_response::{
 pub use transport::{
     build_v3_anthropic_provider_request_header,
     build_v3_transport_13_responses_http_request_from_parts,
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
     build_v3_transport_13_responses_request_from_v3_provider_12,

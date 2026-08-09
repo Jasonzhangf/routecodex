@@ -1,6 +1,6 @@
 use crate::nodes::{
-    build_v3_responses_direct_11_policy_from_v3_target_10,
-    V3ChatDirect11Policy, V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
+    build_v3_responses_direct_11_policy_from_v3_target_10, V3ChatDirect11Policy,
+    V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
 };
 use crate::shared::{project_provider_raw_to_client_payload, V3ProviderResponseProjection};
 use routecodex_v3_error::{
@@ -270,6 +270,8 @@ pub(crate) fn responses_direct_request_projection_hook(
             responses_transport: candidate.responses_transport,
             websocket_v2_url: candidate.websocket_v2_url.clone(),
             provider_request_cleanup: candidate.provider_request_cleanup.clone(),
+            request_timeout_ms: candidate.request_timeout_ms,
+            initial_concurrency_budget: candidate.initial_concurrency_budget,
         },
         request_body,
     )
@@ -311,18 +313,17 @@ pub(crate) fn chat_direct_request_projection_hook(
             V3InternalErrorCode::V3Provider12ResponsesWirePayload,
         )
     })?;
-    let wire_body = crate::hub_v1::build_v3_openai_chat_standard_request_from_chat_canonical(
-        &request_body,
-    )
-    .map_err(|error| {
-        build_v3_error_01_source_raised_internal(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3ChatDirect11Policy",
-            "chat_wire_projection_failed",
-            error,
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
-        )
-    })?;
+    let wire_body =
+        crate::hub_v1::build_v3_openai_chat_standard_request_from_chat_canonical(&request_body)
+            .map_err(|error| {
+                build_v3_error_01_source_raised_internal(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3ChatDirect11Policy",
+                    "chat_wire_projection_failed",
+                    error,
+                    V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                )
+            })?;
     let secret = match (
         &candidate.env_name,
         &candidate.token_file,
@@ -359,6 +360,8 @@ pub(crate) fn chat_direct_request_projection_hook(
             responses_transport: candidate.responses_transport,
             websocket_v2_url: candidate.websocket_v2_url.clone(),
             provider_request_cleanup: candidate.provider_request_cleanup.clone(),
+            request_timeout_ms: candidate.request_timeout_ms,
+            initial_concurrency_budget: candidate.initial_concurrency_budget,
         },
         wire_body,
     )
@@ -682,6 +685,8 @@ mod tests {
                     responses_transport: V3ResponsesTransportKind::Http,
                     websocket_v2_url: None,
                     provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
+                    request_timeout_ms: 300_000,
+                    initial_concurrency_budget: 8,
                     compatibility_profile: None,
                     env_name: Some("TEST_KEY".to_string()),
                     token_file: None,

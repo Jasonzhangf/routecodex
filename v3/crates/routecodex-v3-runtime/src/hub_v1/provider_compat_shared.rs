@@ -1,10 +1,11 @@
 use super::V3HubProviderWireProtocol;
 use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_parts,
-    build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     V3Provider12ResponsesWirePayload, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
 };
+use std::time::Duration;
 
 pub(crate) fn provider_protocol_compat_id(protocol: V3HubProviderWireProtocol) -> String {
     match protocol {
@@ -67,19 +68,22 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
     let target = wire.target().clone();
     let stream_intent = wire.stream_intent();
     let body = wire.body().clone();
+    let timeout = Some(Duration::from_millis(target.request_timeout_ms));
     let url_text = anthropic_messages_url(&target.base_url);
     if provider_headers.is_empty() {
-        return build_v3_transport_13_responses_http_request_from_parts(
+        return build_v3_transport_13_responses_http_request_from_parts_with_timeout(
             request_id,
             target.provider_id,
             url_text,
             target.auth,
             stream_intent,
             body,
+            Vec::new(),
+            timeout,
         )
         .map_err(|error| error.to_string());
     }
-    build_v3_transport_13_responses_http_request_with_provider_headers_from_parts(
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout(
         request_id,
         target.provider_id,
         url_text,
@@ -87,6 +91,7 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
         stream_intent,
         body,
         provider_headers,
+        timeout,
     )
     .map_err(|error| error.to_string())
 }
@@ -122,13 +127,15 @@ fn build_v3_openai_chat_transport_request_from_v3_provider_08(
     let stream_intent = wire.stream_intent();
     let body = wire.body().clone();
     let url_text = format!("{}/chat/completions", target.base_url.trim_end_matches('/'));
-    build_v3_transport_13_responses_http_request_from_parts(
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout(
         request_id,
         target.provider_id,
         url_text,
         target.auth,
         stream_intent,
         body,
+        Vec::new(),
+        Some(Duration::from_millis(target.request_timeout_ms)),
     )
     .map_err(|error| error.to_string())
 }

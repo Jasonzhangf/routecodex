@@ -65,6 +65,8 @@ mod tests {
             responses_transport: V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
+            request_timeout_ms: 300_000,
+            initial_concurrency_budget: 8,
             compatibility_profile: None,
             env_name: Some("TEST_KEY".to_string()),
             token_file: None,
