@@ -17,5 +17,7 @@
     "node_modules/",
     ".beads/"
   ],
-  "allowList": []
+  "allowList": [
+    "scripts/tests/v3-provider-action-gate-red-fixtures.mjs"
+  ]
 }
