@@ -59,6 +59,8 @@ pub struct AdapterContext {
     pub session_id: Option<String>,
     #[serde(default)]
     pub conversation_id: Option<String>,
+    #[serde(default)]
+    pub web_search_execution_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,7 +136,10 @@ pub fn run_req_outbound_stage3_compat(
             "anthropic-messages",
         ) {
             return Ok(CompatResult {
-                payload: minimax_anthropic::apply_request_compat(payload)?,
+                payload: minimax_anthropic::apply_request_compat(
+                    payload,
+                    adapter_context.web_search_execution_mode.as_deref(),
+                )?,
                 applied_profile: Some(profile_id.to_string()),
                 native_applied: true,
             });
