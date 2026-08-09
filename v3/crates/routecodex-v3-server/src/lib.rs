@@ -7707,31 +7707,43 @@ fn build_v3_codex_model_metadata(
     } else {
         "RouteCodex advanced agentic coding model compatible with gpt-5.5 capabilities."
     };
-    let default_reasoning_level = if is_gpt_56_sol { "low" } else { "medium" };
-    let supported_reasoning_levels = if is_gpt_56_sol || is_gpt_56_terra {
-        json!([
+    let is_gpt = is_gpt_55 || is_gpt_56;
+    // 非 gpt 模型不宣告 reasoning 能力：Codex 依 `default_reasoning_level` / `supported_reasoning_levels`
+    // 与 `supports_reasoning_summary_parameter` 决定是否请求 reasoning（含 encrypted_content 加密摘要），
+    // 非 gpt 上游（如 deepseek 经 opencode-go）不接受 `reasoning_content` 缺失回传，必须从能力报告侧关掉。
+    let default_reasoning_level = if is_gpt_56_sol {
+        Some("low")
+    } else if is_gpt {
+        Some("medium")
+    } else {
+        None
+    };
+    let supported_reasoning_levels = if !is_gpt {
+        None
+    } else if is_gpt_56_sol || is_gpt_56_terra {
+        Some(json!([
             {"effort":"low","description":"Fast responses with lighter reasoning"},
             {"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},
             {"effort":"high","description":"Greater reasoning depth for complex problems"},
             {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"},
             {"effort":"max","description":"Maximum reasoning depth for the hardest tasks"},
             {"effort":"ultra","description":"Ultra reasoning depth for frontier-grade tasks"}
-        ])
+        ]))
     } else if is_gpt_56_luna {
-        json!([
+        Some(json!([
             {"effort":"low","description":"Fast responses with lighter reasoning"},
             {"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},
             {"effort":"high","description":"Greater reasoning depth for complex problems"},
             {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"},
             {"effort":"max","description":"Maximum reasoning depth for the hardest tasks"}
-        ])
+        ]))
     } else {
-        json!([
+        Some(json!([
             {"effort":"low","description":"Fast responses with lighter reasoning"},
             {"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},
             {"effort":"high","description":"Greater reasoning depth for complex problems"},
             {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"}
-        ])
+        ]))
     };
     let capability_projection =
         build_v3_model_capability_projection(capabilities, is_gpt_55, is_gpt_56);
@@ -7772,16 +7784,12 @@ fn build_v3_codex_model_metadata(
             "reasoning_summary_format".to_string(),
             json!("experimental"),
         ),
-        ("supports_reasoning_summaries".to_string(), json!(true)),
+        ("supports_reasoning_summaries".to_string(), json!(is_gpt)),
+        (
+            "supports_reasoning_summary_parameter".to_string(),
+            json!(is_gpt),
+        ),
         ("default_reasoning_summary".to_string(), json!("none")),
-        (
-            "default_reasoning_level".to_string(),
-            json!(default_reasoning_level),
-        ),
-        (
-            "supported_reasoning_levels".to_string(),
-            supported_reasoning_levels,
-        ),
         ("shell_type".to_string(), json!("shell_command")),
         ("visibility".to_string(), json!("list")),
         (
@@ -7807,6 +7815,18 @@ fn build_v3_codex_model_metadata(
         ("context_window".to_string(), json!(context_window)),
         ("max_context_window".to_string(), json!(context_window)),
     ]);
+    if let Some(default_reasoning_level) = default_reasoning_level {
+        item.insert(
+            "default_reasoning_level".to_string(),
+            json!(default_reasoning_level),
+        );
+    }
+    if let Some(supported_reasoning_levels) = supported_reasoning_levels {
+        item.insert(
+            "supported_reasoning_levels".to_string(),
+            supported_reasoning_levels,
+        );
+    }
     // Codex treats `tool_mode` and `use_responses_lite` as request/tool-surface selectors.
     // `gpt-5.5` must not advertise them: current Codex then keeps first-class tools such as
     // tool_search instead of forcing nested code-mode `exec`/`wait` entrypoints.
