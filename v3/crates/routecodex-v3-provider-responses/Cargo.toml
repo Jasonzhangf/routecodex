@@ -11,6 +11,7 @@ base64.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
 reqwest.workspace = true
+provider-compat-core = { path = "../../../sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core" }
 routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-error = { path = "../routecodex-v3-error" }
 serde.workspace = true

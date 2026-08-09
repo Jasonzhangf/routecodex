@@ -1,3 +1,4 @@
+use crate::hub_v1::V3RuntimeStreamObservation;
 use crate::nodes::{V3ClientBody, V3ClientSseStream, V3Resp15ClientPayload};
 use futures_util::{stream, StreamExt};
 use routecodex_v3_error::{
@@ -90,6 +91,7 @@ impl V3SseRemoteContinuationObservationState {
 pub struct V3ProviderResponseProjection {
     pub client_payload: V3Resp15ClientPayload,
     pub remote_continuation: V3RemoteContinuationObservation,
+    pub stream_observation: Option<V3RuntimeStreamObservation>,
 }
 
 pub(crate) async fn project_provider_raw_to_client_payload(
@@ -134,12 +136,12 @@ pub(crate) async fn project_provider_raw_to_client_payload(
             )
         })?;
     let provider_body = raw.into_body();
-    let (body, remote_continuation) = if content_type.starts_with("text/event-stream") {
+    let (body, remote_continuation, stream_observation) = if content_type.starts_with("text/event-stream") {
         match provider_body {
             V3ProviderResponseBody::Sse(stream) => project_sse_stream(&provider_id, stream).await?,
             V3ProviderResponseBody::Json(body_bytes) => {
                 let observation = observe_sse_remote_continuation_bytes(&provider_id, &body_bytes)?;
-                (V3ClientBody::Bytes(body_bytes), observation)
+                (V3ClientBody::Bytes(body_bytes), observation, None)
             }
         }
     } else if content_type.starts_with("application/json") {
@@ -178,7 +180,7 @@ pub(crate) async fn project_provider_raw_to_client_payload(
             )
         })?;
         let observation = observe_json_remote_continuation(&provider_id, status, &parsed)?;
-        (V3ClientBody::Json(parsed), observation)
+        (V3ClientBody::Json(parsed), observation, None)
     } else {
         return Err(build_v3_error_01_source_raised_external(
             V3ErrorSourceKind::ProviderFailure,
@@ -204,22 +206,36 @@ pub(crate) async fn project_provider_raw_to_client_payload(
             body,
         },
         remote_continuation,
+        stream_observation,
     })
 }
 
 async fn project_sse_stream(
     provider_id: &str,
     stream: V3ProviderSseStream,
-) -> Result<(V3ClientBody, V3RemoteContinuationObservation), V3Error01SourceRaised> {
+) -> Result<
+    (
+        V3ClientBody,
+        V3RemoteContinuationObservation,
+        Option<V3RuntimeStreamObservation>,
+    ),
+    V3Error01SourceRaised,
+> {
     let stream = guard_initial_direct_sse_provider_failure(provider_id, stream).await?;
     let observation_state = V3SseRemoteContinuationObservationState::default();
-    let client_stream =
-        observed_sse_client_stream(provider_id.to_string(), stream, observation_state.clone());
+    let usage_observation = V3RuntimeStreamObservation::default();
+    let client_stream = observed_sse_client_stream(
+        provider_id.to_string(),
+        stream,
+        observation_state.clone(),
+        usage_observation.clone(),
+    );
     Ok((
         V3ClientBody::Sse(client_stream),
         V3RemoteContinuationObservation::Streaming {
             state: observation_state,
         },
+        Some(usage_observation),
     ))
 }
 
@@ -399,12 +415,14 @@ fn observed_sse_client_stream(
     provider_id: String,
     stream: V3ProviderSseStream,
     observation_state: V3SseRemoteContinuationObservationState,
+    usage_observation: V3RuntimeStreamObservation,
 ) -> V3ClientSseStream {
     struct ObservedState {
         stream: V3ProviderSseStream,
         decoder: SseIncrementalDecoder,
         response_id_candidate: Option<String>,
         observation_state: V3SseRemoteContinuationObservationState,
+        usage_observation: V3RuntimeStreamObservation,
         provider_id: String,
         done: bool,
     }
@@ -415,6 +433,7 @@ fn observed_sse_client_stream(
             decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
             response_id_candidate: None,
             observation_state,
+            usage_observation,
             provider_id,
             done: false,
         },
@@ -430,6 +449,7 @@ fn observed_sse_client_stream(
                         &mut state.decoder,
                         &mut state.response_id_candidate,
                         &state.observation_state,
+                        &state.usage_observation,
                     )
                     .map(|()| chunk);
                     if result.is_err() {
@@ -468,20 +488,74 @@ fn observe_sse_remote_continuation_chunk(
     decoder: &mut SseIncrementalDecoder,
     response_id_candidate: &mut Option<String>,
     observation_state: &V3SseRemoteContinuationObservationState,
+    usage_observation: &V3RuntimeStreamObservation,
 ) -> Result<(), V3Error01SourceRaised> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
         .map_err(|error| sse_transport_source(provider_id, error))?;
     for frame in frames {
-        if let Some(response_id) = observe_sse_frame_remote_continuation(
-            provider_id,
-            frame.frame().fields(),
-            response_id_candidate,
-        )? {
+        let fields = frame.frame().fields();
+        if let Some(response_id) =
+            observe_sse_frame_remote_continuation(provider_id, fields, response_id_candidate)?
+        {
             observation_state.record_pending_response_id(&response_id)?;
         }
+        observe_sse_usage_frame(provider_id, fields, usage_observation)?;
     }
     Ok(())
+}
+
+/// 从 provider SSE 事件帧提取归一化后的 usage（input/output/cache tokens），
+/// 写入流观测器供 server 端 console 打印。SSE 在此处逐帧解码为 JSON
+/// （inbound 归一化边界），提取只消费解码后的 JSON 事件，不触碰传输层语义。
+fn observe_sse_usage_frame(
+    provider_id: &str,
+    fields: &[SseField],
+    usage_observation: &V3RuntimeStreamObservation,
+) -> Result<(), V3Error01SourceRaised> {
+    let mut data = String::new();
+    for field in fields {
+        let SseField::Named { name, value } = field else {
+            continue;
+        };
+        if name != "data" {
+            continue;
+        }
+        if !data.is_empty() {
+            data.push('\n');
+        }
+        data.push_str(value);
+    }
+    let data = data.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return Ok(());
+    }
+    let event: serde_json::Value = serde_json::from_str(data).map_err(|error| {
+        build_v3_error_01_source_raised_external(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_event_invalid",
+            error.to_string(),
+            V3ExternalErrorLink {
+                kind: V3ExternalErrorKind::Provider,
+                status: None,
+                code: Some("PROVIDER_RESPONSE_SSE_EVENT_INVALID".to_string()),
+                provider_id: Some(provider_id.to_string()),
+                upstream_request_id: None,
+                message: Some(error.to_string()),
+            },
+        )
+    })?;
+    usage_observation
+        .record_provider_event_json(&event)
+        .map_err(|error| {
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ProviderResp14Raw",
+                "provider_response_sse_usage_observation_failed",
+                error,
+            )
+        })
 }
 
 fn observe_sse_remote_continuation_bytes(
@@ -905,5 +979,37 @@ mod tests {
             external.code.as_deref(),
             Some("PROVIDER_RESPONSE_JSON_INVALID")
         );
+    }
+
+    #[tokio::test]
+    async fn inbound_sse_usage_extraction_records_chat_usage_into_stream_observation() {
+        // SSE 在 inbound 层逐帧解码为 JSON，usage（含 cache）在同一处提取，
+        // 写入流观测器；SSE 传输层本身不做任何语义观测。
+        use futures_util::StreamExt;
+
+        let provider_id = "test-provider".to_string();
+        let stream = futures_util::stream::iter(vec![Ok::<_, routecodex_v3_provider_responses::V3ProviderError>(
+            b"data: {\"id\":\"req-1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\ndata: {\"id\":\"req-1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":371,\"completion_tokens\":29,\"total_tokens\":400,\"prompt_tokens_details\":{\"cached_tokens\":256}}}\n\ndata: [DONE]\n\n"
+                .to_vec(),
+        )]);
+
+        let observation_state = V3SseRemoteContinuationObservationState::default();
+        let usage_observation = V3RuntimeStreamObservation::default();
+        let mut client_stream = observed_sse_client_stream(
+            provider_id.clone(),
+            Box::pin(stream),
+            observation_state,
+            usage_observation.clone(),
+        );
+        while client_stream.next().await.is_some() {}
+
+        let snapshot = usage_observation.snapshot().expect("usage observation");
+        let usage = snapshot.usage.expect("chat usage must be extracted at inbound");
+        assert_eq!(usage.input_tokens, Some(371));
+        assert_eq!(usage.output_tokens, Some(29));
+        assert_eq!(usage.cached_tokens, Some(256));
+        assert_eq!(usage.total_tokens, Some(400));
+        // SSE 传输层不产生 timing 语义（timing 由调用方收口）。
+        assert!(snapshot.timing.is_none());
     }
 }

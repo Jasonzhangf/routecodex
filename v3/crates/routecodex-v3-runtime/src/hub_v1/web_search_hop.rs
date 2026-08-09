@@ -416,31 +416,55 @@ pub(crate) fn resolve_web_search_mode_and_backend(
             );
         }
     }
-    if let Some(forwarder) = manifest.forwarders.values().find(|forwarder| {
-        forwarder.model == model || forwarder.aliases.iter().any(|alias| alias == model)
-    }) {
+    // forwarder 匹配：请求 model 命中 forwarder.model/aliases 时收集其 target
+    // 的 mode；Local 立即返回。Native 不短路——继续检查 pool（同一 wire 模型
+    // 可能由 Mode A forwarder 与 Mode B pool 直连 provider 分别声明，pool 的
+    // Local 必须保守激活，Resp03 再按 selected candidate 精确决定）。
+    let mut forwarder_first_match: Option<(
+        routecodex_v3_config::V3WebSearchExecutionMode,
+        Option<String>,
+    )> = None;
+    for forwarder in manifest.forwarders.values() {
+        if forwarder.model != model
+            && !forwarder.aliases.iter().any(|alias| alias == model)
+        {
+            continue;
+        }
         for target in &forwarder.targets {
             let (Some(provider_id), Some(model_id)) =
                 (target.provider.as_deref(), target.model.as_deref())
             else {
                 continue;
             };
-            if let Some(model_manifest) = manifest
+            let Some(model_manifest) = manifest
                 .providers
                 .get(provider_id)
                 .and_then(|provider| provider.models.get(model_id))
-            {
-                return (
-                    model_manifest.web_search_execution_mode,
-                    model_manifest.web_search_backend_binding.clone(),
-                );
+            else {
+                continue;
+            };
+            let matched = (
+                model_manifest.web_search_execution_mode,
+                model_manifest.web_search_backend_binding.clone(),
+            );
+            if matched.0.is_metadata_center_local_search() {
+                return matched;
             }
+            forwarder_first_match.get_or_insert(matched);
         }
     }
     // route_group pool 直连（provider_model target，无 forwarder）也按 model
     // 解析：VR 配置把 multimodal / web_search 能力 pool 直连 MiniMax-M3 时，
     // Req04 的 Mode B 判定不能依赖 forwarder 存在。能力信号与入口协议无关，
     // pool 的 match 谓词不含 entry_protocol 时 chat 入口同样命中。
+    // wire_name 共享场景（同 upstream model 被 Mode A / Mode B 两个 provider
+    // 以不同本地 id 声明）：只要 pool 内任一匹配 provider 是本地搜索模式，
+    // Req04 就保守激活本地搜索 surface，Resp03 再按 selected candidate 的
+    // execution mode 决定是否拦截——Mode A（Native）不受影响。
+    let mut first_match: Option<(
+        routecodex_v3_config::V3WebSearchExecutionMode,
+        Option<String>,
+    )> = None;
     for group in manifest.route_groups.values() {
         for pool in group.pools.values() {
             for target in &pool.targets {
@@ -449,21 +473,33 @@ pub(crate) fn resolve_web_search_mode_and_backend(
                 else {
                     continue;
                 };
-                if model_id != model {
-                    continue;
-                }
-                if let Some(model_manifest) = manifest
+                let model_manifest = manifest
                     .providers
                     .get(provider_id)
                     .and_then(|provider| provider.models.get(model_id))
-                {
-                    return (
-                        model_manifest.web_search_execution_mode,
-                        model_manifest.web_search_backend_binding.clone(),
-                    );
+                    .filter(|model_manifest| {
+                        model_id == model
+                            || (model_manifest.wire_name.trim() == model)
+                    });
+                let Some(model_manifest) = model_manifest else {
+                    continue;
+                };
+                let matched = (
+                    model_manifest.web_search_execution_mode,
+                    model_manifest.web_search_backend_binding.clone(),
+                );
+                if matched.0.is_metadata_center_local_search() {
+                    return matched;
                 }
+                first_match.get_or_insert(matched);
             }
         }
+    }
+    if let Some(matched) = forwarder_first_match {
+        return matched;
+    }
+    if let Some(matched) = first_match {
+        return matched;
     }
     (routecodex_v3_config::V3WebSearchExecutionMode::None, None)
 }
@@ -780,6 +816,62 @@ targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key
         assert!(
             mode.is_metadata_center_local_search(),
             "pool 直连 model 必须解析出 Mode B，got: {mode:?}"
+        );
+        assert_eq!(backend.as_deref(), Some("MiniMax-M3"));
+    }
+
+    #[test]
+    fn resolve_web_search_mode_and_backend_prefers_local_when_wire_name_shared_across_providers() {
+        // 同一 wire 模型名被两个 provider 声明（Mode A Native 与 Mode B Local，
+        // 本地 id 不同）：请求 model 命中 pool 内任一 Local provider 时，
+        // Req04 必须保守激活本地搜索 surface（Resp03 再按 selected mode 决定
+        // 是否拦截），Mode A 不受影响。
+        let manifest = routecodex_v3_config::compile_v3_config_05_manifest(
+            routecodex_v3_config::parse_v3_config_02_authoring(
+                r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+endpoints = ["openai_chat", "responses", "anthropic"]
+[providers.mm_anthropic]
+type = "anthropic"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_A_KEY" }] }
+[providers.mm_anthropic.models."MiniMax-M3"]
+capabilities = ["text", "tools", "multimodal", "vision", "web_search"]
+web_search_execution_mode = "native_remote_search_tool_mix"
+[providers.mm_openai]
+type = "openai_chat"
+base_url = "https://api.minimaxi.com/v1"
+default_model = "MiniMax-M3-local"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_O_KEY" }] }
+[providers.mm_openai.models."MiniMax-M3-local"]
+wire_name = "MiniMax-M3"
+capabilities = ["text", "tools", "multimodal", "vision", "web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "MiniMax-M3"
+[route_groups.g.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [
+  { kind = "provider_model", provider = "mm_anthropic", model = "MiniMax-M3", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "mm_openai", model = "MiniMax-M3-local", key = "key1", priority = 2 }
+]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "mm_anthropic", model = "MiniMax-M3", key = "key1", priority = 1 }]
+"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let (mode, backend) = resolve_web_search_mode_and_backend(&manifest, "MiniMax-M3");
+        assert!(
+            mode.is_metadata_center_local_search(),
+            "请求 wire 名同时命中 Native/Local provider 时必须保守激活 Mode B，got: {mode:?}"
         );
         assert_eq!(backend.as_deref(), Some("MiniMax-M3"));
     }

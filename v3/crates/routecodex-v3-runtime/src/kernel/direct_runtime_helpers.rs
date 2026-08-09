@@ -631,6 +631,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
     ))
 }
 
+/// Usage-observation-only SSE wrap：只把 provider SSE 事件 JSON 写入
 fn record_direct_sse_provider_event_json_chunk(
     chunk: &[u8],
     decoder: &mut SseIncrementalDecoder,

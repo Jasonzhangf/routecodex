@@ -847,6 +847,13 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                 continue;
             }
             if done_seen {
+                if is_v3_openai_chat_ping_tail_frame(&data) {
+                    // Some OpenAI-compatible gateways (e.g. Console Go) emit a
+                    // non-semantic `{"type":"ping"}` cost/keep-alive frame after
+                    // the terminal `[DONE]`. It carries no output/usage content,
+                    // so it is a benign protocol tail frame, not stream corruption.
+                    continue;
+                }
                 return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                     "OpenAI Chat provider event stream emitted data after [DONE]".to_string(),
                 ));
@@ -898,6 +905,22 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
         ));
     }
     build_openai_chat_completion_from_stream_state(response_id, model, created, usage, choices)
+}
+
+fn is_v3_openai_chat_ping_tail_frame(data: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(data) else {
+        return false;
+    };
+    if value.get("type").and_then(Value::as_str) == Some("ping") {
+        return true;
+    }
+    // Chat-style gateways emit a non-semantic settlement frame after [DONE]
+    // (e.g. `{"choices":[],"cost":"0"}`): empty choices carry no content or
+    // tool-call delta, so it is a benign protocol tail frame, not corruption.
+    matches!(
+        value.get("choices").and_then(Value::as_array),
+        Some(choices) if choices.is_empty()
+    )
 }
 
 fn is_v3_openai_chat_empty_sse_tail_sentinel(event: &Value) -> bool {
@@ -1110,4 +1133,31 @@ pub(super) fn read_v3_trimmed_string(value: Option<&Value>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ping_tail_frame_after_done_is_recognized() {
+        assert!(is_v3_openai_chat_ping_tail_frame(r#"{"type":"ping","cost":"0"}"#));
+        assert!(is_v3_openai_chat_ping_tail_frame(r#"{"type":"ping"}"#));
+        // Chat-style gateways settle cost with an empty-choices frame after [DONE].
+        assert!(is_v3_openai_chat_ping_tail_frame(r#"{"choices":[],"cost":"0"}"#));
+        assert!(is_v3_openai_chat_ping_tail_frame(r#"{"choices":[]}"#));
+    }
+
+    #[test]
+    fn semantic_frames_after_done_are_not_ping() {
+        assert!(!is_v3_openai_chat_ping_tail_frame(
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#
+        ));
+        assert!(!is_v3_openai_chat_ping_tail_frame(r#"{"id":"x","choices":[{}]}"#));
+        assert!(!is_v3_openai_chat_ping_tail_frame(
+            r#"{"choices":[{"index":0,"delta":{"content":"hi"}}]}"#
+        ));
+        assert!(!is_v3_openai_chat_ping_tail_frame("not json"));
+        assert!(!is_v3_openai_chat_ping_tail_frame("[1,2,3]"));
+    }
 }

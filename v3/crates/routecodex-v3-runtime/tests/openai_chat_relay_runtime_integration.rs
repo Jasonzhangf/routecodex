@@ -131,7 +131,15 @@ async fn run_openai_chat_same_protocol_field_parity_request_response_matrix() {
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
     assert_eq!(captured["model"], "chat-wire-model");
     assert_eq!(captured["messages"], payload["messages"]);
-    assert_eq!(captured["tools"], payload["tools"]);
+    assert_eq!(
+        captured["tools"],
+        json!([{
+            "type": "function",
+            "name": "lookup",
+            "function": {"name": "lookup", "parameters": {"type": "object"}}
+        }]),
+        "openai_chat provider wire normalizes tools to dual-field shape (top-level name + nested function)"
+    );
     assert_eq!(captured["tool_choice"], payload["tool_choice"]);
     assert_eq!(
         captured["parallel_tool_calls"],

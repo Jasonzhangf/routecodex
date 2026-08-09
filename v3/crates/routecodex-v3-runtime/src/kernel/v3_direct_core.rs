@@ -682,7 +682,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             node_trace: trace,
             error_chain: None,
             observability: Some(observability),
-            stream_observation: None,
+            stream_observation: response_projection.stream_observation,
             protocol_relay_handoff: None,
         };
     }

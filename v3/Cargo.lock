@@ -1193,6 +1193,7 @@ dependencies = [
  "base64",
  "bytes",
  "futures-util",
+ "provider-compat-core",
  "reqwest",
  "routecodex-v3-config",
  "routecodex-v3-error",

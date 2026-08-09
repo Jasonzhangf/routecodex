@@ -567,8 +567,91 @@ targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5
 }
 
 #[test]
-fn requested_explicit_model_route_maps_to_declared_targets_without_alias_requirement() {
+fn requested_wire_model_matches_provider_with_distinct_local_id_when_available() {
     let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.minimax_anthropic]
+type = "responses"
+base_url = "http://anthropic.invalid/v1"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_A_KEY" }] }
+[providers.minimax_anthropic.models."MiniMax-M3"]
+capabilities = ["web_search"]
+[providers.minimax_openai]
+type = "openai_chat"
+base_url = "http://openai.invalid/v1"
+default_model = "MiniMax-M3-local"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_O_KEY" }] }
+[providers.minimax_openai.models."MiniMax-M3-local"]
+wire_name = "MiniMax-M3"
+capabilities = ["web_search"]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", key = "key1", priority = 1 }]
+[route_groups.g.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [
+  { kind = "provider_model", provider = "minimax_anthropic", model = "MiniMax-M3", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "minimax_openai", model = "MiniMax-M3-local", key = "key1", priority = 2 }
+]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("MiniMax-M3".into()),
+                capabilities: BTreeSet::from(["web_search".into()]),
+                input_tokens: 10,
+                route_classification: test_route("web_search", &["web_search", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "web_search");
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    assert_eq!(
+        expanded
+            .candidates
+            .iter()
+            .map(|candidate| candidate.provider_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["minimax_anthropic", "minimax_openai"]
+    );
+    let selected = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::from([format!(
+                    "{}:{}:{}",
+                    "minimax_anthropic", "key1", "MiniMax-M3"
+                )]),
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(selected.candidate.provider_id, "minimax_openai");
+    assert_eq!(selected.candidate.model_id, "MiniMax-M3-local");
+}
+
+#[test]
+fn requested_explicit_model_route_maps_to_declared_targets_without_alias_requirement() {    let source = r#"
 version = 3
 [servers.s]
 bind = "127.0.0.1"

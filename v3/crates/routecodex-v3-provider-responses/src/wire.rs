@@ -1,7 +1,12 @@
 use crate::V3ProviderError;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
 use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
-use serde_json::Value;
+use serde_json::{Map, Value};
+
+/// Protocol name recognized by the shared namespace-tool flattener for Responses wire
+/// function shape (`{type:"function", name, description?, parameters?, strict?}`).
+const RESPONSES_WIRE_PROTOCOL_NAME: &str = "openai-responses";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3ProviderAuthSecretHandle {
@@ -112,12 +117,126 @@ pub fn build_v3_provider_12_responses_wire_payload(
             actual_model,
         });
     }
+    let body = expand_namespace_tools_in_responses_wire_body(
+        &request_id,
+        &target.provider_type,
+        current_request_body,
+    )?;
     Ok(V3Provider12ResponsesWirePayload {
         request_id,
         target,
         stream_intent,
-        body: current_request_body,
+        body,
     })
+}
+
+/// Responses wire tools only support provider-native tool types; a Codex `type=namespace`
+/// container (MCP tool discovery) is not a standard Responses tool and fails strict providers.
+/// Flatten each namespace child into a plain `function` tool, preserving order and child
+/// name/description/parameters/strict, so no `namespace` container crosses the provider wire.
+///
+/// The expanded `function` shape follows the target provider's native tool convention:
+/// `responses` providers (OpenAI Responses standard) receive the flat form
+/// (`{"type":"function","name":...}`), while `openai_chat` providers (Chat-style gateways
+/// such as Console Go, whose `/v1/responses` endpoint reuses the Chat tool serde) receive
+/// the nested form (`{"type":"function","function":{...}}`).
+fn expand_namespace_tools_in_responses_wire_body(
+    request_id: &str,
+    provider_type: &str,
+    mut body: Value,
+) -> Result<Value, V3ProviderError> {
+    let Some(tools) = body.get("tools").and_then(Value::as_array) else {
+        return Ok(body);
+    };
+    let has_namespace = tools
+        .iter()
+        .any(|tool| tool.get("type").and_then(Value::as_str) == Some("namespace"));
+    if !has_namespace && provider_type != "openai_chat" {
+        return Ok(body);
+    }
+    let protocol = match provider_type {
+        "openai_chat" => "openai-chat",
+        _ => RESPONSES_WIRE_PROTOCOL_NAME,
+    };
+    let tools = tools.clone();
+    let mut expanded = Vec::with_capacity(tools.len());
+    for tool in tools {
+        match flatten_namespace_tool_for_provider(protocol, &tool) {
+            Ok(Some(children)) => expanded.extend(children),
+            Ok(None) => expanded.push(tool),
+            Err(detail) => {
+                return Err(V3ProviderError::NamespaceToolFlattenFailed {
+                    request_id: request_id.to_string(),
+                    detail,
+                })
+            }
+        }
+    }
+    if provider_type == "openai_chat" {
+        expanded = normalize_openai_chat_function_tools(request_id, expanded)?;
+    }
+    body["tools"] = Value::Array(expanded);
+    Ok(body)
+}
+
+/// Console Go (`openai_chat`) 的 `/v1/responses` 端点使用 Chat 风格工具 serde 的变体：
+/// 每个 function 工具必须**同时**携带顶层 `name` 与嵌套 `function`（双字段）。
+/// 纯嵌套（缺顶层 `name`）报 `missing field 'name'`，标准 Responses 平铺（缺 `function`）
+/// 报 `missing field 'function'`，二者都会让上游 400。
+///
+/// 归一化：为每个 function 工具补上顶层 `name`，并保证嵌套 `function` 存在且含 `name`，
+/// 其余字段（description/parameters/strict）从已有 `function` 或顶层合并。
+fn normalize_openai_chat_function_tools(
+    request_id: &str,
+    tools: Vec<Value>,
+) -> Result<Vec<Value>, V3ProviderError> {
+    let mut normalized = Vec::with_capacity(tools.len());
+    for (index, tool) in tools.into_iter().enumerate() {
+        let object = tool.as_object().ok_or_else(|| {
+            V3ProviderError::FunctionToolShapeFailed {
+                request_id: request_id.to_string(),
+                detail: format!("tools[{index}] must be a JSON object"),
+            }
+        })?;
+        if object.get("type").and_then(Value::as_str) != Some("function") {
+            return Err(V3ProviderError::FunctionToolShapeFailed {
+                request_id: request_id.to_string(),
+                detail: format!("tools[{index}].type must be function for openai_chat provider"),
+            });
+        }
+        let top_level_name = object.get("name").and_then(Value::as_str);
+        let nested_name = object
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str);
+        let name = top_level_name
+            .or(nested_name)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| V3ProviderError::FunctionToolShapeFailed {
+                request_id: request_id.to_string(),
+                detail: format!("tools[{index}] requires a non-empty function name"),
+            })?;
+        let mut function = match object.get("function") {
+            Some(Value::Object(function)) => function.clone(),
+            _ => Map::new(),
+        };
+        function.insert("name".to_string(), Value::String(name.to_string()));
+        for key in ["description", "parameters", "strict"] {
+            if !function.contains_key(key) {
+                if let Some(value) = object.get(key) {
+                    function.insert(key.to_string(), value.clone());
+                }
+            }
+        }
+        let mut dual = Map::new();
+        dual.insert("type".to_string(), Value::String("function".to_string()));
+        dual.insert("name".to_string(), Value::String(name.to_string()));
+        dual.insert("function".to_string(), Value::Object(function));
+        normalized.push(Value::Object(dual));
+    }
+    Ok(normalized)
 }
 
 fn validate_current_responses_data_images(
@@ -579,6 +698,150 @@ mod tests {
                 field: "metadataCenter"
             } if request_id == "req-control"
         ));
+    }
+
+    #[test]
+    fn wire_flattens_namespace_tool_children_into_function_tools() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": "hello",
+            "tools": [
+                {"type": "function", "name": "plain_tool", "description": "d", "parameters": {"type": "object"}},
+                {
+                    "type": "namespace",
+                    "name": "mcp__node_repl",
+                    "tools": [
+                        {"type": "function", "name": "mcp__node_repl__js", "description": "run js", "parameters": {"type": "object", "properties": {}}, "strict": false},
+                        {"type": "function", "name": "mcp__node_repl__npm", "description": "npm", "parameters": {"type": "object", "properties": {}}}
+                    ]
+                }
+            ]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-namespace", target(), body).unwrap();
+        let tools = wire.body()["tools"].as_array().expect("tools array");
+        assert_eq!(tools.len(), 3, "namespace container must be replaced by its children: {tools:?}");
+        assert_eq!(tools[0]["type"], json!("function"));
+        assert_eq!(tools[1], json!({
+            "type": "function",
+            "name": "mcp__node_repl__js",
+            "description": "run js",
+            "parameters": {"type": "object", "properties": {}},
+            "strict": false
+        }));
+        assert_eq!(tools[2]["type"], json!("function"));
+        assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
+        assert!(
+            tools.iter().all(|tool| tool["type"] != json!("namespace")),
+            "no namespace container may cross provider wire payload: {tools:?}"
+        );
+    }
+
+    #[test]
+    fn wire_namespace_tool_empty_children_fails_explicitly() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": "hello",
+            "tools": [
+                {"type": "namespace", "name": "mcp__node_repl", "tools": []}
+            ]
+        });
+        let error = build_v3_provider_12_responses_wire_payload("req-empty-ns", target(), body)
+            .expect_err("empty namespace container must fail explicitly, not reach provider");
+        assert!(matches!(
+            error,
+            V3ProviderError::NamespaceToolFlattenFailed { request_id, .. } if request_id == "req-empty-ns"
+        ));
+    }
+
+    #[test]
+    fn wire_flattens_namespace_children_into_dual_field_functions_for_openai_chat_provider() {
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+        let body = json!({
+            "model": "upstream-model",
+            "input": "hello",
+            "tools": [
+                {"type": "function", "function": {"name": "plain_tool", "description": "d", "parameters": {"type": "object"}}},
+                {
+                    "type": "namespace",
+                    "name": "mcp__node_repl",
+                    "tools": [
+                        {"type": "function", "name": "mcp__node_repl__js", "description": "run js", "parameters": {"type": "object", "properties": {}}, "strict": false},
+                        {"type": "function", "name": "mcp__node_repl__npm", "description": "npm", "parameters": {"type": "object", "properties": {}}}
+                    ]
+                }
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-ns-chat",
+            chat_target,
+            body,
+        )
+        .unwrap();
+        let tools = wire.body()["tools"].as_array().expect("tools array");
+        assert_eq!(tools.len(), 3, "namespace container must be replaced by its children: {tools:?}");
+        assert_eq!(tools[0], json!({
+            "type": "function",
+            "name": "plain_tool",
+            "function": {"name": "plain_tool", "description": "d", "parameters": {"type": "object"}}
+        }), "Console Go requires dual-field tools (top-level name + nested function): {:?}", tools[0]);
+        assert_eq!(tools[1], json!({
+            "type": "function",
+            "name": "mcp__node_repl__js",
+            "function": {
+                "name": "mcp__node_repl__js",
+                "description": "run js",
+                "parameters": {"type": "object", "properties": {}},
+                "strict": false
+            }
+        }), "Console Go requires dual-field tools (top-level name + nested function): {:?}", tools[1]);
+        assert_eq!(tools[2]["type"], json!("function"));
+        assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
+        assert_eq!(tools[2]["function"]["name"], json!("mcp__node_repl__npm"));
+        assert!(
+            tools.iter().all(|tool| tool["type"] != json!("namespace")),
+            "no namespace container may cross provider wire payload: {tools:?}"
+        );
+    }
+
+    #[test]
+    fn openai_chat_normalizes_flat_client_function_tools_to_dual_field_without_namespace() {
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+        // OneStop 会话实际形状：无 namespace、纯嵌套 function（缺顶层 name），
+        // 原样透传会导致 Console Go 上游 400 missing field `name`。
+        let body = json!({
+            "model": "upstream-model",
+            "input": "say hi in one word",
+            "tools": [
+                {"type": "function", "function": {"name": "plain_tool", "description": "d", "parameters": {"properties": {}, "type": "object"}}}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-chat-plain", chat_target, body)
+            .unwrap();
+        let tools = wire.body()["tools"].as_array().expect("tools array");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0], json!({
+            "type": "function",
+            "name": "plain_tool",
+            "function": {"name": "plain_tool", "description": "d", "parameters": {"properties": {}, "type": "object"}}
+        }), "Console Go rejects nested-only tools; wire must add top-level name: {:?}", tools[0]);
+    }
+
+    #[test]
+    fn openai_responses_provider_keeps_flat_tool_shape_untouched() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": "hello",
+            "tools": [
+                {"type": "function", "name": "plain_tool", "description": "d", "parameters": {"type": "object", "properties": {}}}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-flat", target(), body).unwrap();
+        assert_eq!(wire.body()["tools"], json!([
+            {"type": "function", "name": "plain_tool", "description": "d", "parameters": {"type": "object", "properties": {}}}
+        ]), "standard responses provider must keep flat function shape unchanged");
     }
 
     #[test]

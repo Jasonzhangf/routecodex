@@ -487,12 +487,42 @@ fn project_sse_stream(
     ))
 }
 
+fn is_v3_openai_chat_settlement_tail_frame(data: &str) -> bool {
+    if data == "[DONE]" {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
+        return false;
+    };
+    if value.get("type").and_then(serde_json::Value::as_str) == Some("ping") {
+        return true;
+    }
+    matches!(
+        value.get("choices").and_then(serde_json::Value::as_array),
+        Some(choices) if choices.is_empty()
+    )
+}
+
 fn enqueue_sse_client_chunks(
     state: &mut V3OpenAiChatSseState,
     frames: Vec<routecodex_v3_sse::SseTransportIn03ValidatedFrameStream>,
 ) -> Result<(), String> {
     for frame in frames {
-        if state.seen_done && !frame.frame().fields().is_empty() {
+        if state.seen_done {
+            let fields = frame.frame().fields();
+            let is_tail = fields.iter().any(|field| {
+                matches!(
+                    field,
+                    routecodex_v3_sse::SseField::Named { name, value }
+                        if name == "data" && is_v3_openai_chat_settlement_tail_frame(value)
+                )
+            });
+            if fields.is_empty() || is_tail {
+                // Comment-only keep-alive frames and non-semantic settlement
+                // frames (e.g. `{"choices":[],"cost":"0"}`) after [DONE] are
+                // benign protocol tails, not stream corruption.
+                continue;
+            }
             return Err("OpenAI Chat SSE emitted a frame after [DONE]".into());
         }
         let mut data = None;
@@ -1048,5 +1078,26 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         trace: Vec<&'static str>,
     ) -> V3OpenAiChatRelayRuntimeOutput {
         provider_failure_output(failure, trace)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settlement_tail_frame_after_done_is_ignored() {
+        assert!(is_v3_openai_chat_settlement_tail_frame(r#"{"choices":[],"cost":"0"}"#));
+        assert!(is_v3_openai_chat_settlement_tail_frame(r#"{"choices":[]}"#));
+        assert!(is_v3_openai_chat_settlement_tail_frame(r#"{"type":"ping","cost":"0"}"#));
+    }
+
+    #[test]
+    fn semantic_frames_after_done_still_fail() {
+        assert!(!is_v3_openai_chat_settlement_tail_frame("[DONE]"));
+        assert!(!is_v3_openai_chat_settlement_tail_frame(
+            r#"{"choices":[{"index":0,"delta":{"content":"hi"}}]}"#
+        ));
+        assert!(!is_v3_openai_chat_settlement_tail_frame("not json"));
     }
 }

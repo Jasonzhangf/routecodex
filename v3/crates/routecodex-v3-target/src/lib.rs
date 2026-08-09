@@ -665,10 +665,17 @@ fn model_visible_name_matches(model: &V3ProviderModelManifest, requested: &str) 
 fn normalized_model_visible_ids(
     model_id: &str,
     _aliases: &[String],
-    _wire_name: Option<&str>,
+    wire_name: Option<&str>,
 ) -> Vec<String> {
     let mut ids = Vec::new();
     push_unique_visible_model_id(&mut ids, model_id);
+    // wire_name is the upstream wire model identity: a client requesting the
+    // wire name must be able to match this provider's model even when its
+    // local model id differs (e.g. distinct web_search execution mode
+    // profiles sharing the same upstream model).
+    if let Some(wire_name) = wire_name {
+        push_unique_visible_model_id(&mut ids, wire_name);
+    }
     ids
 }
 

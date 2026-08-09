@@ -828,7 +828,9 @@ impl V3LiveSnapProviderSnapshotRecorder {
             V3ProviderError::InvalidWireBody { request_id }
             | V3ProviderError::InvalidStreamIntent { request_id }
             | V3ProviderError::InvalidDataImage { request_id, .. }
-            | V3ProviderError::ControlFieldInWireBody { request_id, .. } => {
+            | V3ProviderError::ControlFieldInWireBody { request_id, .. }
+            | V3ProviderError::NamespaceToolFlattenFailed { request_id, .. }
+            | V3ProviderError::FunctionToolShapeFailed { request_id, .. } => {
                 self.record_transport_provider_error(attempt, request_id, "unknown", error)
             }
             V3ProviderError::InvalidBaseUrl {
