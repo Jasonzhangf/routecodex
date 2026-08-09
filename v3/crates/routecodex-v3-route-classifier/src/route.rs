@@ -58,9 +58,20 @@ pub fn classify_route(input: &RouteClassifierInput) -> RouteClassification {
     let coding_continuation = continuation && last_tool_category == "coding";
     let search_continuation = continuation && last_tool_category == "search";
     let web_search_tool_intent = continuation && last_tool_category == "websearch";
+    // V2 final semantics: web_search text-intent only counts when the request is a
+    // user input turn (latest message from user, no tool output in current turn)
+    // and has no image attachment (multimodal takes precedence). Restoration
+    // targets the strict STRICT_TERMS list in `tools::has_web_search_intent`.
+    let current_user_web_search_intent = input.latest_message_from_user
+        && !input.has_current_turn_tool_output
+        && !input.has_image_attachment
+        && !input.current_user_text.trim().is_empty()
+        && crate::tools::has_web_search_intent(&input.current_user_text);
     let other_tool_continuation = continuation && last_tool_category == "other";
     let unknown_tool_continuation = continuation && last_tool_category.is_empty();
-    let web_search = web_search_tool_intent || input.has_current_turn_web_search;
+    let web_search = web_search_tool_intent
+        || input.has_current_turn_web_search
+        || current_user_web_search_intent;
 
     let evaluation = vec![
         (
@@ -78,6 +89,8 @@ pub fn classify_route(input: &RouteClassifierInput) -> RouteClassification {
             web_search,
             if web_search_tool_intent {
                 "web_search:tool-intent"
+            } else if current_user_web_search_intent {
+                "web_search:user-text-intent"
             } else {
                 "web_search:explicit-or-intent"
             },

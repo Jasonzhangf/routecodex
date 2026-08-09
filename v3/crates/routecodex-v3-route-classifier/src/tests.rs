@@ -211,13 +211,17 @@ fn metadata_attachment_wins_and_web_search_tool_evidence_is_route() {
     });
     assert_eq!(multimodal.route_name, "multimodal");
 
+    // V2 final parity + user-defined priority:
+    // "下一个是 web search，有关键字的路由直接命中可以 remote 直接搜索的路由目标"
+    // current user turn carrying STRICT_TERMS web search intent must route to
+    // web_search (multimodal still wins when an image is attached, asserted above).
     let prose_only = classify_route(&RouteClassifierInput {
         latest_message_from_user: true,
         current_user_text: "search the web for current docs".into(),
         ..Default::default()
     });
-    assert_eq!(prose_only.route_name, "thinking");
-    assert!(prose_only.required_capabilities.is_empty());
+    assert_eq!(prose_only.route_name, "web_search");
+    assert_eq!(prose_only.required_capabilities, vec!["web_search".to_string()]);
 
     let web_call = classify_route(&RouteClassifierInput {
         has_current_turn_tool_output: true,
@@ -300,4 +304,194 @@ fn tool_call_category_matches_v2_command_semantics() {
         category("web_search", Some(&json!({"query":"x"}))).as_deref(),
         Some("websearch")
     );
+}
+
+#[test]
+fn has_web_search_intent_strong_english_phrases_hit() {
+    for text in [
+        "please search the web for rust 1.80 release notes",
+        "do a web search on quantum error correction",
+        "browse the web to find recent cves",
+    ] {
+        assert!(has_web_search_intent(text), "expected hit: {text}");
+    }
+}
+
+#[test]
+fn has_web_search_intent_strong_chinese_phrases_hit() {
+    for text in [
+        "帮我联网搜索一下 rust 最新版本",
+        "请搜索今天的新闻",
+        "答案必须引用来源",
+    ] {
+        assert!(has_web_search_intent(text), "expected hit: {text}");
+    }
+}
+
+#[test]
+fn has_web_search_intent_medium_verb_phrases_hit() {
+    for text in [
+        "look it up please",
+        "上网搜一下新闻",
+        "网页搜索 python 教程",
+        "查一下这件事",
+        "查一查周末天气",
+    ] {
+        assert!(has_web_search_intent(text), "expected hit: {text}");
+    }
+}
+
+#[test]
+fn has_web_search_intent_brand_weak_alone_misses() {
+    for text in [
+        "google it",
+        "百度一下 巴黎天气",
+        "google 一下 rust 教程",
+        "bing 一下新闻",
+        "搜个资料",
+    ] {
+        assert!(
+            !has_web_search_intent(text),
+            "single brand-weak must not hit: {text}"
+        );
+    }
+}
+
+#[test]
+fn has_web_search_intent_two_brand_weak_stack_to_hit() {
+    for text in [
+        "google it and bing 一下",
+        "百度一下 谷歌一下 巴黎",
+        "搜个东西 查一下",
+        "look up then google it",
+    ] {
+        assert!(has_web_search_intent(text), "stacked weak should hit: {text}");
+    }
+}
+
+#[test]
+fn has_web_search_intent_medium_plus_brand_weak_stack_to_hit() {
+    assert!(has_web_search_intent("帮我查一下这个 顺便 google it"));
+    assert!(has_web_search_intent("网页搜索 顺便 google 一下"));
+}
+
+#[test]
+fn has_web_search_intent_negative_context_overrides_strong() {
+    for text in [
+        "do not web search this",
+        "please don't search the web for me",
+        "don't look up anything",
+        "不需要联网搜索",
+        "不用上网搜",
+        "别搜 这个文件",
+        "不用查资料",
+    ] {
+        assert!(
+            !has_web_search_intent(text),
+            "negative context must suppress: {text}"
+        );
+    }
+}
+
+#[test]
+fn has_web_search_intent_unrelated_text_misses() {
+    for text in [
+        "write a rust function to parse json",
+        "帮我修一下这个 bug",
+        "explain monads in haskell",
+        "compute fibonacci up to 100",
+        "explain the architecture of the pipeline",
+        "refactor this typescript file",
+    ] {
+        assert!(!has_web_search_intent(text), "must miss: {text}");
+    }
+}
+
+#[test]
+fn has_web_search_intent_is_case_insensitive() {
+    assert!(has_web_search_intent("PLEASE SEARCH THE WEB"));
+    assert!(has_web_search_intent("Web Search this"));
+    assert!(!has_web_search_intent("BING 一下"));
+}
+
+#[test]
+fn dryrun_strong_keyword_routes_to_web_search() {
+    let r = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        current_user_text: "帮我联网搜索一下 rust 1.80 release notes".into(),
+        ..Default::default()
+    });
+    assert_eq!(r.route_name, "web_search");
+    assert!(r.required_capabilities.contains(&"web_search".to_string()));
+    assert!(
+        r.reasoning.contains("web_search:user-text-intent"),
+        "reasoning: {}",
+        r.reasoning
+    );
+}
+
+#[test]
+fn dryrun_medium_keyword_routes_to_web_search() {
+    let r = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        current_user_text: "查一下 巴黎今天天气".into(),
+        ..Default::default()
+    });
+    assert_eq!(r.route_name, "web_search");
+    assert!(r.reasoning.contains("web_search:user-text-intent"));
+}
+
+#[test]
+fn dryrun_two_brand_weak_stack_routes_to_web_search() {
+    let r = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        current_user_text: "百度一下 谷歌一下 rust 教程".into(),
+        ..Default::default()
+    });
+    assert_eq!(r.route_name, "web_search");
+}
+
+#[test]
+fn dryrun_single_brand_weak_does_not_trigger_web_search_route() {
+    let r = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        current_user_text: "google it".into(),
+        ..Default::default()
+    });
+    assert_ne!(
+        r.route_name, "web_search",
+        "single brand-weak must not promote to web_search"
+    );
+    assert!(r
+        .required_capabilities
+        .iter()
+        .all(|cap| cap != "web_search"));
+}
+
+#[test]
+fn dryrun_negative_context_suppresses_web_search_route() {
+    let r = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        current_user_text: "帮我联网搜索 但不需要联网".into(),
+        ..Default::default()
+    });
+    assert_ne!(
+        r.route_name, "web_search",
+        "negative context must suppress web_search"
+    );
+    assert!(r
+        .required_capabilities
+        .iter()
+        .all(|cap| cap != "web_search"));
+}
+
+#[test]
+fn dryrun_multimodal_outranks_keyword_web_search() {
+    let r = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        has_image_attachment: true,
+        current_user_text: "联网搜索 这张图".into(),
+        ..Default::default()
+    });
+    assert_eq!(r.route_name, "multimodal");
 }
