@@ -368,7 +368,7 @@ fn codex_sample_persistence_and_startup_retention_reject_missing_home() {
 }
 
 #[tokio::test]
-async fn direct_sse_http_projection_adds_transport_keepalive_then_preserves_provider_bytes() {
+async fn direct_sse_http_projection_preserves_provider_bytes_without_keepalive() {
     let provider_bytes =
         b"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n".to_vec();
     let frame = V3Server16HttpFrame {
@@ -393,9 +393,8 @@ async fn direct_sse_http_projection_adds_transport_keepalive_then_preserves_prov
         responses_direct_output_response_with_console(frame, None, Duration::from_millis(3_000));
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
 
-    let mut expected = b": keepalive\n\n".to_vec();
-    expected.extend_from_slice(&provider_bytes);
-    assert_eq!(body.as_ref(), expected.as_slice());
+    // Direct SSE 投影保真传输 provider 字节，不注入 transport keepalive。
+    assert_eq!(body.as_ref(), provider_bytes.as_slice());
 }
 
 #[tokio::test]
@@ -2885,7 +2884,7 @@ async fn dropping_responses_sse_body_releases_source_and_keepalive_timer_state()
 }
 
 #[tokio::test]
-async fn successful_direct_responses_sse_starts_with_keepalive_before_provider_event() {
+async fn successful_direct_responses_sse_preserves_provider_bytes_without_keepalive() {
     let frame = V3Server16HttpFrame {
         status: 200,
         content_type: "text/event-stream".to_string(),
@@ -2906,10 +2905,6 @@ async fn successful_direct_responses_sse_starts_with_keepalive_before_provider_e
     let response = responses_direct_output_response(frame, Duration::from_millis(3_000));
     let mut client = response.into_body().into_data_stream();
 
-    assert_eq!(
-        client.next().await.unwrap().unwrap().as_ref(),
-        b": keepalive\n\n"
-    );
     assert_eq!(
         client.next().await.unwrap().unwrap().as_ref(),
         b"event: response.created\ndata: {}\n\n"

@@ -503,11 +503,18 @@ impl V3ProviderHealthStore {
             .get(&key)
             .filter(|cooldown| cooldown.until_ms.is_none_or(|until_ms| until_ms > now_ms))
         {
-            projection.blocked_scopes.push(format!(
-                "{}:{}",
-                provider_failure_session_scope_label(&key),
-                cooldown.reason
-            ));
+            projection.blocked_scopes.push(match cooldown.until_ms {
+                Some(until_ms) => format!(
+                    "{}:{}:until:{until_ms}",
+                    provider_failure_session_scope_label(&key),
+                    cooldown.reason
+                ),
+                None => format!(
+                    "{}:{}",
+                    provider_failure_session_scope_label(&key),
+                    cooldown.reason
+                ),
+            });
             projection.available = false;
         }
         projection
