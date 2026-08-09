@@ -16,7 +16,7 @@ Feature scope: `hub.servertool_*`
 | `hub.servertool_followup` | servertool followup orchestration and governed response truth | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run verify:servertool-rust-only` |
 | `hub.servertool_engine_selection` | servertool primary auto-hook first pass and rerun selection planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_cli_projection` | servertool execution migrates to client-visible exec_command CLI projection with status-only CLI input | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run build:base`<br/>`npm run verify:architecture-ci` |
-| `hub.servertool_stopless_cli_continuation` | transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src` | `npm run verify:stopless-contract-blackbox`<br/>`npm run verify:stopless-invalid-schema-blackbox`<br/>`npm run verify:servertool-cli-binary-blackbox`<br/>`npm run verify:servertool-rust-only`<br/>`npm run verify:servertool-mount-boundary`<br/>`npm run verify:function-map-compile-gate` |
+| `hub.servertool_stopless_cli_continuation` | transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src` | `npm run verify:servertool-cli-binary-blackbox`<br/>`npm run verify:servertool-rust-only`<br/>`npm run verify:servertool-mount-boundary`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_auto_hook_execution` | servertool auto-hook runtime attempt, trace, and caller finalization planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_engine_preflight_contract` | servertool engine preflight early-return planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_engine_runtime_action_contract` | servertool engine runtime action planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
@@ -215,16 +215,12 @@ Required tests:
 - `tests/servertool/stop-schema-lifecycle-contract.spec.ts`
 - `tests/responses/responses-openai-bridge.spec.ts`
 - `tests/servertool/servertool-cli-result-restore.spec.ts`
-- `scripts/tests/stopless-contract-blackbox.mjs`
-- `scripts/tests/stopless-invalid-schema-blackbox.mjs`
 - `scripts/tests/servertool-cli-binary-blackbox.mjs`
 - `tests/sharedmodule/hub-pipeline-preselected-route.spec.ts`
 - `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs`
 
 Required gates:
-- `npm run verify:stopless-contract-blackbox`
-- `npm run verify:stopless-invalid-schema-blackbox`
 - `npm run verify:servertool-cli-binary-blackbox`
 - `npm run verify:servertool-rust-only`
 - `npm run verify:servertool-mount-boundary`

@@ -43,7 +43,7 @@ servertool / stopless / followup / schema gate 改动前，先查：
 11. `reasoningStop` 有双面合同：managed relay provider request 必须注入 model-visible/internal `reasoningStop` tool schema，并把 auto/missing/none tool choice 提升为 required/any 工具决策，避免模型合法忽略 schema 后连续自然 stop；Responses same-protocol Direct 只允许在 `SameProtocolDirect` 决策之后通过 `V3ResponsesDirectStoplessControlState` 注入 Direct-scoped guidance/tool，并由 Direct-scoped MetadataCenter control state 激发；client-visible continuation 仍只能是公共 CLI alias `exec_command(routecodex hook run reasoningStop ...)`。raw internal `reasoningStop` tool call/history 不得泄漏给客户端；provider-direct 和 non-Responses direct 不得注入或激发。
 12. 任何 stopless 系统提示词若要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报，必须同时要求输出 stop schema JSON；禁止只要求 summary 而不带 schema。旧 AI followup 分支已删除，禁止恢复。
 13. 注入失败必须清理状态，防止循环。
-14. `verify:stopless-contract-blackbox` 必须检查 dry-run 返回的最终 `providerRequest.body`：完整 system schema、`reasoningStop` tool exactly once、原普通工具保留、状态机生成的 ordinary user prompt、无 stopless shell/CLI/control artifact、且 `stoppedBeforeProviderSend=true`。
+14. stopless 注入合同必须检查 dry-run 返回的最终 `providerRequest.body`：完整 system schema、`reasoningStop` tool exactly once、原普通工具保留、状态机生成的 ordinary user prompt、无 stopless shell/CLI/control artifact、且 `stoppedBeforeProviderSend=true`（V3 由 Rust Chat Process 单测与 cargo test 验证）。
 
 ## followup 边界
 0. CLI projection 已迁移的 servertool 不得再进入 followup；stopless 也属于 CLI projection，旧 followup 规则只适用于尚未迁移的 legacy servertool flow。

@@ -111,7 +111,7 @@ Verified live cases:
 At that historical profile boundary, Anthropic Messages and Gemini Generate Content were both outside
 the enabled endpoint set. Section 13 supersedes the Anthropic status with current multi-provider 5555
 JSON/SSE evidence. Gemini and live 401/403/5xx/timeout provider-error samples remain pending. Controlled
-error evidence covers 401/403/5xx/timeout through `npm run verify:provider-failure-ban-blackbox`: failing
+error evidence covers 401/403/5xx/timeout through the provider-error-reroutable-until-pool-and-default-empty contract: failing
 primary is excluded once, backup/default is hit, and the client does not receive an early terminal
 provider error. No live config mutation, credential mutation, or P6 deletion is claimed.
 

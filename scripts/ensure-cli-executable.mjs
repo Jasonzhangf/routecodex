@@ -29,8 +29,6 @@ function getCommandOutput(command) {
 }
 
 function ensureLocalCli() {
-  const cliPath = path.join(process.cwd(), 'dist', 'cli.js');
-  ensureExecutable(cliPath);
   ensureExecutable(path.join(process.cwd(), 'dist', 'bin', 'rccv3'));
 }
 
@@ -56,8 +54,6 @@ function ensureGlobalBinTarget(binName) {
   }
 
   const packageName = 'routecodex';
-  const globalCliPath = path.join(globalRoot, packageName, 'dist', 'cli.js');
-  ensureExecutable(globalCliPath);
   ensureExecutable(path.join(globalRoot, packageName, 'dist', 'bin', 'rccv3'));
 }
 

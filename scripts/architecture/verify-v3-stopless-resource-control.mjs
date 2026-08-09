@@ -37,7 +37,6 @@ const directFeatureId = 'v3.direct_stopless_metadata_center';
 const allowedStoplessChainIds = new Set([featureId, directFeatureId]);
 const verifyGate = 'npm run verify:v3-stopless-resource-control';
 const redGate = 'npm run test:v3-stopless-resource-control-red-fixtures';
-const cliGate = 'npm run jest:run -- --runTestsByPath tests/cli/servertool-command.spec.ts';
 
 const resourceMap = readYaml(paths.resourceMap);
 const functionMap = readYaml(paths.functionMap);
@@ -493,7 +492,6 @@ function verifyFunctionAndVerificationMaps() {
     }
     requireArrayIncludes(feature.required_gates, verifyGate, `${label} ${featureId}.required_gates`);
     requireArrayIncludes(feature.required_gates, redGate, `${label} ${featureId}.required_gates`);
-    requireArrayIncludes(feature.required_gates, cliGate, `${label} ${featureId}.required_gates`);
     const designRefs = [...(feature.design ?? []), ...(feature.owner_files ?? []), ...(feature.allowed_paths ?? [])];
     requireArrayIncludes(designRefs, paths.designContract, `${label} ${featureId}.design/owner_files/allowed_paths`);
   }

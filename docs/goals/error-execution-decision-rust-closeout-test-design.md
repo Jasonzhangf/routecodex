@@ -32,7 +32,6 @@ Rust owns classification consumption, exclusion/reroute decision, attempt-budget
 ## Required gates
 
 - `npm run verify:error-pipeline-contract`
-- `npm run verify:provider-failure-ban-blackbox`
 - focused Rust planner tests and executor bridge tests
 - `npm run verify:function-map-compile-gate`
 - `npm run verify:hub-pipeline-native-reference-gate`

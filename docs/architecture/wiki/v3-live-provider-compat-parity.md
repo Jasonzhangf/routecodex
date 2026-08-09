@@ -43,7 +43,7 @@ The machine manifest covers every endpoint and transport pair:
 
 The manifest also locks the required error cases: http_401, http_402, http_403, http_429, http_5xx, sse_body_level_failure, malformed_provider_body, timeout, disconnect, and cancel.
 
-Provider failure evidence is split by safety boundary. HTTP 401, HTTP 403, HTTP 5xx, and provider timeout are controlled_verified through `npm run verify:provider-failure-ban-blackbox`: each failing primary records one provider failure attempt, then backup/default is hit and the client receives HTTP 200 instead of an early terminal provider error. Live 401/403 remains live_pending because production credentials must not be mutated to manufacture auth/authorization errors; live 5xx/timeout remains live_pending until a natural or authorized live provider failure sample exists.
+Provider failure evidence is split by safety boundary. HTTP 401, HTTP 403, HTTP 5xx, and provider timeout are controlled_verified through the provider-error-reroutable-until-pool-and-default-empty goal contract: each failing primary records one provider failure attempt, then backup/default is hit and the client receives HTTP 200 instead of an early terminal provider error. Live 401/403 remains live_pending because production credentials must not be mutated to manufacture auth/authorization errors; live 5xx/timeout remains live_pending until a natural or authorized live provider failure sample exists.
 
 ## Capability Contract
 
@@ -109,7 +109,6 @@ Responses Direct fresh live recheck on 2026-07-16T12:20:33Z used a temporary nat
 
 - npm run verify:v3-live-provider-compat-parity
 - npm run test:v3-live-provider-compat-parity-red-fixtures
-- npm run verify:provider-failure-ban-blackbox
 - npm run verify:v3-architecture-docs
 - npm run verify:v3-resource-map
 - npm run verify:v3-module-boundaries

@@ -694,7 +694,6 @@ Existing red/negative coverage:
 
 - `tests/debug/pipeline-dry-run.spec.ts` rejects non-local dry-run header use with `403`.
 - `tests/debug/pipeline-dry-run.spec.ts` proves provider HTTP transport is not called during provider-request dry-run.
-- `scripts/dry-run-codex-response.ts` fail-fast rejects provider-response samples containing serialized `sseStream` without replayable `bodyText/raw/text`; this is the required negative fixture shape for response converter bugs that involve SSE snapshots.
 
 Known gaps:
 

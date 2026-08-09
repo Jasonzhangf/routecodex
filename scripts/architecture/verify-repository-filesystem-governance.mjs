@@ -21,7 +21,7 @@ function lines(value) {
 function verifyRepositoryFilesystemGovernance() {
   const failures = [];
   const rootEntries = fs.readdirSync(repoRoot);
-  const forbiddenRootNames = new Set(['--version', '.reasonix', 'note.md.d', 'vendor']);
+  const forbiddenRootNames = new Set(['--version', 'note.md.d', 'vendor']);
   const forbiddenActiveV2Directories = [
     'docs/v2-architecture',
     'scripts/v2-consistency',

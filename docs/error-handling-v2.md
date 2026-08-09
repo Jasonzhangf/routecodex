@@ -144,7 +144,6 @@ Jason 纠偏后的当前硬骨架：
 - `tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts`
 - `tests/config/routecodex-config-loader.v2-single-source.spec.ts`
 - `cargo test -p router-hotpath-napi primary_exhausted_to_default_pool --lib`
-- `npm run verify:provider-failure-ban-blackbox`
 
 ### 1.0.3 direct path 的正确职责
 

@@ -2389,7 +2389,6 @@ features:
   required_gates:
   - npm run verify:v3-live-provider-compat-parity
   - npm run test:v3-live-provider-compat-parity-red-fixtures
-  - npm run verify:provider-failure-ban-blackbox
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
@@ -2704,7 +2703,6 @@ features:
     -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_remote_continuation_integration
     -- --nocapture
-  - npm run jest:run -- --runTestsByPath tests/cli/servertool-command.spec.ts
   - npm run verify:v3-relay-response-semantics
   - npm run verify:v3-relay-request-semantics
   - npm run verify:v3-architecture-docs

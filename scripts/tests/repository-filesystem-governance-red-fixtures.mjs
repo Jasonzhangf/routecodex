@@ -13,7 +13,7 @@ const cases = [
   ['deprecated screenshot root', 'note.md.d/image.png', 'forbidden root entry'],
   ['deprecated vendor root', 'vendor/llmswitch-core/package.json', 'forbidden root entry'],
   ['tracked dist output', 'dist/debug/snapshot/writer.js', 'tracked generated output'],
-  ['tracked reasonix state', '.reasonix/truncated-results/output.txt', 'forbidden root entry'],
+  ['tracked reasonix state', '.reasonix/truncated-results/output.txt', 'tracked deprecated tool state'],
   ['retired sample surface', 'samples/mock-provider/request.json', 'retired V2 sample surface must not be tracked'],
   ['active V2 architecture directory', 'docs/v2-architecture/README.md', 'active V2 directory must be archived'],
   ['active V2 consistency directory', 'scripts/v2-consistency/README.md', 'active V2 directory must be archived'],

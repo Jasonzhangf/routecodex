@@ -223,7 +223,6 @@ Verification:
 
 - `cargo test -p router-hotpath-napi virtual_router_engine::engine::events --lib -- --nocapture`
 - `npm run verify:architecture-error-chain-bypass`
-- `npm run verify:provider-failure-ban-blackbox`
 - Focused provider failure policy Jest suites.
 
 ### Slice 6: Native Wrapper Surface Removal

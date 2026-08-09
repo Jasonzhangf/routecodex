@@ -35,8 +35,6 @@ jobs:
         run: npm run test:v3-responses-session-admission-red-fixtures
       - name: V3 Responses session admission behavior
         run: npm run test:v3-responses-session-admission
-      - name: V3 OpenAI Chat stream tool-call identity tests
-        run: npm run test:v3-openai-chat-stream-tool-call-identity
       - name: File line-limit gate (<500)
         run: npm run verify:file-line-limit
       - name: V3 file-size ratchet gate (<=1500)

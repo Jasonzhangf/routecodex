@@ -2093,15 +2093,6 @@ shared_multi_reference_functions:
   - response.mainline
   note: Rust emits ordered response debug stage records; TS only executes recorder
     IO and does not own stage names or debug payload envelopes.
-- function_id: debug.responses_provider_replay_chat_owner
-  binding_status: confirmed
-  symbol: createReplayChatOwner
-  file: scripts/tools/responses-provider-replay.mjs
-  owner_feature_id: debug.responses_provider_replay_payload_copy_budget
-  reused_by_chains:
-  - debug.unified_surface.mainline
-  note: 'Debug script block: creates only a shallow top-level owner for captured chat
-    replay mutation; nested payload branches remain borrowed and diagnostic-only.'
 - function_id: debug.replay_codex_sample_metadata_projection
   binding_status: confirmed
   symbol: stripReplayOnlyClientHeadersFromBody
@@ -2120,24 +2111,6 @@ shared_multi_reference_functions:
   - debug.pipeline_dry_run_loop.mainline
   note: 'Debug replay block: projects captured provider request shape into a replayable
     Responses client request without cloning complete payload branches.'
-- function_id: debug.responses_fai_capture_variant_projection
-  binding_status: confirmed
-  symbol: buildResponseProbeVariants
-  file: scripts/responses-fai-capture.mjs
-  owner_feature_id: debug.responses_fai_capture_payload_copy_budget
-  reused_by_chains:
-  - debug.unified_surface.mainline
-  note: 'Debug script block: lazily yields one Responses FAI compatibility variant
-    at a time; unchanged nested payload branches remain borrowed and diagnostic-only.'
-- function_id: debug.responses_sse_capture_request_owner
-  binding_status: confirmed
-  symbol: createResponsesCaptureRequestOwner
-  file: scripts/responses-sse-capture.mjs
-  owner_feature_id: debug.responses_sse_capture_payload_copy_budget
-  reused_by_chains:
-  - debug.unified_surface.mainline
-  note: 'Debug script block: creates one shallow top-level owner for Responses SSE
-    capture overrides; unchanged nested payload branches remain borrowed and diagnostic-only.'
 - function_id: debug.responses_sse_completed_response_projection
   binding_status: confirmed
   symbol: convertEventsToResponsesJson
@@ -2212,16 +2185,6 @@ shared_multi_reference_functions:
   - debug.unified_surface.mainline
   note: 'Debug capture block: creates path-local temporary config owners while borrowing
     unchanged nested provider and config branches until artifact serialization.'
-- function_id: debug.outbound_regression_execution_copy
-  binding_status: confirmed
-  symbol: cloneOutboundRegressionExecutionPayload
-  file: scripts/outbound-regression-codex-samples.mjs
-  owner_feature_id: debug.outbound_regression_payload_copy_budget
-  reused_by_chains:
-  - debug.unified_surface.mainline
-  note: 'Debug script block: creates the single provider-mutation isolation graph
-    for one outbound regression attempt; JSON and original-object fallback paths are
-    forbidden.'
 - function_id: error.err_04_router_policy_applied
   symbol: report_provider_error
   file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_runtime_ingress.rs

@@ -83,7 +83,6 @@ function checkRootLayout() {
     'deprecated',
     'docs',
     'eslint.config.js',
-    'jest.config.js',
     'memory',
     'note.md',
     'package-lock.json',
@@ -93,7 +92,6 @@ function checkRootLayout() {
     'src',
     'task.md',
     'tests',
-    'tsconfig.jest.json',
     'tsconfig.json',
     'v3',
   ]);

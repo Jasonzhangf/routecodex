@@ -7,7 +7,7 @@ modules:
       - scripts/install-v3-cli.mjs
       - scripts/ensure-cli-command-shim.mjs
       - scripts/install-global.sh
-      - tests/scripts/v3-cli-distribution.spec.ts
+      - tests/scripts/v3-cli-distribution.spec.mjs
       - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
       - v3/crates/routecodex-v3-config/src/lib.rs
     allowed_dependencies:

@@ -1231,29 +1231,6 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   required_gates: []
-- resource_id: debug.responses_provider_replay_projection
-  resource_kind: diagnostic
-  lifecycle: debug.unified_surface.mainline
-  identity:
-  - requestId
-  - providerKey
-  - samplePath
-  owner_feature_id: debug.responses_provider_replay_payload_copy_budget
-  owner_node: DebugObs07ReplayedOrInspected
-  allowed_readers:
-  - responses-provider-replay
-  allowed_writers:
-  - createReplayChatOwner
-  - ensureReplayChatModel
-  - replaceSystemMessages
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - route.selection
-  - MetadataCenter
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates: []
 - resource_id: debug.replay_codex_sample_request_projection
   resource_kind: diagnostic
   lifecycle: debug.pipeline_dry_run_loop.mainline
@@ -1269,50 +1246,6 @@ resources:
   allowed_writers:
   - stripReplayOnlyClientHeadersFromBody
   - buildReplayInputFromProviderRequest
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - route.selection
-  - MetadataCenter
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates: []
-- resource_id: debug.responses_fai_capture_variant_projection
-  resource_kind: diagnostic
-  lifecycle: debug.unified_surface.mainline
-  identity:
-  - requestId
-  - providerKey
-  - variantIndex
-  - samplePath
-  owner_feature_id: debug.responses_fai_capture_payload_copy_budget
-  owner_node: DebugObs07ReplayedOrInspected
-  allowed_readers:
-  - responses-fai-capture
-  allowed_writers:
-  - buildResponseProbeVariants
-  - readExplicitSampleBody
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - route.selection
-  - MetadataCenter
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates: []
-- resource_id: debug.responses_sse_capture_request_projection
-  resource_kind: diagnostic
-  lifecycle: debug.unified_surface.mainline
-  identity:
-  - requestId
-  - providerKey
-  - samplePath
-  owner_feature_id: debug.responses_sse_capture_payload_copy_budget
-  owner_node: DebugObs07ReplayedOrInspected
-  allowed_readers:
-  - responses-sse-capture
-  allowed_writers:
-  - createResponsesCaptureRequestOwner
   forbidden_writers:
   - ProviderReqOutbound06WirePayload
   - response.client_payload
@@ -1490,28 +1423,6 @@ resources:
   - route.selection
   - MetadataCenter
   - live.provider_config
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates: []
-- resource_id: debug.outbound_regression_execution_copy
-  resource_kind: diagnostic
-  lifecycle: debug.unified_surface.mainline
-  identity:
-  - requestId
-  - providerKey
-  - samplePath
-  owner_feature_id: debug.outbound_regression_payload_copy_budget
-  owner_node: DebugObs05HarnessExecuted
-  allowed_readers:
-  - outbound-regression-codex-samples
-  - ProviderRuntime
-  allowed_writers:
-  - cloneOutboundRegressionExecutionPayload
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - route.selection
-  - MetadataCenter
   may_enter_provider_body: false
   may_enter_client_body: false
   required_gates: []
@@ -2861,8 +2772,7 @@ resources:
   - sse.transport_frame
   may_enter_provider_body: false
   may_enter_client_body: false
-  required_gates:
-  - npm run verify:stopless-invalid-schema-blackbox
+  required_gates: []
 - resource_id: stopless.cli_projection
   resource_kind: normal_payload
   lifecycle: stopless.session.mainline

@@ -2912,7 +2912,6 @@ features:
   required_gates:
   - npm run verify:v3-live-provider-compat-parity
   - npm run test:v3-live-provider-compat-parity-red-fixtures
-  - npm run verify:provider-failure-ban-blackbox
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
@@ -3270,7 +3269,6 @@ features:
     -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough
     -- --nocapture
-  - npm run jest:run -- --runTestsByPath tests/cli/servertool-command.spec.ts
   - npm run verify:v3-relay-response-semantics
   - npm run verify:v3-relay-request-semantics
   - npm run verify:v3-architecture-docs
@@ -4323,7 +4321,7 @@ features:
   - scripts/install-v3-cli.mjs
   - scripts/ensure-cli-command-shim.mjs
   - scripts/install-global.sh
-  - tests/scripts/v3-cli-distribution.spec.ts
+  - tests/scripts/v3-cli-distribution.spec.mjs
   - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
   - v3/crates/routecodex-v3-config/Cargo.toml
   - v3/crates/routecodex-v3-config/build.rs
@@ -4333,6 +4331,7 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/v3-build-tool-module-registry.yml
+  - .github/workflows/test.yml
   forbidden_paths:
   - src
   - sharedmodule

@@ -213,11 +213,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/utils/errorsamples.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/utils/is-direct-execution.ts",
       "textContains": ""
     },
@@ -818,11 +813,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/responses-fai-capture.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "scripts/scan-apply-patch-samples.mjs",
       "textContains": ""
     },
@@ -854,11 +844,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "scripts/verify-apply-patch.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/verify-client-headers.mjs",
       "textContains": ""
     },
     {
@@ -1534,14 +1519,6 @@
       "ruleId": "fallback-keyword",
       "pathContains": "scripts/lib/",
       "textContains": "fallback"
-    },
-    {
-      "ruleId": "fallback-keyword",
-      "pathContains": "scripts/tools/responses-provider-replay.mjs"
-    },
-    {
-      "ruleId": "fallback-keyword",
-      "pathContains": "src/utils/errorsamples.ts"
     },
     {
       "ruleId": "fallback-keyword",

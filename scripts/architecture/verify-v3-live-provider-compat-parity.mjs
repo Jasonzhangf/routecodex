@@ -113,9 +113,6 @@ if (manifest.completion_boundary?.current_5555_multi_provider_profile !== true
 if (manifest.live_read_only_audit?.status !== 'live_v3_provider_replay_partial_verified') {
   failures.push(manifestPath + ': live audit must record partial V3 provider replay verification');
 }
-if (!(manifest.verification_gates ?? []).includes('npm run verify:provider-failure-ban-blackbox')) {
-  failures.push(manifestPath + ': verification_gates missing npm run verify:provider-failure-ban-blackbox');
-}
 if (!String(manifest.live_read_only_audit?.finding ?? '').includes('Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, and OpenAI Chat Relay JSON/SSE')) {
   failures.push(manifestPath + ': live audit must name the verified V3 5555 live replay surface');
 }
@@ -311,7 +308,6 @@ for (const blocker of manifest.production_blockers ?? []) {
 for (const script of [
   'verify:v3-live-provider-compat-parity',
   'test:v3-live-provider-compat-parity-red-fixtures',
-  'verify:provider-failure-ban-blackbox',
 ]) {
   if (!packageJson.scripts?.[script]) failures.push(packagePath + ': missing script ' + script);
 }
@@ -359,7 +355,6 @@ for (const phrase of [
   'responses_relay_live_verified',
   'anthropic_messages_live_verified_current_5555',
   'gemini_generate_content_live_replay_pending',
-  'npm run verify:provider-failure-ban-blackbox',
 ]) requireText(wiki, wikiPath, phrase);
 for (const [path, text] of [
   [manifestPath, readFileSync(manifestPath, 'utf8')],

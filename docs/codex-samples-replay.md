@@ -36,10 +36,6 @@ npm run replay:codex-sample -- \
   - `response.json`：RouteCodex 返回的 JSON payload；
 - 若发生错误，额外写入 `response.error.txt`。
 
-## 配合 proxy replay
-
-对于 responses SSE，可使用 `scripts/responses-sse-proxy.mjs --replay <capture>/response.sse.log` 将黄金样本作为上游输出，再结合本脚本回放客户端 payload，实现“同一份请求 + 同一份 SSE 流”在 RouteCodex 中的完整闭环。
-
 ## 常见场景
 
 - **工具调用链路**：先回放 `/v1/responses` 样本捕获 `required_action`，再回放对应的 `/v1/responses.submit_tool_outputs` 样本；

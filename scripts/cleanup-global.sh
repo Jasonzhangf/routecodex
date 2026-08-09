@@ -44,7 +44,7 @@ fi
 
 # 检查当前目录是否有构建产物
 echo "🔍 检查当前目录构建状态..."
-if [ -f "dist/cli.js" ]; then
+if [ -f "dist/bin/rccv3" ]; then
     echo "✅ 发现构建产物"
 else
     echo "❌ 未发现构建产物，需要先运行 npm run build"

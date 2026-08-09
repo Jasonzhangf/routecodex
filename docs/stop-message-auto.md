@@ -110,8 +110,6 @@ Provider response
 - `cargo test -p servertool-core stopless --lib -- --nocapture`
 - `cargo test -p servertool-core persisted_lookup --lib -- --nocapture`
 - `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/execution-stage-shell.spec.ts --runInBand`
-- `npm run verify:stopless-contract-blackbox`
-- `npm run verify:stopless-invalid-schema-blackbox`
 - `npm run verify:servertool-rust-only`
 - `npm run verify:function-map-compile-gate`
 - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`

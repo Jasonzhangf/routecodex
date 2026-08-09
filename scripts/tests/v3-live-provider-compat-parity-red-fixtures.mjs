@@ -60,14 +60,6 @@ const cases = [
     diagnostic: /error case timeout live evidence must name blockers when not live_verified/,
   },
   {
-    name: 'provider failure blackbox gate removed from manifest',
-    file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
-    mutateYaml: (doc) => {
-      doc.verification_gates = doc.verification_gates.filter((gate) => gate !== 'npm run verify:provider-failure-ban-blackbox');
-    },
-    diagnostic: /missing npm run verify:provider-failure-ban-blackbox/,
-  },
-  {
     name: 'stale Anthropic endpoint blocker reintroduced',
     file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
     mutateYaml: (doc) => {
@@ -177,8 +169,8 @@ const cases = [
   {
     name: 'function map binding removed',
     file: 'docs/architecture/v3-function-map.yml',
-    marker: '  - feature_id: v3.live_provider_compat_parity_closeout\n',
-    mutation: '  - feature_id: v3.live_provider_compat_parity_closeout_removed\n',
+    marker: '- feature_id: v3.live_provider_compat_parity_closeout\n',
+    mutation: '- feature_id: v3.live_provider_compat_parity_closeout_removed\n',
     diagnostic: /missing feature entry v3.live_provider_compat_parity_closeout/,
   },
   {

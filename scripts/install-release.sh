@@ -163,7 +163,7 @@ prepare_isolated_build_root() {
   }
 
   for item in \
-    package.json package-lock.json tsconfig.json tsconfig.jest.json jest.config.js README.md LICENSE \
+    package.json package-lock.json tsconfig.json README.md LICENSE \
     .gitignore .github AGENTS.md \
     src scripts config docs tests vendor; do
     copy_isolated_path "$item"

@@ -48,15 +48,6 @@ node dist/tools/provider-update/index.js \
 
 要求：配置文件中 `auth.headerName` 为 `x-goog-api-key` 或者确保 `Authorization: Bearer <KEY>` 可用（工具也支持 headerName/prefix 覆盖）。
 
-## 快速联调（本地脚本）
-
-```bash
-GEMINI_API_KEY=**** npm run build
-GEMINI_API_KEY=**** node scripts/gemini-smoke.mjs
-```
-
-脚本默认使用 `gemini-2.5-flash-lite` 并发送简短提示；返回结果仅截断打印前 500 字符。
-
 ## 测试建议
 - 单元：按 docs/providers/provider-composite-testing.md 中“协议守卫/形状漂移”用例增加 `gemini-chat` 断言；已允许 `candidates` 通过。
 - 集成：在 provider_golden_samples 中增加 `gemini-chat` 的 request/response 样例（可按真实 wire 形状扩展），并在蓝图回归中启用 gemini 路径。
