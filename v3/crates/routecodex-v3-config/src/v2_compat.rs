@@ -904,4 +904,46 @@ webSearchBackend = "MiniMax-M3"
         assert_eq!(parsed.web_search_execution_mode().as_str(), "metadata_center_local_search");
         assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
     }
+
+    #[test]
+    fn provider_timeout_parses_into_manifest_request_timeout_ms() {
+        let parsed: V2ProviderConfigFile = toml::from_str(
+            r#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+timeout = 900000
+defaultModel = "model"
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(parsed.provider.timeout, Some(900_000), "snake_case timeout must parse");
+
+        let absent: V2ProviderConfigFile = toml::from_str(
+            r#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "model"
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(absent.provider.timeout, None, "absent timeout must be None (default applies later)");
+    }
 }
