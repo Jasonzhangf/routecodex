@@ -135,6 +135,8 @@ description: P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl�
 - 区分测试与生命周期动作：`npm run test:webui` 这类 Jest/UI 单测不得启动、停止、重启 live server；若测试前后 server 变化，必须用 `~/.rcc/logs/server-<port>.log` 的 `signal_received` / `self_termination` / `restart_signal_received` 追真正 stop owner，禁止把 install/restart/HTTP shutdown 误归因给 UI 单测。
 - 如果 Jason 说某次执行导致 live server 停止，并且已经手动恢复，立刻接受现场事实；停止争辩和重复复现。后续命令先按 side-effect 分级：禁止再跑 install/restart/start/stop/HTTP shutdown/foreground server/可能退出会话的 browser probe，除非 Jason 明确要求。
 - 调试 `rcc start`/`routecodex start` 当前行为时，必须同时检查 source、repo `dist`、以及 `~/.rcc/install/current/dist`。start takeover lock 分支禁止用 health OK 直接成功；running 只能说明端口被占，默认/--restart 必须进入 port-scoped stop + safe PID fallback，只有 `--no-restart` 或 live lock still active 可拒绝。
+- **更新运行中 Mach-O 二进制禁止 `cp` 覆盖**（2026-08-09 事故）：`cp` 覆盖 `~/.local/bin/rccv3` 会使 macOS 代码签名失效，进程启动即 `SIGKILL (Code Signature Invalid)`（`config check` / `start` 全部 Killed:9），`codesign --verify` 可能仍报 valid，以崩溃报告 `~/Library/Logs/DiagnosticReports/rccv3-*.ips` 的 `namespace=CODESIGNING` 为准。正确流程：`cargo build --release` 产出 `target/release/rccv3` -> 确认目标进程已停止 -> 安装到目标路径 -> `codesign -s - -f ~/.local/bin/rccv3` 重签 -> `rccv3 config check` + `rccv3 --help` 验证可运行 -> 再启动 daemon。
+- **重启/杀掉协议永远不变**（Jason 2026-08-09）：RouteCodex 的 stop/restart/kill 只走固定协议，禁止每次探索新方式。CLI managed instance（`routecodex restart`）与用户手动在 ttys023 启动的 daemon 是两套 managed lifecycle：CLI 的 stop/restart 对后者会被 SIGKILL 且不生效，必须先停目标进程（或用户在其终端停），再走 `routecodex restart --port <locator>` 聚合重启并验证全部成员端口 `/health`。禁止用 CLI stop 杀用户手动 daemon、禁止 start 兜底恢复。
 
 ## 路由表
 

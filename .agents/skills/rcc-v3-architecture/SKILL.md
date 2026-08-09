@@ -165,6 +165,7 @@ Hard locks:
 - V3 runtime executable truth is `~/.local/bin/rccv3`; `routecodex` and `rcc` must resolve to that binary without release snapshot, npm package, or repository fallback.
 - `~/.rcc/install/**` is retired and forbidden. Runtime data directories may not own executable artifacts, and executable install identity may not enter request/response payload, MetadataCenter, provider wire, or Error payload.
 - Version identity is compiled into the Rust binary and validated through `--version` plus `/health`; no adjacent `package.json` runtime dependency is allowed.
+- **Updating a running Mach-O binary is never done with `cp` overwrite** (2026-08-09 incident): overwriting `~/.local/bin/rccv3` via `cp` invalidates the macOS code signature (`SIGKILL Code Signature Invalid` on next launch). Install the new `target/release/rccv3` after the target process is stopped, then `codesign -s - -f ~/.local/bin/rccv3` and verify `rccv3 config check` before starting the daemon. Restart/kill protocol is fixed (see `rcc-dev-skills`): never improvise a new stop/restart path.
 
 ## Red flags
 - Request and response are merged into one confusing main graph.
