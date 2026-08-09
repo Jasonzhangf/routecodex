@@ -7807,13 +7807,10 @@ fn build_v3_codex_model_metadata(
         ("context_window".to_string(), json!(context_window)),
         ("max_context_window".to_string(), json!(context_window)),
     ]);
-    // Codex treats `tool_mode` and `use_responses_lite` as request/tool-surface selectors.
-    // `gpt-5.5` must not advertise them: current Codex then keeps first-class tools such as
-    // tool_search instead of forcing nested code-mode `exec`/`wait` entrypoints.
-    if is_gpt_56 {
-        item.insert("tool_mode".to_string(), json!("code_mode_only"));
-        item.insert("use_responses_lite".to_string(), json!(true));
-    }
+    // gpt-5.6 系列不对外暴露（is_v3_hidden_codex_future_model 在 models catalog 层隐藏），
+    // 且 RouteCodex 不支持 responses_lite 请求面（input/instructions 拆分、禁 parallel
+    // tool calls、responses_lite header 均未实现）——绝不向 Codex 广告 use_responses_lite
+    // 或 tool_mode=code_mode_only，避免客户端切换到未实现的嵌套 exec/wait 入口。
     item
 }
 

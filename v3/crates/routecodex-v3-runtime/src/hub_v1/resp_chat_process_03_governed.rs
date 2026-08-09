@@ -15,11 +15,44 @@ pub struct V3HubRespChatProcess03Governed {
 pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
     input: V3HubRespInbound02Normalized,
 ) -> V3HubRespChatProcess03Governed {
+    // 兜底：响应侧加密字段（encrypted_content——Codex 客户端本地密文，routecodex 无法
+    // 解密、跨 provider 会触发 reasoning_content 回传校验失败）必须在 resp_outbound
+    // 投影前剥离。此处是响应链唯一 Rust-only 治理入口，剥离后 resp_outbound / SSE /
+    // 客户端只看到明文 summary/content，绝无密文泄漏。
+    let input = strip_v3_resp03_encrypted_reasoning_content(input);
     V3HubRespChatProcess03Governed {
         previous: input,
         terminality: V3HubResponseTerminality::Terminal,
         tool_calls: Vec::new(),
         servertool_action: V3HubServertoolResponseAction::None,
+    }
+}
+
+/// 递归剥离 responses canonical 响应中的 `encrypted_content` 字段（兜底层）。
+/// provider 响应里 reasoning 条目只允许携带明文（summary/content/text），
+/// 任何位置的密文字段都在进入下游投影前删除。
+fn strip_v3_resp03_encrypted_reasoning_content(
+    mut input: V3HubRespInbound02Normalized,
+) -> V3HubRespInbound02Normalized {
+    let payload = std::sync::Arc::make_mut(&mut input.previous.previous.payload.0);
+    strip_v3_resp03_encrypted_fields_recursive(payload);
+    input
+}
+
+fn strip_v3_resp03_encrypted_fields_recursive(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.remove("encrypted_content");
+            for child in map.values_mut() {
+                strip_v3_resp03_encrypted_fields_recursive(child);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                strip_v3_resp03_encrypted_fields_recursive(item);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1213,5 +1246,67 @@ mod tests {
         assert!(harvest.changed);
         assert_eq!(harvest.visible_text, "  before\n after  ");
         assert_eq!(harvest.reasoning_segments, vec!["private".to_string()]);
+    }
+
+    #[test]
+    fn resp03_strips_encrypted_content_from_reasoning_entries_but_keeps_plaintext() {
+        let mut payload = json!({
+            "id": "resp_enc",
+            "status": "completed",
+            "output": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "encrypted_content": "rsn_CIPHERTEXT",
+                    "summary": [{"type": "summary_text", "text": "plain summary"}]
+                },
+                {"type": "output_text", "text": "answer"}
+            ]
+        });
+
+        strip_v3_resp03_encrypted_fields_recursive(&mut payload);
+
+        assert!(!payload.to_string().contains("encrypted_content"));
+        assert!(!payload.to_string().contains("rsn_CIPHERTEXT"));
+        assert_eq!(payload["output"][0]["type"], "reasoning");
+        assert_eq!(
+            payload["output"][0]["summary"][0]["text"],
+            "plain summary",
+            "明文 summary 必须保留"
+        );
+        assert_eq!(payload["output"][1]["text"], "answer");
+    }
+
+    #[test]
+    fn resp03_strips_encrypted_content_recursively_anywhere_in_response() {
+        let mut payload = json!({
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "content": [{
+                    "type": "reasoning",
+                    "encrypted_content": "rsn_NESTED",
+                    "content": [{"type": "reasoning_text", "text": "nested plain"}]
+                }]
+            }]
+        });
+
+        strip_v3_resp03_encrypted_fields_recursive(&mut payload);
+
+        assert!(!payload.to_string().contains("encrypted_content"));
+        assert!(payload.to_string().contains("nested plain"));
+    }
+
+    #[test]
+    fn resp03_noop_when_response_has_no_encrypted_content() {
+        let mut payload = json!({
+            "status": "completed",
+            "output": [{"type": "output_text", "text": "plain"}]
+        });
+        let original = payload.clone();
+
+        strip_v3_resp03_encrypted_fields_recursive(&mut payload);
+
+        assert_eq!(payload, original);
     }
 }
