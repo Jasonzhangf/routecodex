@@ -630,3 +630,69 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::StreamExt;
+
+    /// provider SSE 空流：guard 必须 fail-fast 返回 Transport 错误（进入错误链切 provider），
+    /// 而不是让客户端收到 200 后流立即结束的半截响应。
+    #[tokio::test]
+    async fn guard_rejects_empty_sse_stream() {
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
+            Box::pin(futures_util::stream::empty());
+        let result =
+            guard_relay_sse_first_frame("req-empty", "provider-1", stream).await;
+        assert!(
+            result.is_err(),
+            "empty SSE stream must fail the guard"
+        );
+    }
+
+    /// provider 首帧正常：guard 必须保真重放首帧后继续 provider 流（语义不变）。
+    #[tokio::test]
+    async fn guard_accepts_first_frame_and_replays_it() {
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
+            Box::pin(futures_util::stream::iter(vec![
+                Ok(b"data: ping\n\n".to_vec()),
+                Ok(b"data: pong\n\n".to_vec()),
+            ]));
+        let mut guarded = guard_relay_sse_first_frame("req-ok", "provider-1", stream)
+            .await
+            .expect("non-empty stream must pass the guard");
+        let first = guarded
+            .next()
+            .await
+            .expect("replayed first frame")
+            .expect("frame is ok");
+        assert_eq!(first, b"data: ping\n\n".to_vec());
+        let second = guarded
+            .next()
+            .await
+            .expect("provider stream continues")
+            .expect("frame is ok");
+        assert_eq!(second, b"data: pong\n\n".to_vec());
+        assert!(
+            guarded.next().await.is_none(),
+            "stream must end after provider frames"
+        );
+    }
+
+    /// provider 首帧错误：guard 必须原样上抛（错误链切 provider），不吞错。
+    #[tokio::test]
+    async fn guard_propagates_first_frame_provider_error() {
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
+            Box::pin(futures_util::stream::iter(vec![Err(V3ProviderError::Transport {
+                request_id: "req-err".to_string(),
+                provider_id: "provider-1".to_string(),
+                reason: "upstream reset".to_string(),
+            })]));
+        let result =
+            guard_relay_sse_first_frame("req-err", "provider-1", stream).await;
+        assert!(
+            result.is_err(),
+            "first frame error must propagate"
+        );
+    }
+}
