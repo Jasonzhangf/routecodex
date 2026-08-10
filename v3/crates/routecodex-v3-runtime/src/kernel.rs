@@ -10,7 +10,7 @@ use crate::hub_v1::{
     V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile, V3HubTransportIntent,
     V3ProviderRespInbound01RawContext, V3RuntimeObservability, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
-    V3RuntimeStreamObservation, V3StoplessCenterState,
+    V3RuntimeStreamObservation, V3ServerToolCenterWriteOrigin, V3StoplessCenterState,
 };
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
@@ -1347,8 +1347,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         if let (Some(control), Some(scope)) =
                             (stopless_control, stopless_scope.as_ref())
                         {
-                            if let Err(error) = control.web_search_store_for_scope(scope, captured)
-                            {
+                            if let Err(error) = control.web_search_store_for_scope(
+                                scope,
+                                captured,
+                                V3ServerToolCenterWriteOrigin {
+                                    module: "kernel",
+                                    symbol: "resp02_direct_web_search_control_updated",
+                                    stage: "resp02_runtime_control_updated",
+                                },
+                                Some("resp02 persist captured web_search state"),
+                                None,
+                            ) {
                                 return error_output(
                                     runtime_source(
                                         "V3DirectWebSearchResp02RuntimeControlUpdated",

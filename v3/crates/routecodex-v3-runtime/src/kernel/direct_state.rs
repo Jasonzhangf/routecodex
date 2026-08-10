@@ -110,11 +110,17 @@ impl V3ResponsesDirectStoplessControlState {
         &self,
         scope: &V3ResponsesDirectStoplessControlScope,
         state: V3StoplessCenterState,
+        written_by: V3ServerToolCenterWriteOrigin,
+        reason: Option<&str>,
+        request_id: Option<&str>,
     ) -> Result<(), String> {
         self.center
             .store(
                 Self::center_key(scope),
                 V3ServerToolInstanceState::Stopless(state),
+                written_by,
+                reason,
+                request_id,
             )
             .map_err(|error| error.to_string())
     }
@@ -122,9 +128,12 @@ impl V3ResponsesDirectStoplessControlState {
     pub fn clear_for_scope(
         &self,
         scope: &V3ResponsesDirectStoplessControlScope,
+        written_by: V3ServerToolCenterWriteOrigin,
+        reason: Option<&str>,
+        request_id: Option<&str>,
     ) -> Result<(), String> {
         self.center
-            .clear(&Self::center_key(scope))
+            .clear(&Self::center_key(scope), written_by, reason, request_id)
             .map_err(|error| error.to_string())
     }
 
@@ -163,11 +172,17 @@ impl V3ResponsesDirectStoplessControlState {
         &self,
         scope: &V3ResponsesDirectStoplessControlScope,
         state: V3WebSearchCenterState,
+        written_by: V3ServerToolCenterWriteOrigin,
+        reason: Option<&str>,
+        request_id: Option<&str>,
     ) -> Result<(), String> {
         self.center
             .store(
                 Self::web_search_center_key(scope),
                 V3ServerToolInstanceState::WebSearch(state),
+                written_by,
+                reason,
+                request_id,
             )
             .map_err(|error| error.to_string())
     }
@@ -175,9 +190,17 @@ impl V3ResponsesDirectStoplessControlState {
     pub fn web_search_clear_for_scope(
         &self,
         scope: &V3ResponsesDirectStoplessControlScope,
+        written_by: V3ServerToolCenterWriteOrigin,
+        reason: Option<&str>,
+        request_id: Option<&str>,
     ) -> Result<(), String> {
         self.center
-            .clear(&Self::web_search_center_key(scope))
+            .clear(
+                &Self::web_search_center_key(scope),
+                written_by,
+                reason,
+                request_id,
+            )
             .map_err(|error| error.to_string())
     }
 

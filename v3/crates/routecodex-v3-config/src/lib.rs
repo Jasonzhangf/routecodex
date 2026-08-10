@@ -5,6 +5,7 @@ mod store;
 mod types;
 mod v2_compat;
 mod validate;
+mod validate_relations;
 
 pub use store::{default_v3_config_path, V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan};
 pub use types::*;

@@ -47,6 +47,7 @@ const STEPS = [
   ['verify:v3-selected-provider-model-binding', 'V3 selected provider/model binding'],
   ['verify:v3-protocol-conversion-field-parity', 'V3 protocol conversion field parity'],
   ['verify:v3-stopless-resource-control', 'V3 stopless resource control'],
+  ['verify:v3-server-tool-center-audit', 'V3 servertool center writes carry written_by/reason/request_id audit'],
   ['verify:v3-stopless-state-machine-docs', 'V3 stopless state machine docs'],
   ['verify:v3-normalization-payload-logic-boundary', 'V3 normalization payload/logic boundary'],
   ['verify:v3-hub-relay-runtime-closeout', 'V3 hub relay runtime closeout'],

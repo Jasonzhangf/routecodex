@@ -155,6 +155,7 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
             compatibility_profile: None,
             features: BTreeMap::new(),
+            request_timeout_ms: 300_000,
         },
     );
     manifest
@@ -1003,6 +1004,7 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
             compatibility_profile: None,
             features: BTreeMap::new(),
+            request_timeout_ms: 300_000,
         },
     );
     let mut classified = router

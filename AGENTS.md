@@ -1,5 +1,15 @@
 # RouteCodex Project AGENTS（入口与路由索引）
 
+## 核心架构概要（Project Essence — 先记忆，再路由）
+
+本项目本质是一个**多协议、多入口的代理网关（Proxy）**，核心原则：**保持原意，只做必要修改**。
+
+- **不重写历史**：对话历史不可显式扭曲/篡改——历史轮的任何修改在下一轮仍会原样重现，修改既无意义也有害；既有历史污染不可逆，不做清理。
+- **不在请求侧清洗**：几乎不清理请求内容；只做当前轮必要的归一化，请求侧 cleanup 是禁止项。
+- **在响应进入客户端前治理**：所有治理发生在响应进入客户端之前，让当前轮以正确形态进入历史；不在历史轮补修改。
+- **先归一化，再治理**：多协议（OpenAI Chat / Responses / Anthropic / Gemini / …）请求与响应先归一化为 Hub 规范形态；归一化前、后都不做任何语义处理，只在归一化后的 **Chat Process** 内做工具治理、响应治理、continuation、stopless/servertool。
+- **控制面与数据面物理隔离**：routing / switching / continuation / retry / health / error / scope / stopless 等控制语义只走 typed side-channel / 控制资源 / Error 链，绝不进入业务 payload；控制状态按 session/request 隔离，泄漏在 owning boundary fail-fast。
+
 ## P0 Architecture Guard（先于路由、搜索和实现）
 - P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script 做跨文件/同一文件多位置语义批量替换；每个目标文件必须逐文件读取核实上下文，再用可审查的 apply_patch hunk 手工修改；formatter/canonical generator 仅可生成其声明的机械生成产物，不得语义改写。
 - P0 控制面与业务 payload 物理隔离：routing、switching、continuation、retry、provider selection、health、debug、snapshot、error、scope、Stopless/servertool 状态只能走 typed side-channel、MetadataCenter 控制资源或 Error 链；绝不能进入 payload；发现泄漏必须 fail-fast at owning boundary。

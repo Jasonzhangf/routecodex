@@ -12,8 +12,8 @@ use routecodex_v3_runtime::{
     execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control,
     register_responses_direct_hooks, V3ClientBody, V3ResponsesDirectContinuationScope,
     V3ResponsesDirectContinuationState, V3ResponsesDirectStoplessControlScope,
-    V3ResponsesDirectStoplessControlState, V3RuntimeUsageSummary, V3StoplessCenterState,
-    V3StoplessCenterSteering,
+    V3ResponsesDirectStoplessControlState, V3RuntimeUsageSummary, V3ServerToolCenterWriteOrigin,
+    V3StoplessCenterState, V3StoplessCenterSteering,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -442,6 +442,13 @@ async fn direct_stopless_real_user_turn_after_stale_noop_resets_guard_count() {
             &stopless_scope,
             V3StoplessCenterState::new(4, 5, V3StoplessCenterSteering::Continue)
                 .provider_turn_in_flight(Some("req-old-stopless"), Some(999)),
+            V3ServerToolCenterWriteOrigin {
+                module: "responses_direct_remote_continuation_integration",
+                symbol: "direct_continuation_stopless_control_seed",
+                stage: "test",
+            },
+            Some("test seed stopless control state"),
+            None,
         )
         .unwrap();
 

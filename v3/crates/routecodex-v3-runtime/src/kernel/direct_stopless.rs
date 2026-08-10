@@ -339,7 +339,17 @@ fn store_v3_responses_direct_stopless_control_state(
         return Ok(());
     }
     stopless_control
-        .store_for_scope(stopless_scope, state)
+        .store_for_scope(
+            stopless_scope,
+            state,
+            V3ServerToolCenterWriteOrigin {
+                module: "direct_stopless",
+                symbol: "store_v3_responses_direct_stopless_control_state",
+                stage: "resp02_runtime_control_updated",
+            },
+            Some("resp02 save direct stopless state"),
+            None,
+        )
         .map_err(|error| runtime_source("V3DirectStoplessResp02RuntimeControlUpdated", error))
 }
 
@@ -359,7 +369,16 @@ fn clear_v3_responses_direct_stopless_control_state(
         return Ok(());
     }
     stopless_control
-        .clear_for_scope(stopless_scope)
+        .clear_for_scope(
+            stopless_scope,
+            V3ServerToolCenterWriteOrigin {
+                module: "direct_stopless",
+                symbol: "clear_v3_responses_direct_stopless_control_state",
+                stage: "resp02_runtime_control_updated",
+            },
+            Some("resp02 clear direct stopless state after terminal completion"),
+            None,
+        )
         .map_err(|error| runtime_source("V3DirectStoplessResp02RuntimeControlUpdated", error))
 }
 
@@ -462,7 +481,17 @@ pub(crate) fn prepare_v3_responses_direct_web_search_control_request(
         })?;
     if let Some(state) = state {
         stopless_control
-            .web_search_store_for_scope(stopless_scope, state)
+            .web_search_store_for_scope(
+                stopless_scope,
+                state,
+                V3ServerToolCenterWriteOrigin {
+                    module: "direct_stopless",
+                    symbol: "prepare_v3_responses_direct_web_search_control_request",
+                    stage: "req04_web_search_surface_active",
+                },
+                Some("req04 web_search surface activated, store paired state"),
+                None,
+            )
             .map_err(|error| {
                 runtime_source("V3DirectWebSearchReq01LocalToolSurfaceActive", error)
             })?;
@@ -521,7 +550,17 @@ pub(crate) fn apply_v3_responses_direct_web_search_control_completion(
         })
         .map_err(|reason| runtime_source("V3DirectWebSearchReq02PairVerified", reason))?;
     stopless_control
-        .web_search_store_for_scope(stopless_scope, completed)
+        .web_search_store_for_scope(
+            stopless_scope,
+            completed,
+            V3ServerToolCenterWriteOrigin {
+                module: "direct_stopless",
+                symbol: "apply_v3_responses_direct_web_search_control_completion",
+                stage: "req02_pair_verified",
+            },
+            Some("req02 pair verified, persist completed web_search state"),
+            None,
+        )
         .map_err(|error| runtime_source("V3DirectWebSearchReq02PairVerified", error))?;
     trace.push("V3DirectWebSearchReq02PairVerified");
     Ok(())

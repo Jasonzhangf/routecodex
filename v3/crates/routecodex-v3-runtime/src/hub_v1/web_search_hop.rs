@@ -22,6 +22,7 @@ use super::{
     build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
     build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
     build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04,
+    V3ServerToolCenterWriteOrigin,
     build_v3_hub_req_inbound_01_client_raw,
     build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
     build_v3_hub_req_outbound_07_from_v3_hub_req_target_06,
@@ -82,11 +83,17 @@ impl V3ResponsesRelayStoplessControlState {
         &self,
         scope: &V3ResponsesRelayStoplessControlScope,
         state: V3WebSearchCenterState,
+        written_by: V3ServerToolCenterWriteOrigin,
+        reason: Option<&str>,
+        request_id: Option<&str>,
     ) -> Result<(), V3ResponsesRelayRuntimeError> {
         self.center
             .store(
                 Self::web_search_center_key(scope),
                 V3ServerToolInstanceState::WebSearch(state),
+                written_by,
+                reason,
+                request_id,
             )
             .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)
     }
@@ -94,9 +101,17 @@ impl V3ResponsesRelayStoplessControlState {
     pub fn web_search_clear_for_scope(
         &self,
         scope: &V3ResponsesRelayStoplessControlScope,
+        written_by: V3ServerToolCenterWriteOrigin,
+        reason: Option<&str>,
+        request_id: Option<&str>,
     ) -> Result<(), V3ResponsesRelayRuntimeError> {
         self.center
-            .clear(&Self::web_search_center_key(scope))
+            .clear(
+                &Self::web_search_center_key(scope),
+                written_by,
+                reason,
+                request_id,
+            )
             .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)
     }
 }
@@ -571,7 +586,17 @@ pub(crate) fn apply_v3_responses_relay_web_search_control_completion(
         .map_err(|reason| V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(reason))?;
     execution
         .control
-        .web_search_store_for_scope(&execution.scope, completed)
+        .web_search_store_for_scope(
+            &execution.scope,
+            completed,
+            V3ServerToolCenterWriteOrigin {
+                module: "web_search_hop",
+                symbol: "apply_v3_web_search_control_completion_for_hop",
+                stage: "req04_pair_verified",
+            },
+            Some("req04 pair verified, persist completed web_search state"),
+            None,
+        )
 }
 
 #[cfg(test)]

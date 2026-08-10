@@ -1,9 +1,19 @@
 ---
 name: rcc-v3-architecture
-description: Use before any RouteCodex V3 architecture/debug/development work; agents must read maps before coding, keep control state out of payload, preserve Direct same-protocol and Relay per-stage shapes, and verify owner/gates before review. Stopless current-turn Req04 injection and Resp03 stripping are registered protocol projections, not control-state leakage; history and continuation immutable interval remain untouchable.
+description: RouteCodex 是保持原意、不重写历史的 Proxy：多协议多入口先归一化再治理，治理只在 Rust Chat Process；控制面与数据面物理隔离、按 session 隔离。Use before any V3 architecture/debug/development work; read maps before coding, keep control state out of payload, preserve Direct same-protocol and Relay per-stage shapes, verify owner/gates before review. Stopless Req04/Resp03 are registered protocol projections, not control-state leakage; history and continuation immutable interval remain untouchable.
 ---
 
 # RCC V3 Architecture
+
+## 核心架构概要（Project Essence — 先记忆，再路由）
+
+本项目本质是一个**多协议、多入口的代理网关（Proxy）**，核心原则：**保持原意，只做必要修改**。
+
+- **不重写历史**：对话历史不可显式扭曲/篡改——历史轮的任何修改在下一轮仍会原样重现，修改既无意义也有害；既有历史污染不可逆，不做清理。
+- **不在请求侧清洗**：几乎不清理请求内容；只做当前轮必要的归一化，请求侧 cleanup 是禁止项。
+- **在响应进入客户端前治理**：所有治理发生在响应进入客户端之前，让当前轮以正确形态进入历史；不在历史轮补修改。
+- **先归一化，再治理**：多协议（OpenAI Chat / Responses / Anthropic / Gemini / …）请求与响应先归一化为 Hub 规范形态；归一化前、后都不做任何语义处理，只在归一化后的 **Chat Process** 内做工具治理、响应治理、continuation、stopless/servertool。
+- **控制面与数据面物理隔离**：routing / switching / continuation / retry / health / error / scope / stopless 等控制语义只走 typed side-channel / 控制资源 / Error 链，绝不进入业务 payload；控制状态按 session/request 隔离，泄漏在 owning boundary fail-fast。
 
 ## Summary Hard Rules
 

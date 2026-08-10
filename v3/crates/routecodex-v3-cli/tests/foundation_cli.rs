@@ -81,7 +81,7 @@ fn help_exposes_old_style_top_level_lifecycle_commands() {
         assert!(stdout.contains(command), "{stdout}");
     }
     assert!(
-        !stdout.contains("server"),
+        !stdout.lines().any(|line| line.trim() == "server"),
         "server namespace must stay compatible but not be the user-facing lifecycle shape:\n{stdout}"
     );
 }

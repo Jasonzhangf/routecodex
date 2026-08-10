@@ -32,8 +32,9 @@ const cases = [
   {
     name: 'provider wire historical placeholder revived',
     file: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
-    marker: 'use serde_json::Value;\n',
-    mutation: 'fn replace_historical_responses_tool_output_data_images() {}\nuse serde_json::Value;\n',
+    marker: 'use serde_json::{Map, Value};\n',
+    mutation:
+      'fn replace_historical_responses_tool_output_data_images() {}\nuse serde_json::{Map, Value};\n',
     diagnostic: /provider wire historical payload rewrite or placeholder owner/,
   },
   {

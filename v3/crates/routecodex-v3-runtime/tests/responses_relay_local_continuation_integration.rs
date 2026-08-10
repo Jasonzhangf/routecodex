@@ -398,22 +398,27 @@ fn assert_provider_chat_stopless_guidance(body: &Value) {
         .expect("exec tool");
     assert_eq!(
         exec_tool.get("type").and_then(Value::as_str),
-        Some("custom"),
-        "Responses custom exec must remain a native OpenAI Chat custom tool: {exec_tool}"
+        Some("function"),
+        "Responses custom exec must degrade to a native OpenAI Chat function tool: {exec_tool}"
     );
+    let exec_function = exec_tool
+        .get("function")
+        .and_then(Value::as_object)
+        .expect("OpenAI Chat exec function wrapper");
     assert_eq!(
-        exec_tool.pointer("/custom/format/type"),
-        Some(&json!("grammar")),
-        "Responses custom exec grammar format must remain target-native: {exec_tool}"
+        exec_function.get("name"),
+        Some(&json!("exec")),
+        "degraded exec tool name: {exec_tool}"
     );
-    let exec_description = exec_tool
-        .pointer("/custom/description")
+    let exec_description = exec_function
+        .get("description")
         .and_then(Value::as_str)
         .expect("OpenAI Chat exec description");
     assert!(exec_description.contains("Execute freeform script"));
     assert_eq!(
-        exec_tool.pointer("/custom/format/grammar/syntax"),
-        Some(&json!("lark"))
+        exec_function.get("parameters"),
+        Some(&json!({"type": "object"})),
+        "custom exec grammar degrades to plain object parameters on OpenAI Chat wire: {exec_tool}"
     );
     let serialized = serde_json::to_string(body).unwrap();
     for forbidden in [
@@ -477,57 +482,40 @@ fn assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
                 "OpenAI Chat function tool[{index}] strict flag changed: actual={actual} expected={expected}"
             );
         } else {
-            assert_eq!(actual.get("type").and_then(Value::as_str), Some("custom"));
-            let custom = actual
-                .get("custom")
+            // Responses custom 工具在 openai_chat provider wire 降级为嵌套 function
+            // 形态（Console Go 兼容）：name/description 保留，custom format/grammar
+            // 不被 openai_chat wire 支持，降级为 plain object parameters。
+            assert_eq!(
+                actual.get("type").and_then(Value::as_str),
+                Some("function"),
+                "Responses custom tool must degrade to an OpenAI Chat function wrapper: actual={actual} expected={expected}"
+            );
+            let function = actual
+                .get("function")
                 .and_then(Value::as_object)
-                .expect("OpenAI Chat custom tool wrapper");
-            let description = custom
+                .expect("OpenAI Chat function tool wrapper for degraded custom tool");
+            assert_eq!(
+                function.get("name"),
+                expected.get("name"),
+                "degraded custom tool name changed: actual={actual} expected={expected}"
+            );
+            let description = function
                 .get("description")
                 .and_then(Value::as_str)
-                .expect("custom tool description");
+                .expect("degraded custom tool description");
             let expected_description = expected
                 .get("description")
                 .and_then(Value::as_str)
                 .expect("custom tool description");
             assert!(
                 description.contains(expected_description),
-                "OpenAI Chat custom tool[{index}] must preserve original description: actual={actual} expected={expected}"
+                "OpenAI Chat degraded custom tool[{index}] must preserve original description: actual={actual} expected={expected}"
             );
-            let expected_format = expected
-                .get("format")
-                .and_then(Value::as_object)
-                .expect("Responses custom format");
             assert_eq!(
-                custom
-                    .get("format")
-                    .and_then(Value::as_object)
-                    .and_then(|format| format.get("type")),
-                expected_format.get("type"),
-                "custom format type changed: actual={actual} expected={expected}"
+                function.get("parameters"),
+                Some(&json!({"type": "object"})),
+                "custom grammar format degrades to plain object parameters on OpenAI Chat wire: actual={actual}"
             );
-            if expected_format.get("type").and_then(Value::as_str) == Some("grammar") {
-                assert_eq!(
-                    custom
-                        .get("format")
-                        .and_then(Value::as_object)
-                        .and_then(|format| format.get("grammar"))
-                        .and_then(Value::as_object)
-                        .and_then(|grammar| grammar.get("syntax")),
-                    expected_format.get("syntax"),
-                    "custom grammar syntax changed: actual={actual} expected={expected}"
-                );
-                assert_eq!(
-                    custom
-                        .get("format")
-                        .and_then(Value::as_object)
-                        .and_then(|format| format.get("grammar"))
-                        .and_then(Value::as_object)
-                        .and_then(|grammar| grammar.get("definition")),
-                    expected_format.get("definition"),
-                    "custom grammar definition changed: actual={actual} expected={expected}"
-                );
-            }
         }
     }
 }
@@ -3347,10 +3335,13 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
         original_tools.as_array().unwrap().len(),
         "{tools:?}"
     );
-    assert_eq!(tools[0]["type"], "custom");
-    assert_eq!(tools[0]["custom"]["name"], "exec");
-    assert_eq!(tools[0]["custom"]["format"]["type"], "grammar");
-    assert!(tools[0].get("function").is_none(), "{tools:?}");
+    assert_eq!(tools[0]["type"], "function");
+    assert_eq!(tools[0]["function"]["name"], "exec");
+    assert!(
+        tools[0]["function"]["parameters"].is_object(),
+        "{tools:?}"
+    );
+    assert!(tools[0].get("custom").is_none(), "{tools:?}");
     match result.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "requires_action", "{body}");

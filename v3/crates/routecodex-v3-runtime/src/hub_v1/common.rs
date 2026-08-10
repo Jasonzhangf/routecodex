@@ -1,7 +1,8 @@
 use routecodex_v3_config::V3Config05ManifestPublished;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) fn v3_stopless_center_enabled_for_server(
     manifest: &V3Config05ManifestPublished,
@@ -915,15 +916,48 @@ pub struct V3ServerToolCenterKey {
 #[error("v3 servertool center state poisoned")]
 pub struct V3ServerToolCenterPoisoned;
 
+/// 控制面写入审计记录：谁写的（module/symbol/stage）、为什么写（reason）、何时写、关联哪个请求。
+/// 只作为控制面内部审计轨迹存在，绝不进入业务 payload。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ServerToolCenterWriteAuditEntry {
+    pub action: V3ServerToolCenterWriteAction,
+    pub key: V3ServerToolCenterKey,
+    pub written_by: V3ServerToolCenterWriteOrigin,
+    pub reason: Option<String>,
+    pub request_id: Option<String>,
+    pub at_unix_ms: u64,
+}
+
+/// 写入者身份：模块 + 符号 + 流水线阶段，随每次写操作显式声明。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct V3ServerToolCenterWriteOrigin {
+    pub module: &'static str,
+    pub symbol: &'static str,
+    pub stage: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3ServerToolCenterWriteAction {
+    Register,
+    Store,
+    Transition,
+    Clear,
+}
+
+/// 审计环形容量；超出后丢弃最旧记录。
+const V3_SERVER_TOOL_CENTER_AUDIT_CAPACITY: usize = 256;
+
 #[derive(Debug, Default)]
 pub struct V3ServerToolCenter {
     store: Arc<Mutex<BTreeMap<V3ServerToolCenterKey, V3ServerToolInstanceState>>>,
+    audit: Arc<Mutex<VecDeque<V3ServerToolCenterWriteAuditEntry>>>,
 }
 
 impl Clone for V3ServerToolCenter {
     fn clone(&self) -> Self {
         Self {
             store: Arc::clone(&self.store),
+            audit: Arc::clone(&self.audit),
         }
     }
 }
@@ -942,6 +976,9 @@ impl V3ServerToolCenter {
         &self,
         key: V3ServerToolCenterKey,
         instance: V3ServerToolInstanceState,
+        written_by: V3ServerToolCenterWriteOrigin,
+        reason: Option<&str>,
+        request_id: Option<&str>,
     ) -> Result<(), String> {
         if instance.tool_name() != key.tool_name {
             return Err(format!(
@@ -957,7 +994,14 @@ impl V3ServerToolCenter {
                 key.tool_name, key.scope_key
             ));
         }
-        store.insert(key, instance);
+        store.insert(key.clone(), instance);
+        self.record_write(
+            V3ServerToolCenterWriteAction::Register,
+            key,
+            written_by,
+            reason,
+            request_id,
+        );
         Ok(())
     }
 
@@ -975,6 +1019,9 @@ impl V3ServerToolCenter {
         &self,
         key: V3ServerToolCenterKey,
         instance: V3ServerToolInstanceState,
+        written_by: V3ServerToolCenterWriteOrigin,
+        reason: Option<&str>,
+        request_id: Option<&str>,
     ) -> Result<(), String> {
         if instance.tool_name() != key.tool_name {
             return Err(format!(
@@ -985,14 +1032,34 @@ impl V3ServerToolCenter {
         }
         self.lock_store()
             .map_err(|error| error.to_string())?
-            .insert(key, instance);
+            .insert(key.clone(), instance);
+        self.record_write(
+            V3ServerToolCenterWriteAction::Store,
+            key,
+            written_by,
+            reason,
+            request_id,
+        );
         Ok(())
     }
 
-    pub fn clear(&self, key: &V3ServerToolCenterKey) -> Result<(), String> {
+    pub fn clear(
+        &self,
+        key: &V3ServerToolCenterKey,
+        written_by: V3ServerToolCenterWriteOrigin,
+        reason: Option<&str>,
+        request_id: Option<&str>,
+    ) -> Result<(), String> {
         self.lock_store()
             .map_err(|error| error.to_string())?
             .remove(key);
+        self.record_write(
+            V3ServerToolCenterWriteAction::Clear,
+            key.clone(),
+            written_by,
+            reason,
+            request_id,
+        );
         Ok(())
     }
 
@@ -1000,6 +1067,9 @@ impl V3ServerToolCenter {
     pub fn transition<F>(
         &self,
         key: &V3ServerToolCenterKey,
+        written_by: V3ServerToolCenterWriteOrigin,
+        reason: Option<&str>,
+        request_id: Option<&str>,
         transition: F,
     ) -> Result<V3ServerToolInstanceState, String>
     where
@@ -1021,7 +1091,52 @@ impl V3ServerToolCenter {
             ));
         }
         store.insert(key.clone(), next.clone());
+        self.record_write(
+            V3ServerToolCenterWriteAction::Transition,
+            key.clone(),
+            written_by,
+            reason,
+            request_id,
+        );
         Ok(next)
+    }
+
+    /// 追加一条写入审计记录（环形，超出容量丢弃最旧）。
+    fn record_write(
+        &self,
+        action: V3ServerToolCenterWriteAction,
+        key: V3ServerToolCenterKey,
+        written_by: V3ServerToolCenterWriteOrigin,
+        reason: Option<&str>,
+        request_id: Option<&str>,
+    ) {
+        if let Ok(mut audit) = self.audit.lock() {
+            audit.push_back(V3ServerToolCenterWriteAuditEntry {
+                action,
+                key,
+                written_by,
+                reason: reason.map(str::to_string),
+                request_id: request_id.map(str::to_string),
+                at_unix_ms: now_unix_ms(),
+            });
+            while audit.len() > V3_SERVER_TOOL_CENTER_AUDIT_CAPACITY {
+                audit.pop_front();
+            }
+        }
+    }
+
+    /// 读取控制面写入审计轨迹（最新在前）；用于快速排查“谁写的、为什么写”。
+    pub fn audit_trail(
+        &self,
+    ) -> Result<Vec<V3ServerToolCenterWriteAuditEntry>, V3ServerToolCenterPoisoned> {
+        Ok(self
+            .audit
+            .lock()
+            .map_err(|_| V3ServerToolCenterPoisoned)?
+            .iter()
+            .rev()
+            .cloned()
+            .collect())
     }
 
     fn lock_store(
@@ -1032,6 +1147,13 @@ impl V3ServerToolCenter {
     > {
         self.store.lock().map_err(|_| V3ServerToolCenterPoisoned)
     }
+}
+
+fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -1048,6 +1170,14 @@ mod server_tool_center_tests {
 
     fn stopless_instance() -> V3StoplessCenterState {
         V3StoplessCenterState::new(1, 3, V3StoplessCenterSteering::Continue)
+    }
+
+    fn test_origin() -> V3ServerToolCenterWriteOrigin {
+        V3ServerToolCenterWriteOrigin {
+            module: "common_tests",
+            symbol: "server_tool_center_tests",
+            stage: "test",
+        }
     }
 
     fn key(tool: V3ServerToolName, session: &str) -> V3ServerToolCenterKey {
@@ -1121,12 +1251,18 @@ mod server_tool_center_tests {
             .register(
                 web_key.clone(),
                 V3ServerToolInstanceState::WebSearch(web_search_instance()),
+                test_origin(),
+                Some("test"),
+                None,
             )
             .expect("register web_search");
         center
             .register(
                 stopless_key.clone(),
                 V3ServerToolInstanceState::Stopless(stopless_instance()),
+                test_origin(),
+                Some("test"),
+                None,
             )
             .expect("register stopless");
         assert_eq!(center.len().expect("len"), 2);
@@ -1134,6 +1270,9 @@ mod server_tool_center_tests {
         let duplicate = center.register(
             web_key.clone(),
             V3ServerToolInstanceState::WebSearch(web_search_instance()),
+            test_origin(),
+            Some("test"),
+            None,
         );
         assert!(duplicate.is_err());
         // 各自工具实例互不可见
@@ -1158,6 +1297,9 @@ mod server_tool_center_tests {
         let cross_register = center.register(
             web_key.clone(),
             V3ServerToolInstanceState::Stopless(stopless_instance()),
+            test_origin(),
+            Some("test"),
+            None,
         );
         assert!(cross_register.is_err());
         assert!(cross_register
@@ -1167,6 +1309,9 @@ mod server_tool_center_tests {
         let cross_store = center.store(
             stopless_key.clone(),
             V3ServerToolInstanceState::WebSearch(web_search_instance()),
+            test_origin(),
+            Some("test"),
+            None,
         );
         assert!(cross_store.is_err());
         assert!(cross_store
@@ -1177,11 +1322,18 @@ mod server_tool_center_tests {
             .register(
                 web_key.clone(),
                 V3ServerToolInstanceState::WebSearch(web_search_instance()),
+                test_origin(),
+                Some("test"),
+                None,
             )
             .expect("register web_search");
-        let cross_transition = center.transition(&web_key, |_| {
-            Ok(V3ServerToolInstanceState::Stopless(stopless_instance()))
-        });
+        let cross_transition = center.transition(
+            &web_key,
+            test_origin(),
+            Some("test"),
+            None,
+            |_| Ok(V3ServerToolInstanceState::Stopless(stopless_instance())),
+        );
         assert!(cross_transition.is_err());
         assert!(cross_transition
             .expect_err("cross-tool transition")
@@ -1197,17 +1349,28 @@ mod server_tool_center_tests {
             .register(
                 session_a.clone(),
                 V3ServerToolInstanceState::WebSearch(web_search_instance()),
+                test_origin(),
+                Some("test"),
+                None,
             )
             .expect("register session-a");
         center
             .register(
                 session_b.clone(),
                 V3ServerToolInstanceState::WebSearch(web_search_instance()),
+                test_origin(),
+                Some("test"),
+                None,
             )
             .expect("register session-b");
         // session-a 迁移不影响 session-b
         center
-            .transition(&session_a, |instance| match instance {
+            .transition(
+                &session_a,
+                test_origin(),
+                Some("test"),
+                None,
+                |instance| match instance {
                 V3ServerToolInstanceState::WebSearch(state) => {
                     Ok(V3ServerToolInstanceState::WebSearch(
                         state
@@ -1243,6 +1406,9 @@ mod server_tool_center_tests {
             .register(
                 stopless_key.clone(),
                 V3ServerToolInstanceState::Stopless(original.clone()),
+                test_origin(),
+                Some("test"),
+                None,
             )
             .expect("register stopless");
         let loaded = center.load(&stopless_key).expect("load").expect("present");
@@ -1252,5 +1418,81 @@ mod server_tool_center_tests {
         assert_eq!(state, original, "stopless behavior must be unchanged");
         assert!(state.need_continue());
         assert_eq!(state.phase(), V3StoplessCenterPhase::CliNoopProjected);
+    }
+
+    #[test]
+    fn center_records_write_audit_trail_with_origin_reason_and_request() {
+        let center = V3ServerToolCenter::default();
+        let web_key = key(V3ServerToolName::WebSearch, "session-audit");
+        center
+            .register(
+                web_key.clone(),
+                V3ServerToolInstanceState::WebSearch(web_search_instance()),
+                V3ServerToolCenterWriteOrigin {
+                    module: "common_tests",
+                    symbol: "center_records_write_audit_trail_with_origin_reason_and_request",
+                    stage: "req04",
+                },
+                Some("req04 web_search surface activated"),
+                Some("req-audit-1"),
+            )
+            .expect("register web_search");
+        center
+            .store(
+                web_key.clone(),
+                V3ServerToolInstanceState::WebSearch(
+                    web_search_instance()
+                        .transition_to(
+                            V3WebSearchCenterPhase::LocalToolSurfaceActive,
+                            "req04",
+                        )
+                        .expect("adjacent"),
+                ),
+                V3ServerToolCenterWriteOrigin {
+                    module: "common_tests",
+                    symbol: "center_records_write_audit_trail_with_origin_reason_and_request",
+                    stage: "resp03",
+                },
+                Some("resp03 captured result projected"),
+                Some("req-audit-2"),
+            )
+            .expect("store web_search");
+        center
+            .clear(
+                &web_key,
+                V3ServerToolCenterWriteOrigin {
+                    module: "common_tests",
+                    symbol: "center_records_write_audit_trail_with_origin_reason_and_request",
+                    stage: "req02",
+                },
+                Some("req02 pair verified, release state"),
+                None,
+            )
+            .expect("clear web_search");
+
+        let trail = center.audit_trail().expect("audit trail");
+        assert_eq!(trail.len(), 3, "register/store/clear must all be recorded: {trail:#?}");
+        // 最新在前：clear -> store -> register
+        assert_eq!(trail[0].action, V3ServerToolCenterWriteAction::Clear);
+        assert_eq!(trail[0].written_by.stage, "req02");
+        assert_eq!(trail[0].reason.as_deref(), Some("req02 pair verified, release state"));
+        assert_eq!(trail[0].request_id, None);
+        assert_eq!(trail[1].action, V3ServerToolCenterWriteAction::Store);
+        assert_eq!(trail[1].written_by.module, "common_tests");
+        assert_eq!(trail[1].request_id.as_deref(), Some("req-audit-2"));
+        assert_eq!(trail[2].action, V3ServerToolCenterWriteAction::Register);
+        assert_eq!(trail[2].written_by.stage, "req04");
+        assert_eq!(trail[2].request_id.as_deref(), Some("req-audit-1"));
+        assert!(
+            trail.iter().all(|record| record.at_unix_ms > 0),
+            "every record must carry a write timestamp"
+        );
+        // 键信息必须可追溯
+        assert!(
+            trail[0].key.scope_key.contains("session-audit"),
+            "record must carry full scope key: {}",
+            trail[0].key.scope_key
+        );
+        assert_eq!(trail[0].key.tool_name, V3ServerToolName::WebSearch);
     }
 }

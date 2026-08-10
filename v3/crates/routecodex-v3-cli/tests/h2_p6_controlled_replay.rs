@@ -141,7 +141,18 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     );
     assert_eq!(json_capture.accept.as_deref(), Some("application/json"));
     assert_eq!(json_capture.body["model"], "wire-success");
-    assert_eq!(json_capture.body["input"], json_request["input"]);
+    // “先归一化，再治理”：字符串 input 在 req_inbound 归一言化为 Chat-canonical
+    // message 数组，再按 direct 出口投影到 Responses wire（合法形态，语义等价）。
+    // 断言语义等价而非字节原样。
+    assert_eq!(
+        json_capture.body["input"],
+        json!([{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "json baseline"}]
+        }]),
+        "wire input must be the Chat-canonical projection of the client input"
+    );
     assert_eq!(json_capture.body["metadata"], json_request["metadata"]);
     assert_no_internal_wire_fields(&json_capture.body);
 

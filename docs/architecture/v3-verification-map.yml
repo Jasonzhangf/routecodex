@@ -1184,7 +1184,7 @@ features:
     request Debug, or client payload
   required_gates:
   - npm run test:v3-provider-responses
-  - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses adaptive_concurrency -- --test-threads=1
+  - npm run test:v3-provider-adaptive-concurrency
   - npm run test:v3-responses-direct-blackbox
   - npm run test:v3-provider-health-contract
   - npm run verify:v3-module-boundaries
