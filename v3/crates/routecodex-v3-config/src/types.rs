@@ -869,7 +869,6 @@ pub struct V3CapabilityModelCandidate {
 }
 
 impl V3Config05ManifestPublished {
-    /// 请求模型是否已配置（可路由）：命中任一 enabled provider 的 model/alias、
     /// Splits `requested` on its first `.` and resolves the leading segment
     /// against enabled providers, mapping model aliases to the canonical id.
     pub fn resolve_direct_provider_model(&self, requested: &str) -> V3DirectModelResolution {

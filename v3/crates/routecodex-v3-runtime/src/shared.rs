@@ -16,10 +16,6 @@ use routecodex_v3_virtual_router::V3VirtualRouterError;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-/// Direct SSE 首帧超时：provider 返回 200 但首个语义事件挂起时 fail-fast
-/// （默认 30s，明显短于 provider 请求总超时，避免客户端无限等待/EOF 且无日志）。
-const V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-
 pub(crate) fn v3_route_plan_error_source(
     stage: &'static str,
     code: &'static str,
@@ -245,50 +241,12 @@ async fn project_sse_stream(
 
 async fn guard_initial_direct_sse_provider_failure(
     provider_id: &str,
-    stream: V3ProviderSseStream,
-) -> Result<V3ProviderSseStream, V3Error01SourceRaised> {
-    guard_initial_direct_sse_provider_failure_with_timeout(
-        provider_id,
-        stream,
-        V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT,
-    )
-    .await
-}
-
-async fn guard_initial_direct_sse_provider_failure_with_timeout(
-    provider_id: &str,
     mut stream: V3ProviderSseStream,
-    first_event_timeout: std::time::Duration,
 ) -> Result<V3ProviderSseStream, V3Error01SourceRaised> {
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut buffered = Vec::<Vec<u8>>::new();
     loop {
-        // 首帧超时守卫：provider 返回 200 但 SSE 首帧挂起（连接保持、无数据）时，
-        // 必须 fail-fast 产生显式 provider 错误（而不是无限等待 -> 客户端超时/EOF
-        // 且无 console 打印）。超时错误进入 provider 失败链，可触发 reselect 与
-        // console 错误投影。
-        let next = tokio::time::timeout(first_event_timeout, stream.next())
-            .await
-            .map_err(|_| {
-                build_v3_error_01_source_raised_external(
-                    V3ErrorSourceKind::ProviderFailure,
-                    "V3ProviderResp14Raw",
-                    "provider_response_sse_first_event_timeout",
-                    "provider response SSE stream did not produce a first semantic event within timeout",
-                    V3ExternalErrorLink {
-                        kind: V3ExternalErrorKind::Provider,
-                        status: None,
-                        code: Some("PROVIDER_RESPONSE_SSE_FIRST_EVENT_TIMEOUT".to_string()),
-                        provider_id: Some(provider_id.to_string()),
-                        upstream_request_id: None,
-                        message: Some(
-                            "provider response SSE stream did not produce a first semantic event within timeout"
-                                .to_string(),
-                        ),
-                    },
-                )
-            })?;
-        let Some(next) = next else {
+        let Some(next) = stream.next().await else {
             decoder
                 .finish()
                 .map_err(|error| sse_transport_source(provider_id, error))?;
@@ -864,7 +822,6 @@ fn sse_transport_source(provider_id: &str, error: SseTransportError) -> V3Error0
 mod tests {
     use super::*;
     use routecodex_v3_provider_responses::V3ProviderResponseHeader;
-    use serde_json::json;
 
     #[tokio::test]
     async fn missing_content_type_is_explicit_error() {
@@ -1054,49 +1011,5 @@ mod tests {
         assert_eq!(usage.total_tokens, Some(400));
         // SSE 传输层不产生 timing 语义（timing 由调用方收口）。
         assert!(snapshot.timing.is_none());
-    }
-
-    #[tokio::test]
-    async fn guard_initial_direct_sse_provider_failure_times_out_on_hung_provider() {
-        // provider 返回 200 但 SSE 首帧挂起（连接保持、无数据）时必须 fail-fast，
-        // 否则客户端无限等待/EOF 且 console 无错误打印。
-        let hung: V3ProviderSseStream =
-            Box::pin(futures_util::stream::pending::<Result<Vec<u8>, V3ProviderError>>());
-        let result = guard_initial_direct_sse_provider_failure_with_timeout(
-            "hung-provider",
-            hung,
-            std::time::Duration::from_millis(50),
-        )
-        .await;
-        let Err(error) = result else {
-            panic!("hung provider SSE first frame must time out");
-        };
-        assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
-        assert_eq!(
-            error.code, "provider_response_sse_first_event_timeout",
-            "expected first-event timeout error: {error:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn guard_initial_direct_sse_provider_failure_accepts_prompt_first_frame() {
-        // 正常 provider：首帧在超时内到达则放行（语义事件 -> 启动客户端流）。
-        let prompt = json!({
-            "type": "response.created",
-            "response": {"id": "resp_prompt", "status": "in_progress"}
-        });
-        let wire = serde_json::to_vec(&prompt).unwrap();
-        let stream: V3ProviderSseStream =
-            Box::pin(futures_util::stream::once(async move { Ok(wire) }));
-        let mut guarded = guard_initial_direct_sse_provider_failure_with_timeout(
-            "prompt-provider",
-            stream,
-            std::time::Duration::from_secs(5),
-        )
-        .await
-        .expect("prompt provider first frame must pass");
-        use futures_util::StreamExt;
-        let first = guarded.next().await.expect("first chunk").expect("ok");
-        assert!(!first.is_empty());
     }
 }

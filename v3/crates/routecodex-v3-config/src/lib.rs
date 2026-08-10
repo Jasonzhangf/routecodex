@@ -13,7 +13,7 @@ pub use types::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-pub const V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS: u64 = 15_000;
+pub const V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS: u64 = 3_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum V3ConfigError {

@@ -935,20 +935,6 @@ resources:
     release_point: V3ServerRespOutbound06ClientFrame
     binding_status: anchored
 
-  - resource_id: v3.responses_direct.client_sse_stream
-    resource_kind: client_transport_projection
-    lifecycle: v3.responses_direct.controlled_runtime
-    owner_crate: routecodex-v3-server
-    owner_node: V3Server16HttpFrame
-    identity: [requestId, entryProtocol, frameSequence]
-    allowed_writers: [v3_direct_client_sse_body, v3_direct_sse_error_isolation_stream, wrap_v3_direct_sse_console_stream, v3_io_sse_body]
-    allowed_readers: [responses_direct_output_response_with_console]
-    forbidden_writers: [routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target]
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    release_point: V3ServerRespOutbound06ClientFrame
-    binding_status: design
-
 
   - resource_id: v3.protocol_conversion.field_parity_contract
     resource_kind: verification_manifest

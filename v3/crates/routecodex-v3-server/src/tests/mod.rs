@@ -368,7 +368,7 @@ fn codex_sample_persistence_and_startup_retention_reject_missing_home() {
 }
 
 #[tokio::test]
-async fn direct_sse_http_projection_preserves_provider_bytes_with_keepalive_comment() {
+async fn direct_sse_http_projection_preserves_provider_bytes_without_keepalive() {
     let provider_bytes =
         b"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n".to_vec();
     let frame = V3Server16HttpFrame {
@@ -393,10 +393,8 @@ async fn direct_sse_http_projection_preserves_provider_bytes_with_keepalive_comm
         responses_direct_output_response_with_console(frame, None, Duration::from_millis(3_000));
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
 
-    // Direct SSE 投影前置 transport keepalive 注释，随后保真传输 provider 字节。
-    let mut expected = b": keepalive\n\n".to_vec();
-    expected.extend_from_slice(&provider_bytes);
-    assert_eq!(body.as_ref(), expected.as_slice());
+    // Direct SSE 投影保真传输 provider 字节，不注入 transport keepalive。
+    assert_eq!(body.as_ref(), provider_bytes.as_slice());
 }
 
 #[tokio::test]
@@ -2377,7 +2375,7 @@ async fn relay_sse_console_closeout_projects_observed_failed_terminal_before_dro
 }
 
 #[tokio::test]
-async fn direct_sse_body_error_projects_502_error_event_frame() {
+async fn direct_sse_body_error_propagates_without_fabricated_error06() {
     let log_file = test_v3_console_log_file("direct-console-sse-error");
     let _ = std::fs::remove_file(&log_file);
     let state = test_v3_listener_state(&log_file, 4444);
@@ -2416,83 +2414,17 @@ async fn direct_sse_body_error_projects_502_error_event_frame() {
         finalizer,
         Duration::from_millis(3_000),
     );
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    let result = to_bytes(response.into_body(), usize::MAX).await;
     assert!(
-        text.contains("event: error") && text.contains("\"status\":502"),
-        "direct SSE provider failure must project a 502 error event frame, got: {text}"
+        result.is_err(),
+        "direct SSE body failure must propagate as body error, not fabricated event:error bytes"
     );
-    assert!(text.contains("provider_stream_error"), "{text}");
-    assert!(text.contains("provider stream broke"), "{text}");
 
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap_or_default());
     assert!(!log.contains("event=failed"), "{log}");
     assert!(!log.contains("V3Error06ClientProjected"), "{log}");
+    assert!(!log.contains("provider_stream_error"), "{log}");
     let _ = std::fs::remove_file(&log_file);
-}
-
-#[tokio::test]
-async fn direct_sse_provider_idle_timeout_projects_502_error_event_frame() {
-    let stream: V3ClientSseStream = Box::pin(stream::unfold((), |()| async {
-        futures_util::future::pending::<
-            Option<(Result<Vec<u8>, V3Error01SourceRaised>, ())>,
-        >()
-        .await
-    }));
-    let body = v3_client_sse_body(
-        stream,
-        None,
-        Some(Duration::from_millis(50)),
-    );
-    let mut client = body.into_data_stream();
-    let frame = tokio::time::timeout(Duration::from_secs(2), client.next())
-        .await
-        .expect("idle timeout must fire")
-        .unwrap()
-        .unwrap();
-    let text = std::str::from_utf8(&frame).unwrap();
-    assert!(
-        text.contains("event: error") && text.contains("\"status\":502"),
-        "idle provider SSE must project a 502 error event frame, got: {text}"
-    );
-    assert!(
-        text.contains("provider_response_sse_idle_timeout"),
-        "{text}"
-    );
-    assert!(
-        tokio::time::timeout(Duration::from_millis(50), client.next())
-            .await
-            .unwrap()
-            .is_none()
-    );
-}
-
-#[tokio::test]
-async fn direct_sse_keepalive_15s_heartbeat_emitted_for_idle_provider_stream() {
-    let stream: V3ClientSseStream = Box::pin(stream::unfold((), |()| async {
-        futures_util::future::pending::<
-            Option<(Result<Vec<u8>, V3Error01SourceRaised>, ())>,
-        >()
-        .await
-    }));
-    let body = v3_client_sse_body(
-        stream,
-        Some(Duration::from_millis(50)),
-        None,
-    );
-    let mut client = body.into_data_stream();
-    let first = tokio::time::timeout(Duration::from_secs(1), client.next())
-        .await
-        .expect("initial keepalive must be emitted")
-        .unwrap()
-        .unwrap();
-    assert_eq!(first.as_ref(), b": keepalive\n\n");
-    let second = tokio::time::timeout(Duration::from_secs(1), client.next())
-        .await
-        .expect("keepalive heartbeat must be emitted while provider is idle")
-        .unwrap()
-        .unwrap();
-    assert_eq!(second.as_ref(), b": keepalive\n\n");
 }
 
 #[test]
@@ -2986,26 +2918,18 @@ async fn completed_responses_sse_reaches_eof_without_late_keepalive_comments() {
 }
 
 #[tokio::test]
-async fn responses_sse_relay_provider_stream_error_projects_502_error_event_frame() {
+async fn responses_sse_relay_provider_stream_error_propagates_without_fabricated_terminal() {
     let provider =
         futures_util::stream::iter(vec![Err::<Vec<u8>, String>("controlled error".into())]);
-    let body = v3_guarded_relay_sse_body(
-        Box::pin(provider),
-        Some(Duration::from_millis(10)),
-        Some(Duration::from_secs(300)),
-        Arc::new(|message| v3_sse_error_event_chunk(502, "provider_sse_stream_error", message)),
-    );
+    let body = v3_relay_client_sse_body(Box::pin(provider), Some(Duration::from_millis(10)));
     let mut client = body.into_data_stream();
 
     assert_eq!(
         client.next().await.unwrap().unwrap().as_ref(),
         b": keepalive\n\n"
     );
-    let frame = client.next().await.unwrap().unwrap();
-    let text = std::str::from_utf8(&frame).unwrap();
-    assert!(text.contains("event: error"), "{text}");
-    assert!(text.contains("\"status\":502"), "{text}");
-    assert!(text.contains("controlled error"), "{text}");
+    let error = client.next().await.unwrap().unwrap_err();
+    assert_eq!(error.to_string(), "controlled error");
     assert!(
         tokio::time::timeout(Duration::from_millis(50), client.next())
             .await
