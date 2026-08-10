@@ -3843,6 +3843,22 @@ fn build_v3_responses_reasoning_item_from_openai_chat_message(
     item.insert("type".to_string(), Value::String("reasoning".to_string()));
     if !summary.is_empty() {
         item.insert("summary".to_string(), Value::Array(summary));
+        // 明文推理同时作为 content 供客户端回传：Codex 只把 content（完整推理）
+        // 回传到下一轮；缺失 content 时客户端发保留标记（rsn_*），导致 wire
+        // reasoning_content 字节与上一轮不匹配 -> ds4 续写缓存 miss -> provider
+        // 失忆（"没有之前的上下文"）。content 与 summary 同源（当前 provider
+        // 明文即完整推理，无摘要/完整之分）。
+        let content: Vec<Value> = item
+            .get("summary")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.get("text").cloned())
+            .map(|text| json!({"type": "reasoning_text", "text": text}))
+            .collect();
+        if !content.is_empty() {
+            item.insert("content".to_string(), Value::Array(content));
+        }
     }
     if let Some(encrypted_content) = encrypted_content {
         item.insert(

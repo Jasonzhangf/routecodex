@@ -39,6 +39,11 @@ fn strip_v3_resp03_encrypted_reasoning_content(
     retain_response_cipher: bool,
 ) -> V3HubRespInbound02Normalized {
     if !retain_response_cipher {
+        // 非单一 gpt provider（retain=false）时，响应里出现的 Codex 密文
+        // （encrypted_content 以 `rsn_` / `gAAAA` 开头）一律丢弃，客户端透明无感知
+        // （响应只携带明文 summary/content）。anthropic 链的 thinking signature 载体
+        // （redacted_thinking.data / thinking.signature，值不是 rsn_/gAAAA 前缀）不是
+        // Codex 密文，必须保留给客户端做签名校验。
         let payload = std::sync::Arc::make_mut(&mut input.previous.previous.payload.0);
         strip_v3_resp03_encrypted_fields_recursive(payload);
     }
@@ -48,12 +53,13 @@ fn strip_v3_resp03_encrypted_reasoning_content(
 fn strip_v3_resp03_encrypted_fields_recursive(value: &mut Value) {
     match value {
         Value::Object(map) => {
-            // 仅剥离 Codex 客户端密文（值以 `rsn_` 开头的 encrypted_content）：
-            // 非 gpt / 多 provider 场景下密文不得跨 provider 透传。anthropic 链的
-            // thinking signature 载体（encrypted_content 存 `resp04-` 之类签名）不是
-            // Codex 密文，必须保留给客户端做签名校验。
+            // 仅剥离 Codex 密文（值以 `rsn_` / `gAAAA` 开头）：非 gpt / 多 provider /
+            // 跨服务器场景密文不得跨 provider 透传，客户端透明无感知（响应只携带
+            // 明文 summary/content）。anthropic 链的 thinking signature 载体
+            // （redacted_thinking.data / thinking.signature，值不是 rsn_/gAAAA 前缀）
+            // 不是 Codex 密文，必须保留给客户端做签名校验。
             if let Some(Value::String(cipher)) = map.get("encrypted_content") {
-                if cipher.starts_with("rsn_") {
+                if cipher.starts_with("rsn_") || cipher.starts_with("gAAAA") {
                     map.remove("encrypted_content");
                 }
             }
@@ -1212,6 +1218,10 @@ fn normalize_v3_apply_patch_freeform_input_for_client(arguments_text: &str) -> S
 }
 
 #[cfg(test)]
+#[path = "resp_chat_process_03_governed_tests.rs"]
+mod resp_chat_process_03_governed_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1450,14 +1460,17 @@ mod tests {
             "gpt 单 provider 必须保留 encrypted_content 透传"
         );
 
-        // anthropic thinking signature 载体（非 rsn_ 前缀）永不清除。
+        // anthropic thinking signature 载体（值非 rsn_/gAAAA 前缀）永不清除——
+        // recursive 层只剥离 Codex 密文（rsn_ / gAAAA 开头）。
         let resp02 = build_resp02(payload_with("resp04-signature", "signed"));
         let outcome = govern_v3_hub_relay_response(resp02, &V3HubRelayResponseHookProfile::empty())
             .expect("govern must succeed");
         let (governed, _, _) = outcome.into_parts();
+        let payload = payload_str(&governed);
         assert!(
-            payload_str(&governed).contains("resp04-signature"),
-            "anthropic thinking signature 载体不得被剥离"
+            payload.contains("resp04-signature"),
+            "anthropic thinking signature 载体不得被剥离: {payload}"
         );
+        assert!(payload.contains("signed"), "明文 summary 必须保留: {payload}");
     }
 }
