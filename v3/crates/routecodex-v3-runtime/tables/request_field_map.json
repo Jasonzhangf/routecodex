@@ -7,7 +7,7 @@
   "anthropic",
   "gemini"
  ],
- "description": "出站顶层字段白名单（透传允许清单）。数据来源：request_outbound_format.rs allowed_top_level_outbound_fields（当前为 match 数组，迁移后以本表为真源）。字段名逐字取自原代码，行为零变化。",
+ "description": "\u51fa\u7ad9\u9876\u5c42\u5b57\u6bb5\u767d\u540d\u5355\uff08\u900f\u4f20\u5141\u8bb8\u6e05\u5355\uff09\u3002\u6570\u636e\u6765\u6e90\uff1arequest_outbound_format.rs allowed_top_level_outbound_fields\uff08\u5f53\u524d\u4e3a match \u6570\u7ec4\uff0c\u8fc1\u79fb\u540e\u4ee5\u672c\u8868\u4e3a\u771f\u6e90\uff09\u3002\u5b57\u6bb5\u540d\u9010\u5b57\u53d6\u81ea\u539f\u4ee3\u7801\uff0c\u884c\u4e3a\u96f6\u53d8\u5316\u3002",
  "whitelists": {
   "openai_chat": [
    "model",
@@ -99,7 +99,8 @@
    "text",
    "truncation",
    "web_search_options",
-   "routecodex_chat_extension"
+   "routecodex_chat_extension",
+   "thinking"
   ],
   "anthropic": [
    "model",

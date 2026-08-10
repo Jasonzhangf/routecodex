@@ -102,6 +102,7 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
         "response_format",
         "include",
         "reasoning",
+        "thinking",
         "metadata",
         "client_metadata",
         "safety_identifier",

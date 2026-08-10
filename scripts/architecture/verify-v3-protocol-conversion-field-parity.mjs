@@ -670,16 +670,19 @@ for (const field of [
   'store',
   'web_search_options',
 ]) requireText(openAiChatAllowedFields, `${requestFieldMapRel}::whitelists.openai_chat`, field);
-const responsesAllowedFields = sectionSlice(
-  outboundAllowedFields,
-  'V3OutboundTargetProtocol::OpenAiResponses => &[',
-  'V3OutboundTargetProtocol::Anthropic => &[',
-);
+const responsesAllowedFields = (requestFieldMap?.whitelists?.responses ?? []).join('\n');
 forbid(
   responsesAllowedFields,
   `${paths.requestOutboundFormat}::relay_continuation_owner_consumed_before_outbound`,
   [/"previous_response_id"/],
 );
+for (const field of ['thinking']) {
+  requireText(
+    responsesAllowedFields,
+    `${requestFieldMapRel}::whitelists.responses`,
+    field,
+  );
+}
 for (const phrase of [
   'responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history',
   'direct provider wire payload captured',

@@ -233,6 +233,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         "prompt",
         "truncation",
         "web_search_options",
+        "thinking",
     ] {
         if let Some(value) = root.get(key) {
             request.insert(key.to_string(), value.clone());

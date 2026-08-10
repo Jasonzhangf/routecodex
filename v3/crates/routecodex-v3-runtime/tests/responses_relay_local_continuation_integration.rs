@@ -4475,6 +4475,70 @@ fn manifest_with_unsupported_provider_wire_target(
     manifest
 }
 
+#[tokio::test]
+async fn responses_thinking_field_reaches_responses_provider_wire() {
+    // Codex 客户端发送顶层 thinking 字段；responses 出站白名单必须透传
+    // （openai_chat/anthropic 白名单均含 thinking，responses 缺口曾导致
+    // UnmappedOutboundFields 502，见 request_field_map.json 修复）。
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id": "resp_thinking",
+            "status": "completed",
+            "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}],
+            "output_text": "ok"
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-thinking",
+        "conversation-thinking",
+        5555,
+        "controlled",
+    );
+
+    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-thinking".into(),
+            payload: json!({
+                "model": "responses-wire-model",
+                "stream": false,
+                "thinking": {"type": "enabled"},
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "think"}]
+                }]
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        12_000,
+    )
+    .await
+    .expect("responses provider wire must accept Codex thinking field without UnmappedOutboundFields");
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1, "provider send must occur: {captures:?}");
+    let body = provider_projection_body(&captures[0]);
+    assert_eq!(
+        body["thinking"],
+        json!({"type": "enabled"}),
+        "Codex thinking must pass through to responses provider wire: {body}"
+    );
+    let _ = result;
+}
+
 fn manifest_openai_chat_wire() -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
