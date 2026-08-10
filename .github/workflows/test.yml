@@ -67,6 +67,8 @@ jobs:
         run: npm run test:route-classifier-semantics
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
+      - name: Fetch Rust dependencies for offline builds
+        run: cargo fetch --manifest-path v3/Cargo.toml
       - name: Build (release)
         env:
           BUILD_MODE: release
