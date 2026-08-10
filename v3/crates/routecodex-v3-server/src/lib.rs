@@ -106,6 +106,10 @@ use tokio::sync::oneshot;
 const V3_PROTOCOL_PENDING_PROJECTION_RESOURCE: &str = "v3.protocol.pending_projection";
 // feature_id: v3.codex_sample_retention_snap_scope
 const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 100;
+/// Direct SSE provider 静默超时：provider 流在指定时间内无数据时，向客户端投影
+/// 标准 502 SSE error event 帧（客户端连接保持，不与 provider 耦合）。
+const V3_DIRECT_PROVIDER_SSE_IDLE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(300);
 
 struct V3ResponsesPreviousResponseOwnerResolutionContext {
     direct_scope: V3ResponsesDirectContinuationScope,
@@ -1407,7 +1411,10 @@ async fn pending_endpoint_after_responses_admission(
         ) {
             return response;
         }
-        return openai_chat_relay_output_response(output);
+        return openai_chat_relay_output_response(
+            output,
+            Duration::from_millis(state.server.http_sse_keepalive_ms),
+        );
     }
     if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let stream = payload.get("stream").and_then(serde_json::Value::as_bool) == Some(true);
@@ -1451,7 +1458,11 @@ async fn pending_endpoint_after_responses_admission(
         ) {
             return response;
         }
-        return anthropic_relay_output_response(output, stream);
+        return anthropic_relay_output_response(
+            output,
+            stream,
+            Duration::from_millis(state.server.http_sse_keepalive_ms),
+        );
     }
     if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let output = match execute_v3_gemini_relay_runtime_with_default_transport_provider_health(
@@ -1482,7 +1493,10 @@ async fn pending_endpoint_after_responses_admission(
         ) {
             return response;
         }
-        return gemini_relay_output_response(output);
+        return gemini_relay_output_response(
+            output,
+            Duration::from_millis(state.server.http_sse_keepalive_ms),
+        );
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let continuation_scope = match build_responses_relay_local_continuation_scope(
@@ -6734,9 +6748,11 @@ fn responses_relay_output_response(
         builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
     }
     let body = match output.client_body {
-        V3ResponsesRelayClientBody::Sse(client_stream) => v3_relay_client_sse_body(
+        V3ResponsesRelayClientBody::Sse(client_stream) => v3_guarded_relay_sse_body(
             wrap_v3_relay_sse_console_stream(client_stream, stream_console_finalizer),
             successful_sse.then_some(keepalive_interval),
+            successful_sse.then_some(V3_DIRECT_PROVIDER_SSE_IDLE_TIMEOUT),
+            Arc::new(|message| v3_sse_error_event_chunk(502, "provider_sse_stream_error", message)),
         ),
         V3ResponsesRelayClientBody::Json(client_response) => Body::from(
             serde_json::to_vec(&client_response).expect("typed V3 Responses Relay projection"),
@@ -6870,7 +6886,10 @@ fn wrap_v3_direct_sse_closeout_stream(
     })
 }
 
-fn openai_chat_relay_output_response(output: V3OpenAiChatRelayRuntimeOutput) -> Response<Body> {
+fn openai_chat_relay_output_response(
+    output: V3OpenAiChatRelayRuntimeOutput,
+    keepalive_interval: Duration,
+) -> Response<Body> {
     let content_type = match &output.client_body {
         V3OpenAiChatRelayClientBody::Json(_) => "application/json",
         V3OpenAiChatRelayClientBody::Sse(_) => "text/event-stream",
@@ -6883,7 +6902,14 @@ fn openai_chat_relay_output_response(output: V3OpenAiChatRelayRuntimeOutput) -> 
         builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
     }
     let body = match output.client_body {
-        V3OpenAiChatRelayClientBody::Sse(client_stream) => Body::from_stream(client_stream),
+        V3OpenAiChatRelayClientBody::Sse(client_stream) => v3_guarded_relay_sse_body(
+            client_stream,
+            Some(keepalive_interval),
+            Some(V3_DIRECT_PROVIDER_SSE_IDLE_TIMEOUT),
+            Arc::new(|message| {
+                v3_openai_chat_sse_error_event_chunk(502, "provider_sse_stream_error", message)
+            }),
+        ),
         V3OpenAiChatRelayClientBody::Json(client_response) => Body::from(
             serde_json::to_vec(&client_response).expect("typed V3 OpenAI Chat Relay projection"),
         ),
@@ -6967,7 +6993,10 @@ async fn execute_v3_openai_chat_direct_server_outcome(
         let mut trace = relay_trace;
         trace.extend(relay_output.node_trace);
         relay_output.node_trace = trace;
-        return openai_chat_relay_output_response(relay_output);
+        return openai_chat_relay_output_response(
+            relay_output,
+            Duration::from_millis(state.server.http_sse_keepalive_ms),
+        );
     }
     let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(
         output.client_payload,
@@ -6985,7 +7014,10 @@ async fn execute_v3_openai_chat_direct_server_outcome(
     )
 }
 
-fn gemini_relay_output_response(output: V3GeminiRelayRuntimeOutput) -> Response<Body> {
+fn gemini_relay_output_response(
+    output: V3GeminiRelayRuntimeOutput,
+    keepalive_interval: Duration,
+) -> Response<Body> {
     let content_type = match &output.client_body {
         V3GeminiRelayClientBody::Json(_) => "application/json",
         V3GeminiRelayClientBody::Sse(_) => "text/event-stream",
@@ -6998,7 +7030,14 @@ fn gemini_relay_output_response(output: V3GeminiRelayRuntimeOutput) -> Response<
         builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
     }
     let body = match output.client_body {
-        V3GeminiRelayClientBody::Sse(client_stream) => Body::from_stream(client_stream),
+        V3GeminiRelayClientBody::Sse(client_stream) => v3_guarded_relay_sse_body(
+            client_stream,
+            Some(keepalive_interval),
+            Some(V3_DIRECT_PROVIDER_SSE_IDLE_TIMEOUT),
+            Arc::new(|message| {
+                v3_gemini_sse_error_event_chunk(502, "provider_sse_stream_error", message)
+            }),
+        ),
         V3GeminiRelayClientBody::Json(client_response) => Body::from(
             serde_json::to_vec(&client_response).expect("typed V3 Gemini Relay projection"),
         ),
@@ -7009,6 +7048,7 @@ fn gemini_relay_output_response(output: V3GeminiRelayRuntimeOutput) -> Response<
 fn anthropic_relay_output_response(
     output: V3AnthropicRelayRuntimeOutput,
     stream: bool,
+    keepalive_interval: Duration,
 ) -> Response<Body> {
     let stream = stream && output.error_chain.is_none();
     let mut builder = Response::builder()
@@ -7026,7 +7066,14 @@ fn anthropic_relay_output_response(
         builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
     }
     let body = if stream {
-        anthropic_relay_sse_body(output.client_response)
+        v3_guarded_relay_sse_body(
+            anthropic_relay_sse_body(output.client_response),
+            Some(keepalive_interval),
+            Some(V3_DIRECT_PROVIDER_SSE_IDLE_TIMEOUT),
+            Arc::new(|message| {
+                v3_anthropic_sse_error_event_chunk(502, "provider_sse_stream_error", message)
+            }),
+        )
     } else {
         Body::from(
             serde_json::to_vec(&output.client_response)
@@ -7038,33 +7085,30 @@ fn anthropic_relay_output_response(
         .expect("typed V3 Anthropic Relay response")
 }
 
-fn anthropic_relay_sse_body(client_response: serde_json::Value) -> Body {
+fn anthropic_relay_sse_body(client_response: serde_json::Value) -> V3RelaySseStream {
     let Some(events) = client_response
         .get("events")
         .and_then(serde_json::Value::as_array)
         .cloned()
     else {
-        return Body::from_stream(stream::once(async {
-            Err::<Vec<u8>, io::Error>(io::Error::other(
-                "typed V3 Anthropic Relay SSE projection is missing events",
-            ))
+        return Box::pin(stream::once(async {
+            Err::<Vec<u8>, String>("typed V3 Anthropic Relay SSE projection is missing events"
+                .to_string())
         }));
     };
-    Body::from_stream(stream::iter(
+    Box::pin(stream::iter(
         events
             .into_iter()
             .map(|event| anthropic_relay_sse_event_chunk(&event)),
     ))
 }
 
-fn anthropic_relay_sse_event_chunk(event: &serde_json::Value) -> Result<Vec<u8>, io::Error> {
+fn anthropic_relay_sse_event_chunk(event: &serde_json::Value) -> Result<Vec<u8>, String> {
     let (Some(name), Some(data)) = (
         event.get("event").and_then(serde_json::Value::as_str),
         event.get("data"),
     ) else {
-        return Err(io::Error::other(
-            "typed V3 Anthropic Relay SSE event is missing event or data",
-        ));
+        return Err("typed V3 Anthropic Relay SSE event is missing event or data".to_string());
     };
     let decoded = build_v3_sse_transport_in_02_from_fields(vec![
         SseField::Named {
@@ -7076,9 +7120,9 @@ fn anthropic_relay_sse_event_chunk(event: &serde_json::Value) -> Result<Vec<u8>,
             value: data.to_string(),
         },
     ])
-    .map_err(|error| io::Error::other(error.to_string()))?;
+    .map_err(|error| error.to_string())?;
     let validated = build_v3_sse_transport_in_03_from_v3_sse_transport_in_02(decoded)
-        .map_err(|error| io::Error::other(error.to_string()))?;
+        .map_err(|error| error.to_string())?;
     Ok(build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&validated).into_bytes())
 }
 
@@ -7227,7 +7271,7 @@ fn foundation_output_response(output: V3FoundationRuntimeOutput) -> Response<Bod
         V3Server16Body::Bytes(bytes) => bytes,
         V3Server16Body::Sse(stream) => {
             return builder
-                .body(v3_client_sse_body(stream, None))
+                .body(v3_client_sse_body(stream, None, None))
                 .expect("typed response");
         }
     };
@@ -7299,10 +7343,44 @@ fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -> Vec<u8> {
     format!("event: error\ndata: {event}\n\n").into_bytes()
 }
 
+fn v3_openai_chat_sse_error_event_chunk(status: u16, code: &str, message: &str) -> Vec<u8> {
+    let event = json!({
+        "error": {
+            "code": code,
+            "message": message
+        },
+        "status": status
+    });
+    format!("data: {event}\n\n").into_bytes()
+}
+
+fn v3_anthropic_sse_error_event_chunk(status: u16, code: &str, message: &str) -> Vec<u8> {
+    let event = json!({
+        "type": "error",
+        "status": status,
+        "error": {
+            "type": code,
+            "message": message
+        }
+    });
+    format!("event: error\ndata: {event}\n\n").into_bytes()
+}
+
+fn v3_gemini_sse_error_event_chunk(status: u16, code: &str, message: &str) -> Vec<u8> {
+    let event = json!({
+        "error": {
+            "code": code,
+            "message": message
+        },
+        "status": status
+    });
+    format!("event: error\ndata: {event}\n\n").into_bytes()
+}
+
 fn responses_direct_output_response_with_console(
     frame: V3Server16HttpFrame,
     stream_console_finalizer: Option<V3DirectSseConsoleFinalizer>,
-    _keepalive_interval: Duration,
+    keepalive_interval: Duration,
 ) -> Response<Body> {
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
@@ -7321,9 +7399,15 @@ fn responses_direct_output_response_with_console(
         V3Server16Body::Bytes(bytes) => bytes,
         V3Server16Body::Sse(stream) => {
             let stream = wrap_v3_direct_sse_console_stream(stream, stream_console_finalizer);
-            // Direct SSE 投影保真传输 provider 字节，不注入 transport keepalive。
+            // Direct SSE 客户端连接与 provider 解耦：客户端侧始终由本服务器
+            // 独立注入 keepalive 心跳；provider 错误与静默超时投影为标准
+            // 502 error event 帧，不把 provider 裸错误透传给客户端。
             return builder
-                .body(v3_client_sse_body(stream, None))
+                .body(v3_client_sse_body(
+                    stream,
+                    Some(keepalive_interval),
+                    Some(V3_DIRECT_PROVIDER_SSE_IDLE_TIMEOUT),
+                ))
                 .expect("typed response");
         }
     };
@@ -7348,34 +7432,122 @@ fn wrap_v3_direct_sse_console_stream(
 type V3IoSseStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, io::Error>> + Send>>;
 
-fn v3_relay_client_sse_body(
-    stream: V3ResponsesRelayClientStream,
+type V3RelaySseStream =
+    std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
+
+fn v3_guarded_relay_sse_body(
+    stream: V3RelaySseStream,
     keepalive_interval: Option<Duration>,
+    provider_idle_timeout: Option<Duration>,
+    error_frame: Arc<dyn Fn(&str) -> Vec<u8> + Send + Sync>,
 ) -> Body {
-    let stream = stream::unfold((stream, false), |(mut stream, done)| async move {
-        if done {
-            return None;
-        }
-        match stream.next().await {
-            Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-            Some(Err(error)) => Some((Err(io::Error::other(error)), (stream, true))),
-            None => None,
-        }
-    });
+    let stream = stream::unfold(
+        (
+            stream,
+            false,
+            provider_idle_timeout,
+            provider_idle_timeout.map(|_| tokio::time::Instant::now()),
+            error_frame,
+        ),
+        |(mut stream, done, idle_timeout, last_activity, error_frame)| async move {
+            if done {
+                return None;
+            }
+            let item = match (idle_timeout, last_activity) {
+                (Some(timeout), Some(last_activity)) => {
+                    tokio::select! {
+                        biased;
+                        item = stream.next() => item,
+                        _ = tokio::time::sleep_until(last_activity + timeout) => {
+                            let frame = error_frame(
+                                "provider SSE stream idle timeout",
+                            );
+                            return Some((
+                                Ok::<Vec<u8>, io::Error>(frame),
+                                (stream, true, None, None, error_frame),
+                            ));
+                        }
+                    }
+                }
+                _ => stream.next().await,
+            };
+            match item {
+                Some(Ok(chunk)) => Some((
+                    Ok::<Vec<u8>, io::Error>(chunk),
+                    (
+                        stream,
+                        false,
+                        idle_timeout,
+                        Some(tokio::time::Instant::now()),
+                        error_frame,
+                    ),
+                )),
+                Some(Err(error)) => {
+                    let frame = error_frame(&error);
+                    Some((
+                        Ok::<Vec<u8>, io::Error>(frame),
+                        (stream, true, None, None, error_frame),
+                    ))
+                }
+                None => None,
+            }
+        },
+    );
     v3_io_sse_body(Box::pin(stream), keepalive_interval)
 }
 
-fn v3_client_sse_body(stream: V3ClientSseStream, keepalive_interval: Option<Duration>) -> Body {
-    let stream = stream::unfold((stream, false), |(mut stream, done)| async move {
-        if done {
-            return None;
-        }
-        match stream.next().await {
-            Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-            Some(Err(error)) => Some((Err(io::Error::other(error.message)), (stream, true))),
-            None => None,
-        }
-    });
+fn v3_client_sse_body(
+    stream: V3ClientSseStream,
+    keepalive_interval: Option<Duration>,
+    provider_idle_timeout: Option<Duration>,
+) -> Body {
+    let stream = stream::unfold(
+        (stream, false, provider_idle_timeout, provider_idle_timeout.map(|_| tokio::time::Instant::now())),
+        |(mut stream, done, idle_timeout, last_activity)| async move {
+            if done {
+                return None;
+            }
+            let item = match (idle_timeout, last_activity) {
+                (Some(timeout), Some(last_activity)) => {
+                    tokio::select! {
+                        biased;
+                        item = stream.next() => item,
+                        _ = tokio::time::sleep_until(last_activity + timeout) => {
+                            return Some((
+                                Ok::<Vec<u8>, io::Error>(v3_sse_error_event_chunk(
+                                    502,
+                                    "provider_response_sse_idle_timeout",
+                                    "provider SSE stream idle timeout",
+                                )),
+                                (stream, true, None, None),
+                            ));
+                        }
+                    }
+                }
+                _ => stream.next().await,
+            };
+            match item {
+                Some(Ok(chunk)) => Some((
+                    Ok::<Vec<u8>, io::Error>(chunk),
+                    (
+                        stream,
+                        false,
+                        idle_timeout,
+                        Some(tokio::time::Instant::now()),
+                    ),
+                )),
+                Some(Err(error)) => Some((
+                    Ok::<Vec<u8>, io::Error>(v3_sse_error_event_chunk(
+                        502,
+                        &error.code,
+                        &error.message,
+                    )),
+                    (stream, true, None, None),
+                )),
+                None => None,
+            }
+        },
+    );
     v3_io_sse_body(Box::pin(stream), keepalive_interval)
 }
 

@@ -446,6 +446,11 @@ features:
   - direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish
   - direct_stream_request_error06_projects_sse_error_not_json
   - kernel::tests::direct_stream_request_projects_provider_json_as_client_sse
+  - v3_direct_client_sse_body
+  - v3_direct_sse_error_isolation_stream
+  - direct_sse_keepalive_15s_heartbeat_emitted_for_idle_provider_stream
+  - direct_sse_provider_error_isolation_projects_502_error_event_frame
+  - direct_sse_provider_idle_timeout_projects_502_error_event_frame
   allowed_paths:
   - v3/crates/routecodex-v3-runtime
   - v3/crates/routecodex-v3-provider-responses
