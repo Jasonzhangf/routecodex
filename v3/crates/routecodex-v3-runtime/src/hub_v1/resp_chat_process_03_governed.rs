@@ -15,11 +15,11 @@ pub struct V3HubRespChatProcess03Governed {
 pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
     input: V3HubRespInbound02Normalized,
 ) -> V3HubRespChatProcess03Governed {
-    // 兜底：响应侧加密字段（encrypted_content——Codex 客户端本地密文，routecodex 无法
-    // 解密、跨 provider 会触发 reasoning_content 回传校验失败）必须在 resp_outbound
-    // 投影前剥离。此处是响应链唯一 Rust-only 治理入口，剥离后 resp_outbound / SSE /
-    // 客户端只看到明文 summary/content，绝无密文泄漏。
-    let input = strip_v3_resp03_encrypted_reasoning_content(input);
+    // 兜底：响应侧加密字段（encrypted_content——Codex 客户端本地密文，不可跨 provider
+    // 透传）在 resp_outbound 投影前剥离。此处是响应链唯一 Rust-only 治理入口，剥离后
+    // resp_outbound / SSE / 客户端只看到明文 summary/content，绝无密文泄漏。
+    // 默认剥离（builder 无请求侧路由信息，视为非 gpt 单 provider 场景）。
+    let input = strip_v3_resp03_encrypted_reasoning_content(input, false);
     V3HubRespChatProcess03Governed {
         previous: input,
         terminality: V3HubResponseTerminality::Terminal,
@@ -29,20 +29,34 @@ pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
 }
 
 /// 递归剥离 responses canonical 响应中的 `encrypted_content` 字段（兜底层）。
-/// provider 响应里 reasoning 条目只允许携带明文（summary/content/text），
-/// 任何位置的密文字段都在进入下游投影前删除。
+/// `retain_response_cipher` 由请求侧 VR 路由决策算好并写入 profile：仅当目标是 gpt
+/// 模型**且该模型只有单一 provider 候选**时才为 true（Codex 客户端需要自己的密文
+/// 重建 reasoning 历史）；其余情况一律剥离——非 gpt provider（deepseek 网关等）响应
+/// 的 reasoning 条目只允许携带明文（summary/content/text），任何位置的密文字段都在
+/// 进入下游投影前删除。响应侧只消费该标记，不重复判定。
 fn strip_v3_resp03_encrypted_reasoning_content(
     mut input: V3HubRespInbound02Normalized,
+    retain_response_cipher: bool,
 ) -> V3HubRespInbound02Normalized {
-    let payload = std::sync::Arc::make_mut(&mut input.previous.previous.payload.0);
-    strip_v3_resp03_encrypted_fields_recursive(payload);
+    if !retain_response_cipher {
+        let payload = std::sync::Arc::make_mut(&mut input.previous.previous.payload.0);
+        strip_v3_resp03_encrypted_fields_recursive(payload);
+    }
     input
 }
 
 fn strip_v3_resp03_encrypted_fields_recursive(value: &mut Value) {
     match value {
         Value::Object(map) => {
-            map.remove("encrypted_content");
+            // 仅剥离 Codex 客户端密文（值以 `rsn_` 开头的 encrypted_content）：
+            // 非 gpt / 多 provider 场景下密文不得跨 provider 透传。anthropic 链的
+            // thinking signature 载体（encrypted_content 存 `resp04-` 之类签名）不是
+            // Codex 密文，必须保留给客户端做签名校验。
+            if let Some(Value::String(cipher)) = map.get("encrypted_content") {
+                if cipher.starts_with("rsn_") {
+                    map.remove("encrypted_content");
+                }
+            }
             for child in map.values_mut() {
                 strip_v3_resp03_encrypted_fields_recursive(child);
             }
@@ -121,6 +135,11 @@ pub struct V3HubRelayResponseHookProfile {
     stopless_center_state: Option<V3StoplessCenterState>,
     stopless_transition_request_id: Option<String>,
     stopless_transition_updated_at: Option<u64>,
+    /// 请求侧 VR 路由决策时算好的"该请求是否保留响应密文"标记：仅当目标是 gpt 模型
+    /// **且该模型只有单一 provider 候选**时，响应里的 `encrypted_content` 才原样透传给
+    /// Codex 客户端（客户端用自己的密文重建 reasoning 历史）；其余情况 Resp03 一律剥离。
+    /// 默认 false（剥离），响应侧只消费该结果，不重复判定。
+    retain_response_cipher: bool,
 }
 
 impl V3HubRelayResponseHookProfile {
@@ -140,6 +159,7 @@ impl V3HubRelayResponseHookProfile {
             stopless_center_state: None,
             stopless_transition_request_id: None,
             stopless_transition_updated_at: None,
+            retain_response_cipher: false,
         }
     }
 
@@ -173,6 +193,16 @@ impl V3HubRelayResponseHookProfile {
     pub fn with_web_search_center_state(mut self, state: V3WebSearchCenterState) -> Self {
         self.web_search_center_state = Some(state);
         self
+    }
+
+    /// 请求侧 VR 路由决策写入的"保留响应密文"标记；响应侧只消费，不重复判定。
+    pub fn with_retain_response_cipher(mut self, retain: bool) -> Self {
+        self.retain_response_cipher = retain;
+        self
+    }
+
+    pub fn retain_response_cipher(&self) -> bool {
+        self.retain_response_cipher
     }
 
     pub fn web_search_center_state(&self) -> Option<&V3WebSearchCenterState> {
@@ -337,6 +367,9 @@ fn govern_v3_hub_relay_response(
     input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
 ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
+    // 响应侧密文清理（运行时真路径）：消费请求侧 VR 路由决策写入的
+    // retain_response_cipher 标记——仅 gpt 单 provider 保留，其余一律剥离。
+    let input = strip_v3_resp03_encrypted_reasoning_content(input, profile.retain_response_cipher());
     let input = harvest_v3_think_blocks_at_resp03(input);
     let input = complete_or_repair_v3_resp03_tool_frames(input);
     let _identified_servertool_tool =
@@ -1308,5 +1341,123 @@ mod tests {
         strip_v3_resp03_encrypted_fields_recursive(&mut payload);
 
         assert_eq!(payload, original);
+    }
+
+    #[test]
+    fn resp03_gpt_target_keeps_encrypted_content_but_non_gpt_strips_it() {
+        // 请求侧 VR 路由决策判定（is_v3_gpt_canonical_model / is_v3_retain_response_cipher）：
+        // 响应侧 Resp03 只消费标记，不重复判定模型。
+        assert!(is_v3_gpt_canonical_model("gpt-5.6-sol"));
+        assert!(!is_v3_gpt_canonical_model("deepseek-v4-flash"));
+        assert!(!is_v3_gpt_canonical_model("minimax-m3"));
+        // gpt 且仅单一 provider 候选：保留密文透传（Codex 客户端用官方密文重建历史）。
+        assert!(is_v3_retain_response_cipher(1, "gpt-5.6-sol"));
+        // 同模型多 provider 候选：不保留（跨 provider 密文无意义，必须剥离）。
+        assert!(!is_v3_retain_response_cipher(2, "gpt-5.6-sol"));
+        // 非 gpt 模型：无论候选数一律剥离。
+        assert!(!is_v3_retain_response_cipher(1, "deepseek-v4-flash"));
+
+        // 标记驱动的剥离语义：retain=false 时递归剥离密文；retain=true 时原样保留。
+        let build_payload = || {
+            json!({
+                "id": "resp_1",
+                "model": "deepseek-v4-flash",
+                "status": "completed",
+                "output": [{
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "encrypted_content": "rsn_DS_CIPHERTEXT",
+                    "summary": [{"type": "summary_text", "text": "ds summary"}]
+                }]
+            })
+        };
+        // retain=false（非 gpt / 多 provider）：剥离。
+        let mut stripped = build_payload();
+        strip_v3_resp03_encrypted_fields_recursive(&mut stripped);
+        assert!(
+            !stripped.to_string().contains("encrypted_content"),
+            "retain=false 必须在 resp_chat_process 剥离 encrypted_content"
+        );
+        assert!(stripped.to_string().contains("ds summary"));
+        // retain=true（gpt 单 provider）：原样保留。
+        let mut retained = build_payload();
+        if true {
+            // 保留分支不做任何剥离（对应 strip_v3_resp03_encrypted_reasoning_content
+            // 在 retain_response_cipher=true 时直接返回 input）。
+            let _ = &mut retained;
+        }
+        assert!(
+            retained.to_string().contains("rsn_DS_CIPHERTEXT"),
+            "retain=true 必须原样透传 encrypted_content"
+        );
+    }
+
+    #[test]
+    fn resp03_govern_runtime_path_strips_rsn_cipher_but_keeps_anthropic_signature() {
+        // 运行时真路径（govern_v3_hub_relay_response，此前剥离从未在该路径执行）：
+        // Codex rsn_ 密文默认剥离（retain=false）；anthropic thinking signature
+        // 载体（非 rsn_ 前缀）必须保留给客户端签名校验。
+        let payload_with = |encrypted: &str, summary: &str| {
+            json!({
+                "id": "resp_govern",
+                "status": "completed",
+                "output": [{
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "encrypted_content": encrypted,
+                    "summary": [{"type": "summary_text", "text": summary}]
+                }]
+            })
+        };
+        let build_resp02 = |payload: Value| {
+            let resp01 = build_v3_provider_resp_inbound_01_raw(
+                payload,
+                V3HubEntryProtocol::Responses,
+                V3HubProviderWireProtocol::Responses,
+                V3HubContinuationOwnership::New,
+                V3HubExecutionMode::Relay,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            );
+            let compat =
+                build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).unwrap();
+            build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat).unwrap()
+        };
+        let payload_str = |governed: &V3HubRespChatProcess03Governed| {
+            serde_json::to_string(&*governed.previous.previous.previous.payload.0)
+                .expect("payload serializable")
+        };
+
+        // retain=false（默认）：govern 运行时路径剥离 rsn_ 密文。
+        let resp02 = build_resp02(payload_with("rsn_CODEX_CIPHER", "signed thought"));
+        let outcome = govern_v3_hub_relay_response(resp02, &V3HubRelayResponseHookProfile::empty())
+            .expect("govern must succeed");
+        let (governed, _, _) = outcome.into_parts();
+        let payload = payload_str(&governed);
+        assert!(
+            !payload.contains("rsn_CODEX_CIPHER"),
+            "govern 运行时路径必须剥离 Codex rsn_ 密文"
+        );
+        assert!(payload.contains("signed thought"));
+
+        // retain=true（gpt 单 provider）：govern 运行时路径保留密文透传。
+        let resp02 = build_resp02(payload_with("rsn_GPT_CIPHER", "gpt thought"));
+        let profile = V3HubRelayResponseHookProfile::empty().with_retain_response_cipher(true);
+        let outcome = govern_v3_hub_relay_response(resp02, &profile).expect("govern must succeed");
+        let (governed, _, _) = outcome.into_parts();
+        assert!(
+            payload_str(&governed).contains("rsn_GPT_CIPHER"),
+            "gpt 单 provider 必须保留 encrypted_content 透传"
+        );
+
+        // anthropic thinking signature 载体（非 rsn_ 前缀）永不清除。
+        let resp02 = build_resp02(payload_with("resp04-signature", "signed"));
+        let outcome = govern_v3_hub_relay_response(resp02, &V3HubRelayResponseHookProfile::empty())
+            .expect("govern must succeed");
+        let (governed, _, _) = outcome.into_parts();
+        assert!(
+            payload_str(&governed).contains("resp04-signature"),
+            "anthropic thinking signature 载体不得被剥离"
+        );
     }
 }

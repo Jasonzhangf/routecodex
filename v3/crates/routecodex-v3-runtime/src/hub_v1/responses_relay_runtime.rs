@@ -2243,6 +2243,10 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         stopless_control_has_client_session_scope,
                         transition_request_id: &transition_request_id,
                         transition_updated_at,
+                        retain_response_cipher: is_v3_retain_response_cipher(
+                            selected.route.target_plan.len(),
+                            &selected.candidate.model_id,
+                        ),
                     },
                     &mut trace,
                 ) {
@@ -2516,6 +2520,10 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         stopless_control_has_client_session_scope,
                         transition_request_id: &transition_request_id,
                         transition_updated_at,
+                        retain_response_cipher: is_v3_retain_response_cipher(
+                            selected.route.target_plan.len(),
+                            &selected.candidate.model_id,
+                        ),
                     },
                     &mut trace,
                 ) {
@@ -3278,6 +3286,9 @@ struct V3ResponsesRelayJsonResponseHookInput<'a> {
     stopless_control_has_client_session_scope: bool,
     transition_request_id: &'a str,
     transition_updated_at: u64,
+    /// 请求侧 VR 路由决策算好的"保留响应密文"标记（仅 gpt 模型 + 单一 provider
+    /// 候选时为 true），响应侧 Resp03 只消费此结果，不重复判定。
+    retain_response_cipher: bool,
 }
 
 fn run_json_response_hooks(
@@ -3327,6 +3338,7 @@ fn run_json_response_hooks(
         input.transition_request_id,
         input.transition_updated_at,
         input.web_search_execution_mode,
+        input.retain_response_cipher,
     );
     let response_hook_profile = match input.web_search_center_state {
         Some(state) => response_hook_profile.with_web_search_center_state(state),
@@ -3420,6 +3432,7 @@ fn responses_relay_response_hook_profile(
     transition_request_id: &str,
     transition_updated_at: u64,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
+    retain_response_cipher: bool,
 ) -> V3HubRelayResponseHookProfile {
     let profile = if web_search_execution_mode
         == routecodex_v3_config::V3WebSearchExecutionMode::NativeRemoteSearchToolMix
@@ -3429,9 +3442,12 @@ fn responses_relay_response_hook_profile(
         // 客户端 exec_command 投影；Resp03 按 profile.mode 分别处理。
         V3HubRelayResponseHookProfile::empty()
             .with_web_search_execution_mode(web_search_execution_mode)
+            .with_retain_response_cipher(retain_response_cipher)
     } else {
         // 未声明 web_search 执行模式的兼容路径：保持既有 exec_command 投影。
-        V3HubRelayResponseHookProfile::empty().with_servertool_name("web_search")
+        V3HubRelayResponseHookProfile::empty()
+            .with_servertool_name("web_search")
+            .with_retain_response_cipher(retain_response_cipher)
     };
     if !v3_stopless_center_enabled_for_server(manifest, server_id)
         || !stopless_control_has_client_session_scope

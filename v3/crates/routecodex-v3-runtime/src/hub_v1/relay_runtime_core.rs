@@ -120,6 +120,8 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         provider_header_overrides: Vec<V3ProviderRequestHeader>,
     ) -> Result<V3Transport13ResponsesHttpRequest, V3RelayCoreError>;
     /// JSON 响应投影（resp01 -> 02 -> 03 -> 04 -> 05 -> 06）。
+    /// `retain_response_cipher`：请求侧 VR 路由决策算好的"保留响应密文"标记（仅 gpt
+    /// 单 provider 候选时为 true），响应侧 Resp03 只消费该结果。
     fn project_json_response(
         provider_value: Value,
         provider_wire_protocol: V3HubProviderWireProtocol,
@@ -129,6 +131,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         compatibility_profile: Option<&str>,
         web_search_execution_mode: V3WebSearchExecutionMode,
         web_search_state: Option<&V3WebSearchCenterState>,
+        retain_response_cipher: bool,
     ) -> Result<Value, V3RelayCoreError>;
     /// 构建 SSE provider outcome。
     fn build_sse_outcome(
@@ -142,12 +145,14 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
     ) -> Self::SseOutcome;
     /// SSE 流投影（协议特定 unfold 状态机；wire protocol 由骨架传入）。
     /// `Err(V3RelayCoreError::WebSearchIntercepted)` 表示治理层拦截（fail-fast，不进失败链）。
+    /// `retain_response_cipher`：同上，请求侧路由决策产物，响应侧 Resp03 消费。
     fn project_sse(
         provider: V3ProviderSseStream,
         provider_wire_protocol: V3HubProviderWireProtocol,
         compatibility_profile: Option<String>,
         web_search_execution_mode: V3WebSearchExecutionMode,
         web_search_state: Option<V3WebSearchCenterState>,
+        retain_response_cipher: bool,
         outcome: Self::SseOutcome,
     ) -> Result<Self::SseStream, V3RelayCoreError>;
     /// 组装 JSON 成功输出。
@@ -287,6 +292,14 @@ where
         let selected_target_model_id = selected.candidate.model_id.clone();
         let selected_target_compatibility_profile =
             selected.candidate.compatibility_profile.clone();
+        // VR 路由决策时一次性算出"是否保留响应密文"标记：仅 gpt 模型且目标计划只有
+        // 单一 provider 候选时为 true（Codex 客户端需要 gpt 官方密文重建 reasoning
+        // 历史；跨 provider 或非 gpt 场景一律不保留）。该标记经 codec 写入响应侧
+        // Resp03 profile，响应侧只消费此结果，不重复判定。
+        let retain_response_cipher = is_v3_retain_response_cipher(
+            selected.route.target_plan.len(),
+            &selected.candidate.model_id,
+        );
         let provider_wire_protocol = C::wire_protocol(&selected.candidate)?;
         let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
             req05.clone(),
@@ -471,6 +484,7 @@ where
                     selected_target_compatibility_profile.as_deref(),
                     selected.candidate.web_search_execution_mode,
                     request_web_search_state.as_ref(),
+                    retain_response_cipher,
                 ) {
                     Ok(client_response) => client_response,
                     // 治理层拦截但入口无投影路径：非 provider 失败，禁止进入失败
@@ -527,6 +541,7 @@ where
                     selected_target_compatibility_profile,
                     selected.candidate.web_search_execution_mode,
                     request_web_search_state,
+                    retain_response_cipher,
                     C::build_sse_outcome(
                         &provider_health,
                         &failure_session_scope,

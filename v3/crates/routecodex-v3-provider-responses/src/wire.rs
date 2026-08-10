@@ -122,51 +122,12 @@ pub fn build_v3_provider_12_responses_wire_payload(
         &target.provider_type,
         current_request_body,
     )?;
-    if !is_v3_gpt_canonical_model(&target.canonical_model_id) {
-        strip_v3_encrypted_reasoning_content(&request_id, &mut body);
-    }
     Ok(V3Provider12ResponsesWirePayload {
         request_id,
         target,
         stream_intent,
         body,
     })
-}
-
-/// OpenAI 官方 gpt 系列 canonical 模型判定。encrypted_content（`rsn_` 加密 reasoning）是
-/// OpenAI Responses 协议原生格式；非 gpt 上游（如 deepseek 经 opencode-go）不识别也不接受
-/// 加密 reasoning 回传，因此仅 gpt 系列保留密文透传，其余在出站 wire 上剥离。
-fn is_v3_gpt_canonical_model(canonical_model_id: &str) -> bool {
-    canonical_model_id.starts_with("gpt-")
-}
-
-/// 非 gpt 目标出站时剥离 responses input 中 reasoning 条目的 `encrypted_content`：
-/// 保留 summary/content/text 等明文（Codex 侧仍可回传明文 reasoning），仅删除密文字段。
-/// 若条目删除密文后没有任何明文内容，补成空 reasoning 条目（`{"type":"reasoning","text":""}`）
-/// 而非整条丢弃——opencode（DeepSeek 上游）要求每条 assistant 消息都必须带 reasoning 表示
-/// （transform.ts 对缺失轮补 `{type:"reasoning", text:""}`，空 reasoning_content 是 DeepSeek
-/// 标准接受的回传形态）；直接丢弃会让该轮 assistant 消息缺 reasoning，触发
-/// "reasoning_content must be passed back" 400。
-fn strip_v3_encrypted_reasoning_content(_request_id: &str, body: &mut Value) {
-    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
-        return;
-    };
-    input.retain_mut(|item| {
-        let Some(obj) = item.as_object_mut() else {
-            return true;
-        };
-        if obj.get("type").and_then(Value::as_str) != Some("reasoning") {
-            return true;
-        }
-        obj.remove("encrypted_content");
-        let has_plain_content = ["summary", "content", "text", "reasoning_content"]
-            .iter()
-            .any(|key| obj.get(*key).is_some_and(|value| !value.is_null()));
-        if !has_plain_content {
-            obj.insert("text".to_string(), Value::String(String::new()));
-        }
-        true
-    });
 }
 
 /// Responses wire tools only support provider-native tool types; a Codex `type=namespace`
@@ -960,82 +921,5 @@ mod tests {
             fields.iter().map(|field| field.to_string()).collect();
         target
     }
-
-    #[test]
-    fn wire_strips_encrypted_reasoning_content_for_non_gpt_target() {
-        let mut target = target();
-        target.canonical_model_id = "deepseek-v4-flash".into();
-        let body = json!({
-            "model": "upstream-model",
-            "input": [
-                {
-                    "type": "reasoning",
-                    "id": "item_rsn_1",
-                    "summary": [{"type": "summary_text", "text": "plain summary"}],
-                    "encrypted_content": "rsn_encrypted",
-                    "content": null
-                },
-                {
-                    "type": "reasoning",
-                    "id": "item_rsn_2",
-                    "encrypted_content": "rsn_only",
-                    "content": null,
-                    "summary": null
-                },
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "user turn"}]
-                }
-            ]
-        });
-        let wire = build_v3_provider_12_responses_wire_payload("req-1", target, body).unwrap();
-        let input = wire.body()["input"].as_array().unwrap();
-        assert_eq!(
-            input.len(),
-            3,
-            "encrypted-only reasoning item is kept as empty-text placeholder (opencode DeepSeek requires reasoning on every assistant turn)"
-        );
-        assert_eq!(input[0]["type"], "reasoning");
-        assert_eq!(
-            input[0]["summary"],
-            json!([{"type": "summary_text", "text": "plain summary"}])
-        );
-        assert!(
-            input[0].get("encrypted_content").is_none(),
-            "encrypted_content must be stripped for non-gpt target"
-        );
-        assert_eq!(input[1]["type"], "reasoning");
-        assert_eq!(
-            input[1]["text"],
-            "",
-            "encrypted-only reasoning item becomes empty-text reasoning placeholder"
-        );
-        assert!(
-            input[1].get("encrypted_content").is_none(),
-            "placeholder must not carry encrypted_content"
-        );
-        assert_eq!(input[2]["type"], "message");
-    }
-
-    #[test]
-    fn wire_keeps_encrypted_reasoning_content_for_gpt_target() {
-        let mut target = target();
-        target.canonical_model_id = "gpt-5.6-sol".into();
-        let body = json!({
-            "model": "upstream-model",
-            "input": [
-                {
-                    "type": "reasoning",
-                    "id": "item_rsn_1",
-                    "summary": [{"type": "summary_text", "text": "plain summary"}],
-                    "encrypted_content": "rsn_encrypted"
-                }
-            ]
-        });
-        let wire = build_v3_provider_12_responses_wire_payload("req-1", target, body).unwrap();
-        let input = wire.body()["input"].as_array().unwrap();
-        assert_eq!(input.len(), 1);
-        assert_eq!(input[0]["encrypted_content"], "rsn_encrypted");
-    }
 }
+

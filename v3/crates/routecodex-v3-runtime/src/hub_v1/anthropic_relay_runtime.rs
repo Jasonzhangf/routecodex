@@ -625,6 +625,15 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let selected_target_model_id = selected.candidate.model_id.clone();
         let selected_target_compatibility_profile =
             selected.candidate.compatibility_profile.clone();
+        // VR 路由决策时算好的"保留响应密文"标记：仅 gpt 模型 + 单一 provider 候选时
+        // 保留（Codex 客户端需要官方密文重建 reasoning 历史），其余 Resp03 一律剥离。
+        // 该标记写入响应侧 profile，响应侧只消费此结果，不重复判定。
+        response_hook_profile = response_hook_profile.clone().with_retain_response_cipher(
+            is_v3_retain_response_cipher(
+                selected.route.target_plan.len(),
+                &selected.candidate.model_id,
+            ),
+        );
         let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
             req05.clone(),
             V3HubTargetResolution::Routed,

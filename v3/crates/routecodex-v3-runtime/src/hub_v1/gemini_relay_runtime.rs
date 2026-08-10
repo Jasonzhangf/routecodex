@@ -272,9 +272,16 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         compatibility_profile: Option<&str>,
         _web_search_execution_mode: V3WebSearchExecutionMode,
         _web_search_state: Option<&V3WebSearchCenterState>,
+        retain_response_cipher: bool,
     ) -> Result<Value, V3RelayCoreError> {
-        project_json_response(provider_value, transport_intent, trace, compatibility_profile)
-            .map_err(|error| V3RelayCoreError::Target(error.to_string()))
+        project_json_response(
+            provider_value,
+            transport_intent,
+            trace,
+            compatibility_profile,
+            retain_response_cipher,
+        )
+        .map_err(|error| V3RelayCoreError::Target(error.to_string()))
     }
 
     fn build_sse_outcome(
@@ -303,9 +310,10 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         compatibility_profile: Option<String>,
         _web_search_execution_mode: V3WebSearchExecutionMode,
         _web_search_state: Option<V3WebSearchCenterState>,
+        _retain_response_cipher: bool,
         outcome: V3GeminiSseProviderOutcome,
     ) -> Result<V3GeminiRelayClientStream, V3RelayCoreError> {
-        Ok(project_sse_stream(provider, compatibility_profile, outcome))
+        Ok(project_sse_stream(provider, compatibility_profile, _retain_response_cipher, outcome))
     }
 
     fn assemble_json_output(
@@ -410,6 +418,7 @@ fn project_json_response(
     transport_intent: V3HubTransportIntent,
     trace: &mut Vec<&'static str>,
     compatibility_profile: Option<&str>,
+    retain_response_cipher: bool,
 ) -> Result<Value, V3GeminiRelayRuntimeError> {
     validate_v3_gemini_provider_response_payload(
         &provider_value,
@@ -432,7 +441,11 @@ fn project_json_response(
     let resp02 = hooks.normalize(resp01)?;
     trace.push("ProviderRespCompat02ProviderCompat");
     trace.push("V3HubRespInbound02Normalized");
-    let resp03 = hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty())?;
+    let resp03 = hooks.govern(
+        resp02,
+        &V3HubRelayResponseHookProfile::empty()
+            .with_retain_response_cipher(retain_response_cipher),
+    )?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
     trace.push("V3HubRespContinuation04Committed");
@@ -451,6 +464,8 @@ struct V3GeminiSseState {
     terminal: bool,
     done: bool,
     compatibility_profile: Option<String>,
+    /// 请求侧 VR 路由决策算好的"保留响应密文"标记，SSE 帧级 Resp03 消费。
+    retain_response_cipher: bool,
     provider_outcome: V3GeminiSseProviderOutcome,
 }
 
@@ -503,6 +518,7 @@ impl V3GeminiSseProviderOutcome {
 fn project_sse_stream(
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     compatibility_profile: Option<String>,
+    retain_response_cipher: bool,
     provider_outcome: V3GeminiSseProviderOutcome,
 ) -> V3GeminiRelayClientStream {
     use futures_util::StreamExt;
@@ -515,6 +531,7 @@ fn project_sse_stream(
         terminal: false,
         done: false,
         compatibility_profile,
+        retain_response_cipher,
         provider_outcome,
     };
     Box::pin(futures_util::stream::unfold(
@@ -606,7 +623,7 @@ fn enqueue_sse_client_chunks(
         let Some(data) = data else { continue };
         let payload: Value = serde_json::from_str(&data).map_err(|error| error.to_string())?;
         let client_payload =
-            project_sse_event_payload(payload, state.compatibility_profile.as_deref())?;
+            project_sse_event_payload(payload, state.compatibility_profile.as_deref(), state.retain_response_cipher)?;
         state.terminal = gemini_payload_has_terminal_finish_reason(&client_payload)?;
         state
             .pending
@@ -618,6 +635,7 @@ fn enqueue_sse_client_chunks(
 fn project_sse_event_payload(
     payload: Value,
     compatibility_profile: Option<&str>,
+    retain_response_cipher: bool,
 ) -> Result<Value, String> {
     let mut trace = Vec::new();
     project_json_response(
@@ -625,6 +643,7 @@ fn project_sse_event_payload(
         V3HubTransportIntent::Sse,
         &mut trace,
         compatibility_profile,
+        retain_response_cipher,
     )
     .map_err(|error| error.to_string())
 }

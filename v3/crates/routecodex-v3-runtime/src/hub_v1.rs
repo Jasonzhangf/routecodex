@@ -29,6 +29,7 @@ pub(crate) use provider_compat_shared::{
     build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers,
     build_v3_provider_transport_request_for_protocol, provider_wire_protocol_for_selected_candidate,
     provider_protocol_compat_id, provider_wire_protocol_for_provider_type,
+    is_v3_gpt_canonical_model, is_v3_retain_response_cipher,
 };
 mod relay_runtime_shared;
 pub(crate) use relay_runtime_shared::{

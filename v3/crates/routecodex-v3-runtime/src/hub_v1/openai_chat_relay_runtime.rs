@@ -234,6 +234,7 @@ fn project_json_response(
     compatibility_profile: Option<&str>,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<&V3WebSearchCenterState>,
+    retain_response_cipher: bool,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
     // SSE 流式帧 / JSON 兜底：候选 Mode B 时，payload 内出现**本地** websearch
     // function tool call 必须 fail-fast（禁止静默透传——内部工具无客户端投影）。
@@ -292,7 +293,8 @@ fn project_json_response(
     trace.push("V3HubRespInbound02Normalized");
     let hooks = compile_v3_hub_relay_response_hooks();
     let mut response_profile = V3HubRelayResponseHookProfile::empty()
-        .with_web_search_execution_mode(web_search_execution_mode);
+        .with_web_search_execution_mode(web_search_execution_mode)
+        .with_retain_response_cipher(retain_response_cipher);
     if let Some(state) = web_search_center_state {
         response_profile = response_profile.with_web_search_center_state(state.clone());
     }
@@ -339,6 +341,8 @@ struct V3OpenAiChatSseState {
     compatibility_profile: Option<String>,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<V3WebSearchCenterState>,
+    /// 请求侧 VR 路由决策算好的"保留响应密文"标记，SSE 帧级 Resp03 消费。
+    retain_response_cipher: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 }
 
@@ -393,6 +397,7 @@ fn project_sse_stream(
     compatibility_profile: Option<String>,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<V3WebSearchCenterState>,
+    retain_response_cipher: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3OpenAiChatClientStream {
     use futures_util::StreamExt;
@@ -408,6 +413,7 @@ fn project_sse_stream(
         compatibility_profile,
         web_search_execution_mode,
         web_search_center_state,
+        retain_response_cipher,
         provider_outcome,
     };
     Box::pin(futures_util::stream::unfold(
@@ -548,6 +554,7 @@ fn enqueue_sse_client_chunks(
             state.compatibility_profile.as_deref(),
             state.web_search_execution_mode,
             state.web_search_center_state.as_ref(),
+            state.retain_response_cipher,
         )
         .map_err(|error| match error {
             // 治理层拒绝（web_search Mode B 无投影路径）：不是 provider 流
@@ -580,6 +587,7 @@ fn project_sse_event_payload(
     compatibility_profile: Option<&str>,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<&V3WebSearchCenterState>,
+    retain_response_cipher: bool,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
     let mut trace = Vec::new();
     project_json_response(
@@ -591,6 +599,7 @@ fn project_sse_event_payload(
         compatibility_profile,
         web_search_execution_mode,
         web_search_center_state,
+        retain_response_cipher,
     )
 }
 
@@ -980,6 +989,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         compatibility_profile: Option<&str>,
         web_search_execution_mode: V3WebSearchExecutionMode,
         web_search_state: Option<&V3WebSearchCenterState>,
+        retain_response_cipher: bool,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response(
             provider_value,
@@ -990,6 +1000,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             compatibility_profile,
             web_search_execution_mode,
             web_search_state,
+            retain_response_cipher,
         )
         .map_err(|error| match error {
             V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
@@ -1027,6 +1038,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         compatibility_profile: Option<String>,
         web_search_execution_mode: V3WebSearchExecutionMode,
         web_search_state: Option<V3WebSearchCenterState>,
+        _retain_response_cipher: bool,
         outcome: V3OpenAiChatSseProviderOutcome,
     ) -> Result<V3OpenAiChatClientStream, V3RelayCoreError> {
         if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
@@ -1045,6 +1057,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             compatibility_profile,
             web_search_execution_mode,
             web_search_state,
+            _retain_response_cipher,
             outcome,
         ))
     }
