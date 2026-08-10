@@ -7302,7 +7302,7 @@ fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -> Vec<u8> {
 fn responses_direct_output_response_with_console(
     frame: V3Server16HttpFrame,
     stream_console_finalizer: Option<V3DirectSseConsoleFinalizer>,
-    _keepalive_interval: Duration,
+    keepalive_interval: Duration,
 ) -> Response<Body> {
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
@@ -7321,9 +7321,18 @@ fn responses_direct_output_response_with_console(
         V3Server16Body::Bytes(bytes) => bytes,
         V3Server16Body::Sse(stream) => {
             let stream = wrap_v3_direct_sse_console_stream(stream, stream_console_finalizer);
-            // Direct SSE 投影保真传输 provider 字节，不注入 transport keepalive。
+            // Direct SSE 投影保真传输 provider 字节，同时由 server 注入 transport
+            // keepalive：客户端 SSE 连接与 provider 状态解耦，provider 静默时
+            // 连接仍存活（错误/超时走 runtime 错误链，不在此层造错误帧）。
+            // Error06 终态错误帧（error_chain 非空）是 terminal 投影，保持
+            // "错误事件即首事件"确定性，不注入 keepalive。
+            let keepalive = if frame.error_chain.is_empty() {
+                Some(keepalive_interval)
+            } else {
+                None
+            };
             return builder
-                .body(v3_client_sse_body(stream, None))
+                .body(v3_client_sse_body(stream, keepalive))
                 .expect("typed response");
         }
     };

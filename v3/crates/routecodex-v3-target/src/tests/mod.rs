@@ -451,9 +451,11 @@ targets = [{ kind = "forwarder", id = "client", priority = 1 }]
     assert_eq!(expanded.candidates.len(), 1);
     assert_eq!(expanded.candidates[0].provider_id, "upstream");
     assert_eq!(expanded.candidates[0].model_id, "wire-model");
+    // Symmetric with `pool_targets_route_model` Forwarder branch: the candidate
+    // is addressable by the forwarder model and every target model it wraps.
     assert_eq!(
         expanded.candidates[0].visible_model_ids,
-        vec!["client-model"]
+        vec!["client-model", "wire-model"]
     );
 }
 
@@ -1422,4 +1424,71 @@ targets = [
     assert_eq!(expanded.candidates.len(), 1);
     assert_eq!(expanded.candidates[0].provider_id, "minimax");
     assert_eq!(expanded.candidates[0].model_id, "MiniMax-M3");
+}
+
+#[test]
+fn forwarder_target_model_visible_ids_match_requested_target_model() {
+    // 22:34 生产 503 复刻：forwarder.model=gpt-5.6 而 forwarder target
+    // model=gpt-5.6-sol（client 请求裸 gpt-5.6-sol）。pool_targets_route_model
+    // 判定 Forwarder 分支命中 target.model，但 expand_forwarder 只把
+    // forwarder.model 推入 visible_model_ids，导致 requested filter 把候选
+    // 全部滤光 -> RequestedModelUnavailable -> 假 no-candidate 503。
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.cc_sol]
+type = "responses"
+base_url = "http://cc-sol.invalid/v1"
+default_model = "gpt-5.6-sol"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "CC_SOL_KEY" }] }
+[providers.cc_sol.models."gpt-5.6-sol"]
+capabilities = ["text", "tools"]
+[forwarders.fwd_free]
+model = "gpt-5.6"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "cc_sol", model = "gpt-5.6-sol", key = "key1", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "fwd_free", priority = 1 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("gpt-5.6-sol".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 10,
+                route_classification: RouteClassification::default(),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "default");
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .expect(
+            "forwarder target model must be part of visible_model_ids so the \
+             requested-model filter matches the same identity pool_targets_route_model \
+             already matched",
+        );
+    assert_eq!(expanded.candidates.len(), 1);
+    assert_eq!(expanded.candidates[0].provider_id, "cc_sol");
+    assert_eq!(expanded.candidates[0].model_id, "gpt-5.6-sol");
+    assert!(expanded.candidates[0]
+        .visible_model_ids
+        .iter()
+        .any(|id| id == "gpt-5.6-sol"));
 }

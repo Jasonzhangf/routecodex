@@ -368,7 +368,7 @@ fn codex_sample_persistence_and_startup_retention_reject_missing_home() {
 }
 
 #[tokio::test]
-async fn direct_sse_http_projection_preserves_provider_bytes_without_keepalive() {
+async fn direct_sse_http_projection_injects_keepalive_and_preserves_provider_bytes() {
     let provider_bytes =
         b"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n".to_vec();
     let frame = V3Server16HttpFrame {
@@ -393,8 +393,17 @@ async fn direct_sse_http_projection_preserves_provider_bytes_without_keepalive()
         responses_direct_output_response_with_console(frame, None, Duration::from_millis(3_000));
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
 
-    // Direct SSE 投影保真传输 provider 字节，不注入 transport keepalive。
-    assert_eq!(body.as_ref(), provider_bytes.as_slice());
+    // Direct SSE 投影保真传输 provider 字节，同时由 server 注入 transport
+    // keepalive（客户端连接与 provider 状态解耦）；provider 帧必须原样在尾端。
+    let text = std::str::from_utf8(body.as_ref()).unwrap();
+    assert!(
+        text.starts_with(": keepalive\n\n"),
+        "expected keepalive comment first: {text:?}"
+    );
+    assert!(
+        text.ends_with("event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"),
+        "provider bytes must be preserved verbatim: {text:?}"
+    );
 }
 
 #[tokio::test]
@@ -2966,7 +2975,7 @@ async fn dropping_responses_sse_body_releases_source_and_keepalive_timer_state()
 }
 
 #[tokio::test]
-async fn successful_direct_responses_sse_preserves_provider_bytes_without_keepalive() {
+async fn successful_direct_responses_sse_injects_keepalive_then_preserves_provider_bytes() {
     let frame = V3Server16HttpFrame {
         status: 200,
         content_type: "text/event-stream".to_string(),
@@ -2987,6 +2996,10 @@ async fn successful_direct_responses_sse_preserves_provider_bytes_without_keepal
     let response = responses_direct_output_response(frame, Duration::from_millis(3_000));
     let mut client = response.into_body().into_data_stream();
 
+    // server 注入的 transport keepalive 是首个 chunk（客户端连接与 provider
+    // 解耦），随后保真传输 provider 字节。
+    let first = client.next().await.unwrap().unwrap();
+    assert_eq!(first.as_ref(), b": keepalive\n\n");
     assert_eq!(
         client.next().await.unwrap().unwrap().as_ref(),
         b"event: response.created\ndata: {}\n\n"

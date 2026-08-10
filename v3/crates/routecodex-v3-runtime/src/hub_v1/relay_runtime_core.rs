@@ -29,6 +29,45 @@ use routecodex_v3_provider_responses::{
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Relay SSE 首帧守卫：provider 返回 SSE 后、投影前 await 首帧。首帧错误/空流/
+/// 挂起超时 -> V3ProviderError，走 provider 失败策略(reselect 切 provider)。
+/// 保证 provider SSE 错误在响应头前被捕获并切 provider，客户端无感、对话不断流。
+async fn guard_relay_sse_first_frame(
+    request_id: &str,
+    provider_id: &str,
+    mut stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+) -> Result<routecodex_v3_provider_responses::V3ProviderSseStream, V3ProviderError> {
+    use futures_util::StreamExt;
+    let first = tokio::time::timeout(
+        V3_RELAY_SSE_FIRST_FRAME_TIMEOUT,
+        stream.next(),
+    )
+    .await
+    .map_err(|_| V3ProviderError::Transport {
+        request_id: request_id.to_string(),
+        provider_id: provider_id.to_string(),
+        reason: "provider SSE stream did not produce a first frame within timeout".to_string(),
+    })?;
+    match first {
+        Some(Ok(chunk)) => {
+            // 保真重放首帧后再接 provider 流（语义不变，仅前置首帧检测）。
+            let replay =
+                futures_util::stream::iter(vec![Ok(chunk)]).chain(stream);
+            Ok(Box::pin(replay))
+        }
+        Some(Err(error)) => Err(error),
+        None => Err(V3ProviderError::Transport {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: "provider SSE stream ended before first frame".to_string(),
+        }),
+    }
+}
+
+/// Relay SSE 首帧超时（与 Direct SSE 首帧守卫一致，30s）。
+const V3_RELAY_SSE_FIRST_FRAME_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(30);
 use std::fmt;
 
 /// 骨架内部错误（协议入口负责映射到自身错误类型）。
@@ -535,8 +574,42 @@ where
             }
             V3ProviderResponseBody::Sse(stream) => {
                 push_sse_response_chain_trace(&mut trace);
-                let sse = C::project_sse(
+                // 首帧守卫：provider SSE 首帧错误/空流/挂起在响应头前被捕获，
+                // 走 provider 失败策略切 provider（客户端无感，对话不断流）。
+                let guarded_stream = match guard_relay_sse_first_frame(
+                    request_id,
+                    &selected_target_provider_id,
                     stream,
+                )
+                .await
+                {
+                    Ok(stream) => stream,
+                    Err(error) => {
+                        let failure =
+                            provider_runtime_failure(error, &selected_target_provider_id);
+                        drop(provider_action_permit.take());
+                        if let Some(failure) = handle_provider_failure(
+                            &failure_context,
+                            selected,
+                            failure,
+                            &mut V3RelayProviderFailurePolicyState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                trace: &mut trace,
+                            },
+                            &mut retry_selected,
+                            &mut pending_provider_action_recovery,
+                        )
+                        .await
+                        .map_err(V3RelayCoreError::Target)?
+                        {
+                            return Ok(C::assemble_failure_output(failure, trace));
+                        }
+                        continue;
+                    }
+                };
+                let sse = C::project_sse(
+                    guarded_stream,
                     provider_wire_protocol,
                     selected_target_compatibility_profile,
                     selected.candidate.web_search_execution_mode,

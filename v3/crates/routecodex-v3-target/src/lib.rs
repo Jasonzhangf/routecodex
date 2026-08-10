@@ -381,7 +381,19 @@ impl V3TargetInterpreter {
             .ok_or_else(|| V3TargetError::ForwarderMissing(forwarder_id.to_string()))?;
         // The forwarder model is the configured client-visible target identity. Validation
         // still happens at the provider layer after the nested wire model is resolved.
+        // visible_model_ids must stay symmetric with `pool_targets_route_model`'s
+        // Forwarder branch (forwarder.model / aliases / targets[].model); otherwise a
+        // requested model matched by the route-model predicate is filtered out during
+        // expansion and the selected target falsely exhausts into a no-candidate 503.
         push_unique_visible_model_id(&mut scope.visible_model_ids, &forwarder.model);
+        for alias in &forwarder.aliases {
+            push_unique_visible_model_id(&mut scope.visible_model_ids, alias);
+        }
+        for target in &forwarder.targets {
+            if let Some(model) = target.model.as_deref() {
+                push_unique_visible_model_id(&mut scope.visible_model_ids, model);
+            }
+        }
         let order = self.policy_order(
             &forwarder.selection.strategy,
             &forwarder.targets,
