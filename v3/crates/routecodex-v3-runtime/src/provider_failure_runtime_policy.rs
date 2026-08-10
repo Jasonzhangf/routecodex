@@ -872,6 +872,9 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         .or_insert(0);
     if health_record.state != "cooldown"
         && *retries_done < context.retry_policy.same_candidate_retries
+        // 400 客户端请求错误（如 context window 超限）重试结果必然相同：
+        // 同一 provider 不重试，直接 reselect 到下一个候选。
+        && status != 400
     {
         *retries_done = retries_done.saturating_add(1);
         state.trace.push("V3TargetLocalRetried");

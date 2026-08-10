@@ -213,7 +213,10 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         && (context.provider_pinned
             || selected.default_floor_protected
             || selected.candidate.default_pool_member)
-        && retries_done < V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET;
+        && retries_done < V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET
+        // 400/InvalidRequest（客户端请求错误，如 context window 超限）重试结果
+        // 必然相同：同一 provider 不重试，直接 reselect 到下一个候选。
+        && source.source_kind != V3ErrorSourceKind::InvalidRequest;
     let cross_session_revive_admitted = remaining == 0
         && context
             .provider_health
