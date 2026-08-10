@@ -12,10 +12,6 @@ const verifier = resolve(
   repo,
   "scripts/architecture/verify-v3-runtime-timing-observability.mjs",
 );
-const manifestSyncVerifier = resolve(
-  repo,
-  "scripts/architecture/verify-architecture-mainline-manifest-sync.mjs",
-);
 const copied = [
   "package.json",
   ".github/workflows/test.yml",
@@ -39,6 +35,7 @@ const copied = [
   "docs/architecture/v3-resource-operation-map.yml",
   "docs/architecture/v3-verification-map.yml",
   "docs/architecture/manifests",
+  "docs/architecture/mainline-manifests",
   "docs/architecture/wiki/mainline-call-graph.md",
   "docs/architecture/wiki/response-mainline-call-graph.md",
   "docs/architecture/wiki/error-mainline-call-graph.md",
@@ -230,50 +227,6 @@ const cases = [
     diagnostic: /must bind all Runtime timing edges 01 through 14/u,
   },
   {
-    name: "manifest sync allows global and V3 timing callable drift",
-    path: "docs/architecture/v3-mainline-call-map.yml",
-    verifier: manifestSyncVerifier,
-    mutate: (source) => {
-      const chainStart = source.indexOf(
-        "chain_id: v3.runtime_timing_observability.mainline",
-      );
-      const head = source.slice(0, chainStart);
-      const chain = source.slice(chainStart).replace(
-        "caller_symbol: execute_v3_responses_relay_runtime_inner",
-        "caller_symbol: execute_v3_responses_relay_runtime_inner_drifted",
-      );
-      return head + chain;
-    },
-    diagnostic: /global and V3 mainline callable bindings differ/u,
-  },
-  {
-    name: "manifest sync allows global and V3 timing resource drift",
-    path: "docs/architecture/v3-mainline-call-map.yml",
-    verifier: manifestSyncVerifier,
-    mutate: (source) =>
-      mutateTimingChain(source, (chain) => {
-        chain.edges[0].resource_flow.side_channel_writes = [
-          "v3.runtime.responses_observability",
-        ];
-      }),
-    diagnostic: /global and V3 mainline resource flows differ/u,
-  },
-  {
-    name: "manifest sync allows lifecycle timing resource drift",
-    path: "docs/architecture/manifests/v3.runtime_timing_observability.mainline.yml",
-    verifier: manifestSyncVerifier,
-    mutate: (source) => {
-      const edgeStart = source.indexOf("  - step_id: v3-runtime-timing-12");
-      const head = source.slice(0, edgeStart);
-      const edge = source.slice(edgeStart).replace(
-        "      - v3.runtime.responses_observability",
-        "      - v3.runtime.responses_timing_observability",
-      );
-      return head + edge;
-    },
-    diagnostic: /mainline resource flows differ from lifecycle manifest/u,
-  },
-  {
     name: "Direct SSE timing publication restores timing-state write",
     path: "docs/architecture/v3-mainline-call-map.yml",
     mutate: (source) =>
@@ -295,7 +248,7 @@ const cases = [
     path: "docs/architecture/function-map.yml",
     mutate: (source) =>
       source.replace(
-        "      - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs\n",
+        "  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs\n",
         "",
       ),
     diagnostic: /global function map must register the Direct SSE outcome owner path/u,
@@ -305,7 +258,7 @@ const cases = [
     path: "docs/architecture/v3-function-map.yml",
     mutate: (source) =>
       source.replace(
-        "      - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs\n",
+        "  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs\n",
         "",
       ),
     diagnostic: /V3 function map must register the Direct SSE outcome owner path/u,

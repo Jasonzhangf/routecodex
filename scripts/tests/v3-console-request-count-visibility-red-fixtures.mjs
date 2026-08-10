@@ -87,8 +87,8 @@ const cases = [
     path: "docs/architecture/v3-resource-operation-map.yml",
     mutate: (source) =>
       source.replace(
-        "    owner_feature_id: v3.console_request_count_visibility\n    owner_node: V3RequestCounter01AggregateOwned",
-        "    owner_feature_id: v3.server_request_identity_scope\n    owner_node: V3RequestCounter01AggregateOwned",
+        "    owner_feature_id: v3.console_request_count_visibility\n    owner_crate: routecodex-v3-server\n    owner_node: V3RequestCounter01AggregateOwned",
+        "    owner_feature_id: v3.server_request_identity_scope\n    owner_crate: routecodex-v3-server\n    owner_node: V3RequestCounter01AggregateOwned",
       ),
     diagnostic: /single registered count feature/u,
   },
@@ -127,8 +127,8 @@ const cases = [
     path: "docs/architecture/function-map.yml",
     mutate: (source) =>
       source.replace(
-        "      writes: [v3.server.request_identity]",
-        "      writes: []",
+        "    writes:\n    - v3.server.request_identity",
+        "    writes: []",
       ),
     diagnostic: /must write only v3.server.request_identity/u,
   },
@@ -137,8 +137,8 @@ const cases = [
     path: "docs/architecture/function-map.yml",
     mutate: (source) =>
       source.replace(
-        "      writes: [v3.server.request_identity]",
-        "      writes: [v3.server.request_identity, v3.console.terminal_output]",
+        "    writes:\n    - v3.server.request_identity",
+        "    writes:\n    - v3.server.request_identity\n    - v3.console.terminal_output",
       ),
     diagnostic: /must write only v3.server.request_identity/u,
   },
@@ -146,7 +146,7 @@ const cases = [
     name: "global count function map drops a mainline binding",
     path: "docs/architecture/function-map.yml",
     mutate: (source) =>
-      source.replace("      - v3-console-count-04\n", ""),
+      source.replace("  - v3-console-count-04\n", ""),
     diagnostic: /global function map must bind request count edges 01 through 04 in order/u,
   },
   {
@@ -154,8 +154,8 @@ const cases = [
     path: "docs/architecture/v3-function-map.yml",
     mutate: (source) =>
       source.replace(
-        "      - v3-console-count-02\n      - v3-console-count-03",
-        "      - v3-console-count-03\n      - v3-console-count-02",
+        "  - v3-console-count-02\n  - v3-console-count-03",
+        "  - v3-console-count-03\n  - v3-console-count-02",
       ),
     diagnostic: /V3 function map must bind request count edges 01 through 04 in order/u,
   },
@@ -163,7 +163,7 @@ const cases = [
     name: "global count verification map drops a mainline binding",
     path: "docs/architecture/verification-map.yml",
     mutate: (source) =>
-      source.replace("      - v3-console-count-04\n", ""),
+      source.replace("  - v3-console-count-04\n", ""),
     diagnostic: /global verification map must bind request count edges 01 through 04 in order/u,
   },
   {
@@ -171,8 +171,8 @@ const cases = [
     path: "docs/architecture/v3-verification-map.yml",
     mutate: (source) =>
       source.replace(
-        "      - v3-console-count-02\n      - v3-console-count-03",
-        "      - v3-console-count-03\n      - v3-console-count-02",
+        "  - v3-console-count-02\n  - v3-console-count-03",
+        "  - v3-console-count-03\n  - v3-console-count-02",
       ),
     diagnostic: /V3 verification map must bind request count edges 01 through 04 in order/u,
   },
