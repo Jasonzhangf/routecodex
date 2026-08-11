@@ -114,11 +114,11 @@ fn normalize_responses_content_parts(item: &mut Value) {
         let Some(row) = part.as_object_mut() else {
             continue;
         };
-        let part_type = row.get("type").and_then(Value::as_str);
-        let is_image = matches!(part_type, Some("input_image" | "output_image"))
-            && (row.contains_key("image_url")
-                || row.contains_key("data")
-                || row.contains_key("file_id"));
+        // 有 image_url / data / file_id 即视为图片（Codex 的 fco.output 图片 part
+        // 有时不带 type 字段——只靠 type 匹配会漏，历史 base64 原样进 wire → context 400）。
+        let is_image = row.contains_key("image_url")
+            || row.contains_key("data")
+            || row.contains_key("file_id");
         if is_image {
             *part = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
         }
@@ -139,11 +139,11 @@ fn normalize_responses_output_parts(item: &mut Value) {
         let Some(row) = part.as_object_mut() else {
             continue;
         };
-        let part_type = row.get("type").and_then(Value::as_str);
-        let is_image = matches!(part_type, Some("input_image" | "output_image"))
-            && (row.contains_key("image_url")
-                || row.contains_key("data")
-                || row.contains_key("file_id"));
+        // 与 content[] 一致：有 image_url / data / file_id 即视为图片
+        // （Codex 的 fco.output 图片 part 有时不带 type 字段）。
+        let is_image = row.contains_key("image_url")
+            || row.contains_key("data")
+            || row.contains_key("file_id");
         if is_image {
             *part = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
         }
@@ -441,6 +441,28 @@ mod tests {
             body["input"][1]["output"][0]["type"],
             "input_image",
             "current-turn tool output image must be preserved"
+        );
+    }
+
+    #[test]
+    fn image_part_without_type_field_is_cleaned() {
+        // Codex 的 fco.output 图片 part 有时不带 type 字段（只有 image_url）：
+        // 只靠 type 匹配会漏，必须按 image_url/data/file_id 判定。
+        let mut body = json!({
+            "input": [
+                {"type": "function_call_output", "call_id": "call_1", "output": [
+                    {"detail": "original", "image_url": "data:image/png;base64,CCCC"}
+                ]},
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "current turn"}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["input"][0]["output"][0],
+            json!({"type": "input_text", "text": V3_HISTORY_IMAGE_PLACEHOLDER}),
+            "image part without type field must become placeholder"
         );
     }
 }
