@@ -371,9 +371,10 @@ pub(super) fn normalize_json_schema_redaction_placeholders(
     path: &str,
 ) -> Result<(), String> {
     match value {
-        Value::String(text) if schema_position && text == "[REDACTED]" => Err(format!(
-            "MalformedOutboundField path={path} reason=redacted_schema_placeholder"
-        )),
+        // 客户端 tools schema 中的 "[REDACTED]" 是 Codex 客户端的 redaction 占位
+        // （如 API key / 敏感默认值），必须原样透传（不在请求侧清洗/拒绝）；
+        // provider 是否接受由 provider 决定。见 builtin tool projection 契约。
+        Value::String(text) if schema_position && text == "[REDACTED]" => Ok(()),
         Value::Object(map) if schema_position => {
             for (key, child) in map {
                 normalize_json_schema_redaction_object_member(

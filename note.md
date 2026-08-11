@@ -34882,3 +34882,13 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
   - Mode B 本地搜索自动续轮：替换为本地 `websearch`，Resp03 拦截 → 强制 route=websearch → 重入 VR search-dispatch edge 一次额外 hop → 拦截搜索响应 → 投影 Responses `web_search_call` 等价结果
 - `V3WebSearchExecutionMode`（config types.rs:592）：`None` / `NativeRemoteSearchToolMix` / `NativeRemoteSearchSearchOnly` / `MetadataCenterLocalSearch` / `ServertoolSearchBackend`
 - **当前配置问题**：MiniMax-M3 标 `web_search_execution_mode = "metadata_center_local_search"`（Mode B），但实测 MiniMax 是 anthropic native server tool（Mode A 自动跑）——配置与真实能力不符，待 Jason 决策是否改为 native。
+
+# 2026-08-11T07:40+08:00 22:34 gpt-5.6-sol 503 根因修复 + SSE 客户端解耦（在线验证闭环）
+
+- 根因（22:34 大量 503 selected_target_exhausted，10000 端口 model=gpt-5.6-sol）：`selected_route_requested_model_filter`（routecodex-v3-target lib.rs）判定 `pool_targets_route_model` Forwarder 分支命中 forwarder.targets[].model（gpt-5.6-sol）→ filter=Some("gpt-5.6-sol")；但 `expand_forwarder` 只把 forwarder.model（gpt-5.6）推入 visible_model_ids → expand_provider 匹配失败 → 候选空 → 假 no-candidate 503。
+- 修复：expand_forwarder visible_model_ids 与判定对称（forwarder.model + aliases + targets[].model）。红测 forwarder_target_model_visible_ids_match_requested_target_model（先红后绿）。
+- SSE 解耦：B1 direct passthrough keepalive 注入（server lib.rs responses_direct_output_response_with_console，error_chain 非空=Error06 终态不注入）；B2 shared.rs 首帧挂起超时 guard → Error01 provider_response_sse_first_event_timeout → 错误链（正反测试）。B3 relay 首帧守卫由并行 worker 已在 relay_runtime_core.rs 共享层实现（唯一 owner），我的 openai_chat_relay_runtime 重复实现已撤回。
+- 验证：target 27/27、shared guard 2/2、server lib 82/82、virtual-router 21/21；install 0.90.4261（stop→install→codesign→config check→start，env 需从 ~/.zshrc 提取，`zsh -lc` 不加载 .zshrc）；4 端口 /health ok；22:34 样本在线重放 HTTP 201 + response.created/delta/completed（原 503），修复后零新 503；replay 首 chunk 为 ": keepalive"（B1 生效）。
+- 基线红（非本次引入，HEAD 即红）：multi_listener_server 22 个（provider response status is required）+ runtime 2 个 openai_chat_provider_reasoning 测试。
+- 观察到的其它问题：08:09 minimax_anthropic Relay provider compat 502（chat:minimax Anthropic codec malformed tools[].name）——独立于本次修复。
+- 未跑 codex-review（改动已验证+安装+在线重放，review 待执行）。

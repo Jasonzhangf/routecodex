@@ -663,7 +663,7 @@ async fn responses_relay_openai_chat_target_projects_registered_builtin_tools() 
 }
 
 #[tokio::test]
-async fn responses_relay_openai_chat_target_rejects_redacted_tool_schema_placeholders() {
+async fn responses_relay_openai_chat_target_passes_through_redacted_tool_schema_placeholders() {
     let transport = SingleJsonCaptureTransport {
         captures: Mutex::new(Vec::new()),
         response: json!({
@@ -718,33 +718,15 @@ async fn responses_relay_openai_chat_target_rejects_redacted_tool_schema_placeho
         &transport,
     )
     .await
-    .expect("redacted schema placeholders must project a client-visible error");
+    .expect("redacted schema placeholders must pass through to provider wire");
 
-    assert_eq!(output.status, 502);
-    assert_eq!(
-        output.error_chain.as_ref().unwrap(),
-        &V3_ERROR_CHAIN_NODE_IDS
-    );
-    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
-    let provider_event = &output
-        .observability
-        .as_ref()
-        .expect("provider compat failure must be observable")
-        .provider_failure_events[0];
-    assert!(provider_event.message.contains("MalformedOutboundField"));
-    assert!(provider_event
-        .message
-        .contains("redacted_schema_placeholder"));
+    assert_eq!(output.status, 200);
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1, "redacted schema placeholders must reach provider wire");
+    let wire_text = serde_json::to_string(&captures[0]).expect("wire serializable");
     assert!(
-        provider_event
-            .message
-            .contains("$.tools[0].parameters.properties.max_output_tokens"),
-        "{}",
-        provider_event.message
-    );
-    assert!(
-        transport.captures.lock().unwrap().is_empty(),
-        "redacted schema placeholders must not reach provider wire"
+        wire_text.contains("[REDACTED]"),
+        "client [REDACTED] schema placeholders must be passed through, got {wire_text}"
     );
 }
 
