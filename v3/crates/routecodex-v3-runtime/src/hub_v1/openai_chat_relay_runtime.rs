@@ -582,6 +582,186 @@ fn enqueue_sse_client_chunks(
     Ok(())
 }
 
+fn project_responses_sse_as_openai_chat_stream(
+    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+    provider_outcome: V3OpenAiChatSseProviderOutcome,
+) -> V3OpenAiChatClientStream {
+    use futures_util::StreamExt;
+    let decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
+        routecodex_v3_sse::SseTransportLimits::default(),
+    );
+    let transducer = V3OpenAiChatResponsesSseTransducer::new();
+    Box::pin(futures_util::stream::unfold(
+        (
+            stream,
+            decoder,
+            transducer,
+            VecDeque::<Vec<u8>>::new(),
+            false,
+            false,
+            provider_outcome,
+        ),
+        |(
+            mut provider,
+            mut decoder,
+            mut transducer,
+            mut pending,
+            mut done_seen,
+            mut finished,
+            mut provider_outcome,
+        )| async move {
+            loop {
+                if let Some(frame) = pending.pop_front() {
+                    return Some((
+                        Ok(frame),
+                        (
+                            provider,
+                            decoder,
+                            transducer,
+                            pending,
+                            done_seen,
+                            finished,
+                            provider_outcome,
+                        ),
+                    ));
+                }
+                if finished {
+                    return None;
+                }
+                let Some(chunk) = provider.next().await else {
+                    finished = true;
+                    let decoder_to_finish = std::mem::replace(
+                        &mut decoder,
+                        routecodex_v3_sse::SseIncrementalDecoder::new(
+                            routecodex_v3_sse::SseTransportLimits::default(),
+                        ),
+                    );
+                    let decoder_result = decoder_to_finish
+                        .finish()
+                        .map_err(|error| error.to_string());
+                    let result = decoder_result.and_then(|_| transducer.finish());
+                    if let Err(error) = result {
+                        let recorded = provider_outcome.record_failure(&error).await;
+                        return Some((
+                            Err(recorded.map(|_| error).unwrap_or_else(|record| record)),
+                            (
+                                provider,
+                                decoder,
+                                transducer,
+                                pending,
+                                done_seen,
+                                finished,
+                                provider_outcome,
+                            ),
+                        ));
+                    }
+                    let success = provider_outcome.record_success();
+                    return match success {
+                        Ok(()) => None,
+                        Err(error) => Some((
+                            Err(error),
+                            (
+                                provider,
+                                decoder,
+                                transducer,
+                                pending,
+                                done_seen,
+                                finished,
+                                provider_outcome,
+                            ),
+                        )),
+                    };
+                };
+                let result = (|| -> Result<(), String> {
+                    let raw = match &chunk {
+                        Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
+                            finished = true;
+                            return Err(error.to_string());
+                        }
+                        Err(error) => return Err(error.to_string()),
+                        Ok(chunk) => {
+                            routecodex_v3_sse::build_v3_sse_transport_in_01_raw_chunk(chunk)
+                        }
+                    };
+                    for frame in decoder
+                        .push(raw)
+                        .map_err(|error| error.to_string())?
+                    {
+                        let mut data = None;
+                        for field in frame.frame().fields() {
+                            if let routecodex_v3_sse::SseField::Named { name, value } = field {
+                                if name == "data" {
+                                    data = Some(value.clone());
+                                }
+                            }
+                        }
+                        let Some(data) = data else {
+                            continue;
+                        };
+                        if data == "[DONE]" {
+                            continue;
+                        }
+                        if done_seen {
+                            return Err("Responses SSE emitted data after response.completed".to_string());
+                        }
+                        let event: Value = serde_json::from_str(&data)
+                            .map_err(|error| error.to_string())?;
+                        let event_type = event
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string();
+                        for payload in transducer.push_event(event)? {
+                            pending.push_back(format!("data: {payload}\n\n").into_bytes());
+                        }
+                        if event_type == "response.completed" {
+                            pending.push_back(b"data: [DONE]\n\n".to_vec());
+                            done_seen = true;
+                        }
+                    }
+                    Ok(())
+                })();
+                match result {
+                    Ok(()) if !pending.is_empty() => {
+                        continue;
+                    }
+                    Ok(_) => continue,
+                    Err(error) => {
+                        finished = true;
+                        if error.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
+                            return Some((
+                                Err(error),
+                                (
+                                    provider,
+                                    decoder,
+                                    transducer,
+                                    pending,
+                                    done_seen,
+                                    finished,
+                                    provider_outcome,
+                                ),
+                            ));
+                        }
+                        let recorded = provider_outcome.record_failure(&error).await;
+                        return Some((
+                            Err(recorded.map(|_| error).unwrap_or_else(|record| record)),
+                            (
+                                provider,
+                                decoder,
+                                transducer,
+                                pending,
+                                done_seen,
+                                finished,
+                                provider_outcome,
+                            ),
+                        ));
+                    }
+                }
+            }
+        },
+    ))
+}
+
 fn project_sse_event_payload(
     payload: Value,
     compatibility_profile: Option<&str>,
@@ -1045,6 +1225,16 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             return Ok(project_anthropic_sse_as_openai_chat_stream(
                 provider,
                 web_search_execution_mode,
+                outcome,
+            ));
+        }
+        if provider_wire_protocol == V3HubProviderWireProtocol::Responses {
+            // provider 以 Responses 协议 SSE 返回（如 cc-sol）：经 transducer
+            // 流式转换为 Chat SSE（response.created/output_text.delta/... ->
+            // chat.completion.chunk + [DONE]），不允许把 responses SSE 直接
+            // 当 chat SSE 透传（缺 choices 会让 chat 状态机 fail-fast）。
+            return Ok(project_responses_sse_as_openai_chat_stream(
+                provider,
                 outcome,
             ));
         }

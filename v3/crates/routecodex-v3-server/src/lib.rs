@@ -6985,10 +6985,13 @@ fn openai_chat_relay_output_response(output: V3OpenAiChatRelayRuntimeOutput) -> 
         .expect("typed V3 OpenAI Chat Relay response")
 }
 
-/// OpenAI Chat SSE 请求：等待 provider 完整响应 + resp 链转换完成后回 200 + SSE 流。
-/// 等待期连接保持（不回任何状态码、不发 keepalive 帧——keepalive 是内部心跳，
-/// 发给客户端会污染 SSE 语义）；完整链（req→provider→resp 转换）后台执行，
-/// 转换完成后 200 + 数据帧；中途错误投影为 SSE error 帧（客户端重试续杯）。
+/// OpenAI Chat SSE 请求（Relay）：客户端 SSE 连接由 proxy（routecodex）独立管理，
+/// 与 provider 完全解耦——不提前回任何状态码、不注入 keepalive/其他污染语义的帧，
+/// 连接在完整链（VR 命中 → Relay → Provider 请求 → provider 响应完整入站 + resp
+/// 转换）执行期间由 hyper 保持；provider 出错由内部 provider-failure 策略自动
+/// 切换（reselect），切完继续等最终响应，客户端全程无感知；最终以 200 + 完整
+/// SSE 响应体返回（Body::from 完整 bytes，规避 Body::from_stream 在 axum/hyper
+/// 写回前的连接关闭竞态——h2_p6）。
 async fn v3_openai_chat_relay_sse_accept_response(
     state: &Arc<V3ListenerState>,
     payload: Value,
@@ -7004,71 +7007,74 @@ async fn v3_openai_chat_relay_sse_accept_response(
         request_id: request_id.clone(),
         payload,
     };
-    let (tx, rx) =
-        tokio::sync::mpsc::channel::<Result<Vec<u8>, String>>(32);
-    let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
-    tokio::spawn(async move {
-        let result = execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
-            &manifest,
-            input,
-            provider_health,
-        )
-        .await;
-        let _ = done_tx.send(());
-        match result {
-            Ok(output) => match output.client_body {
-                V3OpenAiChatRelayClientBody::Sse(stream) => {
-                    let mut stream = stream;
-                    while let Some(chunk) = stream.next().await {
-                        if tx.send(chunk).await.is_err() {
+    let result = execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
+        &manifest,
+        input,
+        provider_health,
+    )
+    .await;
+    let full_body: Vec<u8> = match result {
+        Ok(output) => match output.client_body {
+            V3OpenAiChatRelayClientBody::Sse(stream) => {
+                // provider SSE 完整入站 + resp 转换后，收集为完整 SSE bytes 一次性返回。
+                let mut stream = stream;
+                let mut collected = Vec::new();
+                while let Some(chunk) = stream.next().await {
+                    match chunk {
+                        Ok(bytes) => collected.extend_from_slice(&bytes),
+                        Err(message) => {
+                            // 流内错误：以 SSE error 帧收尾（不静默断连）。
+                            let error_frame = serde_json::json!({
+                                "error": {
+                                    "message": format!("provider stream error: {message}"),
+                                    "type": "transport_error",
+                                    "code": "provider_stream_error",
+                                }
+                            });
+                            let bytes = serde_json::to_vec(&error_frame).unwrap_or_default();
+                            let mut frame = Vec::with_capacity(bytes.len() + 8);
+                            frame.extend_from_slice(b"data: ");
+                            frame.extend_from_slice(&bytes);
+                            frame.extend_from_slice(b"\n\n");
+                            collected.extend_from_slice(&frame);
                             break;
                         }
                     }
                 }
-                V3OpenAiChatRelayClientBody::Json(json) => {
-                    // provider 以 JSON 完成（非 SSE）：包装为 SSE data 帧喂给客户端。
-                    let bytes = serde_json::to_vec(&json).unwrap_or_default();
-                    let mut frame = Vec::with_capacity(bytes.len() + 8);
-                    frame.extend_from_slice(b"data: ");
-                    frame.extend_from_slice(&bytes);
-                    frame.extend_from_slice(b"\n\n");
-                    let _ = tx.send(Ok(frame)).await;
-                }
-            },
-            Err(error) => {
-                // 中途错误：投影为 SSE transport error 帧（客户端重试，下次命中
-                // 自动 switch provider 续杯），不用断连/EOF 让客户端误判。
-                let error_frame = serde_json::json!({
-                    "error": {
-                        "message": format!("provider transport error: {error}"),
-                        "type": "transport_error",
-                        "code": "provider_transport_error",
-                    }
-                });
-                let bytes = serde_json::to_vec(&error_frame).unwrap_or_default();
+                collected
+            }
+            V3OpenAiChatRelayClientBody::Json(json) => {
+                // provider 以 JSON 完成（非 SSE）：包装为 SSE data 帧。
+                let bytes = serde_json::to_vec(&json).unwrap_or_default();
                 let mut frame = Vec::with_capacity(bytes.len() + 8);
                 frame.extend_from_slice(b"data: ");
                 frame.extend_from_slice(&bytes);
                 frame.extend_from_slice(b"\n\n");
-                let _ = tx.send(Ok(frame)).await;
+                frame
             }
+        },
+        Err(error) => {
+            // provider 穷尽（错误链已内部切/记录）：投影为 SSE transport error 帧，
+            // 客户端重试时下次命中自动排除坏 provider（续杯），不用断连误导客户端。
+            let error_frame = serde_json::json!({
+                "error": {
+                    "message": format!("provider transport error: {error}"),
+                    "type": "transport_error",
+                    "code": "provider_transport_error",
+                }
+            });
+            let bytes = serde_json::to_vec(&error_frame).unwrap_or_default();
+            let mut frame = Vec::with_capacity(bytes.len() + 8);
+            frame.extend_from_slice(b"data: ");
+            frame.extend_from_slice(&bytes);
+            frame.extend_from_slice(b"\n\n");
+            frame
         }
-    });
-    // 等待完整链（provider 响应 + resp 转换）完成——连接保持，不回任何状态码。
-    let _ = done_rx.await;
-    let client_stream: V3OpenAiChatClientStream = Box::pin(futures_util::stream::unfold(
-        rx,
-        |mut rx| async move { rx.recv().await.map(|item| (item, rx)) },
-    ));
-    let io_stream = Box::pin(client_stream.map(|item| match item {
-        Ok(bytes) => Ok::<Vec<u8>, std::io::Error>(bytes),
-        Err(message) => Err(std::io::Error::other(message)),
-    }));
-    let body = Body::from_stream(io_stream);
+    };
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/event-stream")
-        .body(body)
+        .body(Body::from(full_body))
         .expect("SSE accept response")
 }
 
