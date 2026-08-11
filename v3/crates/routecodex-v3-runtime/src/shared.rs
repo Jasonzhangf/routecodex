@@ -121,6 +121,11 @@ pub(crate) async fn project_provider_raw_to_client_payload(
         ));
     }
     let status = raw.status();
+    // 客户端↔proxy 响应状态由 proxy（routecodex）管理，与 provider 无关：
+    // provider 的 201（OpenAI Responses API 创建成功）归一化为 200 成功，
+    // 避免透传非标准状态码让客户端误判（如 Codex 收到 201 → 无可见答案 →
+    // 无限重试）；>=400 已在上方进入错误链（切 provider）。
+    let status = if status == 201 { 200 } else { status };
     let content_type = raw
         .header_text("content-type")
         .map_err(provider_body_source)?
