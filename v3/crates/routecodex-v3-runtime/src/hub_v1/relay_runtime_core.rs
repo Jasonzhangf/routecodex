@@ -75,6 +75,13 @@ const V3_RELAY_SSE_FIRST_FRAME_TIMEOUT: std::time::Duration =
 /// provider（无法续杯 switch）。
 const V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(15);
+
+/// Relay 收集 provider SSE 流时的流空闲上限：首帧已收到、但后续数据挂起
+/// （连接保持、不失败、无新帧）超过该窗口 → 归一化为 Transport 错误进入错误链
+/// （记录 provider failure + reselect 切 provider + 连续失败拉黑），否则客户端
+/// 会无限重试命中同一挂起 provider（半截响应/断流无感知）。
+const V3_RELAY_SSE_STREAM_IDLE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(30);
 use std::fmt;
 
 /// 骨架内部错误（协议入口负责映射到自身错误类型）。
@@ -649,30 +656,50 @@ where
                     ),
                 )?;
                 // 收集完整 SSE 流（空检测：transducer 空响应标记 → 流内 Err）。
-                // 空响应作为 provider failure 进入错误链（reselect/同 provider 重试
-                // 预算 3 次 → 穷尽后 502 投影），不在 server 层做重试/502 决策。
+                // 空响应/流空闲挂起作为 provider failure 进入错误链（reselect/
+                // 同 provider 重试预算 3 次 → 穷尽后 502 投影），不在 server 层
+                // 做重试/502 决策。
                 let mut sse_bytes: Vec<Vec<u8>> = Vec::new();
-                let mut empty_response: Option<String> = None;
+                let mut stream_error: Option<V3ProviderError> = None;
                 {
                     use futures_util::StreamExt;
                     let mut sse = sse;
-                    while let Some(item) = sse.next().await {
+                    loop {
+                        let item = tokio::time::timeout(
+                            V3_RELAY_SSE_STREAM_IDLE_TIMEOUT,
+                            sse.next(),
+                        )
+                        .await;
                         match item {
-                            Ok(bytes) => sse_bytes.push(bytes),
-                            Err(error) => {
-                                empty_response = Some(error.to_string());
+                            Ok(Some(Ok(bytes))) => sse_bytes.push(bytes),
+                            Ok(Some(Err(error))) => {
+                                stream_error = Some(V3ProviderError::Transport {
+                                    request_id: request_id.to_string(),
+                                    provider_id: selected_target_provider_id.clone(),
+                                    reason: format!("empty provider response: {error}"),
+                                });
+                                break;
+                            }
+                            Ok(None) => break,
+                            Err(_elapsed) => {
+                                // provider SSE 流空闲挂起（首帧后无新帧、连接保持）：
+                                // 归一化为 Transport 错误进入错误链（记录 provider
+                                // failure + reselect 切 provider），避免客户端无限
+                                // 重试命中同一挂起 provider。
+                                stream_error = Some(V3ProviderError::Transport {
+                                    request_id: request_id.to_string(),
+                                    provider_id: selected_target_provider_id.clone(),
+                                    reason: "provider SSE stream idle (suspected hang)"
+                                        .to_string(),
+                                });
                                 break;
                             }
                         }
                     }
                 }
-                if let Some(empty_error) = empty_response {
+                if let Some(stream_error) = stream_error {
                     let failure = provider_runtime_failure(
-                        V3ProviderError::Transport {
-                            request_id: request_id.to_string(),
-                            provider_id: selected_target_provider_id.clone(),
-                            reason: format!("empty provider response: {empty_error}"),
-                        },
+                        stream_error,
                         &selected_target_provider_id,
                     );
                     if let Some(failure) = handle_provider_failure(
