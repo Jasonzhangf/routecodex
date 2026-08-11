@@ -73,7 +73,9 @@ impl V3AdaptiveConcurrencyPermitGuard {
 impl Drop for V3AdaptiveConcurrencyPermitGuard {
     fn drop(&mut self) {
         if let Some(permit) = self.permit.take() {
-            let _ = self.controller.release(permit);
+            self.controller
+                .release(permit)
+                .expect("adaptive concurrency permit release must never fail: lease underflow or missing provider key indicates invariant corruption and must fail fast instead of silently hanging the provider");
         }
     }
 }

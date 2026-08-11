@@ -783,6 +783,7 @@ async fn provider_failure_reselects_without_router_reentry() {
                         status: 400,
                         headers: Vec::new(),
                         body: br#"{"error":{"code":"HTTP_400","message":"first provider rejected request"}}"#.to_vec(),
+                        body_read_failure: None,
                     }),
                 });
             }

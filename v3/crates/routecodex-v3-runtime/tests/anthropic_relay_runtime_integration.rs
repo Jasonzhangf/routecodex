@@ -371,6 +371,7 @@ impl ResponsesTransport for ErrorTransport {
                 headers: vec![],
                 body: br#"{"error":{"type":"rate_limit_error","message":"controlled rate limit"}}"#
                     .to_vec(),
+                body_read_failure: None,
             }),
         })
     }
@@ -397,6 +398,7 @@ impl ResponsesTransport for ReselectTransport {
                     headers: vec![],
                     body: br#"{"error":{"type":"server_error","message":"primary failed"}}"#
                         .to_vec(),
+                    body_read_failure: None,
                 }),
             });
         }

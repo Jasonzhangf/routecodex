@@ -967,11 +967,13 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
 fn terminal_projection_for(
     decision: &V3Error05ExecutionDecision,
 ) -> Option<V3Error06ClientProjected> {
-    decision
+    // 非 terminal decision 必须 fail-fast 暴露（调用点 expect 的 panic 信息会
+    // 掩盖真实状态）；terminal 投影不允许静默丢弃。
+    let terminal = decision
         .clone()
         .try_into_terminal()
-        .ok()
-        .map(V3ErrorHandlingCenter::project_terminal_decision)
+        .expect("terminal projection requires a terminal Error05 decision");
+    Some(V3ErrorHandlingCenter::project_terminal_decision(terminal))
 }
 
 fn build_v3_relay_provider_error_05_decision(

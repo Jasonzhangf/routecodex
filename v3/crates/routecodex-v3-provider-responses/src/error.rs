@@ -7,6 +7,7 @@ pub struct V3ProviderHttpFailure {
     pub status: u16,
     pub headers: Vec<V3ProviderResponseHeader>,
     pub body: Vec<u8>,
+    pub body_read_failure: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]

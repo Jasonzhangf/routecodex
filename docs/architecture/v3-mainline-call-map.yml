@@ -130,7 +130,7 @@ chains:
       side_channel_writes: [v3.target.concrete_provider]
 - chain_id: v3.codex_sample_retention_snap_scope
   owner_feature_id: v3.codex_sample_retention_snap_scope
-  summary: Debug-bounded request and response copies move from explicit manifest authorization to Server-owned filesystem persistence without entering MetadataCenter or normal payload truth.
+  summary: Debug-bounded request and response copies move from explicit manifest authorization to the single V3CodexSampleStore-owned filesystem persistence without entering MetadataCenter or normal payload truth; dev builds sample by default, error evidence force-writes, and each port retains at most 200 request directories.
   edges:
   - step_id: v3-codex-sample-01
     from_node: V3CodexSample02ManifestAuthorizationPublished
@@ -151,8 +151,8 @@ chains:
     to_node: V3CodexSample06RetentionEnforced
     caller_symbol: capture_v3_live_raw_request
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: persist_v3_codex_sample_payload
-    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3CodexSampleStore::persist
+    callee_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
     status: anchored
     owner_feature_id: v3.codex_sample_retention_snap_scope
     resource_flow:

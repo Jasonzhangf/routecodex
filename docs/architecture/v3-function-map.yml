@@ -4206,19 +4206,22 @@ features:
   - npm run test:v3-provider-session-cooldown-red-fixtures
   - npm run verify:v3-resource-map
 - feature_id: v3.codex_sample_retention_snap_scope
-  owner_crate: routecodex-v3-server
-  owner_file: v3/crates/routecodex-v3-server/src/lib.rs
+  owner_crate: routecodex-v3-debug
+  owner_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
   resource_bindings:
   - v3.debug.codex_sample_authorization
   - v3.debug.payload_budget
   - v3.debug.codex_sample_filesystem
   entry_symbols:
-  - V3DebugBoundedTextCapture
+  - V3CodexSampleStore
+  - V3_CODEX_SAMPLE_REQUEST_RETENTION
+  - persist_v3_codex_sample_payload
+  - persist_v3_error_evidence_payload
   - capture_v3_live_raw_request
   - capture_v3_responses_relay_response
   - capture_v3_responses_direct_response
-  - persist_v3_codex_sample_payload
-  - enforce_v3_codex_sample_listener_retention
+  - capture_v3_openai_chat_relay_response
+  - V3LiveSnapOpenAiChatClientResponseSseRecorder
   allowed_paths:
   - v3/crates/routecodex-v3-config
   - v3/crates/routecodex-v3-cli

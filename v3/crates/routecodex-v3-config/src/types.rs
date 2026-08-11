@@ -249,6 +249,8 @@ pub struct V3DebugAuthoringConfig {
     #[serde(default)]
     pub snapshot_direct: Option<bool>,
     #[serde(default)]
+    pub codex_samples: Option<bool>,
+    #[serde(default)]
     pub dry_run: bool,
     #[serde(default)]
     pub retention: BTreeMap<String, u64>,

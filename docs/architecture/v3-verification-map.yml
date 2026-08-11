@@ -3405,8 +3405,10 @@ features:
   status: source_active_live_verification_required
   change_risk: medium
   owner_kind: rust_v3_bounded_debug_artifact_lifecycle
-  owner_scope: Debug owns bounded payload copies; Server owns authorized filesystem
-    persistence; neither may enter MetadataCenter or normal provider/client payload.
+  owner_scope: V3CodexSampleStore is the unique persistence owner; dev builds sample
+    by default, error evidence force-writes, and each port retains at most 200 request
+    directories; neither samples nor control state may enter MetadataCenter or normal
+    provider/client payload.
   owner_modules:
   - v3/crates/routecodex-v3-debug
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -3415,11 +3417,14 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-resource-operation-map.yml
   required_positive:
-  - Debug artifacts are redacted and bounded before filesystem persistence.
-  - Direct SSE provider bytes pass through with no keepalive injection.
+  - Debug artifacts are redacted and preserved verbatim before filesystem persistence.
+  - Error evidence force-writes request/error samples even when sampling is disabled.
+  - Dev builds sample by default; release builds require explicit opt-in.
+  - Each port retains at most 200 request directories.
   required_negative:
   - Debug payload copies never enter MetadataCenter, provider payload, client payload,
     continuation state, or routing truth.
+  - No truncation or placeholder machinery may exist anywhere in the sample path.
   required_gates:
   - npm run verify:v3-debug-payload-budget
   - npm run test:v3-debug-payload-budget-red-fixtures

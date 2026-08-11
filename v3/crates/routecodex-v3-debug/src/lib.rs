@@ -1,30 +1,22 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
+pub mod sample_store;
+
+pub use sample_store::{V3CodexSampleStore, V3_CODEX_SAMPLE_REQUEST_RETENTION};
+
 pub const V3_DEFAULT_SNAPSHOT_STAGE_SELECTOR: &str =
     "client-request,provider-request,provider-response,client-response";
-const V3_DEBUG_MAX_STRING_CHARS: usize = 2048;
-const V3_DEBUG_MAX_ARRAY_ITEMS: usize = 300;
-const V3_DEBUG_MAX_OBJECT_ENTRIES: usize = 64;
-const V3_DEBUG_MAX_KEY_CHARS: usize = 128;
-const V3_DEBUG_MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
-const V3_DEBUG_MAX_PAYLOAD_NODES: usize = 768;
-const V3_DEBUG_MAX_STREAM_CAPTURE_BYTES: usize = 48 * 1024;
-
-pub fn v3_debug_payload_byte_limit() -> usize {
-    V3_DEBUG_MAX_PAYLOAD_BYTES
-}
 
 #[derive(Debug, Default)]
 pub struct V3DebugBoundedTextCapture {
     bytes: Vec<u8>,
     total_bytes: usize,
-    truncated: bool,
 }
 
 impl V3DebugBoundedTextCapture {
@@ -34,33 +26,15 @@ impl V3DebugBoundedTextCapture {
 
     pub fn append(&mut self, bytes: &[u8]) {
         self.total_bytes = self.total_bytes.saturating_add(bytes.len());
-        let remaining = V3_DEBUG_MAX_STREAM_CAPTURE_BYTES.saturating_sub(self.bytes.len());
-        let retained = remaining.min(bytes.len());
-        self.bytes.extend_from_slice(&bytes[..retained]);
-        if retained < bytes.len() {
-            self.truncated = true;
-        }
+        self.bytes.extend_from_slice(bytes);
     }
 
     pub fn rendered_text(&self) -> String {
-        let mut rendered = String::from_utf8_lossy(&self.bytes).into_owned();
-        if self.truncated {
-            rendered.push_str(&format!(
-                "\n[ROUTECODEX_DEBUG_STREAM_TRUNCATED total_bytes={} retained_bytes={} limit={}]\n",
-                self.total_bytes,
-                self.bytes.len(),
-                V3_DEBUG_MAX_STREAM_CAPTURE_BYTES
-            ));
-        }
-        rendered
+        String::from_utf8_lossy(&self.bytes).into_owned()
     }
 
     pub fn total_bytes(&self) -> usize {
         self.total_bytes
-    }
-
-    pub fn truncated(&self) -> bool {
-        self.truncated
     }
 }
 
@@ -695,194 +669,33 @@ fn retain_latest<T>(values: &mut VecDeque<T>, limit: usize) {
 }
 
 pub fn redact_debug_value(policy: &V3RedactionPolicy, value: Value) -> Value {
-    let mut budget = V3DebugPayloadBudget::new();
-    let redacted = redact_debug_value_at_key(policy, None, value, &mut budget);
-    let serialized_bytes =
-        serde_json::to_vec(&redacted).expect("serde_json::Value serialization is infallible");
-    if serialized_bytes.len() <= V3_DEBUG_MAX_PAYLOAD_BYTES {
-        redacted
-    } else {
-        serialized_payload_budget_exceeded_placeholder(serialized_bytes.len())
-    }
+    // Debug/sample 投影只做安全 redaction（敏感键、secret 字面量），
+    // 不做任何截断、占位符替换或预算限制：样本必须保留真实 payload。
+    redact_debug_value_at_key(policy, None, value)
 }
 
-struct V3DebugPayloadBudget {
-    remaining_bytes: usize,
-    remaining_nodes: usize,
-}
-
-impl V3DebugPayloadBudget {
-    fn new() -> Self {
-        Self {
-            remaining_bytes: V3_DEBUG_MAX_PAYLOAD_BYTES,
-            remaining_nodes: V3_DEBUG_MAX_PAYLOAD_NODES,
-        }
-    }
-
-    fn reserve_node(&mut self) -> bool {
-        if self.remaining_nodes == 0 {
-            return false;
-        }
-        self.remaining_nodes -= 1;
-        true
-    }
-
-    fn reserve_bytes(&mut self, bytes: usize) -> bool {
-        if bytes > self.remaining_bytes {
-            self.remaining_bytes = 0;
-            return false;
-        }
-        self.remaining_bytes -= bytes;
-        true
-    }
-}
-
-fn payload_budget_exhausted_placeholder() -> Value {
-    json!({
-        "__routecodex_debug_placeholder": "ROUTECODEX_DEBUG_PAYLOAD_BUDGET_EXHAUSTED",
-        "byte_limit": V3_DEBUG_MAX_PAYLOAD_BYTES,
-        "node_limit": V3_DEBUG_MAX_PAYLOAD_NODES
-    })
-}
-
-fn serialized_payload_budget_exceeded_placeholder(serialized_bytes: usize) -> Value {
-    json!({
-        "__routecodex_debug_placeholder": "ROUTECODEX_DEBUG_SERIALIZED_PAYLOAD_BUDGET_EXCEEDED",
-        "serialized_bytes": serialized_bytes,
-        "byte_limit": V3_DEBUG_MAX_PAYLOAD_BYTES
-    })
-}
-
-fn object_items_omitted_placeholder(items: usize, limit: usize) -> Value {
-    json!({
-        "__routecodex_debug_placeholder": "ROUTECODEX_DEBUG_OMITTED_OBJECT_ITEMS",
-        "items": items,
-        "limit": limit
-    })
-}
-
-fn array_items_omitted_placeholder(items: usize, limit: usize) -> Value {
-    json!({
-        "__routecodex_debug_placeholder": "ROUTECODEX_DEBUG_OMITTED_ARRAY_ITEMS",
-        "items": items,
-        "limit": limit
-    })
-}
-
-fn normalize_debug_object_key(
-    key: String,
-    index: usize,
-    budget: &mut V3DebugPayloadBudget,
-) -> String {
-    let key_chars = key.chars().count();
-    let normalized = if key_chars > V3_DEBUG_MAX_KEY_CHARS {
-        format!("__routecodex_debug_truncated_key_{index}_ROUTECODEX_DEBUG_TRUNCATED_KEY")
-    } else {
-        key
-    };
-    if budget.reserve_bytes(normalized.len()) {
-        normalized
-    } else {
-        format!("__routecodex_debug_budget_key_{index}")
-    }
-}
-
-fn redact_debug_value_at_key(
-    policy: &V3RedactionPolicy,
-    key: Option<&str>,
-    value: Value,
-    budget: &mut V3DebugPayloadBudget,
-) -> Value {
-    if !budget.reserve_node() {
-        return payload_budget_exhausted_placeholder();
-    }
+fn redact_debug_value_at_key(policy: &V3RedactionPolicy, key: Option<&str>, value: Value) -> Value {
     match value {
-        Value::Object(map) => {
-            let original_len = map.len();
-            let mut redacted = Map::new();
-            for (index, (key, value)) in map.into_iter().enumerate() {
-                if index >= V3_DEBUG_MAX_OBJECT_ENTRIES {
-                    redacted.insert(
-                        "__routecodex_debug_omitted_object_items".to_string(),
-                        object_items_omitted_placeholder(
-                            original_len - V3_DEBUG_MAX_OBJECT_ENTRIES,
-                            V3_DEBUG_MAX_OBJECT_ENTRIES,
-                        ),
-                    );
-                    break;
-                }
-                if budget.remaining_bytes == 0 || budget.remaining_nodes == 0 {
-                    redacted.insert(
-                        "__routecodex_debug_payload_budget".to_string(),
-                        payload_budget_exhausted_placeholder(),
-                    );
-                    break;
-                }
-                let is_sensitive = is_sensitive_key(policy, &key);
-                let redacted_key = normalize_debug_object_key(key, index, budget);
-                if is_sensitive {
-                    redacted.insert(redacted_key, Value::String("[REDACTED]".to_string()));
-                } else {
-                    let redacted_value =
-                        redact_debug_value_at_key(policy, Some(&redacted_key), value, budget);
-                    redacted.insert(redacted_key, redacted_value);
-                }
-            }
-            Value::Object(redacted)
-        }
-        Value::Array(values) => {
-            let original_len = values.len();
-            let mut redacted = Vec::new();
-            for (index, value) in values.into_iter().enumerate() {
-                if index >= V3_DEBUG_MAX_ARRAY_ITEMS {
-                    redacted.push(array_items_omitted_placeholder(
-                        original_len - V3_DEBUG_MAX_ARRAY_ITEMS,
-                        V3_DEBUG_MAX_ARRAY_ITEMS,
-                    ));
-                    break;
-                }
-                if budget.remaining_bytes == 0 || budget.remaining_nodes == 0 {
-                    redacted.push(payload_budget_exhausted_placeholder());
-                    break;
-                }
-                redacted.push(redact_debug_value_at_key(policy, key, value, budget));
-            }
-            if original_len > V3_DEBUG_MAX_ARRAY_ITEMS {
-                if !redacted.iter().any(|value| {
-                    value
-                        .to_string()
-                        .contains("ROUTECODEX_DEBUG_OMITTED_ARRAY_ITEMS")
-                }) {
-                    redacted.push(array_items_omitted_placeholder(
-                        original_len - V3_DEBUG_MAX_ARRAY_ITEMS,
-                        V3_DEBUG_MAX_ARRAY_ITEMS,
-                    ));
-                }
-            }
-            Value::Array(redacted)
-        }
-        Value::String(text) if should_omit_debug_media_string(key, &text) => {
-            Value::String(format!(
-                "[ROUTECODEX_DEBUG_MEDIA_PLACEHOLDER chars={}]",
-                text.chars().count()
-            ))
-        }
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| {
+                    let redacted = if is_sensitive_key(policy, &key) {
+                        Value::String("[REDACTED]".to_string())
+                    } else {
+                        redact_debug_value_at_key(policy, Some(&key), value)
+                    };
+                    (key, redacted)
+                })
+                .collect(),
+        ),
+        Value::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(|value| redact_debug_value_at_key(policy, key, value))
+                .collect(),
+        ),
         Value::String(text) if looks_like_secret_literal(&text) => {
             Value::String("[REDACTED]".to_string())
-        }
-        Value::String(text) if text.chars().count() > V3_DEBUG_MAX_STRING_CHARS => {
-            Value::String(format!(
-                "[ROUTECODEX_DEBUG_TRUNCATED_STRING chars={} limit={}]",
-                text.chars().count(),
-                V3_DEBUG_MAX_STRING_CHARS
-            ))
-        }
-        Value::String(text) => {
-            if budget.reserve_bytes(text.len()) {
-                Value::String(text)
-            } else {
-                payload_budget_exhausted_placeholder()
-            }
         }
         other => other,
     }
@@ -902,26 +715,4 @@ fn looks_like_secret_literal(value: &str) -> bool {
         || trimmed.starts_with("Bearer ")
         || trimmed.starts_with("eyJ")
         || trimmed.contains("api_key=")
-}
-
-fn should_omit_debug_media_string(key: Option<&str>, value: &str) -> bool {
-    let lower_key = key.unwrap_or_default().to_ascii_lowercase();
-    if lower_key.contains("image")
-        || lower_key.contains("inline_data")
-        || lower_key.contains("file_data")
-        || lower_key.contains("base64")
-    {
-        return true;
-    }
-    let trimmed = value.trim_start();
-    if trimmed.starts_with("data:image/")
-        || trimmed.starts_with("data:application/octet-stream;base64,")
-    {
-        return true;
-    }
-    value.len() >= V3_DEBUG_MAX_STRING_CHARS
-        && value
-            .bytes()
-            .take(256)
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
 }

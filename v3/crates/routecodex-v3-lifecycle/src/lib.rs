@@ -324,10 +324,14 @@ impl V3ManagedLifecycle {
     }
 
     fn apply_snapshot_authorization_to_manifest(&self, manifest: &mut V3Config05ManifestPublished) {
-        manifest.debug.codex_samples = self.force_snapshots;
-        manifest.debug.snapshot_direct = self.force_snapshot_direct;
+        // 快照授权只在显式标志时强制开启；默认交给 config/dev 语义
+        // （dev build 默认落样本，release 需显式 opt-in），禁止默认强制关闭。
         if self.force_snapshots {
+            manifest.debug.codex_samples = true;
             manifest.debug.snapshots = true;
+        }
+        if self.force_snapshot_direct {
+            manifest.debug.snapshot_direct = true;
         }
         if let Some(stages) = self.force_snapshot_stages.as_ref() {
             manifest.debug.snapshots = true;

@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// V3 debug sample-fidelity red fixtures: reintroducing truncation or
+// placeholder machinery must fail the verifier.
+
 import {
   cpSync,
   mkdtempSync,
@@ -21,8 +24,11 @@ const copied = [
   "package.json",
   ".github/workflows/test.yml",
   "v3/crates/routecodex-v3-debug/src/lib.rs",
+  "v3/crates/routecodex-v3-debug/src/sample_store.rs",
   "v3/crates/routecodex-v3-debug/tests/debug_runtime_contract.rs",
   "v3/crates/routecodex-v3-server/src/lib.rs",
+  "v3/crates/routecodex-v3-config/src/types.rs",
+  "v3/crates/routecodex-v3-config/src/validate.rs",
   "docs/architecture/function-map.yml",
   "docs/architecture/resource-operation-map.yml",
   "docs/architecture/verification-map.yml",
@@ -32,27 +38,37 @@ const copied = [
 ];
 const cases = [
   {
-    name: "final serialized byte check is removed",
+    name: "oversized-string truncation placeholder is reintroduced",
     path: "v3/crates/routecodex-v3-debug/src/lib.rs",
     mutate: (source) =>
       source.replace(
-        "if serialized_bytes.len() <= V3_DEBUG_MAX_PAYLOAD_BYTES {",
-        "if true {",
+        "Value::String(text) if looks_like_secret_literal(&text) => {",
+        "Value::String(text) if text.chars().count() > 2048 => { Value::String(format!(\"[ROUTECODEX_DEBUG_TRUNCATED_STRING chars={}]\", text.chars().count())) } Value::String(text) if looks_like_secret_literal(&text) => {",
       ),
-    diagnostic: /final serialized artifact/u,
+    diagnostic: /must not contain any truncation or placeholder machinery/u,
   },
   {
-    name: "bounded stream capture becomes an unbounded string",
-    path: "v3/crates/routecodex-v3-server/src/lib.rs",
+    name: "array omitted-items placeholder is reintroduced",
+    path: "v3/crates/routecodex-v3-debug/src/lib.rs",
     mutate: (source) =>
-      source.replaceAll(
-        "Arc<Mutex<V3DebugBoundedTextCapture>>",
-        "Arc<Mutex<String>>",
+      source.replace(
+        "Value::Array(values) => Value::Array(",
+        "Value::Array(values) => { let _ = values.len(); Value::Array(vec![serde_json::json!({\"__routecodex_debug_placeholder\":\"ROUTECODEX_DEBUG_OMITTED_ARRAY_ITEMS\"})]) } fn _never() -> serde_json::Value { serde_json::Value::Null } fn _unused_placeholder() -> serde_json::Value { Value::Array(",
       ),
-    diagnostic: /Debug-owned bounded capture/u,
+    diagnostic: /must not contain any truncation or placeholder machinery/u,
   },
   {
-    name: "Direct SSE success keepalive is restored",
+    name: "stream capture truncation is reintroduced",
+    path: "v3/crates/routecodex-v3-debug/src/lib.rs",
+    mutate: (source) =>
+      source.replace(
+        "pub fn append(&mut self, bytes: &[u8]) {\n        self.total_bytes = self.total_bytes.saturating_add(bytes.len());\n        self.bytes.extend_from_slice(bytes);\n    }",
+        "pub fn append(&mut self, bytes: &[u8]) {\n        self.total_bytes = self.total_bytes.saturating_add(bytes.len());\n        self.bytes.extend_from_slice(&bytes[..bytes.len().min(48 * 1024)]);\n        let _ = \"ROUTECODEX_DEBUG_STREAM_TRUNCATED\";\n    }",
+      ),
+    diagnostic: /must not contain any truncation or placeholder machinery/u,
+  },
+  {
+    name: "Direct SSE success keepalive is removed again",
     path: "v3/crates/routecodex-v3-server/src/lib.rs",
     mutate: (source) => {
       const start = source.indexOf(
@@ -60,25 +76,15 @@ const cases = [
       );
       const tail = source.slice(start);
       const changed = tail.replace(
+        ".body(v3_client_sse_body(stream, keepalive))",
         ".body(v3_client_sse_body(stream, None))",
-        ".body(v3_client_sse_body(stream, Some(Duration::from_millis(1))))",
       );
       return source.slice(0, start) + changed;
     },
-    diagnostic: /without keepalive injection/u,
+    diagnostic: /must not pass keepalive=None for success streams/u,
   },
   {
-    name: "missing HOME silently disables persistence again",
-    path: "v3/crates/routecodex-v3-server/src/lib.rs",
-    mutate: (source) =>
-      source.replace(
-        'ok_or_else(|| "codex sample filesystem requires HOME".to_string())?',
-        'unwrap_or_else(|| ".".into())',
-      ),
-    diagnostic: /reject missing or blank HOME/u,
-  },
-  {
-    name: "build skips the payload budget verifier",
+    name: "build skips the sample-fidelity verifier",
     path: "package.json",
     mutate: (source) => {
       const parsed = JSON.parse(source);
@@ -91,20 +97,50 @@ const cases = [
     diagnostic: /build:v3-cli must run verify:v3-debug-payload-budget/u,
   },
   {
-    name: "CI skips payload budget red fixtures",
+    name: "CI skips sample-fidelity red fixtures",
     path: ".github/workflows/test.yml",
     mutate: (source) =>
       source.replaceAll(
         "        run: npm run test:v3-debug-payload-budget-red-fixtures\n",
         "",
       ),
-    diagnostic: /CI must run the V3 debug payload budget red fixtures/u,
+    diagnostic: /CI must run the V3 debug sample-fidelity red fixtures/u,
+  },
+  {
+    name: "codex-sample retention is lowered below 200",
+    path: "v3/crates/routecodex-v3-debug/src/sample_store.rs",
+    mutate: (source) =>
+      source.replace(
+        "pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 200;",
+        "pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 100;",
+      ),
+    diagnostic: /must default to 200 requests/u,
+  },
+  {
+    name: "dev builds no longer enable samples by default",
+    path: "v3/crates/routecodex-v3-config/src/validate.rs",
+    mutate: (source) =>
+      source.replace(
+        ".unwrap_or(cfg!(debug_assertions))",
+        ".unwrap_or(false)",
+      ),
+    diagnostic: /Dev builds must enable codex samples by default/u,
+  },
+  {
+    name: "server reimplements its own sample persistence",
+    path: "v3/crates/routecodex-v3-server/src/lib.rs",
+    mutate: (source) =>
+      source.replace(
+        "fn persist_v3_codex_sample_payload(",
+        "fn persist_v3_codex_sample_payload_unchecked(\n    state: &V3ListenerState,\n    entry_protocol: &str,\n    endpoint: &str,\n    request_id: &str,\n    file_name: &str,\n    payload: &Value,\n) -> Result<(), String> {\n    let port_root = resolve_v3_codex_samples_root()?;\n    let dir = port_root.join(encode_v3_codex_sample_path_segment(request_id));\n    let _ = dir;\n    Ok(())\n}\n\nfn persist_v3_codex_sample_payload(",
+      ),
+    diagnostic: /Server must not reimplement codex-sample persistence/u,
   },
 ];
 
 const failures = [];
 for (const testCase of cases) {
-  const root = mkdtempSync(join(tmpdir(), "v3-debug-budget-red-"));
+  const root = mkdtempSync(join(tmpdir(), "v3-debug-fidelity-red-"));
   try {
     for (const relative of copied) {
       cpSync(resolve(repo, relative), resolve(root, relative), { recursive: true });
@@ -139,5 +175,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `[test:v3-debug-payload-budget-red-fixtures] PASS (${cases.length} forbidden mutations rejected)`,
+  `[test:v3-debug-payload-budget-red-fixtures] PASS (${cases.length} forbidden truncation/placeholder mutations rejected)`,
 );

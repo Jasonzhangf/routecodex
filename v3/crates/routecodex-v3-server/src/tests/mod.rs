@@ -160,7 +160,10 @@ fn test_v3_listener_state_with_debug(
             state: V3RequestCounterState::default(),
             loaded: false,
         })),
-        codex_sample_persistence: Arc::new(Mutex::new(())),
+        codex_sample_store: Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
+            manifest.debug.codex_samples,
+            routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
+        )),
         responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
         responses_direct_stopless_control: Arc::new(
             V3ResponsesDirectStoplessControlState::default(),
@@ -300,48 +303,7 @@ fn codex_sample_scope_blocks_direct_and_preserves_relay() {
 }
 
 #[test]
-fn codex_sample_retention_keeps_exactly_latest_hundred_request_directories() {
-    let root = std::env::temp_dir().join(format!(
-        "routecodex-v3-sample-retention-{}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).unwrap();
-
-    let oldest = root.join("request-000");
-    fs::create_dir_all(&oldest).unwrap();
-    fs::write(oldest.join("request.json"), b"{}\n").unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(10));
-    for index in 1..=100 {
-        let request = root.join(format!("request-{index:03}"));
-        fs::create_dir_all(&request).unwrap();
-        fs::write(request.join("request.json"), b"{}\n").unwrap();
-        fs::write(request.join("response.json"), b"{}\n").unwrap();
-    }
-    let current = root.join("request-100");
-
-    enforce_v3_codex_sample_request_retention(
-        &root,
-        Some(&current),
-        V3_CODEX_SAMPLE_REQUEST_RETENTION,
-    )
-    .unwrap();
-
-    let retained = fs::read_dir(&root)
-        .unwrap()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        .count();
-    assert_eq!(retained, V3_CODEX_SAMPLE_REQUEST_RETENTION);
-    assert!(!oldest.exists());
-    assert!(current.join("request.json").exists());
-    assert!(current.join("response.json").exists());
-
-    fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
-fn codex_sample_persistence_and_startup_retention_reject_missing_home() {
+fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
     let _home_lock = TEST_HOME_LOCK.lock().unwrap();
     let _home = TestHomeGuard::unset();
     let log_file = std::env::temp_dir().join(format!(
@@ -361,9 +323,10 @@ fn codex_sample_persistence_and_startup_retention_reject_missing_home() {
     .expect_err("missing HOME must not silently skip an authorized sample write");
     assert!(persistence_error.contains("HOME"), "{persistence_error}");
 
-    let startup_error =
-        enforce_v3_codex_sample_listener_retention(5555, V3_CODEX_SAMPLE_REQUEST_RETENTION)
-            .expect_err("missing HOME must fail startup retention explicitly");
+    let startup_error = state
+        .codex_sample_store
+        .enforce_listener_retention(5555)
+        .expect_err("missing HOME must fail startup retention explicitly");
     assert!(startup_error.contains("HOME"), "{startup_error}");
 }
 
@@ -525,10 +488,16 @@ fn relay_provider_snapshots_are_redacted_before_codex_sample_persistence() {
     let request = fs::read_to_string(sample_dir.join("provider-request.json")).unwrap();
     let response = fs::read_to_string(sample_dir.join("provider-response.json")).unwrap();
     assert!(request.contains("[REDACTED]"));
-    assert!(request.contains("ROUTECODEX_DEBUG_MEDIA_PLACEHOLDER"));
-    assert!(response.contains("ROUTECODEX_DEBUG_MEDIA_PLACEHOLDER"));
-    assert!(!request.contains(&"A".repeat(4096)));
-    assert!(!response.contains(&"B".repeat(4096)));
+    assert!(
+        request.contains(&"A".repeat(4096)),
+        "media payload must be preserved verbatim in samples, no placeholder replacement"
+    );
+    assert!(
+        response.contains(&"B".repeat(4096)),
+        "media payload must be preserved verbatim in samples, no placeholder replacement"
+    );
+    assert!(!request.contains("ROUTECODEX_DEBUG_"));
+    assert!(!response.contains("ROUTECODEX_DEBUG_"));
     assert_eq!(
         output
             .provider_snapshots
@@ -2647,7 +2616,10 @@ fn error_projection_appends_human_console_failure_line() {
         debug: debug.clone(),
         console_enabled: true,
         request_counter: Arc::new(Mutex::new(V3RequestIdCounter::new())),
-        codex_sample_persistence: Arc::new(Mutex::new(())),
+        codex_sample_store: Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
+            manifest.debug.codex_samples,
+            routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
+        )),
         responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
         responses_direct_stopless_control: Arc::new(
             V3ResponsesDirectStoplessControlState::default(),

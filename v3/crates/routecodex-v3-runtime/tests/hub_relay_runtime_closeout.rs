@@ -1139,6 +1139,7 @@ impl ResponsesTransport for ErrorTransport {
                 status: 429,
                 headers: vec![],
                 body: br#"{"error":{"type":"rate_limit_error","message":"controlled"}}"#.to_vec(),
+                body_read_failure: None,
             }),
         })
     }
@@ -1195,6 +1196,7 @@ impl ResponsesTransport for ResponsesContextErrorThenSuccessTransport {
                     status: 400,
                     headers: vec![],
                     body: br#"{"error":{"code":"bad_response_status_code","type":"bad_response_status_code","message":"This model's maximum context length is 202752 tokens. However, your messages resulted in 206624 tokens. Please reduce the length of the messages."}}"#.to_vec(),
+                    body_read_failure: None,
                 }),
             });
         }
@@ -1378,6 +1380,7 @@ impl ResponsesTransport for ResponsesDefaultFloorFailsThenSucceedsTransport {
                     status: 429,
                     headers: vec![],
                     body: br#"{"error":{"type":"rate_limit_error","message":"controlled default floor backoff"}}"#.to_vec(),
+                    body_read_failure: None,
                 }),
             });
         }

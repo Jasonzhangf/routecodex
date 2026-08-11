@@ -1391,7 +1391,9 @@ fn compile_debug(authoring: V3DebugAuthoringConfig) -> Result<V3DebugManifest, V
         log_console: authoring.log_console,
         log_file: authoring.log_file,
         snapshots: authoring.snapshots,
-        codex_samples: false,
+        codex_samples: authoring
+            .codex_samples
+            .unwrap_or(cfg!(debug_assertions)),
         snapshot_stages,
         snapshot_direct: authoring.snapshot_direct.unwrap_or(true),
         dry_run: authoring.dry_run,
@@ -1421,5 +1423,24 @@ fn require_id(kind: &str, id: &str) -> Result<(), V3ConfigError> {
         Err(validation(format!("{kind} id is empty")))
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod dev_sample_default_tests {
+    use super::*;
+
+    #[test]
+    fn dev_build_enables_codex_samples_by_default() {
+        let manifest = compile_debug(V3DebugAuthoringConfig {
+            codex_samples: None,
+            ..V3DebugAuthoringConfig::default()
+        })
+        .unwrap();
+        assert!(
+            manifest.codex_samples,
+            "dev build must default codex_samples to true (cfg!(debug_assertions)={})",
+            cfg!(debug_assertions)
+        );
     }
 }

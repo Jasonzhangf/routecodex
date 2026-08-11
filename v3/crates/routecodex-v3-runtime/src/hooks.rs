@@ -801,6 +801,7 @@ mod tests {
                         value: b"upstream-req".to_vec(),
                     }],
                     body: b"{\"error\":{\"code\":\"rate_limit\"}}".to_vec(),
+                    body_read_failure: None,
                 }),
             },
         );

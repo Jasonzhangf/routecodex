@@ -1,6 +1,6 @@
 use routecodex_v3_debug::{
-    v3_debug_payload_byte_limit, V3DebugBoundedTextCapture, V3DebugRuntime, V3DebugRuntimeConfig,
-    V3DryRunFixture, V3RedactionPolicy,
+    V3DebugBoundedTextCapture, V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture,
+    V3RedactionPolicy,
 };
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -91,7 +91,7 @@ fn snapshot_sessions_are_request_scoped_and_released() {
 }
 
 #[test]
-fn debug_side_channel_bounds_large_history_arrays() {
+fn debug_side_channel_preserves_large_history_arrays_verbatim() {
     let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
         log_console: false,
         log_file: None,
@@ -118,17 +118,15 @@ fn debug_side_channel_bounds_large_history_arrays() {
         "model": "gpt-5.5"
     }));
     let serialized = serde_json::to_string(&redacted).unwrap();
-    assert!(serialized.contains("ROUTECODEX_DEBUG_OMITTED_ARRAY_ITEMS"));
-    assert!(!serialized.contains("history item 239"));
     assert!(
-        serialized.len() < 80_000,
-        "debug side-channel history snapshot must stay bounded, got {} bytes",
-        serialized.len()
+        serialized.contains("history item 239"),
+        "debug side-channel snapshot must preserve real payload items verbatim"
     );
+    assert!(!serialized.contains("ROUTECODEX_DEBUG_OMITTED_ARRAY_ITEMS"));
 }
 
 #[test]
-fn debug_side_channel_enforces_total_payload_budget_for_nested_artifacts() {
+fn debug_side_channel_preserves_nested_artifacts_and_only_redacts_secrets() {
     let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
         log_console: false,
         log_file: None,
@@ -156,19 +154,15 @@ fn debug_side_channel_enforces_total_payload_budget_for_nested_artifacts() {
     }));
     let serialized = serde_json::to_string(&redacted).unwrap();
     assert!(
-        serialized.contains("ROUTECODEX_DEBUG_PAYLOAD_BUDGET_EXHAUSTED")
-            || serialized.contains("ROUTECODEX_DEBUG_SERIALIZED_PAYLOAD_BUDGET_EXCEEDED")
+        serialized.contains("nested 47-47"),
+        "debug side-channel payload must preserve nested artifacts verbatim"
     );
-    assert!(!serialized.contains("nested 47-47"));
-    assert!(
-        serialized.len() <= v3_debug_payload_byte_limit(),
-        "debug side-channel payload must enforce one total budget, got {} bytes",
-        serialized.len()
-    );
+    assert!(!serialized.contains("ROUTECODEX_DEBUG_PAYLOAD_BUDGET_EXHAUSTED"));
+    assert!(!serialized.contains("ROUTECODEX_DEBUG_SERIALIZED_PAYLOAD_BUDGET_EXCEEDED"));
 }
 
 #[test]
-fn debug_side_channel_caps_final_serialized_artifact_with_sensitive_wide_objects() {
+fn debug_side_channel_redacts_sensitive_wide_objects_without_placeholder_drops() {
     let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
         log_console: false,
         log_file: None,
@@ -201,34 +195,27 @@ fn debug_side_channel_caps_final_serialized_artifact_with_sensitive_wide_objects
     let redacted = runtime.redact_payload_for_side_channel(json!({"input": input}));
     let serialized = serde_json::to_vec(&redacted).unwrap();
 
-    assert!(
-        serialized.len() <= v3_debug_payload_byte_limit(),
-        "final serialized debug artifact exceeded the hard byte budget: {}",
-        serialized.len()
-    );
     assert!(!String::from_utf8_lossy(&serialized).contains("must-not-survive"));
+    assert!(!String::from_utf8_lossy(&serialized).contains("ROUTECODEX_DEBUG_"));
 }
 
 #[test]
-fn debug_stream_capture_retains_a_bounded_prefix_and_explicit_truncation_truth() {
+fn debug_stream_capture_preserves_full_text_verbatim() {
     let mut capture = V3DebugBoundedTextCapture::new();
     let first = b"event: response.output_text.delta\ndata: {\"delta\":\"first\"}\n\n";
     capture.append(first);
-    capture.append(&vec![b'x'; 96 * 1024]);
+    let tail = vec![b'x'; 96 * 1024];
+    capture.append(&tail);
 
     let rendered = capture.rendered_text();
     assert!(rendered.starts_with(std::str::from_utf8(first).unwrap()));
-    assert!(rendered.contains("ROUTECODEX_DEBUG_STREAM_TRUNCATED"));
-    assert_eq!(capture.total_bytes(), first.len() + 96 * 1024);
-    assert!(capture.truncated());
-    assert!(
-        rendered.len() < v3_debug_payload_byte_limit(),
-        "bounded stream capture must leave room for artifact metadata"
-    );
+    assert_eq!(rendered.len(), first.len() + tail.len());
+    assert!(!rendered.contains("ROUTECODEX_DEBUG_STREAM_TRUNCATED"));
+    assert_eq!(capture.total_bytes(), first.len() + tail.len());
 }
 
 #[test]
-fn debug_side_channel_replaces_media_and_oversized_strings_with_placeholders() {
+fn debug_side_channel_preserves_media_and_oversized_strings_and_redacts_secrets() {
     let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
         log_console: false,
         log_file: None,
@@ -245,23 +232,25 @@ fn debug_side_channel_replaces_media_and_oversized_strings_with_placeholders() {
     let long_text = "debug long text ".repeat(1_200);
     let redacted = runtime.redact_payload_for_side_channel(json!({
         "input": [
-            {"type": "input_text", "text": long_text},
-            {"type": "input_image", "image_url": image_payload},
+            {"type": "input_text", "text": long_text.clone()},
+            {"type": "input_image", "image_url": image_payload.clone()},
             {"type": "message", "content": [{"type": "image_url", "image_url": {"url": "https://example.test/image.png"}}]}
         ],
         "metadata": {"authorization": "Bearer side-channel-secret"}
     }));
     let serialized = serde_json::to_string(&redacted).unwrap();
-    assert!(serialized.contains("ROUTECODEX_DEBUG_TRUNCATED_STRING"));
-    assert!(serialized.contains("ROUTECODEX_DEBUG_MEDIA_PLACEHOLDER"));
+    assert!(!serialized.contains("ROUTECODEX_DEBUG_TRUNCATED_STRING"));
+    assert!(!serialized.contains("ROUTECODEX_DEBUG_MEDIA_PLACEHOLDER"));
+    assert!(
+        serialized.contains(&long_text),
+        "long text must be preserved verbatim"
+    );
+    assert!(
+        serialized.contains(&image_payload),
+        "media payload must be preserved verbatim"
+    );
     assert!(serialized.contains("[REDACTED]"));
     assert!(!serialized.contains("side-channel-secret"));
-    assert!(!serialized.contains("data:image/png;base64"));
-    assert!(
-        serialized.len() < 2000,
-        "debug side-channel payload must stay bounded, got {} bytes",
-        serialized.len()
-    );
 }
 
 #[test]

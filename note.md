@@ -34892,3 +34892,33 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 基线红（非本次引入，HEAD 即红）：multi_listener_server 22 个（provider response status is required）+ runtime 2 个 openai_chat_provider_reasoning 测试。
 - 观察到的其它问题：08:09 minimax_anthropic Relay provider compat 502（chat:minimax Anthropic codec malformed tools[].name）——独立于本次修复。
 - 未跑 codex-review（改动已验证+安装+在线重放，review 待执行）。
+
+# 2026-08-11T08:45+08:00 全部移除 debug 截断与占位符（Jason 指令）
+
+- 范围：v3-debug crate 的 redact_debug_value_at_key 从"预算+截断+占位"改为"纯安全 redaction"（sensitive key / secret literal -> [REDACTED]）；V3DebugBoundedTextCapture 改为全量捕获（无 48KB 截断、无 STREAM_TRUNCATED 尾注）；移除全部 ROUTECODEX_DEBUG_* 占位符、V3_DEBUG_MAX_* 限制、V3DebugPayloadBudget、normalize_debug_object_key、should_omit_debug_media_string、v3_debug_payload_byte_limit。
+- 测试：v3-debug 13/13 绿（改为保真断言：大数组/大字符串/媒体/嵌套全部原样保留）；server snapshots redaction 测试改保真断言。
+- Gate：verify:v3-debug-payload-budget 反转语义（禁止占位符/截断存在 + 强制保真语义 + keepalive 注入 + secret redaction）；red fixtures 6 个（引入截断/占位/移除 keepalive/移除 gate 接线 -> verifier FAIL）。
+- 构建安装：0.90.4262 install + codesign + config check + rccv3 restart（restart 语义，instance v3-6dccc5c9cbc4ede302df 保持），4 端口 health 0.90.4262。
+- 在线验证：新 codex-sample 无 ROUTECODEX_DEBUG_ 占位符、tools 完整保留。
+- 待 Jason 复现 zterm 确认 SSE 错误是否消除（新版本样本可完整诊断）。
+
+# 2026-08-11T09:20+08:00 Debug 模块集中化审计（Jason 指令：集中化/模块化/唯一化 + 样本管理）
+
+## 完成项
+1. **样本落盘唯一 owner**：新增 `v3/crates/routecodex-v3-debug/src/sample_store.rs` 的 `V3CodexSampleStore`（root 解析、endpoint 目录映射、request_id 编码、JSON 写入、retention 清理、enabled 开关、错误 force）；server 物理删除 8 个零散函数（persist×3/resolve/format/encode/enforce×2）+ `codex_sample_persistence` Mutex；store 内 Mutex 串行化。
+2. **默认策略**：`codex_samples` authoring 配置项（Option<bool>），默认 `cfg!(debug_assertions)`（dev 默认落样本，release 显式 opt-in）。
+3. **200 条 retention**：`V3_CODEX_SAMPLE_REQUEST_RETENTION = 100 → 200`（debug crate 常量）；内存 raw_requests/raw_responses 默认 16 → 200。
+4. **lifecycle 覆盖修复（关键根因）**：`apply_snapshot_authorization_to_manifest` 原本无条件 `codex_samples = force_snapshots`（默认 false）覆盖 dev 默认——改为仅显式标志时强制开启；`snapshot_direct` 同理。
+5. **openai_chat 入口样本缺口修复（审计发现）**：relay/direct 原本完全不落响应样本；新增 `capture_v3_openai_chat_relay_response` + `V3LiveSnapOpenAiChatClientResponseSseRecorder`（SSE 全量捕获）+ direct 错误 force 落盘（对齐 responses direct 模式）。
+6. **gate**：verify 新增 store 唯一化（server 禁本地持久化实现）、200 条、dev 默认、force 错误落盘断言；red fixtures 9 个（新增 retention<200、dev 默认 false 复辟、server 本地 persist 复辟）。
+
+## 在线验证（0.90.4266 restart 保持 instance v3-6dccc5c9cbc4ede302df）
+- debug status：codex_samples_enabled=True（修复前 False）
+- openai_chat 成功：request.json + response.json 落盘
+- SSE 流式：rawSse 18469 字节全量（含 [DONE]），无截断
+- 大请求 717KB 保真（用户 payload 原样，非样本截断）
+- 注意：~/.local/bin/rccv3 曾被另一 worker 覆盖（旧二进制无改动）——每次 restart 前必须核 hash
+
+## 已知缺口/边界
+- HTTP 输入校验 400（如 malformed tools）只落 request.json 不落 error.json（provider/runtime 错误才 force error.json）——合理边界
+- runtime 6 个失败（4 个 redacted_schema_placeholder + 2 个 reasoning）为基线/另一 worker 中间态，未动

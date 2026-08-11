@@ -367,6 +367,7 @@ impl ResponsesTransport for SaveThenErrorTransport {
                 status: 429,
                 headers: vec![],
                 body: br#"{"error":{"message":"retry later"}}"#.to_vec(),
+                body_read_failure: None,
             }),
         })
     }

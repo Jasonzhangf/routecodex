@@ -60,11 +60,11 @@ flowchart TD
   module_v3_runtime -->|3 edges / 1 paths| module_v3_virtual_router
   module_v3_server -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_server -->|2 edges / 2 paths| module_v3_config
-  module_v3_server -->|2 edges / 2 paths| module_v3_debug
+  module_v3_server -->|3 edges / 2 paths| module_v3_debug
   module_v3_server -->|4 edges / 3 paths| module_v3_error
   module_v3_server -->|3 edges / 3 paths| module_v3_runtime
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
-  module_v3_server -->|26 edges / 15 paths| module_v3_server
+  module_v3_server -->|25 edges / 14 paths| module_v3_server
 ```
 
 | From module | To module | Edges | Functional paths |
@@ -97,11 +97,11 @@ flowchart TD
 | v3-runtime | v3-virtual-router | 3 | `v3.responses_direct.required_mainline` |
 | v3-server | routecodex-v3-sse | 1 | `v3.sse.http_keepalive_boundary` |
 | v3-server | v3-config | 2 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.models.capability_catalog` |
-| v3-server | v3-debug | 2 | `v3.codex_sample_retention_snap_scope`<br/>`v3.server.startup` |
+| v3-server | v3-debug | 3 | `v3.codex_sample_retention_snap_scope`<br/>`v3.server.startup` |
 | v3-server | v3-error | 4 | `v3.debug_error_foundation.mainline`<br/>`v3.responses_session_admission`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 3 | `v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
-| v3-server | v3-server | 26 | `v3.codex_sample_retention_snap_scope`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3-server | v3-server | 25 | `v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 
 ## Auto audit /补救清单
 
@@ -196,7 +196,7 @@ flowchart TD
 
 ## v3.codex_sample_retention_snap_scope
 
-Debug-bounded request and response copies move from explicit manifest authorization to Server-owned filesystem persistence without entering MetadataCenter or normal payload truth.
+Debug-bounded request and response copies move from explicit manifest authorization to the single V3CodexSampleStore-owned filesystem persistence without entering MetadataCenter or normal payload truth; dev builds sample by default, error evidence force-writes, and each port retains at most 200 request directories.
 
 Owner feature: `v3.codex_sample_retention_snap_scope`
 
@@ -204,10 +204,10 @@ Owner feature: `v3.codex_sample_retention_snap_scope`
 flowchart TD
   subgraph c_2_v3_codex_sample_retention_snap_scope_m_v3_debug["v3-debug"]
     c_2_v3_codex_sample_retention_snap_scope_1["v3-debug<br/>V3DebugRuntime::redact_payload_for_side_channel<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
+    c_2_v3_codex_sample_retention_snap_scope_2["v3-debug<br/>V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
   end
   subgraph c_2_v3_codex_sample_retention_snap_scope_m_v3_server["v3-server"]
     c_2_v3_codex_sample_retention_snap_scope_0["v3-server<br/>capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_2_v3_codex_sample_retention_snap_scope_2["v3-server<br/>persist_v3_codex_sample_payload<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
   c_2_v3_codex_sample_retention_snap_scope_0 -->|v3-codex-sample-01<br/>V3CodexSample02ManifestAuthorizationPublished → V3DebugPayloadBudgetApplied| c_2_v3_codex_sample_retention_snap_scope_1
   c_2_v3_codex_sample_retention_snap_scope_0 -->|v3-codex-sample-02<br/>V3DebugPayloadBudgetApplied → V3CodexSample06RetentionEnforced| c_2_v3_codex_sample_retention_snap_scope_2
@@ -216,7 +216,7 @@ flowchart TD
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-codex-sample-01` | `V3CodexSample02ManifestAuthorizationPublished` → `V3DebugPayloadBudgetApplied` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/lib.rs</small> | V3DebugRuntime::redact_payload_for_side_channel<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.codex_sample_retention_snap_scope` |
-| `v3-codex-sample-02` | `V3DebugPayloadBudgetApplied` → `V3CodexSample06RetentionEnforced` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/lib.rs</small> | persist_v3_codex_sample_payload<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.codex_sample_retention_snap_scope` |
+| `v3-codex-sample-02` | `V3DebugPayloadBudgetApplied` → `V3CodexSample06RetentionEnforced` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/lib.rs</small> | V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
 
 ## v3.server.managed_lifecycle
 

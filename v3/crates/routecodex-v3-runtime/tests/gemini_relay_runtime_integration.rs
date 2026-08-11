@@ -198,6 +198,7 @@ impl ResponsesTransport for ErrorTransport {
                 headers: vec![],
                 body: br#"{"error":{"code":429,"message":"controlled rate limit","status":"RESOURCE_EXHAUSTED"}}"#
                     .to_vec(),
+                body_read_failure: None,
             }),
         })
     }
@@ -225,6 +226,7 @@ impl ResponsesTransport for ReselectTransport {
                     body:
                         br#"{"error":{"code":500,"message":"primary failed","status":"INTERNAL"}}"#
                             .to_vec(),
+                    body_read_failure: None,
                 }),
             });
         }
@@ -312,6 +314,7 @@ impl ResponsesTransport for MalformedErrorTransport {
                 status: 502,
                 headers: vec![],
                 body: b"not-json".to_vec(),
+                body_read_failure: None,
             }),
         })
     }
@@ -455,6 +458,7 @@ impl ResponsesTransport for RecoverySseTransport {
                     body:
                         br#"{"error":{"code":500,"message":"primary failed","status":"INTERNAL"}}"#
                             .to_vec(),
+                    body_read_failure: None,
                 }),
             });
         }

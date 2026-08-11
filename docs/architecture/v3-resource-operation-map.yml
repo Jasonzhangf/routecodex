@@ -1314,10 +1314,16 @@ resources:
     lifecycle: v3.debug_error_foundation.mainline
     owner_feature_id: v3.codex_sample_retention_snap_scope
     owner_crate: routecodex-v3-debug
-    owner_node: V3DebugPayloadBudgetApplied
+    owner_node: V3CodexSampleStore
     identity: [serverId, requestId, executionId, artifactKind]
+    semantic_contract:
+      sample_fidelity: debug/codex-sample payloads are preserved verbatim; truncation and placeholder replacement are forbidden
+      redaction_only: only sensitive-key and secret-literal values are replaced with [REDACTED]
+      default_policy: dev builds enable sampling by default (cfg!(debug_assertions)); release builds require explicit opt-in
+      error_evidence: error paths force-write samples even when sampling is disabled
+      retention_cap: at most 200 request directories per port are retained
     allowed_readers: [capture_v3_live_raw_request, capture_v3_responses_relay_response, capture_v3_responses_direct_response, capture_v3_responses_relay_provider_snapshots, V3DebugBoundedTextCapture::rendered_text, developer_diagnostics]
-    allowed_writers: [V3DebugRuntime::redact_payload_for_side_channel, redact_debug_value_at_key, V3DebugBoundedTextCapture::append]
+    allowed_writers: [V3DebugRuntime::redact_payload_for_side_channel, redact_debug_value_at_key, V3DebugBoundedTextCapture::append, V3CodexSampleStore::persist]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1329,11 +1335,11 @@ resources:
     resource_kind: bounded_diagnostic_artifact
     lifecycle: v3.codex_sample_retention_snap_scope
     owner_feature_id: v3.codex_sample_retention_snap_scope
-    owner_crate: routecodex-v3-server
-    owner_node: V3CodexSample06RetentionEnforced
+    owner_crate: routecodex-v3-debug
+    owner_node: V3CodexSampleStore
     identity: [entryProtocol, endpoint, port, requestId, artifactName]
     allowed_readers: [developer_diagnostics, replay-codex-sample]
-    allowed_writers: [persist_v3_codex_sample_payload, enforce_v3_codex_sample_listener_retention, enforce_v3_codex_sample_request_retention]
+    allowed_writers: [V3CodexSampleStore::persist, V3CodexSampleStore::enforce_listener_retention]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
