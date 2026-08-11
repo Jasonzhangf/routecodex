@@ -18,6 +18,39 @@ use serde_json::Value;
 /// 统一占位符文本（chat wire 与 responses wire 共用同一字符串，保证确定性）。
 pub(crate) const V3_HISTORY_IMAGE_PLACEHOLDER: &str = "[Image]";
 
+/// 统计 payload 中图片引用数（临时诊断辅助：image_url / data / file_id 键的 part）。
+pub(crate) fn count_v3_payload_image_refs(body: &Value) -> usize {
+    fn count_in_parts(parts: &[Value]) -> usize {
+        parts
+            .iter()
+            .filter(|part| {
+                part.get("image_url").is_some()
+                    || part.get("data").is_some()
+                    || part.get("file_id").is_some()
+            })
+            .count()
+    }
+    let mut total = 0;
+    if let Some(input) = body.get("input").and_then(Value::as_array) {
+        for item in input {
+            if let Some(content) = item.get("content").and_then(Value::as_array) {
+                total += count_in_parts(content);
+            }
+            if let Some(output) = item.get("output").and_then(Value::as_array) {
+                total += count_in_parts(output);
+            }
+        }
+    }
+    if let Some(messages) = body.get("messages").and_then(Value::as_array) {
+        for message in messages {
+            if let Some(content) = message.get("content").and_then(Value::as_array) {
+                total += count_in_parts(content);
+            }
+        }
+    }
+    total
+}
+
 /// 历史图片统一占位清理（纯函数）。
 ///
 /// 处理三种形状：
@@ -466,6 +499,7 @@ mod tests {
         );
     }
 
+    #[test]
     #[test]
     fn output_images_any_base64_become_identical_placeholder_bytes() {
         // cache 影响确认：历史轮不同 base64 图片（不同请求/不同图片内容）必须归一为
