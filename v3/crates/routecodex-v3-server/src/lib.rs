@@ -63,7 +63,8 @@ use routecodex_v3_runtime::{
     V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
     V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
     V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
-    V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
+    V3OpenAiChatClientStream, V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput,
+    V3OpenAiChatRelayRuntimeOutput,
     V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
@@ -105,7 +106,7 @@ use tokio::sync::oneshot;
 
 const V3_PROTOCOL_PENDING_PROJECTION_RESOURCE: &str = "v3.protocol.pending_projection";
 // feature_id: v3.codex_sample_retention_snap_scope
-const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 100;
+// sample persistence is owned solely by routecodex-v3-debug::V3CodexSampleStore.
 
 struct V3ResponsesPreviousResponseOwnerResolutionContext {
     direct_scope: V3ResponsesDirectContinuationScope,
@@ -121,7 +122,7 @@ struct V3ListenerState {
     debug: V3DebugRuntime,
     console_enabled: bool,
     request_counter: Arc<Mutex<V3RequestIdCounter>>,
-    codex_sample_persistence: Arc<Mutex<()>>,
+    codex_sample_store: Arc<routecodex_v3_debug::V3CodexSampleStore>,
     responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>,
     responses_direct_stopless_control: Arc<V3ResponsesDirectStoplessControlState>,
     responses_relay_local_continuation: Arc<V3ResponsesRelayLocalContinuationState>,
@@ -512,8 +513,13 @@ pub async fn spawn_v3_server_aggregate(
     let provider_health = Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
         &manifest,
     ));
+    let codex_sample_store = Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
+        manifest.debug.codex_samples,
+        routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
+    ));
     for server in &preflight.listeners {
-        enforce_v3_codex_sample_listener_retention(server.port, V3_CODEX_SAMPLE_REQUEST_RETENTION)
+        codex_sample_store
+            .enforce_listener_retention(server.port)
             .map_err(std::io::Error::other)?;
     }
     let mut bound = Vec::with_capacity(preflight.listeners.len());
@@ -537,7 +543,7 @@ pub async fn spawn_v3_server_aggregate(
             debug: debug.clone(),
             console_enabled,
             request_counter: Arc::clone(&request_counter),
-            codex_sample_persistence: Arc::new(Mutex::new(())),
+            codex_sample_store: codex_sample_store.clone(),
             responses_direct_continuation: responses_direct_continuation.clone(),
             responses_direct_stopless_control: responses_direct_stopless_control.clone(),
             responses_relay_local_continuation: responses_relay_local_continuation.clone(),
@@ -1404,6 +1410,18 @@ async fn pending_endpoint_after_responses_admission(
             output.error_chain.as_deref(),
             openai_chat_error_body_for_console(&output.client_body),
             request_console_project_path.as_deref(),
+        ) {
+            return response;
+        }
+        let mut output = output;
+        if let Some(response) = capture_v3_openai_chat_relay_response(
+            &state,
+            &trace_scope,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &payload,
+            &mut output,
         ) {
             return response;
         }
@@ -3294,6 +3312,233 @@ fn capture_v3_responses_relay_response(
     None
 }
 
+fn capture_v3_openai_chat_relay_response(
+    state: &Arc<V3ListenerState>,
+    trace_scope: &V3DebugTraceScope,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    raw_request_payload: &Value,
+    output: &mut V3OpenAiChatRelayRuntimeOutput,
+) -> Option<Response<Body>> {
+    let force_error_evidence = output.status >= 400 || output.error_chain.is_some();
+    if force_error_evidence {
+        let _ = persist_v3_error_evidence_payload(
+            state,
+            entry_protocol,
+            endpoint,
+            request_id,
+            "request.json",
+            &state
+                .debug
+                .redact_payload_for_side_channel(raw_request_payload.clone()),
+        );
+        let _ = persist_v3_error_evidence_payload(
+            state,
+            entry_protocol,
+            endpoint,
+            request_id,
+            "error.json",
+            &json!({
+                "object": "routecodex.v3.error_evidence",
+                "stage": "error",
+                "status": output.status,
+                "request_id": request_id,
+                "endpoint": endpoint,
+                "node_trace": output.node_trace.clone(),
+                "error_chain": output.error_chain.clone(),
+            }),
+        );
+    }
+    if !state.debug.should_capture_snapshot_stage("client-response") && !force_error_evidence {
+        return None;
+    }
+    match &output.client_body {
+        V3OpenAiChatRelayClientBody::Json(value) => {
+            let payload = state.debug.redact_payload_for_side_channel(json!({
+                "object": "routecodex.v3.client_response_snapshot",
+                "stage": "client-response",
+                "source": "live_server_openai_chat_response",
+                "status": output.status,
+                "bodyKind": "json",
+                "rawBody": value,
+                "node_trace": output.node_trace.clone(),
+                "error_chain": output.error_chain.clone(),
+            }));
+            if let Err(error) = persist_v3_codex_sample_payload(
+                state,
+                entry_protocol,
+                endpoint,
+                request_id,
+                "response.json",
+                &payload,
+            ) {
+                return Some(foundation_output_response(project_v3_debug_failure(
+                    "V3Debug03RawResponseCaptured",
+                    V3DebugError::Sink(error),
+                )));
+            }
+        }
+        V3OpenAiChatRelayClientBody::Sse(_) => {
+            let body = std::mem::replace(
+                &mut output.client_body,
+                V3OpenAiChatRelayClientBody::Json(Value::Null),
+            );
+            let V3OpenAiChatRelayClientBody::Sse(stream) = body else {
+                unreachable!("matched OpenAI Chat SSE client body");
+            };
+            let recorder = V3LiveSnapOpenAiChatClientResponseSseRecorder::new(
+                Arc::clone(state),
+                entry_protocol.to_string(),
+                endpoint.to_string(),
+                request_id.to_string(),
+                output,
+            );
+            if let Err(error) = recorder.persist_initial() {
+                return Some(foundation_output_response(project_v3_debug_failure(
+                    "V3Debug03RawResponseCaptured",
+                    V3DebugError::Sink(error),
+                )));
+            }
+            output.client_body = V3OpenAiChatRelayClientBody::Sse(recorder.wrap(stream));
+        }
+    }
+    let _ = trace_scope;
+    None
+}
+
+#[derive(Clone)]
+struct V3LiveSnapOpenAiChatClientResponseSseRecorder {
+    state: Arc<V3ListenerState>,
+    entry_protocol: String,
+    endpoint: String,
+    request_id: String,
+    status: u16,
+    node_trace: Vec<&'static str>,
+    error_chain: Option<Vec<&'static str>>,
+    raw_sse: Arc<Mutex<V3DebugBoundedTextCapture>>,
+}
+
+impl V3LiveSnapOpenAiChatClientResponseSseRecorder {
+    fn new(
+        state: Arc<V3ListenerState>,
+        entry_protocol: String,
+        endpoint: String,
+        request_id: String,
+        output: &V3OpenAiChatRelayRuntimeOutput,
+    ) -> Self {
+        Self {
+            state,
+            entry_protocol,
+            endpoint,
+            request_id,
+            status: output.status,
+            node_trace: output.node_trace.clone(),
+            error_chain: output.error_chain.clone(),
+            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+        }
+    }
+
+    fn wrap(&self, stream: V3OpenAiChatClientStream) -> V3OpenAiChatClientStream {
+        Box::pin(V3LiveSnapOpenAiChatRelayRecordedStream {
+            inner: stream,
+            recorder: self.clone(),
+            terminal_persisted: false,
+        })
+    }
+
+    fn persist_initial(&self) -> Result<(), String> {
+        self.persist_current(None)
+    }
+
+    fn append_chunk(&self, bytes: &[u8]) -> Result<(), String> {
+        self.raw_sse
+            .lock()
+            .map_err(|error| error.to_string())?
+            .append(bytes);
+        Ok(())
+    }
+
+    fn persist_current(&self, stream_error: Option<&str>) -> Result<(), String> {
+        let raw_sse = self
+            .raw_sse
+            .lock()
+            .map_err(|error| error.to_string())?
+            .rendered_text();
+        let mut payload = json!({
+            "object": "routecodex.v3.client_response_snapshot",
+            "stage": "client-response",
+            "source": "live_server_openai_chat_stream",
+            "status": self.status,
+            "bodyKind": "sse",
+            "rawSse": raw_sse,
+            "node_trace": self.node_trace.clone(),
+            "error_chain": self.error_chain.clone(),
+        });
+        if let Some(stream_error) = stream_error {
+            if let Some(object) = payload.as_object_mut() {
+                object.insert(
+                    "streamError".to_string(),
+                    Value::String(stream_error.to_string()),
+                );
+            }
+        }
+        let payload = self.state.debug.redact_payload_for_side_channel(payload);
+        persist_v3_codex_sample_payload(
+            &self.state,
+            &self.entry_protocol,
+            &self.endpoint,
+            &self.request_id,
+            "response.json",
+            &payload,
+        )
+    }
+}
+
+struct V3LiveSnapOpenAiChatRelayRecordedStream {
+    inner: V3OpenAiChatClientStream,
+    recorder: V3LiveSnapOpenAiChatClientResponseSseRecorder,
+    terminal_persisted: bool,
+}
+
+impl futures_util::Stream for V3LiveSnapOpenAiChatRelayRecordedStream {
+    type Item = Result<Vec<u8>, String>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        match this.inner.as_mut().poll_next(context) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Some(Ok(bytes))) => match this.recorder.append_chunk(&bytes) {
+                Ok(()) => Poll::Ready(Some(Ok(bytes))),
+                Err(error) => {
+                    this.terminal_persisted = true;
+                    Poll::Ready(Some(Err(error)))
+                }
+            },
+            Poll::Ready(Some(Err(error))) => {
+                this.terminal_persisted = true;
+                match this.recorder.persist_current(Some(&error)) {
+                    Ok(()) => Poll::Ready(Some(Err(error))),
+                    Err(persistence_error) => Poll::Ready(Some(Err(format!(
+                        "{error}; codex sample persistence failed: {persistence_error}"
+                    )))),
+                }
+            }
+            Poll::Ready(None) if !this.terminal_persisted => {
+                this.terminal_persisted = true;
+                match this.recorder.persist_current(None) {
+                    Ok(()) => Poll::Ready(None),
+                    Err(error) => Poll::Ready(Some(Err(error))),
+                }
+            }
+            Poll::Ready(None) => Poll::Ready(None),
+        }
+    }
+}
+
 fn capture_v3_responses_relay_provider_snapshots(
     state: &V3ListenerState,
     entry_protocol: &str,
@@ -3681,16 +3926,14 @@ fn persist_v3_codex_sample_payload(
     file_name: &str,
     payload: &Value,
 ) -> Result<(), String> {
-    if !state.manifest.debug.codex_samples {
-        return Ok(());
-    }
-    persist_v3_codex_sample_payload_unchecked(
-        state,
+    state.codex_sample_store.persist(
+        state.server.port,
         entry_protocol,
         endpoint,
         request_id,
         file_name,
         payload,
+        false,
     )
 }
 
@@ -3702,175 +3945,24 @@ fn persist_v3_error_evidence_payload(
     file_name: &str,
     payload: &Value,
 ) -> Result<(), String> {
-    persist_v3_codex_sample_payload_unchecked(
-        state,
+    state.codex_sample_store.persist(
+        state.server.port,
         entry_protocol,
         endpoint,
         request_id,
         file_name,
         payload,
+        true,
     )
-}
-
-fn persist_v3_codex_sample_payload_unchecked(
-    state: &V3ListenerState,
-    entry_protocol: &str,
-    endpoint: &str,
-    request_id: &str,
-    file_name: &str,
-    payload: &Value,
-) -> Result<(), String> {
-    let _persistence_guard = state
-        .codex_sample_persistence
-        .lock()
-        .map_err(|error| format!("codex sample persistence lock poisoned: {error}"))?;
-    let port_root = resolve_v3_codex_samples_root()?
-        .join(format_v3_codex_sample_endpoint_dir(
-            entry_protocol,
-            endpoint,
-        ))
-        .join("ports")
-        .join(state.server.port.to_string());
-    let dir = port_root.join(encode_v3_codex_sample_path_segment(request_id));
-    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    let path = dir.join(file_name);
-    let mut file = fs::File::create(path).map_err(|error| error.to_string())?;
-    serde_json::to_writer_pretty(&mut file, payload).map_err(|error| error.to_string())?;
-    file.write_all(b"\n").map_err(|error| error.to_string())?;
-    enforce_v3_codex_sample_request_retention(
-        &port_root,
-        Some(&dir),
-        V3_CODEX_SAMPLE_REQUEST_RETENTION,
-    )?;
-    Ok(())
-}
-
-fn resolve_v3_codex_samples_root() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| "codex sample filesystem requires HOME".to_string())?;
-    if home.to_string_lossy().trim().is_empty() {
-        return Err("codex sample filesystem requires non-empty HOME".to_string());
-    }
-    Ok(PathBuf::from(home).join(".rcc").join("codex-samples"))
 }
 
 fn v3_codex_sample_scope_allows(
     state: &V3ListenerState,
     execution_mode: V3EntryProtocolExecutionMode,
 ) -> bool {
-    state.manifest.debug.codex_samples
+    state.codex_sample_store.is_enabled()
         && (execution_mode != V3EntryProtocolExecutionMode::Direct
             || state.manifest.debug.snapshot_direct)
-}
-
-fn enforce_v3_codex_sample_request_retention(
-    port_root: &std::path::Path,
-    protected_request_dir: Option<&std::path::Path>,
-    retention: usize,
-) -> Result<(), String> {
-    let entries = fs::read_dir(port_root)
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    let mut request_dirs = Vec::new();
-    for entry in entries {
-        if !entry
-            .file_type()
-            .map_err(|error| error.to_string())?
-            .is_dir()
-        {
-            continue;
-        }
-        let modified = entry
-            .metadata()
-            .map_err(|error| error.to_string())?
-            .modified()
-            .map_err(|error| error.to_string())?;
-        request_dirs.push((entry, modified));
-    }
-    if request_dirs.len() <= retention {
-        return Ok(());
-    }
-    request_dirs.sort_by(|left, right| {
-        left.1
-            .cmp(&right.1)
-            .then_with(|| left.0.file_name().cmp(&right.0.file_name()))
-    });
-    let excess = request_dirs.len() - retention;
-    let removable = request_dirs
-        .into_iter()
-        .filter(|(entry, _)| {
-            protected_request_dir.is_none_or(|protected| entry.path() != protected)
-        })
-        .take(excess)
-        .collect::<Vec<_>>();
-    if removable.len() != excess {
-        return Err(format!(
-            "codex sample retention cannot preserve current request while removing {excess} directories"
-        ));
-    }
-    for (entry, _) in removable {
-        fs::remove_dir_all(entry.path()).map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-fn enforce_v3_codex_sample_listener_retention(port: u16, retention: usize) -> Result<(), String> {
-    let samples_root = resolve_v3_codex_samples_root()?;
-    if !samples_root.exists() {
-        return Ok(());
-    }
-    let endpoint_dirs = fs::read_dir(&samples_root)
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    for endpoint_dir in endpoint_dirs {
-        if !endpoint_dir
-            .file_type()
-            .map_err(|error| error.to_string())?
-            .is_dir()
-        {
-            continue;
-        }
-        let port_root = endpoint_dir.path().join("ports").join(port.to_string());
-        if !port_root.is_dir() {
-            continue;
-        }
-        enforce_v3_codex_sample_request_retention(&port_root, None, retention)?;
-    }
-    Ok(())
-}
-
-fn format_v3_codex_sample_endpoint_dir(entry_protocol: &str, endpoint: &str) -> String {
-    match (entry_protocol, endpoint) {
-        ("responses", "/v1/responses") => "openai-responses".to_string(),
-        ("openai_chat", "/v1/chat/completions") => "openai-chat-completions".to_string(),
-        ("anthropic", "/v1/messages") => "anthropic-messages".to_string(),
-        ("gemini", _) => "gemini-generate-content".to_string(),
-        _ => encode_v3_codex_sample_path_segment(
-            endpoint.trim_start_matches('/').replace('/', "-").as_str(),
-        ),
-    }
-}
-
-fn encode_v3_codex_sample_path_segment(value: &str) -> String {
-    let path_safe = value
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('_')
-        .to_string();
-    if path_safe.is_empty() {
-        "unknown".to_string()
-    } else {
-        path_safe
-    }
 }
 
 fn start_v3_live_snapshot_session(
@@ -6893,6 +6985,93 @@ fn openai_chat_relay_output_response(output: V3OpenAiChatRelayRuntimeOutput) -> 
         .expect("typed V3 OpenAI Chat Relay response")
 }
 
+/// OpenAI Chat SSE 请求：等待 provider 完整响应 + resp 链转换完成后回 200 + SSE 流。
+/// 等待期连接保持（不回任何状态码、不发 keepalive 帧——keepalive 是内部心跳，
+/// 发给客户端会污染 SSE 语义）；完整链（req→provider→resp 转换）后台执行，
+/// 转换完成后 200 + 数据帧；中途错误投影为 SSE error 帧（客户端重试续杯）。
+async fn v3_openai_chat_relay_sse_accept_response(
+    state: &Arc<V3ListenerState>,
+    payload: Value,
+    request_id: String,
+    failure_session_scope: V3ProviderFailureSessionScope,
+) -> Response<Body> {
+    use futures_util::StreamExt;
+    let manifest = state.manifest.clone();
+    let provider_health = state.provider_health.runtime_health();
+    let input = V3OpenAiChatRelayRuntimeInput {
+        server_id: state.server.id.clone(),
+        failure_session_scope,
+        request_id: request_id.clone(),
+        payload,
+    };
+    let (tx, rx) =
+        tokio::sync::mpsc::channel::<Result<Vec<u8>, String>>(32);
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let result = execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
+            &manifest,
+            input,
+            provider_health,
+        )
+        .await;
+        let _ = done_tx.send(());
+        match result {
+            Ok(output) => match output.client_body {
+                V3OpenAiChatRelayClientBody::Sse(stream) => {
+                    let mut stream = stream;
+                    while let Some(chunk) = stream.next().await {
+                        if tx.send(chunk).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                V3OpenAiChatRelayClientBody::Json(json) => {
+                    // provider 以 JSON 完成（非 SSE）：包装为 SSE data 帧喂给客户端。
+                    let bytes = serde_json::to_vec(&json).unwrap_or_default();
+                    let mut frame = Vec::with_capacity(bytes.len() + 8);
+                    frame.extend_from_slice(b"data: ");
+                    frame.extend_from_slice(&bytes);
+                    frame.extend_from_slice(b"\n\n");
+                    let _ = tx.send(Ok(frame)).await;
+                }
+            },
+            Err(error) => {
+                // 中途错误：投影为 SSE transport error 帧（客户端重试，下次命中
+                // 自动 switch provider 续杯），不用断连/EOF 让客户端误判。
+                let error_frame = serde_json::json!({
+                    "error": {
+                        "message": format!("provider transport error: {error}"),
+                        "type": "transport_error",
+                        "code": "provider_transport_error",
+                    }
+                });
+                let bytes = serde_json::to_vec(&error_frame).unwrap_or_default();
+                let mut frame = Vec::with_capacity(bytes.len() + 8);
+                frame.extend_from_slice(b"data: ");
+                frame.extend_from_slice(&bytes);
+                frame.extend_from_slice(b"\n\n");
+                let _ = tx.send(Ok(frame)).await;
+            }
+        }
+    });
+    // 等待完整链（provider 响应 + resp 转换）完成——连接保持，不回任何状态码。
+    let _ = done_rx.await;
+    let client_stream: V3OpenAiChatClientStream = Box::pin(futures_util::stream::unfold(
+        rx,
+        |mut rx| async move { rx.recv().await.map(|item| (item, rx)) },
+    ));
+    let io_stream = Box::pin(client_stream.map(|item| match item {
+        Ok(bytes) => Ok::<Vec<u8>, std::io::Error>(bytes),
+        Err(message) => Err(std::io::Error::other(message)),
+    }));
+    let body = Body::from_stream(io_stream);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(body)
+        .expect("SSE accept response")
+}
+
 /// OpenAI Chat 入口动态绑定：入口协议与出口 provider 同协议（chat wire）
 /// 走统一 direct 骨架（`execute_v3_direct_runtime_kernel_core` + ChatCodec）；
 /// 异协议由骨架返回 RelayHandoff，转 chat relay runtime（入口已归一化到 chat）。
@@ -6949,6 +7128,17 @@ async fn execute_v3_openai_chat_direct_server_outcome(
     .await;
     if let Some(handoff) = output.protocol_relay_handoff {
         let relay_trace = handoff.node_trace;
+        // SSE 请求：立即 201 + keepalive 维持连接，后台执行完整 relay 链
+        // （客户端连接与 provider 解耦，provider 挂起/慢不影响 client 连接）。
+        if payload.get("stream").and_then(Value::as_bool) == Some(true) {
+            return v3_openai_chat_relay_sse_accept_response(
+                state,
+                payload.clone(),
+                request_id.clone(),
+                provider_failure_session_scope.clone(),
+            )
+            .await;
+        }
         let relay_result = execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
             &state.manifest,
             V3OpenAiChatRelayRuntimeInput {
@@ -6967,6 +7157,21 @@ async fn execute_v3_openai_chat_direct_server_outcome(
         let mut trace = relay_trace;
         trace.extend(relay_output.node_trace);
         relay_output.node_trace = trace;
+        if let Some(response) = capture_v3_openai_chat_relay_response(
+            state,
+            &V3DebugTraceScope {
+                server_id: state.server.id.clone(),
+                request_id: request_id.clone(),
+                execution_id: String::new(),
+            },
+            "openai_chat",
+            &path,
+            &request_id,
+            &console_payload,
+            &mut relay_output,
+        ) {
+            return response;
+        }
         return openai_chat_relay_output_response(relay_output);
     }
     let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(
@@ -6976,6 +7181,47 @@ async fn execute_v3_openai_chat_direct_server_outcome(
     );
     frame.observability = output.observability;
     frame.stream_observation = output.stream_observation;
+    let has_provider_failure = frame.observability.as_ref().is_some_and(|observability| {
+        !observability.provider_failure_events.is_empty()
+    });
+    if frame.status >= 400 || has_provider_failure {
+        let _ = persist_v3_error_evidence_payload(
+            state,
+            "openai_chat",
+            &path,
+            &request_id,
+            "request.json",
+            &state
+                .debug
+                .redact_payload_for_side_channel(console_payload.clone()),
+        );
+        let _ = persist_v3_error_evidence_payload(
+            state,
+            "openai_chat",
+            &path,
+            &request_id,
+            "error.json",
+            &json!({
+                "object": "routecodex.v3.error_evidence",
+                "stage": "error",
+                "status": frame.status,
+                "request_id": request_id,
+                "endpoint": path,
+                "node_trace": frame.node_trace.clone(),
+                "error_chain": frame.error_chain.clone(),
+                "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
+            }),
+        );
+    }
+    if let Some(response) = capture_v3_responses_direct_response(
+        state,
+        "openai_chat",
+        &path,
+        &request_id,
+        &mut frame,
+    ) {
+        return response;
+    }
     let stream_console_finalizer =
         emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
     responses_direct_output_response_with_console(
@@ -7090,12 +7336,13 @@ async fn debug_status(State(state): State<Arc<V3ListenerState>>) -> Response<Bod
             if let Some(object) = status.as_object_mut() {
                 object.insert(
                     "codex_samples_enabled".to_string(),
-                    Value::Bool(state.manifest.debug.codex_samples),
+                    Value::Bool(state.codex_sample_store.is_enabled()),
                 );
                 object.insert(
                     "direct_snapshots_enabled".to_string(),
                     Value::Bool(
-                        state.manifest.debug.codex_samples && state.manifest.debug.snapshot_direct,
+                        state.codex_sample_store.is_enabled()
+                            && state.manifest.debug.snapshot_direct,
                     ),
                 );
             }
@@ -7876,12 +8123,12 @@ fn build_v3_debug_runtime_from_manifest(
             .retention
             .get("raw_requests")
             .copied()
-            .unwrap_or(16) as usize,
+            .unwrap_or(200) as usize,
         raw_response_retention: manifest
             .retention
             .get("raw_responses")
             .copied()
-            .unwrap_or(16) as usize,
+            .unwrap_or(200) as usize,
         event_retention: manifest.retention.get("events").copied().unwrap_or(512) as usize,
         redaction: V3RedactionPolicy::default(),
     })
