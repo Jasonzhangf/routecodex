@@ -27,6 +27,9 @@ const copied = [
   "v3/crates/routecodex-v3-debug/src/sample_store.rs",
   "v3/crates/routecodex-v3-debug/tests/debug_runtime_contract.rs",
   "v3/crates/routecodex-v3-server/src/lib.rs",
+  "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
+  "v3/crates/routecodex-v3-server/src/frame_builders.rs",
+  "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
   "v3/crates/routecodex-v3-config/src/types.rs",
   "v3/crates/routecodex-v3-config/src/validate.rs",
   "docs/architecture/function-map.yml",
@@ -69,7 +72,7 @@ const cases = [
   },
   {
     name: "Direct SSE success keepalive is removed again",
-    path: "v3/crates/routecodex-v3-server/src/lib.rs",
+    path: "v3/crates/routecodex-v3-server/src/frame_builders.rs",
     mutate: (source) => {
       const start = source.indexOf(
         "fn responses_direct_output_response_with_console(",
@@ -128,13 +131,13 @@ const cases = [
   },
   {
     name: "server reimplements its own sample persistence",
-    path: "v3/crates/routecodex-v3-server/src/lib.rs",
+    path: "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
     mutate: (source) =>
       source.replace(
         "fn persist_v3_codex_sample_payload(",
         "fn persist_v3_codex_sample_payload_unchecked(\n    state: &V3ListenerState,\n    entry_protocol: &str,\n    endpoint: &str,\n    request_id: &str,\n    file_name: &str,\n    payload: &Value,\n) -> Result<(), String> {\n    let port_root = resolve_v3_codex_samples_root()?;\n    let dir = port_root.join(encode_v3_codex_sample_path_segment(request_id));\n    let _ = dir;\n    Ok(())\n}\n\nfn persist_v3_codex_sample_payload(",
       ),
-    diagnostic: /Server must not reimplement codex-sample persistence/u,
+    diagnostic: /must not reimplement codex-sample persistence/u,
   },
 ];
 

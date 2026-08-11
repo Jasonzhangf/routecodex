@@ -122,6 +122,11 @@ for (const leaked of [
     leaked,
     "Server must not reimplement codex-sample persistence (unique owner is V3CodexSampleStore)",
   );
+  forbidMatch(
+    serverLiveSnapshot,
+    leaked,
+    "Server live-snapshot module must not reimplement codex-sample persistence (unique owner is V3CodexSampleStore)",
+  );
 }
 requireMatch(
   server,
@@ -211,11 +216,16 @@ for (const recorder of [
 const directProjectionStart = serverFrameBuilders.indexOf(
   "fn responses_direct_output_response_with_console(",
 );
-const directProjectionEnd = serverFrameBuilders.indexOf(
+let directProjectionEnd = serverFrameBuilders.indexOf(
   "\nfn wrap_v3_direct_sse_console_stream(",
   directProjectionStart,
 );
-const directProjection =
+if (directProjectionEnd === -1) {
+  directProjectionEnd = serverFrameBuilders.indexOf(
+    "fn wrap_v3_direct_sse_console_stream(",
+    directProjectionStart,
+  );
+}const directProjection =
   directProjectionStart >= 0 && directProjectionEnd > directProjectionStart
     ? serverFrameBuilders.slice(directProjectionStart, directProjectionEnd)
     : "";

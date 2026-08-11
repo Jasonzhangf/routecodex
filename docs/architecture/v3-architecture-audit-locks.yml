@@ -95,8 +95,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:99d045db07dc7885fbfdfa29127d968fddd293fd8a34f7f3ad71d6d2f3a90689
-    last_manual_authorization_id: auth-20260806-v3-history-payload-control-audit
+    fingerprint: sha256:4aea8acecaffbc6347c4b169d54554a1462783161667c3a83616cccfc4071d14
+    last_manual_authorization_id: auth-20260811-v3-god-file-decomposition
   - item_id: chain:v3.debug_error_foundation.mainline
     chain_id: v3.debug_error_foundation.mainline
     status: audited_locked
@@ -115,6 +115,13 @@ locked_items:
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md#sse-edge-sop
     fingerprint: sha256:ee58da7eca3b82d7e16b0cff456968919d023c8c8bb5fcf8766b9465d2b275ed
 manual_authorizations:
+  - authorization_id: auth-20260811-v3-god-file-decomposition
+    item_id: chain:v3.servertool_hook_skeleton_lifecycle
+    approved_by: Jason
+    approved_at: '2026-08-11T15:30:00+08:00'
+    reason: "Jason explicitly approved the audit-lock refresh after the god-file decomposition work (server lib.rs split into console/endpoint_handlers/websocket/live_snapshot/scope_metadata/executors/frame_builders submodules; responses relay split into tests/conversion/failures/dry-run/json-hooks/stopless submodules). Chain structure, owners, edges and resources are unchanged; only caller/callee file paths moved."
+    fingerprint_before: sha256:99d045db07dc7885fbfdfa29127d968fddd293fd8a34f7f3ad71d6d2f3a90689
+    fingerprint_after: sha256:4aea8acecaffbc6347c4b169d54554a1462783161667c3a83616cccfc4071d14
   - authorization_id: auth-20260806-v3-responses-direct-history-immutability
     item_id: chain:v3.responses_direct.required_mainline
     approved_by: Jason

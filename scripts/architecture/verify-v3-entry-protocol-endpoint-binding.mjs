@@ -26,6 +26,9 @@ const files = {
   wikiLib: 'scripts/architecture/architecture-wiki-lib.mjs',
   packageJson: 'package.json',
   server: 'v3/crates/routecodex-v3-server/src/lib.rs',
+  endpointHandlers: 'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
+  websocket: 'v3/crates/routecodex-v3-server/src/websocket.rs',
+  scopeMetadata: 'v3/crates/routecodex-v3-server/src/scope_metadata.rs',
   configValidate: 'v3/crates/routecodex-v3-config/src/validate.rs',
   configTypes: 'v3/crates/routecodex-v3-config/src/types.rs',
 };
@@ -332,11 +335,17 @@ function verifyServerSource(server, parsedManifest) {
   requireAnyText(server, files.server, ['entry_protocol_binding_for_endpoint', 'lookup_v3_entry_protocol_binding'], 'binding registry consumer');
   requireAnyText(server, files.server, ['PendingNotImplemented', 'pending_not_implemented'], 'explicit pending_not_implemented status');
   requireText(server, files.server, 'v3.protocol.pending_projection');
-  const effectiveModeCalls = server.match(/responses_effective_execution_mode_for_entry_facts\s*\(/gu) ?? [];
+  const serverAll = [
+    server,
+    read(files.endpointHandlers),
+    read(files.websocket),
+    read(files.scopeMetadata),
+  ].join('\n');
+  const effectiveModeCalls = serverAll.match(/responses_effective_execution_mode_for_entry_facts\s*\(/gu) ?? [];
   if (effectiveModeCalls.length < 3) {
     failures.push(`${files.server}: HTTP and WebSocket must share the fresh Responses execution-mode owner`);
   }
-  if (!/V3EntryProtocolExecutionMode::PendingNotImplemented\s*=>\s*configured_mode/gu.test(server)) {
+  if (!/V3EntryProtocolExecutionMode::PendingNotImplemented\s*=>\s*configured_mode/gu.test(serverAll)) {
     failures.push(`${files.server}: fresh Responses execution mode must preserve Config-owned PendingNotImplemented`);
   }
   if (/fn\s+endpoint_protocol\s*\(/u.test(server)) {

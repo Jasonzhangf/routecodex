@@ -596,7 +596,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_protocol_conversion_field_parity"><code>v3.protocol_conversion_field_parity</code></a><br/>v 3.protocol_conversion_field_parity</td><td><span class="status pending_review">pending review</span></td><td>8</td><td>9</td><td><code>v3.protocol_conversion_field_parity</code></td><td><code>sha256:4b11a30250c6…</code></td></tr>
 <tr><td><a href="#chain-v3_responses_relay_source_server_entry"><code>v3.responses_relay.source_server_entry</code></a><br/>v 3.responses_relay.source_server_entry</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>9</td><td><code>v3.hub_relay_runtime_closeout</code></td><td><code>sha256:5e36679bcd96…</code></td></tr>
 <tr><td><a href="#chain-v3_error_raw_wire_evidence"><code>v3.error.raw_wire_evidence</code></a><br/>v 3.error.raw_wire_evidence</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>2</td><td><code>v3.error.raw_wire_evidence</code></td><td><code>sha256:090844b0b2ae…</code></td></tr>
-<tr><td><a href="#chain-v3_servertool_hook_skeleton_lifecycle"><code>v3.servertool_hook_skeleton_lifecycle</code></a><br/>06 Stopless / Servertool</td><td><span class="status locked_changed">locked item changed</span></td><td>8</td><td>6</td><td><code>v3.servertool_hook_skeleton_lifecycle</code></td><td><code>sha256:4aea8acecaff…</code></td></tr>
+<tr><td><a href="#chain-v3_servertool_hook_skeleton_lifecycle"><code>v3.servertool_hook_skeleton_lifecycle</code></a><br/>06 Stopless / Servertool</td><td><span class="status audited_locked">locked by Jason</span></td><td>8</td><td>6</td><td><code>v3.servertool_hook_skeleton_lifecycle</code></td><td><code>sha256:4aea8acecaff…</code></td></tr>
 <tr><td><a href="#chain-v3_servertool_center_skeleton"><code>v3.servertool_center.skeleton</code></a><br/>v 3.servertool_center.skeleton</td><td><span class="status pending_review">pending review</span></td><td>6</td><td>4</td><td><code>v3.servertool_center_skeleton</code></td><td><code>sha256:90ad91a81901…</code></td></tr>
 <tr><td><a href="#chain-v3_direct_stopless_metadata_center"><code>v3.direct_stopless_metadata_center</code></a><br/>v 3.direct_stopless_metadata_center</td><td><span class="status pending_review">pending review</span></td><td>6</td><td>4</td><td><code>v3.direct_stopless_metadata_center</code></td><td><code>sha256:cede69358921…</code></td></tr>
 <tr><td><a href="#chain-v3_hub_relay_tool_servertool_multiturn_parity"><code>v3.hub_relay.tool_servertool_multiturn_parity</code></a><br/>v 3.hub_relay.tool_servertool_multiturn_parity</td><td><span class="status pending_review">pending review</span></td><td>5</td><td>6</td><td><code>v3.relay_tool_servertool_multiturn_parity_closeout</code></td><td><code>sha256:21b3ad19b2b7…</code></td></tr>
@@ -1029,7 +1029,7 @@ flowchart TD
             <span>Req04 restore/请求治理 + Resp03 响应治理 + Resp04 save；continuation 必须 save/restore 成对。</span>
             <span><code>v3.servertool_hook_skeleton_lifecycle</code></span>
             <span>8 edges · 6 resources · v3-runtime::hub_v1</span>
-            <span class="status locked_changed">locked item changed</span>
+            <span class="status audited_locked">locked by Jason</span>
           </a>
 <a class="branch-card" href="#chain-v3_servertool_center_skeleton">
             <span class="chain-id">v 3.servertool_center.skeleton</span>
@@ -2981,7 +2981,7 @@ flowchart TD
         <p class="chain-summary">StoplessCenter Metadata Center control-signal state-machine lifecycle inside declared Chat Process stopless SOP only. Server entry and generic relay closeout are aggregate routing edges; StoplessCenter read/write ownership is bound to Req04/Resp03 StoplessCenter nodes; CLI is no-input no-op evidence only.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.servertool_hook_skeleton_lifecycle</code></span>
-          <span>audit: <span class="status locked_changed">locked item changed</span></span>
+          <span>audit: <span class="status audited_locked">locked by Jason</span></span>
           <span>modules: <code>v3-runtime::hub_v1</code></span>
           <span>resources: <code>6</code></span>
           <span>manifest: <code>docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml</code></span>
