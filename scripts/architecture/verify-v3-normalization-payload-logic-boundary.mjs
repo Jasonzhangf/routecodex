@@ -8,6 +8,7 @@ const hubSplitDir = 'v3/crates/routecodex-v3-runtime/src/hub_v1';
 const providerWirePath = 'v3/crates/routecodex-v3-provider-responses/src/wire.rs';
 const relayRequestPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs';
 const responsesRelayRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs';
+const responsesRelayJsonHooksPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs';
 const anthropicRelayHooksPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs';
 const openaiChatCodecPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs';
 const geminiCodecPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs';
@@ -25,6 +26,7 @@ const hub = readHubSourceSurface();
 const providerWire = readFileSync(resolve(root, providerWirePath), 'utf8');
 const relayRequest = readFileSync(resolve(root, relayRequestPath), 'utf8');
 const responsesRelayRuntime = readFileSync(resolve(root, responsesRelayRuntimePath), 'utf8');
+const responsesRelayJsonHooks = readFileSync(resolve(root, responsesRelayJsonHooksPath), 'utf8');
 const anthropicRelayHooks = readFileSync(resolve(root, anthropicRelayHooksPath), 'utf8');
 const openaiChatCodec = readFileSync(resolve(root, openaiChatCodecPath), 'utf8');
 const geminiCodec = readFileSync(resolve(root, geminiCodecPath), 'utf8');
@@ -341,7 +343,7 @@ requireAll(anthropicRelayReqInbound, 'Anthropic Relay request protocol codec bou
 // 替代守卫是上方 run_v3_anthropic_relay_runtime_req_inbound 的
 // encode_v3_anthropic_request_as_responses_semantic + build_v3_hub_req_inbound_02 检查。
 
-const responseRuntime = functionBody(responsesRelayRuntime, 'fn run_json_response_hooks');
+const responseRuntime = functionBody(responsesRelayJsonHooks, 'fn run_json_response_hooks');
 if (responseRuntime.indexOf('hooks.govern') > responseRuntime.indexOf('hooks.commit')) {
   fail('Responses Relay response runtime: Chat Process govern must run before continuation commit');
 }

@@ -25,6 +25,8 @@ const paths = {
   providerReqCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+  responsesRuntimeTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
+  responsesOpenaiChatConversion: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
   anthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
   anthropicProjectionContext: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
   anthropicCodecToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
@@ -338,11 +340,11 @@ requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::respons
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
 for (const phrase of [
   'openai_chat_provider_wire_consumes_registered_codex_client_metadata_as_local_context',
-  'openai_chat_function_tool_redacted_schema_placeholders_fail_fast',
-  'openai_chat_function_tool_redacted_schema_placeholders_fail_fast_in_defs',
+  'openai_chat_function_tool_redacted_schema_placeholders_pass_through',
+  'openai_chat_function_tool_redacted_schema_placeholders_pass_through_in_defs',
   'openai_chat_tool_search_rejects_unmapped_builtin_tool',
-  'openai_responses_function_tool_redacted_schema_placeholders_fail_fast',
-  'openai_responses_function_tool_redacted_schema_placeholders_fail_fast_in_definitions',
+  'openai_responses_function_tool_redacted_schema_placeholders_pass_through',
+  'openai_responses_function_tool_redacted_schema_placeholders_pass_through_in_definitions',
   'openai_responses_provider_wire_maps_chat_token_and_logprob_pairs',
   'openai_responses_provider_wire_drops_top_logprobs_when_logprobs_disabled',
   'Responses provider wire must not emit non-spec max_tokens',
@@ -360,12 +362,8 @@ requireText(
 );
 forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::metadata_data_plane`, [/contains\("metadata"\)/, /metadata.*side-channel fields/i]);
 
-const chatToResponses = functionSlice(
-  text.responsesRuntime,
-  paths.responsesRuntime,
-  'fn build_v3_responses_provider_response_from_openai_chat_payload',
-  'fn parse_v3_openai_chat_tool_call_arguments',
-);
+  // chat→responses 转换拆分到 responses_openai_chat_conversion.rs(worker 拆分后唯一真源)。
+  const chatToResponses = text.responsesOpenaiChatConversion;
 for (const phrase of [
   'fn build_v3_responses_provider_response_from_openai_chat_payload',
   'if let Some(model) = payload.get("model") {\n        response.insert("model".to_string(), model.clone());\n    }',
@@ -373,8 +371,8 @@ for (const phrase of [
   'normalize_v3_hub_responses_usage_from_openai_chat_usage',
   'build_v3_responses_reasoning_item_from_openai_chat_message',
   'build_v3_responses_function_call_from_openai_chat_tool_call',
-]) requireText(chatToResponses, `${paths.responsesRuntime}::chat_to_responses_projection`, phrase);
-forbid(chatToResponses, `${paths.responsesRuntime}::chat_to_responses_projection`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i]);
+]) requireText(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, phrase);
+forbid(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i]);
 
 const anthropicToResponses = functionSlice(
   text.anthropicCodec,
@@ -484,10 +482,10 @@ for (const phrase of [
   'custom_tool_names.contains(name)',
   '.get("input")',
   '"type":"custom_tool_call"',
-]) requireText(text.responsesRuntime, `${paths.responsesRuntime}::native_openai_chat_custom_tool_response`, phrase);
+]) requireText(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, phrase);
 forbid(text.responsesRuntime, `${paths.responsesRuntime}::no_function_relabel_for_openai_chat_custom`, [/extract_v3_responses_custom_tool_input_from_openai_chat_arguments/]);
-requireText(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_switches_without_invalid_wire`, 'target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider');
-requireText(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_switches_without_invalid_wire`, 'the incompatible Anthropic candidate must receive no wire request');
+requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider`, 'target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider');
+requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider`, 'the incompatible Anthropic candidate must receive no wire request');
 requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::responses_metadata_projection_context`, 'pub struct V3AnthropicResponsesProjectionContext');
 for (const phrase of ['custom_tool_names: BTreeSet<String>', 'governed_custom_tool_names']) requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::anthropic_custom_reverse_guard`, phrase);
 requireText(text.anthropicCodecToolProjection, `${paths.anthropicCodecToolProjection}::anthropic_custom_reverse_guard`, 'anthropic_tool_use_as_responses_call');

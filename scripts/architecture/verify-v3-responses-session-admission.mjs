@@ -25,6 +25,10 @@ function forbidMatch(source, pattern, label) {
 }
 
 const server = readRequired("v3/crates/routecodex-v3-server/src/lib.rs");
+const serverFrameBuilders = readRequired(
+  "v3/crates/routecodex-v3-server/src/frame_builders.rs",
+);
+const serverAll = server + "\n" + serverFrameBuilders;
 const admission = readRequired(
   "v3/crates/routecodex-v3-server/src/session_admission.rs",
 );
@@ -102,7 +106,7 @@ requireMatch(
   "Request conflict must project HTTP 409",
 );
 requireMatch(
-  server,
+  serverAll,
   /build_v3_sse_transport_out_04_keepalive_comment\(" keepalive"\)[\s\S]*keepalive_interval[\s\S]*tokio::select!/,
   "Successful V3 Responses SSE must schedule transport-only keepalive comments",
 );
@@ -132,7 +136,7 @@ requireMatch(
   "Config keepalive truth must have explicit negative tests",
 );
 requireMatch(
-  server,
+  serverAll,
   /v3_client_sse_body\(stream,\s*None\)/,
   "Error06/foundation SSE must bypass success keepalive injection",
 );

@@ -13,6 +13,7 @@ const requiredFiles = {
   websocket: 'v3/crates/routecodex-v3-server/src/websocket.rs',
   executors: 'v3/crates/routecodex-v3-server/src/executors.rs',
   frameBuilders: 'v3/crates/routecodex-v3-server/src/frame_builders.rs',
+  liveSnapshot: 'v3/crates/routecodex-v3-server/src/live_snapshot.rs',
   localContinuation: 'v3/crates/routecodex-v3-runtime/src/local_continuation.rs',
   directKernel: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
   directState: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs',
@@ -267,10 +268,11 @@ export function verifyResponsesContinuationImmutableBoundary(root) {
     sources.websocket,
     sources.executors,
     sources.frameBuilders,
+    sources.liveSnapshot,
   ].join('\n');
   const handlerPostCommitProjectionFunctions = allFunctionBodiesMatching(
     serverProjectionSources,
-    /(^|\n)(async )?(pub(?:\(crate\))? )?fn (finalize_v3_responses_relay_server_output|prepend_v3_protocol_plan_trace_to_responses_relay_output|prepend_v3_relay_handoff_trace_to_direct_frame|merge_v3_relay_handoff_provider_failure_events_into_direct_frame|merge_v3_direct_handoff_provider_failure_events|project_v3_responses_error_frame_for_request_if_sse|responses_websocket_endpoint|responses_websocket_session|handle_responses_websocket_message_with_mode|send_responses_websocket_sse_stream|send_responses_relay_websocket_sse_stream)\(/g,
+    /(^|\n)(pub(?:\(crate\))? )?(async )?fn (finalize_v3_responses_relay_server_output|prepend_v3_protocol_plan_trace_to_responses_relay_output|prepend_v3_relay_handoff_trace_to_direct_frame|merge_v3_relay_handoff_provider_failure_events_into_direct_frame|merge_v3_direct_handoff_provider_failure_events|project_v3_responses_error_frame_for_request_if_sse|responses_websocket_endpoint|responses_websocket_session|handle_responses_websocket_message_with_mode|send_responses_websocket_sse_stream|send_responses_relay_websocket_sse_stream)\(/g,
     requiredFiles.serverLib,
   );
   requireNonEmpty(

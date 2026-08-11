@@ -22,7 +22,13 @@ const packagePath = 'package.json';
 const workflowPath = '.github/workflows/test.yml';
 
 const runtime = readFileSync(runtimePath, 'utf8');
-const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8');
+const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs', 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs', 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs', 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_stopless.rs', 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs', 'utf8');
+const responsesRelayJsonHooks = readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs', 'utf8');
 const responsesProviderEventCodec = readFileSync(responsesProviderEventCodecPath, 'utf8');
 const responsesProviderStreamMaterialization = readFileSync(
   responsesProviderStreamMaterializationPath,
@@ -32,7 +38,12 @@ const openaiChatRuntime = readFileSync(openaiChatRuntimePath, 'utf8');
 const geminiRuntime = readFileSync(geminiRuntimePath, 'utf8');
 const providerFailurePolicy = readFileSync(providerFailurePolicyPath, 'utf8');
 const relayRuntimeShared = readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs', 'utf8');
-const server = readFileSync(serverPath, 'utf8');
+const server = readFileSync(serverPath, 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-server/src/live_snapshot.rs', 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-server/src/executors.rs', 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-server/src/endpoint_handlers.rs', 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-server/src/frame_builders.rs', 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-server/src/websocket.rs', 'utf8');
 const serverTests = readFileSync(serverTestPath, 'utf8');
 const tests = readFileSync(testPath, 'utf8');
 const localContinuationTests = readFileSync(localContinuationTestPath, 'utf8');
@@ -240,8 +251,16 @@ for (const phrase of [
   'fn is_v3_responses_provider_response_failure(',
   'fn provider_response_hook_failure(',
   'source_stage: "V3HubRespChatProcess03Governed"',
-  'provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate',
 ]) requireText(responsesRuntime, responsesRuntimePath, phrase);
+const responsesUnitTests = readFileSync(
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
+  'utf8',
+);
+requireText(
+  responsesUnitTests,
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
+  'provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate',
+);
 const providerResponseHookFailureBody = functionBody(
   responsesRuntime,
   responsesRuntimePath,
@@ -257,8 +276,18 @@ for (const phrase of [
   'responses_relay_provider_duplicate_tool_identity_projects_typed_error_after_exhaustion',
 ]) requireText(tests, testPath, phrase);
 for (const node of expectedNodes) requireText(responsesRuntime, responsesRuntimePath, node);
-for (const node of expectedNodes.slice(10)) {
+for (const node of expectedNodes.slice(0, 10)) {
   requireCount(responsesRuntime, responsesRuntimePath, `trace.push("${node}");`, 1);
+}
+// 响应链 trace：V3HubRespOutbound05ClientSemantic / V3ServerRespOutbound06ClientFrame
+// 随 worker 拆分位于 responses_relay_json_hooks.rs，其余响应链节点仍在 runtime 主文件。
+for (const node of expectedNodes.slice(10)) {
+  const tailTrace = node === 'V3HubRespOutbound05ClientSemantic' || node === 'V3ServerRespOutbound06ClientFrame';
+  const traceSource = tailTrace ? responsesRelayJsonHooks : responsesRuntime;
+  const tracePath = tailTrace
+    ? 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs'
+    : responsesRuntimePath;
+  requireCount(traceSource, tracePath, `trace.push("${node}");`, 1);
 }
 requireCount(
   responsesRuntime,

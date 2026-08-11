@@ -38,7 +38,13 @@ const server = readRequired("v3/crates/routecodex-v3-server/src/lib.rs");
 const requestIdModule = readRequired(
   "v3/crates/routecodex-v3-server/src/request_id.rs",
 );
-const production = server.split("#[cfg(test)]")[0];
+const consoleImpl = readRequired(
+  "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
+);
+const production =
+  server.split("#[cfg(test)]")[0] +
+  "\n" +
+  consoleImpl.split("#[cfg(test)]")[0];
 const v3FunctionMap = readRequired("docs/architecture/v3-function-map.yml");
 const functionMap = readRequired("docs/architecture/function-map.yml");
 const v3ResourceMap = readRequired("docs/architecture/v3-resource-operation-map.yml");

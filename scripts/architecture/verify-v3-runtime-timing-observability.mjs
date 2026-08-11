@@ -133,11 +133,20 @@ const directSseOutcomeWrapper = directSseOutcome.slice(
   directSseOutcome.indexOf("pub(super) fn wrap_direct_sse_provider_outcome_stream("),
 );
 const server = readRequired(serverPath);
+const consoleImpl = readRequired(
+  path.join(
+    root,
+    "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
+  ),
+);
 const directServerOutcome = readRequired(directServerOutcomePath);
 const serverTests = readRequired(serverTestsPath);
 const serverAndTests = `${server}
 ${serverTests}`;
-const serverProduction = server.split("#[cfg(test)]")[0];
+const serverProduction =
+  server.split("#[cfg(test)]")[0] +
+  "\n" +
+  consoleImpl.split("#[cfg(test)]")[0];
 const responseProjection = serverProduction.slice(
   serverProduction.indexOf("fn emit_v3_request_complete_console_line("),
   serverProduction.indexOf(
@@ -151,7 +160,11 @@ function sliceRustFunction(source, signature) {
     return "";
   }
   const next = source.indexOf("\n    fn ", start + signature.length);
-  return source.slice(start, next === -1 ? source.length : next);
+  const nextPub = source.indexOf("\n    pub(crate) fn ", start + signature.length);
+  const nextPubFn = source.indexOf("\n    pub fn ", start + signature.length);
+  const candidates = [next, nextPub, nextPubFn].filter((candidate) => candidate !== -1);
+  const boundary = candidates.length === 0 ? -1 : Math.min(...candidates);
+  return source.slice(start, boundary === -1 ? source.length : boundary);
 }
 
 function sliceTokioTest(source, testName) {
@@ -252,7 +265,7 @@ requireMatch(
 );
 requireMatch(
   relayRuntime,
-  /transport\.send\(transport_request\)\.await/,
+  /transport\.send\(transport_request\)/,
   "Relay timing must remain adjacent to the provider transport attempt",
 );
 requireMatch(

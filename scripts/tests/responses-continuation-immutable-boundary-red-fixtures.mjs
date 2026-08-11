@@ -13,6 +13,11 @@ const requiredFiles = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-server/src/lib.rs',
+  'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
+  'v3/crates/routecodex-v3-server/src/live_snapshot.rs',
+  'v3/crates/routecodex-v3-server/src/websocket.rs',
+  'v3/crates/routecodex-v3-server/src/executors.rs',
+  'v3/crates/routecodex-v3-server/src/frame_builders.rs',
   'v3/crates/routecodex-v3-runtime/src/local_continuation.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs',
@@ -210,7 +215,7 @@ expectFailure(
   'Server handler cannot commit continuation state',
   (root) => mutate(
     root,
-    'v3/crates/routecodex-v3-server/src/lib.rs',
+    'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
     'async fn pending_endpoint_after_responses_admission(',
     'async fn pending_endpoint_after_responses_admission(\n    let _ = commit_at_resp04;\n',
   ),
@@ -221,7 +226,7 @@ expectFailure(
   'Server handler cannot rewrite history',
   (root) => mutate(
     root,
-    'v3/crates/routecodex-v3-server/src/lib.rs',
+    'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
     'let request_id = request_identity.request_id.clone();',
     'let _ = merge_history;\n    let request_id = request_identity.request_id.clone();',
   ),
@@ -232,7 +237,7 @@ expectFailure(
   'Server handler owner symbol renamed',
   (root) => mutate(
     root,
-    'v3/crates/routecodex-v3-server/src/lib.rs',
+    'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
     'async fn pending_endpoint_after_responses_admission(',
     'async fn pending_endpoint_renamed(',
   ),
@@ -243,7 +248,7 @@ expectFailure(
   'Server handler cannot run Stopless request hook',
   (root) => mutate(
     root,
-    'v3/crates/routecodex-v3-server/src/lib.rs',
+    'v3/crates/routecodex-v3-server/src/live_snapshot.rs',
     'fn finalize_v3_responses_relay_server_output(',
     'fn finalize_v3_responses_relay_server_output(\n    let _ = apply_v3_stopless_request_hook_at_req04;\n',
   ),
@@ -254,7 +259,7 @@ expectFailure(
   'Server handler cannot govern tool outputs',
   (root) => mutate(
     root,
-    'v3/crates/routecodex-v3-server/src/lib.rs',
+    'v3/crates/routecodex-v3-server/src/live_snapshot.rs',
     'fn finalize_v3_responses_relay_server_output(',
     'fn finalize_v3_responses_relay_server_output(\n    let _ = govern_tool_outputs_at_req04;\n',
   ),
@@ -265,7 +270,7 @@ expectFailure(
   'Server handler cannot run servertool response hook',
   (root) => mutate(
     root,
-    'v3/crates/routecodex-v3-server/src/lib.rs',
+    'v3/crates/routecodex-v3-server/src/live_snapshot.rs',
     'fn finalize_v3_responses_relay_server_output(',
     'fn finalize_v3_responses_relay_server_output(\n    let _ = apply_v3_stop_servertool_hook_at_resp03;\n',
   ),
@@ -331,7 +336,7 @@ expectFailure(
   'Post-commit server projection cannot rewrite tool output history',
   (root) => mutate(
     root,
-    'v3/crates/routecodex-v3-server/src/lib.rs',
+    'v3/crates/routecodex-v3-server/src/live_snapshot.rs',
     'fn finalize_v3_responses_relay_server_output(',
     'fn finalize_v3_responses_relay_server_output(\n    let _ = rewrite_tool_outputs_for_client;\n',
   ),
@@ -342,7 +347,7 @@ expectFailure(
   'Post-commit server projection cannot run stopless hook',
   (root) => mutate(
     root,
-    'v3/crates/routecodex-v3-server/src/lib.rs',
+    'v3/crates/routecodex-v3-server/src/live_snapshot.rs',
     'fn finalize_v3_responses_relay_server_output(',
     'fn finalize_v3_responses_relay_server_output(\n    let _ = apply_v3_stopless_request_hook_at_req04;\n',
   ),
@@ -364,7 +369,7 @@ expectFailure(
   'Responses WebSocket session cannot restore continuation context',
   (root) => mutate(
     root,
-    'v3/crates/routecodex-v3-server/src/lib.rs',
+    'v3/crates/routecodex-v3-server/src/websocket.rs',
     'async fn responses_websocket_session(',
     'async fn responses_websocket_session(\n    let _ = restore_local_context;\n',
   ),
@@ -375,7 +380,7 @@ expectFailure(
   'Responses WebSocket message handler cannot repair tool frames',
   (root) => mutate(
     root,
-    'v3/crates/routecodex-v3-server/src/lib.rs',
+    'v3/crates/routecodex-v3-server/src/websocket.rs',
     'async fn handle_responses_websocket_message_with_mode(',
     'async fn handle_responses_websocket_message_with_mode(\n    let _ = complete_or_repair_v3_resp03_tool_frames;\n',
   ),
@@ -386,7 +391,7 @@ expectFailure(
   'Responses WebSocket SSE stream cannot run servertool hook',
   (root) => mutate(
     root,
-    'v3/crates/routecodex-v3-server/src/lib.rs',
+    'v3/crates/routecodex-v3-server/src/websocket.rs',
     'async fn send_responses_websocket_sse_stream(',
     'async fn send_responses_websocket_sse_stream(\n    let _ = apply_v3_tool_call_servertool_hook_at_resp03;\n',
   ),

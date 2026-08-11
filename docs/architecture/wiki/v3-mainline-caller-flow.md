@@ -207,7 +207,7 @@ flowchart TD
     c_2_v3_codex_sample_retention_snap_scope_2["v3-debug<br/>V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
   end
   subgraph c_2_v3_codex_sample_retention_snap_scope_m_v3_server["v3-server"]
-    c_2_v3_codex_sample_retention_snap_scope_0["v3-server<br/>capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_2_v3_codex_sample_retention_snap_scope_0["v3-server<br/>capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
   end
   c_2_v3_codex_sample_retention_snap_scope_0 -->|v3-codex-sample-01<br/>V3CodexSample02ManifestAuthorizationPublished → V3DebugPayloadBudgetApplied| c_2_v3_codex_sample_retention_snap_scope_1
   c_2_v3_codex_sample_retention_snap_scope_0 -->|v3-codex-sample-02<br/>V3DebugPayloadBudgetApplied → V3CodexSample06RetentionEnforced| c_2_v3_codex_sample_retention_snap_scope_2
@@ -215,8 +215,8 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-codex-sample-01` | `V3CodexSample02ManifestAuthorizationPublished` → `V3DebugPayloadBudgetApplied` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/lib.rs</small> | V3DebugRuntime::redact_payload_for_side_channel<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.codex_sample_retention_snap_scope` |
-| `v3-codex-sample-02` | `V3DebugPayloadBudgetApplied` → `V3CodexSample06RetentionEnforced` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/lib.rs</small> | V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
+| `v3-codex-sample-01` | `V3CodexSample02ManifestAuthorizationPublished` → `V3DebugPayloadBudgetApplied` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | V3DebugRuntime::redact_payload_for_side_channel<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.codex_sample_retention_snap_scope` |
+| `v3-codex-sample-02` | `V3DebugPayloadBudgetApplied` → `V3CodexSample06RetentionEnforced` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
 
 ## v3.server.managed_lifecycle
 
@@ -339,9 +339,9 @@ flowchart TD
     c_6_v3_models_capability_catalog_1["v3-config<br/>collect_v3_route_group_catalog_model_refs<br/><small>routecodex-v3-config/src/lib.rs</small>"]
   end
   subgraph c_6_v3_models_capability_catalog_m_v3_server["v3-server"]
-    c_6_v3_models_capability_catalog_0["v3-server<br/>build_v3_models_catalog<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_6_v3_models_capability_catalog_0["v3-server<br/>build_v3_models_catalog<br/><small>routecodex-v3-server/src/models_catalog.rs</small>"]
     c_6_v3_models_capability_catalog_2["v3-server<br/>models_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_6_v3_models_capability_catalog_3["v3-server<br/>json_response<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_6_v3_models_capability_catalog_3["v3-server<br/>json_response<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
   end
   c_6_v3_models_capability_catalog_0 -->|v3-models-01<br/>V3Config05ManifestPublished → V3Models01RouteGroupScopedRefs| c_6_v3_models_capability_catalog_1
   c_6_v3_models_capability_catalog_2 -->|v3-models-02<br/>V3Models01RouteGroupScopedRefs → V3Models02CodexCapabilityProjected| c_6_v3_models_capability_catalog_0
@@ -350,9 +350,9 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-models-01` | `V3Config05ManifestPublished` → `V3Models01RouteGroupScopedRefs` | anchored | build_v3_models_catalog<br/><small>routecodex-v3-server/src/lib.rs</small> | collect_v3_route_group_catalog_model_refs<br/><small>routecodex-v3-config/src/lib.rs</small> | `v3.models_capability_catalog` |
-| `v3-models-02` | `V3Models01RouteGroupScopedRefs` → `V3Models02CodexCapabilityProjected` | anchored | models_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_models_catalog<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.models_capability_catalog` |
-| `v3-models-03` | `V3Models02CodexCapabilityProjected` → `V3Models03HttpResponse` | anchored | models_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | json_response<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.models_capability_catalog` |
+| `v3-models-01` | `V3Config05ManifestPublished` → `V3Models01RouteGroupScopedRefs` | anchored | build_v3_models_catalog<br/><small>routecodex-v3-server/src/models_catalog.rs</small> | collect_v3_route_group_catalog_model_refs<br/><small>routecodex-v3-config/src/lib.rs</small> | `v3.models_capability_catalog` |
+| `v3-models-02` | `V3Models01RouteGroupScopedRefs` → `V3Models02CodexCapabilityProjected` | anchored | models_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_models_catalog<br/><small>routecodex-v3-server/src/models_catalog.rs</small> | `v3.models_capability_catalog` |
+| `v3-models-03` | `V3Models02CodexCapabilityProjected` → `V3Models03HttpResponse` | anchored | models_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | json_response<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | `v3.models_capability_catalog` |
 
 ## v3.entry_protocol_endpoint_binding.mainline
 
@@ -373,7 +373,7 @@ flowchart TD
   end
   subgraph c_7_v3_entry_protocol_endpoint_binding_mainline_m_v3_server["v3-server"]
     c_7_v3_entry_protocol_endpoint_binding_mainline_4["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_7_v3_entry_protocol_endpoint_binding_mainline_5["v3-server<br/>execute_v3_gemini_generate_content_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_7_v3_entry_protocol_endpoint_binding_mainline_5["v3-server<br/>execute_v3_gemini_generate_content_request<br/><small>routecodex-v3-server/src/executors.rs</small>"]
   end
   c_7_v3_entry_protocol_endpoint_binding_mainline_0 -->|v3-entry-bind-01<br/>V3Config05ManifestPublished → V3EntryBind01EndpointPatternDeclared| c_7_v3_entry_protocol_endpoint_binding_mainline_1
   c_7_v3_entry_protocol_endpoint_binding_mainline_2 -->|v3-entry-bind-02<br/>V3EntryBind01EndpointPatternDeclared → V3EntryBind02ProtocolResolved| c_7_v3_entry_protocol_endpoint_binding_mainline_3
@@ -386,7 +386,7 @@ flowchart TD
 | `v3-entry-bind-01` | `V3Config05ManifestPublished` → `V3EntryBind01EndpointPatternDeclared` | binding_pending | compile_entry_protocol_bindings<br/><small>routecodex-v3-config/src/validate.rs</small> | docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml<br/><small>docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml</small> | `v3.entry_protocol_endpoint_binding` |
 | `v3-entry-bind-02` | `V3EntryBind01EndpointPatternDeclared` → `V3EntryBind02ProtocolResolved` | binding_pending | V3HubV1Manifest::entry_protocol_binding_for_endpoint<br/><small>routecodex-v3-config/src/types.rs</small> | V3EntryProtocolBindingManifest<br/><small>routecodex-v3-config/src/types.rs</small> | `v3.entry_protocol_endpoint_binding` |
 | `v3-entry-bind-03` | `V3EntryBind02ProtocolResolved` → `V3EntryBind03ServerEnablementChecked` | binding_pending | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | V3HubV1Manifest::entry_protocol_binding_for_endpoint<br/><small>routecodex-v3-config/src/types.rs</small> | `v3.entry_protocol_endpoint_binding` |
-| `v3-entry-bind-04` | `V3EntryBind03ServerEnablementChecked` → `V3EntryBind04ExecutionBindingProjected` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | execute_v3_gemini_generate_content_request<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.entry_protocol_endpoint_binding` |
+| `v3-entry-bind-04` | `V3EntryBind03ServerEnablementChecked` → `V3EntryBind04ExecutionBindingProjected` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | execute_v3_gemini_generate_content_request<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.entry_protocol_endpoint_binding` |
 
 ## v3.hub_pipeline.v1.hook_registry_compile
 
@@ -438,7 +438,7 @@ flowchart TD
   end
   subgraph c_9_v3_responses_direct_required_mainline_m_v3_server["v3-server"]
     c_9_v3_responses_direct_required_mainline_0["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_9_v3_responses_direct_required_mainline_22["v3-server<br/>build_v3_server_16_http_frame_from_v3_resp_15<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_9_v3_responses_direct_required_mainline_22["v3-server<br/>build_v3_server_16_http_frame_from_v3_resp_15<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
   end
   subgraph c_9_v3_responses_direct_required_mainline_m_v3_target["v3-target"]
     c_9_v3_responses_direct_required_mainline_7["v3-target<br/>V3TargetInterpreter::classify_kind<br/><small>routecodex-v3-target/src/lib.rs</small>"]
@@ -487,7 +487,7 @@ flowchart TD
 | `v3-rd-13` | `V3ProviderResp14Raw` → `V3DirectResp14ProviderProjectionPrepared` | anchored | execute_v3_responses_direct_runtime_kernel<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | responses_direct_response_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | `v3.responses_direct_mvp_architecture` |
 | `v3-rd-14` | `V3DirectResp14ProviderProjectionPrepared` → `V3DirectResp15ClientPayloadReady` | anchored | execute_v3_responses_direct_runtime_kernel<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3ResponsesDirectRuntimeOutput<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | `v3.responses_direct_mvp_architecture` |
 | `v3-rd-15` | `V3DirectResp15ClientPayloadReady` → `V3Resp15ClientPayload` | anchored | execute_v3_responses_direct_runtime_kernel<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3ResponsesDirectRuntimeOutput<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | `v3.responses_direct_mvp_architecture` |
-| `v3-rd-16` | `V3Resp15ClientPayload` → `V3Server16HttpFrame` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_server_16_http_frame_from_v3_resp_15<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.responses_direct_mvp_architecture` |
+| `v3-rd-16` | `V3Resp15ClientPayload` → `V3Server16HttpFrame` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_server_16_http_frame_from_v3_resp_15<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | `v3.responses_direct_mvp_architecture` |
 
 ## v3.hub_pipeline.v1.request
 
@@ -825,8 +825,8 @@ flowchart TD
     c_19_v3_server_startup_1["v3-server<br/>build_v3_server_startup_01_listener_set_from_config_05<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_19_v3_server_startup_2["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_19_v3_server_startup_3["v3-server<br/>build_v3_server_03_http_request_raw<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_19_v3_server_startup_4["v3-server<br/>read_json_payload<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_19_v3_server_startup_8["v3-server<br/>build_v3_server_16_http_frame_from_v3_error_06<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_19_v3_server_startup_4["v3-server<br/>read_json_payload<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
+    c_19_v3_server_startup_8["v3-server<br/>build_v3_server_16_http_frame_from_v3_error_06<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
   end
   c_19_v3_server_startup_0 -->|v3-srv-01<br/>V3Config05ManifestPublished → V3ServerStartup01ListenerSetPreflight| c_19_v3_server_startup_1
   c_19_v3_server_startup_2 -->|v3-srv-02<br/>V3ServerStartup01ListenerSetPreflight → V3Server03HttpRequestRaw| c_19_v3_server_startup_3
@@ -840,10 +840,10 @@ flowchart TD
 | --- | --- | --- | --- | --- | --- |
 | `v3-srv-01` | `V3Config05ManifestPublished` → `V3ServerStartup01ListenerSetPreflight` | anchored | spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_server_startup_01_listener_set_from_config_05<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.foundation_p0_p2` |
 | `v3-srv-02` | `V3ServerStartup01ListenerSetPreflight` → `V3Server03HttpRequestRaw` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_server_03_http_request_raw<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.foundation_p0_p2` |
-| `v3-srv-http-error-01` | `V3Server03HttpRequestRaw` → `V3Error01SourceRaised` | anchored | read_json_payload<br/><small>routecodex-v3-server/src/lib.rs</small> | project_v3_http_boundary_error<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.config_server_full_function` |
+| `v3-srv-http-error-01` | `V3Server03HttpRequestRaw` → `V3Error01SourceRaised` | anchored | read_json_payload<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | project_v3_http_boundary_error<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.config_server_full_function` |
 | `v3-srv-03` | `V3Server03HttpRequestRaw` → `V3Debug01NodeEventRegistered` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | register_v3_debug_01_pending_endpoint_event<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.foundation_p0_p2` |
 | `v3-srv-04` | `V3Debug01NodeEventRegistered` → `V3Error06ClientProjected` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | project_v3_pending_endpoint_error<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.foundation_p0_p2` |
-| `v3-srv-05` | `V3Error06ClientProjected` → `V3Server16HttpFrame` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_server_16_http_frame_from_v3_error_06<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.foundation_p0_p2` |
+| `v3-srv-05` | `V3Error06ClientProjected` → `V3Server16HttpFrame` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_server_16_http_frame_from_v3_error_06<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | `v3.foundation_p0_p2` |
 
 ## v3.debug_error_foundation.mainline
 
@@ -1051,7 +1051,7 @@ flowchart TD
     c_24_v3_anthropic_relay_controlled_runtime_19["v3-runtime::hub_v1<br/>build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05<br/><small>routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs</small>"]
   end
   subgraph c_24_v3_anthropic_relay_controlled_runtime_m_v3_server["v3-server"]
-    c_24_v3_anthropic_relay_controlled_runtime_0["v3-server<br/>execute_v3_anthropic_messages_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_24_v3_anthropic_relay_controlled_runtime_0["v3-server<br/>execute_v3_anthropic_messages_request<br/><small>routecodex-v3-server/src/executors.rs</small>"]
   end
   c_24_v3_anthropic_relay_controlled_runtime_0 -->|v3-anthropic-relay-01<br/>V3ServerValidatedMessagesRequest → V3HubReqInbound01ClientRaw| c_24_v3_anthropic_relay_controlled_runtime_1
   c_24_v3_anthropic_relay_controlled_runtime_2 -->|v3-anthropic-relay-02<br/>V3HubReqInbound01ClientRaw → V3HubReqInbound02Normalized| c_24_v3_anthropic_relay_controlled_runtime_3
@@ -1074,7 +1074,7 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-anthropic-relay-01` | `V3ServerValidatedMessagesRequest` → `V3HubReqInbound01ClientRaw` | anchored | execute_v3_anthropic_messages_request<br/><small>routecodex-v3-server/src/lib.rs</small> | execute_v3_anthropic_relay_runtime_with_default_transport<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | `v3.anthropic_relay_runtime_integration` |
+| `v3-anthropic-relay-01` | `V3ServerValidatedMessagesRequest` → `V3HubReqInbound01ClientRaw` | anchored | execute_v3_anthropic_messages_request<br/><small>routecodex-v3-server/src/executors.rs</small> | execute_v3_anthropic_relay_runtime_with_default_transport<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | `v3.anthropic_relay_runtime_integration` |
 | `v3-anthropic-relay-02` | `V3HubReqInbound01ClientRaw` → `V3HubReqInbound02Normalized` | anchored | execute_v3_anthropic_relay_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | run_v3_anthropic_relay_runtime_req_inbound<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs</small> | `v3.anthropic_relay_runtime_integration` |
 | `v3-anthropic-relay-03` | `V3HubReqInbound02Normalized` → `V3HubReqContinuation03Classified` | anchored | V3HubRelayRequestHooks::run_from_normalized_with_events<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small> | build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02<br/><small>routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs</small> | `v3.anthropic_relay_runtime_integration` |
 | `v3-anthropic-relay-04` | `V3HubReqContinuation03Classified` → `V3HubReqChatProcess04Governed` | anchored | V3HubRelayRequestHooks::run_from_normalized_with_events<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small> | build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03<br/><small>routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs</small> | `v3.anthropic_relay_runtime_integration` |
@@ -1173,9 +1173,9 @@ flowchart TD
     c_27_v3_openai_chat_relay_controlled_runtime_19["v3-runtime::hub_v1<br/>build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small>"]
   end
   subgraph c_27_v3_openai_chat_relay_controlled_runtime_m_v3_server["v3-server"]
-    c_27_v3_openai_chat_relay_controlled_runtime_0["v3-server<br/>execute_v3_openai_chat_completions_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_27_v3_openai_chat_relay_controlled_runtime_20["v3-server<br/>openai_chat_relay_output_response<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_27_v3_openai_chat_relay_controlled_runtime_21["v3-server<br/>Body::from_stream<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_27_v3_openai_chat_relay_controlled_runtime_0["v3-server<br/>execute_v3_openai_chat_completions_request<br/><small>routecodex-v3-server/src/executors.rs</small>"]
+    c_27_v3_openai_chat_relay_controlled_runtime_20["v3-server<br/>openai_chat_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small>"]
+    c_27_v3_openai_chat_relay_controlled_runtime_21["v3-server<br/>Body::from_stream<br/><small>routecodex-v3-server/src/executors.rs</small>"]
   end
   c_27_v3_openai_chat_relay_controlled_runtime_0 -->|v3-openai-chat-relay-01<br/>V3OpenAiChatRelayRuntimeInput → V3HubReqInbound01ClientRaw| c_27_v3_openai_chat_relay_controlled_runtime_1
   c_27_v3_openai_chat_relay_controlled_runtime_2 -->|v3-openai-chat-relay-02<br/>V3HubReqInbound01ClientRaw → V3HubReqInbound02Normalized| c_27_v3_openai_chat_relay_controlled_runtime_3
@@ -1198,7 +1198,7 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-openai-chat-relay-01` | `V3OpenAiChatRelayRuntimeInput` → `V3HubReqInbound01ClientRaw` | anchored | execute_v3_openai_chat_completions_request<br/><small>routecodex-v3-server/src/lib.rs</small> | execute_v3_openai_chat_relay_runtime_with_default_transport<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | `v3.openai_chat_relay_runtime_integration` |
+| `v3-openai-chat-relay-01` | `V3OpenAiChatRelayRuntimeInput` → `V3HubReqInbound01ClientRaw` | anchored | execute_v3_openai_chat_completions_request<br/><small>routecodex-v3-server/src/executors.rs</small> | execute_v3_openai_chat_relay_runtime_with_default_transport<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | `v3.openai_chat_relay_runtime_integration` |
 | `v3-openai-chat-relay-02` | `V3HubReqInbound01ClientRaw` → `V3HubReqInbound02Normalized` | anchored | execute_v3_openai_chat_relay_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01<br/><small>routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs</small> | `v3.openai_chat_relay_runtime_integration` |
 | `v3-openai-chat-relay-03` | `V3HubReqInbound02Normalized` → `V3HubReqContinuation03Classified` | anchored | V3HubRelayRequestHooks::run_from_normalized<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small> | build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02<br/><small>routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs</small> | `v3.openai_chat_relay_runtime_integration` |
 | `v3-openai-chat-relay-04` | `V3HubReqContinuation03Classified` → `V3HubReqChatProcess04Governed` | anchored | V3HubRelayRequestHooks::run_from_normalized<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small> | build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03<br/><small>routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs</small> | `v3.openai_chat_relay_runtime_integration` |
@@ -1214,7 +1214,7 @@ flowchart TD
 | `v3-openai-chat-relay-14` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | V3HubRelayResponseHookRegistry::govern<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.openai_chat_relay_runtime_integration` |
 | `v3-openai-chat-relay-15` | `V3HubRespChatProcess03Governed` → `V3HubRespContinuation04Committed` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | V3HubRelayResponseHookRegistry::commit<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.openai_chat_relay_runtime_integration` |
 | `v3-openai-chat-relay-16` | `V3HubRespContinuation04Committed` → `V3HubRespOutbound05ClientSemantic` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small> | `v3.openai_chat_relay_runtime_integration` |
-| `v3-openai-chat-relay-17` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | openai_chat_relay_output_response<br/><small>routecodex-v3-server/src/lib.rs</small> | Body::from_stream<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.openai_chat_relay_runtime_integration` |
+| `v3-openai-chat-relay-17` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | openai_chat_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small> | Body::from_stream<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.openai_chat_relay_runtime_integration` |
 
 ## v3.gemini_relay.controlled_runtime
 
@@ -1249,9 +1249,9 @@ flowchart TD
     c_28_v3_gemini_relay_controlled_runtime_19["v3-runtime::hub_v1<br/>build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small>"]
   end
   subgraph c_28_v3_gemini_relay_controlled_runtime_m_v3_server["v3-server"]
-    c_28_v3_gemini_relay_controlled_runtime_0["v3-server<br/>execute_v3_gemini_generate_content_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_28_v3_gemini_relay_controlled_runtime_20["v3-server<br/>gemini_relay_output_response<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_28_v3_gemini_relay_controlled_runtime_21["v3-server<br/>Body::from_stream<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_28_v3_gemini_relay_controlled_runtime_0["v3-server<br/>execute_v3_gemini_generate_content_request<br/><small>routecodex-v3-server/src/executors.rs</small>"]
+    c_28_v3_gemini_relay_controlled_runtime_20["v3-server<br/>gemini_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small>"]
+    c_28_v3_gemini_relay_controlled_runtime_21["v3-server<br/>Body::from_stream<br/><small>routecodex-v3-server/src/executors.rs</small>"]
   end
   c_28_v3_gemini_relay_controlled_runtime_0 -->|v3-gemini-relay-01<br/>V3GeminiRelayRuntimeInput → V3HubReqInbound01ClientRaw| c_28_v3_gemini_relay_controlled_runtime_1
   c_28_v3_gemini_relay_controlled_runtime_2 -->|v3-gemini-relay-02<br/>V3HubReqInbound01ClientRaw → V3HubReqInbound02Normalized| c_28_v3_gemini_relay_controlled_runtime_3
@@ -1274,7 +1274,7 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-gemini-relay-01` | `V3GeminiRelayRuntimeInput` → `V3HubReqInbound01ClientRaw` | anchored | execute_v3_gemini_generate_content_request<br/><small>routecodex-v3-server/src/lib.rs</small> | execute_v3_gemini_relay_runtime_with_default_transport<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | `v3.gemini_relay_runtime_integration` |
+| `v3-gemini-relay-01` | `V3GeminiRelayRuntimeInput` → `V3HubReqInbound01ClientRaw` | anchored | execute_v3_gemini_generate_content_request<br/><small>routecodex-v3-server/src/executors.rs</small> | execute_v3_gemini_relay_runtime_with_default_transport<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | `v3.gemini_relay_runtime_integration` |
 | `v3-gemini-relay-02` | `V3HubReqInbound01ClientRaw` → `V3HubReqInbound02Normalized` | anchored | execute_v3_gemini_relay_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01<br/><small>routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs</small> | `v3.gemini_relay_runtime_integration` |
 | `v3-gemini-relay-03` | `V3HubReqInbound02Normalized` → `V3HubReqContinuation03Classified` | anchored | V3HubRelayRequestHooks::run_from_normalized<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small> | build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02<br/><small>routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs</small> | `v3.gemini_relay_runtime_integration` |
 | `v3-gemini-relay-04` | `V3HubReqContinuation03Classified` → `V3HubReqChatProcess04Governed` | anchored | V3HubRelayRequestHooks::run_from_normalized<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small> | build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03<br/><small>routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs</small> | `v3.gemini_relay_runtime_integration` |
@@ -1290,7 +1290,7 @@ flowchart TD
 | `v3-gemini-relay-14` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | V3HubRelayResponseHookRegistry::govern<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.gemini_relay_runtime_integration` |
 | `v3-gemini-relay-15` | `V3HubRespChatProcess03Governed` → `V3HubRespContinuation04Committed` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | V3HubRelayResponseHookRegistry::commit<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.gemini_relay_runtime_integration` |
 | `v3-gemini-relay-16` | `V3HubRespContinuation04Committed` → `V3HubRespOutbound05ClientSemantic` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small> | `v3.gemini_relay_runtime_integration` |
-| `v3-gemini-relay-17` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | gemini_relay_output_response<br/><small>routecodex-v3-server/src/lib.rs</small> | Body::from_stream<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.gemini_relay_runtime_integration` |
+| `v3-gemini-relay-17` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | gemini_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small> | Body::from_stream<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.gemini_relay_runtime_integration` |
 
 ## v3.entry_protocol_registry_contract.mainline
 
@@ -1446,8 +1446,8 @@ flowchart TD
     c_33_v3_sse_transport_boundary_3["v3-provider-responses<br/>validated_sse_stream<br/><small>routecodex-v3-provider-responses/src/shared.rs</small>"]
   end
   subgraph c_33_v3_sse_transport_boundary_m_v3_server["v3-server"]
-    c_33_v3_sse_transport_boundary_5["v3-server<br/>wrap_v3_relay_sse_closeout_stream<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_33_v3_sse_transport_boundary_6["v3-server<br/>Body::from_stream<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_33_v3_sse_transport_boundary_5["v3-server<br/>wrap_v3_relay_sse_closeout_stream<br/><small>routecodex-v3-server/src/executors.rs</small>"]
+    c_33_v3_sse_transport_boundary_6["v3-server<br/>Body::from_stream<br/><small>routecodex-v3-server/src/executors.rs</small>"]
   end
   c_33_v3_sse_transport_boundary_0 -->|v3-sse-transport-01<br/>V3SseTransportIn01RawChunk → V3SseTransportIn02DecodedFrame| c_33_v3_sse_transport_boundary_1
   c_33_v3_sse_transport_boundary_0 -->|v3-sse-transport-02<br/>V3SseTransportIn02DecodedFrame → V3SseTransportIn03ValidatedFrameStream| c_33_v3_sse_transport_boundary_2
@@ -1460,7 +1460,7 @@ flowchart TD
 | `v3-sse-transport-01` | `V3SseTransportIn01RawChunk` → `V3SseTransportIn02DecodedFrame` | anchored | SseIncrementalDecoder::push<br/><small>routecodex-v3-sse/src/lib.rs</small> | build_v3_sse_transport_in_02_from_fields<br/><small>routecodex-v3-sse/src/lib.rs</small> | `v3.sse_transport_core_independent` |
 | `v3-sse-transport-02` | `V3SseTransportIn02DecodedFrame` → `V3SseTransportIn03ValidatedFrameStream` | anchored | SseIncrementalDecoder::push<br/><small>routecodex-v3-sse/src/lib.rs</small> | build_v3_sse_transport_in_03_from_v3_sse_transport_in_02<br/><small>routecodex-v3-sse/src/lib.rs</small> | `v3.sse_transport_core_independent` |
 | `v3-sse-transport-03` | `V3SseTransportIn03ValidatedFrameStream` → `V3SseTransportOut04EncodedChunk` | anchored | validated_sse_stream<br/><small>routecodex-v3-provider-responses/src/shared.rs</small> | build_v3_sse_transport_out_04_from_v3_sse_transport_in_03<br/><small>routecodex-v3-sse/src/lib.rs</small> | `v3.sse_transport_core_independent` |
-| `v3-sse-server-frame-04` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | wrap_v3_relay_sse_closeout_stream<br/><small>routecodex-v3-server/src/lib.rs</small> | Body::from_stream<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.sse_transport_core_independent` |
+| `v3-sse-server-frame-04` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | wrap_v3_relay_sse_closeout_stream<br/><small>routecodex-v3-server/src/executors.rs</small> | Body::from_stream<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.sse_transport_core_independent` |
 
 ## v3.protocol_conversion_field_parity
 
@@ -1529,8 +1529,8 @@ flowchart TD
   subgraph c_35_v3_responses_relay_source_server_entry_m_v3_server["v3-server"]
     c_35_v3_responses_relay_source_server_entry_0["v3-server<br/>responses_relay_manifest<br/><small>routecodex-v3-server/tests/multi_listener_server.rs</small>"]
     c_35_v3_responses_relay_source_server_entry_2["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_35_v3_responses_relay_source_server_entry_3["v3-server<br/>finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_35_v3_responses_relay_source_server_entry_4["v3-server<br/>responses_relay_output_response<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_35_v3_responses_relay_source_server_entry_3["v3-server<br/>finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
+    c_35_v3_responses_relay_source_server_entry_4["v3-server<br/>responses_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small>"]
   end
   c_35_v3_responses_relay_source_server_entry_0 -->|v3-responses-relay-server-01<br/>V3Config05ManifestPublished → V3EntryBind04ExecutionBindingProjected| c_35_v3_responses_relay_source_server_entry_1
   c_35_v3_responses_relay_source_server_entry_2 -->|v3-responses-relay-server-02<br/>V3EntryBind04ExecutionBindingProjected → V3HubReqInbound01ClientRaw| c_35_v3_responses_relay_source_server_entry_1
@@ -1542,7 +1542,7 @@ flowchart TD
 | --- | --- | --- | --- | --- | --- |
 | `v3-responses-relay-server-01` | `V3Config05ManifestPublished` → `V3EntryBind04ExecutionBindingProjected` | anchored | responses_relay_manifest<br/><small>routecodex-v3-server/tests/multi_listener_server.rs</small> | execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.hub_relay_runtime_closeout` |
 | `v3-responses-relay-server-02` | `V3EntryBind04ExecutionBindingProjected` → `V3HubReqInbound01ClientRaw` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.hub_relay_runtime_closeout` |
-| `v3-responses-relay-server-03` | `V3HubReqInbound01ClientRaw` → `V3ServerRespOutbound06ClientFrame` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/lib.rs</small> | responses_relay_output_response<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.hub_relay_runtime_closeout` |
+| `v3-responses-relay-server-03` | `V3HubReqInbound01ClientRaw` → `V3ServerRespOutbound06ClientFrame` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | responses_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.hub_relay_runtime_closeout` |
 | `v3-responses-relay-server-04` | `V3ProviderReqOutbound09TransportRequest` → `V3DryRunNoNetworkTerminalEffect` | anchored | execute_v3_responses_relay_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs</small> | V3Transport13ResponsesRequest::redacted_provider_request_projection<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.hub_relay_runtime_closeout` |
 
 ## v3.error.raw_wire_evidence
@@ -1554,15 +1554,15 @@ Owner feature: `v3.error.raw_wire_evidence`
 ```mermaid
 flowchart TD
   subgraph c_36_v3_error_raw_wire_evidence_m_v3_server["v3-server"]
-    c_36_v3_error_raw_wire_evidence_0["v3-server<br/>finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_36_v3_error_raw_wire_evidence_1["v3-server<br/>persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_36_v3_error_raw_wire_evidence_0["v3-server<br/>finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
+    c_36_v3_error_raw_wire_evidence_1["v3-server<br/>persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
   end
   c_36_v3_error_raw_wire_evidence_0 -->|v3-responses-relay-error-evidence-01<br/>V3Error06ClientProjected → V3ErrorEvidenceFlushOnTerminalFailure| c_36_v3_error_raw_wire_evidence_1
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-responses-relay-error-evidence-01` | `V3Error06ClientProjected` → `V3ErrorEvidenceFlushOnTerminalFailure` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/lib.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-responses-relay-error-evidence-01` | `V3Error06ClientProjected` → `V3ErrorEvidenceFlushOnTerminalFailure` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
 
 ## v3.servertool_hook_skeleton_lifecycle
 
@@ -1803,13 +1803,13 @@ flowchart TD
     c_43_v3_responses_inbound_websocket_proxy_3["v3-runtime<br/>build_v3_server_03_http_request_raw<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
   end
   subgraph c_43_v3_responses_inbound_websocket_proxy_m_v3_server["v3-server"]
-    c_43_v3_responses_inbound_websocket_proxy_0["v3-server<br/>responses_websocket_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_43_v3_responses_inbound_websocket_proxy_1["v3-server<br/>responses_websocket_session<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_43_v3_responses_inbound_websocket_proxy_2["v3-server<br/>responses_websocket_create_payload<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_43_v3_responses_inbound_websocket_proxy_4["v3-server<br/>handle_responses_websocket_message_with_mode<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_43_v3_responses_inbound_websocket_proxy_5["v3-server<br/>execute_responses_relay_websocket_output<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_43_v3_responses_inbound_websocket_proxy_6["v3-server<br/>send_responses_websocket_frame<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_43_v3_responses_inbound_websocket_proxy_7["v3-server<br/>send_responses_relay_websocket_output<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_43_v3_responses_inbound_websocket_proxy_0["v3-server<br/>responses_websocket_endpoint<br/><small>routecodex-v3-server/src/websocket.rs</small>"]
+    c_43_v3_responses_inbound_websocket_proxy_1["v3-server<br/>responses_websocket_session<br/><small>routecodex-v3-server/src/websocket.rs</small>"]
+    c_43_v3_responses_inbound_websocket_proxy_2["v3-server<br/>responses_websocket_create_payload<br/><small>routecodex-v3-server/src/websocket.rs</small>"]
+    c_43_v3_responses_inbound_websocket_proxy_4["v3-server<br/>handle_responses_websocket_message_with_mode<br/><small>routecodex-v3-server/src/websocket.rs</small>"]
+    c_43_v3_responses_inbound_websocket_proxy_5["v3-server<br/>execute_responses_relay_websocket_output<br/><small>routecodex-v3-server/src/websocket.rs</small>"]
+    c_43_v3_responses_inbound_websocket_proxy_6["v3-server<br/>send_responses_websocket_frame<br/><small>routecodex-v3-server/src/websocket.rs</small>"]
+    c_43_v3_responses_inbound_websocket_proxy_7["v3-server<br/>send_responses_relay_websocket_output<br/><small>routecodex-v3-server/src/websocket.rs</small>"]
   end
   c_43_v3_responses_inbound_websocket_proxy_0 -->|v3-inws-01<br/>V3ResponsesInboundWs01ClientUpgrade → V3ResponsesInboundWs02CreateEventParsed| c_43_v3_responses_inbound_websocket_proxy_1
   c_43_v3_responses_inbound_websocket_proxy_2 -->|v3-inws-02<br/>V3ResponsesInboundWs02CreateEventParsed → V3Server03HttpRequestRaw| c_43_v3_responses_inbound_websocket_proxy_3
@@ -1819,10 +1819,10 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-inws-01` | `V3ResponsesInboundWs01ClientUpgrade` → `V3ResponsesInboundWs02CreateEventParsed` | anchored | responses_websocket_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | responses_websocket_session<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.responses_inbound_websocket_proxy` |
-| `v3-inws-02` | `V3ResponsesInboundWs02CreateEventParsed` → `V3Server03HttpRequestRaw` | anchored | responses_websocket_create_payload<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_server_03_http_request_raw<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | `v3.responses_inbound_websocket_proxy` |
-| `v3-inws-03` | `V3Server03HttpRequestRaw` → `V3Resp15ClientPayload` | anchored | handle_responses_websocket_message_with_mode<br/><small>routecodex-v3-server/src/lib.rs</small> | execute_responses_relay_websocket_output<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.responses_inbound_websocket_proxy` |
-| `v3-inws-04` | `V3Resp15ClientPayload` → `V3ResponsesInboundWs04ClientEventProjected` | anchored | send_responses_websocket_frame<br/><small>routecodex-v3-server/src/lib.rs</small> | send_responses_relay_websocket_output<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.responses_inbound_websocket_proxy` |
+| `v3-inws-01` | `V3ResponsesInboundWs01ClientUpgrade` → `V3ResponsesInboundWs02CreateEventParsed` | anchored | responses_websocket_endpoint<br/><small>routecodex-v3-server/src/websocket.rs</small> | responses_websocket_session<br/><small>routecodex-v3-server/src/websocket.rs</small> | `v3.responses_inbound_websocket_proxy` |
+| `v3-inws-02` | `V3ResponsesInboundWs02CreateEventParsed` → `V3Server03HttpRequestRaw` | anchored | responses_websocket_create_payload<br/><small>routecodex-v3-server/src/websocket.rs</small> | build_v3_server_03_http_request_raw<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | `v3.responses_inbound_websocket_proxy` |
+| `v3-inws-03` | `V3Server03HttpRequestRaw` → `V3Resp15ClientPayload` | anchored | handle_responses_websocket_message_with_mode<br/><small>routecodex-v3-server/src/websocket.rs</small> | execute_responses_relay_websocket_output<br/><small>routecodex-v3-server/src/websocket.rs</small> | `v3.responses_inbound_websocket_proxy` |
+| `v3-inws-04` | `V3Resp15ClientPayload` → `V3ResponsesInboundWs04ClientEventProjected` | anchored | send_responses_websocket_frame<br/><small>routecodex-v3-server/src/websocket.rs</small> | send_responses_relay_websocket_output<br/><small>routecodex-v3-server/src/websocket.rs</small> | `v3.responses_inbound_websocket_proxy` |
 
 ## v3.protocol_normalization_tool_governance_boundary
 
@@ -1953,11 +1953,11 @@ flowchart TD
   subgraph c_47_v3_console_request_count_visibility_mainline_m_v3_server["v3-server"]
     c_47_v3_console_request_count_visibility_mainline_0["v3-server<br/>spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_47_v3_console_request_count_visibility_mainline_1["v3-server<br/>V3RequestIdCounter::new<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_47_v3_console_request_count_visibility_mainline_2["v3-server<br/>next_v3_console_request_identity<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_47_v3_console_request_count_visibility_mainline_3["v3-server<br/>next_request_identity<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_47_v3_console_request_count_visibility_mainline_4["v3-server<br/>render_v3_request_console_block<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_47_v3_console_request_count_visibility_mainline_5["v3-server<br/>format_v3_console_request_count<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_47_v3_console_request_count_visibility_mainline_6["v3-server<br/>render_v3_response_console_block<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_47_v3_console_request_count_visibility_mainline_2["v3-server<br/>next_v3_console_request_identity<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
+    c_47_v3_console_request_count_visibility_mainline_3["v3-server<br/>next_request_identity<br/><small>routecodex-v3-server/src/request_id.rs</small>"]
+    c_47_v3_console_request_count_visibility_mainline_4["v3-server<br/>render_v3_request_console_block<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
+    c_47_v3_console_request_count_visibility_mainline_5["v3-server<br/>format_v3_console_request_count<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
+    c_47_v3_console_request_count_visibility_mainline_6["v3-server<br/>render_v3_response_console_block<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
   end
   c_47_v3_console_request_count_visibility_mainline_0 -->|v3-console-count-01<br/>V3RequestCounter01AggregateOwned → V3RequestCounter02ListenerShared| c_47_v3_console_request_count_visibility_mainline_1
   c_47_v3_console_request_count_visibility_mainline_2 -->|v3-console-count-02<br/>V3RequestCounter02ListenerShared → V3RequestIdentity03Allocated| c_47_v3_console_request_count_visibility_mainline_3
@@ -1968,9 +1968,9 @@ flowchart TD
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-console-count-01` | `V3RequestCounter01AggregateOwned` → `V3RequestCounter02ListenerShared` | anchored | spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small> | V3RequestIdCounter::new<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.console_request_count_visibility` |
-| `v3-console-count-02` | `V3RequestCounter02ListenerShared` → `V3RequestIdentity03Allocated` | anchored | next_v3_console_request_identity<br/><small>routecodex-v3-server/src/lib.rs</small> | next_request_identity<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.console_request_count_visibility` |
-| `v3-console-count-03` | `V3RequestIdentity03Allocated` → `V3ConsoleReq02HumanBlock` | anchored | render_v3_request_console_block<br/><small>routecodex-v3-server/src/lib.rs</small> | format_v3_console_request_count<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.console_request_count_visibility` |
-| `v3-console-count-04` | `V3RequestIdentity03Allocated` → `V3ConsoleResp03HumanBlock` | anchored | render_v3_response_console_block<br/><small>routecodex-v3-server/src/lib.rs</small> | format_v3_console_request_count<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.console_request_count_visibility` |
+| `v3-console-count-02` | `V3RequestCounter02ListenerShared` → `V3RequestIdentity03Allocated` | anchored | next_v3_console_request_identity<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | next_request_identity<br/><small>routecodex-v3-server/src/request_id.rs</small> | `v3.console_request_count_visibility` |
+| `v3-console-count-03` | `V3RequestIdentity03Allocated` → `V3ConsoleReq02HumanBlock` | anchored | render_v3_request_console_block<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | format_v3_console_request_count<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | `v3.console_request_count_visibility` |
+| `v3-console-count-04` | `V3RequestIdentity03Allocated` → `V3ConsoleResp03HumanBlock` | anchored | render_v3_response_console_block<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | format_v3_console_request_count<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | `v3.console_request_count_visibility` |
 
 ## v3.console_human_readable_layering.mainline
 
@@ -1994,10 +1994,10 @@ flowchart TD
     c_48_v3_console_human_readable_layering_mainline_3["v3-runtime::hub_v1<br/>V3RuntimeRouteSelectionEventSink<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small>"]
   end
   subgraph c_48_v3_console_human_readable_layering_mainline_m_v3_server["v3-server"]
-    c_48_v3_console_human_readable_layering_mainline_8["v3-server<br/>build_v3_route_selection_event_sink<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_48_v3_console_human_readable_layering_mainline_9["v3-server<br/>emit_v3_request_route_hit_console_line_for_observability<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_48_v3_console_human_readable_layering_mainline_10["v3-server<br/>build_v3_provider_failure_event_sink<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_48_v3_console_human_readable_layering_mainline_11["v3-server<br/>emit_v3_provider_failure_console_event<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_48_v3_console_human_readable_layering_mainline_8["v3-server<br/>build_v3_route_selection_event_sink<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
+    c_48_v3_console_human_readable_layering_mainline_9["v3-server<br/>emit_v3_request_route_hit_console_line_for_observability<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
+    c_48_v3_console_human_readable_layering_mainline_10["v3-server<br/>build_v3_provider_failure_event_sink<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
+    c_48_v3_console_human_readable_layering_mainline_11["v3-server<br/>emit_v3_provider_failure_console_event<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
   end
   c_48_v3_console_human_readable_layering_mainline_0 -->|v3-console-realtime-01<br/>V3RuntimeProviderFailureObservation → V3RuntimeProviderFailureEventSink| c_48_v3_console_human_readable_layering_mainline_1
   c_48_v3_console_human_readable_layering_mainline_2 -->|v3-console-realtime-02<br/>V3RuntimeRouteSelectionObservation → V3RuntimeRouteSelectionEventSink| c_48_v3_console_human_readable_layering_mainline_3
@@ -2013,8 +2013,8 @@ flowchart TD
 | `v3-console-realtime-02` | `V3RuntimeRouteSelectionObservation` → `V3RuntimeRouteSelectionEventSink` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | V3RuntimeRouteSelectionEventSink<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.console_human_readable_layering` |
 | `v3-console-realtime-03` | `V3RuntimeProviderFailureObservation` → `V3RuntimeProviderFailureEventSink` | anchored | publish_v3_direct_provider_failure_event<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3RuntimeProviderFailureEventSink<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | `v3.console_human_readable_layering` |
 | `v3-console-realtime-04` | `V3RuntimeRouteSelectionObservation` → `V3RuntimeRouteSelectionEventSink` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3RuntimeRouteSelectionEventSink<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | `v3.console_human_readable_layering` |
-| `v3-console-realtime-05` | `V3RuntimeRouteSelectionEventSink` → `V3ConsoleReq02HumanBlock` | anchored | build_v3_route_selection_event_sink<br/><small>routecodex-v3-server/src/lib.rs</small> | emit_v3_request_route_hit_console_line_for_observability<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.console_human_readable_layering` |
-| `v3-console-realtime-06` | `V3RuntimeProviderFailureEventSink` → `V3ConsoleProvider04ExceptionalBlock` | anchored | build_v3_provider_failure_event_sink<br/><small>routecodex-v3-server/src/lib.rs</small> | emit_v3_provider_failure_console_event<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.console_human_readable_layering` |
+| `v3-console-realtime-05` | `V3RuntimeRouteSelectionEventSink` → `V3ConsoleReq02HumanBlock` | anchored | build_v3_route_selection_event_sink<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | emit_v3_request_route_hit_console_line_for_observability<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | `v3.console_human_readable_layering` |
+| `v3-console-realtime-06` | `V3RuntimeProviderFailureEventSink` → `V3ConsoleProvider04ExceptionalBlock` | anchored | build_v3_provider_failure_event_sink<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | emit_v3_provider_failure_console_event<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | `v3.console_human_readable_layering` |
 
 ## v3.runtime_timing_observability.mainline
 
@@ -2040,10 +2040,10 @@ flowchart TD
     c_49_v3_runtime_timing_observability_mainline_14["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small>"]
   end
   subgraph c_49_v3_runtime_timing_observability_mainline_m_v3_server["v3-server"]
-    c_49_v3_runtime_timing_observability_mainline_5["v3-server<br/>complete_relay_sse<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_49_v3_runtime_timing_observability_mainline_6["v3-server<br/>merge_v3_runtime_stream_observation<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_49_v3_runtime_timing_observability_mainline_8["v3-server<br/>emit_relay_sse_complete_console_lines<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_49_v3_runtime_timing_observability_mainline_9["v3-server<br/>emit_v3_request_complete_console_line<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_49_v3_runtime_timing_observability_mainline_5["v3-server<br/>complete_relay_sse<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
+    c_49_v3_runtime_timing_observability_mainline_6["v3-server<br/>merge_v3_runtime_stream_observation<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
+    c_49_v3_runtime_timing_observability_mainline_8["v3-server<br/>emit_relay_sse_complete_console_lines<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
+    c_49_v3_runtime_timing_observability_mainline_9["v3-server<br/>emit_v3_request_complete_console_line<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
     c_49_v3_runtime_timing_observability_mainline_13["v3-server<br/>execute_responses_direct_server_outcome<br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small>"]
   end
   c_49_v3_runtime_timing_observability_mainline_0 -->|v3-runtime-timing-01<br/>V3RuntimeTimingStart → V3RuntimeTimingExternalAttempt| c_49_v3_runtime_timing_observability_mainline_1
@@ -2069,9 +2069,9 @@ flowchart TD
 | `v3-runtime-timing-03` | `V3RuntimeTimingExternalComplete` → `V3RuntimeTimingExternalAttempt` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | start_external<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-04` | `V3RuntimeTimingExternalComplete` → `V3RuntimeTimingTerminal` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | finish_runtime<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-05` | `V3RuntimeTimingTerminal` → `V3RuntimeTimingStreamObservation` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | record_timing<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.runtime_timing_observability` |
-| `v3-runtime-timing-06` | `V3RuntimeTimingStreamObservation` → `V3RuntimeTimingServerProjection` | anchored | complete_relay_sse<br/><small>routecodex-v3-server/src/lib.rs</small> | merge_v3_runtime_stream_observation<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.runtime_timing_observability` |
+| `v3-runtime-timing-06` | `V3RuntimeTimingStreamObservation` → `V3RuntimeTimingServerProjection` | anchored | complete_relay_sse<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | merge_v3_runtime_stream_observation<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-07` | `V3RuntimeTimingTerminal` → `V3RuntimeTimingObservability` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | finish_runtime<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
-| `v3-runtime-timing-08` | `V3RuntimeTimingObservability` → `V3RuntimeTimingServerProjection` | anchored | emit_relay_sse_complete_console_lines<br/><small>routecodex-v3-server/src/lib.rs</small> | emit_v3_request_complete_console_line<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.runtime_timing_observability` |
+| `v3-runtime-timing-08` | `V3RuntimeTimingObservability` → `V3RuntimeTimingServerProjection` | anchored | emit_relay_sse_complete_console_lines<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | emit_v3_request_complete_console_line<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-09` | `V3RuntimeTimingStart` → `V3RuntimeTimingExternalAttempt` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | start_external<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-10` | `V3RuntimeTimingExternalAttempt` → `V3RuntimeTimingExternalComplete` | anchored | wrap_direct_sse_provider_event_json_observation_stream<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | finish_external<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-11` | `V3RuntimeTimingExternalComplete` → `V3RuntimeTimingTerminal` | anchored | wrap_direct_sse_provider_outcome_stream<br/><small>routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs</small> | finish_runtime<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
@@ -2095,7 +2095,7 @@ flowchart TD
     c_50_v3_responses_session_admission_0["v3-server<br/>admit_v3_responses_session_after_json_parse<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_50_v3_responses_session_admission_1["v3-server<br/>V3ResponsesSessionAdmissionGate::try_admit<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
     c_50_v3_responses_session_admission_3["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_50_v3_responses_session_admission_4["v3-server<br/>hold_response_body_admission_permit<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_50_v3_responses_session_admission_4["v3-server<br/>hold_response_body_admission_permit<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
   end
   c_50_v3_responses_session_admission_0 -->|v3-responses-admission-01<br/>V3Server03HttpRequestRaw → V3Server03ResponsesSessionAdmissionBlock| c_50_v3_responses_session_admission_1
   c_50_v3_responses_session_admission_0 -->|v3-responses-admission-error-02<br/>V3Server03ResponsesSessionAdmissionBlock → V3Error01SourceRaised| c_50_v3_responses_session_admission_2
@@ -2106,7 +2106,7 @@ flowchart TD
 | --- | --- | --- | --- | --- | --- |
 | `v3-responses-admission-01` | `V3Server03HttpRequestRaw` → `V3Server03ResponsesSessionAdmissionBlock` | anchored | admit_v3_responses_session_after_json_parse<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ResponsesSessionAdmissionGate::try_admit<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.responses_session_inflight_admission` |
 | `v3-responses-admission-error-02` | `V3Server03ResponsesSessionAdmissionBlock` → `V3Error01SourceRaised` | anchored | admit_v3_responses_session_after_json_parse<br/><small>routecodex-v3-server/src/lib.rs</small> | project_v3_http_boundary_error<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.responses_session_inflight_admission` |
-| `v3-responses-admission-release-03` | `V3Server03ResponsesSessionAdmissionBlock` → `V3ServerRespOutbound06ClientFrame` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | hold_response_body_admission_permit<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.responses_session_inflight_admission` |
+| `v3-responses-admission-release-03` | `V3Server03ResponsesSessionAdmissionBlock` → `V3ServerRespOutbound06ClientFrame` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | hold_response_body_admission_permit<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.responses_session_inflight_admission` |
 
 ## v3.sse.http_keepalive_boundary
 
@@ -2121,14 +2121,14 @@ flowchart TD
     c_51_v3_sse_http_keepalive_boundary_1["routecodex-v3-sse<br/>build_v3_sse_transport_out_04_keepalive_comment<br/><small>routecodex-v3-sse/src/lib.rs</small>"]
   end
   subgraph c_51_v3_sse_http_keepalive_boundary_m_v3_server["v3-server"]
-    c_51_v3_sse_http_keepalive_boundary_0["v3-server<br/>v3_io_sse_body<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_51_v3_sse_http_keepalive_boundary_0["v3-server<br/>v3_io_sse_body<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
   end
   c_51_v3_sse_http_keepalive_boundary_0 -->|v3-sse-http-keepalive-01<br/>V3SseTransportOut04EncodedChunk → V3ServerRespOutbound06ClientFrame| c_51_v3_sse_http_keepalive_boundary_1
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-sse-http-keepalive-01` | `V3SseTransportOut04EncodedChunk` → `V3ServerRespOutbound06ClientFrame` | anchored | v3_io_sse_body<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_sse_transport_out_04_keepalive_comment<br/><small>routecodex-v3-sse/src/lib.rs</small> | `v3.sse_http_keepalive_boundary` |
+| `v3-sse-http-keepalive-01` | `V3SseTransportOut04EncodedChunk` → `V3ServerRespOutbound06ClientFrame` | anchored | v3_io_sse_body<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | build_v3_sse_transport_out_04_keepalive_comment<br/><small>routecodex-v3-sse/src/lib.rs</small> | `v3.sse_http_keepalive_boundary` |
 
 ## v3.provider_action_gate.mainline
 

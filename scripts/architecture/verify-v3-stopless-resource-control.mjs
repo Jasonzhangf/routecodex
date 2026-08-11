@@ -17,6 +17,7 @@ const paths = {
   hub: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   hubCommon: 'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
   runtime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+  stopless: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_stopless.rs',
   directRuntime: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
   directState: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs',
   directStopless: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_stopless.rs',
@@ -48,6 +49,7 @@ const designContract = readText(paths.designContract);
 const stoplessSop = readText(paths.stoplessSop);
 const hubSource = [readText(paths.hub), readText(paths.hubCommon)].join('\n');
 const runtimeSource = readText(paths.runtime);
+const stoplessSource = readText(paths.stopless);
 const directRuntimeSource = [
   readText(paths.directRuntime),
   readText(paths.directState),
@@ -615,12 +617,12 @@ function verifyRuntimeSeparation() {
     'store_v3_responses_relay_stopless_control_state',
     'clear_v3_responses_relay_stopless_control_state',
   ]) {
-    const signature = extractBlock(runtimeSource, `fn ${helper}(`, ') ->');
-    if (!signature) fail(`${paths.runtime}: missing ${helper}`);
+    const signature = extractBlock(stoplessSource, `fn ${helper}(`, ') ->');
+    if (!signature) fail(`${paths.stopless}: missing ${helper}`);
     else if (signature.includes('V3ResponsesRelayLocalContinuationExecution')) {
-      fail(`${paths.runtime}: ${helper} must not accept local continuation execution`);
+      fail(`${paths.stopless}: ${helper} must not accept local continuation execution`);
     } else if (!signature.includes('V3ResponsesRelayStoplessControlExecution')) {
-      fail(`${paths.runtime}: ${helper} must accept independent StoplessCenter control execution`);
+      fail(`${paths.stopless}: ${helper} must accept independent StoplessCenter control execution`);
     }
   }
   requireTextIncludes(
