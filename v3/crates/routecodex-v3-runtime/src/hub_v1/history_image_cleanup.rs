@@ -79,8 +79,14 @@ fn is_responses_user_carrier(item: &Value) -> bool {
 }
 
 fn is_top_level_input_image(item: &Value) -> bool {
-    item.get("type").and_then(Value::as_str) == Some("input_image")
-        && item.get("image_url").is_some()
+    // input_image/output_image 的 image_url / data / file_id 形态都必须清洗，
+    // 否则历史图片以 base64 进 wire，导致 provider 侧 context 膨胀。
+    matches!(
+        item.get("type").and_then(Value::as_str),
+        Some("input_image" | "output_image")
+    ) && (item.get("image_url").is_some()
+        || item.get("data").is_some()
+        || item.get("file_id").is_some())
 }
 
 fn normalize_chat_content_parts(message: &mut Value) {
@@ -107,9 +113,12 @@ fn normalize_responses_content_parts(item: &mut Value) {
         let Some(row) = part.as_object_mut() else {
             continue;
         };
-        if row.get("type").and_then(Value::as_str) == Some("input_image")
-            && row.contains_key("image_url")
-        {
+        let part_type = row.get("type").and_then(Value::as_str);
+        let is_image = matches!(part_type, Some("input_image" | "output_image"))
+            && (row.contains_key("image_url")
+                || row.contains_key("data")
+                || row.contains_key("file_id"));
+        if is_image {
             *part = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
         }
     }
@@ -180,6 +189,56 @@ mod tests {
         assert_eq!(
             body["messages"][0]["content"],
             json!([{"type":"text","text":"[Image]"}])
+        );
+    }
+
+    #[test]
+    fn responses_history_output_image_and_data_form_cleaned() {
+        // output_image（assistant 图片输出）与 input_image 的 data/file_id 形态
+        // 在历史中必须替换为 [Image]，否则 base64 进 wire 导致 provider context 膨胀。
+        let mut body = json!({
+            "input": [
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_image", "data": "data:image/png;base64,DDDD"}
+                ]},
+                {"type": "message", "role": "assistant", "content": [
+                    {"type": "output_image", "image_url": {"url": "data:image/png;base64,EEEE"}}
+                ]},
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "current"}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["input"][0]["content"][0],
+            json!({"type":"input_text","text":"[Image]"})
+        );
+        assert_eq!(
+            body["input"][1]["content"][0],
+            json!({"type":"input_text","text":"[Image]"})
+        );
+        assert_eq!(
+            body["input"][2]["content"][0],
+            json!({"type":"input_text","text":"current"}),
+            "current turn must be preserved"
+        );
+    }
+
+    #[test]
+    fn responses_top_level_input_image_data_form_cleaned() {
+        let mut body = json!({
+            "input": [
+                {"type": "input_image", "data": "data:image/png;base64,FFFF"},
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "current"}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["input"][0],
+            json!({"type":"input_text","text":"[Image]"})
         );
     }
 
