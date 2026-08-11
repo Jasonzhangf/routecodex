@@ -51,6 +51,7 @@ pub(crate) fn normalize_v3_history_image_placeholders(body: &mut Value) {
             .unwrap_or(0);
         for item in input.iter_mut().take(current_turn_index) {
             normalize_responses_content_parts(item);
+            normalize_responses_output_parts(item);
             if is_top_level_input_image(item) {
                 *item = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
             }
@@ -110,6 +111,31 @@ fn normalize_responses_content_parts(item: &mut Value) {
         return;
     };
     for part in content.iter_mut() {
+        let Some(row) = part.as_object_mut() else {
+            continue;
+        };
+        let part_type = row.get("type").and_then(Value::as_str);
+        let is_image = matches!(part_type, Some("input_image" | "output_image"))
+            && (row.contains_key("image_url")
+                || row.contains_key("data")
+                || row.contains_key("file_id"));
+        if is_image {
+            *part = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
+        }
+    }
+}
+
+/// function_call_output 的 `output` 数组（Codex 工具输出图片的实际位置）：
+/// 图片 part（input_image/output_image + image_url/data/file_id）同样替换为占位符，
+/// 否则历史工具输出图片以 base64 原样进 wire，provider 侧 context 膨胀（400）。
+fn normalize_responses_output_parts(item: &mut Value) {
+    if item.get("type").and_then(Value::as_str) != Some("function_call_output") {
+        return;
+    }
+    let Some(output) = item.get_mut("output").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for part in output.iter_mut() {
         let Some(row) = part.as_object_mut() else {
             continue;
         };
@@ -372,6 +398,49 @@ mod tests {
             earlier["messages"][0]["content"],
             later["messages"][0]["content"],
             "earlier history prefix must normalize identically across requests"
+        );
+    }
+
+    #[test]
+    fn function_call_output_images_in_output_field_become_placeholder() {
+        // Codex 工具输出图片位于 function_call_output.output（不是 content）：
+        // 历史轮必须清洗，否则 base64 图片原样进 wire → provider context 膨胀 400。
+        let mut body = json!({
+            "input": [
+                {"type": "function_call_output", "call_id": "call_1", "output": [
+                    {"type": "input_image", "detail": "original", "image_url": "data:image/png;base64,AAAA"}
+                ]},
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "current turn"}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["input"][0]["output"][0],
+            json!({"type": "input_text", "text": V3_HISTORY_IMAGE_PLACEHOLDER}),
+            "history function_call_output.output image must become placeholder"
+        );
+    }
+
+    #[test]
+    fn current_turn_function_call_output_output_image_preserved() {
+        // 当前轮（最后一个 user carrier 之后）的工具输出图片不清洗（当前轮输入语义保留）。
+        let mut body = json!({
+            "input": [
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "current turn"}
+                ]},
+                {"type": "function_call_output", "call_id": "call_1", "output": [
+                    {"type": "input_image", "detail": "original", "image_url": "data:image/png;base64,BBBB"}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["input"][1]["output"][0]["type"],
+            "input_image",
+            "current-turn tool output image must be preserved"
         );
     }
 }
