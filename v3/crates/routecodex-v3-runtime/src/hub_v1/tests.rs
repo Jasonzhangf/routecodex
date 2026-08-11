@@ -73,7 +73,7 @@ fn responses_reasoning_rejects_anthropic_fields_in_openai_source_schema() {
 }
 
 #[test]
-fn openai_chat_function_tool_redacted_schema_placeholders_fail_fast() {
+fn openai_chat_function_tool_redacted_schema_placeholders_pass_through() {
     let payload = json!({
         "model": "glm-5.2",
         "messages": [{"role": "user", "content": "continue the coding task"}],
@@ -96,14 +96,16 @@ fn openai_chat_function_tool_redacted_schema_placeholders_fail_fast() {
         }]
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("redacted schema node must fail before provider wire");
-    assert!(error.contains("MalformedOutboundField"), "{error}");
-    assert!(error.contains("redacted_schema_placeholder"), "{error}");
+    let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("Codex redacted schema placeholders must pass through unchanged");
+    assert_eq!(
+        wire["tools"][0]["function"]["parameters"]["properties"]["max_output_tokens"],
+        "[REDACTED]"
+    );
 }
 
 #[test]
-fn openai_chat_function_tool_redacted_schema_placeholders_fail_fast_in_defs() {
+fn openai_chat_function_tool_redacted_schema_placeholders_pass_through_in_defs() {
     let payload = json!({
         "model": "glm-5.2",
         "messages": [{"role": "user", "content": "continue the coding task"}],
@@ -127,10 +129,12 @@ fn openai_chat_function_tool_redacted_schema_placeholders_fail_fast_in_defs() {
         }]
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("redacted schema definitions must fail before provider wire");
-    assert!(error.contains("MalformedOutboundField"), "{error}");
-    assert!(error.contains("redacted_schema_placeholder"), "{error}");
+    let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("Codex redacted schema definitions must pass through unchanged");
+    assert_eq!(
+        wire["tools"][0]["function"]["parameters"]["$defs"]["Command"],
+        "[REDACTED]"
+    );
 }
 
 #[test]
@@ -153,7 +157,7 @@ fn openai_chat_tool_search_rejects_unmapped_builtin_tool() {
 }
 
 #[test]
-fn openai_responses_function_tool_redacted_schema_placeholders_fail_fast() {
+fn openai_responses_function_tool_redacted_schema_placeholders_pass_through() {
     let payload = json!({
         "model": "gpt-5.5",
         "messages": [{"role": "user", "content": "continue the coding task"}],
@@ -173,14 +177,16 @@ fn openai_responses_function_tool_redacted_schema_placeholders_fail_fast() {
         }]
     });
 
-    let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-        .expect_err("redacted schema node must fail before provider wire");
-    assert!(error.contains("MalformedOutboundField"), "{error}");
-    assert!(error.contains("redacted_schema_placeholder"), "{error}");
+    let wire = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Codex redacted schema placeholders must pass through unchanged");
+    assert_eq!(
+        wire["tools"][0]["parameters"]["properties"]["token_budget"],
+        "[REDACTED]"
+    );
 }
 
 #[test]
-fn openai_responses_function_tool_redacted_schema_placeholders_fail_fast_in_definitions() {
+fn openai_responses_function_tool_redacted_schema_placeholders_pass_through_in_definitions() {
     let payload = json!({
         "model": "gpt-5.5",
         "messages": [{"role": "user", "content": "continue the coding task"}],
@@ -200,10 +206,12 @@ fn openai_responses_function_tool_redacted_schema_placeholders_fail_fast_in_defi
         }]
     });
 
-    let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-        .expect_err("redacted schema definitions must fail before provider wire");
-    assert!(error.contains("MalformedOutboundField"), "{error}");
-    assert!(error.contains("redacted_schema_placeholder"), "{error}");
+    let wire = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Codex redacted schema definitions must pass through unchanged");
+    assert_eq!(
+        wire["tools"][0]["parameters"]["definitions"]["Budget"],
+        "[REDACTED]"
+    );
 }
 
 #[test]
