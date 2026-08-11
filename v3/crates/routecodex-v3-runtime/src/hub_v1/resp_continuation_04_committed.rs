@@ -196,11 +196,15 @@ pub(crate) fn build_v3_relay_local_continuation_context_at_resp04(
             responses_context.insert(field.to_string(), value.clone());
         }
     }
-    let chat_context =
+    // continuation 保存的上下文只允许存图片占位符：图片 base64 若存入 continuation，
+    // 下一轮 restore 会把历史图片重新注入 wire（provider context 膨胀 400）。
+    // 全量清理（不分当前轮）——保存的内容是供恢复的历史，图片一律 [Image] 占位。
+    let mut chat_context =
         super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
             &Value::Object(responses_context),
         )
         .map_err(|message| V3LocalContinuationError::Codec { message })?;
+    super::normalize_v3_all_images_to_placeholder(&mut chat_context);
     Ok(coalesce_v3_resp04_reasoning_with_following_tool_call(
         chat_context,
     ))

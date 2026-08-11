@@ -47,7 +47,8 @@ pub(crate) use responses_openai_codec::build_v3_chat_canonical_request_from_resp
 mod client_metadata_projection;
 mod history_image_cleanup;
 pub(crate) use history_image_cleanup::{
-    count_v3_payload_image_refs, normalize_v3_history_image_placeholders,
+    count_v3_payload_image_refs, normalize_v3_all_images_to_placeholder,
+    normalize_v3_history_image_placeholders,
 };
 mod request_outbound_builtin_tool_projection;
 mod request_outbound_format;

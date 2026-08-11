@@ -167,24 +167,7 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
     }
     // 与 chat direct / relay req_inbound 一致：历史轮图片占位符做语义等价归一化
     // （只清理历史轮图片引用，不影响当前轮输入；禁止在不可变区做任何修补）。
-    // 临时诊断：记录清洗前图片数（跑完删除）。
-    {
-        let raw_img = crate::hub_v1::count_v3_payload_image_refs(&body);
-        crate::hub_v1::normalize_v3_history_image_placeholders(&mut body);
-        let cleaned = crate::hub_v1::count_v3_payload_image_refs(&body);
-        if raw_img > 0 {
-            let _ = std::fs::write(
-                "/tmp/cleanup-trace.log",
-                format!(
-                    "req04_responses: raw_images={raw_img} cleaned={cleaned} input_items={}\n",
-                    body.get("input")
-                        .and_then(serde_json::Value::as_array)
-                        .map(|a| a.len())
-                        .unwrap_or(0)
-                ),
-            );
-        }
-    }
+    crate::hub_v1::normalize_v3_history_image_placeholders(&mut body);
     Ok(V3Req04StandardizedResponses {
         protocol_context: V3ProtocolContext {
             server_id: raw.server_id,

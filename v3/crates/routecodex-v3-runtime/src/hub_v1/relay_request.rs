@@ -470,6 +470,12 @@ impl V3HubRelayRequestHooks {
                     reason: error.to_string(),
                 },
             )?;
+            // 保险：restore 合并后的 payload 再次做历史轮图片占位清理——恢复的
+            // 上下文（即使 save 已全清）若含图片 base64，作为历史轮统一替换为
+            // [Image]，图片绝不重新注入 provider wire（context 400）。
+            let restored_payload =
+                Arc::make_mut(&mut classified.previous.previous.payload.0);
+            crate::hub_v1::normalize_v3_history_image_placeholders(restored_payload);
         }
         if let Some(key) = find_v3_hub_side_channel_key(&classified.previous.previous.payload.0) {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });

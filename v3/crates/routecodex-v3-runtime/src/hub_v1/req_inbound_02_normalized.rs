@@ -32,8 +32,15 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
             .and_then(serde_json::Value::as_array)
             .is_none()
     {
+        // canonical 化前先清洗原始 responses payload：此时 fco output 图片还是
+        // 数组形态，normalize 能正确替换为 [Image]；canonical 转换会把数组
+        // 序列化成字符串 content，若转换后再清洗会漏掉图片 base64（字符串
+        // content 不被 normalize 识别，图片原样进 provider wire → context 400）。
+        let mut raw = Arc::try_unwrap(input.payload.0.clone())
+            .unwrap_or_else(|arc| (*arc).clone());
+        normalize_v3_history_image_placeholders(&mut raw);
         let mut canonical = build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
-            input.payload.0.as_ref(),
+            &raw,
         )
         .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
         normalize_v3_history_image_placeholders(&mut canonical);
