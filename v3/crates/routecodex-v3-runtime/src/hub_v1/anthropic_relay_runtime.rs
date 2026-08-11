@@ -754,7 +754,21 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 }
             }
         }
-        let provider_raw = match transport.send(transport_request).await {
+        let transport_result = match tokio::time::timeout(
+            V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT,
+            transport.send(transport_request),
+        )
+        .await
+        {
+            Err(_) => Err(V3ProviderError::Transport {
+                request_id: input.request_id.clone(),
+                provider_id: selected_target_provider_id.clone(),
+                reason: "provider transport did not return response headers within timeout"
+                    .to_string(),
+            }),
+            Ok(result) => result,
+        };
+        let provider_raw = match transport_result {
             Ok(raw) => raw,
             Err(V3ProviderError::HttpStatus { response }) => {
                 let failure = provider_http_failure(
@@ -805,7 +819,15 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         };
         match provider_raw.into_body() {
             V3ProviderResponseBody::Sse(stream) => {
-                let chunks = match collect_v3_anthropic_relay_provider_sse_chunks(stream).await {
+                let chunks = match collect_v3_anthropic_relay_provider_sse_chunks(
+                    crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
+                        &input.request_id,
+                        &selected_target_provider_id,
+                        stream,
+                        crate::hub_v1::relay_runtime_core::V3_RELAY_SSE_STREAM_IDLE_TIMEOUT,
+                    ),
+                )
+                .await {
                     Ok(chunks) => chunks,
                     Err(error) => {
                         let failure = provider_runtime_failure(error, &selected_target_provider_id);

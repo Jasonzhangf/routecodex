@@ -65,6 +65,48 @@ async fn guard_relay_sse_first_frame(
     }
 }
 
+/// Relay SSE 流"每帧空闲守卫"(独立 relay 路径专用):responses/anthropic relay
+/// 不走本骨架的收集循环,需要本守卫保证 provider SSE 数据挂起(连接保持、无新帧)
+/// 超过 30s 时归一化为 Transport 错误进入 provider 失败链(记录 failure + reselect
+/// 切 provider),而不是让客户端无限等待/无限重试同一挂起 provider。
+/// 语义:任意两帧之间(含首帧)超过窗口即产出 Err 并终止流。
+pub(crate) fn guard_v3_provider_sse_idle(
+    request_id: &str,
+    provider_id: &str,
+    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+    idle_timeout: std::time::Duration,
+) -> routecodex_v3_provider_responses::V3ProviderSseStream {
+    use futures_util::StreamExt;
+    let request_id = request_id.to_string();
+    let provider_id = provider_id.to_string();
+    Box::pin(futures_util::stream::unfold(
+        (stream, false),
+        move |(mut stream, timed_out)| {
+            let request_id = request_id.clone();
+            let provider_id = provider_id.clone();
+            async move {
+                if timed_out {
+                    return None;
+                }
+                match tokio::time::timeout(idle_timeout, stream.next()).await {
+                    Ok(Some(Ok(chunk))) => Some((Ok(chunk), (stream, false))),
+                    Ok(Some(Err(error))) => Some((Err(error), (stream, false))),
+                    Ok(None) => None,
+                    Err(_) => Some((
+                        Err(V3ProviderError::Transport {
+                            request_id: request_id.clone(),
+                            provider_id: provider_id.clone(),
+                            reason: "provider SSE stream idle timeout (no frame within 30s)"
+                                .to_string(),
+                        }),
+                        (stream, true),
+                    )),
+                }
+            }
+        },
+    ))
+}
+
 /// Relay SSE 首帧超时（与 Direct SSE 首帧守卫一致，30s）。
 const V3_RELAY_SSE_FIRST_FRAME_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(30);
@@ -73,14 +115,14 @@ const V3_RELAY_SSE_FIRST_FRAME_TIMEOUT: std::time::Duration =
 /// 时归一化为 Transport 错误进入错误链——记录 provider failure（health）+ reselect 切
 /// provider。否则 provider 挂起（连接保持、不失败）会让客户端无限重试且永远命中同一
 /// provider（无法续杯 switch）。
-const V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT: std::time::Duration =
+pub(crate) const V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(15);
 
 /// Relay 收集 provider SSE 流时的流空闲上限：首帧已收到、但后续数据挂起
 /// （连接保持、不失败、无新帧）超过该窗口 → 归一化为 Transport 错误进入错误链
 /// （记录 provider failure + reselect 切 provider + 连续失败拉黑），否则客户端
 /// 会无限重试命中同一挂起 provider（半截响应/断流无感知）。
-const V3_RELAY_SSE_STREAM_IDLE_TIMEOUT: std::time::Duration =
+pub(crate) const V3_RELAY_SSE_STREAM_IDLE_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(30);
 use std::fmt;
 
@@ -790,6 +832,66 @@ mod tests {
         assert!(
             result.is_err(),
             "first frame error must propagate"
+        );
+    }
+
+    /// 空闲守卫：正常 provider 流逐帧透传、EOF 原样结束（不改变语义）。
+    #[tokio::test]
+    async fn guard_idle_passes_through_chunks_until_eof() {
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
+            Box::pin(futures_util::stream::iter(vec![
+                Ok(b"data: a\n\n".to_vec()),
+                Ok(b"data: b\n\n".to_vec()),
+            ]));
+        let mut guarded = guard_v3_provider_sse_idle(
+            "req-idle-ok",
+            "provider-1",
+            stream,
+            std::time::Duration::from_secs(5),
+        );
+        let first = guarded
+            .next()
+            .await
+            .expect("first frame")
+            .expect("frame ok");
+        assert_eq!(first, b"data: a\n\n".to_vec());
+        let second = guarded
+            .next()
+            .await
+            .expect("second frame")
+            .expect("frame ok");
+        assert_eq!(second, b"data: b\n\n".to_vec());
+        assert!(
+            guarded.next().await.is_none(),
+            "stream must end after provider frames"
+        );
+    }
+
+    /// 空闲守卫：provider 流数据挂起（无新帧）超过窗口 -> 产出 Transport 错误并终止
+    /// （进入 provider 失败链切 provider），而不是无限等待。
+    #[tokio::test]
+    async fn guard_idle_times_out_on_hung_stream() {
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
+            Box::pin(futures_util::stream::pending());
+        let mut guarded = guard_v3_provider_sse_idle(
+            "req-idle-hung",
+            "provider-1",
+            stream,
+            std::time::Duration::from_millis(50),
+        );
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), guarded.next()).await;
+        match outcome {
+            Ok(Some(Err(V3ProviderError::Transport { reason, .. }))) => {
+                assert!(
+                    reason.contains("idle timeout"),
+                    "hung stream must produce idle timeout transport error, got {reason}"
+                );
+            }
+            other => panic!("hung stream must produce Transport error, got {other:?}"),
+        }
+        assert!(
+            guarded.next().await.is_none(),
+            "guard must terminate stream after idle timeout"
         );
     }
 }
