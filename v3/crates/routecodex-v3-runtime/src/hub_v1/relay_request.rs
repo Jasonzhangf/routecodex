@@ -476,6 +476,21 @@ impl V3HubRelayRequestHooks {
             let restored_payload =
                 Arc::make_mut(&mut classified.previous.previous.payload.0);
             crate::hub_v1::normalize_v3_history_image_placeholders(restored_payload);
+            // tool-only 轮兜底：合并后若无 user carrier（如 submit_tool_outputs
+            // 续接），历史轮判定失效（last user 缺失 → 不清洗）——此时恢复的
+            // 上下文图片一律全量占位（continuation 恢复的图片绝不进 wire）。
+            let has_user = restored_payload
+                .get("messages")
+                .and_then(serde_json::Value::as_array)
+                .map(|messages| {
+                    messages
+                        .iter()
+                        .any(|m| m.get("role").and_then(serde_json::Value::as_str) == Some("user"))
+                })
+                .unwrap_or(false);
+            if !has_user {
+                crate::hub_v1::normalize_v3_all_images_to_placeholder(restored_payload);
+            }
         }
         if let Some(key) = find_v3_hub_side_channel_key(&classified.previous.previous.payload.0) {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });

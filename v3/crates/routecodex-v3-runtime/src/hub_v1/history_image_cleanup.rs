@@ -194,7 +194,8 @@ fn normalize_chat_content_parts(message: &mut Value) {
                         || row.contains_key("data")
                         || row.contains_key("file_id");
                     if is_image {
-                        *part = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
+                        // 与数组 content 占位形态一致（chat canonical 规范 part）。
+                        *part = serde_json::json!({"type":"text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
                         changed = true;
                     }
                 }
