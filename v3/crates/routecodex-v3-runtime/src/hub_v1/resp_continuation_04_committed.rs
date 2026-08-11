@@ -225,11 +225,16 @@ pub(crate) fn build_v3_relay_local_response_continuation_context_at_resp04(
         .collect::<Result<Vec<_>, _>>()?;
     let mut responses_context = Map::new();
     responses_context.insert("input".to_string(), Value::Array(response_input));
-    let chat_context =
+    let mut chat_context =
         super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
             &Value::Object(responses_context),
         )
         .map_err(|message| V3LocalContinuationError::Codec { message })?;
+    // continuation 保存的上下文只允许存图片占位符：工具输出/历史里的图片 base64
+    // 若存入 continuation，下一轮 restore 会把原图重新注入 wire（413 body_too_large
+    // / provider context 膨胀）。与 build_v3_relay_local_continuation_context_at_resp04
+    // 保持同一策略：全量清理（不分当前轮），保存的内容只是供恢复的历史。
+    super::normalize_v3_all_images_to_placeholder(&mut chat_context);
     Ok(coalesce_v3_resp04_reasoning_with_following_tool_call(
         chat_context,
     ))
