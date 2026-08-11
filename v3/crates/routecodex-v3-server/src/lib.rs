@@ -26,12 +26,12 @@ use routecodex_v3_debug::{
     V3DebugTraceScope, V3DryRunFixture, V3RedactionPolicy,
 };
 use routecodex_v3_error::{
-    project_v3_http_boundary_error, project_v3_post_commit_sse_source,
-    project_v3_server_invalid_request, project_v3_server_runtime_failure,
-    project_v3_server_websocket_error, raise_v3_debug_artifact_failure,
-    raise_v3_runtime_observability_contract_failure, raise_v3_sse_client_disconnect,
-    raise_v3_sse_provider_failure, V3Error01SourceRaised, V3HttpBoundaryErrorKind,
-    V3ProviderFailureSessionScope,
+    build_v3_error_01_source_raised, project_v3_http_boundary_error,
+    project_v3_post_commit_sse_source, project_v3_server_invalid_request,
+    project_v3_server_runtime_failure, project_v3_server_websocket_error,
+    raise_v3_debug_artifact_failure, raise_v3_runtime_observability_contract_failure,
+    raise_v3_sse_client_disconnect, raise_v3_sse_provider_failure, V3Error01SourceRaised,
+    V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope, V3ErrorSourceKind,
 };
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw,
@@ -7007,28 +7007,56 @@ async fn v3_openai_chat_relay_sse_accept_response(
         request_id: request_id.clone(),
         payload,
     };
-    let result = execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
-        &manifest,
-        input,
-        provider_health,
-    )
-    .await;
-    let full_body: Vec<u8> = match result {
-        Ok(output) => match output.client_body {
-            V3OpenAiChatRelayClientBody::Sse(stream) => {
-                // provider SSE 完整入站 + resp 转换后，收集为完整 SSE bytes 一次性返回。
-                let mut stream = stream;
-                let mut collected = Vec::new();
-                while let Some(chunk) = stream.next().await {
-                    match chunk {
-                        Ok(bytes) => collected.extend_from_slice(&bytes),
-                        Err(message) => {
-                            // 流内错误：以 SSE error 帧收尾（不静默断连）。
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, String>>(32);
+    let keepalive_ms = state.server.http_sse_keepalive_ms.max(1000);
+    tokio::spawn(async move {
+        // 标准 SSE 心跳帧（注释行，连接保持、不塞任何语义）；等待完整链期间定期
+        // 发送，客户端不会因 provider 慢/挂起判定连接断。
+        let heartbeat: Vec<u8> = b": keepalive\n\n".to_vec();
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(keepalive_ms));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let run = async {
+            execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
+                &manifest,
+                input,
+                provider_health,
+            )
+            .await
+        };
+        tokio::pin!(run);
+        loop {
+            tokio::select! {
+                biased;
+                result = &mut run => {
+                    // 完整链（VR 命中 → Relay → Provider 请求 → provider 响应完整入站 +
+                    // resp 转换；provider 出错由内部 provider-failure 策略自动切换）完成，
+                    // 把转换结果喂给客户端；错误链穷尽投影为 SSE error 帧（不静默断连）。
+                    match result {
+                        Ok(output) => match output.client_body {
+                            V3OpenAiChatRelayClientBody::Sse(stream) => {
+                                let mut stream = stream;
+                                while let Some(chunk) = stream.next().await {
+                                    if tx.send(chunk).await.is_err() {
+                                        return;
+                                    }
+                                }
+                            }
+                            V3OpenAiChatRelayClientBody::Json(json) => {
+                                // provider 以 JSON 完成（非 SSE）：包装为 SSE data 帧。
+                                let bytes = serde_json::to_vec(&json).unwrap_or_default();
+                                let mut frame = Vec::with_capacity(bytes.len() + 8);
+                                frame.extend_from_slice(b"data: ");
+                                frame.extend_from_slice(&bytes);
+                                frame.extend_from_slice(b"\n\n");
+                                let _ = tx.send(Ok(frame)).await;
+                            }
+                        },
+                        Err(error) => {
                             let error_frame = serde_json::json!({
                                 "error": {
-                                    "message": format!("provider stream error: {message}"),
+                                    "message": format!("provider transport error: {error}"),
                                     "type": "transport_error",
-                                    "code": "provider_stream_error",
+                                    "code": "provider_transport_error",
                                 }
                             });
                             let bytes = serde_json::to_vec(&error_frame).unwrap_or_default();
@@ -7036,45 +7064,46 @@ async fn v3_openai_chat_relay_sse_accept_response(
                             frame.extend_from_slice(b"data: ");
                             frame.extend_from_slice(&bytes);
                             frame.extend_from_slice(b"\n\n");
-                            collected.extend_from_slice(&frame);
-                            break;
+                            let _ = tx.send(Ok(frame)).await;
                         }
                     }
+                    return;
                 }
-                collected
-            }
-            V3OpenAiChatRelayClientBody::Json(json) => {
-                // provider 以 JSON 完成（非 SSE）：包装为 SSE data 帧。
-                let bytes = serde_json::to_vec(&json).unwrap_or_default();
-                let mut frame = Vec::with_capacity(bytes.len() + 8);
-                frame.extend_from_slice(b"data: ");
-                frame.extend_from_slice(&bytes);
-                frame.extend_from_slice(b"\n\n");
-                frame
-            }
-        },
-        Err(error) => {
-            // provider 穷尽（错误链已内部切/记录）：投影为 SSE transport error 帧，
-            // 客户端重试时下次命中自动排除坏 provider（续杯），不用断连误导客户端。
-            let error_frame = serde_json::json!({
-                "error": {
-                    "message": format!("provider transport error: {error}"),
-                    "type": "transport_error",
-                    "code": "provider_transport_error",
+                _ = interval.tick() => {
+                    if tx.send(Ok(heartbeat.clone())).await.is_err() {
+                        return;
+                    }
                 }
-            });
-            let bytes = serde_json::to_vec(&error_frame).unwrap_or_default();
-            let mut frame = Vec::with_capacity(bytes.len() + 8);
-            frame.extend_from_slice(b"data: ");
-            frame.extend_from_slice(&bytes);
-            frame.extend_from_slice(b"\n\n");
-            frame
+            }
         }
-    };
+    });
+    // 客户端 SSE 连接由 proxy（routecodex）独立管理：立即回 200 + text/event-stream，
+    // v3_client_sse_body 注入标准 SSE 心跳（`: keepalive` 注释帧，连接保持、不塞语义），
+    // 后台完整链结果到达后喂数据帧——客户端不会因 provider 慢/错误判定连接断或
+    // 收到半截响应（错误走内部错误链 + 切 provider）。
+    let client_stream: V3ClientSseStream = Box::pin(futures_util::stream::unfold(
+        rx,
+        |mut rx| async move {
+            rx.recv().await.map(|item| {
+                (
+                    item.map_err(|message| {
+                        build_v3_error_01_source_raised(
+                            V3ErrorSourceKind::RuntimeFailure,
+                            "V3OpenAiChatRelaySseClientStream",
+                            "client_stream_error",
+                            message,
+                        )
+                    }),
+                    rx,
+                )
+            })
+        },
+    ));
+    let body = v3_client_sse_body(client_stream, None);
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/event-stream")
-        .body(Body::from(full_body))
+        .body(body)
         .expect("SSE accept response")
 }
 
