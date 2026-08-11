@@ -26,12 +26,12 @@ use routecodex_v3_debug::{
     V3DebugTraceScope, V3DryRunFixture, V3RedactionPolicy,
 };
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, project_v3_http_boundary_error,
-    project_v3_post_commit_sse_source, project_v3_server_invalid_request,
-    project_v3_server_runtime_failure, project_v3_server_websocket_error,
-    raise_v3_debug_artifact_failure, raise_v3_runtime_observability_contract_failure,
-    raise_v3_sse_client_disconnect, raise_v3_sse_provider_failure, V3Error01SourceRaised,
-    V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope, V3ErrorSourceKind,
+    project_v3_http_boundary_error, project_v3_post_commit_sse_source,
+    project_v3_server_invalid_request, project_v3_server_runtime_failure,
+    project_v3_server_websocket_error, raise_v3_debug_artifact_failure,
+    raise_v3_runtime_observability_contract_failure, raise_v3_sse_client_disconnect,
+    raise_v3_sse_provider_failure, V3Error01SourceRaised, V3HttpBoundaryErrorKind,
+    V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw,
@@ -7007,7 +7007,7 @@ async fn v3_openai_chat_relay_sse_accept_response(
         request_id: request_id.clone(),
         payload,
     };
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, String>>(32);
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(32);
     let keepalive_ms = state.server.http_sse_keepalive_ms.max(1000);
     tokio::spawn(async move {
         // 标准 SSE 心跳帧（注释行，连接保持、不塞任何语义）；等待完整链期间定期
@@ -7036,6 +7036,7 @@ async fn v3_openai_chat_relay_sse_accept_response(
                             V3OpenAiChatRelayClientBody::Sse(stream) => {
                                 let mut stream = stream;
                                 while let Some(chunk) = stream.next().await {
+                                    let chunk = chunk.map_err(std::io::Error::other);
                                     if tx.send(chunk).await.is_err() {
                                         return;
                                     }
@@ -7078,28 +7079,14 @@ async fn v3_openai_chat_relay_sse_accept_response(
         }
     });
     // 客户端 SSE 连接由 proxy（routecodex）独立管理：立即回 200 + text/event-stream，
-    // v3_client_sse_body 注入标准 SSE 心跳（`: keepalive` 注释帧，连接保持、不塞语义），
-    // 后台完整链结果到达后喂数据帧——客户端不会因 provider 慢/错误判定连接断或
-    // 收到半截响应（错误走内部错误链 + 切 provider）。
-    let client_stream: V3ClientSseStream = Box::pin(futures_util::stream::unfold(
+    // 后台任务注入标准 SSE 心跳（`: keepalive` 注释帧，连接保持、不塞语义）并喂入
+    // 完整链转换结果——客户端不会因 provider 慢/错误判定连接断或收到半截响应
+    // （错误走内部错误链 + 切 provider）。
+    let client_stream: V3IoSseStream = Box::pin(futures_util::stream::unfold(
         rx,
-        |mut rx| async move {
-            rx.recv().await.map(|item| {
-                (
-                    item.map_err(|message| {
-                        build_v3_error_01_source_raised(
-                            V3ErrorSourceKind::RuntimeFailure,
-                            "V3OpenAiChatRelaySseClientStream",
-                            "client_stream_error",
-                            message,
-                        )
-                    }),
-                    rx,
-                )
-            })
-        },
+        |mut rx| async move { rx.recv().await.map(|item| (item, rx)) },
     ));
-    let body = v3_client_sse_body(client_stream, None);
+    let body = v3_io_sse_body(client_stream, None);
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/event-stream")

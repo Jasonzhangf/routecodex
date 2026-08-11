@@ -688,6 +688,7 @@ fn require_object(payload: &Value) -> Result<&Map<String, Value>, V3OpenAiChatCo
 pub(crate) struct V3OpenAiChatResponsesSseTransducer {
     response_started: bool,
     completed: bool,
+    emitted_content: bool,
     response_id: Option<String>,
     model: Option<String>,
     tool_call_index: usize,
@@ -698,6 +699,7 @@ impl Default for V3OpenAiChatResponsesSseTransducer {
         Self {
             response_started: false,
             completed: false,
+            emitted_content: false,
             response_id: None,
             model: None,
             tool_call_index: 0,
@@ -746,6 +748,7 @@ impl V3OpenAiChatResponsesSseTransducer {
                 if delta.is_empty() {
                     return Ok(Vec::new());
                 }
+                self.emitted_content = true;
                 Ok(vec![self.chunk(json!({"content": delta}), None)])
             }
             "response.output_item.done" => {
@@ -757,6 +760,7 @@ impl V3OpenAiChatResponsesSseTransducer {
                 }
                 let index = self.tool_call_index;
                 self.tool_call_index += 1;
+                self.emitted_content = true;
                 let call_id = item
                     .get("call_id")
                     .and_then(Value::as_str)
@@ -801,6 +805,15 @@ impl V3OpenAiChatResponsesSseTransducer {
     pub(crate) fn finish(&self) -> Result<(), String> {
         if !self.completed {
             return Err("Responses SSE ended without response.completed".to_string());
+        }
+        // 空响应识别：completed 但未产生任何 content / tool_calls 帧 —— provider
+        // 返回了空文本（客户端会判定 "no visible final answer" 并重试）。归一化为
+        // provider 失败进入错误链（记录 health → 连续失败达到阈值 → 拉黑 15 分钟
+        // → 下次 route 排除/切 provider），而不是把空文本投影给客户端。
+        if !self.emitted_content {
+            return Err(
+                "provider returned empty response (no content, no tool calls)".to_string(),
+            );
         }
         Ok(())
     }
