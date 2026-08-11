@@ -163,9 +163,18 @@ if (!/\.method_not_allowed_fallback\(method_not_allowed\)/.test(serverSource)
     || !/\.fallback\(path_not_found\)/.test(serverSource)) {
   fail('Server must explicitly project unsupported method and path errors');
 }
-const bindPush = serverSource.indexOf('bound.push((server, listener, bound_addr))');
-const listenerSpawn = serverSource.indexOf('tokio::spawn');
-if (bindPush === -1 || listenerSpawn === -1 || listenerSpawn < bindPush) {
+const bindPush = serverLibSource.indexOf('bound.push((server, listener, bound_addr))');
+const spawnAggregateStart = serverLibSource.indexOf('pub async fn spawn_v3_server_aggregate(');
+const spawnAggregateEnd = serverLibSource.indexOf('\npub async fn serve_v3_server_aggregate_until_shutdown(', spawnAggregateStart);
+const spawnAggregateBody =
+  spawnAggregateStart >= 0 && spawnAggregateEnd > spawnAggregateStart
+    ? serverLibSource.slice(spawnAggregateStart, spawnAggregateEnd)
+    : '';
+const listenerSpawn =
+  bindPush >= 0
+    ? spawnAggregateBody.indexOf('tokio::spawn', bindPush - spawnAggregateStart)
+    : -1;
+if (bindPush === -1 || listenerSpawn === -1 || listenerSpawn < bindPush - spawnAggregateStart) {
   fail('Server must bind the complete enabled listener set before spawning any listener task');
 }
 

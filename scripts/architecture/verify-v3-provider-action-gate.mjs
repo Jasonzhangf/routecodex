@@ -16,6 +16,9 @@ const files = {
   directExactPinTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
   directSse: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs',
   responses: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+  responsesFailures: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs',
+  responsesRelayUnitTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs',
+  serverConsole: 'v3/crates/routecodex-v3-server/src/console/impl_bulk.rs',
   responsesMaterializer: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs',
   responsesCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs',
   openaiChat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs',
@@ -963,7 +966,7 @@ for (const token of [
   '"V3ProviderReqOutbound08WirePayload"',
   '"provider_request_wire_error"',
 ]) {
-  requireText(text.responses, files.responses, token);
+  requireText(text.responsesFailures, files.responsesFailures, token);
 }
 const responsesRelayRequestBody = findFunctionBody(
   text.responses,
@@ -1379,7 +1382,7 @@ for (const token of [
   'provider_sse_done_without_completed_is_terminal_missing',
   'provider_sse_requires_action_without_completed_is_terminal_missing',
 ]) {
-  assertRustTest(text.responses, files.responses, token);
+  assertRustTest(text.responsesRelayUnitTests, files.responsesRelayUnitTests, token);
 }
 for (const token of [
   'direct_post_commit_malformed_sse_records_failure_but_fresh_request_bypasses_recovery',
@@ -1432,12 +1435,12 @@ for (const token of [
 ]) {
   requireText(text.serverTests, files.serverTests, token);
 }
-for (const token of [
+requireText(
+  text.serverConsole,
+  files.serverConsole,
   'emit_v3_post_commit_sse_source_console_line_for_context',
-  'io::Error::other',
-]) {
-  requireText(text.server, files.server, token);
-}
+);
+requireText(text.server, files.server, 'io::Error::other');
 
 const functionMap = parseYaml(files.functionMap);
 const resourceMap = parseYaml(files.resourceMap);

@@ -34,6 +34,12 @@ const debugTests = readRequired(
   "v3/crates/routecodex-v3-debug/tests/debug_runtime_contract.rs",
 );
 const server = readRequired("v3/crates/routecodex-v3-server/src/lib.rs");
+const serverLiveSnapshot = readRequired(
+  "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
+);
+const serverFrameBuilders = readRequired(
+  "v3/crates/routecodex-v3-server/src/frame_builders.rs",
+);
 const v3FunctionMap = readRequired("docs/architecture/v3-function-map.yml");
 const functionMap = readRequired("docs/architecture/function-map.yml");
 const v3ResourceMap = readRequired(
@@ -123,17 +129,17 @@ requireMatch(
   "Server listener state must hold the single V3CodexSampleStore",
 );
 requireMatch(
-  server,
+  serverLiveSnapshot,
   /fn persist_v3_error_evidence_payload[\s\S]{0,600}payload,\s*\n\s*true,\s*\n\s*\)/,
   "Error evidence must force-write samples even when sampling is disabled",
 );
 requireMatch(
-  server,
+  serverLiveSnapshot,
   /fn v3_codex_sample_scope_allows[\s\S]*state\.codex_sample_store\.is_enabled\(\)/,
   "Direct-sample scope gate must consult the store enablement flag",
 );
 requireMatch(
-  server,
+  serverFrameBuilders,
   /fn build_v3_debug_runtime_from_manifest[\s\S]*unwrap_or\(200\) as usize[\s\S]*unwrap_or\(200\) as usize/,
   "In-memory raw request/response retention must default to 200",
 );
@@ -177,17 +183,17 @@ requireMatch(
 );
 
 requireMatch(
-  server,
+  serverLiveSnapshot,
   /raw_sse:\s*Arc<Mutex<V3DebugBoundedTextCapture>>/,
   "Server SSE recorders must use Debug-owned capture",
 );
 requireMatch(
-  server,
+  serverLiveSnapshot,
   /struct V3LiveSnapRecordedStream<S, E, F, O>[\s\S]*Poll::Ready\(None\) if !this\.terminal_persisted[\s\S]*persist_current\(None\)/,
   "Recorded stream sample persistence must finalize once at stream EOF",
 );
 requireMatch(
-  server,
+  serverLiveSnapshot,
   /struct V3LiveSnapSseRecorderCore[\s\S]*fn persist_current[\s\S]*persist_v3_codex_sample_payload/,
   "SSE recorders must share one Debug-owned core persistence",
 );
@@ -197,21 +203,21 @@ for (const recorder of [
   "V3LiveSnapOpenAiChatClientResponseSseRecorder",
 ]) {
   requireMatch(
-    server,
+    serverLiveSnapshot,
     new RegExp(`struct ${recorder} \\{[\\s\\S]*core: V3LiveSnapSseRecorderCore`),
     `${recorder} must be a thin shell over the shared recorder core`,
   );
 }
-const directProjectionStart = server.indexOf(
+const directProjectionStart = serverFrameBuilders.indexOf(
   "fn responses_direct_output_response_with_console(",
 );
-const directProjectionEnd = server.indexOf(
+const directProjectionEnd = serverFrameBuilders.indexOf(
   "\nfn wrap_v3_direct_sse_console_stream(",
   directProjectionStart,
 );
 const directProjection =
   directProjectionStart >= 0 && directProjectionEnd > directProjectionStart
-    ? server.slice(directProjectionStart, directProjectionEnd)
+    ? serverFrameBuilders.slice(directProjectionStart, directProjectionEnd)
     : "";
 requireMatch(
   directProjection,
