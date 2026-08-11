@@ -214,28 +214,53 @@ fn normalize_chat_content_parts(message: &mut Value) {
     // 原样进入 provider wire（context 400）。
     if let Some(text) = content.as_str() {
         if let Ok(mut parsed) = serde_json::from_str::<Value>(text) {
-            if let Some(parts) = parsed.as_array_mut() {
-                let mut changed = false;
-                for part in parts.iter_mut() {
-                    let Some(row) = part.as_object_mut() else {
-                        continue;
-                    };
-                    let is_image = row.contains_key("image_url")
-                        || row.contains_key("data")
-                        || row.contains_key("file_id");
-                    if is_image {
-                        // 与数组 content 占位形态一致（chat canonical 规范 part）。
-                        *part = serde_json::json!({"type":"text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
-                        changed = true;
-                    }
-                }
-                if changed {
-                    *content = Value::String(
-                        serde_json::to_string(&parsed).unwrap_or_else(|_| text.to_string()),
-                    );
-                }
+            let mut changed = false;
+            // 递归清洗解析后的 JSON（数组/对象/嵌套），字符串值内嵌
+            // data:image 一律替换为占位符（工具输出可能是
+            // `{"image":"data:image/..."}` 对象形态，不只是 part 数组）。
+            strip_v3_embedded_image_bytes(&mut parsed, &mut changed);
+            if changed {
+                *content = Value::String(
+                    serde_json::to_string(&parsed).unwrap_or_else(|_| text.to_string()),
+                );
+            }
+        } else if text.contains("data:image") {
+            // 非 JSON 裸字符串直接内嵌图片字节 → 整段替换为占位符。
+            *content = Value::String(V3_HISTORY_IMAGE_PLACEHOLDER.to_string());
+        }
+    }
+}
+
+/// 递归清洗任意 JSON 值中内嵌的图片字节：对象/数组任意深度的字符串值若包含
+/// `data:image` 或 `image_url`/`data`/`file_id` 图片载体，替换为历史图片占位符。
+/// 覆盖工具输出字符串形态（`{"image":"data:image/..."}` 对象、part 数组、裸字符串）。
+fn strip_v3_embedded_image_bytes(value: &mut Value, changed: &mut bool) {
+    match value {
+        Value::Object(map) => {
+            let is_image_carrier = map.contains_key("image_url")
+                || map.contains_key("data")
+                || map.contains_key("file_id");
+            if is_image_carrier {
+                *value = serde_json::json!({"type":"text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
+                *changed = true;
+                return;
+            }
+            for child in map.values_mut() {
+                strip_v3_embedded_image_bytes(child, changed);
             }
         }
+        Value::Array(items) => {
+            for item in items.iter_mut() {
+                strip_v3_embedded_image_bytes(item, changed);
+            }
+        }
+        Value::String(text) => {
+            if text.contains("data:image") {
+                *text = V3_HISTORY_IMAGE_PLACEHOLDER.to_string();
+                *changed = true;
+            }
+        }
+        _ => {}
     }
 }
 

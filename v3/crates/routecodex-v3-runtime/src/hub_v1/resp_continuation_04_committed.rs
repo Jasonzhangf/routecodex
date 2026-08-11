@@ -644,4 +644,45 @@ mod tests {
         assert!(store.contains_in_scope(&scope, "call_exec_regular"));
         assert_eq!(store.len(), 1);
     }
+
+    #[test]
+    fn resp04_responses_continuation_context_stores_images_as_placeholder_only() {
+        // 复现 413 body_too_large 根因：responses relay 的 continuation 保存
+        // （build_v3_relay_local_response_continuation_context_at_resp04）曾把工具输出里
+        // 的图片 base64 原样存入 continuation；下一轮 restore 把原图重新注入 wire，
+        // 请求体膨胀超限（64MB）→ 413。
+        let finalized_response = json!({
+            "id": "resp_413_repro",
+            "output": [
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_image_1",
+                    "output": "{\"image\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==\"}"
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "图片已查看"}
+                    ]
+                }
+            ]
+        });
+        let chat_context =
+            build_v3_relay_local_response_continuation_context_at_resp04(&finalized_response)
+                .expect("responses continuation context must build");
+        let serialized = serde_json::to_string(&chat_context).expect("context serializes");
+        assert!(
+            !serialized.contains("data:image"),
+            "continuation 不得保存图片 base64,实际残留: {serialized}"
+        );
+        assert!(
+            !serialized.contains("iVBORw0KGgo"),
+            "continuation 不得保存图片字节,实际残留: {serialized}"
+        );
+        assert!(
+            serialized.contains("[Image]"),
+            "历史图片必须替换为 [Image] 占位符"
+        );
+    }
 }
