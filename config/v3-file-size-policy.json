@@ -7,7 +7,6 @@
     "/tests/"
   ],
   "ratchet_whitelist": {
-    "v3/crates/routecodex-v3-server/src/lib.rs": 7573,
     "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs": 7401,
     "v3/crates/routecodex-v3-lifecycle/src/lib.rs": 2795,
     "v3/crates/routecodex-v3-runtime/src/kernel.rs": 1556,
