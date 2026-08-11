@@ -661,6 +661,9 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         } => {
             let _ = attempted_candidates;
             if !is_request_local_compat_failure
+                // 400/InvalidRequest 不触发 cross-session revive：重试结果必然
+                // 相同（客户端请求错误），直接走 terminal（与普通分支 400 拦截对齐）。
+                && status != 400
                 && context
                     .provider_health
                     .store()
@@ -785,7 +788,11 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             .same_candidate_retries
             .entry(candidate_key.clone())
             .or_insert(0);
-        if *retries_done >= context.retry_policy.same_candidate_retries {
+        // 400/InvalidRequest（客户端请求错误，如 context window 超限）重试结果
+        // 必然相同：同一 provider 不重试。与普通分支(874-877)对齐——default floor
+        // 分支同样拦截 400，避免 asxs-grok 等 default 池成员 400 被同 provider
+        // 重试多次才 terminal。
+        if *retries_done >= context.retry_policy.same_candidate_retries || status == 400 {
             let decision = build_v3_relay_provider_error_05_decision(
                 &selected,
                 source_stage,

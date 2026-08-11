@@ -216,8 +216,14 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         && retries_done < V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET
         // 400/InvalidRequest（客户端请求错误，如 context window 超限）重试结果
         // 必然相同：同一 provider 不重试，直接 reselect 到下一个候选。
-        && source.source_kind != V3ErrorSourceKind::InvalidRequest;
+        // 注意：HTTP 400 被构造为 ProviderFailure（code=provider_http_400，
+        // external_error.status=400），不是 InvalidRequest——必须同时按
+        // external status 判定，否则 400 仍会重试同 provider。
+        && source.source_kind != V3ErrorSourceKind::InvalidRequest
+        && source.external_error.as_ref().and_then(|e| e.status) != Some(400);
     let cross_session_revive_admitted = remaining == 0
+        // 400/InvalidRequest 不触发 cross-session revive（重试结果必然相同）。
+        && source.external_error.as_ref().and_then(|e| e.status) != Some(400)
         && context
             .provider_health
             .store()
