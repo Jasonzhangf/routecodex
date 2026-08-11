@@ -61,7 +61,8 @@ if (!ERROR_PIPELINE_CONTRACT_FEATURE_ID || ERROR_PIPELINE_CONTRACT_BUILDERS.leng
   failures.push('error pipeline contract gate must declare feature id and ErrorErr01/02 owner builders');
 }
 
-const v3Server = read('v3/crates/routecodex-v3-server/src/lib.rs');
+const v3Server = read('v3/crates/routecodex-v3-server/src/lib.rs')
+  + '\n' + read('v3/crates/routecodex-v3-server/src/websocket.rs');
 const v3Error = read('v3/crates/routecodex-v3-error/src/lib.rs');
 for (const bypass of [
   'json!({"error":{"message":"forbidden","code":"forbidden"}})',

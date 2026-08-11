@@ -4077,7 +4077,7 @@ chains:
     caller_symbol: responses_openai_chat_field_parity_response_matrix
     caller_file: v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
     callee_symbol: build_v3_responses_provider_response_from_openai_chat_payload
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
     status: anchored
     binding_kind: protocol_field_parity_test_over_existing_relay_chain
     owner_feature_id: v3.protocol_conversion_field_parity
@@ -4235,7 +4235,7 @@ chains:
     from_node: V3ProviderReqOutbound09TransportRequest
     to_node: V3DryRunNoNetworkTerminalEffect
     caller_symbol: execute_v3_responses_relay_dry_run_runtime
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs
     callee_symbol: V3Transport13ResponsesRequest::redacted_provider_request_projection
     callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
     status: anchored
@@ -4300,7 +4300,7 @@ chains:
     from_node: V3HubReqChatProcess04Governed
     to_node: V3StoplessReq01RuntimeControlLoaded
     caller_symbol: load_v3_responses_relay_stopless_control_state
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_stopless.rs
     callee_symbol: V3ResponsesRelayStoplessControlState::load_for_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
     status: anchored
@@ -4366,7 +4366,7 @@ chains:
     from_node: V3StoplessResp01ReasoningStopInspected
     to_node: V3StoplessResp02RuntimeControlUpdated
     caller_symbol: apply_v3_responses_relay_stopless_control_transition
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_stopless.rs
     callee_symbol: V3ResponsesRelayStoplessControlState::store_for_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
     status: anchored
