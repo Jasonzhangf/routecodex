@@ -352,7 +352,8 @@ fn insert_v3_catalog_model_ref(
         });
 }
 
-fn is_v3_hidden_codex_future_model(model_id: &str) -> bool {
+/// 隐藏的 Codex 未来模型（`gpt-5.6` 系列）：不在任何模型目录/能力面暴露。
+pub fn is_v3_hidden_codex_future_model(model_id: &str) -> bool {
     let trimmed = model_id.trim();
     trimmed == "gpt-5.6" || trimmed.starts_with("gpt-5.6-")
 }

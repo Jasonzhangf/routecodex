@@ -1489,76 +1489,19 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 protocol_relay_handoff: None,
             };
         }
-        if let (Some(state), Some(scope)) = (continuation_state, continuation_scope.as_ref()) {
-            let pending_response_id = match &response_projection.remote_continuation {
-                V3RemoteContinuationObservation::Pending { response_id } => {
-                    Some(response_id.clone())
-                }
-                V3RemoteContinuationObservation::Terminal => None,
-                V3RemoteContinuationObservation::Streaming { .. } => unreachable!(
-                    "streaming Responses continuation is handled before material lifecycle"
-                ),
-            };
-            let lifecycle_changed = previous_response_id.is_some() || pending_response_id.is_some();
-            if lifecycle_changed {
-                if let Some(response_id) = pending_response_id {
-                    let locator = V3RemoteContinuationLocator::new_direct(
-                        response_id,
-                        scope.key.clone(),
-                        selected_pin,
-                        selected_capability_revision,
-                        now_epoch_ms,
-                        now_epoch_ms + REMOTE_CONTINUATION_TTL_MS,
-                    );
-                    let input = V3RemoteContinuationCommitInput::locator_only(locator);
-                    let mut store = match state.store.lock() {
-                        Ok(store) => store,
-                        Err(error) => {
-                            return error_output(
-                                runtime_source("V3HubRespContinuation04Committed", error),
-                                trace,
-                                &hook_registry,
-                            )
-                        }
-                    };
-                    let commit = match previous_response_id.as_deref() {
-                        Some(previous_response_id) => {
-                            store.rebind_for_resp04(previous_response_id, input)
-                        }
-                        None => store.commit(input),
-                    };
-                    if let Err(error) = commit {
-                        return error_output(
-                            runtime_source("V3HubRespContinuation04Committed", error),
-                            trace,
-                            &hook_registry,
-                        );
-                    }
-                } else if let Some(previous_response_id) = previous_response_id.as_deref() {
-                    let mut store = match state.store.lock() {
-                        Ok(store) => store,
-                        Err(error) => {
-                            return error_output(
-                                runtime_source("V3HubRespContinuation04Committed", error),
-                                trace,
-                                &hook_registry,
-                            )
-                        }
-                    };
-                    if !store.release(previous_response_id) {
-                        return error_output(
-                            runtime_source(
-                                "V3HubRespContinuation04Committed",
-                                format!(
-                                    "terminal locator {previous_response_id} was not present at Resp04 release"
-                                ),
-                            ),
-                            trace,
-                            &hook_registry,
-                        );
-                    }
-                }
-                trace.push("V3HubRespContinuation04Committed");
+        if let (Some(_state), Some(scope)) = (continuation_state, continuation_scope.as_ref()) {
+            if let Err(projected) = commit_or_release_v3_direct_continuation(
+                continuation_state,
+                scope,
+                &response_projection.remote_continuation,
+                previous_response_id.as_deref(),
+                &selected_pin,
+                &selected_capability_revision,
+                now_epoch_ms,
+                &mut trace,
+                &hook_registry,
+            ) {
+                return projected;
             }
         }
         if !provider_health_neutral {
@@ -1608,5 +1551,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
 include!("kernel/direct_stopless.rs");
 include!("kernel/direct_runtime_helpers.rs");
 include!("kernel/v3_direct_core.rs");
+include!("kernel/direct_continuation_commit.rs");
 #[cfg(test)]
 mod tests;

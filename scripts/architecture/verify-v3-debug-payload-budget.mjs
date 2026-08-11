@@ -183,29 +183,23 @@ requireMatch(
 );
 requireMatch(
   server,
-  /struct V3LiveSnapRelayRecordedStream[\s\S]*Poll::Ready\(None\)[\s\S]*persist_current\(None\)/,
-  "Relay sample persistence must finalize once at stream EOF",
+  /struct V3LiveSnapRecordedStream<S, E, F, O>[\s\S]*Poll::Ready\(None\) if !this\.terminal_persisted[\s\S]*persist_current\(None\)/,
+  "Recorded stream sample persistence must finalize once at stream EOF",
 );
 requireMatch(
   server,
-  /struct V3LiveSnapDirectRecordedStream[\s\S]*Poll::Ready\(None\)[\s\S]*persist_current\(None\)/,
-  "Direct sample persistence must finalize once at stream EOF",
+  /struct V3LiveSnapSseRecorderCore[\s\S]*fn persist_current[\s\S]*persist_v3_codex_sample_payload/,
+  "SSE recorders must share one Debug-owned core persistence",
 );
 for (const recorder of [
   "V3LiveSnapClientResponseSseRecorder",
   "V3LiveSnapDirectClientResponseSseRecorder",
+  "V3LiveSnapOpenAiChatClientResponseSseRecorder",
 ]) {
-  const start = server.indexOf(`impl ${recorder}`);
-  const append = server.indexOf("fn append_chunk", start);
-  const persist = server.indexOf("fn persist_current", append);
-  if (start < 0 || append < 0 || persist < 0) {
-    failures.push(`${recorder} append/finalize methods must exist`);
-    continue;
-  }
-  forbidMatch(
-    server.slice(append, persist),
-    /persist_(?:current|v3_codex_sample_payload)/,
-    `${recorder} must not rewrite the artifact for every stream chunk`,
+  requireMatch(
+    server,
+    new RegExp(`struct ${recorder} \\{[\\s\\S]*core: V3LiveSnapSseRecorderCore`),
+    `${recorder} must be a thin shell over the shared recorder core`,
   );
 }
 const directProjectionStart = server.indexOf(

@@ -2227,6 +2227,15 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         continue;
                     }
                 }
+                let request_web_search_state = match request_web_search_state.clone() {
+                    Some(state) => Some(state),
+                    None => match stopless_control.as_ref() {
+                        Some(execution) => execution
+                            .control
+                            .web_search_load_for_scope(&execution.scope)?,
+                        None => None,
+                    },
+                };
                 let (
                     action,
                     mut finalized_provider_value,
@@ -2243,17 +2252,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         provider_response_transport_intent: V3HubTransportIntent::Json,
                         compatibility_profile: selected.candidate.compatibility_profile.as_deref(),
                         web_search_execution_mode: selected.candidate.web_search_execution_mode,
-                        web_search_center_state: request_web_search_state.clone().or_else(|| {
-                            stopless_control
-                                .as_ref()
-                                .and_then(|execution| {
-                                    execution
-                                        .control
-                                        .web_search_load_for_scope(&execution.scope)
-                                        .ok()
-                                })
-                                .flatten()
-                        }),
+                        web_search_center_state: request_web_search_state,
                         stopless_state: stopless_state.as_ref(),
                         stopless_control_has_client_session_scope,
                         transition_request_id: &transition_request_id,
@@ -4635,8 +4634,15 @@ fn provider_http_failure(
     provider_id: &str,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayProviderFailure {
-    let body = serde_json::from_slice::<Value>(body)
-        .unwrap_or_else(|_| json!({"error":{"type":"provider_error","message":"provider error"}}));
+    let body = match serde_json::from_slice::<Value>(body) {
+        Ok(value) => value,
+        Err(error) => json!({
+            "error": {
+                "type": "provider_error",
+                "message": format!("provider returned HTTP {status} with malformed JSON error body: {error}")
+            }
+        }),
+    };
     let policy_error_type = v3_provider_failure_error_type_from_body(&body);
     let policy_error_message = v3_provider_failure_message_from_body(&body);
     V3ResponsesRelayProviderFailure {

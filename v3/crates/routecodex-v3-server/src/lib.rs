@@ -1,6 +1,13 @@
 mod responses_direct_server_outcome;
 mod session_admission;
 mod console;
+mod models_catalog;
+mod request_id;
+
+use request_id::{
+    format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
+    V3RequestIdCounter,
+};
 
 use axum::body::{to_bytes, Body};
 use axum::extract::{
@@ -129,273 +136,6 @@ struct V3ListenerState {
     responses_relay_stopless_control: Arc<V3ResponsesRelayStoplessControlState>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
-}
-
-#[derive(Debug, Default, Clone)]
-struct V3RequestCounterState {
-    total_count: u64,
-    window_count: u64,
-    window_key: String,
-    updated_at: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct V3AllocatedRequestIdentity {
-    request_id: String,
-    total_count: u64,
-    daily_count: u64,
-}
-
-#[derive(Debug)]
-struct V3RequestIdCounter {
-    state_file: PathBuf,
-    state: V3RequestCounterState,
-    loaded: bool,
-}
-
-impl V3RequestIdCounter {
-    fn new() -> Self {
-        Self {
-            state_file: resolve_v3_request_id_counter_file(),
-            state: V3RequestCounterState::default(),
-            loaded: false,
-        }
-    }
-
-    fn next_request_identity(
-        &mut self,
-        entry: &str,
-        provider: &str,
-        model: &str,
-    ) -> Result<V3AllocatedRequestIdentity, String> {
-        let clock = v3_request_id_clock_now()?;
-        self.ensure_loaded(&clock)?;
-        if self.state.window_key != clock.local_date_key {
-            self.state.window_key = clock.local_date_key.clone();
-            self.state.window_count = 0;
-        }
-        self.state.total_count = self
-            .state
-            .total_count
-            .checked_add(1)
-            .ok_or_else(|| "V3 request id total counter overflowed".to_string())?;
-        self.state.window_count = self
-            .state
-            .window_count
-            .checked_add(1)
-            .ok_or_else(|| "V3 request id daily counter overflowed".to_string())?;
-        self.state.updated_at = clock.utc_iso.clone();
-        self.persist()?;
-        Ok(V3AllocatedRequestIdentity {
-            request_id: format!(
-                "{entry}-{provider}-{model}-{}-{}-{}",
-                clock.local_timestamp, self.state.total_count, self.state.window_count
-            ),
-            total_count: self.state.total_count,
-            daily_count: self.state.window_count,
-        })
-    }
-
-    fn ensure_loaded(&mut self, clock: &V3RequestIdClock) -> Result<(), String> {
-        if self.loaded {
-            return Ok(());
-        }
-        if !self.state_file.exists() {
-            self.state = V3RequestCounterState {
-                total_count: 0,
-                window_count: 0,
-                window_key: clock.local_date_key.clone(),
-                updated_at: clock.utc_iso.clone(),
-            };
-            self.loaded = true;
-            return Ok(());
-        }
-        let mut file = fs::File::open(&self.state_file).map_err(|error| {
-            format!(
-                "failed to read V3 request id counter {}: {error}",
-                self.state_file.display()
-            )
-        })?;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).map_err(|error| {
-            format!(
-                "failed to read V3 request id counter {}: {error}",
-                self.state_file.display()
-            )
-        })?;
-        let value: Value = serde_json::from_slice(&bytes).map_err(|error| {
-            format!(
-                "failed to parse V3 request id counter {}: {error}",
-                self.state_file.display()
-            )
-        })?;
-        let version = value.get("version").and_then(Value::as_u64).unwrap_or(0);
-        if version != 1 {
-            return Err(format!(
-                "unsupported V3 request id counter version {version} in {}",
-                self.state_file.display()
-            ));
-        }
-        let total_count = value
-            .get("totalCount")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| {
-                format!(
-                    "V3 request id counter {} is missing totalCount",
-                    self.state_file.display()
-                )
-            })?;
-        let window_count = value
-            .get("windowCount")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| {
-                format!(
-                    "V3 request id counter {} is missing windowCount",
-                    self.state_file.display()
-                )
-            })?;
-        let window_key = value
-            .get("windowKey")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| {
-                format!(
-                    "V3 request id counter {} is missing windowKey",
-                    self.state_file.display()
-                )
-            })?
-            .to_string();
-        let updated_at = value
-            .get("updatedAt")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        self.state = V3RequestCounterState {
-            total_count,
-            window_count,
-            window_key,
-            updated_at,
-        };
-        self.loaded = true;
-        Ok(())
-    }
-
-    fn persist(&self) -> Result<(), String> {
-        if let Some(parent) = self.state_file.parent() {
-            fs::create_dir_all(parent).map_err(|error| {
-                format!(
-                    "failed to create V3 request id counter directory {}: {error}",
-                    parent.display()
-                )
-            })?;
-        }
-        let body = json!({
-            "version": 1,
-            "totalCount": self.state.total_count,
-            "windowCount": self.state.window_count,
-            "windowKey": self.state.window_key,
-            "updatedAt": self.state.updated_at,
-        });
-        let tmp = self
-            .state_file
-            .with_extension(format!("json.tmp.{}", std::process::id()));
-        let encoded = serde_json::to_vec_pretty(&body)
-            .map_err(|error| format!("failed to serialize V3 request id counter: {error}"))?;
-        fs::write(&tmp, encoded).map_err(|error| {
-            format!(
-                "failed to write V3 request id counter temp file {}: {error}",
-                tmp.display()
-            )
-        })?;
-        fs::rename(&tmp, &self.state_file).map_err(|error| {
-            format!(
-                "failed to publish V3 request id counter {}: {error}",
-                self.state_file.display()
-            )
-        })
-    }
-}
-
-#[derive(Debug)]
-struct V3RequestIdClock {
-    local_timestamp: String,
-    local_date_key: String,
-    utc_iso: String,
-}
-
-fn resolve_v3_request_id_counter_file() -> PathBuf {
-    if let Some(path) = non_empty_env_path("ROUTECODEX_REQUEST_ID_COUNTER_FILE")
-        .or_else(|| non_empty_env_path("RCC_REQUEST_ID_COUNTER_FILE"))
-    {
-        return path;
-    }
-    let home = env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join(".rcc")
-        .join("state")
-        .join("request-id-counter.json")
-}
-
-fn non_empty_env_path(name: &str) -> Option<PathBuf> {
-    env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-}
-
-fn v3_request_id_clock_now() -> Result<V3RequestIdClock, String> {
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| format!("V3 request id clock moved backwards: {error}"))?;
-    let epoch_ms = duration.as_millis();
-    let seconds = (epoch_ms / 1000) as libc::time_t;
-    let millis = (epoch_ms % 1000) as u32;
-    let local = format_v3_tm(seconds, true)?;
-    let utc = format_v3_tm(seconds, false)?;
-    Ok(V3RequestIdClock {
-        local_timestamp: format!(
-            "{:04}{:02}{:02}T{:02}{:02}{:02}{:03}",
-            local.year, local.month, local.day, local.hour, local.minute, local.second, millis
-        ),
-        local_date_key: format!("{:04}{:02}{:02}", local.year, local.month, local.day),
-        utc_iso: format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-            utc.year, utc.month, utc.day, utc.hour, utc.minute, utc.second, millis
-        ),
-    })
-}
-
-#[derive(Debug)]
-struct V3RequestIdTm {
-    year: i32,
-    month: i32,
-    day: i32,
-    hour: i32,
-    minute: i32,
-    second: i32,
-}
-
-fn format_v3_tm(seconds: libc::time_t, local: bool) -> Result<V3RequestIdTm, String> {
-    let mut raw = std::mem::MaybeUninit::<libc::tm>::uninit();
-    let result = unsafe {
-        if local {
-            libc::localtime_r(&seconds, raw.as_mut_ptr())
-        } else {
-            libc::gmtime_r(&seconds, raw.as_mut_ptr())
-        }
-    };
-    if result.is_null() {
-        return Err("failed to format V3 request id timestamp".to_string());
-    }
-    let tm = unsafe { raw.assume_init() };
-    Ok(V3RequestIdTm {
-        year: tm.tm_year + 1900,
-        month: tm.tm_mon + 1,
-        day: tm.tm_mday,
-        hour: tm.tm_hour,
-        minute: tm.tm_min,
-        second: tm.tm_sec,
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -654,7 +394,7 @@ async fn health(State(state): State<Arc<V3ListenerState>>) -> Json<serde_json::V
 async fn models_endpoint(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
     json_response(
         200,
-        build_v3_models_catalog(
+        models_catalog::build_v3_models_catalog(
             &state.manifest,
             &state.server.routing_group,
             &state.server.expose_models,
@@ -2861,7 +2601,7 @@ fn record_and_emit_v3_error_projection(
 }
 
 #[derive(Clone)]
-struct V3LiveSnapClientResponseSseRecorder {
+struct V3LiveSnapSseRecorderCore {
     state: Arc<V3ListenerState>,
     entry_protocol: String,
     endpoint: String,
@@ -2871,7 +2611,131 @@ struct V3LiveSnapClientResponseSseRecorder {
     error_chain: Option<Vec<&'static str>>,
     observability: Option<Value>,
     finalized_response: Option<Value>,
+    source: &'static str,
     raw_sse: Arc<Mutex<V3DebugBoundedTextCapture>>,
+}
+
+impl V3LiveSnapSseRecorderCore {
+    fn persist_initial(&self) -> Result<(), String> {
+        self.persist_current(None)
+    }
+
+    fn append_chunk(&self, bytes: &[u8]) -> Result<(), String> {
+        self.raw_sse
+            .lock()
+            .map_err(|error| error.to_string())?
+            .append(bytes);
+        Ok(())
+    }
+
+    fn persist_current(&self, stream_error: Option<&str>) -> Result<(), String> {
+        let raw_sse = self
+            .raw_sse
+            .lock()
+            .map_err(|error| error.to_string())?
+            .rendered_text();
+        let mut payload = json!({
+            "object": "routecodex.v3.client_response_snapshot",
+            "stage": "client-response",
+            "source": self.source,
+            "status": self.status,
+            "bodyKind": "sse",
+            "rawSse": raw_sse,
+            "node_trace": self.node_trace.clone(),
+            "error_chain": self.error_chain.clone(),
+        });
+        if let Some(observability) = self.observability.as_ref() {
+            if let Some(object) = payload.as_object_mut() {
+                object.insert(
+                    "observability".to_string(),
+                    observability.clone(),
+                );
+            }
+        }
+        if let Some(finalized_response) = self.finalized_response.as_ref() {
+            if let Some(object) = payload.as_object_mut() {
+                object.insert(
+                    "materializedResponse".to_string(),
+                    finalized_response.clone(),
+                );
+            }
+        }
+        if let Some(stream_error) = stream_error {
+            if let Some(object) = payload.as_object_mut() {
+                object.insert(
+                    "streamError".to_string(),
+                    Value::String(stream_error.to_string()),
+                );
+            }
+        }
+        let payload = self.state.debug.redact_payload_for_side_channel(payload);
+        persist_v3_codex_sample_payload(
+            &self.state,
+            &self.entry_protocol,
+            &self.endpoint,
+            &self.request_id,
+            "response.json",
+            &payload,
+        )
+    }
+}
+
+struct V3LiveSnapRecordedStream<S, E, F, O> {
+    inner: S,
+    recorder: V3LiveSnapSseRecorderCore,
+    terminal_persisted: bool,
+    error_message: F,
+    map_error: O,
+    _phantom: std::marker::PhantomData<E>,
+}
+
+impl<S, E, F, O, OErr> futures_util::Stream for V3LiveSnapRecordedStream<S, E, F, O>
+where
+    S: futures_util::Stream<Item = Result<Vec<u8>, E>> + futures_util::StreamExt + Unpin,
+    E: Unpin,
+    F: Fn(&E) -> String + Unpin,
+    O: Fn(String) -> OErr + Unpin,
+{
+    type Item = Result<Vec<u8>, OErr>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        match std::pin::Pin::new(&mut this.inner).poll_next(context) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Some(Ok(bytes))) => match this.recorder.append_chunk(&bytes) {
+                Ok(()) => Poll::Ready(Some(Ok(bytes))),
+                Err(error) => {
+                    this.terminal_persisted = true;
+                    Poll::Ready(Some(Err((this.map_error)(error))))
+                }
+            },
+            Poll::Ready(Some(Err(error))) => {
+                this.terminal_persisted = true;
+                let message = (this.error_message)(&error);
+                match this.recorder.persist_current(Some(&message)) {
+                    Ok(()) => Poll::Ready(Some(Err((this.map_error)(message)))),
+                    Err(persistence_error) => Poll::Ready(Some(Err((this.map_error)(format!(
+                        "{message}; codex sample persistence failed: {persistence_error}"
+                    ))))),
+                }
+            }
+            Poll::Ready(None) if !this.terminal_persisted => {
+                this.terminal_persisted = true;
+                match this.recorder.persist_current(None) {
+                    Ok(()) => Poll::Ready(None),
+                    Err(error) => Poll::Ready(Some(Err((this.map_error)(error)))),
+                }
+            }
+            Poll::Ready(None) => Poll::Ready(None),
+        }
+    }
+}
+
+struct V3LiveSnapClientResponseSseRecorder {
+    core: V3LiveSnapSseRecorderCore,
 }
 
 impl V3LiveSnapClientResponseSseRecorder {
@@ -2883,77 +2747,38 @@ impl V3LiveSnapClientResponseSseRecorder {
         output: &V3ResponsesRelayRuntimeOutput,
     ) -> Self {
         Self {
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            status: output.status,
-            node_trace: output.node_trace.clone(),
-            error_chain: output.error_chain.clone(),
-            observability: output
-                .observability
-                .as_ref()
-                .map(project_v3_runtime_observability_debug),
-            finalized_response: output.finalized_response.clone(),
-            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+            core: V3LiveSnapSseRecorderCore {
+                state,
+                entry_protocol,
+                endpoint,
+                request_id,
+                status: output.status,
+                node_trace: output.node_trace.clone(),
+                error_chain: output.error_chain.clone(),
+                observability: output
+                    .observability
+                    .as_ref()
+                    .map(project_v3_runtime_observability_debug),
+                finalized_response: output.finalized_response.clone(),
+                source: "live_server_response_stream",
+                raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+            },
         }
     }
 
     fn wrap(&self, stream: V3ResponsesRelayClientStream) -> V3ResponsesRelayClientStream {
-        Box::pin(V3LiveSnapRelayRecordedStream {
+        Box::pin(V3LiveSnapRecordedStream {
             inner: stream,
-            recorder: self.clone(),
+            recorder: self.core.clone(),
             terminal_persisted: false,
+            error_message: |error: &String| error.clone(),
+            map_error: |message: String| message,
+            _phantom: std::marker::PhantomData,
         })
     }
 
     fn persist_initial(&self) -> Result<(), String> {
-        self.persist_current(None)
-    }
-
-    fn append_chunk(&self, bytes: &[u8]) -> Result<(), String> {
-        self.raw_sse
-            .lock()
-            .map_err(|error| error.to_string())?
-            .append(bytes);
-        Ok(())
-    }
-
-    fn persist_current(&self, stream_error: Option<&str>) -> Result<(), String> {
-        let raw_sse = self
-            .raw_sse
-            .lock()
-            .map_err(|error| error.to_string())?
-            .rendered_text();
-        let mut payload = json!({
-            "object": "routecodex.v3.client_response_snapshot",
-            "stage": "client-response",
-            "source": "live_server_response_stream",
-            "status": self.status,
-            "bodyKind": "sse",
-            "rawSse": raw_sse,
-            "materializedResponse": self.finalized_response.clone(),
-            "node_trace": self.node_trace.clone(),
-            "error_chain": self.error_chain.clone(),
-            "observability": self.observability.clone(),
-        });
-        if let Some(stream_error) = stream_error {
-            if let Some(object) = payload.as_object_mut() {
-                object.insert(
-                    "streamError".to_string(),
-                    Value::String(stream_error.to_string()),
-                );
-            }
-        }
-        let payload = self.state.debug.redact_payload_for_side_channel(payload);
-        persist_v3_codex_sample_payload(
-            &self.state,
-            &self.entry_protocol,
-            &self.endpoint,
-            &self.request_id,
-            "response.json",
-            &payload,
-        )
+        self.core.persist_initial()
     }
 }
 
@@ -2963,55 +2788,9 @@ struct V3LiveSnapRelayRecordedStream {
     terminal_persisted: bool,
 }
 
-impl futures_util::Stream for V3LiveSnapRelayRecordedStream {
-    type Item = Result<Vec<u8>, String>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        context: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        match this.inner.as_mut().poll_next(context) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Some(Ok(bytes))) => match this.recorder.append_chunk(&bytes) {
-                Ok(()) => Poll::Ready(Some(Ok(bytes))),
-                Err(error) => {
-                    this.terminal_persisted = true;
-                    Poll::Ready(Some(Err(error)))
-                }
-            },
-            Poll::Ready(Some(Err(error))) => {
-                this.terminal_persisted = true;
-                match this.recorder.persist_current(Some(&error)) {
-                    Ok(()) => Poll::Ready(Some(Err(error))),
-                    Err(persistence_error) => Poll::Ready(Some(Err(format!(
-                        "{error}; codex sample persistence failed: {persistence_error}"
-                    )))),
-                }
-            }
-            Poll::Ready(None) if !this.terminal_persisted => {
-                this.terminal_persisted = true;
-                match this.recorder.persist_current(None) {
-                    Ok(()) => Poll::Ready(None),
-                    Err(error) => Poll::Ready(Some(Err(error))),
-                }
-            }
-            Poll::Ready(None) => Poll::Ready(None),
-        }
-    }
-}
-
 #[derive(Clone)]
 struct V3LiveSnapDirectClientResponseSseRecorder {
-    state: Arc<V3ListenerState>,
-    entry_protocol: String,
-    endpoint: String,
-    request_id: String,
-    status: u16,
-    node_trace: Vec<&'static str>,
-    error_chain: Vec<&'static str>,
-    observability: Option<Value>,
-    raw_sse: Arc<Mutex<V3DebugBoundedTextCapture>>,
+    core: V3LiveSnapSseRecorderCore,
 }
 
 impl V3LiveSnapDirectClientResponseSseRecorder {
@@ -3023,122 +2802,38 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
         frame: &V3Server16HttpFrame,
     ) -> Self {
         Self {
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            status: frame.status,
-            node_trace: frame.node_trace.clone(),
-            error_chain: frame.error_chain.clone(),
-            observability: frame
-                .observability
-                .as_ref()
-                .map(project_v3_runtime_observability_debug),
-            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+            core: V3LiveSnapSseRecorderCore {
+                state,
+                entry_protocol,
+                endpoint,
+                request_id,
+                status: frame.status,
+                node_trace: frame.node_trace.clone(),
+                error_chain: Some(frame.error_chain.clone()),
+                observability: frame
+                    .observability
+                    .as_ref()
+                    .map(project_v3_runtime_observability_debug),
+                finalized_response: None,
+                source: "live_server_direct_response_stream",
+                raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+            },
         }
     }
 
     fn wrap(&self, stream: V3ClientSseStream) -> V3ClientSseStream {
-        Box::pin(V3LiveSnapDirectRecordedStream {
+        Box::pin(V3LiveSnapRecordedStream {
             inner: stream,
-            recorder: self.clone(),
+            recorder: self.core.clone(),
             terminal_persisted: false,
+            error_message: |error: &V3Error01SourceRaised| error.message.clone(),
+            map_error: v3_codex_sample_stream_error,
+            _phantom: std::marker::PhantomData,
         })
     }
 
     fn persist_initial(&self) -> Result<(), String> {
-        self.persist_current(None)
-    }
-
-    fn append_chunk(&self, bytes: &[u8]) -> Result<(), String> {
-        self.raw_sse
-            .lock()
-            .map_err(|error| error.to_string())?
-            .append(bytes);
-        Ok(())
-    }
-
-    fn persist_current(&self, stream_error: Option<&str>) -> Result<(), String> {
-        let raw_sse = self
-            .raw_sse
-            .lock()
-            .map_err(|error| error.to_string())?
-            .rendered_text();
-        let mut payload = json!({
-            "object": "routecodex.v3.client_response_snapshot",
-            "stage": "client-response",
-            "source": "live_server_direct_response_stream",
-            "status": self.status,
-            "bodyKind": "sse",
-            "rawSse": raw_sse,
-            "node_trace": self.node_trace.clone(),
-            "error_chain": self.error_chain.clone(),
-            "observability": self.observability.clone(),
-        });
-        if let Some(stream_error) = stream_error {
-            if let Some(object) = payload.as_object_mut() {
-                object.insert(
-                    "streamError".to_string(),
-                    Value::String(stream_error.to_string()),
-                );
-            }
-        }
-        let payload = self.state.debug.redact_payload_for_side_channel(payload);
-        persist_v3_codex_sample_payload(
-            &self.state,
-            &self.entry_protocol,
-            &self.endpoint,
-            &self.request_id,
-            "response.json",
-            &payload,
-        )
-    }
-}
-
-struct V3LiveSnapDirectRecordedStream {
-    inner: V3ClientSseStream,
-    recorder: V3LiveSnapDirectClientResponseSseRecorder,
-    terminal_persisted: bool,
-}
-
-impl futures_util::Stream for V3LiveSnapDirectRecordedStream {
-    type Item = Result<Vec<u8>, V3Error01SourceRaised>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        context: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        match this.inner.as_mut().poll_next(context) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Some(Ok(bytes))) => match this.recorder.append_chunk(&bytes) {
-                Ok(()) => Poll::Ready(Some(Ok(bytes))),
-                Err(error) => {
-                    this.terminal_persisted = true;
-                    Poll::Ready(Some(Err(v3_codex_sample_stream_error(error))))
-                }
-            },
-            Poll::Ready(Some(Err(error))) => {
-                this.terminal_persisted = true;
-                match this.recorder.persist_current(Some(&error.message)) {
-                    Ok(()) => Poll::Ready(Some(Err(error))),
-                    Err(persistence_error) => {
-                        Poll::Ready(Some(Err(v3_codex_sample_stream_error(format!(
-                            "{}; codex sample persistence failed: {persistence_error}",
-                            error.message
-                        )))))
-                    }
-                }
-            }
-            Poll::Ready(None) if !this.terminal_persisted => {
-                this.terminal_persisted = true;
-                match this.recorder.persist_current(None) {
-                    Ok(()) => Poll::Ready(None),
-                    Err(error) => Poll::Ready(Some(Err(v3_codex_sample_stream_error(error)))),
-                }
-            }
-            Poll::Ready(None) => Poll::Ready(None),
-        }
+        self.core.persist_initial()
     }
 }
 
@@ -3409,14 +3104,7 @@ fn capture_v3_openai_chat_relay_response(
 
 #[derive(Clone)]
 struct V3LiveSnapOpenAiChatClientResponseSseRecorder {
-    state: Arc<V3ListenerState>,
-    entry_protocol: String,
-    endpoint: String,
-    request_id: String,
-    status: u16,
-    node_trace: Vec<&'static str>,
-    error_chain: Option<Vec<&'static str>>,
-    raw_sse: Arc<Mutex<V3DebugBoundedTextCapture>>,
+    core: V3LiveSnapSseRecorderCore,
 }
 
 impl V3LiveSnapOpenAiChatClientResponseSseRecorder {
@@ -3428,114 +3116,35 @@ impl V3LiveSnapOpenAiChatClientResponseSseRecorder {
         output: &V3OpenAiChatRelayRuntimeOutput,
     ) -> Self {
         Self {
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            status: output.status,
-            node_trace: output.node_trace.clone(),
-            error_chain: output.error_chain.clone(),
-            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+            core: V3LiveSnapSseRecorderCore {
+                state,
+                entry_protocol,
+                endpoint,
+                request_id,
+                status: output.status,
+                node_trace: output.node_trace.clone(),
+                error_chain: output.error_chain.clone(),
+                observability: None,
+                finalized_response: None,
+                source: "live_server_openai_chat_stream",
+                raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+            },
         }
     }
 
     fn wrap(&self, stream: V3OpenAiChatClientStream) -> V3OpenAiChatClientStream {
-        Box::pin(V3LiveSnapOpenAiChatRelayRecordedStream {
+        Box::pin(V3LiveSnapRecordedStream {
             inner: stream,
-            recorder: self.clone(),
+            recorder: self.core.clone(),
             terminal_persisted: false,
+            error_message: |error: &String| error.clone(),
+            map_error: |message: String| message,
+            _phantom: std::marker::PhantomData,
         })
     }
 
     fn persist_initial(&self) -> Result<(), String> {
-        self.persist_current(None)
-    }
-
-    fn append_chunk(&self, bytes: &[u8]) -> Result<(), String> {
-        self.raw_sse
-            .lock()
-            .map_err(|error| error.to_string())?
-            .append(bytes);
-        Ok(())
-    }
-
-    fn persist_current(&self, stream_error: Option<&str>) -> Result<(), String> {
-        let raw_sse = self
-            .raw_sse
-            .lock()
-            .map_err(|error| error.to_string())?
-            .rendered_text();
-        let mut payload = json!({
-            "object": "routecodex.v3.client_response_snapshot",
-            "stage": "client-response",
-            "source": "live_server_openai_chat_stream",
-            "status": self.status,
-            "bodyKind": "sse",
-            "rawSse": raw_sse,
-            "node_trace": self.node_trace.clone(),
-            "error_chain": self.error_chain.clone(),
-        });
-        if let Some(stream_error) = stream_error {
-            if let Some(object) = payload.as_object_mut() {
-                object.insert(
-                    "streamError".to_string(),
-                    Value::String(stream_error.to_string()),
-                );
-            }
-        }
-        let payload = self.state.debug.redact_payload_for_side_channel(payload);
-        persist_v3_codex_sample_payload(
-            &self.state,
-            &self.entry_protocol,
-            &self.endpoint,
-            &self.request_id,
-            "response.json",
-            &payload,
-        )
-    }
-}
-
-struct V3LiveSnapOpenAiChatRelayRecordedStream {
-    inner: V3OpenAiChatClientStream,
-    recorder: V3LiveSnapOpenAiChatClientResponseSseRecorder,
-    terminal_persisted: bool,
-}
-
-impl futures_util::Stream for V3LiveSnapOpenAiChatRelayRecordedStream {
-    type Item = Result<Vec<u8>, String>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        context: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        match this.inner.as_mut().poll_next(context) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Some(Ok(bytes))) => match this.recorder.append_chunk(&bytes) {
-                Ok(()) => Poll::Ready(Some(Ok(bytes))),
-                Err(error) => {
-                    this.terminal_persisted = true;
-                    Poll::Ready(Some(Err(error)))
-                }
-            },
-            Poll::Ready(Some(Err(error))) => {
-                this.terminal_persisted = true;
-                match this.recorder.persist_current(Some(&error)) {
-                    Ok(()) => Poll::Ready(Some(Err(error))),
-                    Err(persistence_error) => Poll::Ready(Some(Err(format!(
-                        "{error}; codex sample persistence failed: {persistence_error}"
-                    )))),
-                }
-            }
-            Poll::Ready(None) if !this.terminal_persisted => {
-                this.terminal_persisted = true;
-                match this.recorder.persist_current(None) {
-                    Ok(()) => Poll::Ready(None),
-                    Err(error) => Poll::Ready(Some(Err(error))),
-                }
-            }
-            Poll::Ready(None) => Poll::Ready(None),
-        }
+        self.core.persist_initial()
     }
 }
 
@@ -7730,369 +7339,6 @@ pub fn build_v3_server_16_http_frame_from_v3_resp_15(
         observability: None,
         stream_observation: None,
     }
-}
-
-// feature_id: v3.models_capability_catalog
-fn build_v3_models_catalog(
-    manifest: &V3Config05ManifestPublished,
-    routing_group: &str,
-    expose_models: &[String],
-) -> serde_json::Value {
-    let mut data = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    // expose_models 白名单（visible_id）；空 = 全量暴露（兼容现有）。
-    let is_exposed = |visible_id: &str| -> bool {
-        expose_models.is_empty() || expose_models.iter().any(|id| id == visible_id)
-    };
-    let scoped_models = collect_v3_route_group_catalog_model_refs(manifest, routing_group);
-    if scoped_models
-        .values()
-        .any(|model_ref| model_ref.visible_id == "gpt-5.5" || model_ref.model_id == "gpt-5.5")
-    {
-        let builtin_model_id = "gpt-5.5";
-        let capabilities = scoped_models
-            .values()
-            .filter(|model_ref| {
-                model_ref.visible_id == builtin_model_id || model_ref.model_id == builtin_model_id
-            })
-            .flat_map(|model_ref| model_ref.capabilities.iter().cloned())
-            .collect::<BTreeSet<_>>();
-        let capabilities = if capabilities.is_empty() {
-            default_builtin_v3_model_capabilities(builtin_model_id)
-        } else {
-            capabilities
-        };
-        let mut item = build_v3_codex_model_metadata(
-            builtin_model_id,
-            builtin_model_id,
-            None,
-            Some(&capabilities),
-        );
-        item.insert("owned_by".to_string(), json!("openai"));
-        seen.insert(builtin_model_id.to_string());
-        if is_exposed(builtin_model_id) {
-            data.push(Value::Object(item));
-        }
-    }
-    for model_ref in scoped_models.values() {
-        if is_v3_hidden_codex_future_model(&model_ref.visible_id)
-            || is_v3_hidden_codex_future_model(&model_ref.model_id)
-            || seen.contains(&model_ref.visible_id)
-        {
-            continue;
-        }
-        if !is_exposed(&model_ref.visible_id) {
-            continue;
-        }
-        let Some(provider) = manifest.providers.get(&model_ref.provider_id) else {
-            continue;
-        };
-        if !provider.enabled {
-            continue;
-        }
-        let Some(model) = provider.models.get(&model_ref.model_id) else {
-            continue;
-        };
-        let mut item = build_v3_codex_model_metadata(
-            &model_ref.visible_id,
-            &model.id,
-            model.max_context_tokens,
-            Some(&model_ref.capabilities),
-        );
-        item.insert(
-            "owned_by".to_string(),
-            json!(format!("provider:{}", provider.id)),
-        );
-        item.insert("provider_id".to_string(), json!(provider.id));
-        item.insert("canonical_model_id".to_string(), json!(model.id));
-        item.insert("wire_model".to_string(), json!(model.wire_name));
-        item.insert("aliases".to_string(), json!(model.aliases));
-        item.insert(
-            "capabilities".to_string(),
-            json!(model_ref.capabilities.iter().cloned().collect::<Vec<_>>()),
-        );
-        item.insert(
-            "supports_streaming".to_string(),
-            json!(model.supports_streaming),
-        );
-        item.insert(
-            "supports_thinking".to_string(),
-            json!(model.supports_thinking),
-        );
-        item.insert("thinking".to_string(), json!(model.thinking));
-        item.insert("max_tokens".to_string(), json!(model.max_tokens));
-        item.insert(
-            "max_context_tokens".to_string(),
-            json!(model.max_context_tokens),
-        );
-        item.insert("features".to_string(), json!(model.features));
-        seen.insert(model_ref.visible_id.clone());
-        data.push(Value::Object(item));
-    }
-    // Direct-routing surface: every enabled provider model is addressable as
-    // `provider.model` regardless of route-group declarations, so expose those
-    // ids alongside the routed catalog.
-    for provider in manifest.providers.values() {
-        if !provider.enabled {
-            continue;
-        }
-        for model in provider.models.values() {
-            let direct_id = format!("{}.{}", provider.id, model.id);
-            if seen.contains(&direct_id)
-                || is_v3_hidden_codex_future_model(&model.id)
-                || !is_exposed(&direct_id)
-            {
-                continue;
-            }
-            let capabilities = model.capabilities.iter().cloned().collect::<BTreeSet<_>>();
-            let mut item = build_v3_codex_model_metadata(
-                &direct_id,
-                &model.id,
-                model.max_context_tokens,
-                Some(&capabilities),
-            );
-            item.insert(
-                "owned_by".to_string(),
-                json!(format!("provider:{}", provider.id)),
-            );
-            item.insert("provider_id".to_string(), json!(provider.id));
-            item.insert("canonical_model_id".to_string(), json!(model.id));
-            item.insert("wire_model".to_string(), json!(model.wire_name));
-            item.insert("direct_route".to_string(), json!(true));
-            item.insert(
-                "capabilities".to_string(),
-                json!(model.capabilities.clone()),
-            );
-            item.insert(
-                "supports_streaming".to_string(),
-                json!(model.supports_streaming),
-            );
-            item.insert(
-                "supports_thinking".to_string(),
-                json!(model.supports_thinking),
-            );
-            item.insert("max_tokens".to_string(), json!(model.max_tokens));
-            item.insert(
-                "max_context_tokens".to_string(),
-                json!(model.max_context_tokens),
-            );
-            seen.insert(direct_id);
-            data.push(Value::Object(item));
-        }
-    }
-    let models = data.clone();
-    json!({
-        "object": "list",
-        "data": data,
-        "models": models,
-    })
-}
-
-fn is_v3_hidden_codex_future_model(model_id: &str) -> bool {
-    let trimmed = model_id.trim();
-    trimmed == "gpt-5.6" || trimmed.starts_with("gpt-5.6-")
-}
-
-struct V3ModelCapabilityProjection {
-    input_modalities: Vec<&'static str>,
-    supports_image_detail_original: bool,
-    supports_search_tool: bool,
-    web_search_tool_type: &'static str,
-}
-
-fn default_builtin_v3_model_capabilities(model_id: &str) -> BTreeSet<String> {
-    let capabilities = match model_id {
-        "gpt-5.5" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => {
-            ["text", "reasoning", "tools", "web_search", "multimodal"]
-                .into_iter()
-                .collect::<Vec<_>>()
-        }
-        _ => vec!["text"],
-    };
-    capabilities
-        .into_iter()
-        .map(str::to_string)
-        .collect::<BTreeSet<_>>()
-}
-
-fn build_v3_model_capability_projection(
-    capabilities: Option<&BTreeSet<String>>,
-    is_gpt_55: bool,
-    is_gpt_56: bool,
-) -> V3ModelCapabilityProjection {
-    let owned_default;
-    let capabilities = match capabilities {
-        Some(capabilities) => capabilities,
-        None => {
-            owned_default = if is_gpt_55 {
-                default_builtin_v3_model_capabilities("gpt-5.5")
-            } else if is_gpt_56 {
-                default_builtin_v3_model_capabilities("gpt-5.6-sol")
-            } else {
-                ["text"].into_iter().map(str::to_string).collect()
-            };
-            &owned_default
-        }
-    };
-    let image_capable = capabilities.contains("multimodal") || capabilities.contains("vision");
-    let supports_search_tool = capabilities.contains("web_search");
-    let mut input_modalities = vec!["text"];
-    if image_capable {
-        input_modalities.push("image");
-    }
-    V3ModelCapabilityProjection {
-        input_modalities,
-        supports_image_detail_original: image_capable,
-        supports_search_tool,
-        web_search_tool_type: if image_capable {
-            "text_and_image"
-        } else {
-            "text"
-        },
-    }
-}
-
-fn build_v3_codex_model_metadata(
-    visible_id: &str,
-    canonical_model_id: &str,
-    max_context_tokens: Option<u64>,
-    capabilities: Option<&BTreeSet<String>>,
-) -> Map<String, Value> {
-    let is_gpt_55 = canonical_model_id == "gpt-5.5";
-    let is_gpt_56_sol = canonical_model_id == "gpt-5.6-sol";
-    let is_gpt_56_terra = canonical_model_id == "gpt-5.6-terra";
-    let is_gpt_56_luna = canonical_model_id == "gpt-5.6-luna";
-    let is_gpt_56 = is_gpt_56_sol || is_gpt_56_terra || is_gpt_56_luna;
-    let is_builtin_bare = visible_id == canonical_model_id && (is_gpt_55 || is_gpt_56);
-    let preset_context_window = if is_gpt_55 {
-        Some(272_000)
-    } else if is_gpt_56 {
-        Some(372_000)
-    } else {
-        None
-    };
-    let context_window = if is_builtin_bare {
-        preset_context_window.or(max_context_tokens)
-    } else {
-        max_context_tokens.or(preset_context_window)
-    }
-    .unwrap_or(128_000);
-    let description = if is_gpt_55 {
-        "Frontier model for complex coding, research, and real-world work."
-    } else if is_gpt_56_sol {
-        "Latest frontier agentic coding model."
-    } else if is_gpt_56_terra {
-        "Balanced agentic coding model for everyday work."
-    } else if is_gpt_56_luna {
-        "Fast and affordable agentic coding model."
-    } else {
-        "RouteCodex advanced agentic coding model compatible with gpt-5.5 capabilities."
-    };
-    let default_reasoning_level = if is_gpt_56_sol { "low" } else { "medium" };
-    let supported_reasoning_levels = if is_gpt_56_sol || is_gpt_56_terra {
-        json!([
-            {"effort":"low","description":"Fast responses with lighter reasoning"},
-            {"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},
-            {"effort":"high","description":"Greater reasoning depth for complex problems"},
-            {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"},
-            {"effort":"max","description":"Maximum reasoning depth for the hardest tasks"},
-            {"effort":"ultra","description":"Ultra reasoning depth for frontier-grade tasks"}
-        ])
-    } else if is_gpt_56_luna {
-        json!([
-            {"effort":"low","description":"Fast responses with lighter reasoning"},
-            {"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},
-            {"effort":"high","description":"Greater reasoning depth for complex problems"},
-            {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"},
-            {"effort":"max","description":"Maximum reasoning depth for the hardest tasks"}
-        ])
-    } else {
-        json!([
-            {"effort":"low","description":"Fast responses with lighter reasoning"},
-            {"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},
-            {"effort":"high","description":"Greater reasoning depth for complex problems"},
-            {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"}
-        ])
-    };
-    let capability_projection =
-        build_v3_model_capability_projection(capabilities, is_gpt_55, is_gpt_56);
-    let mut item = Map::from_iter([
-        ("id".to_string(), json!(visible_id)),
-        ("object".to_string(), json!("model")),
-        ("owned_by".to_string(), json!("provider")),
-        ("slug".to_string(), json!(visible_id)),
-        ("display_name".to_string(), json!(visible_id)),
-        ("base_instructions".to_string(), json!("")),
-        ("description".to_string(), json!(description)),
-        ("prefer_websockets".to_string(), json!(false)),
-        ("support_verbosity".to_string(), json!(true)),
-        ("default_verbosity".to_string(), json!("low")),
-        ("apply_patch_tool_type".to_string(), json!("freeform")),
-        (
-            "web_search_tool_type".to_string(),
-            json!(capability_projection.web_search_tool_type),
-        ),
-        (
-            "supports_search_tool".to_string(),
-            json!(capability_projection.supports_search_tool),
-        ),
-        (
-            "input_modalities".to_string(),
-            json!(capability_projection.input_modalities),
-        ),
-        (
-            "supports_image_detail_original".to_string(),
-            json!(capability_projection.supports_image_detail_original),
-        ),
-        (
-            "truncation_policy".to_string(),
-            json!({"mode":"tokens","limit":10000}),
-        ),
-        ("supports_parallel_tool_calls".to_string(), json!(true)),
-        (
-            "reasoning_summary_format".to_string(),
-            json!("experimental"),
-        ),
-        ("supports_reasoning_summaries".to_string(), json!(true)),
-        ("default_reasoning_summary".to_string(), json!("none")),
-        (
-            "default_reasoning_level".to_string(),
-            json!(default_reasoning_level),
-        ),
-        (
-            "supported_reasoning_levels".to_string(),
-            supported_reasoning_levels,
-        ),
-        ("shell_type".to_string(), json!("shell_command")),
-        ("visibility".to_string(), json!("list")),
-        (
-            "minimal_client_version".to_string(),
-            json!(if is_gpt_56 {
-                "0.144.0"
-            } else if is_gpt_55 {
-                "0.124.0"
-            } else {
-                "0.98.0"
-            }),
-        ),
-        ("supported_in_api".to_string(), json!(true)),
-        ("priority".to_string(), json!(0)),
-        (
-            "experimental_supported_tools".to_string(),
-            // Codex currently consumes this field for recognized experimental tool names such as
-            // `test_sync_tool`; `apply_patch` and search are controlled by `apply_patch_tool_type`
-            // and `supports_search_tool`, not by this vector.
-            json!(Vec::<&str>::new()),
-        ),
-        ("effective_context_window_percent".to_string(), json!(95)),
-        ("context_window".to_string(), json!(context_window)),
-        ("max_context_window".to_string(), json!(context_window)),
-    ]);
-    // gpt-5.6 系列不对外暴露（is_v3_hidden_codex_future_model 在 models catalog 层隐藏），
-    // 且 RouteCodex 不支持 responses_lite 请求面（input/instructions 拆分、禁 parallel
-    // tool calls、responses_lite header 均未实现）——绝不向 Codex 广告 use_responses_lite
-    // 或 tool_mode=code_mode_only，避免客户端切换到未实现的嵌套 exec/wait 入口。
-    item
 }
 
 pub fn build_v3_server_16_http_frame_from_v3_error_06(

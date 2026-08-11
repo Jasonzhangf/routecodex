@@ -478,13 +478,12 @@ impl V3ManagedLifecycle {
                     Err(error)
                 }
             } else {
-                let _ = error;
                 Ok(V3ManagedStatusRecord {
                     schema_version: SCHEMA_VERSION,
                     instance_id: declaration.instance_id,
                     state: V3ManagedRunState::Stopped,
                     updated_at_epoch_ms: epoch_ms(),
-                    detail: Some("no managed runtime state".to_string()),
+                    detail: Some(format!("no managed runtime state; query_live failed: {error}")),
                 })
             }
         })

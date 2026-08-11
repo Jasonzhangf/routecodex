@@ -35,6 +35,9 @@ function parseYaml(source, label) {
 }
 
 const server = readRequired("v3/crates/routecodex-v3-server/src/lib.rs");
+const requestIdModule = readRequired(
+  "v3/crates/routecodex-v3-server/src/request_id.rs",
+);
 const production = server.split("#[cfg(test)]")[0];
 const v3FunctionMap = readRequired("docs/architecture/v3-function-map.yml");
 const functionMap = readRequired("docs/architecture/function-map.yml");
@@ -56,12 +59,12 @@ try {
 }
 
 requireMatch(
-  production,
+  requestIdModule,
   /struct V3AllocatedRequestIdentity\s*\{[\s\S]*request_id:\s*String,[\s\S]*total_count:\s*u64,[\s\S]*daily_count:\s*u64,/,
   "V3AllocatedRequestIdentity must carry request_id, total_count, and daily_count",
 );
 requireMatch(
-  production,
+  requestIdModule,
   /fn next_request_identity\([\s\S]*Result<V3AllocatedRequestIdentity,\s*String>[\s\S]*V3AllocatedRequestIdentity\s*\{[\s\S]*total_count:\s*self\.state\.total_count,[\s\S]*daily_count:\s*self\.state\.window_count,/,
   "V3RequestIdCounter must return counts from the same atomic allocation",
 );

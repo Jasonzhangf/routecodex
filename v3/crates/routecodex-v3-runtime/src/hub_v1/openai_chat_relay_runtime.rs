@@ -1012,8 +1012,15 @@ fn openai_chat_provider_http_failure(
     body: &[u8],
     _provider_id: &str,
 ) -> V3RelayProviderFailure {
-    let body = serde_json::from_slice::<Value>(body)
-        .unwrap_or_else(|_| json!({"error":{"type":"provider_error","message":"provider error"}}));
+    let body = match serde_json::from_slice::<Value>(body) {
+        Ok(value) => value,
+        Err(error) => json!({
+            "error": {
+                "type": "provider_error",
+                "message": format!("provider returned HTTP {status} with malformed JSON error body: {error}")
+            }
+        }),
+    };
     V3RelayProviderFailure {
         status,
         client_response: body,
