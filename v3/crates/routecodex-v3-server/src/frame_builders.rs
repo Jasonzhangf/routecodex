@@ -451,7 +451,11 @@ pub(crate) fn build_v3_debug_runtime_from_manifest(
 
 // Preserve the V2 HTTP contract: image-bearing Responses requests may contain
 // large data URLs, while the boundary still needs a finite allocation cap.
-pub(crate) const V3_MAX_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
+// 256MB: Codex/OneStop 黑盒客户端会把全部历史图片 base64 随请求发送（累积可超
+// 64MB）；routecodex 必须接收后经 req04 历史轮图片清洗（→[Image] 占位）再进 wire，
+// 而不是在读取阶段 413（客户端黑盒无法修改，只能适配）。读取后 req04 立即剥离历史
+// 图片，wire 侧体积回到正常量级，内存峰值仅存在于读取-清洗窗口。
+pub(crate) const V3_MAX_REQUEST_BODY_BYTES: usize = 256 * 1024 * 1024;
 
 pub(crate) async fn read_json_payload(
     request: Request,
