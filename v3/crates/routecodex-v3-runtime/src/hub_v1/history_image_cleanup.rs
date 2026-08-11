@@ -465,4 +465,53 @@ mod tests {
             "image part without type field must become placeholder"
         );
     }
+
+    #[test]
+    fn output_images_any_base64_become_identical_placeholder_bytes() {
+        // cache 影响确认：历史轮不同 base64 图片（不同请求/不同图片内容）必须归一为
+        // 完全相同的占位符字节——历史 wire 字节稳定 → provider 前缀缓存命中。
+        // 只有当前轮（最后一个 user carrier 之后）保留原始图片（随输入变化，正常影响）。
+        let build = |b64: &str| {
+            let mut body = json!({
+                "input": [
+                    {"type": "function_call_output", "call_id": "call_1", "output": [
+                        {"detail": "original", "image_url": b64}
+                    ]},
+                    {"type": "message", "role": "user", "content": [
+                        {"type": "input_text", "text": "current turn"}
+                    ]}
+                ]
+            });
+            normalize_v3_history_image_placeholders(&mut body);
+            serde_json::to_vec(&body).expect("serializable")
+        };
+        let bytes_a = build("data:image/png;base64,AAAA");
+        let bytes_b = build("data:image/png;base64,BBBB…（不同图片内容）");
+        let bytes_c = build("data:image/png;base64,<任意大 base64>");
+        assert_eq!(
+            bytes_a, bytes_b,
+            "different base64 history images must produce identical bytes (cache stability)"
+        );
+        assert_eq!(
+            bytes_a, bytes_c,
+            "arbitrary base64 history image must produce identical bytes"
+        );
+        // 当前轮图片保留：最后一个 user 之后的 fco.output 不替换。
+        let mut current = json!({
+            "input": [
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "current turn"}
+                ]},
+                {"type": "function_call_output", "call_id": "call_2", "output": [
+                    {"detail": "original", "image_url": "data:image/png;base64,CURRENT"}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut current);
+        assert_eq!(
+            current["input"][1]["output"][0]["image_url"],
+            "data:image/png;base64,CURRENT",
+            "current-turn image stays untouched (only current turn affects cache)"
+        );
+    }
 }
