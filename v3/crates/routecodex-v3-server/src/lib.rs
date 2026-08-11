@@ -7010,72 +7010,109 @@ async fn v3_openai_chat_relay_sse_accept_response(
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(32);
     let keepalive_ms = state.server.http_sse_keepalive_ms.max(1000);
     tokio::spawn(async move {
-        // 标准 SSE 心跳帧（注释行，连接保持、不塞任何语义）；等待完整链期间定期
+        // 标准 SSE 心跳帧（注释行，连接保持、不塞任何语义）；等待/重试期间定期
         // 发送，客户端不会因 provider 慢/挂起判定连接断。
         let heartbeat: Vec<u8> = b": keepalive\n\n".to_vec();
         let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(keepalive_ms));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let run = async {
-            execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
-                &manifest,
-                input,
-                provider_health,
-            )
-            .await
-        };
-        tokio::pin!(run);
+        // 空包/错误自动重试（最多 3 次；health 已在 transducer/错误链 record_failure
+        // 累计，3 次后拉黑 15 分钟 → 下次 route 排除切 provider）；3 次都错 → 报 502。
+        let mut attempts = 0u32;
+        let mut last_error = "provider failure".to_string();
         loop {
-            tokio::select! {
+            attempts += 1;
+            let run = async {
+                execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
+                    &manifest,
+                    input.clone(),
+                    provider_health.clone(),
+                )
+                .await
+            };
+            tokio::pin!(run);
+            let result = tokio::select! {
                 biased;
-                result = &mut run => {
-                    // 完整链（VR 命中 → Relay → Provider 请求 → provider 响应完整入站 +
-                    // resp 转换；provider 出错由内部 provider-failure 策略自动切换）完成，
-                    // 把转换结果喂给客户端；错误链穷尽投影为 SSE error 帧（不静默断连）。
-                    match result {
-                        Ok(output) => match output.client_body {
-                            V3OpenAiChatRelayClientBody::Sse(stream) => {
-                                let mut stream = stream;
-                                while let Some(chunk) = stream.next().await {
-                                    let chunk = chunk.map_err(std::io::Error::other);
-                                    if tx.send(chunk).await.is_err() {
-                                        return;
-                                    }
-                                }
-                            }
-                            V3OpenAiChatRelayClientBody::Json(json) => {
-                                // provider 以 JSON 完成（非 SSE）：包装为 SSE data 帧。
-                                let bytes = serde_json::to_vec(&json).unwrap_or_default();
-                                let mut frame = Vec::with_capacity(bytes.len() + 8);
-                                frame.extend_from_slice(b"data: ");
-                                frame.extend_from_slice(&bytes);
-                                frame.extend_from_slice(b"\n\n");
-                                let _ = tx.send(Ok(frame)).await;
-                            }
-                        },
-                        Err(error) => {
-                            let error_frame = serde_json::json!({
-                                "error": {
-                                    "message": format!("provider transport error: {error}"),
-                                    "type": "transport_error",
-                                    "code": "provider_transport_error",
-                                }
-                            });
-                            let bytes = serde_json::to_vec(&error_frame).unwrap_or_default();
-                            let mut frame = Vec::with_capacity(bytes.len() + 8);
-                            frame.extend_from_slice(b"data: ");
-                            frame.extend_from_slice(&bytes);
-                            frame.extend_from_slice(b"\n\n");
-                            let _ = tx.send(Ok(frame)).await;
-                        }
-                    }
-                    return;
-                }
+                result = &mut run => result,
                 _ = interval.tick() => {
                     if tx.send(Ok(heartbeat.clone())).await.is_err() {
                         return;
                     }
+                    continue;
+                }
+            };
+            // 完整链（VR 命中 → Relay → Provider 请求 → provider 响应完整入站 + resp
+            // 转换）完成；空包（SSE 完成但无 content/tool_calls）与链错误都视为失败。
+            let mut empty = false;
+            match result {
+                Ok(output) => match output.client_body {
+                    V3OpenAiChatRelayClientBody::Sse(stream) => {
+                        // 收集完整流（select 心跳保持连接）；流内 Err = 空响应
+                        // （transducer 已记录 provider failure）→ 空包重试。
+                        let mut stream = stream;
+                        let mut collected = Vec::new();
+                        loop {
+                            let item = tokio::select! {
+                                biased;
+                                item = stream.next() => item,
+                                _ = interval.tick() => {
+                                    if tx.send(Ok(heartbeat.clone())).await.is_err() {
+                                        return;
+                                    }
+                                    continue;
+                                }
+                            };
+                            match item {
+                                Some(Ok(bytes)) => collected.extend_from_slice(&bytes),
+                                Some(Err(error)) => {
+                                    last_error = format!("empty provider response: {error}");
+                                    empty = true;
+                                    break;
+                                }
+                                None => break,
+                            }
+                        }
+                        if !empty {
+                            let _ = tx.send(Ok(collected)).await;
+                            return;
+                        }
+                    }
+                    V3OpenAiChatRelayClientBody::Json(json) => {
+                        // provider 以 JSON 完成（非 SSE）：包装为 SSE data 帧。
+                        let bytes = serde_json::to_vec(&json).unwrap_or_default();
+                        let mut frame = Vec::with_capacity(bytes.len() + 8);
+                        frame.extend_from_slice(b"data: ");
+                        frame.extend_from_slice(&bytes);
+                        frame.extend_from_slice(b"\n\n");
+                        let _ = tx.send(Ok(frame)).await;
+                        return;
+                    }
+                },
+                Err(error) => {
+                    last_error = error.to_string();
+                    empty = true;
                 }
             }
+            if empty && attempts < 3 {
+                // 自动重试（心跳继续，连接保持）；每次失败 health 已累计，
+                // 3 次后拉黑 15 分钟，第 4 次 route 排除/切 provider。
+                continue;
+            }
+            // 3 次都错：投影 502 错误帧（客户端重试时命中已被拉黑的 provider → 切）。
+            let error_frame = serde_json::json!({
+                "status": 502,
+                "error": {
+                    "code": "provider_failed_after_retries",
+                    "message": format!("provider failed after {attempts} attempts: {last_error}"),
+                    "type": "provider_error",
+                }
+            });
+            let bytes = serde_json::to_vec(&error_frame).unwrap_or_default();
+            let mut frame = Vec::with_capacity(bytes.len() + 8);
+            frame.extend_from_slice(b"data: ");
+            frame.extend_from_slice(&bytes);
+            frame.extend_from_slice(b"\n\n");
+            let _ = tx.send(Ok(frame)).await;
+            return;
         }
     });
     // 客户端 SSE 连接由 proxy（routecodex）独立管理：立即回 200 + text/event-stream，
