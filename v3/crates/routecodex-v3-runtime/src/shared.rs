@@ -17,10 +17,10 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 /// Direct SSE 首帧超时：provider 返回 200 但首个语义事件挂起时 fail-fast
-/// （默认 30s，明显短于 provider 请求总超时，避免客户端无限等待/EOF 且无日志）。
+/// （默认 8s，短于常见客户端 ~8-12s 的超时重试窗口，避免客户端无限重试/EOF 且 console 静默）。
 /// 超时归一化为 transport Error01 进入错误链（reselect / Error06 终态投影），
 /// 不在 server/SSE 层裸造错误帧。
-const V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
 pub(crate) fn v3_route_plan_error_source(
     stage: &'static str,
