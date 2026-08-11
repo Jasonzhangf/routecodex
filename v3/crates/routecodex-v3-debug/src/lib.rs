@@ -99,6 +99,7 @@ impl Default for V3RedactionPolicy {
             sensitive_key_fragments: vec![
                 "authorization",
                 "api_key",
+                "api-key",
                 "apikey",
                 "token",
                 "secret",

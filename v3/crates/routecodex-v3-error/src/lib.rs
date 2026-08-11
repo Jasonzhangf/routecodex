@@ -826,9 +826,13 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         error["external_error"] =
             serde_json::to_value(external_error).expect("V3ExternalErrorLink must serialize");
     }
+    let body = routecodex_v3_debug::redact_debug_value(
+        &routecodex_v3_debug::V3RedactionPolicy::default(),
+        serde_json::json!({ "error": error }),
+    );
     V3Error06ClientProjected {
         status,
-        body: serde_json::json!({ "error": error }),
+        body,
         chain: V3_ERROR_CHAIN_NODE_IDS,
         health_action,
     }

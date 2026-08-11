@@ -1,6 +1,7 @@
 use serde_json::Value;
 use std::fs;
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -55,8 +56,11 @@ impl V3CodexSampleStore {
             .join(port.to_string());
         let dir = port_root.join(encode_v3_codex_sample_path_segment(request_id));
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        // 样本含敏感请求/错误载荷：目录 0700、文件 0600（不依赖 umask）。
+        let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
         let path = dir.join(file_name);
-        let mut file = fs::File::create(path).map_err(|error| error.to_string())?;
+        let mut file = fs::File::create(&path).map_err(|error| error.to_string())?;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
         serde_json::to_writer_pretty(&mut file, payload).map_err(|error| error.to_string())?;
         file.write_all(b"\n").map_err(|error| error.to_string())?;
         enforce_v3_codex_sample_request_retention(&port_root, Some(&dir), self.retention)?;
