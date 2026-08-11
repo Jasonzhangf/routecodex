@@ -59,42 +59,72 @@ pub(crate) fn count_v3_payload_image_refs(body: &Value) -> usize {
     total
 }
 
-/// 历史图片统一占位清理（纯函数）。
+/// 历史图片统一占位清理（唯一清洗真源——所有入口/形态/边界在此一次处理完，
+/// 禁止在调用点/其他文件零散补丁）。
 ///
-/// 处理三种形状：
-/// - `messages[]`（chat canonical）：content 数组中的 `{"type":"image_url",...}`
-///   part -> `{"type":"text","text":"[Image]"}`；
-/// - `input[]`（responses）：item content 数组中的 `{"type":"input_image",...}`
-///   part -> `{"type":"input_text","text":"[Image]"}`；
-/// - `contents[]`（gemini）：parts 中的 image/inline_data/file_data part ->
-///   `{"text":"[Image]"}`。
+/// ## 边界（历史轮定义，统一）
+/// - 最后一个 user carrier 之前的所有内容（含历史 fco/assistant）一律清洗；
+/// - 最后 user 之后若没有新的 user carrier（纯工具轮 / 完整历史重放——input
+///   末尾是 function_call_output / tool 结果）：这些 fco/tool 是历史工具结果
+///   截图，被推送会导致 provider context 膨胀 400（如 asxs-grok 收到 2.1MB
+///   请求必 400）——一并清洗；
+/// - 最后 user 本身（若含用户主动发的图片）是当前轮语义——保留不清洗。
+///   user carrier：messages 的 role=="user"；responses 的 role=="user" 或
+///   input_text/text/output_text item；gemini 的 role=="user" content。
 ///
-/// 当前轮判定与 Virtual Router 的 `extract_active_turn_signals` 对齐：
-/// 最后一个 user carrier（role=="user"，或 responses 无 role 的
-/// input_text/text/output_text item，或 gemini role=="user" content）即当前轮，
-/// 其及其之后的内容一律不动；`function_call_output` / tool 结果不是 user
-/// carrier，不会把真实当前轮图片误判为历史。
+/// ## 形态（全部覆盖）
+/// - messages[]：content 数组的 image_url/data/file_id part + tool 消息字符串
+///   content（JSON 数组字符串——解析后清洗）；
+/// - input[]：item content 的 input_image/image_url part + function_call_output
+///   output 数组（含无 type 字段的 image_url/data/file_id part）+ 顶层
+///   input_image/output_image item；
+/// - contents[]（gemini）：parts 的 inline_data/file_data/image。
+///
+/// 替换占位符：chat 用 `{"type":"text","text":"[Image]"}`，responses 用
+/// `{"type":"input_text","text":"[Image]"}`——字节级确定性（任意 base64 →
+/// 相同占位符 → 历史 wire 稳定 → provider 前缀缓存命中）。
 pub(crate) fn normalize_v3_history_image_placeholders(body: &mut Value) {
     if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-        let current_turn_index = messages
+        let last_user = messages
             .iter()
-            .rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"))
-            .unwrap_or(0);
-        for message in messages.iter_mut().take(current_turn_index) {
+            .rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"));
+        let history_end = last_user.unwrap_or(0);
+        for message in messages.iter_mut().take(history_end) {
             normalize_chat_content_parts(message);
+        }
+        // 最后 user 之后若没有新的 user 消息（纯工具轮 / 完整历史重放——末尾是
+        // tool 工具结果）：tool 消息的图片是历史工具结果截图——一并清洗。
+        if let Some(last_user) = last_user {
+            if !messages[last_user + 1..]
+                .iter()
+                .any(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+            {
+                for message in messages.iter_mut().skip(last_user + 1) {
+                    normalize_chat_content_parts(message);
+                }
+            }
         }
         return;
     }
     if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
-        let current_turn_index = input
-            .iter()
-            .rposition(is_responses_user_carrier)
-            .unwrap_or(0);
-        for item in input.iter_mut().take(current_turn_index) {
+        let last_user = input.iter().rposition(is_responses_user_carrier);
+        let history_end = last_user.unwrap_or(0);
+        for item in input.iter_mut().take(history_end) {
             normalize_responses_content_parts(item);
             normalize_responses_output_parts(item);
             if is_top_level_input_image(item) {
                 *item = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
+            }
+        }
+        // 最后 user 之后若没有新的 user carrier（纯工具轮 / 完整历史重放——
+        // input 末尾是 function_call_output 工具结果）：这些 fco 是历史工具结果
+        // 截图，被推送会导致 provider context 膨胀 400（如 asxs-grok 收到
+        // 2.1MB 请求必 400）——一并清洗 fco 图片 → [Image]。
+        if let Some(last_user) = last_user {
+            if !input[last_user + 1..].iter().any(is_responses_user_carrier) {
+                for item in input.iter_mut().skip(last_user + 1) {
+                    normalize_responses_output_parts(item);
+                }
             }
         }
         return;
@@ -527,8 +557,10 @@ mod tests {
     }
 
     #[test]
-    fn current_turn_function_call_output_output_image_preserved() {
-        // 当前轮（最后一个 user carrier 之后）的工具输出图片不清洗（当前轮输入语义保留）。
+    fn current_turn_function_call_output_output_image_cleaned_when_no_new_user() {
+        // 最后 user 之后若无新的 user carrier（纯工具轮 / 完整历史重放——input
+        // 末尾是 function_call_output）：fco 是历史工具结果截图，被推送会导致
+        // provider context 膨胀 400（asxs-grok 2.1MB 必 400）——一律清洗。
         let mut body = json!({
             "input": [
                 {"type": "message", "role": "user", "content": [
@@ -542,8 +574,13 @@ mod tests {
         normalize_v3_history_image_placeholders(&mut body);
         assert_eq!(
             body["input"][1]["output"][0]["type"],
-            "input_image",
-            "current-turn tool output image must be preserved"
+            "input_text",
+            "fco image after last user with no new user must be cleaned to placeholder"
+        );
+        assert_eq!(
+            body["input"][1]["output"][0]["text"],
+            V3_HISTORY_IMAGE_PLACEHOLDER,
+            "cleaned fco image must become placeholder text"
         );
     }
 
@@ -600,7 +637,8 @@ mod tests {
             bytes_a, bytes_c,
             "arbitrary base64 history image must produce identical bytes"
         );
-        // 当前轮图片保留：最后一个 user 之后的 fco.output 不替换。
+        // 最后 user 之后无新 user 的 fco 图片：历史工具结果（完整历史重放/纯工具轮）
+        // ——清洗为占位（与 asxs-grok 2.1MB 400 场景一致，图片绝不推送历史）。
         let mut current = json!({
             "input": [
                 {"type": "message", "role": "user", "content": [
@@ -613,9 +651,9 @@ mod tests {
         });
         normalize_v3_history_image_placeholders(&mut current);
         assert_eq!(
-            current["input"][1]["output"][0]["image_url"],
-            "data:image/png;base64,CURRENT",
-            "current-turn image stays untouched (only current turn affects cache)"
+            current["input"][1]["output"][0]["text"],
+            V3_HISTORY_IMAGE_PLACEHOLDER,
+            "fco image after last user with no new user must be cleaned"
         );
     }
 
@@ -684,5 +722,32 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn chat_tool_messages_after_last_user_without_new_user_are_cleaned() {
+        // chat 边界对称：最后 user 之后若无新的 user 消息（纯工具轮 / 完整历史
+        // 重放——末尾是 tool 工具结果），tool 消息的图片是历史工具结果截图——
+        // 一并清洗（与 responses 的 fco 场景一致，图片绝不推送历史）。
+        let mut body = json!({
+            "messages": [
+                {"role": "user", "content": "last user"},
+                {"role": "assistant", "content": "calling tool"},
+                {"role": "tool", "tool_call_id": "call_1", "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,TOOLIMG"}}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["messages"][2]["content"][0]["type"],
+            "text",
+            "tool image after last user with no new user must be cleaned"
+        );
+        assert_eq!(
+            body["messages"][2]["content"][0]["text"],
+            V3_HISTORY_IMAGE_PLACEHOLDER,
+            "cleaned tool image must become placeholder text"
+        );
     }
 }
