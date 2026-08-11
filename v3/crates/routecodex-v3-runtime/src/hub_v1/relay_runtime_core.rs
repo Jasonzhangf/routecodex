@@ -110,7 +110,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
     /// 协议 runtime 输出类型（如 `V3GeminiRelayRuntimeOutput`）。
     type Output;
     /// SSE 客户端流类型（如 `V3GeminiRelayClientStream`）。
-    type SseStream;
+    type SseStream: futures_util::Stream<Item = Result<Vec<u8>, String>> + Send + Unpin;
     /// SSE provider outcome（记录 success/failure）。
     type SseOutcome;
 
@@ -205,6 +205,8 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
     fn assemble_json_output(client_response: Value, trace: Vec<&'static str>) -> Self::Output;
     /// 组装 SSE 成功输出。
     fn assemble_sse_output(sse: Self::SseStream, trace: Vec<&'static str>) -> Self::Output;
+    /// 从收集的完整字节重建客户端流（非空响应返回给 server；实现方构造自己的流类型）。
+    fn sse_from_collected(collected: Vec<Vec<u8>>) -> Self::SseStream;
     /// 组装 provider failure 输出（terminal Error06）。
     fn assemble_failure_output(
         failure: V3RelayProviderFailure,
@@ -634,18 +636,65 @@ where
                     provider_wire_protocol,
                     selected_target_compatibility_profile,
                     selected.candidate.web_search_execution_mode,
-                    request_web_search_state,
+                    request_web_search_state.clone(),
                     retain_response_cipher,
                     C::build_sse_outcome(
                         &provider_health,
                         &failure_session_scope,
-                        selected_target_provider_id,
+                        selected_target_provider_id.clone(),
                         selected_target_auth_alias,
                         selected_target_model_id,
                         false,
                         provider_action_permit.take(),
                     ),
                 )?;
+                // 收集完整 SSE 流（空检测：transducer 空响应标记 → 流内 Err）。
+                // 空响应作为 provider failure 进入错误链（reselect/同 provider 重试
+                // 预算 3 次 → 穷尽后 502 投影），不在 server 层做重试/502 决策。
+                let mut sse_bytes: Vec<Vec<u8>> = Vec::new();
+                let mut empty_response: Option<String> = None;
+                {
+                    use futures_util::StreamExt;
+                    let mut sse = sse;
+                    while let Some(item) = sse.next().await {
+                        match item {
+                            Ok(bytes) => sse_bytes.push(bytes),
+                            Err(error) => {
+                                empty_response = Some(error.to_string());
+                                break;
+                            }
+                        }
+                    }
+                }
+                if let Some(empty_error) = empty_response {
+                    let failure = provider_runtime_failure(
+                        V3ProviderError::Transport {
+                            request_id: request_id.to_string(),
+                            provider_id: selected_target_provider_id.clone(),
+                            reason: format!("empty provider response: {empty_error}"),
+                        },
+                        &selected_target_provider_id,
+                    );
+                    if let Some(failure) = handle_provider_failure(
+                        &failure_context,
+                        selected,
+                        failure,
+                        &mut V3RelayProviderFailurePolicyState {
+                            failed_candidates: &mut failed_candidates,
+                            same_candidate_retries: &mut same_candidate_retries,
+                            trace: &mut trace,
+                        },
+                        &mut retry_selected,
+                        &mut pending_provider_action_recovery,
+                    )
+                    .await
+                    .map_err(V3RelayCoreError::Target)?
+                    {
+                        return Ok(C::assemble_failure_output(failure, trace));
+                    }
+                    continue;
+                }
+                let sse = C::sse_from_collected(sse_bytes);
                 return Ok(C::assemble_sse_output(sse, trace));
             }
         }

@@ -1276,6 +1276,12 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         }
     }
 
+    fn sse_from_collected(collected: Vec<Vec<u8>>) -> Self::SseStream {
+        let stream: V3OpenAiChatClientStream =
+            Box::pin(futures_util::stream::iter(collected.into_iter().map(Ok)));
+        stream
+    }
+
     fn assemble_failure_output(
         failure: V3RelayProviderFailure,
         trace: Vec<&'static str>,
