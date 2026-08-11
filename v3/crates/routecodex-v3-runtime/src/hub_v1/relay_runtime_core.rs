@@ -68,6 +68,13 @@ async fn guard_relay_sse_first_frame(
 /// Relay SSE 首帧超时（与 Direct SSE 首帧守卫一致，30s）。
 const V3_RELAY_SSE_FIRST_FRAME_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(30);
+
+/// Relay transport 响应头等待上限：provider 在窗口内未返回响应头（上游挂起/无响应）
+/// 时归一化为 Transport 错误进入错误链——记录 provider failure（health）+ reselect 切
+/// provider。否则 provider 挂起（连接保持、不失败）会让客户端无限重试且永远命中同一
+/// provider（无法续杯 switch）。
+const V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(15);
 use std::fmt;
 
 /// 骨架内部错误（协议入口负责映射到自身错误类型）。
@@ -429,7 +436,21 @@ where
                 }
             }
         }
-        let provider_raw = match transport.send(transport_request).await {
+        let provider_raw = match tokio::time::timeout(
+            V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT,
+            transport.send(transport_request),
+        )
+        .await
+        .unwrap_or_else(|_elapsed| {
+            // provider 挂起（响应头等待超时）：归一化为 Transport 错误进入错误链
+            // （记录 provider failure + reselect 切 provider + 连续失败拉黑），
+            // 避免客户端无限重试命中同一挂起 provider。
+            Err(V3ProviderError::Transport {
+                request_id: request_id.to_string(),
+                provider_id: selected_target_provider_id.clone(),
+                reason: "provider response header timed out (suspected hang)".to_string(),
+            })
+        }) {
             Ok(raw) => raw,
             Err(V3ProviderError::HttpStatus { response }) => {
                 let failure = C::provider_http_failure(

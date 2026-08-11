@@ -59,6 +59,12 @@ use direct_sse_provider_outcome::{
 mod v3_direct_protocol_codec;
 pub use v3_direct_protocol_codec::{V3ChatDirectCodec, V3DirectProtocolCodec, V3ResponsesDirectCodec};
 const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
+
+/// Responses direct transport 响应头等待上限：provider 在该窗口内未返回响应头
+/// 视为挂起，归一化为 transport 错误进入错误链（reselect 切 provider + health
+/// 记录 + 连续失败达到阈值拉黑 15 分钟），避免客户端无限重试命中同一挂起 provider。
+const V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(15);
 static DEFAULT_RESPONSES_TRANSPORT: OnceLock<ReqwestResponsesTransport> = OnceLock::new();
 pub fn default_responses_transport() -> &'static ReqwestResponsesTransport {
     DEFAULT_RESPONSES_TRANSPORT.get_or_init(ReqwestResponsesTransport::default)
@@ -979,7 +985,21 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 &hook_registry,
             );
         }
-        let provider_raw = match transport.send(transport_request).await {
+        let provider_raw = match tokio::time::timeout(
+            V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT,
+            transport.send(transport_request),
+        )
+        .await
+        .unwrap_or_else(|_elapsed| {
+            // provider 挂起（响应头等待超时）：归一化为 transport 错误进入错误链
+            // （reselect 切 provider + health 记录 + 3 次拉黑 15 分钟），避免客户端
+            // 无限重试命中同一挂起 provider；错误只反映 provider 行为。
+            Err(V3ProviderError::Transport {
+                request_id: standardized.protocol_context.request_id.clone(),
+                provider_id: policy.target.candidate.provider_id.clone(),
+                reason: "provider response header timed out (suspected hang)".to_string(),
+            })
+        }) {
             Ok(raw) => raw,
             Err(error) => {
                 if let Err(timing_error) = runtime_timing.finish_external() {
