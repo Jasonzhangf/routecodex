@@ -65,16 +65,9 @@ async fn guard_relay_sse_first_frame(
     }
 }
 
-/// Relay SSE 首帧超时（与 Direct SSE 首帧守卫一致）。
-/// 必须短于常见客户端（zterm/codex/reasonix 等 ~8-12s）的超时重试窗口，
-/// 否则 provider 首帧挂起时 client 先超时重试，形成无限重试且 console 静默。
+/// Relay SSE 首帧超时（与 Direct SSE 首帧守卫一致，30s）。
 const V3_RELAY_SSE_FIRST_FRAME_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(8);
-
-/// Relay transport 响应头超时：provider 在窗口内未返回响应头（上游挂起）时
-/// 归一化为 Transport 错误进入错误链切 provider，避免 client 无限重试。
-const V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(8);
+    std::time::Duration::from_secs(30);
 use std::fmt;
 
 /// 骨架内部错误（协议入口负责映射到自身错误类型）。
@@ -436,14 +429,9 @@ where
                 }
             }
         }
-        let provider_raw = match tokio::time::timeout(
-            V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT,
-            transport.send(transport_request),
-        )
-        .await
-        {
-            Ok(Ok(raw)) => raw,
-            Ok(Err(V3ProviderError::HttpStatus { response })) => {
+        let provider_raw = match transport.send(transport_request).await {
+            Ok(raw) => raw,
+            Err(V3ProviderError::HttpStatus { response }) => {
                 let failure = C::provider_http_failure(
                     response.status,
                     &response.body,
@@ -469,42 +457,8 @@ where
                 }
                 continue;
             }
-            Ok(Err(error)) => {
+            Err(error) => {
                 let failure = provider_runtime_failure(error, &selected_target_provider_id);
-                drop(provider_action_permit.take());
-                if let Some(failure) = handle_provider_failure(
-                    &failure_context,
-                    selected,
-                    failure,
-                    &mut V3RelayProviderFailurePolicyState {
-                        failed_candidates: &mut failed_candidates,
-                        same_candidate_retries: &mut same_candidate_retries,
-                        trace: &mut trace,
-                    },
-                    &mut retry_selected,
-                    &mut pending_provider_action_recovery,
-                )
-                .await
-                .map_err(V3RelayCoreError::Target)?
-                {
-                    return Ok(C::assemble_failure_output(failure, trace));
-                }
-                continue;
-            }
-            Err(_elapsed) => {
-                // provider 响应头在超时窗口内未返回（上游挂起）：归一化为 Transport
-                // 错误进入错误链切 provider，避免 client 无限重试且 console 静默。
-                let failure = provider_runtime_failure(
-                    V3ProviderError::Transport {
-                        request_id: request_id.to_string(),
-                        provider_id: selected_target_provider_id.clone(),
-                        reason: format!(
-                            "provider did not return a response header within {}ms",
-                            V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT.as_millis()
-                        ),
-                    },
-                    &selected_target_provider_id,
-                );
                 drop(provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
                     &failure_context,
