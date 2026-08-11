@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 pub const V3_DEFAULT_SNAPSHOT_STAGE_SELECTOR: &str =
     "client-request,provider-request,provider-response,client-response";
 const V3_DEBUG_MAX_STRING_CHARS: usize = 2048;
-const V3_DEBUG_MAX_ARRAY_ITEMS: usize = 32;
+const V3_DEBUG_MAX_ARRAY_ITEMS: usize = 300;
 const V3_DEBUG_MAX_OBJECT_ENTRIES: usize = 64;
 const V3_DEBUG_MAX_KEY_CHARS: usize = 128;
 const V3_DEBUG_MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
