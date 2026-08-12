@@ -33,6 +33,7 @@ flowchart TD
   module_v3_target["v3-target"]
   module_v3_virtual_router["v3-virtual-router"]
   module_pending -->|8 edges / 1 paths| module_pending
+  module_routecodex_v3_route_classifier -->|1 edges / 1 paths| module_routecodex_v3_route_classifier
   module_routecodex_v3_sse -->|2 edges / 1 paths| module_routecodex_v3_sse
   module_scripts -->|2 edges / 1 paths| module_docs
   module_scripts -->|1 edges / 1 paths| module_docs__manifest
@@ -50,7 +51,7 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|5 edges / 5 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|28 edges / 4 paths| module_v3_runtime
   module_v3_runtime__hub_v1 -->|127 edges / 20 paths| module_v3_runtime__hub_v1
-  module_v3_runtime -->|3 edges / 2 paths| module_routecodex_v3_route_classifier
+  module_v3_runtime -->|2 edges / 2 paths| module_routecodex_v3_route_classifier
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|4 edges / 2 paths| module_v3_error
   module_v3_runtime -->|9 edges / 5 paths| module_v3_provider_responses
@@ -70,6 +71,7 @@ flowchart TD
 | From module | To module | Edges | Functional paths |
 | --- | --- | ---: | --- |
 | pending | pending | 8 | `v3.web_search_servertool_state_machine` |
+| routecodex-v3-route-classifier | routecodex-v3-route-classifier | 1 | `vr.current_turn_typed_route_facts` |
 | routecodex-v3-sse | routecodex-v3-sse | 2 | `v3.sse.transport_boundary` |
 | scripts | docs | 2 | `v3.live_provider_compat.parity` |
 | scripts | docs::manifest | 1 | `v3.live_provider_compat.parity` |
@@ -87,7 +89,7 @@ flowchart TD
 | v3-runtime::hub_v1 | v3-provider-responses | 5 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
 | v3-runtime::hub_v1 | v3-runtime | 28 | `v3.provider_action_gate.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | v3-runtime::hub_v1 | 127 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.anthropic_relay.local_continuation`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.servertool_hook_skeleton_lifecycle`<br/>`v3.sse.protocol_codec_projection_boundary` |
-| v3-runtime | routecodex-v3-route-classifier | 3 | `v3.route_classifier.facts_classification`<br/>`vr.current_turn_typed_route_facts` |
+| v3-runtime | routecodex-v3-route-classifier | 2 | `v3.route_classifier.facts_classification`<br/>`vr.current_turn_typed_route_facts` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 4 | `v3.debug_error_foundation.mainline`<br/>`v3.hub_relay.response_failure_entry` |
 | v3-runtime | v3-provider-responses | 9 | `v3.debug_error_foundation.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.selected_provider_model_binding` |
@@ -117,9 +119,6 @@ flowchart TD
 
 | chain_id | step_id | from_node | to_node |
 | --- | --- | --- | --- |
-| v3.entry_protocol_endpoint_binding.mainline | v3-entry-bind-01 | V3Config05ManifestPublished | V3EntryBind01EndpointPatternDeclared |
-| v3.entry_protocol_endpoint_binding.mainline | v3-entry-bind-02 | V3EntryBind01EndpointPatternDeclared | V3EntryBind02ProtocolResolved |
-| v3.entry_protocol_endpoint_binding.mainline | v3-entry-bind-03 | V3EntryBind02ProtocolResolved | V3EntryBind03ServerEnablementChecked |
 | v3.web_search_servertool_state_machine | v3-web-search-sm-01 | HubReqChatProcess03Governed | V3WebSearch01RouteEvidenceClassified |
 | v3.web_search_servertool_state_machine | v3-web-search-sm-02 | V3WebSearch01RouteEvidenceClassified | VrRoute04SelectedTarget |
 | v3.web_search_servertool_state_machine | v3-web-search-sm-03 | HubRespChatProcess03Governed | V3ServerToolState01ControlScope |
@@ -128,10 +127,6 @@ flowchart TD
 | v3.web_search_servertool_state_machine | v3-web-search-sm-06 | HubRespChatProcess03Governed | V3WebSearch03SearchResultCaptured |
 | v3.web_search_servertool_state_machine | v3-web-search-sm-07 | V3WebSearch03SearchResultCaptured | HubRespOutbound04ClientSemantic |
 | v3.web_search_servertool_state_machine | v3-web-search-sm-08 | HubReqChatProcess03Governed | V3WebSearch04ToolResultInjected |
-| v3.sse.protocol_codec_projection_boundary | v3-sse-codec-01 | V3ProviderRespInbound01Raw | V3SseTransportIn03ValidatedFrameStream |
-| v3.sse.protocol_codec_projection_boundary | v3-sse-codec-02 | V3SseTransportIn03ValidatedFrameStream | V3HubRespInbound02Normalized |
-| v3.sse.protocol_codec_projection_boundary | v3-sse-codec-03 | V3HubRespContinuation04Committed | V3HubRespOutbound05ClientSemantic |
-| vr.current_turn_typed_route_facts | vr-current-turn-01 | V3HubReqExecution05Planned | V3CurrentTurnRouteFacts |
 
 ### Missing caller/callee fields
 
@@ -364,7 +359,7 @@ Manifest: `docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainli
 ```mermaid
 flowchart TD
   subgraph c_7_v3_entry_protocol_endpoint_binding_mainline_m_docs__manifest["docs::manifest"]
-    c_7_v3_entry_protocol_endpoint_binding_mainline_1["docs::manifest<br/>docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml<br/><small>docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml</small>"]
+    c_7_v3_entry_protocol_endpoint_binding_mainline_1["docs::manifest<br/>v3.entry_protocol_endpoint_binding.mainline<br/><small>docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml</small>"]
   end
   subgraph c_7_v3_entry_protocol_endpoint_binding_mainline_m_v3_config["v3-config"]
     c_7_v3_entry_protocol_endpoint_binding_mainline_0["v3-config<br/>compile_entry_protocol_bindings<br/><small>routecodex-v3-config/src/validate.rs</small>"]
@@ -372,20 +367,21 @@ flowchart TD
     c_7_v3_entry_protocol_endpoint_binding_mainline_3["v3-config<br/>V3EntryProtocolBindingManifest<br/><small>routecodex-v3-config/src/types.rs</small>"]
   end
   subgraph c_7_v3_entry_protocol_endpoint_binding_mainline_m_v3_server["v3-server"]
-    c_7_v3_entry_protocol_endpoint_binding_mainline_4["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
-    c_7_v3_entry_protocol_endpoint_binding_mainline_5["v3-server<br/>execute_v3_gemini_generate_content_request<br/><small>routecodex-v3-server/src/executors.rs</small>"]
+    c_7_v3_entry_protocol_endpoint_binding_mainline_4["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_7_v3_entry_protocol_endpoint_binding_mainline_5["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
+    c_7_v3_entry_protocol_endpoint_binding_mainline_6["v3-server<br/>execute_v3_gemini_generate_content_request<br/><small>routecodex-v3-server/src/executors.rs</small>"]
   end
   c_7_v3_entry_protocol_endpoint_binding_mainline_0 -->|v3-entry-bind-01<br/>V3Config05ManifestPublished → V3EntryBind01EndpointPatternDeclared| c_7_v3_entry_protocol_endpoint_binding_mainline_1
   c_7_v3_entry_protocol_endpoint_binding_mainline_2 -->|v3-entry-bind-02<br/>V3EntryBind01EndpointPatternDeclared → V3EntryBind02ProtocolResolved| c_7_v3_entry_protocol_endpoint_binding_mainline_3
   c_7_v3_entry_protocol_endpoint_binding_mainline_4 -->|v3-entry-bind-03<br/>V3EntryBind02ProtocolResolved → V3EntryBind03ServerEnablementChecked| c_7_v3_entry_protocol_endpoint_binding_mainline_2
-  c_7_v3_entry_protocol_endpoint_binding_mainline_4 -->|v3-entry-bind-04<br/>V3EntryBind03ServerEnablementChecked → V3EntryBind04ExecutionBindingProjected| c_7_v3_entry_protocol_endpoint_binding_mainline_5
+  c_7_v3_entry_protocol_endpoint_binding_mainline_5 -->|v3-entry-bind-04<br/>V3EntryBind03ServerEnablementChecked → V3EntryBind04ExecutionBindingProjected| c_7_v3_entry_protocol_endpoint_binding_mainline_6
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-entry-bind-01` | `V3Config05ManifestPublished` → `V3EntryBind01EndpointPatternDeclared` | binding_pending | compile_entry_protocol_bindings<br/><small>routecodex-v3-config/src/validate.rs</small> | docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml<br/><small>docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml</small> | `v3.entry_protocol_endpoint_binding` |
-| `v3-entry-bind-02` | `V3EntryBind01EndpointPatternDeclared` → `V3EntryBind02ProtocolResolved` | binding_pending | V3HubV1Manifest::entry_protocol_binding_for_endpoint<br/><small>routecodex-v3-config/src/types.rs</small> | V3EntryProtocolBindingManifest<br/><small>routecodex-v3-config/src/types.rs</small> | `v3.entry_protocol_endpoint_binding` |
-| `v3-entry-bind-03` | `V3EntryBind02ProtocolResolved` → `V3EntryBind03ServerEnablementChecked` | binding_pending | pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | V3HubV1Manifest::entry_protocol_binding_for_endpoint<br/><small>routecodex-v3-config/src/types.rs</small> | `v3.entry_protocol_endpoint_binding` |
+| `v3-entry-bind-01` | `V3Config05ManifestPublished` → `V3EntryBind01EndpointPatternDeclared` | anchored | compile_entry_protocol_bindings<br/><small>routecodex-v3-config/src/validate.rs</small> | v3.entry_protocol_endpoint_binding.mainline<br/><small>docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml</small> | `v3.entry_protocol_endpoint_binding` |
+| `v3-entry-bind-02` | `V3EntryBind01EndpointPatternDeclared` → `V3EntryBind02ProtocolResolved` | anchored | V3HubV1Manifest::entry_protocol_binding_for_endpoint<br/><small>routecodex-v3-config/src/types.rs</small> | V3EntryProtocolBindingManifest<br/><small>routecodex-v3-config/src/types.rs</small> | `v3.entry_protocol_endpoint_binding` |
+| `v3-entry-bind-03` | `V3EntryBind02ProtocolResolved` → `V3EntryBind03ServerEnablementChecked` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | V3HubV1Manifest::entry_protocol_binding_for_endpoint<br/><small>routecodex-v3-config/src/types.rs</small> | `v3.entry_protocol_endpoint_binding` |
 | `v3-entry-bind-04` | `V3EntryBind03ServerEnablementChecked` → `V3EntryBind04ExecutionBindingProjected` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | execute_v3_gemini_generate_content_request<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.entry_protocol_endpoint_binding` |
 
 ## v3.hub_pipeline.v1.hook_registry_compile
@@ -1729,7 +1725,7 @@ flowchart TD
 Resp03 response small skeleton: provider-neutral text harvest and tool-frame repair occur before finish_reason branch; tool_call branch runs servertool hook before ordinary governance; stop branch runs a distinct stop hook; Resp04 only saves the governed continuation truth.
 
 Owner feature: `v3.resp03_tool_governance_gap_closeout`
-Manifest: `binding_pending`
+Manifest: `docs/architecture/manifests/v3.resp03_tool_governance_gap_closeout.mainline.yml`
 
 ```mermaid
 flowchart TD
@@ -2354,9 +2350,9 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-sse-codec-01` | `V3ProviderRespInbound01Raw` → `V3SseTransportIn03ValidatedFrameStream` | binding_pending | project_sse_stream<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | SseIncrementalDecoder::push<br/><small>routecodex-v3-sse/src/lib.rs</small> | `v3.sse_protocol_codec_projection_boundary` |
-| `v3-sse-codec-02` | `V3SseTransportIn03ValidatedFrameStream` → `V3HubRespInbound02Normalized` | binding_pending | project_sse_event_payload<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | build_v3_hub_resp_inbound_02_from_provider_resp_compat_02<br/><small>routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs</small> | `v3.sse_protocol_codec_projection_boundary` |
-| `v3-sse-codec-03` | `V3HubRespContinuation04Committed` → `V3HubRespOutbound05ClientSemantic` | binding_pending | project_sse_stream<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small> | `v3.sse_protocol_codec_projection_boundary` |
+| `v3-sse-codec-01` | `V3ProviderRespInbound01Raw` → `V3SseTransportIn03ValidatedFrameStream` | anchored | project_sse_stream<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | SseIncrementalDecoder::push<br/><small>routecodex-v3-sse/src/lib.rs</small> | `v3.sse_protocol_codec_projection_boundary` |
+| `v3-sse-codec-02` | `V3SseTransportIn03ValidatedFrameStream` → `V3HubRespInbound02Normalized` | anchored | project_sse_event_payload<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | build_v3_hub_resp_inbound_02_from_provider_resp_compat_02<br/><small>routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs</small> | `v3.sse_protocol_codec_projection_boundary` |
+| `v3-sse-codec-03` | `V3HubRespContinuation04Committed` → `V3HubRespOutbound05ClientSemantic` | anchored | project_sse_stream<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small> | `v3.sse_protocol_codec_projection_boundary` |
 
 ## vr.current_turn_typed_route_facts
 
@@ -2368,20 +2364,19 @@ Manifest: `docs/architecture/manifests/vr.route_classifier.mainline.yml`
 ```mermaid
 flowchart TD
   subgraph c_56_vr_current_turn_typed_route_facts_m_routecodex_v3_route_classifier["routecodex-v3-route-classifier"]
+    c_56_vr_current_turn_typed_route_facts_0["routecodex-v3-route-classifier<br/>build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small>"]
     c_56_vr_current_turn_typed_route_facts_1["routecodex-v3-route-classifier<br/>classify_route<br/><small>routecodex-v3-route-classifier/src/route.rs</small>"]
-    c_56_vr_current_turn_typed_route_facts_3["routecodex-v3-route-classifier<br/>build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small>"]
   end
   subgraph c_56_vr_current_turn_typed_route_facts_m_v3_runtime["v3-runtime"]
-    c_56_vr_current_turn_typed_route_facts_0["v3-runtime<br/>build_v3_current_turn_route_facts<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
     c_56_vr_current_turn_typed_route_facts_2["v3-runtime<br/>build_v3_router_request_facts_for_entry_with_control<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
   end
   c_56_vr_current_turn_typed_route_facts_0 -->|vr-current-turn-01<br/>V3HubReqExecution05Planned → V3CurrentTurnRouteFacts| c_56_vr_current_turn_typed_route_facts_1
-  c_56_vr_current_turn_typed_route_facts_2 -->|v3-route-classifier-facts-02<br/>V3RouterRequestFacts → V3CurrentTurnRouteFacts| c_56_vr_current_turn_typed_route_facts_3
+  c_56_vr_current_turn_typed_route_facts_2 -->|v3-route-classifier-facts-02<br/>V3RouterRequestFacts → V3CurrentTurnRouteFacts| c_56_vr_current_turn_typed_route_facts_0
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `vr-current-turn-01` | `V3HubReqExecution05Planned` → `V3CurrentTurnRouteFacts` | binding_pending | build_v3_current_turn_route_facts<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | classify_route<br/><small>routecodex-v3-route-classifier/src/route.rs</small> | `vr.current_turn_typed_route_facts` |
+| `vr-current-turn-01` | `V3HubReqExecution05Planned` → `V3CurrentTurnRouteFacts` | anchored | build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small> | classify_route<br/><small>routecodex-v3-route-classifier/src/route.rs</small> | `vr.current_turn_typed_route_facts` |
 | `v3-route-classifier-facts-02` | `V3RouterRequestFacts` → `V3CurrentTurnRouteFacts` | anchored | build_v3_router_request_facts_for_entry_with_control<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small> | `v3.route_classifier_local_owner` |
 
 ## v3.provider_global_subscription_probe
