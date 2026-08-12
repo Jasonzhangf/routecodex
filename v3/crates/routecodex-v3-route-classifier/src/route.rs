@@ -1,3 +1,19 @@
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct V3CurrentTurnRouteFacts {
+    /// Typed facts are the only input to route classification. This type must
+    /// not expose request/response payload or metadata carriers.
+    pub reached_long_context: bool,
+    pub has_image_attachment: bool,
+    pub latest_message_from_user: bool,
+    pub stopless_followup: bool,
+    pub has_current_turn_tool_output: bool,
+    pub has_current_turn_web_search: bool,
+    pub last_assistant_tool_category: Option<String>,
+    pub has_background_keyword: bool,
+}
+
+pub type RouteClassifierInput = V3CurrentTurnRouteFacts;
+
 pub const DEFAULT_ROUTE: &str = "default";
 
 pub const ROUTE_PRIORITY: [&str; 8] = [
@@ -10,26 +26,6 @@ pub const ROUTE_PRIORITY: [&str; 8] = [
     "tools",
     DEFAULT_ROUTE,
 ];
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RouteClassifierInput {
-    /// Long-context threshold result. Caller is responsible for the token
-    /// estimate; this crate does NOT carry previous-turn usage in metadata
-    /// (P0 control-plane isolation forbids stuffing control state into the
-    /// request payload). If the caller wants better accuracy across many
-    /// turns, it must surface usage via a typed carrier — not by smuggling
-    /// it through `metadata` or any field the route-classifier would expose
-    /// to providers.
-    pub reached_long_context: bool,
-    pub has_image_attachment: bool,
-    pub latest_message_from_user: bool,
-    pub stopless_followup: bool,
-    pub has_current_turn_tool_output: bool,
-    pub has_current_turn_web_search: bool,
-    pub last_assistant_tool_category: Option<String>,
-    pub current_user_text: String,
-    pub has_background_keyword: bool,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteClassification {
@@ -50,7 +46,7 @@ impl Default for RouteClassification {
     }
 }
 
-pub fn classify_route(input: &RouteClassifierInput) -> RouteClassification {
+pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
     let last_tool_category = if input.latest_message_from_user {
         ""
     } else {
@@ -65,20 +61,10 @@ pub fn classify_route(input: &RouteClassifierInput) -> RouteClassification {
     let coding_continuation = continuation && last_tool_category == "coding";
     let search_continuation = continuation && last_tool_category == "search";
     let web_search_tool_intent = continuation && last_tool_category == "websearch";
-    // V2 final semantics: web_search text-intent only counts when the request is a
-    // user input turn (latest message from user, no tool output in current turn)
-    // and has no image attachment (multimodal takes precedence). Restoration
-    // targets the strict STRICT_TERMS list in `tools::has_web_search_intent`.
-    let current_user_web_search_intent = input.latest_message_from_user
-        && !input.has_current_turn_tool_output
-        && !input.has_image_attachment
-        && !input.current_user_text.trim().is_empty()
-        && crate::tools::has_web_search_intent(&input.current_user_text);
     let other_tool_continuation = continuation && last_tool_category == "other";
     let unknown_tool_continuation = continuation && last_tool_category.is_empty();
     let web_search = web_search_tool_intent
-        || input.has_current_turn_web_search
-        || current_user_web_search_intent;
+        || input.has_current_turn_web_search;
 
     let evaluation = vec![
         (
@@ -96,8 +82,6 @@ pub fn classify_route(input: &RouteClassifierInput) -> RouteClassification {
             web_search,
             if web_search_tool_intent {
                 "web_search:tool-intent"
-            } else if current_user_web_search_intent {
-                "web_search:user-text-intent"
             } else {
                 "web_search:explicit-or-intent"
             },

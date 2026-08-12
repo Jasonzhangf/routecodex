@@ -135,7 +135,7 @@ requireMatch(
 );
 requireMatch(
   serverLiveSnapshot,
-  /fn persist_v3_error_evidence_payload[\s\S]{0,600}payload,\s*\n\s*true,\s*\n\s*\)/,
+  /persist_v3_error_evidence_payload[\s\S]*?state\.codex_sample_store\.persist\([\s\S]*?payload,[\s\S]*?true,/,
   "Error evidence must force-write samples even when sampling is disabled",
 );
 requireMatch(
@@ -159,33 +159,24 @@ requireMatch(
 );
 requireMatch(
   configValidate,
-  /codex_samples: authoring\s*\n?\s*\.codex_samples\s*\n?\s*\.unwrap_or\(cfg!\(debug_assertions\)\)/,
-  "Dev builds must enable codex samples by default; release builds must require explicit opt-in",
+  /codex_samples:\s*false,/,
+  "Config compilation must not authorize live codex samples; lifecycle must opt in explicitly",
 );
 
-// 保真语义必须存在：全量捕获 + 纯 redaction。
+// 保真语义必须存在：全量捕获 + 原样诊断投影。
 requireMatch(
   debug,
-  /pub fn redact_debug_value[\s\S]*redact_debug_value_at_key\(policy,\s*None,\s*value\)/,
-  "redact_debug_value must delegate to pure redaction without a budget",
+  /pub fn project_debug_value_verbatim\(_policy:\s*&V3RedactionPolicy,\s*value:\s*Value\)\s*->\s*Value\s*\{\s*value\s*\}/,
+  "debug payload projection must preserve the complete value verbatim",
 );
 requireMatch(
   debug,
   /pub struct V3DebugBoundedTextCapture[\s\S]*pub fn append[\s\S]*self\.bytes\.extend_from_slice\(bytes\)/,
   "BoundedTextCapture must append full stream text without truncation",
 );
-requireMatch(
-  debug,
-  /fn redact_debug_value_at_key[\s\S]*Value::String\(text\)\s+if\s+looks_like_secret_literal\(&text\)/,
-  "Redaction must keep secret-literal redaction",
-);
-
-// 安全 redaction 标记必须保留（sensitive key / secret literal）。
-requireMatch(
-  debug,
-  /Value::String\("\[REDACTED\]"\.to_string\(\)\)/,
-  "Debug must keep [REDACTED] security redaction",
-);
+if (/Value::String\("\[REDACTED\]"\.to_string\(\)/.test(debug)) {
+  throw new Error("Debug payload projection must not generate [REDACTED]");
+}
 
 requireMatch(
   serverLiveSnapshot,
@@ -242,7 +233,7 @@ forbidMatch(
 for (const testName of [
   "debug_side_channel_preserves_large_history_arrays_verbatim",
   "debug_stream_capture_preserves_full_text_verbatim",
-  "debug_side_channel_preserves_media_and_oversized_strings_and_redacts_secrets",
+  "debug_side_channel_preserves_media_and_oversized_strings_verbatim",
 ]) {
   requireMatch(debugTests, new RegExp(`fn ${testName}\\b`), `${testName} must exist`);
 }

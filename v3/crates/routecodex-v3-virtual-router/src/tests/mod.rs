@@ -44,9 +44,11 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
             snapshot_direct: true,
             dry_run: false,
             retention: BTreeMap::new(),
+            full_codex_sampling: false,
         },
         error: V3ErrorManifest {
             policies: BTreeMap::new(),
+            provider_error_default_path: Vec::new(),
             provider_error_action_policy: Vec::new(),
             client_error_projection_policy: Vec::new(),
         },

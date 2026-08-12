@@ -1229,7 +1229,7 @@ features:
   test_design:
   - docs/goals/v3-debug-error-foundation-plan.md
   required_unit:
-  - routecodex-v3-debug ordered events, sinks, redaction, raw capture, snapshot sessions,
+  - routecodex-v3-debug ordered events, sinks, verbatim diagnostic projection, raw capture, snapshot sessions,
     dry-run fixture plans
   - routecodex-v3-error six adjacent builders, taxonomy, action scope, target exhaustion,
     client projection
@@ -1859,6 +1859,8 @@ features:
   - OpenAI Chat finish_reason=stop is the semantic terminal.
   - "[DONE] and EOF do not create semantic terminality or success."
   - provider event parsing stays in the selected provider codec.
+  - provider SSE data parsing and Responses typed outcome are owned by
+    v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs.
   - runtime and SSE transport do not parse business/control semantics.
   required_reverse:
   - EOF without semantic terminal fails explicitly at the codec/lifecycle owner.
@@ -1866,6 +1868,8 @@ features:
   - malformed provider event fails at provider codec, not transport/server.
   required_gates:
   - npm run verify:sse-architecture-boundary
+  - npm run verify:v3-provider-action-gate
+  - npm run verify:v3-runtime-timing-observability
   - npm run test:v3-openai-chat-relay-runtime-integration
   - npm run verify:v3-openai-chat-relay-runtime-integration
   - npm run verify:v3-resource-map
@@ -1878,7 +1882,7 @@ features:
       and exact same-entry live replay before delivery.
     forbidden_claim: Do not claim completion from transport tests alone.
 - feature_id: vr.current_turn_typed_route_facts
-  status: design_not_implemented
+  status: source_controlled_live_replay_pending
   change_risk: critical
   owner_kind: rust_v3_route_fact_boundary
   owner_scope: Explicit typed current-turn facts only; no request-message or
@@ -1888,11 +1892,11 @@ features:
     phase: 1
     steps:
     - P1: '定义 V3CurrentTurnRouteFacts typed carrier（与 RouteClassification 同 crate）。'
-    - P2: 'build_v3_current_turn_route_facts 提取 typed 字段，classify_route 只消费 typed facts。'
+    - P2: 'build_v3_current_turn_route_facts 提取 typed 字段，classify_route 只消费 typed facts；不扫描业务文本。'
     - P3: 'nodes.rs / 测试迁移到 typed carrier；物理删除 payload-scanning 推断（硬护栏 12）。'
     - P4: 'VR 消费方只读 typed current-turn facts，禁止重建。'
-    status_note: 未实现前保持 status=design_not_implemented（不冒充 active）；
-      canonical_builders 符号未实现，红测/verify 未锚定；进度以符号存在为准。
+    status_note: typed carrier and canonical builder are source-bound; live
+      positive/reverse replay remains pending and must not be claimed complete.
   design:
   - docs/goals/v3-openai-chat-anthropic-sse-terminal-closeout-fix-design.md
   contract:
@@ -1912,8 +1916,8 @@ features:
   - npm run verify:v3-module-boundaries
   - git diff --check
   completion_rule:
-    source: Complete only when raw payload inference is physically removed and
-      all callers consume the typed current-turn carrier.
+    source: Complete only when all classifier callers consume the typed
+      current-turn carrier and no raw payload reaches classify_route.
     runtime: Requires exact current-turn live replay and negative historical/text
       replay after install and aggregate restart.
 - feature_id: v3.protocol_conversion_field_parity
@@ -3417,7 +3421,7 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-resource-operation-map.yml
   required_positive:
-  - Debug artifacts are redacted and preserved verbatim before filesystem persistence.
+  - Debug artifacts are preserved verbatim before filesystem persistence; no proxy-generated redaction marker is allowed.
   - Error evidence force-writes request/error samples even when sampling is disabled.
   - Dev builds sample by default; release builds require explicit opt-in.
   - Each port retains at most 200 request directories.
@@ -3436,7 +3440,7 @@ features:
   status: source_active_live_verification_required
   change_risk: medium
   owner_kind: rust_v3_failure_scoped_diagnostic_artifact
-  owner_scope: Server persists redacted request, Error chain, and provider wire snapshots
+  owner_scope: Server persists verbatim request, Error chain, and provider wire snapshots
     only after terminal failure; artifacts remain outside MetadataCenter and normal
     payload.
   owner_modules:
@@ -3446,7 +3450,7 @@ features:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
-  - Terminal Relay failure persists redacted request and Error chain evidence through
+  - Terminal Relay failure persists verbatim request and Error chain evidence through
     the declared side-channel edge.
   required_negative:
   - Success responses do not force failure evidence persistence.
@@ -3546,7 +3550,7 @@ features:
   required_unit:
   - classify_route consumes only typed request facts and returns a classification decision;
     it never reads raw payloads or writes control state into bodies.
-  - extract_active_turn_signals reads request data-plane fields only and emits typed signals.
+  - build_v3_current_turn_route_facts reads protocol fields only and emits typed current-turn facts; business text does not create route-control state.
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
   - npm run verify:v3-module-boundaries
@@ -3620,6 +3624,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib transient_stage_code_classifier
   - npm run verify:responses-continuation-immutable-boundary
   completion_rule:
     source: Relay runtime lib tests and continuation immutable-boundary gate pass
@@ -3639,9 +3644,34 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_direct_transport_header_timeout_keeps_120_second_budget
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_transport_header_timeout_keeps_120_second_budget
   - npm run verify:v3-architecture-ci
   - npm run verify:v3-stage-protocol-shapes
   completion_rule:
     source: Runtime lib tests, architecture CI 35/35, and stage-protocol-shapes
       (direct same_protocol, shared codec allowed) pass.
     runtime: 'responses/chat direct live entries replayed (200 with content); known gap: openai_chat direct success response timing observability (V3E3) tracked in handoff H3 for the parallel direct claim.'
+- feature_id: v3.provider_global_subscription_probe
+  status: source_active_live_verification_required
+  change_risk: critical
+  owner_kind: rust_v3_provider_global_health_lifecycle
+  owner_modules:
+  - v3/crates/routecodex-v3-error/src/subscription.rs
+  - v3/crates/routecodex-v3-config/src/types.rs
+  - v3/crates/routecodex-v3-config/src/validate/provider_error_policy.rs
+  - v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --test config_v3_contract -- --nocapture
+  - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_boundary:
+    source_controlled: true
+    live_cutover: required
+    global_install_restart: required
+    forbidden_claim: Do not claim hourly probe or provider-global recovery from state-only tests; live runtime evidence is required.

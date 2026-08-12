@@ -106,7 +106,6 @@ pub fn run_req_outbound_stage3_compat(
     ) {
         if let Some(root) = payload.as_object_mut() {
             normalize_responses_function_tools(root);
-            strip_responses_reasoning_content_for_provider_wire(root);
         }
     }
 
@@ -497,20 +496,6 @@ fn normalize_responses_function_tools(root: &mut Map<String, Value>) {
         normalized.push(Value::Object(normalized_tool));
     }
     root.insert("tools".to_string(), Value::Array(normalized));
-}
-
-fn strip_responses_reasoning_content_for_provider_wire(root: &mut Map<String, Value>) {
-    let Some(input) = root.get_mut("input").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for entry in input.iter_mut() {
-        let Some(row) = entry.as_object_mut() else {
-            continue;
-        };
-        if row.get("type").and_then(Value::as_str) == Some("reasoning") {
-            row.remove("content");
-        }
-    }
 }
 
 fn apply_responses_temperature_unsupported_compat(root: &mut Map<String, Value>) {
@@ -1159,17 +1144,6 @@ fn sanitize_id_token(value: &str) -> String {
     }
 }
 
-fn short_hash(value: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(value.as_bytes());
-    let digest = hasher.finalize();
-    digest
-        .iter()
-        .take(5)
-        .map(|byte| format!("{:02x}", byte))
-        .collect::<String>()
-}
-
 fn normalize_function_call_id(call_id: Option<&str>, fallback: &str) -> String {
     let raw = call_id.unwrap_or(fallback).trim();
     let safe = sanitize_id_token(raw);
@@ -1181,10 +1155,12 @@ fn normalize_function_call_id(call_id: Option<&str>, fallback: &str) -> String {
     if normalized.len() <= 64 {
         return normalized;
     }
-    let hash = short_hash(raw);
+    let mut hasher = Sha256::new();
+    hasher.update(raw.as_bytes());
+    let hash = hasher.finalize().iter().take(5).map(|byte| format!("{byte:02x}")).collect::<String>();
     let room = 64usize.saturating_sub("fc_".len() + 1 + hash.len()).max(1);
     let head = sanitize_id_token(&safe.chars().take(room).collect::<String>());
-    format!("fc_{}_{}", head, hash)
+    format!("fc_{head}_{hash}")
 }
 
 fn stringify_arguments(value: Option<&Value>) -> String {
@@ -2092,7 +2068,12 @@ mod tests {
             result.payload["tools"][0]["parameters"]["properties"]["q"]["type"],
             "string"
         );
-        assert!(result.payload["input"][0].get("content").is_none());
+        // #3: 请求侧不再无条件剥离 reasoning content——reasoning 明文原样透传。
+        assert_eq!(
+            result.payload["input"][0]["content"][0]["text"],
+            "old",
+            "reasoning content must pass through verbatim (no unconditional strip)"
+        );
     }
 
     #[test]

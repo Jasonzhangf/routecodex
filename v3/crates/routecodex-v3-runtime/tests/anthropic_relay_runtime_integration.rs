@@ -503,14 +503,15 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         "controlled rate limit"
     );
     assert_eq!(output.client_response["error"]["code"], "rate_limit_error");
-    assert_eq!(
-        output.client_response["error"]["stage"],
-        "V3ProviderReqOutbound09TransportRequest"
-    );
-    assert_eq!(output.client_response["error"]["class"], "provider_failure");
-    assert_eq!(
-        output.client_response["error"]["error_node"],
-        "V3Error06ClientProjected"
+    assert!(
+        output.client_response["error"].get("stage").is_none()
+            && output.client_response["error"].get("class").is_none()
+            && output.client_response["error"].get("error_node").is_none()
+            && output.client_response["error"].get("decision").is_none()
+            && output.client_response["error"].get("target_exhausted").is_none()
+            && output.client_response["error"].get("external_error").is_none(),
+        "Error06 body must not carry control-plane fields: {}",
+        output.client_response["error"]
     );
     assert!(
         output.client_response["error"].get("type").is_none(),
@@ -578,11 +579,11 @@ async fn sse_projection_accepts_live_data_only_text_delta_frames() {
 #[tokio::test]
 async fn structured_sse_contract_preserves_reasoning_tool_and_terminal_order() {
     let stream = futures_util::stream::iter([
-        Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"Need\"}\n\n".to_vec()),
-        Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\" beta\"}\n\n".to_vec()),
-        Ok(b"event: response.output_item.added\ndata: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_sse_1\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n".to_vec()),
-        Ok(b"event: response.function_call_arguments.delta\ndata: {\"delta\":\"{\\\"q\\\":\\\"beta\\\"}\"}\n\n".to_vec()),
-        Ok(b"event: response.completed\ndata: {\"response\":{\"id\":\"resp_sse_1\",\"status\":\"completed\"}}\n\n".to_vec()),
+        Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"Need\"}\n\n".to_vec()),
+        Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\" beta\"}\n\n".to_vec()),
+        Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_sse_1\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n".to_vec()),
+        Ok(b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\\\"q\\\":\\\"beta\\\"}\"}\n\n".to_vec()),
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse_1\",\"status\":\"completed\"}}\n\n".to_vec()),
     ]);
     let canonical_response =
         materialize_v3_responses_provider_sse_as_canonical_response(Box::pin(stream))

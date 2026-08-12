@@ -45,6 +45,8 @@ pub(super) fn openai_chat_provider_diagnostic_message(payload: &Value) -> Option
 pub(super) struct V3ProviderSemanticErrorProjection {
     pub(super) code: String,
     pub(super) message: String,
+    pub(super) provider_global_failure: bool,
+    pub(super) cooldown_ms: Option<u64>,
 }
 
 pub(super) fn anthropic_cyber_refusal_error_from_payload(
@@ -69,6 +71,8 @@ pub(super) fn anthropic_cyber_refusal_error_from_payload(
         message: format!(
             "Anthropic cyber refusal is treated as retryable provider saturation: {explanation}"
         ),
+        provider_global_failure: false,
+        cooldown_ms: None,
     })
 }
 
@@ -145,6 +149,27 @@ pub(super) fn provider_response_semantic_error_from_manifest(
                     policy.action.kind.as_str(),
                     public_message
                 ),
+                provider_global_failure: policy.action.provider_global_failure
+                    || policy.path.iter().any(|step| {
+                        matches!(
+                            step,
+                            routecodex_v3_config::V3ProviderDispositionStepManifest::Cooldown {
+                                provider_global_failure: true,
+                                ..
+                            }
+                        )
+                    }),
+                cooldown_ms: policy
+                    .path
+                    .iter()
+                    .find_map(|step| match step {
+                        routecodex_v3_config::V3ProviderDispositionStepManifest::Cooldown {
+                            duration_ms,
+                            ..
+                        } => *duration_ms,
+                        _ => None,
+                    })
+                    .or(policy.action.cooldown_ms),
             }
         })
 }
@@ -156,31 +181,27 @@ fn provider_error_action_policy_matches(
     model: Option<&str>,
     payload: &Value,
 ) -> bool {
-    if policy
-        .scope
-        .provider_id
-        .as_deref()
-        .is_some_and(|expected| expected != provider_id)
-    {
-        return false;
-    }
-    if policy
-        .scope
-        .provider_type
-        .as_deref()
-        .is_some_and(|expected| Some(expected) != provider_type)
-    {
-        return false;
-    }
-    if policy
-        .scope
-        .model_id
-        .as_deref()
-        .is_some_and(|expected| Some(expected) != model)
-    {
-        return false;
-    }
-    provider_error_matcher_matches(&policy.matcher, payload)
+    let provider_code = provider_payload_provider_code(payload);
+    crate::provider_error_policy_matching::provider_error_policy_matches_failure(
+        policy,
+        provider_id,
+        provider_type,
+        model,
+        200,
+        provider_code,
+    ) && provider_error_matcher_matches(&policy.matcher, payload)
+}
+
+fn provider_payload_provider_code(payload: &Value) -> Option<&str> {
+    [
+        payload.pointer("/error/code"),
+        payload.pointer("/response/error/code"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(Value::as_str)
+    .map(str::trim)
+    .filter(|code| !code.is_empty())
 }
 
 fn provider_error_matcher_matches(
@@ -273,4 +294,25 @@ fn provider_payload_content_contains_any(payload: &Value, phrases: &[String]) ->
         .filter_map(|choice| choice.get("message").and_then(Value::as_object))
         .filter_map(|message| message.get("content").and_then(Value::as_str))
         .any(|content| phrases.iter().any(|phrase| content.contains(phrase)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::provider_payload_provider_code;
+    use serde_json::json;
+
+    #[test]
+    fn provider_code_is_read_from_provider_error_semantics() {
+        assert_eq!(
+            provider_payload_provider_code(&json!({"error":{"code":"quota_exhausted"}})),
+            Some("quota_exhausted")
+        );
+        assert_eq!(
+            provider_payload_provider_code(
+                &json!({"type":"response.failed","response":{"error":{"code":"upstream_failed"}}})
+            ),
+            Some("upstream_failed")
+        );
+        assert_eq!(provider_payload_provider_code(&json!({"error":{"code":"  "}})), None);
+    }
 }

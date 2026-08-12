@@ -1,7 +1,9 @@
 mod impl_bulk;
 mod impl_display;
+mod impl_format;
 pub(crate) use impl_bulk::*;
 pub(crate) use impl_display::*;
+pub(crate) use impl_format::*;
 
 use serde_json::Value;
 

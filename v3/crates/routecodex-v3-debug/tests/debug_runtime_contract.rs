@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::thread;
 
 #[test]
-fn records_ordered_events_redacts_secrets_and_does_not_retain_node_payloads_by_default() {
+fn records_ordered_events_preserves_verbatim_payload_and_does_not_retain_node_payloads_by_default() {
     let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
         log_console: false,
         log_file: None,
@@ -47,9 +47,8 @@ fn records_ordered_events_redacts_secrets_and_does_not_retain_node_payloads_by_d
     let logs = runtime.logs().unwrap();
     assert_eq!(logs[0].sequence + 1, logs[1].sequence);
     let serialized = serde_json::to_string(&logs).unwrap();
-    assert!(serialized.contains("[REDACTED]"));
-    assert!(!serialized.contains("sk-secret"));
-    assert!(!serialized.contains("secret-token"));
+    assert!(serialized.contains("sk-hidden"));
+    assert!(serialized.contains("secret-token"));
     assert!(
         !serialized.contains("hello"),
         "normal events must not retain full node payloads"
@@ -83,7 +82,7 @@ fn snapshot_sessions_are_request_scoped_and_released() {
     let snapshots = runtime.snapshots().unwrap();
     assert_eq!(snapshots.len(), 1);
     assert_eq!(snapshots[0].server_id, "srv-a");
-    assert!(!serde_json::to_string(&snapshots)
+    assert!(serde_json::to_string(&snapshots)
         .unwrap()
         .contains("sk-nope"));
     runtime.release_snapshot_session(&scope, &session).unwrap();
@@ -113,7 +112,7 @@ fn debug_side_channel_preserves_large_history_arrays_verbatim() {
             })
         })
         .collect::<Vec<_>>();
-    let redacted = runtime.redact_payload_for_side_channel(json!({
+    let redacted = runtime.project_payload_verbatim(json!({
         "input": input,
         "model": "gpt-5.5"
     }));
@@ -126,7 +125,7 @@ fn debug_side_channel_preserves_large_history_arrays_verbatim() {
 }
 
 #[test]
-fn debug_side_channel_preserves_nested_artifacts_and_only_redacts_secrets() {
+fn debug_side_channel_preserves_nested_artifacts_verbatim() {
     let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
         log_console: false,
         log_file: None,
@@ -148,7 +147,7 @@ fn debug_side_channel_preserves_nested_artifacts_and_only_redacts_secrets() {
             })
         })
         .collect::<Vec<_>>();
-    let redacted = runtime.redact_payload_for_side_channel(json!({
+    let redacted = runtime.project_payload_verbatim(json!({
         "input": nested,
         "model": "gpt-5.5"
     }));
@@ -162,7 +161,7 @@ fn debug_side_channel_preserves_nested_artifacts_and_only_redacts_secrets() {
 }
 
 #[test]
-fn debug_side_channel_redacts_sensitive_wide_objects_without_placeholder_drops() {
+fn debug_side_channel_preserves_sensitive_wide_objects_without_placeholder_drops() {
     let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
         log_console: false,
         log_file: None,
@@ -192,10 +191,10 @@ fn debug_side_channel_redacts_sensitive_wide_objects_without_placeholder_drops()
         .map(serde_json::Value::Object)
         .collect::<Vec<_>>();
 
-    let redacted = runtime.redact_payload_for_side_channel(json!({"input": input}));
+    let redacted = runtime.project_payload_verbatim(json!({"input": input}));
     let serialized = serde_json::to_vec(&redacted).unwrap();
 
-    assert!(!String::from_utf8_lossy(&serialized).contains("must-not-survive"));
+    assert!(String::from_utf8_lossy(&serialized).contains("must-not-survive"));
     assert!(!String::from_utf8_lossy(&serialized).contains("ROUTECODEX_DEBUG_"));
 }
 
@@ -215,7 +214,7 @@ fn debug_stream_capture_preserves_full_text_verbatim() {
 }
 
 #[test]
-fn debug_side_channel_preserves_media_and_oversized_strings_and_redacts_secrets() {
+fn debug_side_channel_preserves_media_and_oversized_strings_verbatim() {
     let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
         log_console: false,
         log_file: None,
@@ -230,7 +229,7 @@ fn debug_side_channel_preserves_media_and_oversized_strings_and_redacts_secrets(
     .unwrap();
     let image_payload = format!("data:image/png;base64,{}", "A".repeat(16_000));
     let long_text = "debug long text ".repeat(1_200);
-    let redacted = runtime.redact_payload_for_side_channel(json!({
+    let redacted = runtime.project_payload_verbatim(json!({
         "input": [
             {"type": "input_text", "text": long_text.clone()},
             {"type": "input_image", "image_url": image_payload.clone()},
@@ -249,8 +248,7 @@ fn debug_side_channel_preserves_media_and_oversized_strings_and_redacts_secrets(
         serialized.contains(&image_payload),
         "media payload must be preserved verbatim"
     );
-    assert!(serialized.contains("[REDACTED]"));
-    assert!(!serialized.contains("side-channel-secret"));
+    assert!(serialized.contains("side-channel-secret"));
 }
 
 #[test]
@@ -287,7 +285,7 @@ fn dry_run_fixture_registry_tracks_no_network_terminal_effect() {
 }
 
 #[test]
-fn file_sink_writes_redacted_json_and_sink_open_failure_is_explicit() {
+fn file_sink_writes_verbatim_json_and_sink_open_failure_is_explicit() {
     let path = std::env::temp_dir().join(format!(
         "routecodex-v3-debug-{}-{}.jsonl",
         std::process::id(),
@@ -315,8 +313,7 @@ fn file_sink_writes_redacted_json_and_sink_open_failure_is_explicit() {
         )
         .unwrap();
     let written = fs::read_to_string(&path).unwrap();
-    assert!(written.contains("[REDACTED]"));
-    assert!(!written.contains("sk-file-secret"));
+    assert!(written.contains("sk-file-secret"));
     fs::remove_file(path).unwrap();
 
     let error = V3DebugRuntime::new(V3DebugRuntimeConfig {
@@ -347,12 +344,12 @@ fn file_sink_creates_parent_dirs_and_appends_human_console_lines() {
     runtime
         .append_human_console_line("[5555] ▶ [/v1/responses] request req-1 started")
         .unwrap();
-    let redacted = runtime.redact_payload_for_side_channel(serde_json::json!({
+    let redacted = runtime.project_payload_verbatim(serde_json::json!({
         "input": "visible",
         "authorization": "Bearer side-channel-secret"
     }));
     assert_eq!(redacted["input"], "visible");
-    assert_eq!(redacted["authorization"], "[REDACTED]");
+    assert_eq!(redacted["authorization"], "Bearer side-channel-secret");
     let written = fs::read_to_string(&file).unwrap();
     assert!(written.contains("request req-1 started"));
     fs::remove_dir_all(path).unwrap();

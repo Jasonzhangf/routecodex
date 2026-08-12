@@ -647,7 +647,8 @@ fn compile_providers(
                     routing_group: None,
                 },
                 matcher: policy.matcher,
-                action: policy.action,
+                path: None,
+                action: Some(policy.action),
             }
         }));
         providers.insert(
@@ -744,9 +745,10 @@ fn is_gpt_series_provider_model(model: &V3ProviderModelManifest) -> bool {
     is_gpt_series_model_id(&model.id) || is_gpt_series_model_id(&model.wire_name)
 }
 
+/// gpt 系列模型判定：委托内部配置层家族判定（internal.toml [model_families.gpt]），
+/// 校验面不内联模型名 / 前缀规则。
 fn is_gpt_series_model_id(model_id: &str) -> bool {
-    let normalized = model_id.trim().to_ascii_lowercase();
-    normalized == "gpt" || normalized.starts_with("gpt-")
+    crate::internal::is_v3_gpt_family_model(model_id)
 }
 
 fn ensure_model_capability(model: &mut V3ProviderModelManifest, capability: &str) {
@@ -1391,13 +1393,14 @@ fn compile_debug(authoring: V3DebugAuthoringConfig) -> Result<V3DebugManifest, V
         log_console: authoring.log_console,
         log_file: authoring.log_file,
         snapshots: authoring.snapshots,
-        codex_samples: authoring
-            .codex_samples
-            .unwrap_or(cfg!(debug_assertions)),
+        // Live sample persistence is a lifecycle authorization, never a config
+        // compilation default.  The lifecycle layer may opt in explicitly.
+        codex_samples: false,
         snapshot_stages,
         snapshot_direct: authoring.snapshot_direct.unwrap_or(true),
         dry_run: authoring.dry_run,
         retention: authoring.retention,
+        full_codex_sampling: false,
     })
 }
 
@@ -1431,16 +1434,12 @@ mod dev_sample_default_tests {
     use super::*;
 
     #[test]
-    fn dev_build_enables_codex_samples_by_default() {
+    fn config_compilation_does_not_authorize_codex_samples() {
         let manifest = compile_debug(V3DebugAuthoringConfig {
             codex_samples: None,
             ..V3DebugAuthoringConfig::default()
         })
         .unwrap();
-        assert!(
-            manifest.codex_samples,
-            "dev build must default codex_samples to true (cfg!(debug_assertions)={})",
-            cfg!(debug_assertions)
-        );
+        assert!(!manifest.codex_samples);
     }
 }

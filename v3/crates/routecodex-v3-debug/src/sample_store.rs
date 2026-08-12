@@ -10,14 +10,18 @@ pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 200;
 pub struct V3CodexSampleStore {
     enabled: bool,
     retention: usize,
+    /// 只落错误样本（force=true 的 error evidence）；由 server 从 internal 默认值
+    /// 与 `--snap` 运行时授权（full_codex_sampling）组合传入。
+    error_samples_only: bool,
     persistence_guard: Mutex<()>,
 }
 
 impl V3CodexSampleStore {
-    pub fn new(enabled: bool, retention: usize) -> Self {
+    pub fn new(enabled: bool, retention: usize, error_samples_only: bool) -> Self {
         Self {
             enabled,
             retention,
+            error_samples_only,
             persistence_guard: Mutex::new(()),
         }
     }
@@ -39,9 +43,21 @@ impl V3CodexSampleStore {
         file_name: &str,
         payload: &Value,
         force: bool,
+        status: Option<u16>,
     ) -> Result<(), String> {
         if !self.enabled && !force {
             return Ok(());
+        }
+        if !force && self.error_samples_only {
+            return Ok(());
+        }
+        // 账号/配额类错误状态不落盘（401/402/403/429/503 等）。
+        if force {
+            if let Some(status) = status {
+                if routecodex_v3_config::internal::v3_error_sample_skip_statuses().contains(&status) {
+                    return Ok(());
+                }
+            }
         }
         let _persistence_guard = self
             .persistence_guard
@@ -195,8 +211,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    struct TestHome(std::sync::Mutex<()>);
-
     fn with_test_home(f: impl FnOnce(&std::path::Path)) {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = LOCK.lock().unwrap();
@@ -231,10 +245,10 @@ mod tests {
     #[test]
     fn persist_writes_verbatim_sample_when_enabled() {
         with_test_home(|home_base| {
-            let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION);
+            let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
             let payload = json!({"model": "deepseek-v4-flash", "input": [{"role": "user", "content": "hello"}]});
             store
-                .persist(10000, "responses", "/v1/responses", "req-1", "request.json", &payload, false)
+                .persist(10000, "responses", "/v1/responses", "req-1", "request.json", &payload, false, None)
                 .unwrap();
             let path = sample_dir(home_base)
                 .join("req-1")
@@ -249,9 +263,9 @@ mod tests {
     #[test]
     fn persist_skips_when_disabled_without_force() {
         with_test_home(|home_base| {
-            let store = V3CodexSampleStore::new(false, V3_CODEX_SAMPLE_REQUEST_RETENTION);
+            let store = V3CodexSampleStore::new(false, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
             store
-                .persist(10000, "responses", "/v1/responses", "req-1", "request.json", &json!({"a": 1}), false)
+                .persist(10000, "responses", "/v1/responses", "req-1", "request.json", &json!({"a": 1}), false, None)
                 .unwrap();
             assert!(!sample_dir(home_base).join("req-1").exists());
         });
@@ -260,23 +274,65 @@ mod tests {
     #[test]
     fn persist_forces_error_evidence_when_disabled() {
         with_test_home(|home_base| {
-            let store = V3CodexSampleStore::new(false, V3_CODEX_SAMPLE_REQUEST_RETENTION);
+            let store = V3CodexSampleStore::new(false, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
             store
-                .persist(10000, "responses", "/v1/responses", "req-1", "error.json", &json!({"status": 503}), true)
+                .persist(10000, "responses", "/v1/responses", "req-1", "error.json", &json!({"status": 502}), true, Some(502))
                 .unwrap();
             let path = sample_dir(home_base).join("req-1").join("error.json");
             let written = fs::read_to_string(&path).unwrap();
-            assert!(written.contains("503"));
+            assert!(written.contains("502"));
+        });
+    }
+
+    #[test]
+    fn persist_skips_error_sample_for_skipped_status_even_when_forced() {
+        with_test_home(|home_base| {
+            let store = V3CodexSampleStore::new(false, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
+            store
+                .persist(10000, "responses", "/v1/responses", "req-1", "error.json", &json!({"status": 503}), true, Some(503))
+                .unwrap();
+            assert!(
+                !sample_dir(home_base).join("req-1").exists(),
+                "skipped account/quota error status must not be persisted"
+            );
+            store
+                .persist(10000, "responses", "/v1/responses", "req-2", "error.json", &json!({"status": 502}), true, Some(502))
+                .unwrap();
+            assert!(
+                sample_dir(home_base).join("req-2").join("error.json").exists(),
+                "non-skipped error status must still be persisted"
+            );
+        });
+    }
+
+    #[test]
+    fn persist_skips_normal_sample_when_error_samples_only() {
+        with_test_home(|home_base| {
+            let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION, true);
+            store
+                .persist(10000, "responses", "/v1/responses", "req-1", "request.json", &json!({"a": 1}), false, None)
+                .unwrap();
+            assert!(
+                !sample_dir(home_base).join("req-1").exists(),
+                "normal sample must not be persisted when error_samples_only"
+            );
+            store
+                .persist(10000, "responses", "/v1/responses", "req-2", "error.json", &json!({"status": 500}), true, Some(500))
+                .unwrap();
+            assert!(
+                sample_dir(home_base).join("req-2").join("error.json").exists(),
+                "error evidence must still be persisted when error_samples_only"
+            );
         });
     }
 
     #[test]
     fn retention_caps_samples_at_configured_limit() {
         with_test_home(|home_base| {
-            let store = V3CodexSampleStore::new(true, 200);
+            let store = V3CodexSampleStore::new(true, 200, false);
             for index in 0..201 {
                 store
-                    .persist(10000, "responses", "/v1/responses", &format!("req-{index}"), "request.json", &json!({"n": index}), false)
+                    .persist(10000, "responses", "/v1/responses", &format!("req-{index}"), "request.json", &json!({"n": index}), true, Some(502))
                     .unwrap();
             }
             let dirs = fs::read_dir(sample_dir(home_base)).unwrap().count();

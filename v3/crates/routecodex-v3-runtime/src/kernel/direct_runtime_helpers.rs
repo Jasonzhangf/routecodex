@@ -48,6 +48,10 @@ pub(crate) struct V3DirectProviderFailurePolicyResult {
     decision: V3Error05ExecutionDecision,
     retry_selected: Option<Box<routecodex_v3_target::V3Target10ConcreteProviderSelected>>,
     event: Option<V3RuntimeProviderFailureObservation>,
+    /// health-neutral 瞬态失败（SSE 流内/挂起）：重试与切换不经过 provider
+    /// action gate / recovery witness 等待，立即执行；由调用方据此跳过
+    /// `pending_provider_action_recovery` 的 gate 等待。
+    retryable_transient: bool,
 }
 
 pub(crate) struct V3DirectProviderFailurePolicyContext<'ctx, R: V3ProviderAvailabilityReader + ?Sized> {
@@ -133,7 +137,22 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             decision,
             retry_selected: None,
             event: None,
+            retryable_transient: false,
         });
+    }
+    let _revive_admitted = context
+        .provider_health
+        .try_acquire_cross_session_revive(
+            context.failure_session_scope,
+            &selected.candidate.provider_id,
+            Some(&selected.candidate.auth_alias),
+            Some(&selected.candidate.model_id),
+            context.now_epoch_ms,
+        )
+        .map_err(|error| runtime_source("V3ProviderHealthState", error))?;
+    if is_v3_retryable_transient_source(&source) {
+        return run_v3_direct_transient_failure_policy(context, selected, source, status, state)
+            .await;
     }
     let health_record = record_v3_direct_provider_failure_record(
         context.provider_health,
@@ -156,6 +175,19 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     };
     let mut failed_with_current = state.failed_candidates.clone();
     failed_with_current.insert(failed_key.clone());
+    if source.code == "provider_transport_error" {
+        // 连接层错误是 provider/baseurl 级故障：同 provider 的所有 key
+        // 共用同一 baseURL，全部排除，避免 key2 失败切 key1 的 thrashing。
+        if let Some(expanded_candidates) = expanded_candidates {
+            for candidate in expanded_candidates {
+                if candidate.provider_id == selected.candidate.provider_id {
+                    let key = candidate_key(candidate);
+                    failed_with_current.insert(key.clone());
+                    state.failed_candidates.insert(key);
+                }
+            }
+        }
+    }
     let mut remaining = expanded_candidates.map_or(0, |expanded_candidates| {
         remaining_available_candidates(expanded_candidates, context.availability, &failed_with_current)
     });
@@ -213,7 +245,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         && (context.provider_pinned
             || selected.default_floor_protected
             || selected.candidate.default_pool_member)
-        && retries_done < V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET
+        && retries_done < context.provider_health.default_same_provider_retries()
         // 400/InvalidRequest（客户端请求错误，如 context window 超限）重试结果
         // 必然相同：同一 provider 不重试，直接 reselect 到下一个候选。
         // 注意：HTTP 400 被构造为 ProviderFailure（code=provider_http_400，
@@ -221,23 +253,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         // external status 判定，否则 400 仍会重试同 provider。
         && source.source_kind != V3ErrorSourceKind::InvalidRequest
         && source.external_error.as_ref().and_then(|e| e.status) != Some(400);
-    let cross_session_revive_admitted = remaining == 0
-        // 400/InvalidRequest 不触发 cross-session revive（重试结果必然相同）。
-        && source.external_error.as_ref().and_then(|e| e.status) != Some(400)
-        && context
-            .provider_health
-            .store()
-            .try_acquire_cross_session_revive(
-                context.failure_session_scope,
-                &selected.candidate.provider_id,
-                Some(&selected.candidate.auth_alias),
-                Some(&selected.candidate.model_id),
-                context.now_epoch_ms,
-            )
-            .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error.to_string()))?
-            .is_some();
-    let same_provider_retry_available =
-        ordinary_same_provider_retry_available || cross_session_revive_admitted;
+    let same_provider_retry_available = ordinary_same_provider_retry_available;
     let recovery_record = if remaining > 0 || same_provider_retry_available {
         Some(
             context
@@ -293,6 +309,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 next_provider_key,
                 Some(failure_record.minimum_delay_ms),
             )),
+            retryable_transient: false,
         });
     }
     if matches!(
@@ -301,11 +318,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     ) {
         let retries_done = state.same_candidate_retries.entry(failed_key).or_insert(0);
         *retries_done = retries_done.saturating_add(1);
-        state.trace.push(if cross_session_revive_admitted {
-            "V3CrossSessionReviveAdmitted"
-        } else {
-            "V3DefaultFloorBackoffWait"
-        });
+        state.trace.push("V3DefaultFloorBackoffWait");
         let failure_record = recovery_record
             .as_ref()
             .expect("retry-same Error05 must carry its recorded recovery witness");
@@ -317,14 +330,11 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 status,
                 &source,
                 &health_record,
-                if cross_session_revive_admitted {
-                    "cross_session_revive"
-                } else {
-                    "retry_provider"
-                },
+                "retry_provider",
                 Some(candidate_key(&selected.candidate)),
                 Some(failure_record.minimum_delay_ms),
             )),
+            retryable_transient: false,
         });
     }
     if !matches!(decision.action, V3Error05ExecutionAction::ProjectTerminal) {
@@ -374,6 +384,184 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             None,
             Some(admission.minimum_delay_ms),
         )),
+        retryable_transient: false,
+    })
+}
+
+/// 流内/挂起瞬态失败策略（health-neutral + 同 provider 3 次尝试）：
+/// HTTP 2xx 后 SSE 流内协议失败（裸 error 事件、空包、首事件超时等）或
+/// transport 响应头挂起超时，不写入 provider health（不冷却、不计失败数），
+/// 在同一 provider 上直接重试；第 3 次尝试仍失败才回报一次错误事件并切走。
+/// 与 relay 侧 request_local_provider_compat 的处理一致：synthetic health
+/// record + 直接构造 recovery witness，不触碰 provider health store。
+async fn run_v3_direct_transient_failure_policy<R: V3ProviderAvailabilityReader>(
+    context: &V3DirectProviderFailurePolicyContext<'_, R>,
+    selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    source: V3Error01SourceRaised,
+    status: u16,
+    state: &mut V3DirectProviderFailurePolicyState<'_>,
+) -> Result<V3DirectProviderFailurePolicyResult, V3Error01SourceRaised> {
+    context
+        .provider_health
+        .try_acquire_cross_session_revive(
+            context.failure_session_scope,
+            &selected.candidate.provider_id,
+            Some(&selected.candidate.auth_alias),
+            Some(&selected.candidate.model_id),
+            context.now_epoch_ms,
+        )
+        .map_err(|error| runtime_source("V3ProviderHealthState", error))?;
+    let failed_key = candidate_key(&selected.candidate);
+    let retries_done = *state.same_candidate_retries.get(&failed_key).unwrap_or(&0);
+    let provider_scope = V3ErrorActionScope::ProviderInstance {
+        provider_id: selected.candidate.provider_id.clone(),
+    };
+    let expanded_candidates = match (context.expanded, context.provider_pinned) {
+        (Some(expanded), _) => Some(&expanded.candidates),
+        (None, true) => None,
+        (None, false) => {
+            return Err(runtime_source(
+                "V3Target09CandidateSetExpanded",
+                "routed candidate set missing",
+            ))
+        }
+    };
+    let mut failed_with_current = state.failed_candidates.clone();
+    failed_with_current.insert(failed_key.clone());
+    if source.code == "provider_transport_error" {
+        // 连接层错误是 provider/baseurl 级故障：同 provider 的所有 key
+        // 共用同一 baseURL，全部排除，避免 key2 失败切 key1 的 thrashing。
+        if let Some(expanded_candidates) = expanded_candidates {
+            for candidate in expanded_candidates {
+                if candidate.provider_id == selected.candidate.provider_id {
+                    let key = candidate_key(candidate);
+                    failed_with_current.insert(key.clone());
+                    state.failed_candidates.insert(key);
+                }
+            }
+        }
+    }
+    let mut remaining = expanded_candidates.map_or(0, |candidates| {
+        remaining_available_candidates(candidates, context.availability, &failed_with_current)
+    });
+    let mut next_provider_key = expanded_candidates.and_then(|candidates| {
+        first_remaining_available_candidate_key(
+            candidates,
+            context.availability,
+            &failed_with_current,
+        )
+    });
+    if remaining == 0 {
+        if let Some(candidates) = expanded_candidates {
+            if candidates.len() > 1 {
+                remaining = candidates
+                    .iter()
+                    .filter(|candidate| {
+                        let key = candidate_key(candidate);
+                        !failed_with_current.contains(&key)
+                            && context
+                                .provider_health
+                                .availability(
+                                    &candidate.provider_id,
+                                    Some(&candidate.auth_alias),
+                                    Some(&candidate.model_id),
+                                    context.now_epoch_ms,
+                                )
+                                .available
+                    })
+                    .count();
+                if next_provider_key.is_none() {
+                    next_provider_key = candidates.iter().find_map(|candidate| {
+                        let key = candidate_key(candidate);
+                        (!failed_with_current.contains(&key)
+                            && context
+                                .provider_health
+                                .availability(
+                                    &candidate.provider_id,
+                                    Some(&candidate.auth_alias),
+                                    Some(&candidate.model_id),
+                                    context.now_epoch_ms,
+                                )
+                                .available)
+                            .then(|| key)
+                    });
+                }
+            }
+        }
+    }
+    let recovery = build_v3_transient_recovery_witness(
+        context.failure_session_scope,
+        &failed_key,
+        &source.code,
+    )
+    .map_err(|error| runtime_source("V3Error05RecoveryAdmissionWitness", error))?;
+    if retries_done < V3_TRANSIENT_RETRY_BUDGET {
+        // 前 2 次失败：静默重试同一 provider，不写 health、不产生事件。
+        state
+            .same_candidate_retries
+            .insert(failed_key.clone(), retries_done + 1);
+        state.trace.push("V3DirectTransientRetrySame");
+        let decision = (context.run_error)(
+            source,
+            provider_scope,
+            remaining,
+            false,
+            true,
+            Some(recovery),
+        );
+        return Ok(V3DirectProviderFailurePolicyResult {
+            decision,
+            retry_selected: Some(Box::new(selected.clone())),
+            event: None,
+            retryable_transient: true,
+        });
+    }
+    // 第 3 次尝试仍失败：回报一次错误中心 + 切 provider（无候选则 terminal）。
+    // 同时写 session 级短期绕行（30s）：同 session 后续请求绕开该 provider，
+    // 避免 health-neutral 导致反复命中同一失败 provider；不触发 15 分钟冷却。
+    context
+        .provider_health
+        .record_provider_transient_bypass_in_session(
+            context.failure_session_scope,
+            &selected.candidate.provider_id,
+            Some(&selected.candidate.auth_alias),
+            Some(&selected.candidate.model_id),
+            Some(&source.message),
+            context.now_epoch_ms,
+        )
+        .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))?;
+    state.failed_candidates.insert(failed_key.clone());
+    state.trace.push("V3TargetLocalReselected");
+    let decision = (context.run_error)(
+        source.clone(),
+        provider_scope,
+        remaining,
+        false,
+        false,
+        Some(recovery),
+    );
+    let health_record = build_v3_transient_failure_record(
+        &failed_key,
+        (retries_done + 1) as u32,
+        Some(&source.message),
+    );
+    Ok(V3DirectProviderFailurePolicyResult {
+        decision,
+        retry_selected: None,
+        event: Some(build_v3_direct_provider_failure_observation(
+            selected,
+            status,
+            &source,
+            &health_record,
+            if remaining > 0 {
+                "switch_provider"
+            } else {
+                "terminal_transient_exhausted"
+            },
+            next_provider_key,
+            Some(1),
+        )),
+        retryable_transient: true,
     })
 }
 
@@ -659,41 +847,7 @@ fn record_direct_sse_provider_event_json_frame(
     fields: &[SseField],
     stream_observation: &V3RuntimeStreamObservation,
 ) -> Result<(), V3Error01SourceRaised> {
-    let mut data = String::new();
-    for field in fields {
-        let SseField::Named { name, value } = field else {
-            continue;
-        };
-        if name != "data" {
-            continue;
-        }
-        if !data.is_empty() {
-            data.push('\n');
-        }
-        data.push_str(value);
-    }
-    let data = data.trim();
-    if data.is_empty() || data == "[DONE]" {
-        return Ok(());
-    }
-    let event: Value = serde_json::from_str(data).map_err(|error| {
-        build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_response_sse_event_invalid",
-            error.to_string(),
-        )
-    })?;
-    if let Some(field) = find_v3_routecodex_control_payload_key(&event) {
-        return Err(build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3DirectSseProviderEventObservation",
-            "control_field_in_provider_sse_event",
-            format!("provider SSE event carries RouteCodex control payload key {field:?}"),
-        ));
-    }
-    stream_observation
-        .record_provider_event_json(&event)
+    record_v3_provider_sse_json_frame(fields, stream_observation)
         .map_err(|error| runtime_source("V3ProviderResp14Raw", error))
 }
 

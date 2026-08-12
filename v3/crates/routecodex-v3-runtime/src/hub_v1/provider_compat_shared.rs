@@ -1,6 +1,5 @@
 use super::V3HubProviderWireProtocol;
 use routecodex_v3_provider_responses::{
-    build_v3_transport_13_responses_http_request_from_parts,
     build_v3_transport_13_responses_http_request_from_parts_with_timeout,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     V3Provider12ResponsesWirePayload, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
@@ -184,9 +183,10 @@ fn is_v3_deepseek_reasoning_target(canonical_model_id: &str) -> bool {
 }
 
 /// gpt 目标判定（请求侧路由决策）：canonical model id 以 `gpt-` 开头（OpenAI 官方
-/// gpt-5.x，Codex 客户端用自己的密文重建 reasoning 历史）。
+/// gpt-5.x，Codex 客户端用自己的密文重建 reasoning 历史）。判定真源委托
+/// config 内部配置层模型家族判定，compat 只保留语义包装不重复实现。
 pub(crate) fn is_v3_gpt_canonical_model(model_id: &str) -> bool {
-    model_id.trim().starts_with("gpt-")
+    routecodex_v3_config::internal::is_v3_gpt_family_model(model_id)
 }
 
 /// 请求侧 VR 路由决策统一判定"是否保留响应密文"：仅当目标是 gpt 模型**且**该模型

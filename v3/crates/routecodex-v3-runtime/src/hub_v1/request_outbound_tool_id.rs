@@ -1,3 +1,7 @@
+/// 规范化 tool call id 为 responses function_call item id：
+/// - 前缀归一（functions./call_/fc_ -> fc_）与合法字符过滤保持原语义；
+/// - 保留 hash 后缀用于字符过滤/前缀变换后的防碰撞（同一轮多个 tool call 不得碰撞）；
+/// - 不按长度截断：超长 id 原样保留（长度截断逻辑已移除）。
 pub(super) fn compact_tool_id(prefix: &str, raw: &str) -> String {
     const MAX_ID_LEN: usize = 64;
     let trimmed = raw.trim();
@@ -24,12 +28,10 @@ pub(super) fn compact_tool_id(prefix: &str, raw: &str) -> String {
     }
 
     let hash = compact_tool_id_hash(raw);
-    let keep = MAX_ID_LEN.saturating_sub(prefix.len() + 1 + hash.len());
-    let body: String = safe_full.chars().take(keep).collect();
-    if body.is_empty() {
+    if safe_full.is_empty() {
         format!("{prefix}{hash}")
     } else {
-        format!("{prefix}{body}_{hash}")
+        format!("{prefix}{safe_full}_{hash}")
     }
 }
 

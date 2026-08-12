@@ -83,11 +83,7 @@ pub(crate) fn responses_relay_output_response(
     };
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(output.status).expect("typed V3 Responses Relay status"))
-        .header("content-type", content_type)
-        .header("x-routecodex-v3-node-trace", output.node_trace.join(","));
-    if let Some(error_chain) = output.error_chain {
-        builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
-    }
+        .header("content-type", content_type);
     let body = match output.client_body {
         V3ResponsesRelayClientBody::Sse(client_stream) => v3_relay_client_sse_body(
             wrap_v3_relay_sse_console_stream(client_stream, stream_console_finalizer),
@@ -232,11 +228,7 @@ pub(crate) fn openai_chat_relay_output_response(output: V3OpenAiChatRelayRuntime
     };
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(output.status).expect("typed V3 OpenAI Chat Relay status"))
-        .header("content-type", content_type)
-        .header("x-routecodex-v3-node-trace", output.node_trace.join(","));
-    if let Some(error_chain) = output.error_chain {
-        builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
-    }
+        .header("content-type", content_type);
     let body = match output.client_body {
         V3OpenAiChatRelayClientBody::Sse(client_stream) => Body::from_stream(client_stream),
         V3OpenAiChatRelayClientBody::Json(client_response) => Body::from(
@@ -473,6 +465,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         !observability.provider_failure_events.is_empty()
     });
     if frame.status >= 400 || has_provider_failure {
+        let error_status = (frame.status >= 400).then_some(frame.status);
         let _ = persist_v3_error_evidence_payload(
             state,
             "openai_chat",
@@ -481,7 +474,8 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             "request.json",
             &state
                 .debug
-                .redact_payload_for_side_channel(console_payload.clone()),
+                .project_payload_verbatim(console_payload.clone()),
+            error_status,
         );
         let _ = persist_v3_error_evidence_payload(
             state,
@@ -491,7 +485,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             "error.json",
             &state
                 .debug
-                .redact_payload_for_side_channel(json!({
+                .project_payload_verbatim(json!({
                     "object": "routecodex.v3.error_evidence",
                     "stage": "error",
                     "status": frame.status,
@@ -501,6 +495,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
                     "error_chain": frame.error_chain.clone(),
                     "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
                 })),
+            error_status,
         );
     }
     if let Some(response) = capture_v3_responses_direct_response(
@@ -528,11 +523,7 @@ pub(crate) fn gemini_relay_output_response(output: V3GeminiRelayRuntimeOutput) -
     };
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(output.status).expect("typed V3 Gemini Relay status"))
-        .header("content-type", content_type)
-        .header("x-routecodex-v3-node-trace", output.node_trace.join(","));
-    if let Some(error_chain) = output.error_chain {
-        builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
-    }
+        .header("content-type", content_type);
     let body = match output.client_body {
         V3GeminiRelayClientBody::Sse(client_stream) => Body::from_stream(client_stream),
         V3GeminiRelayClientBody::Json(client_response) => Body::from(
@@ -556,11 +547,7 @@ pub(crate) fn anthropic_relay_output_response(
             } else {
                 "application/json"
             },
-        )
-        .header("x-routecodex-v3-node-trace", output.node_trace.join(","));
-    if let Some(error_chain) = output.error_chain {
-        builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
-    }
+        );
     let body = if stream {
         anthropic_relay_sse_body(output.client_response)
     } else {
@@ -617,4 +604,3 @@ pub(crate) fn anthropic_relay_sse_event_chunk(event: &serde_json::Value) -> Resu
         .map_err(|error| io::Error::other(error.to_string()))?;
     Ok(build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&validated).into_bytes())
 }
-

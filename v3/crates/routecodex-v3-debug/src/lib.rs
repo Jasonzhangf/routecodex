@@ -89,26 +89,11 @@ impl Default for V3DebugRuntimeConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RedactionPolicy {
-    sensitive_key_fragments: Vec<&'static str>,
-}
+pub struct V3RedactionPolicy;
 
 impl Default for V3RedactionPolicy {
     fn default() -> Self {
-        Self {
-            sensitive_key_fragments: vec![
-                "authorization",
-                "api_key",
-                "api-key",
-                "apikey",
-                "token",
-                "secret",
-                "password",
-                "credential",
-                "auth_env",
-                "token_file",
-            ],
-        }
+        Self
     }
 }
 
@@ -307,7 +292,7 @@ impl V3DebugRuntime {
             execution_id: scope.execution_id.clone(),
             node_id: node_id.into(),
             event: event.into(),
-            details: details.map(|value| redact_debug_value(&self.config.redaction, value)),
+            details: details.map(|value| project_debug_value_verbatim(&self.config.redaction, value)),
         };
         {
             let mut state = self.write_state()?;
@@ -327,8 +312,8 @@ impl V3DebugRuntime {
         Ok(())
     }
 
-    pub fn redact_payload_for_side_channel(&self, payload: Value) -> Value {
-        redact_debug_value(&self.config.redaction, payload)
+    pub fn project_payload_verbatim(&self, payload: Value) -> Value {
+        project_debug_value_verbatim(&self.config.redaction, payload)
     }
 
     pub fn capture_raw_request(
@@ -347,7 +332,7 @@ impl V3DebugRuntime {
         self.capture_raw(
             scope,
             "response",
-            payload,
+            project_debug_value_verbatim(&self.config.redaction, payload),
             self.config.raw_response_retention,
         )
     }
@@ -368,7 +353,7 @@ impl V3DebugRuntime {
             request_id: scope.request_id.clone(),
             execution_id: scope.execution_id.clone(),
             kind: kind.to_string(),
-            payload: redact_debug_value(&self.config.redaction, payload),
+            payload: project_debug_value_verbatim(&self.config.redaction, payload),
         };
         let mut state = self.write_state()?;
         match kind {
@@ -439,7 +424,7 @@ impl V3DebugRuntime {
             request_id: scope.request_id.clone(),
             execution_id: scope.execution_id.clone(),
             node_id: node_id.into(),
-            payload: redact_debug_value(&self.config.redaction, payload),
+            payload,
         };
         state.snapshots.push_back(snapshot.clone());
         retain_latest(&mut state.snapshots, self.config.event_retention);
@@ -570,8 +555,8 @@ impl V3DebugRuntime {
         Ok(self.read_state()?.raw_responses.iter().cloned().collect())
     }
 
-    pub fn redact_projection(&self, value: Value) -> Value {
-        redact_debug_value(&self.config.redaction, value)
+    pub fn project_verbatim(&self, value: Value) -> Value {
+        project_debug_value_verbatim(&self.config.redaction, value)
     }
 
     fn write_state(&self) -> V3DebugResult<std::sync::RwLockWriteGuard<'_, V3DebugState>> {
@@ -669,51 +654,6 @@ fn retain_latest<T>(values: &mut VecDeque<T>, limit: usize) {
     }
 }
 
-pub fn redact_debug_value(policy: &V3RedactionPolicy, value: Value) -> Value {
-    // Debug/sample 投影只做安全 redaction（敏感键、secret 字面量），
-    // 不做任何截断、占位符替换或预算限制：样本必须保留真实 payload。
-    redact_debug_value_at_key(policy, None, value)
-}
-
-fn redact_debug_value_at_key(policy: &V3RedactionPolicy, key: Option<&str>, value: Value) -> Value {
-    match value {
-        Value::Object(map) => Value::Object(
-            map.into_iter()
-                .map(|(key, value)| {
-                    let redacted = if is_sensitive_key(policy, &key) {
-                        Value::String("[REDACTED]".to_string())
-                    } else {
-                        redact_debug_value_at_key(policy, Some(&key), value)
-                    };
-                    (key, redacted)
-                })
-                .collect(),
-        ),
-        Value::Array(values) => Value::Array(
-            values
-                .into_iter()
-                .map(|value| redact_debug_value_at_key(policy, key, value))
-                .collect(),
-        ),
-        Value::String(text) if looks_like_secret_literal(&text) => {
-            Value::String("[REDACTED]".to_string())
-        }
-        other => other,
-    }
-}
-
-fn is_sensitive_key(policy: &V3RedactionPolicy, key: &str) -> bool {
-    let lower = key.to_ascii_lowercase();
-    policy
-        .sensitive_key_fragments
-        .iter()
-        .any(|fragment| lower.contains(fragment))
-}
-
-fn looks_like_secret_literal(value: &str) -> bool {
-    let trimmed = value.trim();
-    trimmed.starts_with("sk-")
-        || trimmed.starts_with("Bearer ")
-        || trimmed.starts_with("eyJ")
-        || trimmed.contains("api_key=")
+pub fn project_debug_value_verbatim(_policy: &V3RedactionPolicy, value: Value) -> Value {
+    value
 }

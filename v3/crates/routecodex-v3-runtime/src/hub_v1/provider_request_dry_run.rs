@@ -30,7 +30,7 @@ impl ResponsesTransport for V3ProviderRequestDryRunNoNetworkTransport {
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         if let Ok(mut captured) = self.captured_provider_request.lock() {
-            *captured = Some(request.redacted_provider_request_projection());
+            *captured = Some(request.provider_request_projection());
         }
         let response_payload =
             provider_request_dry_run_response_payload_for_request(&request, &self.response_payload);

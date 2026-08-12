@@ -60,7 +60,7 @@ impl ResponsesTransport for AnthropicProviderProjectionTransport {
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         *self.captured_projection.lock().unwrap() =
-            Some(request.redacted_provider_request_projection());
+            Some(request.provider_request_projection());
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
             request.provider_id(),
@@ -243,8 +243,8 @@ async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_h
         "http://controlled.invalid/anthropic/v1/messages?beta=true"
     );
     let headers = &projection["headers"];
-    assert_eq!(headers["authorization"], "[REDACTED]");
-    assert_eq!(headers["x-api-key"], "[REDACTED]");
+    assert!(headers.get("authorization").is_none());
+    assert!(headers.get("x-api-key").is_none());
     assert_eq!(headers["anthropic-version"], "2023-06-01");
     assert_eq!(
         headers["user-agent"],

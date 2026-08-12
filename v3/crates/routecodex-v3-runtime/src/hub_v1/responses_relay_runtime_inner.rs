@@ -1,4 +1,5 @@
 use super::*;
+use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 
@@ -436,6 +437,12 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     trace.push("V3ProviderActionGateTerminalReevaluation");
                     continue;
                 }
+                V3ProviderActionRecoveryTransition::Consumed(_) => {
+                    pending_provider_action_recovery = None;
+                    retry_selected = Some(selected);
+                    trace.push("V3ProviderActionGateConsumedReevaluation");
+                    continue;
+                }
             }
         }
         handle_error_before_resp03!(runtime_timing
@@ -450,8 +457,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             Err(_) => Err(V3ProviderError::Transport {
                 request_id: input.request_id.clone(),
                 provider_id: selected_target_provider_id.clone(),
-                reason: "provider transport did not return response headers within timeout"
-                    .to_string(),
+                reason: V3_RELAY_TRANSPORT_HANG_REASON.to_string(),
             }),
             Ok(result) => result,
         };
@@ -656,13 +662,40 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     } else {
                         provider_wire_protocol
                     };
-                if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
-                    if let Some(semantic_error) =
-                        responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
+                if let Some(semantic_error) =
+                    responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
                         Some(manifest),
                         Some(&selected_target_provider_id),
-                        &provider_value,
+                        &hook_provider_value,
                     ) {
+                        let global_probe_compatible = semantic_error.provider_global_failure
+                            && provider_wire_protocol == V3HubProviderWireProtocol::Responses
+                            && manifest
+                                .providers
+                                .get(&selected_target_provider_id)
+                                .and_then(|provider| provider.responses.as_ref())
+                                .is_some();
+                        if global_probe_compatible {
+                            let fingerprint = routecodex_v3_error::V3ProviderErrorFingerprint::new(
+                                semantic_error.code.clone(),
+                                semantic_error.code.clone(),
+                                provider_status,
+                                semantic_error.code.clone(),
+                            )
+                            .map_err(V3ResponsesRelayRuntimeError::Target)?;
+                            provider_health
+                                .record_provider_global_subscription_failure(
+                                    &input.failure_session_scope,
+                                    &selected_target_provider_id,
+                                    Some(&selected.candidate.auth_alias),
+                                    Some(&selected.candidate.model_id),
+                                    fingerprint,
+                                    semantic_error.cooldown_ms,
+                                    v3_relay_provider_policy_now_epoch_ms()
+                                        .map_err(V3ResponsesRelayRuntimeError::Target)?,
+                                )
+                                .map_err(V3ResponsesRelayRuntimeError::Target)?;
+                        }
                         let failure = provider_semantic_failure(
                             provider_status,
                             semantic_error,
@@ -699,7 +732,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             return Ok(provider_failure_output(failure, trace, 0));
                         }
                         continue;
-                    }
                 }
                 let request_web_search_state = match request_web_search_state.clone() {
                     Some(state) => Some(state),
@@ -945,13 +977,40 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     } else {
                         provider_wire_protocol
                     };
-                if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
-                    if let Some(semantic_error) =
-                        responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
+                if let Some(semantic_error) =
+                    responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
                         Some(manifest),
                         Some(&selected_target_provider_id),
                         &provider_value,
                     ) {
+                        let global_probe_compatible = semantic_error.provider_global_failure
+                            && provider_wire_protocol == V3HubProviderWireProtocol::Responses
+                            && manifest
+                                .providers
+                                .get(&selected_target_provider_id)
+                                .and_then(|provider| provider.responses.as_ref())
+                                .is_some();
+                        if global_probe_compatible {
+                            let fingerprint = routecodex_v3_error::V3ProviderErrorFingerprint::new(
+                                semantic_error.code.clone(),
+                                semantic_error.code.clone(),
+                                provider_status,
+                                semantic_error.code.clone(),
+                            )
+                            .map_err(V3ResponsesRelayRuntimeError::Target)?;
+                            provider_health
+                                .record_provider_global_subscription_failure(
+                                    &input.failure_session_scope,
+                                    &selected_target_provider_id,
+                                    Some(&selected.candidate.auth_alias),
+                                    Some(&selected.candidate.model_id),
+                                    fingerprint,
+                                    semantic_error.cooldown_ms,
+                                    v3_relay_provider_policy_now_epoch_ms()
+                                        .map_err(V3ResponsesRelayRuntimeError::Target)?,
+                                )
+                                .map_err(V3ResponsesRelayRuntimeError::Target)?;
+                        }
                         let failure = provider_semantic_failure(
                             provider_status,
                             semantic_error,
@@ -988,7 +1047,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             return Ok(provider_failure_output(failure, trace, 0));
                         }
                         continue;
-                    }
                 }
                 let (
                     action,
@@ -1283,4 +1341,3 @@ pub(crate) fn find_responses_tool_output_ids(
     }
     Ok(ids)
 }
-

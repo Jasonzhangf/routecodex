@@ -89,6 +89,8 @@ mod provider_resp_inbound_01_raw;
 pub use provider_resp_inbound_01_raw::*;
 mod provider_resp_compat_02_provider_compat;
 pub use provider_resp_compat_02_provider_compat::*;
+mod provider_sse_json_codec;
+pub(crate) use provider_sse_json_codec::*;
 mod resp_inbound_02_normalized;
 pub use resp_inbound_02_normalized::*;
 mod resp_chat_process_03_governed;

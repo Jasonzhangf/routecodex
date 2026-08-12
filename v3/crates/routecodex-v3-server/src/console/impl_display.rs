@@ -387,7 +387,31 @@ pub(crate) fn compact_v3_error_number(error_chain: &[&'static str]) -> String {
 
 pub(crate) fn emit_v3_startup_console_line(listeners: &[V3ListenerHandle]) {
     println!("{}", format_v3_startup_console_block(listeners));
+    println!("{}", format_v3_plain_startup_console_line(listeners));
     let _ = io::stdout().flush();
+}
+
+fn format_v3_plain_startup_console_line(listeners: &[V3ListenerHandle]) -> String {
+    let addresses = listeners
+        .iter()
+        .map(|listener| listener.addr.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let executable = std::env::current_exe().ok();
+    let binary = executable
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let version = executable
+        .as_deref()
+        .and_then(resolve_routecodex_package_version_from_executable)
+        .unwrap_or_else(|| "unknown".to_string());
+    format!(
+        "[RouteCodexV3] Server started version={} crate={} binary={} on {addresses}",
+        version,
+        env!("CARGO_PKG_VERSION"),
+        binary,
+    )
 }
 
 pub(crate) fn format_v3_startup_console_block(listeners: &[V3ListenerHandle]) -> String {
@@ -521,6 +545,16 @@ pub(crate) fn colorize_v3_error_console_line(
         return format_v3_console_layered_block_plain(block);
     }
     colorize_v3_layered_console_line(block, ANSI_ERROR_RED, ANSI_DEBUG_DIM)
+}
+
+/// 行内局部错误着色：只把错误段（provider 名 + 错误详情）染红，
+/// 行的其余部分（req/selected/reason 等）保持正常色，避免整行一片红。
+pub(crate) fn colorize_v3_console_error_segment(segment: &str) -> String {
+    if is_v3_console_color_enabled() {
+        format!("{ANSI_ERROR_RED}{segment}{ANSI_RESET}")
+    } else {
+        segment.to_string()
+    }
 }
 
 pub(crate) fn colorize_v3_stopless_console_line(

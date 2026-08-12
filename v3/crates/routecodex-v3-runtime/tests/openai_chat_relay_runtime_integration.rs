@@ -412,14 +412,13 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     };
     assert_eq!(client_response["error"]["message"], "controlled rate limit");
     assert_eq!(client_response["error"]["code"], "rate_limit_error");
-    assert_eq!(
-        client_response["error"]["stage"],
-        "V3ProviderReqOutbound09TransportRequest"
-    );
-    assert_eq!(client_response["error"]["class"], "provider_failure");
-    assert_eq!(
-        client_response["error"]["error_node"],
-        "V3Error06ClientProjected"
+    assert!(
+        client_response["error"].get("stage").is_none()
+            && client_response["error"].get("class").is_none()
+            && client_response["error"].get("error_node").is_none()
+            && client_response["error"].get("decision").is_none()
+            && client_response["error"].get("external_error").is_none(),
+        "Error06 body must not carry control-plane fields: {client_response}"
     );
     assert!(
         client_response["error"].get("type").is_none(),

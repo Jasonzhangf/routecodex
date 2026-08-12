@@ -147,7 +147,7 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
                 V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string())
             })?;
         for frame in frames {
-            let Some((_event_type, data)) = parse_v3_runtime_sse_frame_fields(&frame)? else {
+            let Some(data) = parse_v3_runtime_sse_frame_fields(&frame)? else {
                 continue;
             };
             if data == "[DONE]" {
@@ -834,7 +834,7 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                 V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string())
             })?;
         for frame in frames {
-            let Some((_event_type, data)) = parse_v3_runtime_sse_frame_fields(&frame)? else {
+            let Some(data) = parse_v3_runtime_sse_frame_fields(&frame)? else {
                 continue;
             };
             if data == "[DONE]" {

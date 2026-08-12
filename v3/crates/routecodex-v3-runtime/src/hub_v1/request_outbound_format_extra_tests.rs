@@ -52,8 +52,13 @@ fn responses_openai_chat_field_parity_responses_wire_generates_collision_resista
         .expect("Responses wire input array");
     assert_ne!(input[0]["id"], input[1]["id"]);
     for item in input {
-        assert!(item["id"].as_str().unwrap().starts_with("fc_"));
-        assert!(item["id"].as_str().unwrap().len() <= 64);
+        let id = item["id"].as_str().expect("Responses item id");
+        assert!(id.starts_with("fc_"), "id must keep fc_ prefix: {id}");
+        // 超长 id 原样保留（不按长度截断），仅带 hash 后缀防碰撞。
+        assert!(
+            id.contains(&format!("{}_", &repeated_prefix[5..])),
+            "overlong id must be preserved verbatim: {id}"
+        );
     }
 }
 

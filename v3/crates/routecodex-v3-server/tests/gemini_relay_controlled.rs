@@ -170,13 +170,6 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .await
         .unwrap();
     assert_eq!(json_response.status(), StatusCode::OK);
-    assert!(json_response
-        .headers()
-        .get("x-routecodex-v3-node-trace")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains("V3ServerRespOutbound06ClientFrame"));
     let json_body: Value = json_response.json().await.unwrap();
     assert_eq!(
         json_body["candidates"][0]["content"]["parts"][0]["text"],
@@ -239,20 +232,15 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .await
         .unwrap();
     assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(
-        error_response
-            .headers()
-            .get("x-routecodex-v3-error-chain")
-            .unwrap(),
-        "V3Error01SourceRaised,V3Error02Classified,V3Error03TargetLocalAction,V3Error04TargetExhaustionDecision,V3Error05ExecutionDecision,V3Error06ClientProjected"
-    );
     let error_body: Value = error_response.json().await.unwrap();
     assert_eq!(error_body["error"]["message"], "controlled rate limit");
     assert_eq!(error_body["error"]["code"], "RESOURCE_EXHAUSTED");
-    assert_eq!(error_body["error"]["class"], "provider_failure");
-    assert_eq!(
-        error_body["error"]["error_node"],
-        "V3Error06ClientProjected"
+    assert!(
+        error_body["error"].get("class").is_none()
+            && error_body["error"].get("error_node").is_none()
+            && error_body["error"].get("stage").is_none()
+            && error_body["error"].get("decision").is_none(),
+        "Error06 body must not carry control-plane fields: {error_body}"
     );
     assert!(
         error_body["error"].get("status").is_none(),
@@ -278,13 +266,6 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     assert_eq!(
         isolation_response.status(),
         StatusCode::INTERNAL_SERVER_ERROR
-    );
-    assert_eq!(
-        isolation_response
-            .headers()
-            .get("x-routecodex-v3-error-chain")
-            .unwrap(),
-        "V3Error01SourceRaised,V3Error02Classified,V3Error03TargetLocalAction,V3Error04TargetExhaustionDecision,V3Error05ExecutionDecision,V3Error06ClientProjected"
     );
     assert!(
         tokio::time::timeout(Duration::from_millis(100), captures_rx.recv())

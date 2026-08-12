@@ -10,7 +10,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime(
         .into_foundation()
 }
 
-pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
+pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     state: &V3ResponsesRelayLocalContinuationState,
@@ -40,7 +40,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_local_contin
     .into_foundation()
 }
 
-pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control(
+pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     state: &V3ResponsesRelayLocalContinuationState,
@@ -161,7 +161,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         local,
         stopless_control,
         provider_health.runtime_health(),
-        V3ResponsesRelayRetryPolicy::default(),
+        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         None,
         None,
         initial_selected_target,

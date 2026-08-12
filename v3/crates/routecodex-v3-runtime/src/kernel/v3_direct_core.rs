@@ -284,6 +284,12 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                     trace.push("V3ProviderActionGateTerminalReevaluation");
                     continue;
                 }
+                Ok(V3ProviderActionRecoveryTransition::Consumed(_)) => {
+                    pending_provider_action_recovery = None;
+                    retry_selected = Some(selected);
+                    trace.push("V3ProviderActionGateConsumedReevaluation");
+                    continue;
+                }
                 Err(error) => {
                     return error_output(
                         runtime_source("V3ProviderActionGateAdmission", error),
@@ -360,11 +366,21 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                 }
                 match &policy_result.decision.action {
                     V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                        if policy_result.retryable_transient {
+                            // 瞬态失败切走：request-local witness 不经过
+                            // provider action gate（无 lane 可等），立即重选。
+                            continue;
+                        }
                         pending_provider_action_recovery = Some(recovery.clone());
                         continue;
                     }
                     V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
                         retry_selected = policy_result.retry_selected.map(|selected| *selected);
+                        if policy_result.retryable_transient {
+                            // 瞬态失败重试同一 provider：不经过 provider action
+                            // gate（无 lane 可等），立即重发。
+                            continue;
+                        }
                         pending_provider_action_recovery = Some(recovery.clone());
                         continue;
                     }
@@ -493,11 +509,21 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             }
             match &policy_result.decision.action {
                 V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                    if policy_result.retryable_transient {
+                        // 瞬态失败切走：request-local witness 不经过
+                        // provider action gate（无 lane 可等），立即重选。
+                        continue;
+                    }
                     pending_provider_action_recovery = Some(recovery.clone());
                     continue;
                 }
                 V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
                     retry_selected = policy_result.retry_selected.map(|selected| *selected);
+                    if policy_result.retryable_transient {
+                        // 瞬态失败重试同一 provider：不经过 provider action
+                        // gate（无 lane 可等），立即重发。
+                        continue;
+                    }
                     pending_provider_action_recovery = Some(recovery.clone());
                     continue;
                 }

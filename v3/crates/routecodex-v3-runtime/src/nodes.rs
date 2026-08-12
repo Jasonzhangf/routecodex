@@ -4,7 +4,7 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope,
 };
 use routecodex_v3_route_classifier::{
-    classify_route, extract_active_turn_signals, RouteClassifierInput,
+    build_v3_current_turn_route_facts, classify_route, V3CurrentTurnRouteFacts,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -290,13 +290,13 @@ fn build_v3_router_request_facts_for_entry_with_control(
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
     let input_tokens = estimate_v3_routing_input_tokens(body);
-    let active_turn = extract_active_turn_signals(body);
+    let active_turn = build_v3_current_turn_route_facts(body);
     let has_image_attachment = has_v3_protocol_image_attachment(body);
     // 客户端显式声明 websearch 工具（function/custom 名为 websearch/web_search）
     // 是 typed current-turn 路由事实：候选 Mode B pool 必须据此命中，禁止依赖
     // 请求文本意图推断（r4 typed facts 设计：不扫描 payload 文本重建控制）。
     let declares_web_search_tool = request_declares_v3_web_search_tool(body, manifest);
-    let route_classification = classify_route(&RouteClassifierInput {
+    let route_facts = V3CurrentTurnRouteFacts {
         reached_long_context: longcontext_threshold_tokens
             .is_some_and(|threshold| input_tokens >= threshold),
         has_image_attachment,
@@ -309,9 +309,9 @@ fn build_v3_router_request_facts_for_entry_with_control(
             .last_assistant_tool
             .as_ref()
             .map(|tool| tool.category.clone()),
-        current_user_text: active_turn.current_user_text,
         has_background_keyword: false,
-    });
+    };
+    let route_classification = classify_route(&route_facts);
     for capability in &route_classification.required_capabilities {
         capabilities.insert(capability.clone());
     }

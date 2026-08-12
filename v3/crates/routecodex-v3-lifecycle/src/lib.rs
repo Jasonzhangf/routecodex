@@ -46,9 +46,9 @@ pub enum V3LifecycleError {
     OperationLocked(String),
     #[error("managed instance is already running: {0}")]
     AlreadyRunning(String),
-    #[error("managed instance is not running: {0}")]
+    #[error("NotRunning: managed instance is not running: {0}")]
     NotRunning(String),
-    #[error("managed instance identity mismatch: {0}")]
+    #[error("IdentityMismatch: managed instance identity mismatch: {0}")]
     IdentityMismatch(String),
     #[error("managed lifecycle control timed out: {0}")]
     Timeout(String),
@@ -306,7 +306,9 @@ impl V3ManagedLifecycle {
                 "managed instance has no enabled listeners".to_string(),
             ));
         }
-        if self.force_console && manifest.debug.log_file.is_none() {
+        if (self.force_console || self.force_snapshots || self.force_snapshot_stages.is_some())
+            && manifest.debug.log_file.is_none()
+        {
             if let Some(port) = listeners.first().map(|listener| listener.port) {
                 if let Some(home) = std::env::var_os("HOME") {
                     manifest.debug.log_file = Some(
@@ -334,11 +336,21 @@ impl V3ManagedLifecycle {
     }
 
     fn apply_snapshot_authorization_to_manifest(&self, manifest: &mut V3Config05ManifestPublished) {
-        // 快照授权只在显式标志时强制开启；默认交给 config/dev 语义
-        // （dev build 默认落样本，release 需显式 opt-in），禁止默认强制关闭。
+        // Codex samples are a lifecycle opt-in. Configured debug snapshots remain
+        // available for diagnostics, but sample persistence requires an explicit
+        // lifecycle snapshot flag.
+        if !self.force_snapshots
+            && !self.force_snapshot_direct
+            && self.force_snapshot_stages.is_none()
+        {
+            manifest.debug.codex_samples = false;
+        }
         if self.force_snapshots {
             manifest.debug.codex_samples = true;
             manifest.debug.snapshots = true;
+            manifest.debug.snapshot_direct = false;
+            // 显式 --snap：全量样本（成功+错误），关闭 internal 默认只落错误样本。
+            manifest.debug.full_codex_sampling = true;
         }
         if self.force_snapshot_direct {
             manifest.debug.snapshot_direct = true;
@@ -347,6 +359,8 @@ impl V3ManagedLifecycle {
             manifest.debug.snapshots = true;
             manifest.debug.codex_samples = true;
             manifest.debug.snapshot_stages = Some(stages.clone());
+            // 显式 --snap-stages：全量样本，关闭只落错误样本模式。
+            manifest.debug.full_codex_sampling = true;
         }
     }
 
@@ -384,9 +398,6 @@ impl V3ManagedLifecycle {
         timeout: Duration,
     ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
         let instance_dir = self.instance_dir(&declaration.instance_id);
-        let log_path = instance_dir.join("server.log");
-        let stdout = private_log_file(&log_path)?;
-        let stderr = stdout.try_clone()?;
         let mut command = Command::new(executable_path);
         command
             .arg("server")
@@ -404,6 +415,9 @@ impl V3ManagedLifecycle {
         if self.force_console {
             command.arg("--console");
         }
+        let log_path = instance_dir.join("server.log");
+        let stdout = private_log_file(&log_path)?;
+        let stderr = stdout.try_clone()?;
         command
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))

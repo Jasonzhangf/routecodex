@@ -2584,9 +2584,12 @@ fn assert_error_chain(output: &routecodex_v3_runtime::V3ResponsesDirectRuntimeOu
     let V3ClientBody::Json(body) = &output.client_payload.body else {
         panic!("error projection must be JSON")
     };
-    assert_eq!(
-        body.pointer("/error/error_node").and_then(Value::as_str),
-        Some("V3Error06ClientProjected")
+    assert!(
+        body.pointer("/error/error_node").is_none()
+            && body.pointer("/error/stage").is_none()
+            && body.pointer("/error/class").is_none()
+            && body.pointer("/error/decision").is_none(),
+        "Error06 body must not carry control-plane fields: {body}"
     );
 }
 

@@ -146,7 +146,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health<T: Respon
         input,
         transport,
         provider_health,
-        V3RelayProviderFailureRetryPolicy::default(),
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
     )
     .await
 }
@@ -444,10 +444,9 @@ fn project_sse_stream(
                             .and_then(Err);
                         return Some((result, state));
                     }
-                    if !state.terminal || !state.seen_done {
+                    if !state.terminal {
                         let error =
-                            "OpenAI Chat SSE ended without terminal finish_reason or [DONE]"
-                                .to_string();
+                            "OpenAI Chat SSE ended without terminal finish_reason".to_string();
                         let result = state
                             .provider_outcome
                             .record_failure(&error)

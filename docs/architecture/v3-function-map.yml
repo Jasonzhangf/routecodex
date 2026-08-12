@@ -278,6 +278,7 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-runtime/src/foundation.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_error_policy_matching.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
@@ -339,6 +340,8 @@ features:
   - build_v3_error_05_execution_decision_from_v3_error_04
   - build_v3_error_06_client_projected_from_v3_error_05
   - V3ProviderFailureRuntimeHealth::record_provider_failure_record
+  - V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy
+  - V3ProviderFailureRuntimeHealth::record_provider_transient_bypass_in_session
   - V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
   - V3ProviderFailureRuntimeHealth::session_bound_availability
   - V3ProviderSessionAvailabilityReader::availability
@@ -347,8 +350,23 @@ features:
   - V3ProviderHealthStore::availability
   - V3ProviderHealthStore::availability_for_session
   - V3ProviderHealthStore::try_acquire_cross_session_revive
+  - V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response
+  - V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
+  - V3ProviderGlobalSubscriptionHealthStore::complete_probe_success
+  - V3ProviderGlobalSubscriptionHealthStore::complete_probe_failure
+  - V3ProviderGlobalSubscriptionHealthStore::reset_after_restart
+  - V3ProviderGlobalSubscriptionHealthStore::record_provider_success
+  - V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
+  - V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+  - configured_retry_budget_for_failure
+  - configured_health_policy_for_failure
+  - provider_error_policy_matches_failure
+  - is_v3_retryable_transient_stage_code
+  - V3_TRANSIENT_TRANSPORT_HANG_CODE
+  - V3_TRANSIENT_RETRY_BUDGET
+  - build_v3_provider_global_probe_target
+  - probe_v3_provider_global_target
   - build_v3_provider_failure_session_scope_for_request
-  - V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET
   - V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS
   allowed_paths:
   - v3/crates/routecodex-v3-debug
@@ -2153,9 +2171,19 @@ features:
   canonical_builders:
   - build_v3_hub_resp_inbound_02_from_provider_resp_compat_02
   - build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload
+  canonical_codecs:
+  - parse_v3_provider_sse_json_data
+  - classify_v3_provider_responses_json_data
+  - classify_v3_provider_responses_json_event
+  - record_v3_provider_sse_json_frame
   allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
   - v3/crates/routecodex-v3-runtime/tests
@@ -2168,28 +2196,23 @@ features:
   - MetadataCenter
   required_tests:
   - v3/crates/routecodex-v3-sse/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/tests.rs
+  - v3/crates/routecodex-v3-server/src/websocket.rs
   - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
   required_gates:
   - npm run verify:sse-architecture-boundary
+  - npm run verify:v3-provider-action-gate
+  - npm run verify:v3-runtime-timing-observability
   - npm run test:v3-openai-chat-relay-runtime-integration
   migration_target: rust
   notes:
   - OpenAI Chat finish_reason is semantic protocol data; [DONE] is transport-only.
   - Unsupported or malformed standard protocol events fail at the adjacent codec.
 - feature_id: vr.current_turn_typed_route_facts
-  status: design
-  # 2026-08-08 登记（fixlist item 3）：设计已批准但代码未实现
-  # （build_v3_current_turn_route_facts / V3CurrentTurnRouteFacts 全仓零命中；
-  #  nodes.rs 仍以 build_v3_router_request_facts_for_entry_with_control 扫描
-  #  messages/input/图片/tool 声明，含 chat direct 的 req04 chat 变体）。
-  # owner: design_id:v3-openai-chat-anthropic-sse-terminal-closeout-20260808-r4
-  #   （claim active，run 20260808T231651Z-Macstudio-94227-r4-sse-route）
-  # 阶段计划：
-  #   1. typed current-turn route-facts carrier 定义（V3CurrentTurnRouteFacts +
-  #      build_v3_current_turn_route_facts，owning entry/Req edge）
-  #   2. 调用方迁移（VR classifier 消费 typed facts，移除 payload 文本/图片扫描）
-  #   3. 物理删除旧扫描（nodes.rs build_v3_router_request_facts_* 扫描分支）
-  # ETA: r4-sse-route claim 实现轮（实现完成前保持 status=design，禁止宣称 active）
+  status: source_controlled_runtime_pending_live_replay
+  # 2026-08-12：typed route-facts carrier and classifier boundary implemented.
+  # Raw request parsing is confined to the named current-turn builder; the
+  # classifier consumes only V3CurrentTurnRouteFacts. No raw Value reaches it.
   summary: Virtual Router consumes explicit typed route facts for the current
     request turn and never reconstructs control from request business content.
   owner_kind: rust_ssot
@@ -2241,13 +2264,12 @@ features:
     - P2: 'build_v3_current_turn_route_facts 从现有 build_v3_router_request_facts_for_entry_with_control 的输入提取 typed 字段，使 classify_route 只消费 typed facts（不再直接扫描原始 payload）。'
     - P3: 'nodes.rs / route-classifier 测试迁移到 typed carrier；物理删除 payload-scanning 推断路径（硬护栏 12）。'
     - P4: 'VR 消费方（provider-failure policy / route facts 使用者）改为只读 v3.route.current_turn_facts@V3HubReqExecution05Planned，禁止重建。'
-    status: 'design_not_implemented（未落地前保持 status=design，禁止宣称 active；canonical_builders 符号在代码中不存在，红测/verify 未锚定）'
+    status: 'source_controlled（typed carrier and builder symbols exist; live replay remains required）'
   notes:
   - Current-turn scope is an ownership boundary, not a license to scan historical payload.
   - Control state must arrive through typed side-channel facts; payload cannot rebuild it.
-  - 未实现状态由本 map 显式记录（design_not_implemented + 阶段计划），
-    不允许以「binding_pending/design」掩盖活跃代码；实现进度以
-    `V3CurrentTurnRouteFacts` 符号存在 + 红测锚定为准。
+  - Source status is not runtime closeout: install, aggregate restart, and
+    exact positive/reverse live replay remain required before delivery.
 - feature_id: v3.protocol_conversion_field_parity
   owner_crates:
   - routecodex-v3-runtime
@@ -4359,10 +4381,10 @@ features:
   resource_bindings: []
   entry_symbols:
   - classify_route
-  - extract_active_turn_signals
+  - build_v3_current_turn_route_facts
   - classify_tool_call
-  - has_web_search_intent
   - RouteClassification
+  - V3CurrentTurnRouteFacts
   - RouteClassifierInput
   allowed_paths:
   - v3/crates/routecodex-v3-route-classifier
@@ -4520,8 +4542,53 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
   - npm run verify:v3-architecture-ci
   - npm run verify:v3-stage-protocol-shapes
+  entry_symbols:
+  - run_v3_direct_transient_failure_policy
+  - V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT
+  - V3_TRANSIENT_RETRY_BUDGET
   mainline_bindings:
   - v3-provider-action-gate-19
   - v3-provider-action-gate-20
   - v3-provider-action-gate-24
   runtime_status: source_controlled_runtime_boundary_verified
+
+- feature_id: v3.provider_global_subscription_probe
+  status: source_active_live_verification_required
+  change_risk: critical
+  owner_kind: rust_v3_provider_global_health_lifecycle
+  owner_crates:
+  - routecodex-v3-provider-responses
+  - routecodex-v3-runtime
+  - routecodex-v3-server
+  owner_files:
+  - v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  resource_bindings:
+  - v3.provider.global_subscription_health
+  - v3.config.published_manifest
+  entry_symbols:
+  - V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
+  - V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
+  - V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+  - probe_v3_provider_global_target
+  - spawn_v3_server_aggregate
+  allowed_paths:
+  - v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-error/src/subscription.rs
+  - v3/crates/routecodex-v3-config/src
+  - docs/architecture
+  - docs/goals
+  forbidden_paths:
+  - src
+  - sharedmodule/llmswitch-core
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
+  - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-architecture-docs
+  runtime_status: source_controlled_live_verification_required

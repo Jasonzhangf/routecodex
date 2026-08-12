@@ -1,6 +1,6 @@
 # V3 Provider Error Disposition Path Config Plan
 
-Status: design prompt source（实现前需确认）
+Status: source_active_live_verification_required
 Created: 2026-08-09
 Supersedes scope: 在 `docs/goals/v3-provider-error-unified-interface-contract-plan.md`（2026-07-24，已部分落地）骨架之上做增量演进，不重写其已落地部分。
 
@@ -276,3 +276,72 @@ hook/codec 失败 ────────┘            │
 - §7 硬护栏全部保持且有 red 测试证明（exhaustion 判定、status>=400、client_disconnect health-neutral、控制语义不进 payload）。
 - 红测全部先红后绿；旧样本在线复测证明不再走 stopless/requires_action。
 - map / wiki / verification map 同步更新；提交不含无关 dirty 文件。
+
+## 11. 本次实现计划：session 隔离与订阅失效 provider 级治理
+
+### 11.1 目标
+
+在不改变 Error01-06、Hub Pipeline 和 provider wire 边界的前提下，完成以下行为：
+
+1. 默认错误状态严格按 `server_id + routing_group + session_id + provider_runtime_identity` 隔离；同一 provider 的其他 session 不得清理、恢复或改变当前 session 的失败状态。
+2. 默认普通非临时错误连续命中 3 次后进入 session cooldown，默认 15 分钟；阈值和时长由配置默认路径提供。
+3. 非临时错误分类、连续次数、retry/reselect、cooldown scope、cooldown 时长、终态投影全部由 manifest 配置驱动；runtime 不再自行解释 provider 特例或硬编码处置参数。
+4. 订阅失效且无 token 的错误必须先经过稳定的 typed error fingerprint；同一 session 连续 3 次命中相同 fingerprint，且分类为非临时错误后，才允许触发 provider 级全局封禁。
+5. provider 级封禁默认 1 小时；封禁期间每小时最多发起一次后台 probe。probe 成功恢复 provider；probe 失败后本轮不再继续 probe，只有进程重启才重新开启探测资格。
+
+### 11.2 明确非目标
+
+- 不修改业务 request/response payload，不把 fingerprint、policy、scope、probe 状态写入 metadata 或协议字段。
+- 不在请求侧 cleanup，不在 handler、SSE、outbound 或 continuation 不可变区补偿。
+- 不引入 provider-specific Hub/Virtual Router 分支。
+- 不保留 cross-session revive 作为 fallback；session 隔离是唯一默认路径。
+
+### 11.3 唯一 owner 与边界
+
+| 语义 | 唯一 owner | 禁止位置 |
+| --- | --- | --- |
+| 错误 signal / fingerprint / 分类 | `routecodex-v3-error` | handler、payload、provider runtime 私有分支 |
+| policy 编译与默认路径 | `routecodex-v3-config` | runtime 读取原始配置、散落默认值 |
+| session health / provider-global health / cooldown | `routecodex-v3-provider-responses` health resource | HTTP 层、SSE 层、Virtual Router 临时 map |
+| retry/reselect/path 执行 | `routecodex-v3-runtime` provider failure policy | Error06 自行重试、handler 补偿 |
+| hourly probe 生命周期 | `routecodex-v3-runtime` managed lifecycle owner | 每个请求创建 task、provider codec 自行探测 |
+
+实现前必须同步 resource map、function map、mainline call map、module registry、verification map，并确认每条跨模块边已登记。
+
+### 11.4 强制实施顺序
+
+必须严格按以下顺序执行，不得先改线上接线：
+
+1. 固化最小 red tests：session 完全隔离、相同 fingerprint 三次、不同 fingerprint 不触发、provider-global 一小时封禁、probe 成功恢复、probe 失败至重启才可再探测、配置非法组合 fail-fast。
+2. 只实现 typed error fingerprint、配置 manifest path、health state 和 probe lifecycle；先让新实现通过单元测试和模块测试。
+3. 完成 runtime integration tests、错误链测试、provider response 测试和架构 gate；证明控制语义仍只在 side-channel/Error/health resource。
+4. 在测试全部通过后，整体替换旧处置路径：统一切到 manifest-driven policy，删除旧 hardcoded retry/cooldown、cross-session revive 和未消费的旧 action 分支；不得保留双路径、fallback 或静默兼容。
+5. 接线后重新跑全局 architecture/build/test gates。
+6. 全局安装当前版本，使用 `routecodex restart` 聚合重启，验证所有配置成员端口 `/health`，再用旧错误样本和真实同入口样本在线重放。
+7. 在线版本、安装版本、源码版本一致且旧样本验证通过后，才允许 code review 和交付。
+
+### 11.5 必测矩阵
+
+| 场景 | 必须证明 |
+| --- | --- |
+| session A 三次普通非临时错误 | A cooldown，阈值 3，默认 15 分钟 |
+| session B 同 provider 成功 | 不清理、不恢复、不改变 A |
+| A 三次不同 fingerprint | 不触发“相同无效响应” provider-global 封禁 |
+| A 三次相同订阅失效 fingerprint | provider-global cooldown 1 小时 |
+| global cooldown 期间任意 session | provider 不可选，不能被 cross-session revive |
+| 每小时 probe 成功 | provider 恢复，状态清理可验证 |
+| 每小时 probe 失败 | 本进程不重复探测，重启前保持封禁 |
+| 进程重启 | 清理进程内 cooldown，并重新允许 probe |
+| 临时轮询/SSE/header timeout | 不触发订阅失效 global policy |
+| 默认池可用 / candidateExhausted=false | 不得提前投影终态 |
+| client_disconnect | health-neutral，不切换、不封禁 |
+| control/payload 扫描 | fingerprint、policy、scope、probe 状态不得进入 provider/client normal payload |
+
+### 11.6 完成定义
+
+- 新 red tests 先红，唯一 owner 实现后转绿。
+- 旧处置路径物理删除，不能以配置开关、异常捕获或 fallback 继续存在。
+- 配置是非临时错误处置的唯一参数真源；runtime 只消费编译后的 manifest。
+- session 错误完全隔离；provider-global 订阅失效策略按稳定 fingerprint 触发。
+- 一小时封禁、每小时 probe、probe 失败至重启暂停探测均有正反测试和在线证据。
+- 全局安装、聚合重启、全部成员端口健康检查、旧样本在线重放和最终 review 全部完成。

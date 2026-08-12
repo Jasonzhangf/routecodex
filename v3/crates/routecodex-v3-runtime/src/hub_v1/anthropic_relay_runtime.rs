@@ -276,7 +276,7 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
         None,
         V3HubRelayResponseHookProfile::empty(),
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
-        V3RelayProviderFailureRetryPolicy::default(),
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
     )
     .await
     {
@@ -385,7 +385,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_client_headers_provider_hea
         None,
         V3HubRelayResponseHookProfile::empty(),
         provider_health,
-        V3RelayProviderFailureRetryPolicy::default(),
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
     )
     .await
 }
@@ -440,7 +440,7 @@ where
         }),
         V3HubRelayResponseHookProfile::new(servertool_names),
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
-        V3RelayProviderFailureRetryPolicy::default(),
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
     )
     .await
 }
@@ -750,6 +750,12 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     );
                     retry_selected = Some(selected);
                     trace.push("V3ProviderActionGateTerminalReevaluation");
+                    continue;
+                }
+                V3ProviderActionRecoveryTransition::Consumed(_) => {
+                    pending_provider_action_recovery = None;
+                    retry_selected = Some(selected);
+                    trace.push("V3ProviderActionGateConsumedReevaluation");
                     continue;
                 }
             }

@@ -6,7 +6,9 @@ pub mod kernel;
 pub mod local_continuation;
 pub mod nodes;
 mod provider_action_gate;
+mod provider_error_policy_matching;
 mod provider_failure_runtime_policy;
+mod provider_failure_runtime_helpers;
 pub mod protocol_tables;
 pub mod remote_continuation;
 pub mod responses_continuation_owner;
@@ -43,6 +45,9 @@ pub use kernel::{
 pub use local_continuation::*;
 pub use nodes::*;
 pub use provider_action_gate::*;
+pub use provider_failure_runtime_policy::{
+    build_v3_provider_global_probe_target, probe_v3_provider_global_target,
+};
 pub use remote_continuation::*;
 pub use responses_continuation_owner::*;
 pub use runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};

@@ -803,6 +803,33 @@ async fn recovery_ticket_consumes_its_exact_failure_key_not_the_latest_group_lan
 }
 
 #[tokio::test]
+async fn consumed_recovery_lane_releases_ticket_for_reevaluation() {
+    let gate = V3ProviderActionGate::default();
+    let failed = scoped_key(
+        "released-server",
+        "released-group",
+        "provider-a:key:model",
+        "provider_http_500",
+    );
+    let ticket = gate
+        .record_failure(&failed)
+        .expect("provider failure")
+        .recovery_ticket()
+        .clone();
+    gate.record_success(&failed).expect("provider success");
+
+    let transition = gate
+        .wait_for_recovery_ticket(&ticket, provider_scope("provider-b:key:model"))
+        .await
+        .expect("consumed lane is a re-evaluation");
+    assert!(matches!(
+        transition,
+        V3ProviderActionRecoveryTransition::Consumed(released)
+            if released == ticket
+    ));
+}
+
+#[tokio::test]
 async fn superseded_same_key_generation_returns_typed_transition() {
     let gate = V3ProviderActionGate::default();
     let failed = scoped_key(

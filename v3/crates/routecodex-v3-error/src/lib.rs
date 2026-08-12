@@ -658,6 +658,45 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
     }
 }
 
+/// 瞬态失败（SSE 流内协议失败 / transport 响应头挂起）判定，由错误处理中心
+/// 根据**错误阶段 + 错误类别**决定，与入口（direct/relay/chat）无关。
+/// 命中时 provider failure 层按「同 provider 直接重试 3 次、health-neutral
+/// （不计冷却）、第 3 次失败后一次回报错误中心再切 provider」驱动重试。
+///
+/// - SSE 流内阶段：ProviderFailure 一律视为瞬态（HTTP 2xx 后响应体/流内失败，
+///   含裸 error 事件、response.failed/incomplete、空包、首事件超时、
+///   malformed SSE、body 读取错误等）。
+/// - transport 阶段：仅挂起（响应头等待超时，code=`provider_response_header_timeout`）
+///   视为瞬态；其余 transport 错误（连接失败等）保持计 health 的原策略。
+pub fn is_v3_retryable_transient_source(source: &V3Error01SourceRaised) -> bool {
+    if source.source_kind != V3ErrorSourceKind::ProviderFailure {
+        return false;
+    }
+    is_v3_retryable_transient_stage_code(&source.source_stage, &source.code)
+}
+
+/// Returns whether a provider failure is health-neutral and eligible for the
+/// transient same-provider retry budget at the given pipeline stage.
+pub fn is_v3_retryable_transient_stage_code(source_stage: &str, code: &str) -> bool {
+    match source_stage {
+        // direct 与 relay 两套阶段命名都覆盖。该阶段的 ProviderFailure 含两类：
+        // - HTTP 状态错误（code=`provider_http_*`）：真实 provider 故障，计 health；
+        // - 2xx 响应内容/流内失败（裸 error 事件、response.failed/incomplete、
+        //   空包、首事件超时、malformed SSE、body/JSON 解码失败、SSE 事件内
+        //   动态错误码等）：provider 内部瞬态问题，health-neutral 重试。
+        "V3ProviderResp14Raw" | "V3ProviderRespInbound01Raw" => {
+            !code.starts_with("provider_http_")
+        }
+        // transport 阶段仅挂起（响应头等待超时，专属 code）为瞬态。
+        "V3Transport13ResponsesHttpRequest" | "V3ProviderReqOutbound09TransportRequest" => {
+            code == V3_TRANSIENT_TRANSPORT_HANG_CODE
+        }
+        _ => false,
+    }
+}
+
+pub const V3_TRANSIENT_TRANSPORT_HANG_CODE: &str = "provider_response_header_timeout";
+
 pub fn build_v3_error_03_target_local_action_from_v3_error_02(
     classified: V3Error02Classified,
     scope: V3ErrorActionScope,
@@ -676,7 +715,12 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
         V3ErrorSourceKind::ModelNotFound
     );
     let retry_eligible = provider_failure && candidates_remaining > 0;
-    let health_affecting = provider_failure && !matches!(scope, V3ErrorActionScope::None);
+    // 瞬态失败（SSE 流内/挂起，由错误处理中心按阶段+类别判定）为 provider
+    // 内部瞬态问题：不计入 provider health（health-neutral），由 provider
+    // failure 层按「同 provider 重试 3 次、第 3 次失败后一次回报再切」处理。
+    let health_affecting = provider_failure
+        && !matches!(scope, V3ErrorActionScope::None)
+        && !is_v3_retryable_transient_source(&classified.source);
     let exhaustion_effect = if retry_eligible {
         "target_local_reselect"
     } else if client_disconnect {
@@ -692,11 +736,10 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
         action: V3ErrorActionPlan {
             scope,
             reason: classified.source.code.clone(),
-            duration_ms: if health_affecting {
-                Some(15 * 60_000)
-            } else {
-                None
-            },
+            // Error03 is deliberately parameter-free at this crate boundary;
+            // cooldown duration is supplied by the compiled disposition path
+            // at the runtime health owner.
+            duration_ms: None,
             retry_eligible,
             health_affecting,
             exhaustion_effect: exhaustion_effect.to_string(),
@@ -804,29 +847,8 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
     let mut error = serde_json::json!({
         "code": source.code,
         "message": source.message,
-        "stage": source.source_stage,
-        "class": execution.exhaustion.local_action.classified.class,
-        "decision": execution.action.observability_label(),
-        "target_exhausted": execution.exhaustion.target_exhausted,
-        "candidates_remaining": execution.exhaustion.route_pool_remaining_after_exclusion,
-        "route_pool_remaining_after_exclusion": execution.exhaustion.route_pool_remaining_after_exclusion,
-        "default_pool_available": execution.exhaustion.default_pool_available,
-        "error_node": "V3Error06ClientProjected"
     });
-    if let Some(internal_error) = &source.internal_error {
-        error["internal_code"] =
-            serde_json::Value::String(internal_error.internal_code.to_string());
-        error["internal_node"] = serde_json::Value::String(internal_error.node_id.to_string());
-        error["internal_owner_feature_id"] =
-            serde_json::Value::String(internal_error.owner_feature_id.to_string());
-        error["internal_module_block"] =
-            serde_json::Value::String(internal_error.module_block.to_string());
-    }
-    if let Some(external_error) = &source.external_error {
-        error["external_error"] =
-            serde_json::to_value(external_error).expect("V3ExternalErrorLink must serialize");
-    }
-    let body = routecodex_v3_debug::redact_debug_value(
+    let body = routecodex_v3_debug::project_debug_value_verbatim(
         &routecodex_v3_debug::V3RedactionPolicy::default(),
         serde_json::json!({ "error": error }),
     );
@@ -1207,4 +1229,35 @@ mod tests {
         assert_eq!(observability.source_stage, "V3RuntimeObservability");
         assert_eq!(observability.code, "runtime_observability_contract");
     }
+
+    #[test]
+    fn transient_stage_code_classifier_accepts_stream_and_header_hang_failures() {
+        assert!(is_v3_retryable_transient_stage_code(
+            "V3ProviderRespInbound01Raw",
+            "provider_response_sse_stream"
+        ));
+        assert!(is_v3_retryable_transient_stage_code(
+            "V3ProviderReqOutbound09TransportRequest",
+            V3_TRANSIENT_TRANSPORT_HANG_CODE
+        ));
+    }
+
+    #[test]
+    fn transient_stage_code_classifier_rejects_http_and_non_provider_failures() {
+        assert!(!is_v3_retryable_transient_stage_code(
+            "V3ProviderRespInbound01Raw",
+            "provider_http_502"
+        ));
+        assert!(!is_v3_retryable_transient_stage_code(
+            "V3ProviderReqOutbound09TransportRequest",
+            "provider_connect_failed"
+        ));
+        assert!(!is_v3_retryable_transient_stage_code(
+            "V3ServerRespOutbound06ClientFrame",
+            "provider_response_sse_stream"
+        ));
+    }
 }
+mod subscription;
+
+pub use subscription::V3ProviderErrorFingerprint;

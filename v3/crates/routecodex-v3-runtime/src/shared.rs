@@ -1,4 +1,8 @@
-use crate::hub_v1::V3RuntimeStreamObservation;
+use crate::hub_v1::{
+    classify_v3_provider_generic_sse_json_data, parse_v3_provider_sse_json_data,
+    V3ProviderResponsesJsonFrameOutcome,
+    V3RuntimeStreamObservation,
+};
 use crate::nodes::{V3ClientBody, V3ClientSseStream, V3Resp15ClientPayload};
 use futures_util::{stream, StreamExt};
 use routecodex_v3_error::{
@@ -300,23 +304,25 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
             decoder
                 .finish()
                 .map_err(|error| sse_transport_source(provider_id, error))?;
-            return Err(build_v3_error_01_source_raised_external(
-                V3ErrorSourceKind::ProviderFailure,
-                "V3ProviderResp14Raw",
-                "provider_response_sse_empty",
-                "provider response SSE stream ended before first semantic event",
-                V3ExternalErrorLink {
-                    kind: V3ExternalErrorKind::Provider,
-                    status: None,
-                    code: Some("PROVIDER_RESPONSE_SSE_EMPTY".to_string()),
-                    provider_id: Some(provider_id.to_string()),
-                    upstream_request_id: None,
-                    message: Some(
-                        "provider response SSE stream ended before first semantic event"
-                            .to_string(),
-                    ),
-                },
-            ));
+            return Err(
+                build_v3_error_01_source_raised_external(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "provider_response_sse_empty",
+                    "provider response SSE stream ended before first semantic event",
+                    V3ExternalErrorLink {
+                        kind: V3ExternalErrorKind::Provider,
+                        status: None,
+                        code: Some("PROVIDER_RESPONSE_SSE_EMPTY".to_string()),
+                        provider_id: Some(provider_id.to_string()),
+                        upstream_request_id: None,
+                        message: Some(
+                            "provider response SSE stream ended before first semantic event"
+                                .to_string(),
+                        ),
+                    },
+                )
+            );
         };
         let chunk = next.map_err(provider_body_source)?;
         let frames = decoder
@@ -342,59 +348,35 @@ fn direct_sse_frame_provider_failure_source(
     provider_id: &str,
     fields: &[SseField],
 ) -> Result<DirectSseInitialFrameAction, V3Error01SourceRaised> {
-    let mut event_type = None::<String>;
     let mut data = String::new();
     for field in fields {
         let SseField::Named { name, value } = field else {
             continue;
         };
-        if name == "event" && event_type.is_none() {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                event_type = Some(trimmed.to_string());
-            }
-        } else if name == "data" {
+        if name == "data" {
             if !data.is_empty() {
                 data.push('\n');
             }
             data.push_str(value);
         }
     }
-    let data = data.trim();
-    if data.is_empty() || data == "[DONE]" {
-        return Ok(DirectSseInitialFrameAction::ContinueBuffering);
-    }
-    let event: serde_json::Value = serde_json::from_str(data).map_err(|error| {
-        build_v3_error_01_source_raised_external(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_response_sse_event_invalid",
-            error.to_string(),
-            V3ExternalErrorLink {
-                kind: V3ExternalErrorKind::Provider,
-                status: None,
-                code: Some("PROVIDER_RESPONSE_SSE_EVENT_INVALID".to_string()),
-                provider_id: Some(provider_id.to_string()),
-                upstream_request_id: None,
-                message: Some(error.to_string()),
-            },
-        )
+    let parsed = classify_v3_provider_generic_sse_json_data(&data).map_err(|message| {
+        build_v3_provider_sse_json_error(provider_id, "provider_response_sse_event_invalid", message)
     })?;
-    let semantic_event_type = event_type
-        .as_deref()
-        .or_else(|| event.get("type").and_then(serde_json::Value::as_str));
-    if let Some(source) =
-        direct_sse_event_provider_failure_source(provider_id, semantic_event_type, &event)
-    {
-        return Err(source);
-    }
-    if matches!(
-        semantic_event_type.map(str::trim),
-        Some("response.created" | "response.in_progress")
-    ) {
-        Ok(DirectSseInitialFrameAction::ContinueBuffering)
-    } else {
-        Ok(DirectSseInitialFrameAction::StartClientStream)
+    let Some(outcome) = parsed else {
+        return Ok(DirectSseInitialFrameAction::ContinueBuffering);
+    };
+    match outcome {
+        V3ProviderResponsesJsonFrameOutcome::ContinueBuffering => {
+            Ok(DirectSseInitialFrameAction::ContinueBuffering)
+        }
+        V3ProviderResponsesJsonFrameOutcome::StartClientStream
+        | V3ProviderResponsesJsonFrameOutcome::Terminal => {
+            Ok(DirectSseInitialFrameAction::StartClientStream)
+        }
+        V3ProviderResponsesJsonFrameOutcome::Failure { code, message } => {
+            Err(build_v3_provider_sse_json_error(provider_id, &code, message))
+        }
     }
 }
 
@@ -404,61 +386,25 @@ enum DirectSseInitialFrameAction {
     StartClientStream,
 }
 
-fn direct_sse_event_provider_failure_source(
+fn build_v3_provider_sse_json_error(
     provider_id: &str,
-    event_type: Option<&str>,
-    event: &serde_json::Value,
-) -> Option<V3Error01SourceRaised> {
-    let event_type = event_type?.trim();
-    let error_object = if event_type == "error" {
-        event.get("error").unwrap_or(event)
-    } else if matches!(
-        event_type,
-        "response.failed"
-            | "response.incomplete"
-            | "response.cancelled"
-            | "response.canceled"
-            | "response.error"
-    ) {
-        event
-            .pointer("/response/error")
-            .or_else(|| event.get("error"))
-            .unwrap_or(event)
-    } else {
-        return None;
-    };
-    let code = error_object
-        .get("code")
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(event_type)
-        .to_string();
-    let message = error_object
-        .get("message")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            event
-                .pointer("/response/incomplete_details/reason")
-                .and_then(serde_json::Value::as_str)
-        })
-        .or_else(|| event.get("message").and_then(serde_json::Value::as_str))
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("provider response SSE stream reported failure")
-        .to_string();
-    Some(build_v3_error_01_source_raised_external(
+    code: &str,
+    message: String,
+) -> V3Error01SourceRaised {
+    build_v3_error_01_source_raised_external(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderResp14Raw",
-        code.clone(),
+        code,
         message.clone(),
         V3ExternalErrorLink {
             kind: V3ExternalErrorKind::Provider,
             status: None,
-            code: Some(code),
+            code: Some(code.to_string()),
             provider_id: Some(provider_id.to_string()),
             upstream_request_id: None,
             message: Some(message),
         },
-    ))
+    )
 }
 
 fn observed_sse_client_stream(
@@ -576,26 +522,24 @@ fn observe_sse_usage_frame(
         }
         data.push_str(value);
     }
-    let data = data.trim();
-    if data.is_empty() || data == "[DONE]" {
-        return Ok(());
-    }
-    let event: serde_json::Value = serde_json::from_str(data).map_err(|error| {
+    let Some(event) = parse_v3_provider_sse_json_data(&data).map_err(|error| {
         build_v3_error_01_source_raised_external(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_response_sse_event_invalid",
-            error.to_string(),
+            error.clone(),
             V3ExternalErrorLink {
                 kind: V3ExternalErrorKind::Provider,
                 status: None,
                 code: Some("PROVIDER_RESPONSE_SSE_EVENT_INVALID".to_string()),
                 provider_id: Some(provider_id.to_string()),
                 upstream_request_id: None,
-                message: Some(error.to_string()),
+                message: Some(error),
             },
         )
-    })?;
+    })? else {
+        return Ok(());
+    };
     usage_observation
         .record_provider_event_json(&event)
         .map_err(|error| {
@@ -655,26 +599,24 @@ fn observe_sse_frame_remote_continuation(
         }
         data.push_str(value);
     }
-    let data = data.trim();
-    if data.is_empty() || data == "[DONE]" {
-        return Ok(None);
-    }
-    let event: serde_json::Value = serde_json::from_str(data).map_err(|error| {
+    let Some(event) = parse_v3_provider_sse_json_data(&data).map_err(|error| {
         build_v3_error_01_source_raised_external(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_response_sse_event_invalid",
-            error.to_string(),
+            error.clone(),
             V3ExternalErrorLink {
                 kind: V3ExternalErrorKind::Provider,
                 status: None,
                 code: Some("PROVIDER_RESPONSE_SSE_EVENT_INVALID".to_string()),
                 provider_id: Some(provider_id.to_string()),
                 upstream_request_id: None,
-                message: Some(error.to_string()),
+                message: Some(error),
             },
         )
-    })?;
+    })? else {
+        return Ok(None);
+    };
     let semantic = event.get("response").unwrap_or(&event);
     let semantic_response_id = semantic
         .get("id")

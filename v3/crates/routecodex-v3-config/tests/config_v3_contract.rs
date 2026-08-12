@@ -706,6 +706,68 @@ retry_mode = "reselect_before_client_projection"
 }
 
 #[test]
+fn compiles_manifest_disposition_path_and_rejects_invalid_step_order() {
+    let path_config = format!(
+        r#"{FULL_CONFIG}
+
+[[error.provider_error_action_policy]]
+policy_id = "subscription_invalid_global"
+
+[error.provider_error_action_policy.match]
+http_status = 401
+provider_code = "missing_token"
+
+[[error.provider_error_action_policy.path]]
+step = "wait_retry"
+retry_mode = "reselect_before_client_projection"
+max_attempts = 3
+backoff_ms = 100
+
+[[error.provider_error_action_policy.path]]
+step = "cooldown"
+scope = "provider_instance"
+duration_ms = 3600000
+provider_global_failure = true
+
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 502
+reason_code = "subscription_invalid_without_token"
+message_mode = "code_only"
+"#
+    );
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&path_config).unwrap(),
+    )
+    .unwrap();
+    let policy = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| policy.policy_id == "subscription_invalid_global")
+        .unwrap();
+    assert_eq!(policy.path.len(), 3);
+    assert!(policy.action.provider_global_failure);
+
+    let ambiguous = path_config.replacen(
+        "[[error.provider_error_action_policy.path]]",
+        "[error.provider_error_action_policy.action]\nkind = \"periodic_recovery\"\nreason_code = \"ambiguous\"\nretry_mode = \"none\"\ncooldown_ms = 3600000\n\n[[error.provider_error_action_policy.path]]",
+        1,
+    );
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&ambiguous).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("both action and path"), "{error}");
+
+    let invalid = path_config.replace(
+        "step = \"cooldown\"\nscope = \"provider_instance\"\nduration_ms = 3600000\nprovider_global_failure = true",
+        "step = \"project\"\nstatus = 502\nreason_code = \"early_project\"\nmessage_mode = \"code_only\"",
+    );
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("project must be the final step"), "{error}");
+}
+
+#[test]
 fn rejects_duplicate_provider_error_policy_ids_across_provider_local_and_global_surfaces() {
     let duplicate = format!(
         r#"{FULL_CONFIG}
@@ -2283,3 +2345,68 @@ allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
 continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 "#;
+
+#[test]
+fn path_only_provider_error_policy_compiles_project_step_fields_into_action() {
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "__SCOPE__"
+endpoints = ["responses"]
+[providers.first]
+type = "responses"
+base_url = "http://first.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "FIRST_KEY" }] }
+[providers.first.models.gpt-test]
+wire_name = "gpt-test"
+capabilities = ["text", "tools"]
+[route_groups.__SCOPE__.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 1 }
+]
+[[error.provider_error_action_policy]]
+policy_id = "path_only"
+scope = { provider_type = "responses", model_id = "gpt-test" }
+match = { http_status = 429 }
+
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 429
+reason_code = "path_rate_limit"
+public_code = "E_PATH_RATE_LIMIT"
+message_mode = "code_only"
+"#
+    .replace("__SCOPE__", "path_only_policy");
+    let authoring = parse_v3_config_02_authoring(&source).unwrap();
+    let manifest = compile_v3_config_05_manifest(authoring).unwrap();
+    let policy = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| policy.policy_id == "path_only")
+        .expect("path-only policy must compile");
+    assert_eq!(policy.action.reason_code, "path_rate_limit");
+    let project = policy
+        .path
+        .iter()
+        .find_map(|step| match step {
+            routecodex_v3_config::V3ProviderDispositionStepManifest::Project {
+                status,
+                public_code,
+                message_mode,
+                ..
+            } => Some((*status, public_code.clone(), *message_mode)),
+            _ => None,
+        })
+        .expect("path must carry the project step");
+    assert_eq!(project.0, 429);
+    assert_eq!(project.1.as_deref(), Some("E_PATH_RATE_LIMIT"));
+    assert_eq!(
+        project.2,
+        routecodex_v3_config::V3ClientErrorProjectionMessageMode::CodeOnly
+    );
+}

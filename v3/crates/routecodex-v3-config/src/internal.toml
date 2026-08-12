@@ -1,0 +1,72 @@
+# RouteCodex 内部配置层（internal）：内部控制特判与内部模型清单。
+#
+# 分层约束：
+# - 本文件是代码编译期嵌入资产（include_str!），随包发布；运行时判定全部查表。
+# - 用户配置面（路由池 / provider / 模型）不承载任何特判，用户无需关心本文件。
+# - 路由层（target）、流水线 compat（runtime）、能力面（server models catalog）、
+#   配置校验面（validate）只消费本文件的判定结果，禁止内联具体模型名。
+# - 修改本文件即修改 RouteCodex 内部行为（属发布级变更）。
+
+# 模型家族判定表：key 是家族名（内部标识），消费方只调用具名判定函数，
+# 不感知家族名与匹配规则。
+[model_families]
+  # gpt 家族：OpenAI 官方 gpt 系列模型（Codex 客户端主模型族）。
+  # 用途：路由层 requested-model 过滤豁免；compat 面 hosted web_search 保留、
+  # 响应密文保留；配置校验面 gpt 系列自动补 text 能力。
+  [model_families.gpt]
+    prefix = "gpt-"
+    exact = ["gpt"]
+
+# 内置 Codex 目录模型清单与默认元数据：路由组内存在对应模型引用时以
+# builtin 目录入口暴露（能力面用 defaults 构建内置条目的能力 / 上下文窗口 /
+# 描述 / reasoning 预设）；路由候选展开对 builtin 模型跳过 requested-model
+# 过滤（target 层按模型家族豁免，不依赖 manifest 声明）。
+[builtin_catalog_models]
+  ids = ["gpt-5.5"]
+
+  [[builtin_catalog_models.defaults]]
+  model_id = "gpt-5.5"
+  capabilities = ["text", "reasoning", "tools", "web_search", "multimodal"]
+  context_window = 272000
+  description = "Frontier model for complex coding, research, and real-world work."
+  default_reasoning_level = "medium"
+  reasoning_efforts = ["low", "medium", "high", "xhigh"]
+  minimal_client_version = "0.124.0"
+
+  [[builtin_catalog_models.defaults]]
+  model_id = "gpt-5.6-sol"
+  capabilities = ["text", "reasoning", "tools", "web_search", "multimodal"]
+  context_window = 372000
+  description = "Latest frontier agentic coding model."
+  default_reasoning_level = "low"
+  reasoning_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+  minimal_client_version = "0.144.0"
+
+  [[builtin_catalog_models.defaults]]
+  model_id = "gpt-5.6-terra"
+  capabilities = ["text", "reasoning", "tools", "web_search", "multimodal"]
+  context_window = 372000
+  description = "Balanced agentic coding model for everyday work."
+  default_reasoning_level = "medium"
+  reasoning_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+  minimal_client_version = "0.144.0"
+
+  [[builtin_catalog_models.defaults]]
+  model_id = "gpt-5.6-luna"
+  capabilities = ["text", "reasoning", "tools", "web_search", "multimodal"]
+  context_window = 372000
+  description = "Fast and affordable agentic coding model."
+  default_reasoning_level = "medium"
+  reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+  minimal_client_version = "0.144.0"
+
+# 隐藏的 Codex 未来模型：不在任何模型目录 / 能力面暴露。
+[hidden_models]
+  exact = ["gpt-5.6"]
+  prefixes = ["gpt-5.6-"]
+
+# 内部 debug 样本策略：不暴露在用户 config manifest；显式 --snap/--snap-stages
+# 仍由 lifecycle 授权覆盖为全量样本。
+[debug_samples]
+  error_samples_only = true
+  error_sample_skip_statuses = [401, 402, 403, 429, 503]

@@ -188,7 +188,13 @@ pub async fn handle_provider_failure(
         }
         V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
             *retry_selected = result.retry_selected.map(|selected| *selected);
-            *pending_recovery = Some(recovery);
+            // 瞬态重试（request-local recovery witness，wait_ms=None）不经过
+            // provider action gate：无 health 记录/lane 可等，立即重发。
+            if result.event.wait_ms.is_some() {
+                *pending_recovery = Some(recovery);
+            } else {
+                *pending_recovery = None;
+            }
             Ok(None)
         }
         V3Error05ExecutionAction::ProjectTerminal => {

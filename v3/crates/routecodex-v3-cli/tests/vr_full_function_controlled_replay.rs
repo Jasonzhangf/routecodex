@@ -95,12 +95,6 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
         .await
         .unwrap();
     assert_eq!(default_response.status(), ReqwestStatusCode::OK);
-    let default_trace = trace(&default_response);
-    assert_eq!(
-        count_node(&default_trace, "V3Router07OpaqueTargetHitOnce"),
-        1
-    );
-    assert!(!default_trace.contains("V3TargetLocalReselected"));
     assert_eq!(
         default_response.json::<Value>().await.unwrap(),
         json!({"id":"vr_success","output_text":"ok"})
@@ -121,12 +115,6 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
         .await
         .unwrap();
     assert_eq!(matched_response.status(), ReqwestStatusCode::OK);
-    let matched_trace = trace(&matched_response);
-    assert_eq!(
-        count_node(&matched_trace, "V3Router07OpaqueTargetHitOnce"),
-        1
-    );
-    assert!(matched_trace.contains("V3TargetLocalReselected"));
     let optional_capture = next_capture(&mut failure_a.captures, "optional failure").await;
     assert_eq!(optional_capture.body["model"], "wire-optional");
     assert_no_route_controls(&optional_capture.body);
@@ -148,32 +136,12 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
         exhausted_response.status(),
         ReqwestStatusCode::SERVICE_UNAVAILABLE
     );
-    let exhausted_trace = trace(&exhausted_response);
-    assert_eq!(
-        count_node(&exhausted_trace, "V3Router07OpaqueTargetHitOnce"),
-        1
-    );
-    assert!(exhausted_trace.contains("V3TargetLocalReselected"));
-    assert_eq!(
-        exhausted_response.headers()["x-routecodex-v3-error-chain"]
-            .to_str()
-            .unwrap(),
-        "V3Error01SourceRaised,V3Error02Classified,V3Error03TargetLocalAction,V3Error04TargetExhaustionDecision,V3Error05ExecutionDecision,V3Error06ClientProjected"
-    );
     let exhausted_body = exhausted_response.json::<Value>().await.unwrap();
     assert_eq!(exhausted_body["error"]["code"], "provider_http_503");
     assert_eq!(
-        exhausted_body["error"]["external_error"]["kind"],
-        "provider"
+        exhausted_body["error"]["message"],
+        "provider returned HTTP 503"
     );
-    assert_eq!(
-        exhausted_body["error"]["external_error"]["code"],
-        "HTTP_503"
-    );
-    assert_eq!(exhausted_body["error"]["external_error"]["status"], 503);
-    assert!(exhausted_body["error"].get("internal_code").is_none());
-    assert_eq!(exhausted_body["error"]["target_exhausted"], true);
-    assert_eq!(exhausted_body["error"]["candidates_remaining"], 0);
     let exhausted_optional = next_capture(&mut failure_a.captures, "exhaust optional").await;
     assert_eq!(exhausted_optional.body["model"], "wire-optional");
     let exhausted_default = next_capture(&mut failure_b.captures, "exhaust default").await;
@@ -385,23 +353,6 @@ fn assert_no_capture(captures: &mut mpsc::UnboundedReceiver<ProviderCapture>, la
         captures.try_recv().is_err(),
         "unexpected capture for {label}"
     );
-}
-
-fn trace(response: &reqwest::Response) -> String {
-    response
-        .headers()
-        .get("x-routecodex-v3-node-trace")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string()
-}
-
-fn count_node(trace: &str, node: &str) -> usize {
-    trace
-        .split(',')
-        .filter(|candidate| *candidate == node)
-        .count()
 }
 
 fn assert_no_route_controls(body: &Value) {

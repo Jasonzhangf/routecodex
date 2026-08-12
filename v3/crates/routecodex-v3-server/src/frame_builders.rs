@@ -136,15 +136,7 @@ pub(crate) fn foundation_output_response(output: V3FoundationRuntimeOutput) -> R
     let frame = build_v3_server_16_http_frame_from_v3_foundation_output(output);
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
-        .header("content-type", &frame.content_type)
-        .header("x-routecodex-v3-debug-node", frame.debug_node);
-    if frame.error_chain.is_empty() {
-        builder = builder.header("x-routecodex-v3-no-network-send", "true");
-    } else {
-        builder = builder
-            .header("x-routecodex-v3-error-node", frame.error_node)
-            .header("x-routecodex-v3-error-chain", frame.error_chain.join(","));
-    }
+        .header("content-type", &frame.content_type);
     let body = match frame.body {
         V3Server16Body::Json(value) => {
             serde_json::to_vec(&value).expect("V3Server16 JSON projection")
@@ -231,14 +223,7 @@ pub(crate) fn responses_direct_output_response_with_console(
 ) -> Response<Body> {
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
-        .header("content-type", &frame.content_type)
-        .header("x-routecodex-v3-debug-node", frame.debug_node)
-        .header("x-routecodex-v3-node-trace", frame.node_trace.join(","));
-    if !frame.error_chain.is_empty() {
-        builder = builder
-            .header("x-routecodex-v3-error-node", frame.error_node)
-            .header("x-routecodex-v3-error-chain", frame.error_chain.join(","));
-    }
+        .header("content-type", &frame.content_type);
     let body = match frame.body {
         V3Server16Body::Json(value) => {
             serde_json::to_vec(&value).expect("V3Server16 JSON projection")

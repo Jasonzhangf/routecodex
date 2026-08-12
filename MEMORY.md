@@ -5298,3 +5298,45 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 - **GPT 路由配置**：5555 web_search → `fwd.free.gpt-5.6` (cc-sol/gpt-5.6-sol) p1；5520 web_search → minimax_anthropic/MiniMax-M3 p1。
 - **待决策**：MiniMax-M3 当前标 `metadata_center_local_search`（Mode B），但实测是 anthropic native（Mode A 自动跑）——配置与能力不符。
 - V3 设计真源：`docs/goals/v3-web-search-servertool-state-machine-plan.md`（Mode A 原生透传 / Mode B 本地搜索自动续轮，proposal 已定稿）。
+
+## 2026-08-12 opencode-go 502 根因（已 playground 实证）
+
+- opencode-go/Console Go 拒绝 tool JSON Schema 位置上的 `"[REDACTED]"` 字符串：`Invalid schema for function 'exec_command': "[REDACTED]" is not of types "boolean", "object"`。
+- 相同请求把该 schema 位置归一为 boolean `true` 后 upstream HTTP 200。
+- V3 当前 `normalize_json_schema_redaction_placeholders`（`request_outbound_builtin_tool_projection.rs`）把 `[REDACTED]` 原样透传，是 10000 端口 opencode-go 大工具请求 502 的根因；修复 owner 是 `v3.protocol_conversion_field_parity`，正式修复待 Jason 批准。
+
+## 2026-08-12 纠偏：opencode-go 502 根因是历史图片/请求 payload 改写，不是 schema/context
+
+- 前一条 `[REDACTED]` schema 归因作废：禁止按 `"[REDACTED]" -> JSON Schema true` 实施。
+- 真实根因是 `history_image_cleanup.rs` 的 `normalize_v3_history_image_placeholders` / `normalize_v3_all_images_to_placeholder` 在 ReqInbound02、Direct 标准化、Relay Req04 restore、Resp04 continuation save 中把历史图片/工具输出图片替换为 `[Image]`，并改写内嵌图片字节字符串；这违反“proxy 保持原意、只做协议兼容”。
+- 调用点：`req_inbound_02_normalized.rs:40,45,105,114,117`、`nodes.rs:170,197,252,274`、`relay_request.rs:478,492`、`resp_continuation_04_committed.rs:207,237`。
+- 现有 `cargo test ... history_image --lib` 17 个测试全绿，但这些测试断言“图片必须变 `[Image]`”，是错误行为测试，正式修复需反转/替换。
+- 正式方案：删除所有清洗调用和 `history_image_cleanup` 功能，路由 multimodal 判定改为只读 active turn 检测，同步 map/doc/gate/red test，再做 install/restart/live replay。
+# 2026-08-12 Req04 continuation image boundary
+- Confirmed root cause: save-time all-image placeholder normalization existed, but Req04 restore only history-normalized the merged payload. A legacy continuation whose last restored user item had an image could be treated as current-turn data and re-enter provider wire.
+- Canonical fix: `merge_v3_relay_restored_local_context_at_req04` clones and fully placeholder-normalizes restored context before appending current request messages. Current request images remain untouched. Targeted unit and continuation/image tests pass; broader integration test is currently blocked by pre-existing missing dry-run exports in the dirty worktree.
+
+## 2026-08-12 DeepSeek image-history fix — verified truth
+
+- The previous placeholder-normalization design was wrong for RouteCodex’s proxy contract: ReqInbound02, Direct Req04, Relay Req04 restore, and Resp04 continuation save were rewriting historical image payloads to `[Image]`, losing real image semantics.
+- Formal fix removes those production calls. Continuation save/restore and request canonicalization preserve historical image bytes; routing facts read the original payload instead of a cleaned copy.
+- Verification: runtime lib 380/380; install `0.90.4277`; config check, aggregate restart, and 4444/5555/10000/5520 health all passed. A live 10000 Responses replay with valid PNG in one historical turn and one current turn returned HTTP 200; the provider-request snapshot contained both original Anthropic `image` blocks/base64.
+- OpenCode Go DeepSeek is text-only at the current Go endpoint: real upstream error is `unknown variant image_url, expected text`. Capability truth was corrected by removing `vision/multimodal` from opencode-go and removing its 4444 multimodal target. Text-only DeepSeek replay still returns HTTP 200 through opencode-go.
+- Supersedes the earlier “Req04 restore must placeholder historical images” conclusion; that was the faulty behavior, not a valid contract.
+
+## 2026-08-12 Jason boundary correction: schema passthrough, image-only compatibility placeholder
+
+- The `[REDACTED]` function-schema shape was introduced by RouteCodex-side handling; proxy code must not repair, coerce, redact, truncate, or fail-fast on it. The schema placeholder normalizers and dedicated fail-fast gate/fixture were removed; outbound conversion passes the client value unchanged.
+- Image cleanup is the explicit exception for this incident: image history/continuation is projected to the `[Image]` placeholder at the established compatibility boundaries. This is the minimal compatibility semantic, not authorization for general payload cleanup or truncation.
+
+## 2026-08-12 SSE transport / JSON semantic boundary audit
+
+- Jason locked the boundary: SSE is transport-only; business/error/terminal/health/routing decisions consume provider JSON or typed JSON-codec results. `event:` is opaque; `[DONE]` and EOF never create success.
+- First confirmed violation was the direct runtime path. Audit and required red tests are persisted in `docs/goals/v3-sse-transport-json-semantic-decoupling-audit.md`.
+
+## 2026-08-12 SSE JSON codec boundary implementation
+
+- SSE transport must remain opaque: runtime/server may extract `data` fields and transport markers, but `event:` cannot synthesize or validate provider JSON semantics. The provider JSON codec owns parsing and typed semantic outcomes.
+- `v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs` is the current Responses JSON parser/outcome owner. Direct/shared paths consume `classify_v3_provider_responses_json_data` or `parse_v3_provider_sse_json_data`; websocket projection forwards JSON data without synthesizing `type` from `event:`.
+- `[DONE]` and EOF are not terminal truth. OpenAI Chat relay now succeeds only when JSON `finish_reason` terminal is present; missing `[DONE]` does not convert a JSON terminal into failure. EOF without JSON terminal still fails.
+- Verified targeted: runtime direct_sse 15/15, Responses provider SSE 6/6, server websocket projection 2/2, OpenAI Chat relay 3/3; SSE boundary, resource/module/mainline/rust-only/architecture/provider-action/runtime-timing gates pass. Full workspace test compilation remains blocked by unrelated dirty `routecodex-v3-virtual-router/src/tests/mod.rs` missing two new debug manifest fields; no install/restart/review yet.

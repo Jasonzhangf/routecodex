@@ -3,15 +3,14 @@ use serde_json::{json, Value};
 use crate::{classify_tool_call, RouteToolCallClassification};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RouteActiveTurnSignals {
+pub struct V3CurrentTurnSignals {
     pub latest_message_from_user: bool,
     pub has_current_turn_tool_output: bool,
     pub has_current_turn_web_search: bool,
     pub last_assistant_tool: Option<RouteToolCallClassification>,
-    pub current_user_text: String,
 }
 
-pub fn extract_active_turn_signals(request: &Value) -> RouteActiveTurnSignals {
+pub fn build_v3_current_turn_route_facts(request: &Value) -> V3CurrentTurnSignals {
     let message_signals = request
         .get("messages")
         .and_then(value_as_array)
@@ -19,22 +18,22 @@ pub fn extract_active_turn_signals(request: &Value) -> RouteActiveTurnSignals {
         .unwrap_or_default();
     let responses_input = responses_input(request);
     if (message_signals.latest_message_from_user || responses_input.is_empty())
-        && message_signals != RouteActiveTurnSignals::default()
+        && message_signals != V3CurrentTurnSignals::default()
     {
         return message_signals;
     }
     if !responses_input.is_empty() {
         return extract_responses_signals(&responses_input);
     }
-    if let Some(prompt) = request
+    if request
         .get("prompt")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|text| !text.is_empty())
+        .is_some()
     {
-        return RouteActiveTurnSignals {
+        return V3CurrentTurnSignals {
             latest_message_from_user: true,
-            current_user_text: prompt.to_string(),
             ..Default::default()
         };
     }
@@ -75,22 +74,17 @@ fn responses_input(request: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-fn extract_message_signals(messages: &[Value]) -> RouteActiveTurnSignals {
+fn extract_message_signals(messages: &[Value]) -> V3CurrentTurnSignals {
     let latest_role = messages.iter().rev().find_map(message_role);
     let latest_user_index = messages
         .iter()
         .rposition(|message| message_role(message).as_deref() == Some("user"));
-    let current_user_text = latest_user_index
-        .and_then(|index| messages.get(index))
-        .map(extract_user_text)
-        .unwrap_or_default();
     let Some(segment) = active_segment(messages, latest_user_index, latest_role.as_deref()) else {
-        return RouteActiveTurnSignals {
+        return V3CurrentTurnSignals {
             latest_message_from_user: latest_role.as_deref() == Some("user"),
             has_current_turn_web_search: latest_user_index
                 .and_then(|index| messages.get(index))
                 .is_some_and(message_contains_web_search),
-            current_user_text,
             ..Default::default()
         };
     };
@@ -137,22 +131,17 @@ fn extract_message_signals(messages: &[Value]) -> RouteActiveTurnSignals {
             _ => {}
         }
     }
-    RouteActiveTurnSignals {
+    V3CurrentTurnSignals {
         latest_message_from_user: latest_role.as_deref() == Some("user"),
         has_current_turn_tool_output,
         has_current_turn_web_search,
         last_assistant_tool,
-        current_user_text,
     }
 }
 
-fn extract_responses_signals(entries: &[Value]) -> RouteActiveTurnSignals {
+fn extract_responses_signals(entries: &[Value]) -> V3CurrentTurnSignals {
     let latest_role = entries.iter().rev().find_map(response_entry_role);
     let latest_user_index = entries.iter().rposition(is_user_carrier);
-    let current_user_text = latest_user_index
-        .and_then(|index| entries.get(index))
-        .map(extract_user_text)
-        .unwrap_or_default();
     let Some(segment) = active_segment(entries, latest_user_index, latest_role.as_deref()) else {
         let current_turn_start = latest_user_index
             .map(|index| {
@@ -163,14 +152,13 @@ fn extract_responses_signals(entries: &[Value]) -> RouteActiveTurnSignals {
                     .unwrap_or(0)
             })
             .unwrap_or(0);
-        return RouteActiveTurnSignals {
+        return V3CurrentTurnSignals {
             latest_message_from_user: latest_role.as_deref() == Some("user"),
             has_current_turn_web_search: latest_user_index.is_some_and(|index| {
                 entries[current_turn_start..=index]
                     .iter()
                     .any(entry_contains_web_search)
             }),
-            current_user_text,
             ..Default::default()
         };
     };
@@ -217,12 +205,11 @@ fn extract_responses_signals(entries: &[Value]) -> RouteActiveTurnSignals {
             }
         }
     }
-    RouteActiveTurnSignals {
+    V3CurrentTurnSignals {
         latest_message_from_user: latest_role.as_deref() == Some("user"),
         has_current_turn_tool_output,
         has_current_turn_web_search,
         last_assistant_tool,
-        current_user_text,
     }
 }
 
@@ -317,35 +304,4 @@ fn classify_call_value(call: &Value) -> Option<RouteToolCallClassification> {
         .or_else(|| call.get("arguments"))
         .or_else(|| call.get("input"));
     classify_tool_call(name, arguments)
-}
-
-fn extract_user_text(entry: &Value) -> String {
-    if let Some(text) = entry.as_str() {
-        return text.to_string();
-    }
-    if let Some(text) = entry.get("text").and_then(Value::as_str) {
-        return text.to_string();
-    }
-    let Some(content) = entry.get("content") else {
-        return String::new();
-    };
-    extract_content_text(content)
-}
-
-fn extract_content_text(content: &Value) -> String {
-    if let Some(text) = content.as_str() {
-        return text.to_string();
-    }
-    let Some(items) = content.as_array() else {
-        return String::new();
-    };
-    items
-        .iter()
-        .filter_map(|item| {
-            item.get("text")
-                .and_then(Value::as_str)
-                .or_else(|| item.as_str())
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }

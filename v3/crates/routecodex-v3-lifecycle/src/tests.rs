@@ -689,17 +689,14 @@ fn restart_plan_keeps_true_snapshot_direct_for_snapall_restart() {
 }
 
 #[test]
-fn default_snapshot_authorization_does_not_override_dev_sample_defaults() {
+fn default_snapshot_authorization_does_not_enable_sample_persistence() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
     let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
     let (_, manifest) = lifecycle.declaration(&executable).unwrap();
-    assert!(
-        manifest.debug.codex_samples,
-        "dev build must default codex samples on even when lifecycle flags are absent"
-    );
+    assert!(!manifest.debug.codex_samples);
     assert!(
         manifest.debug.snapshot_direct,
         "config default snapshot_direct must survive lifecycle without explicit flags"

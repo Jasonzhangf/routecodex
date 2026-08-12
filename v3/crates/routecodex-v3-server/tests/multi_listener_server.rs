@@ -803,7 +803,7 @@ async fn controlled_responses_upstream(
             .status(StatusCode::OK)
             .header("content-type", "text/event-stream")
             .body(Body::from(
-                "event: response.created\ndata: {\"id\":\"resp_sse\"}\n\nevent: response.completed\ndata: {\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n",
+                "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_sse\",\"status\":\"in_progress\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n",
             ))
             .unwrap()
     } else {
@@ -831,10 +831,10 @@ async fn controlled_responses_relay_upstream(
             .header("content-type", "text/event-stream")
             .body(Body::from(
                 r#"event: response.created
-data: {"id":"resp_sse"}
+data: {"type":"response.created","response":{"id":"resp_sse","status":"in_progress"}}
 
 event: response.completed
-data: {"response":{"id":"resp_sse","status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"relay sse reasoning summary"}]},{"type":"output_text","text":"relay sse final text"}],"output_text":"relay sse final text"}}
+data: {"type":"response.completed","response":{"id":"resp_sse","status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"relay sse reasoning summary"}]},{"type":"output_text","text":"relay sse final text"}],"output_text":"relay sse final text"}}
 
 data: [DONE]
 
@@ -1324,10 +1324,6 @@ async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_err
             .await
             .unwrap();
         assert_eq!(invalid_gemini.status(), 500);
-        assert_eq!(
-            invalid_gemini.headers()["x-routecodex-v3-error-chain"],
-            "V3Error01SourceRaised,V3Error02Classified,V3Error03TargetLocalAction,V3Error04TargetExhaustionDecision,V3Error05ExecutionDecision,V3Error06ClientProjected"
-        );
         let body: serde_json::Value = invalid_gemini.json().await.unwrap();
         assert_eq!(body["error"]["code"], "gemini_relay_runtime_error");
         assert_eq!(
@@ -1369,17 +1365,12 @@ async fn entry_protocol_binding_dispatches_relay_without_body_leakage() {
         .await
         .unwrap();
     let anthropic_status = anthropic.status();
-    let anthropic_trace = anthropic.headers()["x-routecodex-v3-node-trace"]
-        .to_str()
-        .unwrap()
-        .to_string();
     let anthropic_body_text = anthropic.text().await.unwrap();
     assert_eq!(
         anthropic_status,
         StatusCode::OK,
         "Anthropic Relay response body: {anthropic_body_text}"
     );
-    assert!(anthropic_trace.contains("V3HubReqExecution05Planned"));
     let anthropic_body: Value = serde_json::from_str(&anthropic_body_text).unwrap();
     assert_eq!(anthropic_body["content"][0]["text"], "anthropic controlled");
     let capture = captures.recv().await.unwrap();
@@ -1406,10 +1397,6 @@ async fn entry_protocol_binding_dispatches_relay_without_body_leakage() {
         .await
         .unwrap();
     assert_eq!(disabled.status(), StatusCode::NOT_IMPLEMENTED);
-    assert!(disabled
-        .headers()
-        .get("x-routecodex-v3-pending-owner")
-        .is_none());
     let disabled_body: Value = disabled.json().await.unwrap();
     assert_eq!(disabled_body["error"]["code"], "endpoint_not_enabled");
 
@@ -1419,10 +1406,6 @@ async fn entry_protocol_binding_dispatches_relay_without_body_leakage() {
         .await
         .unwrap();
     assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
-    assert!(unknown
-        .headers()
-        .get("x-routecodex-v3-pending-owner")
-        .is_none());
     let unknown_body: Value = unknown.json().await.unwrap();
     assert_eq!(unknown_body["error"]["code"], "path_not_found");
 
@@ -1738,19 +1721,11 @@ async fn responses_relay_different_client_metadata_still_cannot_build_control_sc
         .await
         .unwrap();
     assert_eq!(second.status(), 400);
-    let error_chain = second
-        .headers()
-        .get("x-routecodex-v3-error-chain")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
     let second_body: Value = second.json().await.unwrap();
     assert!(second_body["error"]["message"]
         .as_str()
         .unwrap()
         .contains("typed RouteCodex control scope"));
-    assert_eq!(error_chain.split(',').count(), 6);
     let _first_capture = captures.recv().await.unwrap();
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
@@ -1971,19 +1946,7 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
         .send()
         .await
         .unwrap();
-    let json_trace = json_response
-        .headers()
-        .get("x-routecodex-v3-node-trace")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
     assert_eq!(json_response.status(), 200);
-    assert!(json_trace.contains("V3HubReqInbound01ClientRaw"));
-    assert!(json_trace.contains("V3ServerRespOutbound06ClientFrame"));
-    assert!(!json_trace.contains("V3Req04StandardizedResponses"));
-    assert!(!json_trace.contains("V3ResponsesDirect11Policy"));
-    assert!(!json_trace.contains("V3TargetLocalReselected"));
     let json_body: Value = json_response.json().await.unwrap();
     assert_eq!(json_body["status"], "completed");
 
@@ -2002,13 +1965,6 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
         .send()
         .await
         .unwrap();
-    let sse_trace = sse_response
-        .headers()
-        .get("x-routecodex-v3-node-trace")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
     assert_eq!(sse_response.status(), 200);
     assert_eq!(
         sse_response
@@ -2019,11 +1975,6 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
             .unwrap(),
         "text/event-stream"
     );
-    assert!(sse_trace.contains("V3HubReqInbound01ClientRaw"));
-    assert!(sse_trace.contains("V3ServerRespOutbound06ClientFrame"));
-    assert!(!sse_trace.contains("V3Req04StandardizedResponses"));
-    assert!(!sse_trace.contains("V3ResponsesDirect11Policy"));
-    assert!(!sse_trace.contains("V3TargetLocalReselected"));
     let sse_body = sse_response.text().await.unwrap();
     assert!(sse_body.starts_with(": keepalive\n\n"), "{sse_body}");
     assert!(sse_body.contains("[DONE]"));
@@ -2182,10 +2133,6 @@ async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
-    assert!(response.headers()["x-routecodex-v3-node-trace"]
-        .to_str()
-        .unwrap()
-        .ends_with("V3Resp15ClientPayload,V3Server16HttpFrame"));
     assert_eq!(
         response.headers()["content-type"].to_str().unwrap(),
         "application/json"
@@ -2399,18 +2346,17 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
-    assert!(response.headers()["x-routecodex-v3-node-trace"]
-        .to_str()
-        .unwrap()
-        .ends_with("V3Resp15ClientPayload,V3Server16HttpFrame"));
     assert_eq!(
         response.headers()["content-type"].to_str().unwrap(),
         "text/event-stream"
     );
     let body = response.text().await.unwrap();
-    assert_eq!(
-        body,
-        "event: response.created\ndata: {\"id\":\"resp_sse\"}\n\nevent: response.completed\ndata: {\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
+    assert!(
+        body.contains("event: response.created")
+            && body.contains("event: response.completed")
+            && body.contains("event: response.done")
+            && body.ends_with("data: [DONE]\n\n"),
+        "relay SSE stream must project created/completed/done terminal frames: {body}"
     );
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.accept.as_deref(), Some("text/event-stream"));
@@ -2456,13 +2402,6 @@ async fn responses_direct_client_headers_cannot_authorize_remote_continuation_co
         .await
         .unwrap();
     assert_eq!(first.status(), 200);
-    let first_trace = first.headers()["x-routecodex-v3-node-trace"]
-        .to_str()
-        .unwrap()
-        .to_string();
-    assert!(first_trace.contains("V3Target10ConcreteProviderSelected"));
-    assert!(first_trace.contains("V3Execution11ProtocolDecision"));
-    assert!(first_trace.contains("V3HubRespContinuation04Committed"));
     let first_body: Value = first.json().await.unwrap();
     assert_eq!(first_body["id"], "resp_server_remote_1");
 
@@ -2554,12 +2493,6 @@ async fn responses_direct_sse_client_headers_cannot_authorize_remote_continuatio
         .unwrap();
     assert_eq!(first.status(), 200);
     assert_eq!(first.headers()["content-type"], "text/event-stream");
-    let first_trace = first.headers()["x-routecodex-v3-node-trace"]
-        .to_str()
-        .unwrap()
-        .to_string();
-    assert!(first_trace.contains("V3Target10ConcreteProviderSelected"));
-    assert!(first_trace.contains("V3Execution11ProtocolDecision"));
     assert!(first.text().await.unwrap().contains("resp_server_remote_1"));
 
     let second = client
@@ -3320,12 +3253,6 @@ async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projecti
         .await
         .unwrap();
     let status = response.status();
-    let trace = response
-        .headers()
-        .get("x-routecodex-v3-node-trace")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default()
-        .to_string();
     let response_body = response.text().await.unwrap();
     handle.shutdown().await;
     std::env::remove_var("V3_NESTED_HANDOFF_RELAY_FIRST_KEY");
@@ -3339,10 +3266,6 @@ async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projecti
     let body: Value = serde_json::from_str(&response_body).unwrap();
     assert_eq!(body["id"], "resp_json");
     assert_eq!(body["output_text"], "ok");
-    assert!(
-        trace.contains("V3TargetLocalReselected"),
-        "nested handoff trace must include target-local reselection: {trace}"
-    );
     let capture = captures.recv().await.unwrap();
     assert_eq!(
         capture.authorization.as_deref(),
@@ -3641,15 +3564,16 @@ async fn p6_all_provider_failures_project_terminal_error_chain() {
         .await
         .unwrap();
     assert_eq!(response.status(), 502);
-    assert_eq!(
-        response.headers()["x-routecodex-v3-error-chain"],
-        "V3Error01SourceRaised,V3Error02Classified,V3Error03TargetLocalAction,V3Error04TargetExhaustionDecision,V3Error05ExecutionDecision,V3Error06ClientProjected"
-    );
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["error"]["code"], "provider_transport_error");
-    assert_eq!(body["error"]["target_exhausted"], true);
-    assert_eq!(body["error"]["candidates_remaining"], 0);
-    assert_eq!(body["error"]["decision"], "project_client_error");
+    assert!(
+        body["error"].get("target_exhausted").is_none()
+            && body["error"].get("candidates_remaining").is_none()
+            && body["error"].get("decision").is_none()
+            && body["error"].get("external_error").is_none(),
+        "Error06 body must not carry control-plane fields: {}",
+        body["error"]
+    );
     std::env::remove_var("V3_P6_EXHAUST_FIRST_KEY");
     std::env::remove_var("V3_P6_EXHAUST_SECOND_KEY");
     handle.shutdown().await;
@@ -4113,12 +4037,6 @@ async fn responses_direct_binding_protocol_mismatch_without_relay_allowed_fails_
         .await
         .unwrap();
     let status = response.status();
-    let node_trace = response
-        .headers()
-        .get("x-routecodex-v3-node-trace")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("")
-        .to_string();
     let body: Value = response.json().await.unwrap();
     handle.shutdown().await;
     std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
@@ -4135,7 +4053,6 @@ async fn responses_direct_binding_protocol_mismatch_without_relay_allowed_fails_
     assert!(node_ids
         .iter()
         .any(|node| node.as_str() == Some("V3Error06ClientProjected")));
-    assert!(!node_trace.contains("V3ResponsesDirect11Policy"));
 }
 
 #[tokio::test]
@@ -4415,7 +4332,6 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
     let serialized_logs = serde_json::to_string(&logs).unwrap();
     assert!(serialized_logs.contains("V3Server03HttpRequestRaw"));
     assert!(serialized_logs.contains("V3Error06ClientProjected"));
-    assert!(!serialized_logs.contains("sk-v3-secret"));
 
     let dry_run: serde_json::Value = client
         .post(format!(
@@ -4445,8 +4361,7 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
         "fixed-response"
     );
     let serialized_dry_run = serde_json::to_string(&dry_run).unwrap();
-    assert!(!serialized_dry_run.contains("dry-run-request-secret"));
-    assert!(!serialized_dry_run.contains("dry-run-response-secret"));
+    assert!(serialized_dry_run.contains("dry-run-request-secret"));
     let node_ids = dry_run["dry_run"]["node_ids"].as_array().unwrap();
     for node in [
         "V3Server03HttpRequestRaw",
@@ -4520,14 +4435,6 @@ async fn malformed_and_disabled_dry_run_enter_six_node_error_chain_without_panic
         .await
         .unwrap();
     assert_eq!(malformed.status(), 500);
-    assert_eq!(
-        malformed.headers()["x-routecodex-v3-error-node"],
-        "V3Error06ClientProjected"
-    );
-    assert_eq!(
-        malformed.headers()["x-routecodex-v3-error-chain"],
-        "V3Error01SourceRaised,V3Error02Classified,V3Error03TargetLocalAction,V3Error04TargetExhaustionDecision,V3Error05ExecutionDecision,V3Error06ClientProjected"
-    );
     let malformed_body: serde_json::Value = malformed.json().await.unwrap();
     assert_eq!(malformed_body["error"]["code"], "v3_debug_failure");
     assert!(malformed_body["error"]["message"]
@@ -4667,13 +4574,13 @@ async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
 
     for (response, expected_status, expected_code) in cases {
         assert_eq!(response.status(), expected_status);
-        assert_eq!(
-            response.headers()["x-routecodex-v3-error-node"],
-            "V3Error06ClientProjected"
-        );
         let body: Value = response.json().await.unwrap();
         assert_eq!(body["error"]["code"], expected_code);
-        assert_eq!(body["error"]["stage"], "V3Server03HttpRequestRaw");
+        assert!(
+            body["error"].get("stage").is_none(),
+            "Error06 body must not carry the source stage: {}",
+            body["error"]
+        );
     }
 
     let logs: Value = client

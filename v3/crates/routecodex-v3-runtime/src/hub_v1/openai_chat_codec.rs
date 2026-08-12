@@ -724,7 +724,7 @@ impl V3OpenAiChatResponsesSseTransducer {
             return Ok(Vec::new());
         }
         match event_type {
-            "response.created" | "response.in_progress" => {
+            "response.created" => {
                 if self.response_started {
                     return Err("Responses SSE emitted duplicate response.created".to_string());
                 }
@@ -739,6 +739,26 @@ impl V3OpenAiChatResponsesSseTransducer {
                     .and_then(Value::as_str)
                     .map(str::to_owned);
                 Ok(vec![self.chunk(json!({"role": "assistant"}), None)])
+            }
+            "response.in_progress" => {
+                // Official Responses SSE streams emit response.in_progress after
+                // response.created as a status transition. It is idempotent here:
+                // it starts the response when it arrives first (some implementations
+                // emit no created event) and otherwise carries no output.
+                if !self.response_started {
+                    self.response_started = true;
+                    let response = object.get("response").and_then(Value::as_object);
+                    self.response_id = response
+                        .and_then(|response| response.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    self.model = response
+                        .and_then(|response| response.get("model"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    return Ok(vec![self.chunk(json!({"role": "assistant"}), None)]);
+                }
+                Ok(Vec::new())
             }
             "response.output_text.delta" => {
                 let delta = object
@@ -793,10 +813,21 @@ impl V3OpenAiChatResponsesSseTransducer {
                 };
                 Ok(vec![self.chunk(json!({}), finish_reason)])
             }
-            // 已知无 Chat 投影的事件：容错跳过（reasoning 摘要等）。
-            "response.output_item.added"
-            | "response.reasoning_summary_text.delta"
-            | "response.reasoning_text.delta" => Ok(Vec::new()),
+            // 事件通知帧无内容，容错跳过（不丢弃任何实际内容）。
+            "response.output_item.added" => Ok(Vec::new()),
+            // reasoning 内容必须投影给客户端（与 Anthropic thinking_delta 投影
+            // reasoning_content 一致）：reasoning-only 响应不得被当作空响应丢弃。
+            "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
+                let delta = object
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if delta.is_empty() {
+                    return Ok(Vec::new());
+                }
+                self.emitted_content = true;
+                Ok(vec![self.chunk(json!({"reasoning_content": delta}), None)])
+            }
             // 未知事件：容错跳过（provider 扩展事件不得破坏 client 流）。
             _ => Ok(Vec::new()),
         }
@@ -842,5 +873,99 @@ impl V3OpenAiChatResponsesSseTransducer {
             json!([{"index": 0, "delta": delta, "finish_reason": finish}]),
         );
         Value::Object(chunk)
+    }
+}
+
+#[cfg(test)]
+mod openai_chat_responses_sse_transducer_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn created_event() -> Value {
+        json!({
+            "type": "response.created",
+            "response": {
+                "id": "resp_test_1",
+                "status": "in_progress",
+                "model": "gpt-5.6-sol"
+            }
+        })
+    }
+
+    fn in_progress_event() -> Value {
+        json!({
+            "type": "response.in_progress",
+            "response": {
+                "id": "resp_test_1",
+                "status": "in_progress"
+            }
+        })
+    }
+
+    fn delta_event(text: &str) -> Value {
+        json!({"type": "response.output_text.delta", "delta": text})
+    }
+
+    #[test]
+    fn transducer_accepts_official_created_then_in_progress_sequence() {
+        let mut with_in_progress = V3OpenAiChatResponsesSseTransducer::new();
+        let created_chunks = with_in_progress.push_event(created_event()).expect("created");
+        let progress_chunks = with_in_progress
+            .push_event(in_progress_event())
+            .expect("official response.in_progress after response.created must not be rejected");
+        let delta_chunks = with_in_progress
+            .push_event(delta_event("hello"))
+            .expect("delta");
+        with_in_progress
+            .push_event(json!({"type": "response.completed", "response": {"id": "resp_test_1"}}))
+            .expect("completed");
+        with_in_progress.finish().expect("finish");
+
+        let mut without_in_progress = V3OpenAiChatResponsesSseTransducer::new();
+        let baseline_created = without_in_progress.push_event(created_event()).expect("created");
+        let baseline_delta = without_in_progress
+            .push_event(delta_event("hello"))
+            .expect("delta");
+        without_in_progress
+            .push_event(json!({"type": "response.completed", "response": {"id": "resp_test_1"}}))
+            .expect("completed");
+        without_in_progress.finish().expect("finish");
+
+        assert_eq!(
+            created_chunks
+                .iter()
+                .cloned()
+                .chain(progress_chunks.iter().cloned())
+                .chain(delta_chunks.iter().cloned())
+                .collect::<Vec<_>>(),
+            baseline_created
+                .iter()
+                .cloned()
+                .chain(baseline_delta.iter().cloned())
+                .collect::<Vec<_>>(),
+            "response.in_progress must be idempotent and emit no extra chunk"
+        );
+    }
+
+    #[test]
+    fn transducer_still_rejects_duplicate_created() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("first created");
+        let error = transducer
+            .push_event(created_event())
+            .expect_err("a genuinely duplicate response.created must still fail fast");
+        assert!(
+            error.contains("duplicate response.created"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn transducer_in_progress_without_created_starts_response() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        let chunks = transducer
+            .push_event(in_progress_event())
+            .expect("response.in_progress as first event must start the response");
+        assert_eq!(chunks.len(), 1, "in_progress start must emit the assistant role chunk");
     }
 }

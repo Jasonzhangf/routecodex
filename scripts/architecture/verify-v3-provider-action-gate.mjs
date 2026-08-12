@@ -406,10 +406,10 @@ for (const [name, source, rel] of [
 }
 requireText(text.direct, files.direct, 'let mut continuation_provider_action_lookup = previous_response_id.is_some();');
 requireText(text.direct, files.direct, 'wait_for_exact_selected_provider_action');
-requireText(text.directSse, files.directSse, 'if event_type == "response.completed" {');
-if (/matches!\s*\(\s*[\w.]+\s*,\s*"response\.completed"\s*\|\s*"response\.done"/u.test(text.directSse)) {
+requireText(text.directSse, files.directSse, 'classify_v3_provider_responses_json_data(&data)');
+if (/event_type|event\s*==\s*["']response\./u.test(text.directSse)) {
   failures.push(
-    `${files.directSse}: provider response.done must not satisfy the response.completed terminal contract`,
+    `${files.directSse}: SSE event metadata must not be used as provider semantic source`,
   );
 }
 if (text.directHelpers.includes('wrap_direct_sse_stopless_control_stream')) {

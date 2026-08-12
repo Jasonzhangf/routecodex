@@ -235,7 +235,7 @@ impl V3Transport13ResponsesRequest {
         }
     }
 
-    pub fn redacted_provider_request_projection(&self) -> Value {
+    pub fn provider_request_projection(&self) -> Value {
         let stream_intent = match self.stream_intent() {
             V3ResponsesStreamIntent::Json => "json",
             V3ResponsesStreamIntent::Sse => "sse",
@@ -245,7 +245,7 @@ impl V3Transport13ResponsesRequest {
                 "method": "POST",
                 "providerId": self.provider_id(),
                 "url": self.url(),
-                "headers": redacted_http_request_headers(self.url(), self.stream_intent(), self.provider_headers()),
+                "headers": provider_request_headers(self.stream_intent(), self.provider_headers()),
                 "body": self.body(),
                 "streamIntent": stream_intent
             }),
@@ -253,10 +253,7 @@ impl V3Transport13ResponsesRequest {
                 "method": "WEBSOCKET",
                 "providerId": self.provider_id(),
                 "url": self.url(),
-                "headers": {
-                    "authorization": "[REDACTED]",
-                    "openai-beta": RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE
-                },
+                "headers": {"openai-beta": RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE},
                 "body": self.body(),
                 "streamIntent": stream_intent
             }),
@@ -274,8 +271,7 @@ impl V3Transport13ResponsesRequest {
     }
 }
 
-fn redacted_http_request_headers(
-    url: &str,
+fn provider_request_headers(
     stream_intent: V3ResponsesStreamIntent,
     provider_headers: &[V3ProviderRequestHeader],
 ) -> Value {
@@ -292,38 +288,16 @@ fn redacted_http_request_headers(
         ),
     );
     headers.insert(
-        "authorization".to_string(),
-        Value::String("[REDACTED]".to_string()),
-    );
-    headers.insert(
         "content-type".to_string(),
         Value::String("application/json".to_string()),
     );
-    if is_anthropic_messages_url_text(url) {
+    for header in provider_headers {
         headers.insert(
-            "x-api-key".to_string(),
-            Value::String("[REDACTED]".to_string()),
+            header.name().to_string(),
+            Value::String(header.value().to_string()),
         );
-        for header in default_anthropic_messages_compat_headers() {
-            headers.insert(header.name, Value::String(header.value));
-        }
-        for header in provider_headers {
-            headers.insert(
-                header.name().to_string(),
-                Value::String(redacted_provider_header_value(
-                    header.name(),
-                    header.value(),
-                )),
-            );
-        }
     }
     Value::Object(headers)
-}
-
-fn is_anthropic_messages_url_text(url: &str) -> bool {
-    reqwest::Url::parse(url)
-        .map(|url| is_anthropic_messages_url(&url))
-        .unwrap_or_else(|_| url.trim_end_matches('/').ends_with("/v1/messages"))
 }
 
 fn is_anthropic_messages_url(url: &reqwest::Url) -> bool {
@@ -358,10 +332,6 @@ fn default_anthropic_messages_compat_headers() -> Vec<V3ProviderRequestHeader> {
         V3ProviderRequestHeader::new("x-stainless-retry-count", "0"),
         V3ProviderRequestHeader::new("x-stainless-timeout", "300"),
     ]
-}
-
-fn redacted_provider_header_value(_name: &str, value: &str) -> String {
-    value.to_string()
 }
 
 fn v3_transport_13_request(

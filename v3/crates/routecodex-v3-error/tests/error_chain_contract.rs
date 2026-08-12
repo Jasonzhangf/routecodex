@@ -69,9 +69,19 @@ fn error_handling_center_owns_error01_06_and_preserves_provider_error_status() {
 
     assert_eq!(projected.status, 429);
     assert_eq!(projected.body["error"]["code"], "rate_limit_error");
-    assert_eq!(
-        projected.body["error"]["error_node"],
-        "V3Error06ClientProjected"
+    assert!(
+        projected.body["error"].get("error_node").is_none()
+            && projected.body["error"].get("stage").is_none()
+            && projected.body["error"].get("class").is_none()
+            && projected.body["error"].get("decision").is_none()
+            && projected.body["error"].get("target_exhausted").is_none()
+            && projected.body["error"].get("candidates_remaining").is_none()
+            && projected.body["error"].get("route_pool_remaining_after_exclusion").is_none()
+            && projected.body["error"].get("default_pool_available").is_none()
+            && projected.body["error"].get("external_error").is_none()
+            && projected.body["error"].get("internal_code").is_none(),
+        "Error06 body must not carry control-plane fields: {}",
+        projected.body["error"]
     );
     assert_eq!(projected.chain.len(), 6);
 }
@@ -102,7 +112,15 @@ fn error_handling_center_never_projects_an_error_as_http_success() {
 
     assert_eq!(projected.status, 502);
     assert!(projected.status >= 400);
-    assert_eq!(projected.body["error"]["decision"], "project_client_error");
+    assert_eq!(
+        projected.body["error"]["code"],
+        "provider_business_error"
+    );
+    assert!(
+        projected.body["error"].get("decision").is_none(),
+        "Error06 body must not carry the execution decision: {}",
+        projected.body["error"]
+    );
 }
 
 #[test]
@@ -114,9 +132,10 @@ fn request_in_flight_projects_standard_error_chain_with_http_conflict() {
 
     assert_eq!(projected.status, 409);
     assert_eq!(projected.body["error"]["code"], "request_in_flight");
-    assert_eq!(
-        projected.body["error"]["error_node"],
-        "V3Error06ClientProjected"
+    assert!(
+        projected.body["error"].get("error_node").is_none(),
+        "Error06 body must not carry the error node identity: {}",
+        projected.body["error"]
     );
     assert_eq!(projected.chain.len(), 6);
 }
@@ -218,7 +237,12 @@ fn provider_failure_projects_only_after_selected_target_is_fully_exhausted() {
             .expect("exhausted provider failure is terminal"),
     );
     assert_eq!(projected.status, 502);
-    assert_eq!(projected.body["error"]["target_exhausted"], true);
+    assert_eq!(projected.body["error"]["code"], "provider_http_429");
+    assert!(
+        projected.body["error"].get("target_exhausted").is_none(),
+        "Error06 body must not carry exhaustion state: {}",
+        projected.body["error"]
+    );
 }
 
 #[test]
@@ -246,14 +270,11 @@ fn external_provider_429_projects_external_link_without_internal_code() {
     );
 
     assert_eq!(projected.status, 429);
-    assert_eq!(
-        projected.body["error"]["external_error"]["kind"],
-        "provider"
-    );
-    assert_eq!(projected.body["error"]["external_error"]["status"], 429);
-    assert_eq!(
-        projected.body["error"]["external_error"]["provider_id"],
-        "asxs-grok"
+    assert_eq!(projected.body["error"]["code"], "provider_http_429");
+    assert!(
+        projected.body["error"].get("external_error").is_none(),
+        "Error06 body must not carry the external provider link: {}",
+        projected.body["error"]
     );
     assert!(projected.body["error"].get("internal_code").is_none());
     assert!(projected.body["error"].get("internal_node").is_none());
@@ -276,14 +297,14 @@ fn internal_runtime_failure_projects_numbered_internal_code_without_external_lin
     });
 
     assert_eq!(projected.status, 500);
-    assert_eq!(projected.body["error"]["internal_code"], "500-150");
-    assert_eq!(
-        projected.body["error"]["internal_node"],
-        "V3Provider12ResponsesWirePayload"
-    );
-    assert_eq!(
-        projected.body["error"]["internal_owner_feature_id"],
-        "v3.debug_error_foundation"
+    assert_eq!(projected.body["error"]["code"], "provider_auth_handle_missing");
+    assert!(
+        projected.body["error"].get("internal_code").is_none()
+            && projected.body["error"].get("internal_node").is_none()
+            && projected.body["error"].get("internal_owner_feature_id").is_none()
+            && projected.body["error"].get("internal_module_block").is_none(),
+        "Error06 body must not carry internal error identity: {}",
+        projected.body["error"]
     );
     assert!(projected.body["error"].get("external_error").is_none());
 }

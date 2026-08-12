@@ -10,8 +10,8 @@ special focus on `web_search` because that is the most common source of confusio
 
 - V2 (`sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/`) and V3
   (`v3/crates/routecodex-v3-route-classifier/`) are independent Rust owners.
-  Each one carries its own `extract_active_turn_signals`, `classify_tool_call`,
-  `classify_shell_command`, `classify_route`, and `has_web_search_intent`. V2 is
+  Each one carries its own active-turn builder, `classify_tool_call`,
+  `classify_shell_command`, and `classify_route`. V2 is
   a characterization baseline only; V3 edits do not import or call V2.
 - Route priority is fixed in both: `multimodal > thinking > coding > longcontext > search > tools > background > default`
   (`route.rs::ROUTE_PRIORITY`).
@@ -30,7 +30,7 @@ special focus on `web_search` because that is the most common source of confusio
 | Aspect | V2 (legacy) | V3 (current) |
 | --- | --- | --- |
 | Route name | `web_search` could appear as a route bucket in older route configs | Never a `routeName`; emitted only in `RouteClassification::required_capabilities` |
-| Why it triggers | Function name keyword + declared `tools=[web_search]` + `web_search_force` config | `has_web_search_intent` on the newest user message OR `last_assistant_tool_category == "websearch"` (from the same active turn) |
+| Why it triggers | Function name keyword + declared `tools=[web_search]` + `web_search_force` config | Protocol-explicit current-turn web-search fact OR `last_assistant_tool_category == "websearch"` (from the same active turn) |
 | Effect on pool | Could select a separate `web_search` route pool as primary | Forces `required_capabilities = ["web_search"]` on Target; VR primary route stays `thinking` or `tools` |
 | `webSearch.force` config | Honored | Honored (see `engine/core.rs::web_search_force`), but still a capability, never a route reason |
 | Declared `type: web_search` / `web_search_preview` in `tools` | Often counted as route signal | Zero signal (`route-classifier-core/src/tools.rs::WEB_TOOL_KEYWORDS` is used only on tool-call names, not declarations) |
@@ -44,7 +44,7 @@ keeps the route as `thinking`.
 
 | Aspect | V2 (legacy) | V3 (current) |
 | --- | --- | --- |
-| Old user `messages[0].content` | Could bias route selection in old scripts | Ignored unless it is the *newest* user carrier inside the active turn (`active_turn.rs::extract_message_signals`) |
+| Old user `messages[0].content` | Could bias route selection in old scripts | Ignored; only protocol-explicit current-turn facts and current-turn tool evidence are considered |
 | Declared client function/custom tool inventory | Could push the request to `coding`/`search`/`tools` | Adds the `tools` route fact for pool matching; actual tool calls inside the active turn still decide coding/search/tool route semantics |
 | `reasoning` field on the request body | Could override route to `thinking` | Not a route signal; routing ignores it (see `v3-v2-route-classifier-parity-test-design.md` bullet 4) |
 | Longcontext threshold | Hard-coded `180000` in some V2 callers | Per-server-group `routing.longcontext.match.min_input_tokens` (was lost during the V2→V3 config compile, now restored) |

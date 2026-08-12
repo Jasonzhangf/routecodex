@@ -1,0 +1,96 @@
+{
+  "bodyKind": "sse",
+  "error_chain": null,
+  "materializedResponse": {
+    "created_at": 1786506208,
+    "finish_reason": "tool_calls",
+    "id": "c5ad9b51-5fe5-4f18-8240-981a63517c8f",
+    "model": "deepseek-v4-flash",
+    "object": "response",
+    "output": [
+      {
+        "content": [
+          {
+            "text": "Maybe current live traffic stopped after 11:41. We can preserve a sample now. Let's pick newest with request/provider. Use `find ... -maxdepth 2 -name provider-request.json` and sort by time. Then `cp -a` to playground. But `cp` of possibly large 800KB is fine. Need also avoid output. Let's find.",
+            "type": "reasoning_text"
+          }
+        ],
+        "summary": [
+          {
+            "text": "Maybe current live traffic stopped after 11:41. We can preserve a sample now. Let's pick newest with request/provider. Use `find ... -maxdepth 2 -name provider-request.json` and sort by time. Then `cp -a` to playground. But `cp` of possibly large 800KB is fine. Need also avoid output. Let's find.",
+            "type": "summary_text"
+          }
+        ],
+        "type": "reasoning"
+      },
+      {
+        "arguments": "{\"cmd\": \"find ~/.rcc/codex-samples/openai-responses/ports/10000 -maxdepth 2 -name 'provider-request.json' -print0 | xargs -0 ls -lt | head -n 5\"}",
+        "call_id": "call_00_bAzSq7BtzUdtVVcAIBdJ1333",
+        "name": "exec_command",
+        "type": "function_call"
+      }
+    ],
+    "status": "requires_action",
+    "usage": {
+      "input_tokens": "[REDACTED]",
+      "input_tokens_details": "[REDACTED]",
+      "output_tokens": "[REDACTED]",
+      "output_tokens_details": "[REDACTED]",
+      "total_tokens": "[REDACTED]"
+    }
+  },
+  "node_trace": [
+    "V3HubReqInbound01ClientRaw",
+    "V3HubReqInbound02Normalized",
+    "V3HubReqContinuation03Classified",
+    "V3HubReqChatProcess04Governed",
+    "V3HubReqExecution05Planned",
+    "V3HubReqTarget06Resolved",
+    "V3HubReqOutbound07ProviderSemantic",
+    "ProviderReqCompat06ProviderCompat",
+    "V3ProviderReqOutbound08WirePayload",
+    "V3ProviderReqOutbound09TransportRequest",
+    "V3ProviderRespInbound01Raw",
+    "ProviderRespCompat02ProviderCompat",
+    "V3HubRespInbound02Normalized",
+    "V3HubRespChatProcess03Governed",
+    "V3HubRespContinuation04Committed",
+    "V3HubRespOutbound05ClientSemantic",
+    "V3ServerRespOutbound06ClientFrame"
+  ],
+  "object": "routecodex.v3.client_response_snapshot",
+  "observability": {
+    "attempts": 1,
+    "finish_reason": "tool_calls",
+    "model_id": "deepseek-v4-flash",
+    "pool_id": "implicit:tools",
+    "provider_failure_events": [],
+    "provider_id": "opencode-go",
+    "provider_key": "opencode-go:key2:deepseek-v4-flash",
+    "provider_status": 200,
+    "provider_type": "openai_chat",
+    "response_status": "requires_action",
+    "routing_group_id": "anthropic_v3_10000",
+    "stopless_activation": false,
+    "target_path": [
+      "pool:default",
+      "provider:opencode-go"
+    ],
+    "transport": "sse",
+    "unavailable_candidates": [
+      "asxs:crsa:gpt-5.5:availability(provider_failure_session:anthropic_v3_10000:anthropic_v3_10000:019ff3c7-7860-7d62-8021-e971b22bf1c2:asxs:crsa:gpt-5.5:provider returned HTTP 403:until:1786507089430)",
+      "cc-sol:key1:gpt-5.6-sol:availability(provider_failure_session:anthropic_v3_10000:anthropic_v3_10000:019ff3c7-7860-7d62-8021-e971b22bf1c2:cc-sol:key1:gpt-5.6-sol:provider returned HTTP 502:until:1786506633335)"
+    ],
+    "usage": {
+      "cached_tokens": "[REDACTED]",
+      "input_tokens": "[REDACTED]",
+      "output_tokens": "[REDACTED]",
+      "total_tokens": "[REDACTED]"
+    },
+    "wire_model": "deepseek-v4-flash"
+  },
+  "rawSse": "event: response.created\ndata: {\"response\":{\"id\":\"c5ad9b51-5fe5-4f18-8240-981a63517c8f\",\"status\":\"requires_action\"},\"type\":\"response.created\"}\n\nevent: response.output_item.done\ndata: {\"item\":{\"content\":[{\"text\":\"Maybe current live traffic stopped after 11:41. We can preserve a sample now. Let's pick newest with request/provider. Use `find ... -maxdepth 2 -name provider-request.json` and sort by time. Then `cp -a` to playground. But `cp` of possibly large 800KB is fine. Need also avoid output. Let's find.\",\"type\":\"reasoning_text\"}],\"summary\":[{\"text\":\"Maybe current live traffic stopped after 11:41. We can preserve a sample now. Let's pick newest with request/provider. Use `find ... -maxdepth 2 -name provider-request.json` and sort by time. Then `cp -a` to playground. But `cp` of possibly large 800KB is fine. Need also avoid output. Let's find.\",\"type\":\"summary_text\"}],\"type\":\"reasoning\"},\"output_index\":0,\"response_id\":\"c5ad9b51-5fe5-4f18-8240-981a63517c8f\",\"type\":\"response.output_item.done\"}\n\nevent: response.output_item.added\ndata: {\"item\":{\"arguments\":\"\",\"call_id\":\"call_00_bAzSq7BtzUdtVVcAIBdJ1333\",\"name\":\"exec_command\",\"type\":\"function_call\"},\"output_index\":1,\"response_id\":\"c5ad9b51-5fe5-4f18-8240-981a63517c8f\",\"type\":\"response.output_item.added\"}\n\nevent: response.function_call_arguments.done\ndata: {\"arguments\":\"{\\\"cmd\\\": \\\"find ~/.rcc/codex-samples/openai-responses/ports/10000 -maxdepth 2 -name 'provider-request.json' -print0 | xargs -0 ls -lt | head -n 5\\\"}\",\"call_id\":\"call_00_bAzSq7BtzUdtVVcAIBdJ1333\",\"output_index\":1,\"response_id\":\"c5ad9b51-5fe5-4f18-8240-981a63517c8f\",\"type\":\"response.function_call_arguments.done\"}\n\nevent: response.output_item.done\ndata: {\"item\":{\"arguments\":\"{\\\"cmd\\\": \\\"find ~/.rcc/codex-samples/openai-responses/ports/10000 -maxdepth 2 -name 'provider-request.json' -print0 | xargs -0 ls -lt | head -n 5\\\"}\",\"call_id\":\"call_00_bAzSq7BtzUdtVVcAIBdJ1333\",\"name\":\"exec_command\",\"type\":\"function_call\"},\"output_index\":1,\"response_id\":\"c5ad9b51-5fe5-4f18-8240-981a63517c8f\",\"type\":\"response.output_item.done\"}\n\nevent: response.completed\ndata: {\"response\":{\"created_at\":1786506208,\"finish_reason\":\"tool_calls\",\"id\":\"c5ad9b51-5fe5-4f18-8240-981a63517c8f\",\"model\":\"deepseek-v4-flash\",\"object\":\"response\",\"output\":[{\"content\":[{\"text\":\"Maybe current live traffic stopped after 11:41. We can preserve a sample now. Let's pick newest with request/provider. Use `find ... -maxdepth 2 -name provider-request.json` and sort by time. Then `cp -a` to playground. But `cp` of possibly large 800KB is fine. Need also avoid output. Let's find.\",\"type\":\"reasoning_text\"}],\"summary\":[{\"text\":\"Maybe current live traffic stopped after 11:41. We can preserve a sample now. Let's pick newest with request/provider. Use `find ... -maxdepth 2 -name provider-request.json` and sort by time. Then `cp -a` to playground. But `cp` of possibly large 800KB is fine. Need also avoid output. Let's find.\",\"type\":\"summary_text\"}],\"type\":\"reasoning\"},{\"arguments\":\"{\\\"cmd\\\": \\\"find ~/.rcc/codex-samples/openai-responses/ports/10000 -maxdepth 2 -name 'provider-request.json' -print0 | xargs -0 ls -lt | head -n 5\\\"}\",\"call_id\":\"call_00_bAzSq7BtzUdtVVcAIBdJ1333\",\"name\":\"exec_command\",\"type\":\"function_call\"}],\"status\":\"requires_action\",\"usage\":{\"input_tokens\":157812,\"input_tokens_details\":{\"cached_tokens\":156672},\"output_tokens\":170,\"output_tokens_details\":{\"reasoning_tokens\":78},\"total_tokens\":157982}},\"type\":\"response.completed\"}\n\nevent: response.done\ndata: {\"response\":{\"created_at\":1786506208,\"finish_reason\":\"tool_calls\",\"id\":\"c5ad9b51-5fe5-4f18-8240-981a63517c8f\",\"model\":\"deepseek-v4-flash\",\"object\":\"response\",\"output\":[{\"content\":[{\"text\":\"Maybe current live traffic stopped after 11:41. We can preserve a sample now. Let's pick newest with request/provider. Use `find ... -maxdepth 2 -name provider-request.json` and sort by time. Then `cp -a` to playground. But `cp` of possibly large 800KB is fine. Need also avoid output. Let's find.\",\"type\":\"reasoning_text\"}],\"summary\":[{\"text\":\"Maybe current live traffic stopped after 11:41. We can preserve a sample now. Let's pick newest with request/provider. Use `find ... -maxdepth 2 -name provider-request.json` and sort by time. Then `cp -a` to playground. But `cp` of possibly large 800KB is fine. Need also avoid output. Let's find.\",\"type\":\"summary_text\"}],\"type\":\"reasoning\"},{\"arguments\":\"{\\\"cmd\\\": \\\"find ~/.rcc/codex-samples/openai-responses/ports/10000 -maxdepth 2 -name 'provider-request.json' -print0 | xargs -0 ls -lt | head -n 5\\\"}\",\"call_id\":\"call_00_bAzSq7BtzUdtVVcAIBdJ1333\",\"name\":\"exec_command\",\"type\":\"function_call\"}],\"status\":\"requires_action\",\"usage\":{\"input_tokens\":157812,\"input_tokens_details\":{\"cached_tokens\":156672},\"output_tokens\":170,\"output_tokens_details\":{\"reasoning_tokens\":78},\"total_tokens\":157982}},\"type\":\"response.done\"}\n\ndata: [DONE]\n\n",
+  "source": "live_server_response_stream",
+  "stage": "client-response",
+  "status": 200
+}

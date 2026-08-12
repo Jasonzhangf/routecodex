@@ -217,6 +217,7 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
+            let manifest = load_manifest(&config)?;
             let snap_flags = resolve_v3_cli_snapshot_flags(snap, snapall, snap_stages);
             let debug = resolve_v3_cli_debug_flag(debug);
             emit_v3_cli_start_console_line(
@@ -228,13 +229,14 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 snap_flags.snap_stages.as_deref(),
                 debug,
             );
+            emit_v3_cli_server_started_console_line(&manifest, &executable);
             configure_v3_snapshot_flags(
                 V3ManagedLifecycle::new(config)?,
                 snap_flags.snap,
                 snap_flags.snapall,
                 snap_flags.snap_stages,
             )
-            .with_console_enabled(debug)
+            .with_console_enabled(true)
             .start_foreground(&executable)
             .await?;
         }

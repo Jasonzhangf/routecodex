@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 57 functional paths, 372 caller edges.
+Generated view: 58 functional paths, 376 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -48,12 +48,12 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_llmswitch_core
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime__hub_v1 -->|5 edges / 5 paths| module_v3_provider_responses
-  module_v3_runtime__hub_v1 -->|27 edges / 3 paths| module_v3_runtime
+  module_v3_runtime__hub_v1 -->|28 edges / 4 paths| module_v3_runtime
   module_v3_runtime__hub_v1 -->|127 edges / 20 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|3 edges / 2 paths| module_routecodex_v3_route_classifier
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|4 edges / 2 paths| module_v3_error
-  module_v3_runtime -->|7 edges / 4 paths| module_v3_provider_responses
+  module_v3_runtime -->|9 edges / 5 paths| module_v3_provider_responses
   module_v3_runtime -->|49 edges / 10 paths| module_v3_runtime
   module_v3_runtime -->|42 edges / 10 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|4 edges / 2 paths| module_v3_target
@@ -62,7 +62,7 @@ flowchart TD
   module_v3_server -->|2 edges / 2 paths| module_v3_config
   module_v3_server -->|3 edges / 2 paths| module_v3_debug
   module_v3_server -->|4 edges / 3 paths| module_v3_error
-  module_v3_server -->|3 edges / 3 paths| module_v3_runtime
+  module_v3_server -->|4 edges / 4 paths| module_v3_runtime
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
   module_v3_server -->|25 edges / 14 paths| module_v3_server
 ```
@@ -85,12 +85,12 @@ flowchart TD
 | v3-runtime::hub_v1 | llmswitch-core | 1 | `v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | routecodex-v3-sse | 1 | `v3.sse.protocol_codec_projection_boundary` |
 | v3-runtime::hub_v1 | v3-provider-responses | 5 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
-| v3-runtime::hub_v1 | v3-runtime | 27 | `v3.provider_action_gate.mainline`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
+| v3-runtime::hub_v1 | v3-runtime | 28 | `v3.provider_action_gate.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | v3-runtime::hub_v1 | 127 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.anthropic_relay.local_continuation`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.servertool_hook_skeleton_lifecycle`<br/>`v3.sse.protocol_codec_projection_boundary` |
 | v3-runtime | routecodex-v3-route-classifier | 3 | `v3.route_classifier.facts_classification`<br/>`vr.current_turn_typed_route_facts` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 4 | `v3.debug_error_foundation.mainline`<br/>`v3.hub_relay.response_failure_entry` |
-| v3-runtime | v3-provider-responses | 7 | `v3.debug_error_foundation.mainline`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.selected_provider_model_binding` |
+| v3-runtime | v3-provider-responses | 9 | `v3.debug_error_foundation.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime | v3-runtime | 49 | `v3.console_human_readable_layering.mainline`<br/>`v3.direct_stopless_metadata_center`<br/>`v3.provider_action_gate.mainline`<br/>`v3.responses_continuation.remote_contract_store`<br/>`v3.responses_continuation.remote_locator_codec`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.target.session_global_selection` |
 | v3-runtime | v3-runtime::hub_v1 | 42 | `v3.direct_stopless_metadata_center`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.runtime_timing_observability.mainline` |
 | v3-runtime | v3-target | 4 | `v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
@@ -99,7 +99,7 @@ flowchart TD
 | v3-server | v3-config | 2 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.models.capability_catalog` |
 | v3-server | v3-debug | 3 | `v3.codex_sample_retention_snap_scope`<br/>`v3.server.startup` |
 | v3-server | v3-error | 4 | `v3.debug_error_foundation.mainline`<br/>`v3.responses_session_admission`<br/>`v3.server.startup` |
-| v3-server | v3-runtime | 3 | `v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
+| v3-server | v3-runtime | 4 | `v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
 | v3-server | v3-server | 25 | `v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 
@@ -196,14 +196,14 @@ flowchart TD
 
 ## v3.codex_sample_retention_snap_scope
 
-Debug-bounded request and response copies move from explicit manifest authorization to the single V3CodexSampleStore-owned filesystem persistence without entering MetadataCenter or normal payload truth; dev builds sample by default, error evidence force-writes, and each port retains at most 200 request directories.
+Debug-bounded request and response copies move from explicit manifest authorization to the single V3CodexSampleStore-owned filesystem persistence without entering MetadataCenter or normal payload truth; diagnostic payloads remain verbatim, dev builds sample by default, error evidence force-writes, and each port retains at most 200 request directories.
 
 Owner feature: `v3.codex_sample_retention_snap_scope`
 
 ```mermaid
 flowchart TD
   subgraph c_2_v3_codex_sample_retention_snap_scope_m_v3_debug["v3-debug"]
-    c_2_v3_codex_sample_retention_snap_scope_1["v3-debug<br/>V3DebugRuntime::redact_payload_for_side_channel<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
+    c_2_v3_codex_sample_retention_snap_scope_1["v3-debug<br/>V3DebugRuntime::project_payload_verbatim<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
     c_2_v3_codex_sample_retention_snap_scope_2["v3-debug<br/>V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
   end
   subgraph c_2_v3_codex_sample_retention_snap_scope_m_v3_server["v3-server"]
@@ -215,7 +215,7 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-codex-sample-01` | `V3CodexSample02ManifestAuthorizationPublished` → `V3DebugPayloadBudgetApplied` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | V3DebugRuntime::redact_payload_for_side_channel<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.codex_sample_retention_snap_scope` |
+| `v3-codex-sample-01` | `V3CodexSample02ManifestAuthorizationPublished` → `V3DebugPayloadBudgetApplied` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | V3DebugRuntime::project_payload_verbatim<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.codex_sample_retention_snap_scope` |
 | `v3-codex-sample-02` | `V3DebugPayloadBudgetApplied` → `V3CodexSample06RetentionEnforced` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
 
 ## v3.server.managed_lifecycle
@@ -1432,7 +1432,7 @@ flowchart TD
 V3 SSE is a transport-only edge: provider bytes become opaque validated SSE frames in routecodex-v3-sse, protocol semantics are handled by provider/protocol codecs, and server output only hands finalized client stream bytes to Body::from_stream.
 
 Owner feature: `v3.sse_transport_core_independent`
-Manifest: `docs/architecture/manifests/v3.sse.transport_boundary.mainline.yml`
+Manifest: `docs/architecture/manifests/v3.sse.protocol_codec_projection.mainline.yml`
 
 ```mermaid
 flowchart TD
@@ -1520,7 +1520,7 @@ Owner feature: `v3.hub_relay_runtime_closeout`
 ```mermaid
 flowchart TD
   subgraph c_35_v3_responses_relay_source_server_entry_m_v3_provider_responses["v3-provider-responses"]
-    c_35_v3_responses_relay_source_server_entry_6["v3-provider-responses<br/>V3Transport13ResponsesRequest::redacted_provider_request_projection<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
+    c_35_v3_responses_relay_source_server_entry_6["v3-provider-responses<br/>V3Transport13ResponsesRequest::provider_request_projection<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
   end
   subgraph c_35_v3_responses_relay_source_server_entry_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_35_v3_responses_relay_source_server_entry_1["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small>"]
@@ -1543,11 +1543,11 @@ flowchart TD
 | `v3-responses-relay-server-01` | `V3Config05ManifestPublished` → `V3EntryBind04ExecutionBindingProjected` | anchored | responses_relay_manifest<br/><small>routecodex-v3-server/tests/multi_listener_server.rs</small> | execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.hub_relay_runtime_closeout` |
 | `v3-responses-relay-server-02` | `V3EntryBind04ExecutionBindingProjected` → `V3HubReqInbound01ClientRaw` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.hub_relay_runtime_closeout` |
 | `v3-responses-relay-server-03` | `V3HubReqInbound01ClientRaw` → `V3ServerRespOutbound06ClientFrame` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | responses_relay_output_response<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.hub_relay_runtime_closeout` |
-| `v3-responses-relay-server-04` | `V3ProviderReqOutbound09TransportRequest` → `V3DryRunNoNetworkTerminalEffect` | anchored | execute_v3_responses_relay_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs</small> | V3Transport13ResponsesRequest::redacted_provider_request_projection<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.hub_relay_runtime_closeout` |
+| `v3-responses-relay-server-04` | `V3ProviderReqOutbound09TransportRequest` → `V3DryRunNoNetworkTerminalEffect` | anchored | execute_v3_responses_relay_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs</small> | V3Transport13ResponsesRequest::provider_request_projection<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.hub_relay_runtime_closeout` |
 
 ## v3.error.raw_wire_evidence
 
-Terminal Responses Relay failure flushes redacted request, Error chain, and provider wire evidence through the Server-owned failure diagnostic side channel only.
+Terminal Responses Relay failure flushes verbatim request, Error chain, and provider wire evidence through the Server-owned failure diagnostic side channel only.
 
 Owner feature: `v3.error.raw_wire_evidence`
 
@@ -2334,7 +2334,7 @@ flowchart TD
 Opaque SSE framing feeds adjacent provider/client protocol codecs; runtime and server do not infer semantic terminality or control state.
 
 Owner feature: `v3.sse_protocol_codec_projection_boundary`
-Manifest: `docs/architecture/manifests/v3.sse.transport_boundary.mainline.yml`
+Manifest: `docs/architecture/manifests/v3.sse.protocol_codec_projection.mainline.yml`
 
 ```mermaid
 flowchart TD
@@ -2369,17 +2369,54 @@ Manifest: `docs/architecture/manifests/vr.route_classifier.mainline.yml`
 flowchart TD
   subgraph c_56_vr_current_turn_typed_route_facts_m_routecodex_v3_route_classifier["routecodex-v3-route-classifier"]
     c_56_vr_current_turn_typed_route_facts_1["routecodex-v3-route-classifier<br/>classify_route<br/><small>routecodex-v3-route-classifier/src/route.rs</small>"]
-    c_56_vr_current_turn_typed_route_facts_3["routecodex-v3-route-classifier<br/>extract_active_turn_signals<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small>"]
+    c_56_vr_current_turn_typed_route_facts_3["routecodex-v3-route-classifier<br/>build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small>"]
   end
   subgraph c_56_vr_current_turn_typed_route_facts_m_v3_runtime["v3-runtime"]
     c_56_vr_current_turn_typed_route_facts_0["v3-runtime<br/>build_v3_current_turn_route_facts<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
     c_56_vr_current_turn_typed_route_facts_2["v3-runtime<br/>build_v3_router_request_facts_for_entry_with_control<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
   end
   c_56_vr_current_turn_typed_route_facts_0 -->|vr-current-turn-01<br/>V3HubReqExecution05Planned → V3CurrentTurnRouteFacts| c_56_vr_current_turn_typed_route_facts_1
-  c_56_vr_current_turn_typed_route_facts_2 -->|v3-route-classifier-facts-02<br/>V3RouterRequestFacts → V3RouteActiveTurnSignals| c_56_vr_current_turn_typed_route_facts_3
+  c_56_vr_current_turn_typed_route_facts_2 -->|v3-route-classifier-facts-02<br/>V3RouterRequestFacts → V3CurrentTurnRouteFacts| c_56_vr_current_turn_typed_route_facts_3
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `vr-current-turn-01` | `V3HubReqExecution05Planned` → `V3CurrentTurnRouteFacts` | binding_pending | build_v3_current_turn_route_facts<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | classify_route<br/><small>routecodex-v3-route-classifier/src/route.rs</small> | `vr.current_turn_typed_route_facts` |
-| `v3-route-classifier-facts-02` | `V3RouterRequestFacts` → `V3RouteActiveTurnSignals` | anchored | build_v3_router_request_facts_for_entry_with_control<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | extract_active_turn_signals<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small> | `v3.route_classifier_local_owner` |
+| `v3-route-classifier-facts-02` | `V3RouterRequestFacts` → `V3CurrentTurnRouteFacts` | anchored | build_v3_router_request_facts_for_entry_with_control<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small> | `v3.route_classifier_local_owner` |
+
+## v3.provider_global_subscription_probe
+
+Managed aggregate lifecycle acquires due provider-global probes and completes recovery or process-lifetime suspension through the typed health resource.
+
+Owner feature: `v3.provider_global_subscription_probe`
+Manifest: `docs/architecture/manifests/v3.provider_global_subscription_probe.mainline.yml`
+
+```mermaid
+flowchart TD
+  subgraph c_57_v3_provider_global_subscription_probe_m_v3_provider_responses["v3-provider-responses"]
+    c_57_v3_provider_global_subscription_probe_1["v3-provider-responses<br/>V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe<br/><small>routecodex-v3-provider-responses/src/provider_global_health.rs</small>"]
+    c_57_v3_provider_global_subscription_probe_6["v3-provider-responses<br/>V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response<br/><small>routecodex-v3-provider-responses/src/provider_global_health.rs</small>"]
+  end
+  subgraph c_57_v3_provider_global_subscription_probe_m_v3_runtime["v3-runtime"]
+    c_57_v3_provider_global_subscription_probe_0["v3-runtime<br/>V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_57_v3_provider_global_subscription_probe_3["v3-runtime<br/>probe_v3_provider_global_target<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_57_v3_provider_global_subscription_probe_5["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+  end
+  subgraph c_57_v3_provider_global_subscription_probe_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
+    c_57_v3_provider_global_subscription_probe_4["v3-runtime::hub_v1<br/>responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
+  end
+  subgraph c_57_v3_provider_global_subscription_probe_m_v3_server["v3-server"]
+    c_57_v3_provider_global_subscription_probe_2["v3-server<br/>spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+  end
+  c_57_v3_provider_global_subscription_probe_0 -->|v3-provider-global-probe-01<br/>V3ProviderGlobalSubscriptionHealthStore → V3ProviderGlobalProbePermit| c_57_v3_provider_global_subscription_probe_1
+  c_57_v3_provider_global_subscription_probe_2 -->|v3-provider-global-probe-02<br/>V3ServerAggregateLifecycle → V3ProviderGlobalProbeExecution| c_57_v3_provider_global_subscription_probe_3
+  c_57_v3_provider_global_subscription_probe_4 -->|v3-provider-global-probe-03<br/>V3ProviderGlobalSubscriptionFailureObservation → V3ProviderGlobalSubscriptionHealthStore| c_57_v3_provider_global_subscription_probe_5
+  c_57_v3_provider_global_subscription_probe_5 -->|v3-provider-global-probe-04<br/>V3ProviderGlobalSubscriptionFailureObservation → V3ProviderGlobalSubscriptionHealthStore| c_57_v3_provider_global_subscription_probe_6
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-provider-global-probe-01` | `V3ProviderGlobalSubscriptionHealthStore` → `V3ProviderGlobalProbePermit` | anchored | V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe<br/><small>routecodex-v3-provider-responses/src/provider_global_health.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-provider-global-probe-02` | `V3ServerAggregateLifecycle` → `V3ProviderGlobalProbeExecution` | anchored | spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small> | probe_v3_provider_global_target<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-provider-global-probe-03` | `V3ProviderGlobalSubscriptionFailureObservation` → `V3ProviderGlobalSubscriptionHealthStore` | anchored | responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-provider-global-probe-04` | `V3ProviderGlobalSubscriptionFailureObservation` → `V3ProviderGlobalSubscriptionHealthStore` | anchored | V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response<br/><small>routecodex-v3-provider-responses/src/provider_global_health.rs</small> | `v3.provider_global_subscription_probe` |

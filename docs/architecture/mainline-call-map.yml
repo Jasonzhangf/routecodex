@@ -1917,11 +1917,11 @@ chains:
     to_node: V3CodexSample04PayloadBudgeted
     caller_symbol: capture_v3_live_raw_request
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: redact_payload_for_side_channel
+    callee_symbol: project_payload_verbatim
     callee_file: v3/crates/routecodex-v3-debug/src/lib.rs
     owner_feature_id: v3.codex_sample_retention_snap_scope
     semantic_input: authorized diagnostic copy of a live protocol payload
-    semantic_output: redacted and size-bounded debug artifact
+    semantic_output: verbatim debug artifact with retention-only bounds
     resource_flow:
       consumes:
       - v3.debug.codex_sample_authorization

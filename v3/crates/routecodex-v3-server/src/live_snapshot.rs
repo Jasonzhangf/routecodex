@@ -73,7 +73,7 @@ impl V3LiveSnapSseRecorderCore {
                 );
             }
         }
-        let payload = self.state.debug.redact_payload_for_side_channel(payload);
+        let payload = self.state.debug.project_payload_verbatim(payload);
         persist_v3_codex_sample_payload(
             &self.state,
             &self.entry_protocol,
@@ -262,7 +262,7 @@ pub(crate) fn capture_v3_live_raw_request(
         if !v3_codex_sample_scope_allows(state, execution_mode) {
             return None;
         }
-        let payload = state.debug.redact_payload_for_side_channel(payload.clone());
+        let payload = state.debug.project_payload_verbatim(payload.clone());
         if let Err(error) = persist_v3_codex_sample_payload(
             state,
             entry_protocol,
@@ -431,7 +431,8 @@ pub(crate) fn capture_v3_openai_chat_relay_response(
             "request.json",
             &state
                 .debug
-                .redact_payload_for_side_channel(raw_request_payload.clone()),
+                .project_payload_verbatim(raw_request_payload.clone()),
+            (output.status >= 400).then_some(output.status),
         );
         let _ = persist_v3_error_evidence_payload(
             state,
@@ -441,7 +442,7 @@ pub(crate) fn capture_v3_openai_chat_relay_response(
             "error.json",
             &state
                 .debug
-                .redact_payload_for_side_channel(json!({
+                .project_payload_verbatim(json!({
                     "object": "routecodex.v3.error_evidence",
                     "stage": "error",
                     "status": output.status,
@@ -450,6 +451,7 @@ pub(crate) fn capture_v3_openai_chat_relay_response(
                     "node_trace": output.node_trace.clone(),
                     "error_chain": output.error_chain.clone(),
                 })),
+            (output.status >= 400).then_some(output.status),
         );
     }
     if !state.debug.should_capture_snapshot_stage("client-response") && !force_error_evidence {
@@ -457,7 +459,7 @@ pub(crate) fn capture_v3_openai_chat_relay_response(
     }
     match &output.client_body {
         V3OpenAiChatRelayClientBody::Json(value) => {
-            let payload = state.debug.redact_payload_for_side_channel(json!({
+            let payload = state.debug.project_payload_verbatim(json!({
                 "object": "routecodex.v3.client_response_snapshot",
                 "stage": "client-response",
                 "source": "live_server_openai_chat_response",
@@ -578,6 +580,7 @@ pub(crate) fn capture_v3_responses_relay_provider_snapshots(
         return None;
     }
     let snapshots = output.provider_snapshots.as_mut()?;
+    let error_status = (output.status >= 400).then_some(output.status);
     if let Some(provider_request) = snapshots.provider_request.take() {
         if force_error_evidence
             || state
@@ -586,15 +589,28 @@ pub(crate) fn capture_v3_responses_relay_provider_snapshots(
         {
             let provider_request = state
                 .debug
-                .redact_payload_for_side_channel(provider_request);
-            if let Err(error) = persist_v3_codex_sample_payload(
-                state,
-                entry_protocol,
-                endpoint,
-                request_id,
-                "provider-request.json",
-                &provider_request,
-            ) {
+                .project_payload_verbatim(provider_request);
+            let result = if force_error_evidence {
+                persist_v3_error_evidence_payload(
+                    state,
+                    entry_protocol,
+                    endpoint,
+                    request_id,
+                    "provider-request.json",
+                    &provider_request,
+                    error_status,
+                )
+            } else {
+                persist_v3_codex_sample_payload(
+                    state,
+                    entry_protocol,
+                    endpoint,
+                    request_id,
+                    "provider-request.json",
+                    &provider_request,
+                )
+            };
+            if let Err(error) = result {
                 return Some(foundation_output_response(project_v3_debug_failure(
                     "V3DebugProviderRequestCaptured",
                     V3DebugError::Sink(error),
@@ -610,15 +626,28 @@ pub(crate) fn capture_v3_responses_relay_provider_snapshots(
         {
             let provider_response = state
                 .debug
-                .redact_payload_for_side_channel(provider_response);
-            if let Err(error) = persist_v3_codex_sample_payload(
-                state,
-                entry_protocol,
-                endpoint,
-                request_id,
-                "provider-response.json",
-                &provider_response,
-            ) {
+                .project_payload_verbatim(provider_response);
+            let result = if force_error_evidence {
+                persist_v3_error_evidence_payload(
+                    state,
+                    entry_protocol,
+                    endpoint,
+                    request_id,
+                    "provider-response.json",
+                    &provider_response,
+                    error_status,
+                )
+            } else {
+                persist_v3_codex_sample_payload(
+                    state,
+                    entry_protocol,
+                    endpoint,
+                    request_id,
+                    "provider-response.json",
+                    &provider_response,
+                )
+            };
+            if let Err(error) = result {
                 return Some(foundation_output_response(project_v3_debug_failure(
                     "V3DebugProviderResponseCaptured",
                     V3DebugError::Sink(error),
@@ -655,7 +684,8 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             "request.json",
             &state
                 .debug
-                .redact_payload_for_side_channel(raw_request_payload.clone()),
+                .project_payload_verbatim(raw_request_payload.clone()),
+            (output.status >= 400).then_some(output.status),
         );
         let _ = persist_v3_error_evidence_payload(
             state,
@@ -665,7 +695,7 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             "error.json",
             &state
                 .debug
-                .redact_payload_for_side_channel(json!({
+                .project_payload_verbatim(json!({
                     "object": "routecodex.v3.error_evidence",
                     "stage": "error",
                     "status": output.status,
@@ -675,6 +705,7 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
                     "error_chain": output.error_chain.clone(),
                     "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
                 })),
+            (output.status >= 400).then_some(output.status),
         );
     }
     if let Some(response) = capture_v3_responses_relay_provider_snapshots(
@@ -800,7 +831,7 @@ pub(crate) fn capture_v3_responses_direct_response(
             return None;
         }
     };
-    let payload = state.debug.redact_payload_for_side_channel(payload);
+    let payload = state.debug.project_payload_verbatim(payload);
     if let Err(error) = persist_v3_codex_sample_payload(
         state,
         entry_protocol,
@@ -835,7 +866,7 @@ pub(crate) fn capture_v3_foundation_runtime_response(
         }
         let payload = state
             .debug
-            .redact_payload_for_side_channel(output.body.clone());
+            .project_payload_verbatim(output.body.clone());
         if let Err(error) = persist_v3_codex_sample_payload(
             state,
             entry_protocol,
@@ -952,6 +983,7 @@ pub(crate) fn persist_v3_codex_sample_payload(
         file_name,
         payload,
         false,
+        None,
     )
 }
 
@@ -962,6 +994,7 @@ pub(crate) fn persist_v3_error_evidence_payload(
     request_id: &str,
     file_name: &str,
     payload: &Value,
+    status: Option<u16>,
 ) -> Result<(), String> {
     state.codex_sample_store.persist(
         state.server.port,
@@ -971,6 +1004,7 @@ pub(crate) fn persist_v3_error_evidence_payload(
         file_name,
         payload,
         true,
+        status,
     )
 }
 

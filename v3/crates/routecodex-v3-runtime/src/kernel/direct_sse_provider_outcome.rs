@@ -1,4 +1,7 @@
 use super::*;
+use crate::hub_v1::{
+    classify_v3_provider_generic_sse_json_data, V3ProviderResponsesJsonFrameOutcome,
+};
 pub(super) struct V3DirectSseProviderOutcome {
     pub(super) provider_health: V3ProviderFailureRuntimeHealth,
     pub(super) failure_session_scope: V3ProviderFailureSessionScope,
@@ -38,122 +41,44 @@ impl V3DirectSseProviderOutcome {
         &mut self,
         fields: &[SseField],
     ) -> Result<(), V3Error01SourceRaised> {
-        let mut event_name = None;
         let mut data = String::new();
         for field in fields {
             let SseField::Named { name, value } = field else {
                 continue;
             };
-            if name == "event" && event_name.is_none() {
-                event_name = Some(value.trim().to_string());
-            } else if name == "data" {
+            if name == "data" {
                 if !data.is_empty() {
                     data.push('\n');
                 }
                 data.push_str(value);
             }
         }
-        let data = data.trim();
-        if data.is_empty() {
-            return Ok(());
-        }
-        if data == "[DONE]" {
-            self.seen_done = true;
-            return Ok(());
-        }
-        let event: Value = serde_json::from_str(data).map_err(|error| {
+        let parsed = classify_v3_provider_generic_sse_json_data(&data).map_err(|message| {
             build_v3_error_01_source_raised(
                 V3ErrorSourceKind::ProviderFailure,
                 "V3ProviderResp14Raw",
                 "provider_response_sse_event_invalid",
-                error.to_string(),
+                message,
             )
         })?;
-        let sse_event_type = event_name
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                build_v3_error_01_source_raised(
+        let Some(outcome) = parsed else {
+            if data.trim() == "[DONE]" {
+                self.seen_done = true;
+            }
+            return Ok(());
+        };
+        match outcome {
+            V3ProviderResponsesJsonFrameOutcome::Failure { code, message } => {
+                return Err(build_v3_error_01_source_raised(
                     V3ErrorSourceKind::ProviderFailure,
                     "V3ProviderResp14Raw",
-                    "provider_response_sse_event_invalid",
-                    "provider Responses SSE event requires a non-empty event name",
-                )
-            })?;
-        let json_event_type = event
-            .get("type")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::ProviderFailure,
-                    "V3ProviderResp14Raw",
-                    "provider_response_sse_event_invalid",
-                    "provider Responses SSE event requires a non-empty JSON type",
-                )
-            })?;
-        if sse_event_type != json_event_type {
-            return Err(build_v3_error_01_source_raised(
-                V3ErrorSourceKind::ProviderFailure,
-                "V3ProviderResp14Raw",
-                "provider_response_sse_event_invalid",
-                format!(
-                    "provider Responses SSE event name {sse_event_type} does not match JSON type {json_event_type}"
-                ),
-            ));
-        }
-        let event_type = sse_event_type;
-        if matches!(event_type, "response.failed" | "response.incomplete") {
-            let semantic = event
-                .get("response")
-                .and_then(Value::as_object)
-                .ok_or_else(|| {
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::ProviderFailure,
-                        "V3ProviderResp14Raw",
-                        "provider_response_sse_event_invalid",
-                        format!("{event_type} requires a response object"),
-                    )
-                })?;
-            let code = semantic
-                .get("error")
-                .and_then(Value::as_object)
-                .and_then(|error| error.get("code"))
-                .and_then(Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| {
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::ProviderFailure,
-                        "V3ProviderResp14Raw",
-                        "provider_response_sse_event_invalid",
-                        format!("{event_type} requires non-empty response.error.code"),
-                    )
-                })?;
-            let message = semantic
-                .get("error")
-                .and_then(Value::as_object)
-                .and_then(|error| error.get("message"))
-                .and_then(Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| {
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::ProviderFailure,
-                        "V3ProviderResp14Raw",
-                        "provider_response_sse_event_invalid",
-                        format!("{event_type} requires non-empty response.error.message"),
-                    )
-                })?;
-            return Err(build_v3_error_01_source_raised(
-                V3ErrorSourceKind::ProviderFailure,
-                "V3ProviderResp14Raw",
-                code,
-                message,
-            ));
-        }
-        if event_type == "response.completed" {
-            self.terminal = true;
+                    code,
+                    message,
+                ));
+            }
+            V3ProviderResponsesJsonFrameOutcome::Terminal => self.terminal = true,
+            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
+            | V3ProviderResponsesJsonFrameOutcome::StartClientStream => {}
         }
         Ok(())
     }
@@ -315,7 +240,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream(
                             return Some((
                                 Err(runtime_source("V3RuntimeTimingTerminal", error)),
                                 state,
-                            ))
+                            ));
                         }
                     };
                     match state.stream_observation.record_timing(timing) {

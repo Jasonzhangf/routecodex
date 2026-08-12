@@ -49,10 +49,10 @@ pub(crate) fn merge_v3_relay_restored_local_context_at_req04(
     let mut merged = restored_messages;
     merged.extend(current_messages);
     current_object.insert("messages".to_string(), Value::Array(merged));
-    copy_restored_protocol_field_if_missing(current_object, restored, "tools");
-    copy_restored_protocol_field_if_missing(current_object, restored, "tool_choice");
-    copy_restored_protocol_field_if_missing(current_object, restored, "parallel_tool_calls");
-    copy_restored_protocol_field_if_missing(current_object, restored, "instructions");
+    copy_restored_protocol_field_if_missing(current_object, &restored, "tools");
+    copy_restored_protocol_field_if_missing(current_object, &restored, "tool_choice");
+    copy_restored_protocol_field_if_missing(current_object, &restored, "parallel_tool_calls");
+    copy_restored_protocol_field_if_missing(current_object, &restored, "instructions");
     Ok(restored_len)
 }
 

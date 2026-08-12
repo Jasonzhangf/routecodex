@@ -130,14 +130,14 @@ chains:
       side_channel_writes: [v3.target.concrete_provider]
 - chain_id: v3.codex_sample_retention_snap_scope
   owner_feature_id: v3.codex_sample_retention_snap_scope
-  summary: Debug-bounded request and response copies move from explicit manifest authorization to the single V3CodexSampleStore-owned filesystem persistence without entering MetadataCenter or normal payload truth; dev builds sample by default, error evidence force-writes, and each port retains at most 200 request directories.
+  summary: Debug-bounded request and response copies move from explicit manifest authorization to the single V3CodexSampleStore-owned filesystem persistence without entering MetadataCenter or normal payload truth; diagnostic payloads remain verbatim, dev builds sample by default, error evidence force-writes, and each port retains at most 200 request directories.
   edges:
   - step_id: v3-codex-sample-01
     from_node: V3CodexSample02ManifestAuthorizationPublished
     to_node: V3DebugPayloadBudgetApplied
     caller_symbol: capture_v3_live_raw_request
     caller_file: v3/crates/routecodex-v3-server/src/live_snapshot.rs
-    callee_symbol: V3DebugRuntime::redact_payload_for_side_channel
+    callee_symbol: V3DebugRuntime::project_payload_verbatim
     callee_file: v3/crates/routecodex-v3-debug/src/lib.rs
     status: anchored
     owner_feature_id: v3.codex_sample_retention_snap_scope
@@ -3930,7 +3930,7 @@ chains:
 - chain_id: v3.sse.transport_boundary
   owner_feature_id: v3.sse_transport_core_independent
   summary: 'V3 SSE is a transport-only edge: provider bytes become opaque validated SSE frames in routecodex-v3-sse, protocol semantics are handled by provider/protocol codecs, and server output only hands finalized client stream bytes to Body::from_stream.'
-  manifest: docs/architecture/manifests/v3.sse.transport_boundary.mainline.yml
+  manifest: docs/architecture/manifests/v3.sse.protocol_codec_projection.mainline.yml
   entry_contract:
     node: V3SseTransportIn01RawChunk
     owner_doc: docs/architecture/wiki/v3-mainline-skeleton-sop.md#sse-edge-sop
@@ -4236,7 +4236,7 @@ chains:
     to_node: V3DryRunNoNetworkTerminalEffect
     caller_symbol: execute_v3_responses_relay_dry_run_runtime
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs
-    callee_symbol: V3Transport13ResponsesRequest::redacted_provider_request_projection
+    callee_symbol: V3Transport13ResponsesRequest::provider_request_projection
     callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
     status: anchored
     owner_feature_id: v3.hub_relay_runtime_closeout
@@ -4251,7 +4251,7 @@ chains:
       - v3.debug.dry_run_execution
 - chain_id: v3.error.raw_wire_evidence
   owner_feature_id: v3.error.raw_wire_evidence
-  summary: Terminal Responses Relay failure flushes redacted request, Error chain, and provider wire evidence through the Server-owned failure diagnostic side channel only.
+  summary: Terminal Responses Relay failure flushes verbatim request, Error chain, and provider wire evidence through the Server-owned failure diagnostic side channel only.
   edges:
   - step_id: v3-responses-relay-error-evidence-01
     from_node: V3Error06ClientProjected
@@ -6893,7 +6893,7 @@ chains:
   owner_feature_id: v3.sse_protocol_codec_projection_boundary
   summary: Opaque SSE framing feeds adjacent provider/client protocol codecs;
     runtime and server do not infer semantic terminality or control state.
-  manifest: docs/architecture/manifests/v3.sse.transport_boundary.mainline.yml
+  manifest: docs/architecture/manifests/v3.sse.protocol_codec_projection.mainline.yml
   edges:
   - step_id: v3-sse-codec-01
     from_node: V3ProviderRespInbound01Raw
@@ -6959,10 +6959,10 @@ chains:
       side_channel_writes: []
   - step_id: v3-route-classifier-facts-02
     from_node: V3RouterRequestFacts
-    to_node: V3RouteActiveTurnSignals
+    to_node: V3CurrentTurnRouteFacts
     caller_symbol: build_v3_router_request_facts_for_entry_with_control
     caller_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
-    callee_symbol: extract_active_turn_signals
+    callee_symbol: build_v3_current_turn_route_facts
     callee_file: v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
     status: anchored
     binding_kind: v3_route_classifier_facts
@@ -6972,3 +6972,64 @@ chains:
       produces: [v3.route.request_facts]
       side_channel_reads: []
       side_channel_writes: []
+- chain_id: v3.provider_global_subscription_probe
+  owner_feature_id: v3.provider_global_subscription_probe
+  summary: Managed aggregate lifecycle acquires due provider-global probes and completes recovery or process-lifetime suspension through the typed health resource.
+  manifest: docs/architecture/manifests/v3.provider_global_subscription_probe.mainline.yml
+  edges:
+  - step_id: v3-provider-global-probe-01
+    from_node: V3ProviderGlobalSubscriptionHealthStore
+    to_node: V3ProviderGlobalProbePermit
+    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-02
+    from_node: V3ServerAggregateLifecycle
+    to_node: V3ProviderGlobalProbeExecution
+    caller_symbol: spawn_v3_server_aggregate
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: probe_v3_provider_global_target
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health, v3.config.published_manifest]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-03
+    from_node: V3ProviderGlobalSubscriptionFailureObservation
+    to_node: V3ProviderGlobalSubscriptionHealthStore
+    caller_symbol: responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health, v3.error.source]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health, v3.error.source]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-04
+    from_node: V3ProviderGlobalSubscriptionFailureObservation
+    to_node: V3ProviderGlobalSubscriptionHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health, v3.error.source]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health]
+      side_channel_writes: [v3.provider.global_subscription_health]

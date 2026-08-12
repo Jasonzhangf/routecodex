@@ -1,4 +1,5 @@
 mod error;
+pub mod provider_global_health;
 pub mod adaptive_concurrency;
 #[cfg_attr(not(test), allow(dead_code))]
 mod health;
@@ -8,10 +9,15 @@ pub mod transport;
 pub mod wire;
 
 pub use error::{V3ProviderError, V3ProviderHttpFailure};
+pub use provider_global_health::{
+    V3ProviderGlobalAvailability, V3ProviderGlobalProbePermit,
+    V3ProviderGlobalSubscriptionDecision, V3ProviderGlobalSubscriptionHealthStore,
+    V3ProviderGlobalSubscriptionPolicy,
+};
 pub use health::{
     V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
-    V3ProviderAvailabilityRegistry, V3ProviderCrossSessionReviveAdmission, V3ProviderFailureRecord,
-    V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
+    V3ProviderAvailabilityRegistry, V3ProviderFailureRecord,
+    V3ProviderFailurePolicy, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
 };
 pub use raw_response::{
     V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseBodyKind,

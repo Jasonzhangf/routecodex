@@ -197,6 +197,7 @@ pub enum V3ProviderActionRecoveryTransition {
     Admitted(V3ProviderActionAdmission),
     Superseded(V3ProviderActionRecoveryTicket),
     ReleasedBySuccess(V3ProviderActionRecoveryTicket),
+    Consumed(V3ProviderActionRecoveryTicket),
 }
 
 #[derive(Debug)]
@@ -303,12 +304,15 @@ impl V3ProviderActionGate {
     ) -> Result<V3ProviderActionRecoveryTransition, String> {
         {
             let states = self.lock_states()?;
-            let current_generation = states
-                .get(ticket.key())
-                .map(|state| state.generation)
-                .ok_or_else(|| {
-                    "provider action recovery ticket references a lane that is absent".to_string()
-                })?;
+            let Some(current_generation) = states.get(ticket.key()).map(|state| state.generation)
+            else {
+                // A success transition may consume the lane before the pending
+                // recovery witness is observed.  That is a typed re-evaluation,
+                // not an invalid recovery ticket and must not become V3E3.
+                return Ok(V3ProviderActionRecoveryTransition::Consumed(
+                    ticket.clone(),
+                ));
+            };
             if current_generation < ticket.generation() {
                 return Err(format!(
                     "provider action recovery ticket generation {} is ahead of lane generation {}",
@@ -708,6 +712,9 @@ impl V3ProviderActionWaiter {
             V3ProviderActionRecoveryTransition::ReleasedBySuccess(_) => Err(
                 "provider action waiter was released by provider success without admission"
                     .to_string(),
+            ),
+            V3ProviderActionRecoveryTransition::Consumed(_) => Err(
+                "provider action waiter recovery lane was already consumed".to_string(),
             ),
         }
     }

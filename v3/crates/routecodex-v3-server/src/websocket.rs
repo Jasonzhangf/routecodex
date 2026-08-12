@@ -597,36 +597,23 @@ pub(crate) async fn send_responses_relay_websocket_sse_stream(
 pub(crate) fn responses_websocket_event_text_from_sse_fields(
     fields: &[SseField],
 ) -> Result<Option<String>, String> {
-    let mut event_name: Option<&str> = None;
     let mut data_lines = Vec::new();
     for field in fields {
         if let SseField::Named { name, value } = field {
-            if name == "event" {
-                event_name = Some(value.as_str());
-            } else if name == "data" {
+            if name == "data" {
                 data_lines.push(value.as_str());
             }
         }
     }
     if data_lines.is_empty() {
-        return Ok(Some(
-            json!({"type": event_name.unwrap_or("response.event")}).to_string(),
-        ));
+        return Ok(None);
     }
     let data = data_lines.join("\n");
     if data.trim() == "[DONE]" {
         return Ok(None);
     }
-    let mut value: serde_json::Value = serde_json::from_str(&data)
+    let value: serde_json::Value = serde_json::from_str(&data)
         .map_err(|error| format!("runtime SSE data is not valid JSON: {error}"))?;
-    if value.get("type").is_none() {
-        if let (Some(event_name), Some(object)) = (event_name, value.as_object_mut()) {
-            object.insert(
-                "type".to_string(),
-                serde_json::Value::String(event_name.to_string()),
-            );
-        }
-    }
     Ok(Some(value.to_string()))
 }
 
@@ -664,3 +651,37 @@ pub(crate) fn has_responses_websocket_beta(headers: &HeaderMap) -> bool {
         })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websocket_projection_uses_json_data_not_opaque_event_label() {
+        let fields = vec![
+            SseField::Named {
+                name: "event".to_string(),
+                value: "provider.label".to_string(),
+            },
+            SseField::Named {
+                name: "data".to_string(),
+                value: r#"{"type":"response.completed"}"#.to_string(),
+            },
+        ];
+        assert_eq!(
+            responses_websocket_event_text_from_sse_fields(&fields).unwrap(),
+            Some(r#"{"type":"response.completed"}"#.to_string())
+        );
+    }
+
+    #[test]
+    fn websocket_projection_does_not_synthesize_json_from_event_only_frame() {
+        let fields = vec![SseField::Named {
+            name: "event".to_string(),
+            value: "response.completed".to_string(),
+        }];
+        assert_eq!(
+            responses_websocket_event_text_from_sse_fields(&fields).unwrap(),
+            None
+        );
+    }
+}

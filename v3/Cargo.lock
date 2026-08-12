@@ -1156,6 +1156,7 @@ dependencies = [
 name = "routecodex-v3-debug"
 version = "0.1.0"
 dependencies = [
+ "routecodex-v3-config",
  "serde",
  "serde_json",
 ]

@@ -1,5 +1,11 @@
 use super::*;
+use routecodex_v3_error::V3_TRANSIENT_TRANSPORT_HANG_CODE;
 use serde_json::{json, Value};
+
+/// relay transport 挂起判定的固定 reason：与 `responses_relay_runtime_inner.rs`
+/// 的响应头等待超时构造保持一致，作为「瞬态挂起」的单一真源。
+pub(crate) const V3_RELAY_TRANSPORT_HANG_REASON: &str =
+    "provider transport did not return response headers within timeout";
 
 pub(crate) fn server_routing_group(
     manifest: &V3Config05ManifestPublished,
@@ -68,13 +74,24 @@ pub(crate) fn provider_runtime_failure(
             )
         });
     let policy_error_message = error.to_string();
+    // transport 响应头挂起由错误处理中心按「transport 阶段 + 专属类别码」判定为
+    // 瞬态（health-neutral 同 provider 重试 3 次）；其余 transport 错误保持原策略。
+    let policy_error_type = if matches!(
+        &error,
+        V3ProviderError::Transport { reason, .. }
+            if reason == V3_RELAY_TRANSPORT_HANG_REASON
+    ) {
+        V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string()
+    } else {
+        "provider_runtime_error".to_string()
+    };
     V3ResponsesRelayProviderFailure {
         status: if terminal_projection.is_some() {
             499
         } else {
             502
         },
-        policy_error_type: "provider_runtime_error".to_string(),
+        policy_error_type,
         policy_error_message: policy_error_message.clone(),
         provider_id: provider_id.to_string(),
         source_stage: provider_runtime_failure_stage(&error),

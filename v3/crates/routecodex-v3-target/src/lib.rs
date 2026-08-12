@@ -1,8 +1,8 @@
 use routecodex_v3_config::{
-    V3Config05ManifestPublished, V3ForwarderTargetManifest, V3ProviderModelManifest,
-    V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3RouteGroupManifest,
-    V3RoutePoolManifest, V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
-    V3WebSearchExecutionMode,
+    internal::is_v3_builtin_catalog_model, V3Config05ManifestPublished, V3ForwarderTargetManifest,
+    V3ProviderModelManifest, V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind,
+    V3RouteGroupManifest, V3RoutePoolManifest, V3RoutePoolTargetManifest, V3RouteTargetKind,
+    V3SelectionStrategy, V3WebSearchExecutionMode,
 };
 use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
 use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTargetHitOnce};
@@ -612,7 +612,9 @@ fn selected_route_requested_model_filter(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())?;
-    if requested == "gpt-5.5" {
+    // Only configured built-in Codex catalog models may use the legacy
+    // requested-model exemption. Unknown gpt-* names must still be rejected.
+    if is_v3_builtin_catalog_model(requested) {
         return None;
     }
     let pool = group.pools.get(&route.pool_id);

@@ -11,14 +11,15 @@ use crate::hub_v1::{
     V3ProviderRespInbound01RawContext, V3RuntimeObservability, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
     V3RuntimeStreamObservation, V3ServerToolCenterWriteOrigin, V3StoplessCenterState,
+    record_v3_provider_sse_json_frame,
 };
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
+    build_v3_transient_failure_record, build_v3_transient_recovery_witness,
     select_v3_target_with_session_then_global,
-    try_reselect_cross_session_revive_from_captured_candidates,
     v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
-    V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
+    V3_TRANSIENT_RETRY_BUDGET,
 };
 use crate::remote_continuation::{
     V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,
@@ -32,13 +33,14 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    V3Error01SourceRaised, V3Error05ExecutionAction, V3Error05ExecutionDecision,
-    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
-    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
-    V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
+    is_v3_retryable_transient_source, V3Error01SourceRaised, V3Error05ExecutionAction,
+    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope,
+    V3_TRANSIENT_TRANSPORT_HANG_CODE, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    find_v3_routecodex_control_payload_key, ReqwestResponsesTransport, ResponsesTransport,
+    ReqwestResponsesTransport, ResponsesTransport,
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
     V3ProviderFailureRecord, V3ProviderResp14Raw, V3ProviderResponseBodyKind,
     V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
@@ -62,9 +64,28 @@ const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
 
 /// Responses direct transport 响应头等待上限：provider 在该窗口内未返回响应头
 /// 视为挂起，归一化为 transport 错误进入错误链（reselect 切 provider + health
-/// 记录 + 连续失败达到阈值拉黑 15 分钟），避免客户端无限重试命中同一挂起 provider。
+/// 记录 + 连续失败达到阈值拉黑 15 分钟）。120 秒覆盖深上下文 provider 的首响应
+/// 延迟；transport request 自身仍保留 provider 声明的 300 秒总超时。
 const V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(15);
+    std::time::Duration::from_secs(120);
+/// 挂起判定的固定 reason：只有响应头等待超时构造的 Transport 错误才进入
+/// health-neutral 瞬态重试；其余 transport 错误（连接失败等）保持原策略。
+const V3_DIRECT_TRANSPORT_HANG_REASON: &str =
+    "provider response header timed out (suspected hang)";
+
+#[cfg(test)]
+mod response_header_timeout_contract_tests {
+    use super::V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT;
+
+    #[test]
+    fn responses_direct_transport_header_timeout_keeps_120_second_budget() {
+        assert_eq!(
+            V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT,
+            std::time::Duration::from_secs(120)
+        );
+    }
+}
+
 static DEFAULT_RESPONSES_TRANSPORT: OnceLock<ReqwestResponsesTransport> = OnceLock::new();
 pub fn default_responses_transport() -> &'static ReqwestResponsesTransport {
     DEFAULT_RESPONSES_TRANSPORT.get_or_init(ReqwestResponsesTransport::default)
@@ -357,7 +378,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
     let mut send_attempts = 0usize;
     let mut pending_provider_action_recovery = None;
     let mut continuation_provider_action_lookup = previous_response_id.is_some();
-    let mut pre_send_cross_session_revive_candidate = None::<String>;
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, &standardized.protocol_context.server_id);
     loop {
@@ -391,42 +411,19 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         ) {
                             Ok(value) => value,
                             Err(error) => {
-                                match try_reselect_cross_session_revive_from_captured_candidates(
-                                    &provider_health,
-                                    &direct_failure_session_scope,
-                                    &captured_expanded,
-                                    &failed_candidates,
-                                    now_epoch_ms,
-                                ) {
-                                    Ok(Some(value)) => {
-                                        pre_send_cross_session_revive_candidate =
-                                            Some(candidate_key(&value.candidate));
-                                        trace.push("V3CrossSessionReviveAdmitted");
-                                        value
-                                    }
-                                    Ok(None) => {
-                                        return error_output(
-                                            build_v3_error_01_source_raised(
-                                                V3ErrorSourceKind::TargetPoolExhausted,
-                                                "V3Target10ConcreteProviderSelected",
-                                                "selected_target_exhausted",
-                                                format!(
-                                                    "{} candidates unavailable",
-                                                    error.attempted_candidates.len()
-                                                ),
-                                            ),
-                                            trace,
-                                            &hook_registry,
-                                        )
-                                    }
-                                    Err(error) => {
-                                        return error_output(
-                                            runtime_source("V3ProviderHealthStateMutated", error),
-                                            trace,
-                                            &hook_registry,
-                                        )
-                                    }
-                                }
+                                return error_output(
+                                    build_v3_error_01_source_raised(
+                                        V3ErrorSourceKind::TargetPoolExhausted,
+                                        "V3Target10ConcreteProviderSelected",
+                                        "selected_target_exhausted",
+                                        format!(
+                                            "{} candidates unavailable",
+                                            error.attempted_candidates.len()
+                                        ),
+                                    ),
+                                    trace,
+                                    &hook_registry,
+                                )
                             }
                         }
                     }
@@ -498,6 +495,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     trace.push("V3ProviderActionGateTerminalReevaluation");
                     continue;
                 }
+                Ok(V3ProviderActionRecoveryTransition::Consumed(_)) => {
+                    pending_provider_action_recovery = None;
+                    retry_selected = Some(selected);
+                    trace.push("V3ProviderActionGateConsumedReevaluation");
+                    continue;
+                }
                 Err(error) => {
                     return error_output(
                         runtime_source("V3ProviderActionGateAdmission", error),
@@ -534,7 +537,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 }
             }
         }
-        let selected_candidate_key = candidate_key(&selected.candidate);
         let selected_available = v3_direct_selected_available_for_send(
             &selected,
             expanded.as_ref(),
@@ -543,51 +545,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             &failed_candidates,
             now_epoch_ms,
         );
-        let mut selected_has_cross_session_revive =
-            pre_send_cross_session_revive_candidate.take().as_deref()
-                == Some(selected_candidate_key.as_str());
-        if !selected_available && !selected_has_cross_session_revive {
-            let mut failed_with_selected = failed_candidates.clone();
-            failed_with_selected.insert(selected_candidate_key.clone());
-            let remaining_after_selected = expanded.as_ref().map_or(0, |expanded| {
-                remaining_available_candidates(
-                    &expanded.candidates,
-                    &availability,
-                    &failed_with_selected,
-                )
-            });
-            let globally_available = provider_health
-                .availability(
-                    &selected.candidate.provider_id,
-                    Some(&selected.candidate.auth_alias),
-                    Some(&selected.candidate.model_id),
-                    now_epoch_ms,
-                )
-                .available;
-            if globally_available && remaining_after_selected == 0 {
-                selected_has_cross_session_revive =
-                    match provider_health.store().try_acquire_cross_session_revive(
-                        &direct_failure_session_scope,
-                        &selected.candidate.provider_id,
-                        Some(&selected.candidate.auth_alias),
-                        Some(&selected.candidate.model_id),
-                        now_epoch_ms,
-                    ) {
-                        Ok(admission) => admission.is_some(),
-                        Err(error) => {
-                            return error_output(
-                                runtime_source("V3ProviderHealthStateMutated", error.to_string()),
-                                trace,
-                                &hook_registry,
-                            )
-                        }
-                    };
-            }
-            if selected_has_cross_session_revive {
-                trace.push("V3CrossSessionReviveAdmitted");
-            }
-        }
-        if !selected_available && !selected_has_cross_session_revive {
+        if !selected_available {
             let source = build_v3_error_01_source_raised(
                 V3ErrorSourceKind::ProviderFailure,
                 "V3HubReqTarget06Resolved",
@@ -633,11 +591,21 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             }
             match &policy_result.decision.action {
                 V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                    if policy_result.retryable_transient {
+                        // 瞬态失败切走：request-local witness 不经过
+                        // provider action gate（无 lane 可等），立即重选。
+                        continue;
+                    }
                     pending_provider_action_recovery = Some(recovery.clone());
                     continue;
                 }
                 V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
                     retry_selected = policy_result.retry_selected.map(|selected| *selected);
+                    if policy_result.retryable_transient {
+                        // 瞬态失败重试同一 provider：不经过 provider action
+                        // gate（无 lane 可等），立即重发。
+                        continue;
+                    }
                     pending_provider_action_recovery = Some(recovery.clone());
                     continue;
                 }
@@ -851,7 +819,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             Err(V3ProviderError::Transport {
                 request_id: standardized.protocol_context.request_id.clone(),
                 provider_id: policy.target.candidate.provider_id.clone(),
-                reason: "provider response header timed out (suspected hang)".to_string(),
+                reason: V3_DIRECT_TRANSPORT_HANG_REASON.to_string(),
             })
         }) {
             Ok(raw) => raw,
@@ -863,8 +831,24 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         &hook_registry,
                     );
                 }
-                let source =
-                    build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);
+                let hang = matches!(
+                    &error,
+                    V3ProviderError::Transport { reason, .. }
+                        if reason == V3_DIRECT_TRANSPORT_HANG_REASON
+                );
+                let source = build_v3_provider_error_source(
+                    "V3Transport13ResponsesHttpRequest",
+                    error,
+                );
+                // 挂起由错误处理中心按「transport 阶段 + 专属 code」判定为瞬态
+                // （health-neutral 重试 3 次），不在构造处打标记。
+                let source = if hang {
+                    let mut source = source;
+                    source.code = V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string();
+                    source
+                } else {
+                    source
+                };
                 drop(provider_action_permit.take());
                 let policy_result = match run_v3_direct_provider_failure_policy(
                     &V3DirectProviderFailurePolicyContext {
@@ -904,11 +888,20 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 }
                 match &policy_result.decision.action {
                     V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                        if policy_result.retryable_transient {
+                            // 瞬态失败切走：不经过 provider action gate，立即重选。
+                            continue;
+                        }
                         pending_provider_action_recovery = Some(recovery.clone());
                         continue;
                     }
                     V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
                         retry_selected = policy_result.retry_selected.map(|selected| *selected);
+                        if policy_result.retryable_transient {
+                            // 瞬态失败重试同一 provider：不经过 provider action
+                            // gate（无 health 记录可等），立即重发。
+                            continue;
+                        }
                         pending_provider_action_recovery = Some(recovery.clone());
                         continue;
                     }
@@ -1045,11 +1038,20 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     }
                     match &policy_result.decision.action {
                         V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                            if policy_result.retryable_transient {
+                                // 瞬态失败切走：不经过 provider action gate，立即重选。
+                                continue;
+                            }
                             pending_provider_action_recovery = Some(recovery.clone());
                             continue;
                         }
                         V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
                             retry_selected = policy_result.retry_selected.map(|selected| *selected);
+                            if policy_result.retryable_transient {
+                                // 瞬态失败重试同一 provider：不经过 provider action
+                                // gate（无 health 记录可等），立即重发。
+                                continue;
+                            }
                             pending_provider_action_recovery = Some(recovery.clone());
                             continue;
                         }

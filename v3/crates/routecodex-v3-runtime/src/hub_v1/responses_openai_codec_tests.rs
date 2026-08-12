@@ -394,3 +394,54 @@ fn responses_web_search_call_rejects_side_channel_before_tool_result_stringifica
         "unexpected error: {error}"
     );
 }
+
+#[test]
+fn responses_compaction_input_item_is_discarded_before_chat_encoding() {
+    let with_compaction = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hi"}]
+        }, {
+            "type": "compaction",
+            "encrypted_content": "gAAAAABjYW5vbmljYWwtc2VjcmV0LWl2LXNhbHQ="
+        }]
+    }))
+    .expect("client compaction item with encrypted content must be discarded, not rejected");
+
+    let without_compaction = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hi"}]
+        }]
+    }))
+    .expect("baseline without compaction must encode");
+
+    assert_eq!(
+        with_compaction, without_compaction,
+        "compaction item must not leak into provider chat messages"
+    );
+}
+
+#[test]
+fn responses_unknown_input_item_type_still_fails_fast() {
+    let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hi"}]
+        }, {
+            "type": "future_mystery_item",
+            "payload": {"anything": true}
+        }]
+    }))
+    .expect_err("genuinely unknown Responses input item types must keep failing fast");
+    assert!(
+        error.contains("unsupported Responses input item type"),
+        "unexpected error: {error}"
+    );
+}

@@ -107,6 +107,7 @@ use routecodex_v3_runtime::{
     V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
     V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
+    build_v3_provider_global_probe_target, probe_v3_provider_global_target,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -135,10 +136,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
-const V3_PROTOCOL_PENDING_PROJECTION_RESOURCE: &str = "v3.protocol.pending_projection";
 // feature_id: v3.codex_sample_retention_snap_scope
 // sample persistence is owned solely by routecodex-v3-debug::V3CodexSampleStore.
-
 struct V3ResponsesPreviousResponseOwnerResolutionContext {
     direct_scope: V3ResponsesDirectContinuationScope,
     relay_scope: V3ResponsesRelayLocalContinuationScope,
@@ -211,6 +210,7 @@ pub struct V3ListenerHandle {
 #[derive(Debug)]
 pub struct V3ServerAggregateHandle {
     pub listeners: Vec<V3ListenerHandle>,
+    probe_shutdown: Option<oneshot::Sender<()>>,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -229,6 +229,9 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 
 impl V3ServerAggregateHandle {
     pub async fn shutdown(mut self) {
+        if let Some(shutdown) = self.probe_shutdown.take() {
+            let _ = shutdown.send(());
+        }
         for listener in &mut self.listeners {
             if let Some(shutdown) = listener.shutdown.take() {
                 let _ = shutdown.send(());
@@ -280,6 +283,8 @@ pub async fn spawn_v3_server_aggregate(
     let codex_sample_store = Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
         manifest.debug.codex_samples,
         routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
+        routecodex_v3_config::internal::v3_error_samples_only()
+            && !manifest.debug.full_codex_sampling,
     ));
     for server in &preflight.listeners {
         codex_sample_store
@@ -351,7 +356,46 @@ pub async fn spawn_v3_server_aggregate(
             )
             .map_err(std::io::Error::other)?;
     }
-    Ok(V3ServerAggregateHandle { listeners })
+    let (probe_shutdown, mut probe_shutdown_rx) = oneshot::channel();
+    let probe_manifest = Arc::clone(&manifest);
+    let probe_health = Arc::clone(&provider_health).runtime_health();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            tokio::select! {
+                _ = &mut probe_shutdown_rx => break,
+                _ = interval.tick() => {
+                    let now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
+                        Ok(duration) => duration.as_millis() as u64,
+                        Err(error) => {
+                            eprintln!("provider global probe clock failure: {error}");
+                            continue;
+                        }
+                    };
+                    let manifest_for_probe = Arc::clone(&probe_manifest);
+                    let result = probe_health.run_due_global_subscription_probes(now_ms, move |provider_id, auth_alias, model_id| {
+                        let manifest_for_probe = Arc::clone(&manifest_for_probe);
+                        async move {
+                            let target = build_v3_provider_global_probe_target(
+                                &manifest_for_probe,
+                                &provider_id,
+                                auth_alias.as_deref(),
+                                model_id.as_deref(),
+                            )?;
+                            probe_v3_provider_global_target(target).await
+                        }
+                    }).await;
+                    if let Err(error) = result {
+                        eprintln!("provider global probe cycle failed: {error}");
+                    }
+                }
+            }
+        }
+    });
+    Ok(V3ServerAggregateHandle {
+        listeners,
+        probe_shutdown: Some(probe_shutdown),
+    })
 }
 
 pub async fn serve_v3_server_aggregate_until_shutdown(
@@ -731,40 +775,11 @@ async fn pending_endpoint(
 
 fn pending_binding_output_response(
     output: V3FoundationRuntimeOutput,
-    entry_protocol: &str,
-    pending_not_implemented: &str,
-    pending_owner: &str,
+    _entry_protocol: &str,
+    _pending_not_implemented: &str,
+    _pending_owner: &str,
 ) -> Response<Body> {
-    let mut response = foundation_output_response(output);
-    insert_v3_projection_header(
-        response.headers_mut(),
-        "x-routecodex-v3-entry-protocol",
-        entry_protocol,
-    );
-    insert_v3_projection_header(
-        response.headers_mut(),
-        "x-routecodex-v3-execution-mode",
-        pending_not_implemented,
-    );
-    insert_v3_projection_header(
-        response.headers_mut(),
-        "x-routecodex-v3-pending-owner",
-        pending_owner,
-    );
-    insert_v3_projection_header(
-        response.headers_mut(),
-        "x-routecodex-v3-pending-resource",
-        V3_PROTOCOL_PENDING_PROJECTION_RESOURCE,
-    );
-    response
-}
-
-fn insert_v3_projection_header(headers: &mut HeaderMap, name: &'static str, value: &str) {
-    headers.insert(
-        name,
-        HeaderValue::from_str(value)
-            .expect("V3 binding projection header value is validated ASCII"),
-    );
+    foundation_output_response(output)
 }
 
 struct V3ErrorProjectionConsoleInput<'input> {

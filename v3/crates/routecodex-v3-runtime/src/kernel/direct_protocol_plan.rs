@@ -262,7 +262,7 @@ impl ResponsesTransport for V3DryRunNoNetworkTransport {
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         if let Ok(mut captured) = self.captured_provider_request.lock() {
-            *captured = Some(request.redacted_provider_request_projection());
+            *captured = Some(request.provider_request_projection());
         }
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
@@ -420,7 +420,7 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         .lock()
         .ok()
         .and_then(|captured| captured.clone())
-        .map(|request| debug.redact_projection(request))
+        .map(|request| debug.project_verbatim(request))
         .unwrap_or_else(|| json!(null));
     let dry_run_status = if provider_request.is_null() {
         output.client_payload.status
@@ -453,7 +453,7 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
                 "provider_request": provider_request,
                 "node_ids": output.node_trace,
                 "snapshots": transient_snapshots,
-                "response_payload": debug.redact_projection(response_payload)
+                "response_payload": debug.project_verbatim(response_payload)
             }
         }),
         debug_node: "V3DryRunNoNetworkTerminalEffect",

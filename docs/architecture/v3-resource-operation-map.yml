@@ -832,7 +832,7 @@ resources:
     identity: [serverId, routingGroup, sessionId]
     allowed_writers: [V3ProviderFailureSessionScope::new]
     allowed_readers: [V3Server03HttpRequestRaw, V3Error05RecoveryAdmissionWitness::new, V3ProviderFailureRuntimeHealth::record_provider_failure_record, V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope, V3ProviderFailureRuntimeHealth::session_bound_availability, V3ProviderActionProviderScope::new, V3ProviderSessionAvailabilityReader::availability]
-    forbidden_writers: [routecodex-v3-provider-responses, V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_cross_session_revive, routecodex-v3-virtual-router, routecodex-v3-target]
+    forbidden_writers: [routecodex-v3-provider-responses, V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, routecodex-v3-virtual-router, routecodex-v3-target]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -845,6 +845,18 @@ resources:
     allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_cross_session_revive]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderSessionAvailabilityReader::availability, V3ProviderHealthStore::try_acquire_cross_session_revive]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.provider.global_subscription_health
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3ProviderGlobalSubscriptionHealthStore
+    identity: [providerId, sessionScope, errorFingerprint]
+    allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure, V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response, V3ProviderGlobalSubscriptionHealthStore::complete_probe_success, V3ProviderGlobalSubscriptionHealthStore::complete_probe_failure, V3ProviderGlobalSubscriptionHealthStore::reset_after_restart]
+    allowed_readers: [V3ProviderGlobalSubscriptionHealthStore::availability, V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-server]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -1073,7 +1085,7 @@ resources:
     forbidden_readers: [request.normal_payload, response.provider_raw, response.client_payload, MetadataCenter]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
 
   - resource_id: v3.sse.protocol_semantic_projection
     resource_kind: protocol_projection_resource
@@ -1083,6 +1095,7 @@ resources:
     identity: [requestId, providerProtocol, entryProtocol, frameSequence]
     payload_contract: standard_protocol_codec_owned
     allowed_writers: [build_v3_hub_resp_inbound_02_from_provider_resp_compat_02, build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload]
+    canonical_codecs: [parse_v3_provider_sse_json_data, classify_v3_provider_responses_json_data, classify_v3_provider_responses_json_event, record_v3_provider_sse_json_frame]
     allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespOutbound05ClientSemantic]
     forbidden_writers: [routecodex-v3-sse, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter]
     forbidden_readers: [routecodex-v3-sse, routecodex-v3-server]
@@ -1318,12 +1331,12 @@ resources:
     identity: [serverId, requestId, executionId, artifactKind]
     semantic_contract:
       sample_fidelity: debug/codex-sample payloads are preserved verbatim; truncation and placeholder replacement are forbidden
-      redaction_only: only sensitive-key and secret-literal values are replaced with [REDACTED]
+      payload_fidelity: diagnostic payloads are preserved verbatim; no sensitive-key replacement or secret-literal substitution is performed
       default_policy: dev builds enable sampling by default (cfg!(debug_assertions)); release builds require explicit opt-in
       error_evidence: error paths force-write samples even when sampling is disabled
       retention_cap: at most 200 request directories per port are retained
     allowed_readers: [capture_v3_live_raw_request, capture_v3_responses_relay_response, capture_v3_responses_direct_response, capture_v3_responses_relay_provider_snapshots, V3DebugBoundedTextCapture::rendered_text, developer_diagnostics]
-    allowed_writers: [V3DebugRuntime::redact_payload_for_side_channel, redact_debug_value_at_key, V3DebugBoundedTextCapture::append, V3CodexSampleStore::persist]
+    allowed_writers: [V3DebugRuntime::project_payload_verbatim, V3DebugBoundedTextCapture::append, V3CodexSampleStore::persist]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false

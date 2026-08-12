@@ -19,11 +19,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
             V3ResponsesRelayClientBody::Sse(_) => panic!("target exhaustion must project as JSON"),
         };
         assert_eq!(body["error"]["code"], "selected_target_exhausted");
-        assert_eq!(body["error"]["class"], "target_pool_exhausted");
-        assert_eq!(body["error"]["target_exhausted"], true);
         assert_eq!(
             body["error"]["message"],
             "selected target exhausted after [\"routecodex:key1:deepseek-v4-flash:availability(cooldown)\"]"
+        );
+        assert!(
+            body["error"].get("class").is_none()
+                && body["error"].get("target_exhausted").is_none()
+                && body["error"].get("stage").is_none()
+                && body["error"].get("decision").is_none(),
+            "Error06 body must not carry control-plane fields: {}",
+            body["error"]
         );
         assert!(!body.to_string().contains("V3TargetExhaustion"));
         assert_eq!(
@@ -44,15 +50,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
             V3ResponsesRelayClientBody::Sse(_) => panic!("runtime failure must project as JSON"),
         };
         assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
-        assert_eq!(body["error"]["class"], "runtime_failure");
-        assert_eq!(body["error"]["stage"], "V3HubRuntime");
-        assert_eq!(body["error"]["decision"], "project_client_error");
-        assert_eq!(body["error"]["target_exhausted"], true);
-        assert_eq!(body["error"]["candidates_remaining"], 0);
-        assert_eq!(body["error"]["error_node"], "V3Error06ClientProjected");
         assert_eq!(
             body["error"]["message"],
             "V3 Hub static hook registry failed: registry unavailable"
+        );
+        assert!(
+            body["error"].get("class").is_none()
+                && body["error"].get("stage").is_none()
+                && body["error"].get("decision").is_none()
+                && body["error"].get("target_exhausted").is_none()
+                && body["error"].get("candidates_remaining").is_none()
+                && body["error"].get("error_node").is_none(),
+            "Error06 body must not carry control-plane fields: {}",
+            body["error"]
         );
         assert_eq!(
             output.error_chain.as_deref(),
@@ -113,15 +123,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
         };
         assert_eq!(body["error"]["code"], "rate_limit_error");
         assert_eq!(body["error"]["message"], "controlled rate limit");
-        assert_eq!(
-            body["error"]["stage"],
-            "V3ProviderReqOutbound09TransportRequest"
+        assert!(
+            body["error"].get("stage").is_none()
+                && body["error"].get("class").is_none()
+                && body["error"].get("decision").is_none()
+                && body["error"].get("target_exhausted").is_none()
+                && body["error"].get("candidates_remaining").is_none()
+                && body["error"].get("error_node").is_none()
+                && body["error"].get("external_error").is_none(),
+            "Error06 body must not carry control-plane fields: {}",
+            body["error"]
         );
-        assert_eq!(body["error"]["class"], "provider_failure");
-        assert_eq!(body["error"]["decision"], "project_client_error");
-        assert_eq!(body["error"]["target_exhausted"], true);
-        assert_eq!(body["error"]["candidates_remaining"], 0);
-        assert_eq!(body["error"]["error_node"], "V3Error06ClientProjected");
         assert!(
             body["error"].get("type").is_none(),
             "provider raw error body must not bypass ErrorErr06 projection: {body}"
@@ -217,7 +229,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
             "exec"
         );
         assert_eq!(
-            provider_request["attempts"][0]["request"]["headers"]["authorization"],
+            provider_request["attempts"][0]["request"]["headers"].get("authorization"),
+            None
+        );
+        assert_ne!(
+            provider_request["attempts"][0]["request"].to_string(),
             "[REDACTED]"
         );
         assert!(
@@ -378,10 +394,44 @@ use std::sync::atomic::{AtomicUsize, Ordering};
     }
 
     #[tokio::test]
+    async fn provider_sse_json_failure_wins_over_opaque_event_label() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"event: response.created\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"message\":\"json failure\"}}}\n\n".to_vec(),
+        )]));
+        let error = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("json failure"));
+        assert!(!error.to_string().contains("event/type mismatch"));
+    }
+
+    #[tokio::test]
+    async fn provider_sse_json_completed_wins_over_opaque_event_label() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"event: provider-specific-label\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_json_authority\",\"status\":\"completed\"}}\n\n".to_vec(),
+        )]));
+        let response = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect("JSON response.completed must remain terminal");
+
+        assert_eq!(response["id"], "resp_json_authority");
+        assert_eq!(response["status"], "completed");
+    }
+
+    #[tokio::test]
     async fn provider_sse_raw_json_error_body_exposes_upstream_error() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![Ok(
-            b"{\"error\":{\"message\":\"Panic detected\",\"type\":\"new_api_panic\"}}\n\n".to_vec(),
+            b"data: {\"error\":{\"message\":\"Panic detected\",\"type\":\"new_api_panic\"}}\n\n".to_vec(),
         )]));
         let error = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
             provider,
@@ -914,7 +964,7 @@ data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_dup_
     async fn anthropic_provider_sse_raw_json_error_body_exposes_upstream_error() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![Ok(
-            b"{\"error\":{\"message\":\"Panic detected\",\"type\":\"new_api_panic\"}}\n\n".to_vec(),
+            b"data: {\"error\":{\"message\":\"Panic detected\",\"type\":\"new_api_panic\"}}\n\n".to_vec(),
         )]));
         let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
             V3HubProviderWireProtocol::Anthropic,
@@ -932,7 +982,7 @@ data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_dup_
     async fn openai_chat_provider_sse_raw_json_error_body_exposes_upstream_error() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![Ok(
-            b"{\"error\":{\"message\":\"Panic detected\",\"type\":\"new_api_panic\"}}\n\n".to_vec(),
+            b"data: {\"error\":{\"message\":\"Panic detected\",\"type\":\"new_api_panic\"}}\n\n".to_vec(),
         )]));
         let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
             V3HubProviderWireProtocol::OpenAiChat,

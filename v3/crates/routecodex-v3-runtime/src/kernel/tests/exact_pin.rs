@@ -94,9 +94,12 @@ async fn missing_exact_pin_is_provider_availability_error05_without_router_reent
     match output.client_payload.body {
         V3ClientBody::Json(value) => {
             assert_eq!(value["error"]["code"], "continuation_exact_pin_unavailable");
-            assert_eq!(
-                value.pointer("/error/external_error/kind"),
-                Some(&json!("provider"))
+            assert!(
+                value.pointer("/error/external_error").is_none()
+                    && value.pointer("/error/class").is_none()
+                    && value.pointer("/error/stage").is_none()
+                    && value.pointer("/error/error_node").is_none(),
+                "Error06 body must not carry control-plane fields: {value}"
             );
         }
         V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
@@ -196,8 +199,11 @@ async fn exact_pin_capability_revision_mismatch_stays_out_of_provider_failure_ga
     );
     match output.client_payload.body {
         V3ClientBody::Json(value) => {
-            assert_eq!(value["error"]["class"], "runtime_failure");
             assert_eq!(value["error"]["code"], "v3_route_target_runtime_failure");
+            assert!(
+                value.pointer("/error/class").is_none(),
+                "Error06 body must not carry the error class: {value}"
+            );
             assert_ne!(
                 value["error"]["code"],
                 json!("continuation_exact_pin_unavailable")

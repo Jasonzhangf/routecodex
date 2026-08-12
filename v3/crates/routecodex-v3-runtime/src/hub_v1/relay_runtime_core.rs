@@ -113,10 +113,23 @@ const V3_RELAY_SSE_FIRST_FRAME_TIMEOUT: std::time::Duration =
 
 /// Relay transport 响应头等待上限：provider 在窗口内未返回响应头（上游挂起/无响应）
 /// 时归一化为 Transport 错误进入错误链——记录 provider failure（health）+ reselect 切
-/// provider。否则 provider 挂起（连接保持、不失败）会让客户端无限重试且永远命中同一
-/// provider（无法续杯 switch）。
+/// provider。120 秒覆盖深上下文 provider 的首响应延迟；provider request 自身仍保留
+/// 300 秒总 timeout。
 pub(crate) const V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(15);
+    std::time::Duration::from_secs(120);
+
+#[cfg(test)]
+mod response_header_timeout_contract_tests {
+    use super::V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT;
+
+    #[test]
+    fn relay_transport_header_timeout_keeps_120_second_budget() {
+        assert_eq!(
+            V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT,
+            std::time::Duration::from_secs(120)
+        );
+    }
+}
 
 /// Relay 收集 provider SSE 流时的流空闲上限：首帧已收到、但后续数据挂起
 /// （连接保持、不失败、无新帧）超过该窗口 → 归一化为 Transport 错误进入错误链
@@ -483,6 +496,12 @@ where
                         Some(ticket.recovery_witness().map_err(V3RelayCoreError::Target)?);
                     retry_selected = Some(selected);
                     trace.push("V3ProviderActionGateTerminalReevaluation");
+                    continue;
+                }
+                V3ProviderActionRecoveryTransition::Consumed(_) => {
+                    pending_provider_action_recovery = None;
+                    retry_selected = Some(selected);
+                    trace.push("V3ProviderActionGateConsumedReevaluation");
                     continue;
                 }
             }

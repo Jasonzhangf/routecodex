@@ -232,6 +232,26 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                     .await
             }
         };
+        let raw_input_items = payload
+            .get("input")
+            .and_then(Value::as_array)
+            .map_or(1, Vec::len);
+        emit_v3_dry_run_console_lines(
+            &build_v3_console_emission_context(
+                &state,
+                &entry_protocol,
+                &path,
+                &request_identity,
+                &request_headers,
+                &payload,
+            ),
+            &resolve_v3_dry_run_target_label(&state),
+            "provider-request-dry-run",
+            raw_input_items,
+            raw_input_items,
+            output.status,
+            output.node_trace.len(),
+        );
         if let Some(response) = record_v3_live_snapshot_projection(
             &state,
             &trace_scope,
@@ -337,6 +357,26 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                 output
             }
         };
+        let raw_input_items = payload
+            .get("input")
+            .and_then(Value::as_array)
+            .map_or(1, Vec::len);
+        emit_v3_dry_run_console_lines(
+            &build_v3_console_emission_context(
+                &state,
+                &entry_protocol,
+                &path,
+                &request_identity,
+                &request_headers,
+                &payload,
+            ),
+            &resolve_v3_dry_run_target_label(&state),
+            "provider-request-dry-run",
+            raw_input_items,
+            raw_input_items,
+            output.status,
+            output.node_trace.len(),
+        );
         if let Some(response) = record_v3_live_snapshot_projection(
             &state,
             &trace_scope,
@@ -852,7 +892,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                         "request.json",
                         &state
                             .debug
-                            .redact_payload_for_side_channel(raw_request_payload.clone()),
+                            .project_payload_verbatim(raw_request_payload.clone()),
+                        (frame.status >= 400).then_some(frame.status),
                     );
                     let _ = persist_v3_error_evidence_payload(
                         &state,
@@ -862,7 +903,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                         "error.json",
                         &state
                             .debug
-                            .redact_payload_for_side_channel(json!({
+                            .project_payload_verbatim(json!({
                                 "object": "routecodex.v3.error_evidence",
                                 "stage": "error",
                                 "status": frame.status,
@@ -872,6 +913,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                                 "error_chain": frame.error_chain.clone(),
                                 "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
                             })),
+                        (frame.status >= 400).then_some(frame.status),
                     );
                 }
                 if let Some(response) = capture_v3_responses_direct_response(
@@ -990,6 +1032,22 @@ pub(crate) fn is_provider_request_dry_run(headers: &HeaderMap) -> bool {
         .get("x-routecodex-dry-run")
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.trim().eq_ignore_ascii_case("provider-request"))
+}
+
+fn resolve_v3_dry_run_target_label(state: &V3ListenerState) -> String {
+    state
+        .manifest
+        .providers
+        .values()
+        .find_map(|provider| {
+            let auth_alias = provider.auth.entries.first()?.alias.as_str();
+            let model = provider.models.get(&provider.default_model)?;
+            Some(format!(
+                "{}[{}].{}",
+                provider.id, auth_alias, model.wire_name
+            ))
+        })
+        .unwrap_or_else(|| "-".to_string())
 }
 
 pub(crate) fn merge_v3_protocol_plan_trace(

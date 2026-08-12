@@ -587,7 +587,7 @@ impl ResponsesTransport for ProviderProjectionJsonTransport {
         self.captures
             .lock()
             .unwrap()
-            .push(request.redacted_provider_request_projection());
+            .push(request.provider_request_projection());
         let response = self.responses.lock().unwrap().pop_front().unwrap();
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
@@ -611,7 +611,7 @@ impl ResponsesTransport for ProviderProjectionFirstSseThenJsonTransport {
         self.captures
             .lock()
             .unwrap()
-            .push(request.redacted_provider_request_projection());
+            .push(request.provider_request_projection());
         let response = self.responses.lock().unwrap().pop_front().unwrap();
         if response.get("object").and_then(Value::as_str) == Some("chat.completion.chunk") {
             let stream = futures_util::stream::iter([
@@ -651,7 +651,7 @@ impl ResponsesTransport for ProviderProjectionOpenAiChatSseTransport {
         self.captures
             .lock()
             .unwrap()
-            .push(request.redacted_provider_request_projection());
+            .push(request.provider_request_projection());
         let first = json!({
             "id":"chatcmpl-stopless-wire-sse",
             "object":"chat.completion.chunk",

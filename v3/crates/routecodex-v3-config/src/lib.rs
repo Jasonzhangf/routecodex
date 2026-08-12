@@ -337,8 +337,8 @@ fn insert_v3_catalog_model_ref(
 ) {
     let visible_id = visible_id.trim().to_string();
     if visible_id.is_empty()
-        || is_v3_hidden_codex_future_model(&visible_id)
-        || is_v3_hidden_codex_future_model(&model_id)
+        || internal::is_v3_hidden_codex_future_model(&visible_id)
+        || internal::is_v3_hidden_codex_future_model(&model_id)
     {
         return;
     }
@@ -352,11 +352,9 @@ fn insert_v3_catalog_model_ref(
         });
 }
 
-/// 隐藏的 Codex 未来模型（`gpt-5.6` 系列）：不在任何模型目录/能力面暴露。
-pub fn is_v3_hidden_codex_future_model(model_id: &str) -> bool {
-    let trimmed = model_id.trim();
-    trimmed == "gpt-5.6" || trimmed.starts_with("gpt-5.6-")
-}
+/// 内部配置层（internal）：RouteCodex 内部控制特判与内部模型清单。
+/// 用户配置面不承载任何特判；路由/流水线/能力面节点只消费本层判定结果。
+pub mod internal;
 
 pub fn looks_like_secret_literal(value: &str) -> bool {
     let trimmed = value.trim();

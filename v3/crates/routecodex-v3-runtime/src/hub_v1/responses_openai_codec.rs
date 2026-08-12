@@ -192,6 +192,13 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     tool_result,
                 )?;
             }
+            "compaction" => {
+                // Client session-compaction marker. Its encrypted_content is Fernet
+                // ciphertext of prior context and must be discarded here, never
+                // encoded into provider messages: retaining it would pollute the
+                // conversation history rendered to the provider. Mirrors the
+                // encrypted-reasoning discard rule applied at response ingress.
+            }
             other => {
                 return Err(format!(
                     "unsupported Responses input item type for OpenAI Chat provider encoding: {other}"

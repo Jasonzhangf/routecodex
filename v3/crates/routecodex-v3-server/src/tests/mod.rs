@@ -110,6 +110,9 @@ fn test_v3_listener_state_with_debug(
     snapshot_stages: Option<String>,
     snapshot_direct: bool,
 ) -> Arc<V3ListenerState> {
+    // 显式 --snap-stages 授权（与 lifecycle 语义一致）：关闭只落错误样本，
+    // 允许成功样本落盘（recorder / provider snapshot 机制测试依赖此授权）。
+    let full_codex_sampling = snapshot_stages.is_some();
     let mut servers = BTreeMap::new();
     let server = V3ServerManifest {
         id: format!("server-{port}"),
@@ -141,9 +144,11 @@ fn test_v3_listener_state_with_debug(
             snapshot_direct,
             dry_run: false,
             retention: BTreeMap::new(),
+            full_codex_sampling,
         },
         error: routecodex_v3_config::V3ErrorManifest {
             policies: BTreeMap::new(),
+            provider_error_default_path: Vec::new(),
             provider_error_action_policy: Vec::new(),
             client_error_projection_policy: Vec::new(),
         },
@@ -163,6 +168,8 @@ fn test_v3_listener_state_with_debug(
         codex_sample_store: Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
             manifest.debug.codex_samples,
             routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
+            routecodex_v3_config::internal::v3_error_samples_only()
+                && !manifest.debug.full_codex_sampling,
         )),
         responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
         responses_direct_stopless_control: Arc::new(
@@ -312,13 +319,14 @@ fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
     ));
     let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, false);
 
-    let persistence_error = persist_v3_codex_sample_payload(
+    let persistence_error = persist_v3_error_evidence_payload(
         &state,
         "responses",
         "/v1/responses",
         "missing-home",
-        "request.json",
+        "error.json",
         &json!({"input":"must fail explicitly"}),
+        Some(502),
     )
     .expect_err("missing HOME must not silently skip an authorized sample write");
     assert!(persistence_error.contains("HOME"), "{persistence_error}");
@@ -436,7 +444,7 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
 }
 
 #[test]
-fn relay_provider_snapshots_are_redacted_before_codex_sample_persistence() {
+fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
     let _home_lock = TEST_HOME_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-provider-snapshot-redaction-{}",
@@ -487,7 +495,7 @@ fn relay_provider_snapshots_are_redacted_before_codex_sample_persistence() {
     let sample_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/redaction-request");
     let request = fs::read_to_string(sample_dir.join("provider-request.json")).unwrap();
     let response = fs::read_to_string(sample_dir.join("provider-response.json")).unwrap();
-    assert!(request.contains("[REDACTED]"));
+    assert!(request.contains("Bearer secret"));
     assert!(
         request.contains(&"A".repeat(4096)),
         "media payload must be preserved verbatim in samples, no placeholder replacement"
@@ -2617,9 +2625,11 @@ fn error_projection_appends_human_console_failure_line() {
             snapshot_direct: true,
             dry_run: false,
             retention: BTreeMap::new(),
+            full_codex_sampling: false,
         },
         error: routecodex_v3_config::V3ErrorManifest {
             policies: BTreeMap::new(),
+            provider_error_default_path: Vec::new(),
             provider_error_action_policy: Vec::new(),
             client_error_projection_policy: Vec::new(),
         },
@@ -2635,6 +2645,8 @@ fn error_projection_appends_human_console_failure_line() {
         codex_sample_store: Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
             manifest.debug.codex_samples,
             routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
+            routecodex_v3_config::internal::v3_error_samples_only()
+                && !manifest.debug.full_codex_sampling,
         )),
         responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
         responses_direct_stopless_control: Arc::new(

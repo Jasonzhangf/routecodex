@@ -26,7 +26,7 @@ impl ResponsesTransport for CaptureAnthropicTransport {
         self.captures
             .lock()
             .unwrap()
-            .push(request.redacted_provider_request_projection());
+            .push(request.provider_request_projection());
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
             request.provider_id(),

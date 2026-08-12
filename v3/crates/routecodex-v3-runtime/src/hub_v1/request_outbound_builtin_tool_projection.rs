@@ -2,6 +2,8 @@ use serde_json::{Map, Value};
 
 use routecodex_v3_config::V3WebSearchExecutionMode;
 
+use super::is_v3_gpt_canonical_model;
+
 #[cfg(test)]
 pub(super) fn project_openai_chat_provider_tools(payload: &mut Value) -> Result<(), String> {
     project_openai_chat_provider_tools_for_web_search_mode(
@@ -27,10 +29,11 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     let tools = tools.as_array().ok_or_else(|| {
         "MalformedOutboundField target_protocol=openai_chat path=$.tools".to_string()
     })?;
-    // gpt 系列模型保留标准 hosted web_search 语义（openai 官方支持）；其余
+    // gpt 家族模型保留标准 hosted web_search 语义（openai 官方支持）；其余
     // 所有模型统一替换为内部 websearch 工具（RouteCodex 本地搜索 hop 执行，
-    // 不区分 provider、不依赖 provider 原生搜索能力）。
-    let is_gpt_model = model_id.is_some_and(|model| model.starts_with("gpt"));
+    // 不区分 provider、不依赖 provider 原生搜索能力）。家族判定真源在 compat
+    // 层（is_v3_gpt_canonical_model 委托 config 家族判定），本节点只消费结果。
+    let is_gpt_model = model_id.is_some_and(is_v3_gpt_canonical_model);
     let mut normalized_tools = Vec::new();
     let mut web_search_options = Map::new();
     let mut has_web_search = false;

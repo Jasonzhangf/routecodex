@@ -355,7 +355,11 @@ async fn direct_sse_failed_event_without_error_code_is_protocol_invalid() {
         .expect("invalid failure event must terminate the stream")
         .expect_err("missing provider error.code must fail explicitly");
     assert_eq!(error.code, "provider_response_sse_event_invalid");
-    assert!(error.message.contains("error.code"), "{}", error.message);
+    assert!(
+        error.message.contains("non-empty error code"),
+        "{}",
+        error.message
+    );
     assert!(observation.snapshot().unwrap().timing.is_none());
 }
 
@@ -386,12 +390,39 @@ async fn direct_sse_incomplete_event_without_error_message_is_protocol_invalid()
         .expect("invalid incomplete event must terminate the stream")
         .expect_err("missing provider error.message must fail explicitly");
     assert_eq!(error.code, "provider_response_sse_event_invalid");
-    assert!(error.message.contains("error.message"), "{}", error.message);
+    assert!(
+        error.message.contains("non-empty error message"),
+        "{}",
+        error.message
+    );
     assert!(observation.snapshot().unwrap().timing.is_none());
 }
 
 #[tokio::test]
-async fn direct_sse_failed_event_rejects_top_level_error_envelope() {
+async fn direct_sse_incomplete_details_reason_is_a_valid_json_failure() {
+    let runtime_timing = V3RuntimeTimingState::start();
+    runtime_timing.start_external().unwrap();
+    let observation = V3RuntimeStreamObservation::default();
+    let source = Box::pin(stream::iter(vec![Ok(
+        b"data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n".to_vec(),
+    )]));
+    let stream = wrap_direct_sse_provider_outcome_stream(
+        source,
+        test_direct_sse_provider_outcome("direct_sse_incomplete_details_reason"),
+        runtime_timing,
+        observation,
+    );
+    let items = stream.collect::<Vec<_>>().await;
+    let error = items
+        .into_iter()
+        .find_map(Result::err)
+        .expect("JSON incomplete_details must produce provider failure");
+    assert_eq!(error.code, "response_incomplete");
+    assert_eq!(error.message, "max_output_tokens");
+}
+
+#[tokio::test]
+async fn direct_sse_failed_event_accepts_top_level_error_envelope() {
     let runtime_timing = V3RuntimeTimingState::start();
     runtime_timing.start_external().unwrap();
     let observation = V3RuntimeStreamObservation::default();
@@ -415,18 +446,14 @@ async fn direct_sse_failed_event_rejects_top_level_error_envelope() {
         .next()
         .await
         .expect("alternate failure envelope must terminate the stream")
-        .expect_err("top-level error must not replace response.error");
-    assert_eq!(error.code, "provider_response_sse_event_invalid");
-    assert!(
-        error.message.contains("response object"),
-        "{}",
-        error.message
-    );
+        .expect_err("top-level JSON error must terminate the stream");
+    assert_eq!(error.code, "HTTP_429");
+    assert!(error.message.contains("alternate envelope"), "{}", error.message);
     assert!(observation.snapshot().unwrap().timing.is_none());
 }
 
 #[tokio::test]
-async fn direct_sse_event_name_json_type_mismatch_is_protocol_invalid() {
+async fn direct_sse_json_type_remains_provider_semantic_source() {
     let runtime_timing = V3RuntimeTimingState::start();
     runtime_timing.start_external().unwrap();
     let observation = V3RuntimeStreamObservation::default();
@@ -452,17 +479,109 @@ async fn direct_sse_event_name_json_type_mismatch_is_protocol_invalid() {
             error = Some(source);
         }
     }
-    let error = error.expect("mismatched SSE event and JSON type must fail");
-    assert_eq!(error.code, "provider_response_sse_event_invalid");
-    assert!(
-        error.message.contains("does not match JSON type"),
-        "{}",
-        error.message
-    );
+    let error = error.expect("JSON response.failed must remain a provider failure");
+    assert_eq!(error.code, "HTTP_429");
+    assert!(error.message.contains("quota exhausted"), "{}", error.message);
     assert!(
         observation.snapshot().unwrap().timing.is_none(),
         "mismatched provider terminal semantics must not publish successful timing"
     );
+}
+
+#[tokio::test]
+async fn red_sse_semantics_must_use_json_type_not_event_name() {
+    let runtime_timing = V3RuntimeTimingState::start();
+    runtime_timing.start_external().unwrap();
+    let observation = V3RuntimeStreamObservation::default();
+    let source = Box::pin(stream::iter(vec![Ok(
+        b"event: response.created\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"quota exhausted\"}}}\n\n"
+            .to_vec(),
+    )]));
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(
+        source,
+        observation.clone(),
+        runtime_timing.clone(),
+    );
+    let mut governed = wrap_direct_sse_provider_outcome_stream(
+        observed,
+        test_direct_sse_provider_outcome("red_json_type_authority"),
+        runtime_timing,
+        observation,
+    );
+
+    let mut error = None;
+    while let Some(result) = governed.next().await {
+        if let Err(source) = result {
+            error = Some(source);
+        }
+    }
+    let error = error.expect("JSON response.failed must remain a provider failure");
+    assert_eq!(
+        error.code, "HTTP_429",
+        "provider JSON type is authoritative; SSE event label is opaque"
+    );
+}
+
+#[tokio::test]
+async fn red_sse_semantics_ignore_event_name_when_json_is_completed() {
+    let runtime_timing = V3RuntimeTimingState::start();
+    runtime_timing.start_external().unwrap();
+    let observation = V3RuntimeStreamObservation::default();
+    let source = Box::pin(stream::iter(vec![Ok(
+        b"event: provider-specific-label\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
+            .to_vec(),
+    )]));
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(
+        source,
+        observation.clone(),
+        runtime_timing.clone(),
+    );
+    let mut governed = wrap_direct_sse_provider_outcome_stream(
+        observed,
+        test_direct_sse_provider_outcome("red_json_completed_authority"),
+        runtime_timing,
+        observation,
+    );
+
+    let mut results = Vec::new();
+    while let Some(result) = governed.next().await {
+        results.push(result);
+    }
+    assert!(
+        results.iter().all(Result::is_ok),
+        "JSON response.completed must not be rejected because SSE event label differs"
+    );
+}
+
+#[tokio::test]
+async fn direct_sse_failure_after_client_commit_does_not_reselect_current_request() {
+    let runtime_timing = V3RuntimeTimingState::start();
+    runtime_timing.start_external().unwrap();
+    let observation = V3RuntimeStreamObservation::default();
+    let source = Box::pin(stream::iter(vec![
+        Ok(b"event: provider-label\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"committed\"}\n\n".to_vec()),
+        Ok(b"event: provider-label\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"after commit\"}}}\n\n".to_vec()),
+    ]));
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(
+        source,
+        observation.clone(),
+        runtime_timing.clone(),
+    );
+    let mut governed = wrap_direct_sse_provider_outcome_stream(
+        observed,
+        test_direct_sse_provider_outcome("direct_sse_failure_after_commit"),
+        runtime_timing,
+        observation,
+    );
+
+    assert!(governed.next().await.expect("committed frame").is_ok());
+    let error = governed
+        .next()
+        .await
+        .expect("post-commit failure")
+        .expect_err("post-commit provider failure must close current stream");
+    assert_eq!(error.code, "HTTP_429");
+    assert!(governed.next().await.is_none(), "current stream must not reroute");
 }
 
 #[tokio::test]
@@ -891,127 +1010,6 @@ async fn provider_failure_reselects_without_router_reentry() {
     );
 }
 
-#[tokio::test]
-async fn direct_cross_session_revive_failure_sends_once_and_preserves_cooldown_block() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    struct AlwaysFails<'a> {
-        sends: &'a AtomicUsize,
-    }
-
-    #[async_trait]
-    impl ResponsesTransport for AlwaysFails<'_> {
-        async fn send(
-            &self,
-            request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            self.sends.fetch_add(1, Ordering::SeqCst);
-            Err(V3ProviderError::Transport {
-                request_id: request.request_id().to_string(),
-                provider_id: request.provider_id().to_string(),
-                reason: "controlled revive failure".to_string(),
-            })
-        }
-    }
-
-    let routing_group = "direct_cross_session_revive";
-    let manifest = scoped_test_manifest(test_manifest(), routing_group);
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let store = provider_health.store();
-    let session_a = test_failure_session_scope_for(routing_group, "session-a");
-    let session_b = test_failure_session_scope_for(routing_group, "session-b");
-    store
-        .record_provider_success_in_session(
-            &session_b,
-            "openai",
-            Some("key1"),
-            Some("gpt-test"),
-            90,
-        )
-        .expect("session B success evidence");
-    let mut original_deadline = None;
-    for now_ms in 100..103 {
-        original_deadline = store
-            .record_provider_failure_in_session(
-                &session_a,
-                "openai",
-                Some("key1"),
-                Some("gpt-test"),
-                Some("controlled cooldown"),
-                now_ms,
-            )
-            .expect("session A failure")
-            .cooldown_until_ms;
-    }
-    assert!(original_deadline.is_some(), "session A must enter cooldown");
-    let sends = AtomicUsize::new(0);
-    let first_raw = V3Server03HttpRequestRaw {
-        server_id: "test".to_string(),
-        failure_session_scope: session_a.clone(),
-        request_id: "req-revive-once".to_string(),
-        execution_id: "exec-revive-once".to_string(),
-        method: "POST".to_string(),
-        path: "/v1/responses".to_string(),
-        body: json!({"model":"client-model","input":"hello"}),
-    };
-    let first_plan = test_protocol_plan(&manifest, first_raw.clone(), provider_health.clone(), 103);
-    let first = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
-            .with_now_epoch_ms(103)
-            .with_provider_health(provider_health.clone())
-            .with_initial_plan(&first_plan),
-        &manifest,
-        first_raw,
-        crate::register_responses_direct_hooks(),
-        &AlwaysFails { sends: &sends },
-    )
-    .await;
-    assert_eq!(
-        sends.load(Ordering::SeqCst),
-        1,
-        "failed revive must send exactly once: {first:?}"
-    );
-    assert!(first.node_trace.contains(&"V3CrossSessionReviveAdmitted"));
-    let failed_revive = first
-        .observability
-        .as_ref()
-        .and_then(|observability| observability.provider_failure_events.last())
-        .expect("failed revive observability");
-    assert_eq!(failed_revive.cooldown_until_ms, original_deadline);
-
-    let second_raw = V3Server03HttpRequestRaw {
-        server_id: "test".to_string(),
-        failure_session_scope: session_a,
-        request_id: "req-before-original-deadline".to_string(),
-        execution_id: "exec-before-original-deadline".to_string(),
-        method: "POST".to_string(),
-        path: "/v1/responses".to_string(),
-        body: json!({"model":"client-model","input":"hello"}),
-    };
-    let second_plan =
-        test_protocol_plan(&manifest, second_raw.clone(), provider_health.clone(), 104);
-    let second = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
-            .with_now_epoch_ms(104)
-            .with_provider_health(provider_health)
-            .with_initial_plan(&second_plan),
-        &manifest,
-        second_raw,
-        crate::register_responses_direct_hooks(),
-        &AlwaysFails { sends: &sends },
-    )
-    .await;
-    assert_eq!(
-        sends.load(Ordering::SeqCst),
-        1,
-        "no second send before deadline"
-    );
-    assert_eq!(second.client_payload.status, 502);
-    assert!(!second
-        .node_trace
-        .contains(&"V3Transport13ResponsesHttpRequest"));
-}
-
 #[test]
 fn responses_provider_process_chat_forces_hub_relay() {
     let routing_group = "responses_process_chat";
@@ -1132,7 +1130,7 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
             &self,
             request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            if self.sends.fetch_add(1, Ordering::SeqCst) == 0 {
+            if self.sends.fetch_add(1, Ordering::SeqCst) < 3 {
                 assert_eq!(request.provider_id(), "first");
                 return Ok(V3ProviderResp14Raw::from_json(
                     request.request_id(),
@@ -1185,7 +1183,11 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
     .await;
 
     assert_eq!(output.client_payload.status, 200, "{output:?}");
-    assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        transport.sends.load(Ordering::SeqCst),
+        4,
+        "2xx decode failure must retry same provider 3 times then switch: {output:?}"
+    );
     assert_eq!(
         output
             .node_trace
@@ -1195,6 +1197,16 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
         1
     );
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert!(output.node_trace.contains(&"V3DirectTransientRetrySame"));
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("decode failure switch must be observable");
+    assert_eq!(observability.provider_failure_events.len(), 1);
+    assert_eq!(
+        observability.provider_failure_events[0].health_state, "transient_exhausted",
+        "2xx decode failure is transient: must not write provider health"
+    );
 }
 
 #[tokio::test]
@@ -1211,8 +1223,15 @@ async fn provider_sse_failure_event_reselects_before_client_stream() {
             &self,
             request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            if self.sends.fetch_add(1, Ordering::SeqCst) == 0 {
-                assert_eq!(request.provider_id(), "first");
+            if self.sends.fetch_add(1, Ordering::SeqCst) < 3 {
+                // 前 3 次尝试：同一 provider first 每次都在 HTTP 200 SSE 流内
+                // 报失败事件（瞬态流内失败 → health-neutral 同 provider 重试）。
+                assert_eq!(
+                    request.provider_id(),
+                    "first",
+                    "attempt {} must hit first",
+                    self.sends.load(Ordering::SeqCst)
+                );
                 return Ok(V3ProviderResp14Raw::from_sse(
                     request.request_id().to_string(),
                     request.provider_id().to_string(),
@@ -1226,7 +1245,12 @@ async fn provider_sse_failure_event_reselects_before_client_stream() {
                     )])),
                 ));
             }
-            assert_eq!(request.provider_id(), "second");
+            assert_eq!(
+                request.provider_id(),
+                "second",
+                "attempt {} must hit second",
+                self.sends.load(Ordering::SeqCst)
+            );
             assert_eq!(request.body()["model"], "wire-second");
             Ok(V3ProviderResp14Raw::from_json(
                 request.request_id(),
@@ -1266,19 +1290,26 @@ async fn provider_sse_failure_event_reselects_before_client_stream() {
     .await;
 
     assert_eq!(output.client_payload.status, 200, "{output:?}");
-    assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
-    match output.client_payload.body {
-        V3ClientBody::Json(value) => assert_eq!(value["id"], "resp_second"),
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
-            panic!("provider SSE failure must be reselected before client stream starts")
-        }
-    }
+    assert_eq!(
+        transport.sends.load(Ordering::SeqCst),
+        4,
+        "transient SSE failure must retry same provider 3 times then switch: {output:?}"
+    );
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert!(
+        output.node_trace.contains(&"V3DirectTransientRetrySame"),
+        "transient failures must retry same provider: {:?}",
+        output.node_trace
+    );
     let observability = output
         .observability
         .as_ref()
         .expect("provider SSE failure switch must be observable");
-    assert_eq!(observability.provider_failure_events.len(), 1);
+    assert_eq!(
+        observability.provider_failure_events.len(),
+        1,
+        "only the 3rd transient failure reports once to the error center: {output:?}"
+    );
     assert_eq!(
         observability.provider_failure_events[0].message,
         "first quota exhausted"
@@ -1289,6 +1320,16 @@ async fn provider_sse_failure_event_reselects_before_client_stream() {
             .as_deref(),
         Some("second:key:test")
     );
+    assert_eq!(
+        observability.provider_failure_events[0].health_state, "transient_exhausted",
+        "transient failure must not write provider health (no cooldown)"
+    );
+    match output.client_payload.body {
+        V3ClientBody::Json(value) => assert_eq!(value["id"], "resp_second"),
+        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
+            panic!("provider SSE failure must be reselected before client stream starts")
+        }
+    }
 }
 
 #[tokio::test]

@@ -13,7 +13,7 @@ pub(super) fn observe_v3_runtime_responses_sse_transport_chunk(
         .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
     let mut terminal_response = None;
     for frame in frames {
-        let Some((event_type, data)) = parse_v3_runtime_sse_frame_fields(&frame)? else {
+        let Some(data) = parse_v3_runtime_sse_frame_fields(&frame)? else {
             continue;
         };
         if data == "[DONE]" {
@@ -33,14 +33,12 @@ pub(super) fn observe_v3_runtime_responses_sse_transport_chunk(
             .record_provider_event_json(&event)
             .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
         collect_v3_runtime_responses_event_payload_evidence(
-            event_type.as_deref(),
             &event,
             response_scaffold,
             output_items,
             output_text,
         )?;
         if let Some(response) = apply_v3_runtime_responses_semantic_event(
-            event_type.as_deref(),
             &event,
             response_scaffold,
             output_items,
@@ -53,14 +51,15 @@ pub(super) fn observe_v3_runtime_responses_sse_transport_chunk(
 }
 
 fn apply_v3_runtime_responses_semantic_event(
-    frame_event_type: Option<&str>,
     event: &Value,
     response_scaffold: &mut Option<Value>,
     output_items: &[Value],
     output_text: &str,
 ) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
-    let semantic_event_type =
-        frame_event_type.or_else(|| event.get("type").and_then(Value::as_str));
+    let semantic_event_type = event
+        .get("type")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
     match semantic_event_type {
         Some("response.created" | "response.in_progress") => {
             if response_scaffold.is_none() {
@@ -162,58 +161,24 @@ fn attach_required_action_from_sse_event(response: &mut Value, event: &Value) {
 
 pub(super) fn parse_v3_runtime_sse_frame_fields(
     frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
-) -> Result<Option<(Option<String>, String)>, V3ResponsesRelayRuntimeError> {
-    let mut event_type: Option<String> = None;
+) -> Result<Option<String>, V3ResponsesRelayRuntimeError> {
     let mut data = String::new();
     for field in frame.frame().fields() {
         let SseField::Named { name, value } = field else {
             continue;
         };
-        match name.as_str() {
-            "event" => event_type = Some(value.to_string()),
-            "data" => {
-                if !data.is_empty() {
-                    data.push('\n');
-                }
-                data.push_str(value);
+        if name == "data" {
+            if !data.is_empty() {
+                data.push('\n');
             }
-            _ => {}
+            data.push_str(value);
         }
     }
     let data = data.trim();
     if data.is_empty() {
-        if let Some(message) = extract_v3_provider_event_error_message_from_sse_frame(frame) {
-            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                message,
-            ));
-        }
         return Ok(None);
     }
-    Ok(Some((event_type, data.to_string())))
-}
-
-fn extract_v3_provider_event_error_message_from_sse_frame(
-    frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
-) -> Option<String> {
-    let raw = reconstruct_v3_runtime_sse_frame_text(frame)?;
-    let payload = serde_json::from_str::<Value>(&raw).ok()?;
-    extract_v3_provider_event_error_payload_message(&payload)
-}
-
-fn reconstruct_v3_runtime_sse_frame_text(
-    frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
-) -> Option<String> {
-    let mut lines = Vec::new();
-    for field in frame.frame().fields() {
-        match field {
-            SseField::Comment(value) => lines.push(format!(":{value}")),
-            SseField::Named { name, value } if value.is_empty() => lines.push(name.clone()),
-            SseField::Named { name, value } => lines.push(format!("{name}: {value}")),
-        }
-    }
-    let text = lines.join("\n");
-    let text = text.trim();
-    (!text.is_empty()).then(|| text.to_string())
+    Ok(Some(data.to_string()))
 }
 
 pub(super) fn extract_v3_provider_event_error_payload_message(payload: &Value) -> Option<String> {
@@ -243,13 +208,15 @@ pub(super) fn extract_v3_provider_event_error_payload_message(payload: &Value) -
 }
 
 fn collect_v3_runtime_responses_event_payload_evidence(
-    event_type: Option<&str>,
     event: &Value,
     response_scaffold: &mut Option<Value>,
     output_items: &mut Vec<Value>,
     output_text: &mut String,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
-    let semantic_event_type = event_type.or_else(|| event.get("type").and_then(Value::as_str));
+    let semantic_event_type = event
+        .get("type")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
     match semantic_event_type {
         Some("response.created" | "response.in_progress") => {
             if response_scaffold.is_none() {

@@ -47,6 +47,27 @@ fn reasoning_stop_tool_fixture() -> Value {
 }
 
 #[test]
+fn provider_request_projection_preserves_transport_headers_verbatim() {
+    let request = build_v3_transport_13_responses_http_request_with_provider_headers_from_parts(
+        "req-provider-projection-verbatim",
+        "provider-projection",
+        "https://provider.example/v1/responses",
+        V3ProviderAuthHandle {
+            alias: "key1".into(),
+            secret: V3ProviderAuthSecretHandle::ApiKey("secret-value".into()),
+        },
+        V3ResponsesStreamIntent::Sse,
+        json!({"model":"deepseek-v4-flash","input":"original"}),
+        vec![V3ProviderRequestHeader::new("x-api-key", "secret-value")],
+    )
+    .unwrap();
+    let projection = request.provider_request_projection();
+    assert_eq!(projection["headers"]["x-api-key"], "secret-value");
+    assert!(!projection.to_string().contains("[REDACTED]"));
+    assert_eq!(projection["body"]["input"], "original");
+}
+
+#[test]
 fn responses_http_provider_request_preserves_additional_tools_surface() {
     let original_exec = json!({
         "type":"custom",

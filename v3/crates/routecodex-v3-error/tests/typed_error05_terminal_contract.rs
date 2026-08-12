@@ -101,11 +101,23 @@ fn provider_failure_projects_only_with_route_and_default_exhaustion_proof() {
         .expect("route and default exhaustion is terminal");
     let projected = build_v3_error_06_client_projected_from_v3_error_05(terminal);
     assert_eq!(projected.status, 502);
+    assert_eq!(projected.body["error"]["code"], "provider_malformed_sse");
     assert_eq!(
-        projected.body["error"]["route_pool_remaining_after_exclusion"],
-        0
+        projected.body["error"]["message"],
+        "provider stream is malformed"
     );
-    assert_eq!(projected.body["error"]["default_pool_available"], false);
+    assert!(
+        projected.body["error"].get("route_pool_remaining_after_exclusion").is_none()
+            && projected.body["error"].get("default_pool_available").is_none()
+            && projected.body["error"].get("target_exhausted").is_none()
+            && projected.body["error"].get("candidates_remaining").is_none()
+            && projected.body["error"].get("stage").is_none()
+            && projected.body["error"].get("class").is_none()
+            && projected.body["error"].get("decision").is_none()
+            && projected.body["error"].get("error_node").is_none(),
+        "Error06 body must not carry control-plane fields: {}",
+        projected.body["error"]
+    );
 }
 
 #[test]

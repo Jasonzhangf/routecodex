@@ -1,5 +1,9 @@
 use routecodex_v3_config::{
-    collect_v3_route_group_catalog_model_refs, is_v3_hidden_codex_future_model,
+    collect_v3_route_group_catalog_model_refs,
+    internal::{
+        is_v3_hidden_codex_future_model, v3_builtin_catalog_model_ids, v3_builtin_model_defaults,
+        V3BuiltinModelDefaults,
+    },
     V3Config05ManifestPublished,
 };
 use serde_json::{json, Map, Value};
@@ -17,16 +21,20 @@ pub fn build_v3_models_catalog(
         expose_models.is_empty() || expose_models.iter().any(|id| id == visible_id)
     };
     let scoped_models = collect_v3_route_group_catalog_model_refs(manifest, routing_group);
-    if scoped_models
-        .values()
-        .any(|model_ref| model_ref.visible_id == "gpt-5.5" || model_ref.model_id == "gpt-5.5")
-    {
-        let builtin_model_id = "gpt-5.5";
-        let capabilities = scoped_models
+    // builtin 目录模型清单来自 config 内部配置层（internal.toml [builtin_catalog_models]），
+    // 本面不内联具体模型名：路由组内存在对应模型引用时以 builtin 目录入口暴露。
+    for builtin_model_id in v3_builtin_catalog_model_ids() {
+        let builtin_refs = scoped_models
             .values()
             .filter(|model_ref| {
-                model_ref.visible_id == builtin_model_id || model_ref.model_id == builtin_model_id
+                model_ref.visible_id == *builtin_model_id || model_ref.model_id == *builtin_model_id
             })
+            .collect::<Vec<_>>();
+        if builtin_refs.is_empty() {
+            continue;
+        }
+        let capabilities = builtin_refs
+            .iter()
             .flat_map(|model_ref| model_ref.capabilities.iter().cloned())
             .collect::<BTreeSet<_>>();
         let capabilities = if capabilities.is_empty() {
@@ -167,14 +175,16 @@ struct V3ModelCapabilityProjection {
     web_search_tool_type: &'static str,
 }
 
+/// 内置目录模型默认能力（内部配置真源：internal.toml [builtin_catalog_models.defaults]），
+/// 未命中时回退最小能力集 ["text"]。
 fn default_builtin_v3_model_capabilities(model_id: &str) -> BTreeSet<String> {
-    let capabilities = match model_id {
-        "gpt-5.5" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => {
-            ["text", "reasoning", "tools", "web_search", "multimodal"]
-                .into_iter()
-                .collect::<Vec<_>>()
-        }
-        _ => vec!["text"],
+    let capabilities = match v3_builtin_model_defaults(model_id) {
+        Some(defaults) => defaults
+            .capabilities
+            .iter()
+            .map(|capability| capability.as_str())
+            .collect::<Vec<_>>(),
+        None => vec!["text"],
     };
     capabilities
         .into_iter()
@@ -182,21 +192,49 @@ fn default_builtin_v3_model_capabilities(model_id: &str) -> BTreeSet<String> {
         .collect::<BTreeSet<_>>()
 }
 
+/// reasoning 级别列表构建（effort 顺序来自内部配置 internal.toml
+/// [builtin_catalog_models.defaults].reasoning_efforts，描述文案是静态 UI 模板）。
+/// 非内置预设模型固定暴露 4 级（low/medium/high/xhigh）。
+fn build_v3_supported_reasoning_levels(efforts: &[String], has_preset: bool) -> Value {
+    let effort_order: Vec<&str> = if has_preset {
+        efforts.iter().map(String::as_str).collect()
+    } else {
+        vec!["low", "medium", "high", "xhigh"]
+    };
+    let descriptions = [
+        ("low", "Fast responses with lighter reasoning"),
+        ("medium", "Balances speed and reasoning depth for everyday tasks"),
+        ("high", "Greater reasoning depth for complex problems"),
+        ("xhigh", "Extra high reasoning depth for complex problems"),
+        ("max", "Maximum reasoning depth for the hardest tasks"),
+        ("ultra", "Ultra reasoning depth for frontier-grade tasks"),
+    ];
+    Value::Array(
+        effort_order
+            .iter()
+            .map(|effort| {
+                let description = descriptions
+                    .iter()
+                    .find(|(key, _)| key == effort)
+                    .map(|(_, desc)| *desc)
+                    .unwrap_or("Reasoning depth for complex tasks");
+                json!({"effort": effort, "description": description})
+            })
+            .collect(),
+    )
+}
+
 fn build_v3_model_capability_projection(
     capabilities: Option<&BTreeSet<String>>,
-    is_gpt_55: bool,
-    is_gpt_56: bool,
+    preset: Option<&V3BuiltinModelDefaults>,
 ) -> V3ModelCapabilityProjection {
     let owned_default;
     let capabilities = match capabilities {
         Some(capabilities) => capabilities,
         None => {
-            owned_default = if is_gpt_55 {
-                default_builtin_v3_model_capabilities("gpt-5.5")
-            } else if is_gpt_56 {
-                default_builtin_v3_model_capabilities("gpt-5.6-sol")
-            } else {
-                ["text"].into_iter().map(str::to_string).collect()
+            owned_default = match preset {
+                Some(defaults) => defaults.capabilities.iter().cloned().collect(),
+                None => ["text"].into_iter().map(str::to_string).collect(),
             };
             &owned_default
         }
@@ -225,64 +263,35 @@ fn build_v3_codex_model_metadata(
     max_context_tokens: Option<u64>,
     capabilities: Option<&BTreeSet<String>>,
 ) -> Map<String, Value> {
-    let is_gpt_55 = canonical_model_id == "gpt-5.5";
-    let is_gpt_56_sol = canonical_model_id == "gpt-5.6-sol";
-    let is_gpt_56_terra = canonical_model_id == "gpt-5.6-terra";
-    let is_gpt_56_luna = canonical_model_id == "gpt-5.6-luna";
-    let is_gpt_56 = is_gpt_56_sol || is_gpt_56_terra || is_gpt_56_luna;
-    let is_builtin_bare = visible_id == canonical_model_id && (is_gpt_55 || is_gpt_56);
-    let preset_context_window = if is_gpt_55 {
-        Some(272_000)
-    } else if is_gpt_56 {
-        Some(372_000)
-    } else {
-        None
-    };
+    let preset = v3_builtin_model_defaults(canonical_model_id);
+    let is_builtin_bare = visible_id == canonical_model_id && preset.is_some();
+    let preset_context_window = preset.and_then(|defaults| defaults.context_window);
     let context_window = if is_builtin_bare {
         preset_context_window.or(max_context_tokens)
     } else {
         max_context_tokens.or(preset_context_window)
     }
     .unwrap_or(128_000);
-    let description = if is_gpt_55 {
-        "Frontier model for complex coding, research, and real-world work."
-    } else if is_gpt_56_sol {
-        "Latest frontier agentic coding model."
-    } else if is_gpt_56_terra {
-        "Balanced agentic coding model for everyday work."
-    } else if is_gpt_56_luna {
-        "Fast and affordable agentic coding model."
-    } else {
-        "RouteCodex advanced agentic coding model compatible with gpt-5.5 capabilities."
-    };
-    let default_reasoning_level = if is_gpt_56_sol { "low" } else { "medium" };
-    let supported_reasoning_levels = if is_gpt_56_sol || is_gpt_56_terra {
-        json!([
-            {"effort":"low","description":"Fast responses with lighter reasoning"},
-            {"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},
-            {"effort":"high","description":"Greater reasoning depth for complex problems"},
-            {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"},
-            {"effort":"max","description":"Maximum reasoning depth for the hardest tasks"},
-            {"effort":"ultra","description":"Ultra reasoning depth for frontier-grade tasks"}
-        ])
-    } else if is_gpt_56_luna {
-        json!([
-            {"effort":"low","description":"Fast responses with lighter reasoning"},
-            {"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},
-            {"effort":"high","description":"Greater reasoning depth for complex problems"},
-            {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"},
-            {"effort":"max","description":"Maximum reasoning depth for the hardest tasks"}
-        ])
-    } else {
-        json!([
-            {"effort":"low","description":"Fast responses with lighter reasoning"},
-            {"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},
-            {"effort":"high","description":"Greater reasoning depth for complex problems"},
-            {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"}
-        ])
-    };
-    let capability_projection =
-        build_v3_model_capability_projection(capabilities, is_gpt_55, is_gpt_56);
+    // preset 模型的描述 / reasoning / 最小客户端版本全部来自内部配置层
+    // （internal.toml 必填字段，缺失即解析 fail-fast）；非 preset 模型用
+    // 不包含具体模型名的通用默认文案。
+    let description = preset
+        .map(|defaults| defaults.description.clone())
+        .unwrap_or_else(|| "RouteCodex advanced agentic coding model.".to_string());
+    let default_reasoning_level = preset
+        .map(|defaults| defaults.default_reasoning_level.clone())
+        .unwrap_or_else(|| "medium".to_string());
+    let minimal_client_version = preset
+        .map(|defaults| defaults.minimal_client_version.clone())
+        .unwrap_or_else(|| "0.98.0".to_string());
+    let supported_reasoning_efforts = preset
+        .map(|defaults| defaults.reasoning_efforts.clone())
+        .unwrap_or_default();
+    let supported_reasoning_levels = build_v3_supported_reasoning_levels(
+        &supported_reasoning_efforts,
+        preset.is_some(),
+    );
+    let capability_projection = build_v3_model_capability_projection(capabilities, preset);
     let mut item = Map::from_iter([
         ("id".to_string(), json!(visible_id)),
         ("object".to_string(), json!("model")),
@@ -334,13 +343,7 @@ fn build_v3_codex_model_metadata(
         ("visibility".to_string(), json!("list")),
         (
             "minimal_client_version".to_string(),
-            json!(if is_gpt_56 {
-                "0.144.0"
-            } else if is_gpt_55 {
-                "0.124.0"
-            } else {
-                "0.98.0"
-            }),
+            json!(minimal_client_version),
         ),
         ("supported_in_api".to_string(), json!(true)),
         ("priority".to_string(), json!(0)),

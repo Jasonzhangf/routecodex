@@ -293,8 +293,7 @@ resources:
   - V3DebugBoundedTextCapture::rendered_text
   - developer_diagnostics
   allowed_writers:
-  - V3DebugRuntime::redact_payload_for_side_channel
-  - redact_debug_value_at_key
+  - V3DebugRuntime::project_payload_verbatim
   - V3DebugBoundedTextCapture::append
   forbidden_writers:
   - routecodex-v3-server

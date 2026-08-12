@@ -34922,3 +34922,126 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 ## 已知缺口/边界
 - HTTP 输入校验 400（如 malformed tools）只落 request.json 不落 error.json（provider/runtime 错误才 force error.json）——合理边界
 - runtime 6 个失败（4 个 redacted_schema_placeholder + 2 个 reasoning）为基线/另一 worker 中间态，未动
+
+# 2026-08-12 opencode-go 10000 502 根因：tool schema `[REDACTED]` 被上游拒绝
+
+- 样本：`~/.rcc/codex-samples/openai-responses/ports/10000/openai-responses-router-gpt-5.5-20260812T102147963-751892-2971/`
+- 最终 opencode-go provider wire body 858KB，`tools.0/1/10` 的 schema 位置出现 `"[REDACTED]"`（来自客户端 request，非 debug 落盘 redaction）。
+- playground 直接重放：`repro-redacted.json` 保留 `"[REDACTED]"` -> upstream HTTP 400 `Invalid schema for function 'exec_command': "[REDACTED]" is not of types "boolean", "object"`；同一 body 把该 schema 位置投影为 boolean `true` -> HTTP 200。
+- 唯一 owner：`v3.protocol_conversion_field_parity`，修改点在 `request_outbound_builtin_tool_projection.rs::normalize_json_schema_redaction_placeholders`，该函数当前把 schema-position `[REDACTED]` 原样透传。
+- 候选修复：provider send 前把 schema-position `[REDACTED]` 归一为 JSON Schema boolean `true`；同步改 4 个 `pass_through` 测试、verify script、red fixture、field parity 文档。SOP `95-v3-stopless-sop.md:419-420` 已写同一规则。
+- 当前未改正式 runtime；正式修复需 Jason 批准 design 后走红测 -> 单测 -> install:v3 -> rccv3 restart -> 真实样本回放 -> codex-review。
+
+# 2026-08-12 纠偏：opencode-go 502 根因 = 历史图片/请求 payload 被改写
+
+- 上一条 schema 归因作废。Jason 确认问题不是 context，也不是 `[REDACTED]` schema；是历史图片删除和请求处理改了原请求。
+- 代码证据：`history_image_cleanup.rs` 的 `normalize_v3_history_image_placeholders` / `normalize_v3_all_images_to_placeholder` 把历史图片/工具输出图片替换为 `[Image]`，调用点跨 ReqInbound02、Direct nodes、Relay Req04 restore、Resp04 continuation save。
+- 样本证据已落到 `playground/opencode-502/evidence/request-114325523-753225-4304/`；原始 502 样本已被 retention 轮出，正式修复后需重新采集同入口样本 replay。
+- 现有 17 个 history_image 测试全绿但锁的是“图片必须被替换”，属于错误行为测试，后续反转。
+- 正式修复待 Jason 批准 design；当前只改 playground 报告和记忆，不改正式 runtime。
+# 2026-08-12 opencode-go deepseek-v4-flash 502 根因确认
+
+- 真实样本：`~/.rcc/codex-samples/openai-responses/ports/10000/openai-responses-router-gpt-5.5-20260812T135742081-755456-6535/`。
+- 两次 opencode-go 请求实际 URL 均为 `https://opencode.ai/zen/go/v1/chat/completions`，model `deepseek-v4-flash`，97 messages、14 tools、约 393KB；key1/key2 均被真实尝试。
+- `/Volumes/extension/.rcc/provider/opencode-go/config.v2.toml` 配置 `timeout = 300000`；V3 `kernel.rs` 固定 `V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT = 15s` 包住 `transport.send`，在 headers 返回前误判 502。
+- 错误链证据：两次 `provider transport did not return response headers within timeout`，随后 `switch_provider` 到 `minimax_anthropic`；模型/密钥选择正确。
+- 唯一 owner：`v3/crates/routecodex-v3-runtime/src/kernel.rs` direct response-header deadline。Design id：`fix:v3.responses_direct_provider_header_deadline`，待 Jason 明确批准后正式修复。
+- Jason 批准拉长窗口后，发现 Direct→Relay handoff 仍由 `hub_v1/relay_runtime_core.rs` 的 15s deadline 截断；同一语义两处均改为 120s，provider target 300s 总 timeout 保持不变。
+- 安装 `0.90.4275`、`rccv3 restart` 后，同一旧样本带 typed scope headers 在线回放耗时 64s，未出现 header-timeout；opencode-go 返回真实 HTTP 400 schema 错误，随后才切 MiniMax。另一个长上下文 opencode-go 请求耗时 20.1s，直接 200 完成。timeout 根因闭环。
+# 2026-08-12T14:10:00+08:00 continuation image restore boundary
+- Root cause confirmed: save builders already replace all images with `[Image]`, but Req04 restore only history-normalized the merged payload. A legacy stored context whose last user item contained an image could therefore survive as the apparent current turn and re-enter provider wire.
+- Fix: `merge_v3_relay_restored_local_context_at_req04` clones and fully placeholder-normalizes restored context before appending current request messages; current request image remains unchanged. Added positive test for saved-prefix cleanup + current-turn preservation.
+- Verification: rustfmt check; targeted Rust unit test PASS; continuation/image unit filter 21 PASS; `npm run verify:responses-continuation-immutable-boundary` PASS; live install/restart/replay not run yet.
+- Runtime closeout: first install attempt was rejected by module-boundary wording gate because the new comment contained `sanitize`; comment changed to `normalize`, `RUSTUP_TOOLCHAIN=stable npm run install:v3` then passed. Installed V3 binary sha256 `2442a8de96ec04e50379011b50b9ec51191d010584270a968741cf52016a96e6`; `routecodex restart -c ~/.rcc/config.v3.toml` exec-restarted aggregate instance `v3-6dccc5c9cbc4ede302df`; ports 4444/5520/5555/10000 all health OK at build `0.90.4276`.
+
+# 2026-08-12 DeepSeek image-history fix verified
+- Formal runtime fix removed history-image placeholder rewriting from ReqInbound02, Direct Req04, Relay Req04 restore, and Resp04 continuation save. Continuation now preserves historical image bytes; current-turn and restored-prefix image tests assert both images remain.
+- `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib -- --nocapture`: 380/380 passed.
+- Installed `0.90.4277`, config check/restart passed, all 4444/5555/10000/5520 health versions are `0.90.4277`.
+- Live valid PNG replay on 10000 `/v1/responses`: client sent two images (one historical, one current), provider-request snapshot contains both Anthropic `image` blocks with original base64, route selected `multimodal -> minimax_anthropic.MiniMax-M3`, HTTP 200 in 2.7449s.
+- Corrected capability truth: OpenCode Go DeepSeek endpoint rejects `messages[].content` `image_url` (`unknown variant image_url, expected text`), so `/Volumes/extension/.rcc/provider/opencode-go/config.v2.toml` no longer declares `vision/multimodal`; 4444 multimodal pool no longer contains opencode-go. Text-only live replay still routes to opencode-go/deepseek-v4-flash and returns HTTP 200 in 1.648s.
+- The earlier “restore images to `[Image]` placeholder” note is superseded; it described the faulty behavior and is not the current design.
+
+# 2026-08-12 14:48 latest 400/502 log and sample audit
+- Scope: canonical `/Users/fanzhang/.rcc/codex-samples/**/ports/**` plus `/Volumes/extension/.rcc/logs/server-v3-5555.log`, current day through 14:48.
+- Sample aggregate: 670 HTTP 200 response samples; 101 response records with external status 502, of which 100 are `openai-responses-router-client-test-*` synthetic `provider_response_event_codec_failure` records (`provider_id=test`, missing provider status), not live provider incidents. One live sample is `asxs-grok` transport 502; one live 400 is `modrouter_anthropic` prompt-too-long (407980 > 262144 tokens). The invalid PNG image probe is local/provider validation failure and is not a valid image-history regression.
+- Log final client outcomes, request-id deduplicated for 2026-08-12 14:00–14:48: 2 final 502 and 2 final 400. The 502s at 14:02:55 and 14:04:12 are opencode-go DeepSeek response-header timeout; the 400s at 14:06:02 and 14:06:10 are missing typed Responses continuation control headers (`malformed_json`), not provider schema errors.
+- Additional provider errors inside otherwise continuing requests: the `[REDACTED]` `exec_command` schema 400 recurred at 14:07 and 14:09 after opencode-go attempts; it remains a separate unresolved provider-compatibility issue. After 14:35, the invalid PNG probe was the only 400-class image event; valid PNG image-history replay completed 200, and current traffic through 14:48 shows successful 200 completions.
+
+# 2026-08-12 14:52 provider-unavailable persistence correction
+- User identified a missed signal: `provider-unavailable` continued emitting after the 400/502 final-outcome count reached zero. This is not a final client error and must be counted separately in live audits.
+- Evidence: session `019fec17-cd82-75c2-a7f8-5f2dda89919c` repeatedly logs unavailable `cc-sol:key1:gpt-5.6-sol` because its session-bound failure state references request `openai-responses-router-gpt-5.5-20260812T143830775-755905-6984` and expires at epoch `1786517676184` (14:54:36 +0800); `asxs:crsa:gpt-5.5` has a separate 403 availability state expiring at `1786517785597` (14:56:25 +0800).
+- From 14:40 onward, deduplicated console/session lines still show 112 selections to `opencode-go[key1]`, 112 to `opencode-go[key2]`, 94 to `cc-sol`, and 4 to MiniMax; repeated `provider-unavailable` is the availability projection emitted on each request while the session state is active, not proof that every selected opencode-go request failed. Request `...145126476-756168-7247` itself completed HTTP 200 with `requires_action` at 14:51:32.
+- Correct reporting rule: report final client outcomes and persistent availability projections as separate counters; do not omit the latter merely because the request eventually completed 200. Do not clear the state by silent cleanup or suppress the error before confirming owner/TTL behavior.
+
+# 2026-08-12 schema boundary correction
+- Jason confirmed the `[REDACTED]` schema was introduced by RouteCodex-side processing and must not be repaired, converted, truncated, redacted, or rejected by the proxy.
+- Removed the schema placeholder normalization helper and its fail-fast gate/fixture. Outbound conversion now leaves the client schema unchanged; targeted pass-through tests lock this behavior.
+- The only retained compatibility projection in this incident is image data to `[Image]` placeholder at the established image-history/continuation boundaries. This is an explicit minimal semantic compatibility rule, not general payload cleanup.
+
+# 2026-08-12 provider-error disposition continuation
+- Re-read the implementation objective. The provider-global semantic owner had a protocol guard: only `OpenAiChat` entered `provider_response_semantic_error_from_manifest`; normalized Responses/Anthropic semantic failures were outside the typed global fingerprint path. Removed the guard and kept the decision in the existing relay semantic/Error-chain owner.
+- Evidence: runtime check PASS; provider-global contract 5/5 PASS; runtime policy 9/9 PASS; resource/module/architecture/diff gates PASS.
+- Workspace remains blocked only by `h2_p6_controlled_replay` real SSE `IncompleteMessage` at the request `.send()` boundary, an existing HTTP stream race documented in project memory. No install/restart/review performed until the required workspace/live gate is green.
+
+# 2026-08-12 compaction item 丢弃修复（design:responses-relay-compaction-item-skip-20260812）
+- Jason 指示：加密内容（encrypted_content Fernet 密文）第一次响应进入就该丢弃（既有规则：加密思维链丢弃 MEMORY.md 3986/4031/4174）；"丢弃了就不会污染历史"——compaction 密文保留会污染后续轮次历史。
+- 根因：codex 客户端 19:21 起在 /v1/responses 长会话发送 compaction input item（Fernet 密文），relay 编码路径 responses_openai_codec.rs:195 `other => Err` → V3E3 500。git diff 证明本次内联配置重构未触碰该文件——客户端行为变化暴露既有缺口。
+- 修复：responses_openai_codec.rs input item 分派加 `"compaction" => {}` 丢弃分支（注释引用加密内容丢弃规则）；其余未知类型保持 fail-fast。
+- 红测：responses_compaction_input_item_is_discarded_before_chat_encoding（先红：panic unsupported compaction）；反向：responses_unknown_input_item_type_still_fails_fast（真未知仍 fail-fast）。
+- 验证：cargo test --lib 377 全绿；install:v3 → 0.90.4289；restart 被 abort 中断留下 lifecycle.lock（v3-65f31bb03689e1a03ac8），但在线行为证明进程已含新代码（txt inode=磁盘 inode）。
+- 在线 replay：19:21 失败样本（openai-responses-router-gpt-5.6-sol-20260812T192104602-758146-9225，241 items 含 1 compaction）→ 不再 500；带 compaction vs 无 compaction 响应逐字段等价（equivalent: True）——丢弃 = 等同不存在，无泄漏。
+- 剩余 502：reasoning_context_policy UnmappedOutboundFields（provider compat profile chat:minimax 的 request_protocol 阶段）——其他 worker 未提交 wip（provider-compat-core 等 modified）引入，与 compaction 无关。
+- 已知既有失败：anthropic_relay_runtime_integration responses_sse_without_terminal（provider action recovery lane absent）——其他 worker wip，非本次改动。
+
+# 2026-08-12 SSE JSON boundary implementation continuation
+- Re-read the persisted goal before continuing. Removed server websocket compensation that synthesized JSON `type` from opaque SSE `event:` metadata; event-only frames now produce no JSON event.
+- Added `hub_v1/provider_sse_json_codec.rs` data parser/typed Responses outcome owner and routed direct/shared observation through it. OpenAI Chat EOF now requires JSON finish terminal only; `[DONE]` is not required for success and never creates terminal truth.
+- Added websocket positive/reverse tests and direct post-commit no-reroute test. Targeted runtime direct_sse 15/15, Responses provider SSE 6/6, server websocket projection 2/2, OpenAI Chat relay 3/3; runtime/server lib checks and workspace library build pass.
+- Updated SSE boundary gates to assert JSON codec ownership rather than obsolete event/type mismatch behavior. SSE boundary, resource map, module boundaries, mainline flow, rust-only, architecture docs, provider-action gate, and runtime-timing gate pass.
+- Workspace `cargo test --workspace --no-run` remains blocked by unrelated dirty-worktree initializer `v3/crates/routecodex-v3-virtual-router/src/tests/mod.rs:38` missing `V3DebugManifest.error_sample_skip_statuses` and `error_samples_only`; do not fix unrelated test fixtures under this task.
+- Added `docs/architecture/manifests/v3.sse.protocol_codec_projection.mainline.yml`; feature maps now declare canonical JSON codec symbols. Feature status remains `design`/binding pending until full workspace gates, install/restart/live replay, and MCP review close.
+
+# 2026-08-12 SSE transport / JSON semantic decoupling audit
+- Jason locked the rule: SSE is transport-only; all business/error/terminal/health/routing decisions must consume provider JSON or typed JSON-codec results. `event:` is opaque; `[DONE]` and EOF never create success.
+- Audit persisted to `docs/goals/v3-sse-transport-json-semantic-decoupling-audit.md`.
+- Added two intentional red tests in `v3/crates/routecodex-v3-runtime/src/kernel/tests.rs`: JSON `type` must override an unrelated SSE event label for failed/completed Responses events.
+- Evidence: `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib red_sse_semantics -- --nocapture` compiled and ran both tests; both failed against current runtime because it rejects `event`/JSON type mismatch. Workspace integration test compilation is independently blocked by missing `V3DebugManifest` fields in `tests/hub_v1_h1_contract.rs`.
+- No runtime fix was made. Next implementation must move semantic decisions to provider JSON codec, then re-run red tests, add post-client-commit no-reroute coverage, and update active maps/gates before install/restart/review.
+
+# 2026-08-12 SSE audit continuation — implementation/evidence correction
+- The above entry is the pre-implementation audit baseline. The implementation now exists in `hub_v1/provider_sse_json_codec.rs`; direct/shared SSE paths no longer use `event:` for provider semantics, and the JSON-authority/post-commit tests are green.
+- Current evidence is recorded in `docs/goals/v3-sse-transport-json-semantic-decoupling-audit.md`: targeted SSE tests, architecture gates, build, install, aggregate restart, four-port health, and same-entry live replay passed.
+- Delivery remains open: workspace test compilation is blocked by missing `V3DebugManifest` fields in `v3/crates/routecodex-v3-runtime/tests/hub_v1_h1_contract.rs`; MCP review `sse-json-decoupling-20260812-r2` is FAIL. Do not report PASS.
+
+# 2026-08-12 SSE audit continuation — relay coverage and runtime evidence
+- Added relay-side positive/reverse JSON-authority tests: mismatched opaque `event:` labels cannot override JSON `response.failed` or `response.completed`.
+- Aligned the H1 test fixture with the current debug manifest so `cargo test --workspace --no-run` now passes. Full workspace tests reach the unrelated H2 live fixture and fail at `v3/crates/routecodex-v3-cli/tests/h2_p6_controlled_replay.rs` (`node trace header`).
+- Rebuilt and globally installed `0.90.4297`, aggregate `routecodex restart` completed, all four health endpoints returned 200, and same-entry 5555 `/v1/responses` replay emitted JSON `response.created` and subsequent JSON response events. Review remains required and no PASS is claimed.
+
+# 2026-08-12 止血 + 泄露审计修复（第二波）
+- duplicate response.created 止血：openai_chat_codec.rs transducer 拆分 created/in_progress——官方 Responses SSE 流 created 后必发 in_progress（cc-sol=anyint.ai 上游），原代码把 in_progress 误判 duplicate → 154 次冷却。in_progress 幂等（未 started 时 start，已 started 时跳过）；真重复 created 仍 fail-fast。3 测试（正/反/start）。
+- lane absent 止血（双层）：
+  - relay 共享版 relay_runtime_shared.rs WaitThenRetrySame 无条件 set pending → transient request-local witness（从未 record lane）→ wait → absent。对齐 responses relay 的 wait_ms 检查（wait_ms.is_some() 才 set）。
+  - direct 三处（kernel.rs 550 第一循环 + v3_direct_core.rs 两处）缺 retryable_transient 检查 → 无条件 pending → absent。kernel.rs 837/987 已有检查，补齐对齐。
+  - 在线：restart 后 598 条日志 0 次 duplicate/lane；06:53 cc-sol 请求正常完成。
+- 泄露审计（Jason: payload 与控制面完整去耦）：
+  - Error06 body 裁剪：只留 code/message；移除 stage/class/decision/target_exhausted/candidates_remaining/route_pool_remaining_after_exclusion/default_pool_available/error_node/internal_*/external_error（v3-error lib.rs build_v3_error_06）。
+  - x-routecodex-v3-* 响应头全部移除（executors 5 处 + frame_builders 3 处 + lib pending 4 处 + insert_v3_projection_header 死代码删除）。
+  - 27 处测试头断言适配（改 body 反向断言或删 trace 断言）。
+  - 在线：400 错误 body 只含 code/message，无诊断头。
+- 测试状态：runtime lib 388 绿；error crate 绿；anthropic integration 13/14（1 wip）；gemini/openai controlled 绿；responses direct 24/27（2 wip + 1 stopless 待查）。
+- wip 阻塞（其他 worker 未提交）：responses_provider_event_codec.rs + shared.rs 移除 frame event_type 改 data.type 真源 → fixture（data 无 type）大量红：structured_sse_contract、h2_p6 sse_baseline、multi_listener 26、direct failed_terminal、openai_chat 12。未修（P0 边界）。
+- 事故：restart 0.90.4304 时进程 56046 卡死（100% CPU 不响应控制挑战）→ 4 端口全挂 → Jason 授权 SIGTERM→SIGKILL → restart 恢复 0.90.4306（4 端口 200）。二进制被其他 worker 覆盖（4304→4306）。
+- provider_action_gate.rs absent 错误消息增强：含 ticket key 字段 + existing lanes（定位辅助）。
+
+# 2026-08-12 P0 route control facts boundary
+- Root cause: `classify_route` was typed only by convention; the runtime caller used the old `extract_active_turn_signals` surface and the map still recorded the typed carrier as unimplemented.
+- Fix: introduced `V3CurrentTurnRouteFacts` as the classifier input contract and `build_v3_current_turn_route_facts` as the named current-turn builder; runtime `nodes.rs` now materializes the typed facts before classification; removed the old extraction API and aligned route-classifier tests.
+- Boundary: raw request parsing remains confined to the named current-turn builder; no raw `serde_json::Value` reaches `classify_route`; no metadata, SSE, server, provider, or client path was changed.
+- Evidence: `npm run test:route-classifier-semantics` passed route-classifier 29/29, runtime nodes 23/23, target/virtual-router 48/48; resource/module/mainline/diff gates passed. Install/restart/live positive+reverse replay remains pending.
+
+# 2026-08-12 Chat SSE missing-type regression fix
+- Root cause: `classify_v3_provider_generic_sse_json_data` delegated to the Responses-only classifier, so valid OpenAI Chat chunks without top-level `type` raised `provider_response_sse_event_invalid`.
+- Fix: generic JSON codec accepts recognized Chat chunk shapes (`choices` or `object=chat.completion.chunk`) without inventing a type; Responses events remain strict.
+- Evidence: runtime lib 394/394; global install `rccv3 0.90.4319`; aggregate restart; ports 10000/5520/5555/4444 all HTTP 200; live `/v1/chat/completions` SSE through `opencode-go[key2].deepseek-v4-flash` completed HTTP 200 with `[DONE]`.

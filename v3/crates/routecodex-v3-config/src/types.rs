@@ -265,6 +265,8 @@ pub struct V3ErrorAuthoringConfig {
     pub provider_error_action_policy: Vec<V3ProviderErrorActionPolicyAuthoringConfig>,
     #[serde(default)]
     pub client_error_projection_policy: Vec<V3ClientErrorProjectionPolicyAuthoringConfig>,
+    #[serde(default)]
+    pub provider_error_default_path: Option<Vec<V3ProviderDispositionStepAuthoringConfig>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -285,7 +287,38 @@ pub struct V3ProviderErrorActionPolicyAuthoringConfig {
     pub scope: V3ProviderErrorPolicyScopeAuthoringConfig,
     #[serde(rename = "match")]
     pub matcher: V3ProviderErrorMatcherAuthoringConfig,
-    pub action: V3ProviderErrorActionAuthoringConfig,
+    #[serde(default)]
+    pub path: Option<Vec<V3ProviderDispositionStepAuthoringConfig>>,
+    #[serde(default)]
+    pub action: Option<V3ProviderErrorActionAuthoringConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "step", rename_all = "snake_case", deny_unknown_fields)]
+pub enum V3ProviderDispositionStepAuthoringConfig {
+    WaitRetry {
+        retry_mode: V3ProviderErrorRetryMode,
+        max_attempts: u32,
+        backoff_ms: u64,
+        #[serde(default)]
+        backoff_multiplier: Option<u64>,
+    },
+    Cooldown {
+        scope: V3ProviderErrorActionScope,
+        #[serde(default)]
+        duration_ms: Option<u64>,
+        #[serde(default)]
+        until_restart: Option<bool>,
+        #[serde(default)]
+        provider_global_failure: bool,
+    },
+    Project {
+        status: u16,
+        reason_code: String,
+        #[serde(default)]
+        public_code: Option<String>,
+        message_mode: V3ClientErrorProjectionMessageMode,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -360,6 +393,8 @@ pub struct V3ProviderErrorActionAuthoringConfig {
     pub cooldown_ms: Option<u64>,
     #[serde(default)]
     pub disable_scope: V3ProviderErrorActionScope,
+    #[serde(default)]
+    pub provider_global_failure: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1099,12 +1134,17 @@ pub struct V3DebugManifest {
     pub snapshot_direct: bool,
     pub dry_run: bool,
     pub retention: BTreeMap<String, u64>,
+    /// 内部运行时授权（非用户配置面）：显式 `--snap`/`--snap-stages` 时置位，
+    /// 关闭 internal `[debug_samples] error_samples_only` 的默认只落错误样本策略，
+    /// 允许全量样本落盘。仅 lifecycle 在内存中设置，不写回用户 TOML。
+    pub full_codex_sampling: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ErrorManifest {
     pub policies: BTreeMap<String, V3ErrorPolicyManifest>,
     pub provider_error_action_policy: Vec<V3ProviderErrorActionPolicyManifest>,
+    pub provider_error_default_path: Vec<V3ProviderDispositionStepManifest>,
     pub client_error_projection_policy: Vec<V3ClientErrorProjectionPolicyManifest>,
 }
 
@@ -1121,6 +1161,29 @@ pub struct V3ProviderErrorActionPolicyManifest {
     pub scope: V3ProviderErrorPolicyScopeManifest,
     pub matcher: V3ProviderErrorMatcherManifest,
     pub action: V3ProviderErrorActionManifest,
+    pub path: Vec<V3ProviderDispositionStepManifest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V3ProviderDispositionStepManifest {
+    WaitRetry {
+        retry_mode: V3ProviderErrorRetryMode,
+        max_attempts: u32,
+        backoff_ms: u64,
+        backoff_multiplier: Option<u64>,
+    },
+    Cooldown {
+        scope: V3ProviderErrorActionScope,
+        duration_ms: Option<u64>,
+        until_restart: Option<bool>,
+        provider_global_failure: bool,
+    },
+    Project {
+        status: u16,
+        reason_code: String,
+        public_code: Option<String>,
+        message_mode: V3ClientErrorProjectionMessageMode,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -1153,6 +1216,7 @@ pub struct V3ProviderErrorActionManifest {
     pub retry_mode: V3ProviderErrorRetryMode,
     pub cooldown_ms: Option<u64>,
     pub disable_scope: V3ProviderErrorActionScope,
+    pub provider_global_failure: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

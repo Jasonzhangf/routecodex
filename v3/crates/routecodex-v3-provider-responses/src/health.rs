@@ -1,4 +1,6 @@
-use routecodex_v3_config::V3Config05ManifestPublished;
+use routecodex_v3_config::{
+    V3Config05ManifestPublished, V3ProviderDispositionStepManifest,
+};
 use routecodex_v3_error::{V3ErrorActionScope, V3ProviderFailureSessionScope};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -31,16 +33,23 @@ pub struct V3ProviderConcurrencyState {
 pub struct V3ProviderFailurePolicy {
     pub failure_threshold: u32,
     pub cooldown_ms: u64,
+    pub until_restart: bool,
 }
 
 impl Default for V3ProviderFailurePolicy {
     fn default() -> Self {
         Self {
             failure_threshold: 3,
-            cooldown_ms: 15 * 60_000,
+            cooldown_ms: 900_000,
+            until_restart: false,
         }
     }
 }
+
+/// 瞬态失败（SSE 流内/挂起）耗尽 3 次尝试后的 session 级短期绕行时长：
+/// 不触发 15 分钟 cooldown（health-neutral），但同一 session 的后续请求
+/// 在该窗口内绕开该 provider，避免反复命中同一失败 provider；超时自动恢复。
+pub const V3_PROVIDER_TRANSIENT_BYPASS_MS: u64 = 30_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct V3ProviderFailureRecord {
@@ -50,13 +59,6 @@ pub struct V3ProviderFailureRecord {
     pub failure_count: u32,
     pub cooldown_until_ms: Option<u64>,
     pub reason: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct V3ProviderCrossSessionReviveAdmission {
-    pub provider_key: String,
-    pub original_cooldown_until_ms: u64,
-    pub evidence_session_id: String,
 }
 
 pub trait V3ProviderAvailabilityReader {
@@ -168,7 +170,6 @@ struct V3ProviderHealthState {
     failure_policies: BTreeMap<String, V3ProviderFailurePolicy>,
     consecutive_failures: BTreeMap<V3ProviderFailureSessionKey, V3ProviderConsecutiveFailure>,
     cooldowns: BTreeMap<V3ProviderFailureSessionKey, V3ProviderCooldown>,
-    session_successes: BTreeMap<V3ProviderFailureSessionKey, u64>,
     quotas: BTreeMap<String, V3ProviderQuotaState>,
     concurrency: BTreeMap<String, V3ProviderConcurrencyState>,
 }
@@ -184,8 +185,8 @@ struct V3ProviderFailureSessionKey {
 #[derive(Debug, Clone)]
 struct V3ProviderCooldown {
     reason: String,
+    original_cooldown_until_ms: Option<u64>,
     until_ms: Option<u64>,
-    revive_consumed_for_until_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -222,12 +223,15 @@ impl V3ProviderHealthStore {
                         V3ProviderFailurePolicy {
                             failure_threshold: health.failure_threshold.max(1),
                             cooldown_ms: health.cooldown_ms.max(1),
+                            until_restart: false,
                         },
                     );
                 }
                 None => {
-                    failure_policies
-                        .insert(provider.id.clone(), V3ProviderFailurePolicy::default());
+                    failure_policies.insert(
+                        provider.id.clone(),
+                        default_failure_policy_from_manifest(manifest),
+                    );
                 }
             }
         }
@@ -249,6 +253,27 @@ impl V3ProviderHealthStore {
         model_id: Option<&str>,
         reason: Option<&str>,
         now_ms: u64,
+    ) -> Result<V3ProviderFailureRecord, V3ProviderHealthError> {
+        self.record_provider_failure_in_session_with_policy(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            reason,
+            now_ms,
+            None,
+        )
+    }
+
+    pub fn record_provider_failure_in_session_with_policy(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        reason: Option<&str>,
+        now_ms: u64,
+        policy_override: Option<V3ProviderFailurePolicy>,
     ) -> Result<V3ProviderFailureRecord, V3ProviderHealthError> {
         let provider_key = provider_key_label(provider_id, auth_alias, model_id);
         let key =
@@ -298,11 +323,13 @@ impl V3ProviderHealthStore {
             state.cooldowns.remove(&key);
             state.consecutive_failures.remove(&key);
         }
-        let policy = state
-            .failure_policies
-            .get(provider_id)
-            .copied()
-            .unwrap_or_default();
+        let policy = policy_override.unwrap_or_else(|| {
+            state
+                .failure_policies
+                .get(provider_id)
+                .copied()
+                .unwrap_or_default()
+        });
         let failure =
             state
                 .consecutive_failures
@@ -322,7 +349,8 @@ impl V3ProviderHealthStore {
         let mut cooldown_until_ms = None;
         let mut record_state = "healthy".to_string();
         if failure_count >= policy.failure_threshold {
-            cooldown_until_ms = Some(now_ms.saturating_add(policy.cooldown_ms));
+            cooldown_until_ms = (!policy.until_restart)
+                .then(|| now_ms.saturating_add(policy.cooldown_ms));
             record_state = "cooldown".to_string();
             state.cooldowns.insert(
                 key,
@@ -330,8 +358,8 @@ impl V3ProviderHealthStore {
                     reason: record_reason
                         .clone()
                         .unwrap_or_else(|| "provider_consecutive_failures".to_string()),
+                    original_cooldown_until_ms: cooldown_until_ms,
                     until_ms: cooldown_until_ms,
-                    revive_consumed_for_until_ms: None,
                 },
             );
         }
@@ -345,13 +373,86 @@ impl V3ProviderHealthStore {
         })
     }
 
+    /// session 级短期绕行（瞬态失败耗尽 3 次尝试后调用）：在当前 session
+    /// scope 内把 provider 短时（`V3_PROVIDER_TRANSIENT_BYPASS_MS`）标记为
+    /// 不可用，供 availability 查询绕开；不累计 consecutive_failures、
+    /// 不触发 15 分钟 cooldown（health-neutral），超时由
+    /// `remove_expired_session_state` 自动清理恢复。若已存在更长的真实
+    /// cooldown，保持不动（真实冷却优先）。
+    pub fn record_provider_transient_bypass_in_session(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        reason: Option<&str>,
+        now_ms: u64,
+    ) -> Result<V3ProviderFailureRecord, V3ProviderHealthError> {
+        let provider_key = provider_key_label(provider_id, auth_alias, model_id);
+        let key =
+            provider_failure_session_key(failure_session_scope, provider_id, auth_alias, model_id);
+        let scope_label = provider_failure_session_scope_label(&key);
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        if state.health_disabled.contains(provider_id) {
+            return Ok(V3ProviderFailureRecord {
+                scope_label,
+                provider_key,
+                state: "health_disabled".to_string(),
+                failure_count: 0,
+                cooldown_until_ms: None,
+                reason: reason.map(str::to_string),
+            });
+        }
+        if let Some(cooldown) = state
+            .cooldowns
+            .get(&key)
+            .filter(|cooldown| cooldown.until_ms.is_none_or(|until| until > now_ms))
+        {
+            // 已有未过期冷却（真实 cooldown 或更早的 bypass）：保持现状。
+            let failure_count = state
+                .consecutive_failures
+                .get(&key)
+                .map_or(0, |failure| failure.failure_count);
+            return Ok(V3ProviderFailureRecord {
+                scope_label,
+                provider_key,
+                state: "cooldown".to_string(),
+                failure_count,
+                cooldown_until_ms: cooldown.until_ms,
+                reason: reason.map(str::to_string),
+            });
+        }
+        let until_ms = now_ms.saturating_add(V3_PROVIDER_TRANSIENT_BYPASS_MS);
+        state.cooldowns.insert(
+            key,
+            V3ProviderCooldown {
+                reason: reason
+                    .map(str::to_string)
+                    .unwrap_or_else(|| "provider_transient_exhausted".to_string()),
+                original_cooldown_until_ms: Some(until_ms),
+                until_ms: Some(until_ms),
+            },
+        );
+        Ok(V3ProviderFailureRecord {
+            scope_label,
+            provider_key,
+            state: "transient_bypass".to_string(),
+            failure_count: 0,
+            cooldown_until_ms: Some(until_ms),
+            reason: reason.map(str::to_string),
+        })
+    }
+
     pub fn record_provider_success_in_session(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
-        now_ms: u64,
+        _now_ms: u64,
     ) -> Result<(), V3ProviderHealthError> {
         let key =
             provider_failure_session_key(failure_session_scope, provider_id, auth_alias, model_id);
@@ -361,28 +462,6 @@ impl V3ProviderHealthStore {
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
         state.cooldowns.remove(&key);
         state.consecutive_failures.remove(&key);
-        state.session_successes.insert(key, now_ms);
-        Ok(())
-    }
-
-    pub fn record_provider_revive_success_in_session(
-        &self,
-        failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        now_ms: u64,
-    ) -> Result<(), V3ProviderHealthError> {
-        let key =
-            provider_failure_session_key(failure_session_scope, provider_id, auth_alias, model_id);
-        let mut state = self
-            .state
-            .write()
-            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        state.cooldowns.remove(&key);
-        state.consecutive_failures.remove(&key);
-        state.session_successes.insert(key, now_ms);
-        remove_expired_session_state(&mut state, now_ms);
         Ok(())
     }
 
@@ -393,53 +472,30 @@ impl V3ProviderHealthStore {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> Result<Option<V3ProviderCrossSessionReviveAdmission>, V3ProviderHealthError> {
-        let key =
-            provider_failure_session_key(failure_session_scope, provider_id, auth_alias, model_id);
+    ) -> Result<bool, V3ProviderHealthError> {
+        let key = provider_failure_session_key(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+        );
         let mut state = self
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        remove_expired_session_state(&mut state, now_ms);
-        let original_cooldown_until_ms = match state.cooldowns.get(&key) {
-            Some(cooldown) => match cooldown.until_ms {
-                Some(until_ms) if until_ms > now_ms => until_ms,
-                _ => return Ok(None),
-            },
-            None => return Ok(None),
+        let Some(cooldown) = state.cooldowns.get(&key).cloned() else {
+            // Revival is an admission to clear an expired cooldown.  A
+            // provider with no cooldown has nothing to revive and must not
+            // be mistaken for a successful cross-session recovery.
+            return Ok(false);
         };
-        if state.cooldowns.get(&key).is_some_and(|cooldown| {
-            cooldown.revive_consumed_for_until_ms == Some(original_cooldown_until_ms)
-        }) {
-            return Ok(None);
+        if cooldown.until_ms.is_some_and(|until_ms| until_ms > now_ms) {
+            return Ok(false);
         }
-        let evidence_session_id = state
-            .session_successes
-            .iter()
-            .filter(|(candidate, _)| {
-                candidate.server_id == key.server_id
-                    && candidate.routing_group == key.routing_group
-                    && candidate.provider_runtime_identity == key.provider_runtime_identity
-                    && candidate.session_id != key.session_id
-                    && !state.cooldowns.get(*candidate).is_some_and(|cooldown| {
-                        cooldown.until_ms.is_none_or(|until_ms| until_ms > now_ms)
-                    })
-            })
-            .max_by_key(|(_, success_at_ms)| *success_at_ms)
-            .map(|(candidate, _)| candidate.session_id.clone());
-        let Some(evidence_session_id) = evidence_session_id else {
-            return Ok(None);
-        };
-        state
-            .cooldowns
-            .get_mut(&key)
-            .expect("active cooldown was validated under the same write lock")
-            .revive_consumed_for_until_ms = Some(original_cooldown_until_ms);
-        Ok(Some(V3ProviderCrossSessionReviveAdmission {
-            provider_key: provider_key_label(provider_id, auth_alias, model_id),
-            original_cooldown_until_ms,
-            evidence_session_id,
-        }))
+        let _original_cooldown_until_ms = cooldown.original_cooldown_until_ms;
+        state.cooldowns.remove(&key);
+        state.consecutive_failures.remove(&key);
+        Ok(true)
     }
 
     pub(crate) fn update_quota_state(
@@ -518,6 +574,43 @@ impl V3ProviderHealthStore {
             projection.available = false;
         }
         projection
+    }
+}
+
+fn default_failure_policy_from_manifest(
+    manifest: &V3Config05ManifestPublished,
+) -> V3ProviderFailurePolicy {
+    let threshold = manifest
+        .error
+        .provider_error_default_path
+        .iter()
+        .find_map(|step| match step {
+            V3ProviderDispositionStepManifest::WaitRetry { max_attempts, .. } => {
+                Some((*max_attempts).max(1))
+            }
+            _ => None,
+        })
+        .unwrap_or(1);
+    let (cooldown_ms, until_restart) = manifest
+        .error
+        .provider_error_default_path
+        .iter()
+        .find_map(|step| match step {
+            V3ProviderDispositionStepManifest::Cooldown {
+                duration_ms: Some(duration_ms),
+                ..
+            } => Some(((*duration_ms).max(1), false)),
+            V3ProviderDispositionStepManifest::Cooldown {
+                until_restart: Some(true),
+                ..
+            } => Some((1, true)),
+            _ => None,
+        })
+        .expect("compiled provider error default path must contain cooldown");
+    V3ProviderFailurePolicy {
+        failure_threshold: threshold,
+        cooldown_ms,
+        until_restart,
     }
 }
 
@@ -656,9 +749,6 @@ fn remove_expired_session_state(state: &mut V3ProviderHealthState, now_ms: u64) 
                 .last_failure_at_ms
                 .saturating_add(SESSION_STATE_IDLE_TTL_MS)
                 > now_ms
-    });
-    state.session_successes.retain(|_, success_at_ms| {
-        success_at_ms.saturating_add(SESSION_STATE_IDLE_TTL_MS) > now_ms
     });
 }
 
@@ -840,69 +930,6 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                     .available
             );
         }
-    }
-
-    #[test]
-    fn cross_session_revive_is_atomic_and_preserves_original_deadline_on_failure() {
-        let store = V3ProviderHealthStore::default();
-        store
-            .record_provider_success_in_session(
-                &session("session-b"),
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                90,
-            )
-            .unwrap();
-        let mut original_deadline = None;
-        for now_ms in 100..103 {
-            original_deadline = store
-                .record_provider_failure_in_session(
-                    &session("session-a"),
-                    "provider-a",
-                    Some("key-a"),
-                    Some("gpt-5.5"),
-                    None,
-                    now_ms,
-                )
-                .unwrap()
-                .cooldown_until_ms;
-        }
-        let admission = store
-            .try_acquire_cross_session_revive(
-                &session("session-a"),
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                103,
-            )
-            .unwrap()
-            .expect("healthy sibling evidence grants one revive");
-        assert_eq!(
-            Some(admission.original_cooldown_until_ms),
-            original_deadline
-        );
-        assert!(store
-            .try_acquire_cross_session_revive(
-                &session("session-a"),
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                104,
-            )
-            .unwrap()
-            .is_none());
-        let failed_revive = store
-            .record_provider_failure_in_session(
-                &session("session-a"),
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                Some("revive failed"),
-                105,
-            )
-            .unwrap();
-        assert_eq!(failed_revive.cooldown_until_ms, original_deadline);
     }
 
     #[test]

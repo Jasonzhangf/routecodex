@@ -144,12 +144,30 @@ pub struct V3ResponsesRelayRetryPolicy {
 impl Default for V3ResponsesRelayRetryPolicy {
     fn default() -> Self {
         Self {
-            same_candidate_retries: V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_COUNT,
+            same_candidate_retries: 0,
         }
     }
 }
 
 impl V3ResponsesRelayRetryPolicy {
+    pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
+        let same_candidate_retries = manifest
+            .error
+            .provider_error_default_path
+            .iter()
+            .find_map(|step| match step {
+                routecodex_v3_config::V3ProviderDispositionStepManifest::WaitRetry {
+                    max_attempts,
+                    ..
+                } => Some(max_attempts.saturating_sub(1) as usize),
+                _ => None,
+            })
+            .unwrap_or(0);
+        Self {
+            same_candidate_retries,
+        }
+    }
+
     pub(crate) fn as_shared_policy(self) -> V3RelayProviderFailureRetryPolicy {
         V3RelayProviderFailureRetryPolicy {
             same_candidate_retries: self.same_candidate_retries,
@@ -624,7 +642,7 @@ impl V3LiveSnapProviderSnapshotRecorder {
         let attempt = state.requests.len() + 1;
         state.requests.push(json!({
             "attempt": attempt,
-            "request": request.redacted_provider_request_projection(),
+            "request": request.provider_request_projection(),
         }));
         Ok(attempt)
     }

@@ -23,6 +23,12 @@ fn compile_error(
     authoring
         .provider_error_action_policy
         .extend(provider_scoped_policies);
+    let provider_error_default_path = authoring
+        .provider_error_default_path
+        .take()
+        .map(|path| compile_provider_error_path("provider_error_default_path", path))
+        .transpose()?
+        .unwrap_or_else(default_provider_error_path);
     let provider_error_action_policy =
         compile_provider_error_action_policies(authoring.provider_error_action_policy)?;
     let client_error_projection_policy =
@@ -30,6 +36,7 @@ fn compile_error(
     Ok(V3ErrorManifest {
         policies,
         provider_error_action_policy,
+        provider_error_default_path,
         client_error_projection_policy,
     })
 }
@@ -49,15 +56,252 @@ fn compile_provider_error_action_policies(
         }
         let scope = compile_provider_error_policy_scope(&policy.policy_id, policy.scope)?;
         let matcher = compile_provider_error_matcher(&policy.policy_id, policy.matcher, &scope)?;
-        let action = compile_provider_error_action(&policy.policy_id, policy.action)?;
+        let (action, path) = match (policy.action, policy.path) {
+            (Some(_), Some(_)) => {
+                return Err(validation(format!(
+                    "provider error policy {} cannot define both action and path",
+                    policy.policy_id
+                )))
+            }
+            (Some(action), None) => {
+                let action = compile_provider_error_action(&policy.policy_id, action)?;
+                let path = legacy_provider_error_path(&policy.policy_id, &action)?;
+                (action, path)
+            }
+            (None, Some(path)) => {
+                let path = compile_provider_error_path(&policy.policy_id, path)?;
+                let project_reason = path.iter().find_map(|step| match step {
+                    V3ProviderDispositionStepManifest::Project { reason_code, .. } => {
+                        Some(reason_code.clone())
+                    }
+                    _ => None,
+                });
+                let reason_code = project_reason.ok_or_else(|| {
+                    validation(format!(
+                        "provider error policy {} path project reason_code is missing",
+                        policy.policy_id
+                    ))
+                })?;
+                let provider_global_failure = path.iter().any(|step| {
+                    matches!(
+                        step,
+                        V3ProviderDispositionStepManifest::Cooldown {
+                            provider_global_failure: true,
+                            ..
+                        }
+                    )
+                });
+                (
+                    V3ProviderErrorActionManifest {
+                        kind: V3ProviderErrorActionClass::RecoverableNoPenalty,
+                        reason_code,
+                        retry_mode: V3ProviderErrorRetryMode::None,
+                        cooldown_ms: None,
+                        disable_scope: V3ProviderErrorActionScope::ProviderModel,
+                        provider_global_failure,
+                    },
+                    path,
+                )
+            }
+            (None, None) => {
+                return Err(validation(format!(
+                    "provider error policy {} requires action or path",
+                    policy.policy_id
+                )))
+            }
+        };
         compiled.push(V3ProviderErrorActionPolicyManifest {
             policy_id: policy.policy_id,
             scope,
             matcher,
             action,
+            path,
         });
     }
     Ok(compiled)
+}
+
+fn legacy_provider_error_path(
+    policy_id: &str,
+    action: &V3ProviderErrorActionManifest,
+) -> Result<Vec<V3ProviderDispositionStepManifest>, V3ConfigError> {
+    let mut path = vec![V3ProviderDispositionStepManifest::WaitRetry {
+        retry_mode: action.retry_mode,
+        max_attempts: 1,
+        backoff_ms: 0,
+        backoff_multiplier: None,
+    }];
+    if action.kind == V3ProviderErrorActionClass::DisableUntilRestart
+        && action.cooldown_ms.is_none()
+    {
+        path.push(V3ProviderDispositionStepManifest::Cooldown {
+            scope: action.disable_scope,
+            duration_ms: None,
+            until_restart: Some(true),
+            provider_global_failure: action.provider_global_failure,
+        });
+    } else if let Some(duration_ms) = action.cooldown_ms {
+        path.push(V3ProviderDispositionStepManifest::Cooldown {
+            scope: action.disable_scope,
+            duration_ms: Some(duration_ms),
+            until_restart: None,
+            provider_global_failure: action.provider_global_failure,
+        });
+    }
+    path.push(V3ProviderDispositionStepManifest::Project {
+        status: 503,
+        reason_code: action.reason_code.clone(),
+        public_code: None,
+        message_mode: V3ClientErrorProjectionMessageMode::CodeOnly,
+    });
+    validate_provider_error_path(policy_id, &path)?;
+    Ok(path)
+}
+
+fn compile_provider_error_path(
+    policy_id: &str,
+    path: Vec<V3ProviderDispositionStepAuthoringConfig>,
+) -> Result<Vec<V3ProviderDispositionStepManifest>, V3ConfigError> {
+    let compiled = path
+        .into_iter()
+        .map(|step| match step {
+            V3ProviderDispositionStepAuthoringConfig::WaitRetry {
+                retry_mode,
+                max_attempts,
+                backoff_ms,
+                backoff_multiplier,
+            } => V3ProviderDispositionStepManifest::WaitRetry {
+                retry_mode,
+                max_attempts,
+                backoff_ms,
+                backoff_multiplier,
+            },
+            V3ProviderDispositionStepAuthoringConfig::Cooldown {
+                scope,
+                duration_ms,
+                until_restart,
+                provider_global_failure,
+            } => V3ProviderDispositionStepManifest::Cooldown {
+                scope,
+                duration_ms,
+                until_restart,
+                provider_global_failure,
+            },
+            V3ProviderDispositionStepAuthoringConfig::Project {
+                status,
+                reason_code,
+                public_code,
+                message_mode,
+            } => V3ProviderDispositionStepManifest::Project {
+                status,
+                reason_code,
+                public_code,
+                message_mode,
+            },
+        })
+        .collect::<Vec<_>>();
+    validate_provider_error_path(policy_id, &compiled)?;
+    Ok(compiled)
+}
+
+fn validate_provider_error_path(
+    policy_id: &str,
+    path: &[V3ProviderDispositionStepManifest],
+) -> Result<(), V3ConfigError> {
+    if path.is_empty() || path.len() > 5 {
+        return Err(validation(format!(
+            "provider error policy {policy_id} path must contain 1..=5 steps"
+        )));
+    }
+    let mut project_count = 0;
+    for (index, step) in path.iter().enumerate() {
+        match step {
+            V3ProviderDispositionStepManifest::WaitRetry {
+                max_attempts,
+                backoff_ms,
+                backoff_multiplier,
+                ..
+            } => {
+                if *max_attempts == 0 || *max_attempts > 10 {
+                    return Err(validation(format!(
+                        "provider error policy {policy_id} wait_retry max_attempts must be 1..=10"
+                    )));
+                }
+                if *backoff_ms > 60_000 {
+                    return Err(validation(format!(
+                        "provider error policy {policy_id} wait_retry backoff_ms exceeds 60000"
+                    )));
+                }
+                if backoff_multiplier.is_some_and(|value| !(1..=10).contains(&value)) {
+                    return Err(validation(format!(
+                        "provider error policy {policy_id} backoff_multiplier must be 1..=10"
+                    )));
+                }
+            }
+            V3ProviderDispositionStepManifest::Cooldown {
+                duration_ms,
+                until_restart,
+                ..
+            } => {
+                let has_duration = duration_ms.is_some();
+                let has_restart = until_restart == &Some(true);
+                if has_duration == has_restart
+                    || duration_ms.is_some_and(|value| value == 0 || value > 86_400_000)
+                    || until_restart.is_some_and(|value| !value)
+                {
+                    return Err(validation(format!(
+                        "provider error policy {policy_id} cooldown requires exactly one valid duration_ms or until_restart=true"
+                    )));
+                }
+            }
+            V3ProviderDispositionStepManifest::Project {
+                status,
+                reason_code,
+                ..
+            } => {
+                project_count += 1;
+                if *status < 400 || reason_code.trim().is_empty() {
+                    return Err(validation(format!(
+                        "provider error policy {policy_id} project requires status >= 400 and non-empty reason_code"
+                    )));
+                }
+                if index + 1 != path.len() {
+                    return Err(validation(format!(
+                        "provider error policy {policy_id} project must be the final step"
+                    )));
+                }
+            }
+        }
+    }
+    if project_count != 1 {
+        return Err(validation(format!(
+            "provider error policy {policy_id} path must contain exactly one final project step"
+        )));
+    }
+    Ok(())
+}
+
+fn default_provider_error_path() -> Vec<V3ProviderDispositionStepManifest> {
+    vec![
+        V3ProviderDispositionStepManifest::WaitRetry {
+            retry_mode: V3ProviderErrorRetryMode::RetrySame,
+            max_attempts: 3,
+            backoff_ms: 0,
+            backoff_multiplier: None,
+        },
+        V3ProviderDispositionStepManifest::Cooldown {
+            scope: V3ProviderErrorActionScope::ProviderModel,
+            duration_ms: Some(900_000),
+            until_restart: None,
+            provider_global_failure: false,
+        },
+        V3ProviderDispositionStepManifest::Project {
+            status: 503,
+            reason_code: "provider_failure".to_string(),
+            public_code: None,
+            message_mode: V3ClientErrorProjectionMessageMode::CodeOnly,
+        },
+    ]
 }
 
 fn compile_provider_error_policy_scope(
@@ -188,6 +432,7 @@ fn compile_provider_error_action(
         retry_mode: action.retry_mode,
         cooldown_ms: action.cooldown_ms,
         disable_scope: action.disable_scope,
+        provider_global_failure: action.provider_global_failure,
     })
 }
 

@@ -54,29 +54,33 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
         && !observability.unavailable_candidates.is_empty()
     {
         let selected = format_v3_console_provider_target(observability);
+        // 局部着色：unavailable 错误段（provider 名 + 错误详情）染红，
+        // req / selected / reason 保持正常色，避免整行一片红不易读。
+        let provider_errors =
+            colorize_v3_console_error_segment(&observability.unavailable_candidates.join(","));
         let content = format_v3_console_timed_content(
             "[provider-unavailable]",
             &format!(
                 "req={} unavailable={} selected={} reason=availability",
                 context.request_identity.request_id,
-                observability.unavailable_candidates.join(","),
+                provider_errors,
                 selected
             ),
         );
-        emit_v3_colorized_request_console_line(
-            &context.state,
-            &content,
-            &content,
-            identity.color_key.as_deref(),
-            &format_v3_console_human_prefix_for_observability(
-                &context.state.server.port.to_string(),
-                &context.entry_protocol,
-                identity.project_path.as_deref(),
-                observability,
-                &route.label,
-            ),
-            &identity.session_id,
+        let human_prefix = format_v3_console_human_prefix_for_observability(
+            &context.state.server.port.to_string(),
+            &context.entry_protocol,
+            identity.project_path.as_deref(),
+            observability,
+            &route.label,
         );
+        let line = if human_prefix.is_empty() {
+            content
+        } else {
+            format!("{human_prefix} {content}")
+        };
+        append_v3_human_console_line(&context.state, &line);
+        eprintln!("{line}");
     }
 }
 
@@ -471,6 +475,90 @@ pub(crate) fn emit_v3_request_route_hit_console_line_for_observability(
             &route.label,
         ),
         &identity.session_id,
+    );
+}
+
+pub(crate) fn emit_v3_dry_run_console_lines(
+    context: &V3ConsoleEmissionContext,
+    target: &str,
+    reason: &str,
+    raw_input_items: usize,
+    prepared_input_items: usize,
+    status: u16,
+    node_count: usize,
+) {
+    if !context.state.console_enabled {
+        return;
+    }
+    let route = "default";
+    let request_headline = format_v3_console_timed_content(
+        &format!("▶ [{}]", context.endpoint),
+        &format!(
+            "{} req={} route={} target={} reason={}",
+            format_v3_console_request_count(&context.request_identity),
+            context.request_identity.request_id,
+            route,
+            target,
+            reason,
+        ),
+    );
+    let request_debug = format_v3_console_timed_content(
+        "[virtual-router-hit]",
+        &format!(
+            "req={} event=started route={} target={} reason={} rawInputItems={} preparedInputItems={}",
+            context.request_identity.request_id,
+            route,
+            target,
+            reason,
+            raw_input_items,
+            prepared_input_items,
+        ),
+    );
+    let prefix = format_v3_console_human_prefix(
+        &context.state.server.port.to_string(),
+        &context.entry_protocol,
+        context.identity.project_path.as_deref(),
+        target,
+        route,
+    );
+    emit_v3_colorized_request_console_line(
+        &context.state,
+        &request_headline,
+        &request_debug,
+        context.identity.color_key.as_deref(),
+        &prefix,
+        &context.identity.session_id,
+    );
+
+    let response_headline = format_v3_console_timed_content(
+        &format!("✅ [{}]", context.endpoint),
+        &format!(
+            "{} status={} responseStatus=completed finish_reason=stop elapsedMs=0.0 reason={} time_i=0ms time_e=0ms time_t=0.0ms transport=dry_run",
+            format_v3_console_request_count(&context.request_identity),
+            status,
+            reason,
+        ),
+    );
+    let response_debug = format_v3_console_timed_content(
+        &format!("✅ [{}]", context.endpoint),
+        &format!(
+            "req={} event=completed detail=[usage] usage=unreported status={} responseStatus=completed finish_reason=stop elapsedMs=0.0 reason={} [provider-request-dry-run] nodes={} transport=dry_run {}:responses:sessionID:{} [test.wire-test] [{}]",
+            context.request_identity.request_id,
+            status,
+            reason,
+            node_count,
+            context.state.server.port,
+            context.identity.session_id,
+            target,
+        ),
+    );
+    emit_v3_colorized_request_console_line(
+        &context.state,
+        &response_headline,
+        &response_debug,
+        context.identity.color_key.as_deref(),
+        &prefix,
+        &context.identity.session_id,
     );
 }
 
@@ -1424,88 +1512,3 @@ pub(crate) fn parse_v3_console_provider_key(
         [] => (None, None, None),
     }
 }
-
-pub(crate) fn format_v3_usage_request_id(request_id: &str) -> String {
-    let normalized = request_id.trim();
-    let normalized = if normalized.is_empty() {
-        "unknown-request"
-    } else {
-        normalized
-    };
-    if let Some(sequence) = parse_v3_direct_sequence(normalized, '-') {
-        return sequence;
-    }
-    if let Some(rest) = normalized.strip_prefix("req_") {
-        if let Some(sequence) = parse_v3_direct_sequence(rest, '_') {
-            return sequence;
-        }
-    }
-    if let Some(sequence) = parse_v3_trailing_provider_sequence(normalized) {
-        return sequence;
-    }
-    short_v3_request_tail(normalized, 8)
-}
-
-pub(crate) fn parse_v3_direct_sequence(value: &str, delimiter: char) -> Option<String> {
-    let (left, right) = value.split_once(delimiter)?;
-    if !left.is_empty()
-        && !right.is_empty()
-        && left.chars().all(|character| character.is_ascii_digit())
-        && right.chars().all(|character| character.is_ascii_digit())
-    {
-        Some(format!("{left}-{right}"))
-    } else {
-        None
-    }
-}
-
-pub(crate) fn parse_v3_trailing_provider_sequence(value: &str) -> Option<String> {
-    let without_suffix = value.split(':').next().unwrap_or(value);
-    let mut segments = without_suffix.rsplitn(3, '-');
-    let daily = segments.next()?;
-    let total = segments.next()?;
-    if !daily.is_empty()
-        && !total.is_empty()
-        && daily.chars().all(|character| character.is_ascii_digit())
-        && total.chars().all(|character| character.is_ascii_digit())
-    {
-        Some(format!("{total}-{daily}"))
-    } else {
-        None
-    }
-}
-
-pub(crate) fn short_v3_request_tail(value: &str, max_chars: usize) -> String {
-    let chars = value.chars().collect::<Vec<_>>();
-    if chars.len() <= max_chars {
-        return value.to_string();
-    }
-    chars[chars.len() - max_chars..].iter().collect()
-}
-
-pub(crate) fn format_v3_console_project_name(project_path: Option<&str>) -> String {
-    let Some(project) = project_path
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return "-".to_string();
-    };
-    let trimmed = project.trim_end_matches(['/', '\\']);
-    if trimmed.is_empty() {
-        return "-".to_string();
-    }
-    std::path::Path::new(trimmed)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(format_v3_console_safe_label)
-        .filter(|value| value != "-")
-        .unwrap_or_else(|| {
-            trimmed
-                .rsplit(['/', '\\'])
-                .find(|value| !value.trim().is_empty())
-                .map(format_v3_console_safe_label)
-                .unwrap_or_else(|| "-".to_string())
-        })
-}
-
-

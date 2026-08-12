@@ -63,6 +63,16 @@ if (fs.existsSync(path.join(root, deletedNativeBridgePath))) {
   failures.push(`${deletedNativeBridgePath}: retired SSE native TS wrapper must stay physically deleted`);
 }
 
+// Server websocket projection may forward JSON data, but it must not synthesize
+// JSON business type/status from the opaque SSE event field.
+const websocketProjectionPath = 'v3/crates/routecodex-v3-server/src/websocket.rs';
+const websocketProjection = read(websocketProjectionPath);
+for (const forbidden of ['event_name', 'response.event']) {
+  if (websocketProjection.includes(forbidden)) {
+    failures.push(`${websocketProjectionPath}: must not reconstruct JSON semantics from SSE event metadata: ${forbidden}`);
+  }
+}
+
 // TS runtime roots must not import retired TS SSE wrapper paths.
 for (const runtimeRoot of [
   'sharedmodule/llmswitch-core/src/conversion/hub',

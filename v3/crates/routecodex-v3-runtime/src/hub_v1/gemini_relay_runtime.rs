@@ -146,7 +146,7 @@ pub async fn execute_v3_gemini_relay_runtime_with_provider_health<T: ResponsesTr
         input,
         transport,
         provider_health,
-        V3RelayProviderFailureRetryPolicy::default(),
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
     )
     .await
 }

@@ -331,23 +331,23 @@ forbidMatch(
 );
 requireMatch(
   directSseOutcome,
-  /event\s*\.get\("response"\)\s*\.and_then\(Value::as_object\)[\s\S]*requires a response object[\s\S]*provider_response_sse_event_invalid/,
-  "Direct SSE provider failure events must reject a missing response object as provider_response_sse_event_invalid",
+  /classify_v3_provider_responses_json_data\(&data\)[\s\S]*provider_response_sse_event_invalid/,
+  "Direct SSE provider outcome must consume the typed JSON codec result",
 );
-requireMatch(
+forbidMatch(
   directSseOutcome,
-  /response\.error\.code[\s\S]*provider_response_sse_event_invalid[\s\S]*response\.error\.message/,
-  "Direct SSE provider failure events must reject missing error fields as provider_response_sse_event_invalid",
-);
-requireMatch(
-  directSseOutcome,
-  /if sse_event_type != json_event_type[\s\S]*provider Responses SSE event name[\s\S]*does not match JSON type[\s\S]*provider_response_sse_event_invalid/,
-  "Direct SSE provider outcome must reject mismatched SSE event and JSON types",
+  /event_type|sse_event_type|does not match JSON type/,
+  "Direct SSE provider outcome must not use opaque SSE event metadata as semantic source",
 );
 requireMatch(
   kernelTests,
-  /async fn direct_sse_event_name_json_type_mismatch_is_protocol_invalid\(\)[\s\S]*provider_response_sse_event_invalid[\s\S]*does not match JSON type[\s\S]*timing\.is_none\(\)/,
-  "Direct SSE mismatch regression must prove explicit failure without successful timing",
+  /async fn red_sse_semantics_must_use_json_type_not_event_name\(\)[\s\S]*HTTP_429/,
+  "Direct SSE mismatch regression must prove JSON failure authority",
+);
+requireMatch(
+  kernelTests,
+  /async fn red_sse_semantics_ignore_event_name_when_json_is_completed\(\)[\s\S]*results\.iter\(\)\.all\(Result::is_ok\)/,
+  "Direct SSE completed regression must ignore opaque event labels",
 );
 forbidMatch(
   serverProduction,

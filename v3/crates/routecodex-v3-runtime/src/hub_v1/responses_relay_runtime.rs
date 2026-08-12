@@ -17,7 +17,7 @@ use crate::provider_failure_runtime_policy::{
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
     V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolution,
-    V3RelayProviderTargetResolutionInput, V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
+    V3RelayProviderTargetResolutionInput,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};
 use crate::{
@@ -97,6 +97,8 @@ use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
 use responses_relay_json_hooks::*;
 pub use responses_relay_dry_run::{
+    execute_v3_responses_relay_dry_run_runtime_with_local_continuation,
+    execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control,
     execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control,
     project_v3_responses_relay_runtime_failure,
 };
@@ -118,9 +120,6 @@ const V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER: &str = "ProviderRespInbound
 const V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER: &str =
     "V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame";
 const V3_ANTHROPIC_CYBER_REFUSAL_CODE: &str = "ANTHROPIC_CYBER_REFUSAL";
-const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_COUNT: usize =
-    V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET;
-
 pub async fn execute_v3_responses_relay_runtime_with_default_transport(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
@@ -149,7 +148,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_stople
             commit_effects: true,
         }),
         provider_health.runtime_health(),
-        V3ResponsesRelayRetryPolicy::default(),
+        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         None,
         None,
         None,
@@ -187,7 +186,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
             commit_effects: true,
         }),
         provider_health.runtime_health(),
-        V3ResponsesRelayRetryPolicy::default(),
+        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         provider_failure_event_sink,
         local_stopless.route_selection_event_sink.clone(),
         None,
@@ -229,7 +228,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
             commit_effects: true,
         }),
         provider_health.runtime_health(),
-        V3ResponsesRelayRetryPolicy::default(),
+        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         provider_failure_event_sink,
         local_stopless.route_selection_event_sink.clone(),
         Some(initial_selected_target),
@@ -397,7 +396,7 @@ pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
         manifest,
         input,
         transport,
-        V3ResponsesRelayRetryPolicy::default(),
+        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
     )
     .await
 }
@@ -481,7 +480,7 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
             commit_effects: true,
         }),
         provider_health.runtime_health(),
-        V3ResponsesRelayRetryPolicy::default(),
+        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         None,
         None,
         None,
@@ -563,7 +562,13 @@ async fn handle_v3_responses_relay_provider_failure(
         }
         V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
             *state.retry_selected = result.retry_selected.map(|selected| *selected);
-            *state.pending_recovery = Some(recovery);
+            // 瞬态重试（request-local recovery witness，wait_ms=None）不经过
+            // provider action gate：无 health 记录可等，立即重发。
+            if result.event.wait_ms.is_some() {
+                *state.pending_recovery = Some(recovery);
+            } else {
+                *state.pending_recovery = None;
+            }
             Ok(None)
         }
         V3Error05ExecutionAction::ProjectTerminal => {
