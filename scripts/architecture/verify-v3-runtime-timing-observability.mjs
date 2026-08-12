@@ -126,7 +126,8 @@ const runtimeObservability = relayRuntime.slice(
     relayRuntime.indexOf("pub struct V3RuntimeObservability"),
   ) + 2,
 );
-const kernel = readRequired(kernelPath);
+const kernel = readRequired(kernelPath)
+  + '\n' + readRequired(path.join(root, 'v3/crates/routecodex-v3-runtime/src/kernel/direct_resp15_finalize.rs'));
 const directState = readRequired(directStatePath);
 const directSseOutcome = readRequired(directSseOutcomePath);
 const directRuntimeHelpers = readRequired(directRuntimeHelpersPath);

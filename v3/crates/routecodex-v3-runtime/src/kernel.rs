@@ -69,154 +69,8 @@ static DEFAULT_RESPONSES_TRANSPORT: OnceLock<ReqwestResponsesTransport> = OnceLo
 pub fn default_responses_transport() -> &'static ReqwestResponsesTransport {
     DEFAULT_RESPONSES_TRANSPORT.get_or_init(ReqwestResponsesTransport::default)
 }
+include!("kernel/direct_kernel_entrypoints.rs");
 include!("kernel/direct_state.rs");
-pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation(
-    state: &V3ResponsesDirectContinuationState,
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    continuation_scope: V3ResponsesDirectContinuationScope,
-    hook_registry: V3HookRegistry,
-    debug: &V3DebugRuntime,
-    now_epoch_ms: u64,
-) -> V3ResponsesDirectRuntimeOutput {
-    let stopless_control = V3ResponsesDirectStoplessControlState::default();
-    let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
-    execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
-        V3ResponsesDirectRuntimeCoreState::with_continuation(
-            state,
-            continuation_scope,
-            now_epoch_ms,
-        )
-        .with_stopless_control(&stopless_control, stopless_scope),
-        manifest,
-        raw,
-        hook_registry,
-        default_responses_transport(),
-        debug,
-    )
-    .await
-}
-pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
-    shared_state: V3ResponsesDirectRuntimeSharedState<'_>,
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    continuation_scope: V3ResponsesDirectContinuationScope,
-    hook_registry: V3HookRegistry,
-    debug: &V3DebugRuntime,
-    now_epoch_ms: u64,
-) -> V3ResponsesDirectRuntimeOutput {
-    let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
-    execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
-        V3ResponsesDirectRuntimeCoreState::with_continuation(
-            shared_state.continuation_state,
-            continuation_scope,
-            now_epoch_ms,
-        )
-        .with_stopless_control(shared_state.stopless_control, stopless_scope)
-        .with_provider_health(shared_state.provider_health)
-        .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
-        .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone()),
-        manifest,
-        raw,
-        hook_registry,
-        default_responses_transport(),
-        debug,
-    )
-    .await
-}
-pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
-    shared_state: V3ResponsesDirectRuntimeSharedState<'_>,
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    continuation_scope: V3ResponsesDirectContinuationScope,
-    hook_registry: V3HookRegistry,
-    debug: &V3DebugRuntime,
-    now_epoch_ms: u64,
-    initial_plan: &V3ResponsesProtocolExecutionPlan,
-    observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
-) -> V3ResponsesDirectRuntimeOutput {
-    let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
-    execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
-        V3ResponsesDirectRuntimeCoreState::with_continuation(
-            shared_state.continuation_state,
-            continuation_scope,
-            now_epoch_ms,
-        )
-        .with_stopless_control(shared_state.stopless_control, stopless_scope)
-        .with_provider_health(shared_state.provider_health)
-        .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
-        .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
-        .with_initial_plan(initial_plan)
-        .with_observability_accumulator(observability_accumulator),
-        manifest,
-        raw,
-        hook_registry,
-        default_responses_transport(),
-        debug,
-    )
-    .await
-}
-include!("kernel/direct_protocol_plan.rs");
-pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    hook_registry: V3HookRegistry,
-    transport: &T,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation(),
-        manifest,
-        raw,
-        hook_registry,
-        transport,
-    )
-    .await
-}
-pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation<T: ResponsesTransport>(
-    state: &V3ResponsesDirectContinuationState,
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    scope: V3ResponsesDirectContinuationScope,
-    hook_registry: V3HookRegistry,
-    transport: &T,
-    now_epoch_ms: u64,
-) -> V3ResponsesDirectRuntimeOutput {
-    let stopless_control = V3ResponsesDirectStoplessControlState::default();
-    execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
-        state,
-        &stopless_control,
-        manifest,
-        raw,
-        scope,
-        hook_registry,
-        transport,
-        now_epoch_ms,
-    )
-    .await
-}
-pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control<
-    T: ResponsesTransport,
->(
-    state: &V3ResponsesDirectContinuationState,
-    stopless_control: &V3ResponsesDirectStoplessControlState,
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    scope: V3ResponsesDirectContinuationScope,
-    hook_registry: V3HookRegistry,
-    transport: &T,
-    now_epoch_ms: u64,
-) -> V3ResponsesDirectRuntimeOutput {
-    let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&scope);
-    execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::with_continuation(state, scope, now_epoch_ms)
-            .with_stopless_control(stopless_control, stopless_scope),
-        manifest,
-        raw,
-        hook_registry,
-        transport,
-    )
-    .await
-}
 async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
     state: V3ResponsesDirectRuntimeCoreState<'_>,
     manifest: &V3Config05ManifestPublished,
@@ -1418,76 +1272,38 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             if let (Some(continuation_state), Some(scope)) =
                 (continuation_state, continuation_scope.as_ref())
             {
-                let body = std::mem::replace(
+                wrap_v3_direct_sse_remote_stream_for_outcome(
                     &mut response_projection.client_payload.body,
-                    V3ClientBody::Bytes(Vec::new()),
-                );
-                response_projection.client_payload.body = match body {
-                    V3ClientBody::Sse(stream) => {
-                        let policy = V3DirectSseRemoteContinuationPolicy {
-                            state: continuation_state.clone(),
-                            scope_key: scope.key.clone(),
-                            previous_response_id: previous_response_id.clone(),
-                            selected_pin: selected_pin.clone(),
-                            selected_capability_revision: selected_capability_revision.clone(),
-                            now_epoch_ms,
-                            committed_pending: false,
-                        };
-                        V3ClientBody::Sse(wrap_direct_sse_remote_continuation_stream(
-                            stream,
-                            state.clone(),
-                            policy,
-                        ))
-                    }
-                    other => other,
-                };
-            }
-            let body = std::mem::replace(
+                    continuation_state.clone(),
+                    scope,
+                    previous_response_id.clone(),
+                selected_pin.clone(),
+                selected_capability_revision.clone(),
+                now_epoch_ms,
+                state.clone(),
+            );
+            wrap_v3_direct_sse_provider_stream_for_outcome(
                 &mut response_projection.client_payload.body,
-                V3ClientBody::Bytes(Vec::new()),
+                provider_health.clone(),
+                &direct_failure_session_scope,
+                &policy,
+                provider_health_neutral,
+                &mut provider_action_permit,
+                runtime_timing.clone(),
+                stream_observation.clone(),
             );
-            response_projection.client_payload.body = match body {
-                V3ClientBody::Sse(stream) => {
-                    V3ClientBody::Sse(wrap_direct_sse_provider_outcome_stream(
-                        stream,
-                        V3DirectSseProviderOutcome {
-                            provider_health: provider_health.clone(),
-                            failure_session_scope: direct_failure_session_scope.clone(),
-                            provider_id: policy.target.candidate.provider_id.clone(),
-                            auth_alias: policy.target.candidate.auth_alias.clone(),
-                            model_id: policy.target.candidate.model_id.clone(),
-                            terminal: false,
-                            seen_done: false,
-                            recorded: false,
-                            provider_health_neutral,
-                            _provider_action_permit: provider_action_permit.take(),
-                        },
-                        runtime_timing.clone(),
-                        stream_observation.clone(),
-                    ))
-                }
-                other => other,
-            };
-            trace.push("V3DirectResp15ClientPayloadReady");
-            trace.push("V3Resp15ClientPayload");
-
-            let mut observability = build_v3_direct_runtime_observability(
-                &policy.target,
-                v3_direct_client_transport_label(&response_projection.client_payload),
-                Some(provider_status),
-                "streaming",
-                provider_failure_events.clone(),
+            }
+            return finalize_v3_direct_resp15_streaming_output(
+                &policy,
+                provider_status,
+                provider_failure_events,
                 direct_stopless_request_state.is_some(),
+                &accumulator,
+                send_attempts,
+                response_projection,
+                stream_observation,
+                &mut trace,
             );
-            observability.attempts = Some(total_attempts(&accumulator, send_attempts));
-            return V3ResponsesDirectRuntimeOutput {
-                observability: Some(observability),
-                stream_observation: Some(stream_observation),
-                client_payload: response_projection.client_payload,
-                node_trace: trace,
-                error_chain: None,
-                protocol_relay_handoff: None,
-            };
         }
         if let (Some(_state), Some(scope)) = (continuation_state, continuation_scope.as_ref()) {
             if let Err(projected) = commit_or_release_v3_direct_continuation(
@@ -1552,5 +1368,6 @@ include!("kernel/direct_stopless.rs");
 include!("kernel/direct_runtime_helpers.rs");
 include!("kernel/v3_direct_core.rs");
 include!("kernel/direct_continuation_commit.rs");
+include!("kernel/direct_resp15_finalize.rs");
 #[cfg(test)]
 mod tests;

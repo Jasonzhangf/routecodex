@@ -7,7 +7,6 @@
     "/tests/"
   ],
   "ratchet_whitelist": {
-    "v3/crates/routecodex-v3-runtime/src/kernel.rs": 1556,
     "v3/crates/routecodex-v3-runtime/src/kernel/tests.rs": 1740
   }
 }
