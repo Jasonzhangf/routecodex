@@ -25,6 +25,7 @@ const paths = {
   providerReqCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+  responsesRuntimeInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   responsesRuntimeTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
   responsesOpenaiChatConversion: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
   anthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
@@ -822,7 +823,7 @@ for (const [key, expected] of [
   ['from_node', 'ProviderReqCompat06ProviderCompat'],
   ['to_node', 'V3Error05ExecutionDecision'],
   ['caller_symbol', 'execute_v3_responses_relay_runtime_inner'],
-  ['caller_file', paths.responsesRuntime],
+  ['caller_file', paths.responsesRuntimeInner],
   ['callee_symbol', 'handle_v3_responses_relay_provider_failure'],
   ['callee_file', paths.responsesRuntime],
 ]) {

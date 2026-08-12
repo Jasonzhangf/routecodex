@@ -1809,7 +1809,7 @@ chains:
     caller_symbol: wrap_direct_sse_provider_outcome_stream
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
     callee_symbol: record_timing
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
     owner_feature_id: v3.runtime_timing_observability
     semantic_input: typed Direct SSE Runtime timing summary after clean EOF and terminal
       validation

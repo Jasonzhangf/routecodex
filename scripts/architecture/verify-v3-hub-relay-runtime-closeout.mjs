@@ -27,7 +27,9 @@ const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_stopless.rs', 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs', 'utf8');
+  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs', 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs', 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs', 'utf8');
 const responsesRelayJsonHooks = readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs', 'utf8');
 const responsesProviderEventCodec = readFileSync(responsesProviderEventCodecPath, 'utf8');
 const responsesProviderStreamMaterialization = readFileSync(
@@ -295,14 +297,22 @@ requireCount(
   'let (\n                    action,\n                    mut finalized_provider_value,\n                    response_stopless_state,\n                    response_web_search_state,\n                ) =',
   2,
 );
-requireOrderedSequence(responsesRuntime, responsesRuntimePath, [
-  'V3ProviderResponseBody::Sse(stream) => {',
-  'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
-  'let (\n                    action,\n                    mut finalized_provider_value,\n                    response_stopless_state,\n                    response_web_search_state,\n                ) =',
-  'run_json_response_hooks(',
-  'commit_or_release_responses_local_continuation(',
+requireOrderedSequence(
+  readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs', 'utf8'),
+  responsesRuntimePath + '::inner',
+  [
+    'V3ProviderResponseBody::Sse(stream) => {',
+    'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
+    'let (\n                    action,\n                    mut finalized_provider_value,\n                    response_stopless_state,\n                    response_web_search_state,\n                ) =',
+    'run_json_response_hooks(',
+    'commit_or_release_responses_local_continuation(',
+  ],
+);
+requireText(
+  responsesRuntime,
+  responsesRuntimePath,
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
-]);
+);
 forbid(responsesRuntime, responsesRuntimePath, [
   /struct\s+V3ResponsesRelayExcludedAvailability\b/,
   /struct\s+V3ResponsesRelayProviderFailureContext\b/,

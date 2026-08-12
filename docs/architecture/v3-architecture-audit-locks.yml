@@ -53,7 +53,7 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:ec52486bae2f975f5d074093398d63f474861552068a3144acd24e2dcf1e4ef4
+    fingerprint: sha256:0dede5f24ffddbdddf50f09d922acccec3ed323f8d3dffeb69aa76cb79490a54
     last_manual_authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths
   - item_id: chain:v3.server.startup
     chain_id: v3.server.startup
@@ -62,7 +62,7 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:18ce0b024407c0b13e63b595954ecaf24fa19b2fe8c42a2789503cd6181f13dc
+    fingerprint: sha256:6723629cdf05ebc91d9a951f9e255cf89b6c4ee326544fc451b11a222f68d4ca
     last_manual_authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-server-startup
   - item_id: chain:v3.responses_direct.required_mainline
     chain_id: v3.responses_direct.required_mainline
@@ -71,7 +71,7 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:0cd7c8563436a51a61a51b6aa2c5730a9f9427b3f13d206cab242675ced62c63
+    fingerprint: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
     last_manual_authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-responses-direct
   - item_id: chain:v3.hub_pipeline.v1.request
     chain_id: v3.hub_pipeline.v1.request
@@ -97,7 +97,7 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:4aea8acecaffbc6347c4b169d54554a1462783161667c3a83616cccfc4071d14
+    fingerprint: sha256:e96820574fa6d0c2a9f5a635397c754566241991108e54b6018dc16e8e031089
     last_manual_authorization_id: auth-20260811-v3-god-file-decomposition
   - item_id: chain:v3.debug_error_foundation.mainline
     chain_id: v3.debug_error_foundation.mainline
@@ -123,22 +123,22 @@ manual_authorizations:
     approved_by: Jason
     approved_at: '2026-08-11T15:45:00+08:00'
     reason: "Same Jason authorization as auth-20260811-v3-god-file-decomposition: mainline-call-map edge caller/callee file paths moved to the decomposed server submodules (console/impl_bulk.rs, frame_builders.rs, request_id.rs, websocket.rs, executors.rs, endpoint_handlers.rs). No symbol, edge, owner or resource semantics changed."
-    fingerprint_before: sha256:9ebd6fe03f79c332e18760ccde292cb7fffb90cbd07b1fb1c2ccf9bbeee8b0f6
-    fingerprint_after: sha256:ec52486bae2f975f5d074093398d63f474861552068a3144acd24e2dcf1e4ef4
+    fingerprint_before: sha256:ec52486bae2f975f5d074093398d63f474861552068a3144acd24e2dcf1e4ef4
+    fingerprint_after: sha256:0dede5f24ffddbdddf50f09d922acccec3ed323f8d3dffeb69aa76cb79490a54
   - authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-server-startup
     item_id: chain:v3.server.startup
     approved_by: Jason
     approved_at: '2026-08-11T15:45:00+08:00'
     reason: "Same Jason authorization as auth-20260811-v3-god-file-decomposition: edge caller/callee file paths moved to decomposed server submodules."
-    fingerprint_before: sha256:f266fbe1eab21df845296ae90bccff940cb80b71875af9ccfa1086ac1aa46ac0
-    fingerprint_after: sha256:18ce0b024407c0b13e63b595954ecaf24fa19b2fe8c42a2789503cd6181f13dc
+    fingerprint_before: sha256:18ce0b024407c0b13e63b595954ecaf24fa19b2fe8c42a2789503cd6181f13dc
+    fingerprint_after: sha256:6723629cdf05ebc91d9a951f9e255cf89b6c4ee326544fc451b11a222f68d4ca
   - authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-responses-direct
     item_id: chain:v3.responses_direct.required_mainline
     approved_by: Jason
     approved_at: '2026-08-11T15:45:00+08:00'
     reason: "Same Jason authorization as auth-20260811-v3-god-file-decomposition: edge caller/callee file paths moved to decomposed server submodules."
-    fingerprint_before: sha256:748b132377095dbcb9c2740867cf099296d207c54ae6cac37ff3237572b70e00
-    fingerprint_after: sha256:0cd7c8563436a51a61a51b6aa2c5730a9f9427b3f13d206cab242675ced62c63
+    fingerprint_before: sha256:0cd7c8563436a51a61a51b6aa2c5730a9f9427b3f13d206cab242675ced62c63
+    fingerprint_after: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
   - authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-sse
     item_id: chain:v3.sse.transport_boundary
     approved_by: Jason
@@ -151,8 +151,8 @@ manual_authorizations:
     approved_by: Jason
     approved_at: '2026-08-11T15:30:00+08:00'
     reason: "Jason explicitly approved the audit-lock refresh after the god-file decomposition work (server lib.rs split into console/endpoint_handlers/websocket/live_snapshot/scope_metadata/executors/frame_builders submodules; responses relay split into tests/conversion/failures/dry-run/json-hooks/stopless submodules). Chain structure, owners, edges and resources are unchanged; only caller/callee file paths moved."
-    fingerprint_before: sha256:99d045db07dc7885fbfdfa29127d968fddd293fd8a34f7f3ad71d6d2f3a90689
-    fingerprint_after: sha256:4aea8acecaffbc6347c4b169d54554a1462783161667c3a83616cccfc4071d14
+    fingerprint_before: sha256:4aea8acecaffbc6347c4b169d54554a1462783161667c3a83616cccfc4071d14
+    fingerprint_after: sha256:e96820574fa6d0c2a9f5a635397c754566241991108e54b6018dc16e8e031089
   - authorization_id: auth-20260806-v3-responses-direct-history-immutability
     item_id: chain:v3.responses_direct.required_mainline
     approved_by: Jason

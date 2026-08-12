@@ -116,7 +116,9 @@ function parseYaml(source, label) {
 
 const runtimeTiming = readRequired(runtimeTimingPath);
 const runtimeLib = readRequired(runtimeLibPath);
-const relayRuntime = readRequired(relayRuntimePath);
+const relayRuntime = readRequired(relayRuntimePath)
+  + '\n' + readRequired(path.join(root, 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs'))
+  + '\n' + readRequired(path.join(root, 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs'));
 const runtimeObservability = relayRuntime.slice(
   relayRuntime.indexOf("pub struct V3RuntimeObservability"),
   relayRuntime.indexOf(
@@ -510,7 +512,7 @@ for (const [source, label] of [
       "wrap_direct_sse_provider_outcome_stream" ||
     directTimingPublication?.callee_symbol !== "record_timing" ||
     directTimingPublication?.callee_file !==
-      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs"
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs"
   ) {
     failures.push(
       `${label} timing edge 12 must bind Direct SSE timing publication to record_timing`,

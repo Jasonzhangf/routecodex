@@ -48,7 +48,9 @@ const snapshotContract = readText(paths.snapshotContract);
 const designContract = readText(paths.designContract);
 const stoplessSop = readText(paths.stoplessSop);
 const hubSource = [readText(paths.hub), readText(paths.hubCommon)].join('\n');
-const runtimeSource = readText(paths.runtime);
+const runtimeSource = readText(paths.runtime)
+  + '\n' + readText('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs')
+  + '\n' + readText('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs');
 const stoplessSource = readText(paths.stopless);
 const directRuntimeSource = [
   readText(paths.directRuntime),
