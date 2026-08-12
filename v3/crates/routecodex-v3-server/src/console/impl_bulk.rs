@@ -165,20 +165,21 @@ pub(crate) fn emit_v3_provider_failure_console_event(
         let switch_content =
             format_v3_provider_switch_console_content(&context.request_identity.request_id, event);
         let switch_content_str = switch_content.as_str();
-        emit_v3_colorized_request_console_line(
-            &context.state,
+        let switch_human_prefix = format_v3_console_human_prefix_for_observability(
+            &context.state.server.port.to_string(),
+            &context.entry_protocol,
+            identity.project_path.as_deref(),
+            &event_observability,
+            &route.label,
+        );
+        let colorized_switch = colorize_v3_error_console_line(
+            &switch_human_prefix,
             switch_content_str,
             switch_content_str,
-            identity.color_key.as_deref(),
-            &format_v3_console_human_prefix_for_observability(
-                &context.state.server.port.to_string(),
-                &context.entry_protocol,
-                identity.project_path.as_deref(),
-                &event_observability,
-                &route.label,
-            ),
             &identity.session_id,
         );
+        append_v3_human_console_line(&context.state, &colorized_switch);
+        eprintln!("{colorized_switch}");
     }
 }
 
@@ -235,10 +236,11 @@ pub(crate) fn format_v3_provider_failure_console_content(
         .unwrap_or_else(|| "-".to_string());
     let mut fields = if event.action == "switch_provider" && event.next_provider_key.is_some() {
         format!(
-            "req={} [switch to:{}] [switch from:{}] result={} causeStatus={} failures={} health={}",
+            "req={} [switch to:{}] [switch from:{}] model={} result={} causeStatus={} failures={} health={}",
             request_id,
             next,
             provider,
+            event.model_id,
             event.action,
             event.status,
             event.failure_count,
@@ -246,9 +248,10 @@ pub(crate) fn format_v3_provider_failure_console_content(
         )
     } else {
         format!(
-            "req={} target={} result={} next={} causeStatus={} failures={} health={}",
+            "req={} target={} model={} result={} next={} causeStatus={} failures={} health={}",
             request_id,
             provider,
+            event.model_id,
             event.action,
             next,
             event.status,
@@ -297,8 +300,16 @@ pub(crate) fn format_v3_provider_switch_console_content(
     format_v3_console_timed_content(
         "[provider-switch]",
         &format!(
-            "req={} [switch to:{}] [switch from:{}] result={} reason=provider_failure causeStatus={} failures={} health={} message={}",
-            request_id, target, from, event.action, event.status, event.failure_count, event.health_state, event.message
+            "req={} [switch to:{}] [switch from:{}] model={} result={} reason=provider_failure causeStatus={} failures={} health={} message={}",
+            request_id,
+            target,
+            from,
+            event.model_id,
+            event.action,
+            event.status,
+            event.failure_count,
+            event.health_state,
+            format_v3_console_single_line_message(&event.message)
         ),
     )
 }

@@ -1465,11 +1465,13 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
     assert!(error_content.contains("health=cooldown"));
     assert!(error_content.contains("external=transport"));
     assert!(error_content.contains("externalCode=TRANSPORT_ERROR"));
+    assert!(error_content.contains("model=gpt-5.5"));
     let switch_content = format_v3_provider_switch_console_content("req-provider-switch", &event);
     assert!(switch_content.contains("[provider-switch]"));
     assert!(switch_content.contains(
-        "[switch to:minimax[key1].MiniMax-M3] [switch from:limited[key1].gpt-5.5] result=switch_provider"
+        "[switch to:minimax[key1].MiniMax-M3] [switch from:limited[key1].gpt-5.5] model=gpt-5.5 result=switch_provider"
     ));
+    assert!(switch_content.contains("model=gpt-5.5"));
     assert!(
         switch_content
             .find("[switch to:minimax[key1].MiniMax-M3]")

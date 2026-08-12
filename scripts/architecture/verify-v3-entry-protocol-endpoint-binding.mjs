@@ -126,6 +126,17 @@ function read(rel) {
   }
 }
 
+// 并行 worker 用 include!("kernel/xxx.rs") 内联子模块：文本扫描需展开 include 才能看到符号。
+function readWithIncludes(rel) {
+  let source = read(rel);
+  const includePattern = /include!\("([^"]+)"\)/g;
+  for (const match of source.matchAll(includePattern)) {
+    const includeRel = path.join(path.dirname(rel), match[1]);
+    source += '\n' + read(includeRel);
+  }
+  return source;
+}
+
 function parseYaml(rel) {
   try {
     return YAML.parse(read(rel));
@@ -313,7 +324,7 @@ function verifyServerSource(server, parsedManifest) {
       binding.runtime_owner_symbol &&
       binding.runtime_owner_path
     ) {
-      const ownerSource = read(binding.runtime_owner_path);
+      const ownerSource = readWithIncludes(binding.runtime_owner_path);
       if (!ownerSource) {
         failures.push(
           `${files.manifest}: ${binding.entry_protocol} runtime_owner_path ${binding.runtime_owner_path} is unreadable`,
