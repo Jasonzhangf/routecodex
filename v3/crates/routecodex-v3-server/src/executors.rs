@@ -310,15 +310,14 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                             }
                         },
                         Err(error) => {
-                            // 骨架级错误（非 provider 失败）：投影 SSE error 帧。
-                            let error_frame = serde_json::json!({
-                                "error": {
-                                    "message": format!("relay runtime error: {error}"),
-                                    "type": "relay_runtime_error",
-                                    "code": "relay_runtime_error",
-                                }
-                            });
-                            let bytes = serde_json::to_vec(&error_frame).unwrap_or_default();
+                            // 复用 runtime typed 投影（Error01-06 链），禁止
+                            // handler 手拼错误帧旁路错误链。
+                            let projected = project_v3_openai_chat_relay_runtime_failure(error);
+                            let V3OpenAiChatRelayClientBody::Json(body) = projected.client_body
+                            else {
+                                return;
+                            };
+                            let bytes = serde_json::to_vec(&body).unwrap_or_default();
                             let mut frame = Vec::with_capacity(bytes.len() + 8);
                             frame.extend_from_slice(b"data: ");
                             frame.extend_from_slice(&bytes);

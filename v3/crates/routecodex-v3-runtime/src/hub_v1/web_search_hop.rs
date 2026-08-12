@@ -42,7 +42,8 @@ use crate::provider_failure_runtime_policy::{
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{V3ErrorSourceKind, V3ProviderFailureSessionScope};
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload, ResponsesTransport, V3ProviderResponseBody,
+    build_v3_provider_12_responses_wire_payload, ResponsesTransport, V3ProviderError,
+    V3ProviderResponseBody,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -251,10 +252,40 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
             "search_hop_in_flight",
         )
         .map_err(|reason| V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(reason))?;
-    let provider_raw = transport
-        .send(transport_request)
-        .await
-        .map_err(V3ResponsesRelayRuntimeError::Provider)?;
+    // 搜索 hop 是 Resp03 内的独立 provider 往返：必须受标准 transport 超时
+    // 约束（防止搜索后端挂起无限阻塞主响应），失败记录搜索 provider health
+    // （冷却），错误显式上抛进入主请求错误链（禁止降级吞错）。
+    let provider_raw = match tokio::time::timeout(
+        crate::hub_v1::relay_runtime_core::V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT,
+        transport.send(transport_request),
+    )
+    .await
+    {
+        Ok(Ok(raw)) => raw,
+        Ok(Err(error)) => {
+            record_web_search_hop_failure(
+                provider_health,
+                failure_session_scope,
+                &selected.candidate,
+                Some(&error.to_string()),
+            );
+            return Err(V3ResponsesRelayRuntimeError::Provider(error));
+        }
+        Err(_) => {
+            let timeout_reason = "web search hop response header timed out".to_string();
+            record_web_search_hop_failure(
+                provider_health,
+                failure_session_scope,
+                &selected.candidate,
+                Some(&timeout_reason),
+            );
+            return Err(V3ResponsesRelayRuntimeError::Provider(V3ProviderError::Transport {
+                request_id: request_id.to_string(),
+                provider_id: selected.candidate.provider_id.clone(),
+                reason: timeout_reason,
+            }));
+        }
+    };
     // 5. 响应归一化：仅接受 JSON body，提取 message 文本作为 text_result。
     let text_result = match provider_raw.into_body() {
         V3ProviderResponseBody::Json(bytes) => {
@@ -284,6 +315,24 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
             "text_result": text_result
         })));
     Ok(captured)
+}
+
+/// 搜索 hop 失败时记录搜索 provider health（冷却），防止持续失败的搜索后端
+/// 反复命中；health 记录失败不改变主错误语义（side-effect，显式忽略）。
+fn record_web_search_hop_failure(
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    failure_session_scope: &V3ProviderFailureSessionScope,
+    candidate: &routecodex_v3_target::V3TargetCandidate,
+    reason: Option<&str>,
+) {
+    let _ = provider_health.record_provider_failure_record(
+        failure_session_scope,
+        &candidate.provider_id,
+        Some(&candidate.auth_alias),
+        Some(&candidate.model_id),
+        reason,
+        v3_relay_provider_policy_now_epoch_ms().unwrap_or_default(),
+    );
 }
 
 /// 把搜索 hop 结果投影到客户端可见的 finalized 响应：追加 hosted
