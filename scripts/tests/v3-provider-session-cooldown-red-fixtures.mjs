@@ -37,6 +37,7 @@ const copied = [
   "docs/architecture/v3-verification-map.yml",
   "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
   "package.json",
+  "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs",
 ];
 
 const cases = [
@@ -201,7 +202,7 @@ const cases = [
   },
   {
     name: "Responses Relay drops typed scope",
-    path: copied[8],
+    path: copied[20],
     mutate: (source) =>
       source.replace(
         "    pub failure_session_scope: V3ProviderFailureSessionScope,",

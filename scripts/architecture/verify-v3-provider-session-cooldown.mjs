@@ -102,6 +102,8 @@ const files = {
     "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
   responses:
     "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
+  responsesTypes:
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs",
   openaiChat:
     "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs",
   anthropic:
@@ -120,6 +122,9 @@ const files = {
 const source = Object.fromEntries(
   Object.entries(files).map(([key, relativePath]) => [key, readRequired(relativePath)]),
 );
+// 并行 worker 拆分：responses relay 类型（RuntimeInput/Output 等）迁至 responses_relay_types.rs，
+// 会话冷却门禁同时覆盖主文件与类型文件。
+source.responses = source.responses + '\n' + source.responsesTypes;
 
 requireMatch(
   source.error,

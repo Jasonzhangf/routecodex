@@ -16,6 +16,7 @@ const files = {
   directExactPinTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
   directSse: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs',
   responses: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+  responsesInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   responsesFailures: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs',
   responsesRelayUnitTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs',
   serverConsole: 'v3/crates/routecodex-v3-server/src/console/impl_bulk.rs',
@@ -286,7 +287,7 @@ const requiredV3Edges = [
     from_node: 'ProviderReqCompat06ProviderCompat',
     to_node: 'V3Error05ExecutionDecision',
     caller_symbol: 'execute_v3_responses_relay_runtime_inner',
-    caller_file: files.responses,
+    caller_file: files.responsesInner,
     callee_symbol: 'handle_v3_responses_relay_provider_failure',
     callee_file: files.responses,
     call_witness: /\bhandle_v3_responses_relay_provider_failure\s*\(/u,
@@ -298,7 +299,7 @@ const requiredV3Edges = [
     from_node: 'V3ProviderReqOutbound08WirePayload',
     to_node: 'V3Error05ExecutionDecision',
     caller_symbol: 'execute_v3_responses_relay_runtime_inner',
-    caller_file: files.responses,
+    caller_file: files.responsesInner,
     callee_symbol: 'handle_v3_responses_relay_provider_failure',
     callee_file: files.responses,
     call_witness: /\bhandle_v3_responses_relay_provider_failure\s*\(/u,
@@ -394,7 +395,7 @@ const requiredV3Edges = [
     from_node: 'V3Error05RecoveryWitness',
     to_node: 'V3ProviderActionGateAdmission',
     caller_symbol: 'execute_v3_responses_relay_runtime_inner',
-    caller_file: files.responses,
+    caller_file: files.responsesInner,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::wait_for_error05_recovery',
     callee_file: files.policy,
     call_witness: /\bprovider_health\s*\.\s*wait_for_error05_recovery\s*\(/u,
@@ -493,7 +494,7 @@ const requiredV3Edges = [
     from_node: 'V3ProviderActionGateAdmission',
     to_node: 'V3ProviderActionPermitInFlight',
     caller_symbol: 'execute_v3_responses_relay_runtime_inner',
-    caller_file: files.responses,
+    caller_file: files.responsesInner,
     callee_symbol: 'V3ProviderActionAdmission::take_permit',
     callee_file: files.gate,
     call_witness: /\badmission\s*\.\s*take_permit\s*\(/u,
@@ -554,7 +555,7 @@ const requiredV3Edges = [
     from_node: 'V3ProviderActionPermitInFlight',
     to_node: 'V3ProviderActionPermitAbandonRequested',
     caller_symbol: 'execute_v3_responses_relay_runtime_inner',
-    caller_file: files.responses,
+    caller_file: files.responsesInner,
     callee_symbol: 'V3ProviderActionPermit::drop',
     callee_file: files.gate,
     call_witness: /\bdrop\s*\(\s*_provider_action_permit\.take\(\)\s*\)/u,
@@ -795,7 +796,7 @@ const requiredV3Edges = [
     from_node: 'V3ProviderActionPermitInFlight',
     to_node: 'V3ProviderActionSuccessRecorded',
     caller_symbol: 'execute_v3_responses_relay_runtime_inner',
-    caller_file: files.responses,
+    caller_file: files.responsesInner,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
     callee_file: files.policy,
     call_witness: /\bprovider_health\s*\.\s*record_provider_success_in_failure_scope\s*\(/u,
@@ -959,6 +960,9 @@ for (const rel of Object.values(files)) {
   if (!fs.existsSync(abs(rel))) failures.push(`${rel}: missing required file`);
 }
 const text = Object.fromEntries(Object.entries(files).map(([key, rel]) => [key, read(rel)]));
+// 并行 worker 拆分：responses relay 执行函数迁至 responses_relay_runtime_inner.rs，
+// gate 语义（provider 动作门禁/恢复）同时覆盖主文件与 inner 执行体。
+text.responses = text.responses + '\n' + text.responsesInner;
 
 for (const token of [
   '"ProviderReqCompat06ProviderCompat"',
