@@ -192,7 +192,6 @@ The matrix is required as one mixed request, not only one test per field. This l
 | `finish_reason` | `finish_reason` and status terminality | response matrix |
 | `usage.prompt_tokens/completion_tokens/total_tokens` | `usage.input_tokens/output_tokens/total_tokens` | response matrix |
 | malformed custom-tool wrapper | explicit error, not `{}` or text fallback | negative test |
-| function `parameters` schema-position `[REDACTED]` placeholder | adjacent OpenAI Chat/Responses codec fails fast before provider wire; debug redaction placeholders must not be widened into provider JSON Schema | `openai_chat_function_tool_redacted_schema_placeholders_fail_fast` / `openai_responses_function_tool_redacted_schema_placeholders_fail_fast` |
 | Responses function history `id` with a non-`fc_` provider prefix | adjacent Responses outbound codec deterministically projects the item id to `fc_*` and applies the same id to the paired `function_call_output`; `call_id` remains unchanged | `responses_wire_projects_non_fc_function_item_ids_to_matching_fc_ids` |
 | Responses custom-tool history `id` | adjacent Responses outbound codec preserves the opaque provider-owned custom item id for both `custom_tool_call` and its paired output; function-only `fc_*` normalization must not run | `responses_wire_preserves_custom_tool_item_ids` |
 

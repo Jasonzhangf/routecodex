@@ -4,10 +4,7 @@ use crate::protocol_tables::{
 };
 use serde_json::{json, Map, Value};
 
-use super::request_outbound_builtin_tool_projection::{
-    normalize_json_schema_redaction_placeholders,
-    project_openai_chat_provider_tools_for_web_search_mode,
-};
+use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode;
 use super::request_outbound_metadata::{
     project_openai_chat_reasoning_summary_policy, project_openai_client_metadata_to_metadata,
     validate_openai_metadata,
@@ -146,33 +143,8 @@ fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<
             object.insert("instructions".to_string(), Value::String(instructions));
         }
     }
-    normalize_responses_function_tool_schema_redaction_placeholders(&mut normalized)?;
     normalize_responses_target_token_and_logprob_fields(&mut normalized);
     Ok(normalized)
-}
-
-fn normalize_responses_function_tool_schema_redaction_placeholders(
-    payload: &mut Value,
-) -> Result<(), String> {
-    let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
-        return Ok(());
-    };
-    for (index, tool) in tools.iter_mut().enumerate() {
-        let Some(tool_row) = tool.as_object_mut() else {
-            continue;
-        };
-        if tool_row.get("type").and_then(Value::as_str) != Some("function") {
-            continue;
-        }
-        if let Some(parameters) = tool_row.get_mut("parameters") {
-            normalize_json_schema_redaction_placeholders(
-                parameters,
-                true,
-                &format!("$.tools[{index}].parameters"),
-            )?;
-        }
-    }
-    Ok(())
 }
 
 fn responses_input_accepts_system_instruction_prefix(payload: &Value) -> bool {

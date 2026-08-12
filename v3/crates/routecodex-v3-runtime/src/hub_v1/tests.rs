@@ -81,23 +81,16 @@ fn openai_chat_function_tool_redacted_schema_placeholders_pass_through() {
             "type": "function",
             "function": {
                 "name": "exec_command",
-                "description": "Runs a command.",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "cmd": {"type": "string"},
-                        "max_output_tokens": "[REDACTED]"
-                    },
-                    "required": ["cmd"],
-                    "additionalProperties": false
-                },
-                "strict": false
+                    "properties": {"max_output_tokens": "[REDACTED]"}
+                }
             }
         }]
     });
 
     let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect("Codex redacted schema placeholders must pass through unchanged");
+        .expect("proxy must not process the client schema placeholder");
     assert_eq!(
         wire["tools"][0]["function"]["parameters"]["properties"]["max_output_tokens"],
         "[REDACTED]"
@@ -105,34 +98,24 @@ fn openai_chat_function_tool_redacted_schema_placeholders_pass_through() {
 }
 
 #[test]
-fn openai_chat_function_tool_redacted_schema_placeholders_pass_through_in_defs() {
+fn openai_responses_function_tool_redacted_schema_placeholders_pass_through() {
     let payload = json!({
-        "model": "glm-5.2",
+        "model": "gpt-5.5",
         "messages": [{"role": "user", "content": "continue the coding task"}],
         "tools": [{
             "type": "function",
-            "function": {
-                "name": "exec_command",
-                "description": "Runs a command.",
-                "parameters": {
-                    "type": "object",
-                    "$defs": {
-                        "Command": "[REDACTED]"
-                    },
-                    "properties": {
-                        "cmd": {"$ref": "#/$defs/Command"}
-                    },
-                    "required": ["cmd"],
-                    "additionalProperties": false
-                }
+            "name": "create_goal",
+            "parameters": {
+                "type": "object",
+                "properties": {"token_budget": "[REDACTED]"}
             }
         }]
     });
 
-    let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect("Codex redacted schema definitions must pass through unchanged");
+    let wire = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("proxy must not process the client schema placeholder");
     assert_eq!(
-        wire["tools"][0]["function"]["parameters"]["$defs"]["Command"],
+        wire["tools"][0]["parameters"]["properties"]["token_budget"],
         "[REDACTED]"
     );
 }
@@ -153,64 +136,6 @@ fn openai_chat_tool_search_rejects_unmapped_builtin_tool() {
     assert!(
         error.contains("UnmappedOutboundFields target_protocol=openai_chat paths=$.tools[0].name"),
         "{error}"
-    );
-}
-
-#[test]
-fn openai_responses_function_tool_redacted_schema_placeholders_pass_through() {
-    let payload = json!({
-        "model": "gpt-5.5",
-        "messages": [{"role": "user", "content": "continue the coding task"}],
-        "tools": [{
-            "type": "function",
-            "name": "create_goal",
-            "description": "Create a goal.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "objective": {"type": "string"},
-                    "token_budget": "[REDACTED]"
-                },
-                "required": ["objective"],
-                "additionalProperties": false
-            }
-        }]
-    });
-
-    let wire = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-        .expect("Codex redacted schema placeholders must pass through unchanged");
-    assert_eq!(
-        wire["tools"][0]["parameters"]["properties"]["token_budget"],
-        "[REDACTED]"
-    );
-}
-
-#[test]
-fn openai_responses_function_tool_redacted_schema_placeholders_pass_through_in_definitions() {
-    let payload = json!({
-        "model": "gpt-5.5",
-        "messages": [{"role": "user", "content": "continue the coding task"}],
-        "tools": [{
-            "type": "function",
-            "name": "create_goal",
-            "description": "Create a goal.",
-            "parameters": {
-                "type": "object",
-                "definitions": {
-                    "Budget": "[REDACTED]"
-                },
-                "properties": {
-                    "token_budget": {"$ref": "#/definitions/Budget"}
-                }
-            }
-        }]
-    });
-
-    let wire = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-        .expect("Codex redacted schema definitions must pass through unchanged");
-    assert_eq!(
-        wire["tools"][0]["parameters"]["definitions"]["Budget"],
-        "[REDACTED]"
     );
 }
 
@@ -950,6 +875,42 @@ fn req04_rejects_responses_shaped_continuation_instead_of_rebuilding_chat() {
         .expect_err("Req04 must not rebuild Chat from a stored Responses payload");
 
     assert!(error.to_string().contains("Chat canonical messages"));
+}
+
+#[test]
+fn req04_restore_preserves_saved_and_current_request_images() {
+    let mut current = json!({
+        "messages": [{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,CURRENT"}
+            }]
+        }]
+    });
+    let restored = json!({
+        "messages": [{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,SAVED"}
+            }]
+        }]
+    });
+
+    let current_payload_start =
+        merge_v3_relay_restored_local_context_at_req04(&mut current, &restored)
+            .expect("Req04 must merge restored Chat continuation");
+
+    assert_eq!(current_payload_start, 1);
+    assert_eq!(
+        current["messages"][0]["content"][0]["image_url"]["url"],
+        "data:image/png;base64,SAVED"
+    );
+    assert_eq!(
+        current["messages"][1]["content"][0]["image_url"]["url"],
+        "data:image/png;base64,CURRENT"
+    );
 }
 
 #[test]

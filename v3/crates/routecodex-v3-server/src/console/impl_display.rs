@@ -420,6 +420,7 @@ pub(crate) const ANSI_RESET: &str = "\x1b[0m";
 pub(crate) const ANSI_REQUEST_CYAN: &str = "\x1b[36m";
 pub(crate) const ANSI_DEBUG_DIM: &str = "\x1b[2;90m";
 pub(crate) const ANSI_ERROR_RED: &str = "\x1b[31m";
+pub(crate) const ANSI_ERROR_TEXT_WHITE: &str = "\x1b[97m";
 pub(crate) const ANSI_STOPLESS_ORANGE: &str = "\x1b[38;5;208m";
 
 #[derive(Clone, Copy)]

@@ -756,13 +756,6 @@ const cases = [
     diagnostic: /strip_private_fields|no_silent_strip_projector/u,
   },
   {
-    name: 'Responses function schema forwards debug redaction placeholder to provider',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
-    from: '    normalize_responses_function_tool_schema_redaction_placeholders(&mut normalized)?;\n',
-    to: '',
-    diagnostic: /normalize_responses_function_tool_schema_redaction_placeholders|openai_responses_function_tool_redacted_schema_placeholders_fail_fast/u,
-  },
-  {
     name: 'Responses function history forwards non-fc item id to provider',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
     from: '        Some(item_id) => compact_tool_id("fc_", item_id),',

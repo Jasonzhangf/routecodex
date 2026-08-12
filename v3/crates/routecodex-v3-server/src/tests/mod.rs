@@ -1493,6 +1493,20 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
         colored.starts_with(ANSI_ERROR_RED),
         "provider error console line must be red: {colored:?}"
     );
+
+    let inline_colored = colorize_v3_provider_failure_console_content(&error_content, &event);
+    assert!(inline_colored.contains(&format!(
+        "{ANSI_ERROR_TEXT_WHITE}[switch from:limited[key1].gpt-5.5]{ANSI_ERROR_RED}"
+    )));
+    assert!(inline_colored.contains(&format!(
+        "{ANSI_RESET}[switch to:minimax[key1].MiniMax-M3]{ANSI_ERROR_RED}"
+    )));
+    assert!(inline_colored.contains(&format!(
+        "{ANSI_ERROR_TEXT_WHITE}causeStatus=502{ANSI_ERROR_RED}"
+    )));
+    assert!(inline_colored.contains(&format!(
+        "{ANSI_ERROR_TEXT_WHITE}externalCode=TRANSPORT_ERROR{ANSI_ERROR_RED}"
+    )));
     assert!(
         colored.contains(&format!("\n\n{ANSI_DEBUG_DIM}")),
         "provider error diagnostic line must be dim gray: {colored:?}"

@@ -103,7 +103,6 @@
 ### 高(2)
 1. **file-size gate 失败**:`v3/crates/routecodex-v3-server/src/console/impl_bulk.rs` = **2198 行** > 1500,不在 ratchet_whitelist(`verify:v3-file-size` 红,verify:v3-architecture-ci 停在 5/36)
 2. **6 个过时测试必红**(期望旧行为但实现已改):
-   - `hub_v1/tests.rs:76/106/156/183` 4× `redacted_schema_placeholders_fail_fast`(实现已改透传 `normalize_json_schema_redaction_placeholders` :368-390 返回 Ok)
    - 2× reasoning.content 相关(实现已改透传 `build_v3_responses_reasoning_...` :3841-3861)
 
 ### 中(4)

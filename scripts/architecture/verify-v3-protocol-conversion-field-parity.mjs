@@ -318,8 +318,6 @@ for (const phrase of [
   'row.insert("max_output_tokens".to_string(), value)',
   '.remove("logprobs")',
   'row.insert("top_logprobs".to_string(), value)',
-  'normalize_responses_function_tool_schema_redaction_placeholders(&mut normalized)?',
-  'normalize_json_schema_redaction_placeholders',
   'project_outbound_payload_for_target_protocol',
   'ControlFieldLeak target_protocol={}',
   'UnmappedOutboundFields target_protocol={}',
@@ -327,11 +325,6 @@ for (const phrase of [
   '"metadata_center"',
   '"runtime_control"',
 ]) requireText(text.requestOutboundFormat, paths.requestOutboundFormat, phrase);
-requireText(
-  text.requestOutboundToolProjection,
-  paths.requestOutboundToolProjection,
-  'normalize_json_schema_redaction_placeholders',
-);
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::explicit_outbound_projection`, 'project_outbound_payload_for_target_protocol');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::explicit_outbound_projection`, 'ControlFieldLeak target_protocol={}');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::explicit_outbound_projection`, 'UnmappedOutboundFields target_protocol={}');
@@ -382,14 +375,11 @@ requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_
 for (const phrase of [
   'openai_chat_provider_wire_consumes_registered_codex_client_metadata_as_local_context',
   'openai_chat_function_tool_redacted_schema_placeholders_pass_through',
-  'openai_chat_function_tool_redacted_schema_placeholders_pass_through_in_defs',
-  'openai_chat_tool_search_rejects_unmapped_builtin_tool',
   'openai_responses_function_tool_redacted_schema_placeholders_pass_through',
-  'openai_responses_function_tool_redacted_schema_placeholders_pass_through_in_definitions',
+  'openai_chat_tool_search_rejects_unmapped_builtin_tool',
   'openai_responses_provider_wire_maps_chat_token_and_logprob_pairs',
   'openai_responses_provider_wire_drops_top_logprobs_when_logprobs_disabled',
   'Responses provider wire must not emit non-spec max_tokens',
-  'redacted_schema_placeholder',
 ]) requireText(text.hubTests, paths.hubTests, phrase);
 requireText(
   text.requestOutboundFormatExtraTests,
@@ -1204,5 +1194,3 @@ if (failures.length) {
   process.exit(1);
 }
 console.log('[verify:v3-protocol-conversion-field-parity] ok');
-
-

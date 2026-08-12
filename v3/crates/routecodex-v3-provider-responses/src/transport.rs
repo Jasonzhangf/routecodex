@@ -55,6 +55,8 @@ const ANTHROPIC_PROVIDER_HEADER_NAMES: &[&str] = &[
     "x-stainless-timeout",
 ];
 const V3_PROVIDER_HTTP_READ_TIMEOUT_SECS: u64 = 300;
+const V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 30;
+const V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS: u64 = 30;
 const V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER: &str =
     "V3ProviderResponsesWebSocketSession -> V3ProviderResp14Raw";
 
@@ -605,6 +607,10 @@ impl ProviderResponsesTransport {
         Self {
             client: reqwest::Client::builder()
                 .read_timeout(timeout)
+                .pool_idle_timeout(Duration::from_secs(
+                    V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS,
+                ))
+                .tcp_keepalive(Duration::from_secs(V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS))
                 .build()
                 .expect("valid V3 provider HTTP client read timeout"),
             websocket_sessions: Arc::new(Mutex::new(BTreeMap::new())),

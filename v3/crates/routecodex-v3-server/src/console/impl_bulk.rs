@@ -155,8 +155,8 @@ pub(crate) fn emit_v3_provider_failure_console_event(
     );
     let colorized_error = colorize_v3_error_console_line(
         &error_human_prefix,
-        error_content_str,
-        error_content_str,
+        &colorize_v3_provider_failure_console_content(error_content_str, event),
+        &colorize_v3_provider_failure_console_content(error_content_str, event),
         &identity.session_id,
     );
     append_v3_human_console_line(&context.state, &colorized_error);
@@ -174,8 +174,8 @@ pub(crate) fn emit_v3_provider_failure_console_event(
         );
         let colorized_switch = colorize_v3_error_console_line(
             &switch_human_prefix,
-            switch_content_str,
-            switch_content_str,
+            &colorize_v3_provider_failure_console_content(switch_content_str, event),
+            &colorize_v3_provider_failure_console_content(switch_content_str, event),
             &identity.session_id,
         );
         append_v3_human_console_line(&context.state, &colorized_switch);
@@ -312,6 +312,60 @@ pub(crate) fn format_v3_provider_switch_console_content(
             format_v3_console_single_line_message(&event.message)
         ),
     )
+}
+
+pub(crate) fn colorize_v3_provider_failure_console_content(
+    content: &str,
+    event: &V3RuntimeProviderFailureObservation,
+) -> String {
+    if !is_v3_console_color_enabled() {
+        return content.to_string();
+    }
+
+    let provider = format_v3_console_provider_key_label(&event.provider_key);
+    let target = event
+        .next_provider_key
+        .as_deref()
+        .map(format_v3_console_provider_key_label)
+        .unwrap_or_else(|| "-".to_string());
+    let mut colorized = content.to_string();
+    for token in [
+        format!("[switch from:{provider}]"),
+        format!("target={provider}"),
+    ] {
+        colorized = colorized.replace(
+            &token,
+            &format!("{ANSI_ERROR_TEXT_WHITE}{token}{ANSI_ERROR_RED}"),
+        );
+    }
+    if event.next_provider_key.is_some() {
+        let token = format!("[switch to:{target}]");
+        colorized = colorized.replace(&token, &format!("{ANSI_RESET}{token}{ANSI_ERROR_RED}"));
+    } else if target != "-" {
+        let token = format!("next={target}");
+        colorized = colorized.replace(&token, &format!("{ANSI_RESET}{token}{ANSI_ERROR_RED}"));
+    }
+    let error_code_tokens = [
+        Some(format!("causeStatus={}", event.status)),
+        event
+            .external_error_code
+            .as_deref()
+            .map(|code| format!("externalCode={code}")),
+        event
+            .external_error_status
+            .map(|status| format!("externalStatus={status}")),
+        event
+            .internal_code
+            .as_deref()
+            .map(|code| format!("internalCode={code}")),
+    ];
+    for token in error_code_tokens.into_iter().flatten() {
+        colorized = colorized.replace(
+            &token,
+            &format!("{ANSI_ERROR_TEXT_WHITE}{token}{ANSI_ERROR_RED}"),
+        );
+    }
+    colorized
 }
 
 pub(crate) struct V3ConsoleRequestHeadline<'a> {
