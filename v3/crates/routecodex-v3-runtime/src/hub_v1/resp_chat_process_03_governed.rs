@@ -389,13 +389,21 @@ fn govern_v3_hub_relay_response(
             let tool_call_hook = apply_v3_tool_call_servertool_hook_at_resp03(input, profile)?;
             stopless_center_state = tool_call_hook.center_state;
             web_search_center_state = tool_call_hook.web_search_state;
-            let input = if tool_call_hook.intercepted {
+            let mut input = if tool_call_hook.intercepted {
                 tool_call_hook.input
             } else {
                 project_v3_apply_patch_freeform_calls_at_resp03(tool_call_hook.input)
             };
-            let governance = build_v3_resp03_protocol_governance(&input)?;
-            (input, governance)
+            let mut governed_input = input;
+            if profile.stopless_schema_guidance_active() {
+                // Client projection consumes the provider-side Stopless control
+                // text at the response owner; it must not leak into client data.
+                let mut visible = governed_input.provider_payload().as_ref().clone();
+                super::servertool_hooks::strip_v3_stopless_control_echoes(&mut visible);
+                *governed_input.provider_payload_mut() = Arc::new(visible);
+            }
+            let governance = build_v3_resp03_protocol_governance(&governed_input)?;
+            (governed_input, governance)
         }
         V3Resp03FinishReasonBranch::Stop => {
             let stop_hook = apply_v3_stop_servertool_hook_at_resp03(input, profile)?;
@@ -403,7 +411,17 @@ fn govern_v3_hub_relay_response(
             let governance = build_v3_resp03_protocol_governance(&stop_hook.input)?;
             (stop_hook.input, governance)
         }
-        V3Resp03FinishReasonBranch::Other => (input, governance),
+        V3Resp03FinishReasonBranch::Other => {
+            let mut input = input;
+            if profile.stopless_schema_guidance_active() {
+                // Client projection consumes the provider-side Stopless control
+                // text at the response owner; it must not leak into client data.
+                let mut visible = input.provider_payload().as_ref().clone();
+                super::servertool_hooks::strip_v3_stopless_control_echoes(&mut visible);
+                *input.provider_payload_mut() = Arc::new(visible);
+            }
+            (input, governance)
+        }
     };
     let servertool_tool_call_followup = governance
         .tool_calls

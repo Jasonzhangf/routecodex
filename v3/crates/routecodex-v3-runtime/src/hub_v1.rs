@@ -114,6 +114,7 @@ mod relay_request;
 pub use relay_request::*;
 mod servertool_hooks;
 pub use servertool_hooks::*;
+mod stopless_injection;
 mod anthropic_codec;
 pub use anthropic_codec::*;
 mod openai_chat_codec;

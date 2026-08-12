@@ -84,14 +84,32 @@ pub(crate) fn govern_v3_servertool_request_at_req04(
         web_search_mode_b,
     );
     let stopless_state = if identified == Some(V3ServerToolName::Stopless) {
-        apply_v3_stopless_request_hook_at_req04(
+        let state = apply_v3_stopless_request_hook_at_req04(
             payload,
             current_payload_start,
             events,
             stopless_center_state,
             transition_request_id,
             transition_updated_at,
-        )?
+        )?;
+        let should_inject_provider_contract = state
+            .as_ref()
+            .is_some_and(V3StoplessCenterState::schema_guidance_active)
+            || stopless_center_state
+                .is_some_and(|restored| restored.schema_guidance_active())
+                && transition_request_id
+                    .map(str::trim)
+                    .is_some_and(|request_id| !request_id.is_empty());
+        if should_inject_provider_contract {
+            // 激活路径（同轮 schema_guidance_active）注入当前轮 provider-facing
+            // stopless 合同：完整推进准则 + exactly-one reasoningStop tool +
+            // tool_choice 提升为 required。未激活（缺 scope/request_id）不注入。
+            super::stopless_injection::inject_v3_stopless_provider_contract(
+                payload,
+                current_payload_start,
+            )?;
+        }
+        state
     } else {
         None
     };
@@ -722,7 +740,7 @@ fn finalize_current_stopless_response(payload: &mut Value, keep_noop: bool) {
     }
 }
 
-fn strip_current_stopless_instruction_echo(payload: &mut Value) {
+pub(crate) fn strip_current_stopless_instruction_echo(payload: &mut Value) {
     if let Some(instructions) = payload
         .get("instructions")
         .and_then(Value::as_str)
@@ -767,25 +785,28 @@ fn strip_current_stopless_instruction_echo(payload: &mut Value) {
     }
 }
 
+pub(crate) fn strip_v3_stopless_control_echoes(payload: &mut Value) {
+    strip_current_stopless_instruction_echo(payload);
+    strip_current_stopless_control_text(payload);
+}
+
 fn strip_current_stopless_control_text(payload: &mut Value) {
     if let Some(output_text) = payload.get_mut("output_text") {
         strip_current_stopless_control_string(output_text);
     }
-    let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for item in output {
-        if let Some(text) = item.get_mut("text") {
-            strip_current_stopless_control_string(text);
-        }
-        let Some(content) = item.get_mut("content").and_then(Value::as_array_mut) else {
-            continue;
-        };
-        for part in content {
-            let Some(text) = part.get_mut("text") else {
+    if let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) {
+        for item in output {
+            if let Some(text) = item.get_mut("text") {
+                strip_current_stopless_control_string(text);
+            }
+            let Some(content) = item.get_mut("content").and_then(Value::as_array_mut) else {
                 continue;
             };
-            strip_current_stopless_control_string(text);
+            for part in content {
+                if let Some(text) = part.get_mut("text") {
+                    strip_current_stopless_control_string(text);
+                }
+            }
         }
     }
 }
@@ -828,7 +849,7 @@ fn is_stopless_control_object(value: &Value) -> bool {
 }
 
 pub fn apply_v3_stop_servertool_hook_at_resp03(
-    input: V3HubRespInbound02Normalized,
+    mut input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
 ) -> Result<V3StoplessResponseHookOutcome, V3HubRelayResponseError> {
     if !profile.stopless_reasoning_stop_enabled() || !profile.stopless_schema_guidance_active() {
@@ -849,6 +870,9 @@ pub fn apply_v3_stop_servertool_hook_at_resp03(
         .map(ToOwned::to_owned)
         .unwrap_or_default();
     if status != "completed" {
+        let mut visible = input.provider_payload().as_ref().clone();
+        strip_current_stopless_instruction_echo(&mut visible);
+        *input.provider_payload_mut() = Arc::new(visible);
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
@@ -917,6 +941,7 @@ fn project_stopless_noop_for_stop_candidate(
     })
 }
 
+/// Req04 激活路径向当前轮 provider request 注入 stopless 合同：
 pub fn apply_v3_stopless_request_hook_at_req04(
     payload: &mut Value,
     current_payload_start: usize,
@@ -1450,4 +1475,3 @@ fn is_stopless_cli_call(item: &Value) -> bool {
 #[cfg(test)]
 #[path = "servertool_hooks_tests.rs"]
 mod servertool_hooks_tests;
-

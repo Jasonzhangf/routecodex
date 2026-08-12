@@ -56,6 +56,12 @@ async fn guard_relay_sse_first_frame(
                 futures_util::stream::iter(vec![Ok(chunk)]).chain(stream);
             Ok(Box::pin(replay))
         }
+        Some(Err(error @ V3ProviderError::ClientDisconnect { .. })) => {
+            // Client disconnect is health-neutral and must stay lazy: the client
+            // connection owns observing this terminal stream item.
+            let replay = futures_util::stream::iter(vec![Err(error)]).chain(stream);
+            Ok(Box::pin(replay))
+        }
         Some(Err(error)) => Err(error),
         None => Err(V3ProviderError::Transport {
             request_id: request_id.to_string(),
@@ -699,8 +705,16 @@ where
                         continue;
                     }
                 };
-                let sse = C::project_sse(
+                // 首帧已收：后续流仍受 idle guard 约束（provider 发一帧后挂起
+                // 30s → 归一化为 Transport 错误进入错误链，客户端不无限等待）。
+                let idle_guarded_stream = guard_v3_provider_sse_idle(
+                    request_id,
+                    &selected_target_provider_id,
                     guarded_stream,
+                    V3_RELAY_SSE_STREAM_IDLE_TIMEOUT,
+                );
+                let sse = C::project_sse(
+                    idle_guarded_stream,
                     provider_wire_protocol,
                     selected_target_compatibility_profile,
                     selected.candidate.web_search_execution_mode,
@@ -716,73 +730,10 @@ where
                         provider_action_permit.take(),
                     ),
                 )?;
-                // 收集完整 SSE 流（空检测：transducer 空响应标记 → 流内 Err）。
-                // 空响应/流空闲挂起作为 provider failure 进入错误链（reselect/
-                // 同 provider 重试预算 3 次 → 穷尽后 502 投影），不在 server 层
-                // 做重试/502 决策。
-                let mut sse_bytes: Vec<Vec<u8>> = Vec::new();
-                let mut stream_error: Option<V3ProviderError> = None;
-                {
-                    use futures_util::StreamExt;
-                    let mut sse = sse;
-                    loop {
-                        let item = tokio::time::timeout(
-                            V3_RELAY_SSE_STREAM_IDLE_TIMEOUT,
-                            sse.next(),
-                        )
-                        .await;
-                        match item {
-                            Ok(Some(Ok(bytes))) => sse_bytes.push(bytes),
-                            Ok(Some(Err(error))) => {
-                                stream_error = Some(V3ProviderError::Transport {
-                                    request_id: request_id.to_string(),
-                                    provider_id: selected_target_provider_id.clone(),
-                                    reason: format!("empty provider response: {error}"),
-                                });
-                                break;
-                            }
-                            Ok(None) => break,
-                            Err(_elapsed) => {
-                                // provider SSE 流空闲挂起（首帧后无新帧、连接保持）：
-                                // 归一化为 Transport 错误进入错误链（记录 provider
-                                // failure + reselect 切 provider），避免客户端无限
-                                // 重试命中同一挂起 provider。
-                                stream_error = Some(V3ProviderError::Transport {
-                                    request_id: request_id.to_string(),
-                                    provider_id: selected_target_provider_id.clone(),
-                                    reason: "provider SSE stream idle (suspected hang)"
-                                        .to_string(),
-                                });
-                                break;
-                            }
-                        }
-                    }
-                }
-                if let Some(stream_error) = stream_error {
-                    let failure = provider_runtime_failure(
-                        stream_error,
-                        &selected_target_provider_id,
-                    );
-                    if let Some(failure) = handle_provider_failure(
-                        &failure_context,
-                        selected,
-                        failure,
-                        &mut V3RelayProviderFailurePolicyState {
-                            failed_candidates: &mut failed_candidates,
-                            same_candidate_retries: &mut same_candidate_retries,
-                            trace: &mut trace,
-                        },
-                        &mut retry_selected,
-                        &mut pending_provider_action_recovery,
-                    )
-                    .await
-                    .map_err(V3RelayCoreError::Target)?
-                    {
-                        return Ok(C::assemble_failure_output(failure, trace));
-                    }
-                    continue;
-                }
-                let sse = C::sse_from_collected(sse_bytes);
+                // Return the projected stream immediately after the first-frame guard.
+                // The client connection must remain independent from provider EOF and
+                // post-commit failures; the codec stream owns those later outcomes and
+                // records them through its typed side-channel.
                 return Ok(C::assemble_sse_output(sse, trace));
             }
         }

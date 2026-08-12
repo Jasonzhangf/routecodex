@@ -122,12 +122,42 @@ pub fn build_v3_provider_12_responses_wire_payload(
         &target.provider_type,
         current_request_body,
     )?;
+    normalize_deepseek_thinking_stopless_tool_choice(&mut body, &target);
     Ok(V3Provider12ResponsesWirePayload {
         request_id,
         target,
         stream_intent,
         body,
     })
+}
+
+fn normalize_deepseek_thinking_stopless_tool_choice(
+    body: &mut Value,
+    target: &V3ResponsesProviderTarget,
+) {
+    if target.provider_type != "openai_chat"
+        || (target.canonical_model_id != "deepseek-v4-flash"
+            && target.wire_model != "deepseek-v4-flash")
+        || body.get("tool_choice") != Some(&Value::String("required".to_string()))
+        || !v3_wire_payload_is_thinking_mode(body)
+    {
+        return;
+    }
+    let has_reasoning_stop = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| {
+            tools.iter().any(|tool| {
+                tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
+                    || tool
+                        .pointer("/function/name")
+                        .and_then(Value::as_str)
+                        == Some("reasoningStop")
+            })
+        });
+    if has_reasoning_stop {
+        body["tool_choice"] = Value::String("auto".to_string());
+    }
 }
 
 /// Responses wire tools only support provider-native tool types; a Codex `type=namespace`
@@ -896,6 +926,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn opencode_go_deepseek_responses_wire_accepts_thinking_stopless_tool_choice() {
+        let mut selected = target();
+        selected.provider_id = "opencode-go".into();
+        selected.provider_type = "openai_chat".into();
+        selected.canonical_model_id = "deepseek-v4-flash".into();
+        selected.wire_model = "deepseek-v4-flash".into();
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-deepseek-stopless",
+            selected,
+            json!({
+                "model": "deepseek-v4-flash",
+                "input": "continue",
+                "reasoning": {"effort": "high"},
+                "tool_choice": "required",
+                "tools": [{
+                    "type": "function",
+                    "name": "reasoningStop",
+                    "description": "stopless control"
+                }]
+            }),
+        )
+        .expect("DeepSeek Responses wire must not reject Stopless thinking mode");
+        assert_eq!(wire.body()["tool_choice"], "auto");
+        assert!(wire.body()["tools"].as_array().is_some_and(|tools| {
+            tools.iter().any(|tool| {
+                tool.pointer("/function/name").and_then(Value::as_str) == Some("reasoningStop")
+            })
+        }));
+    }
+
     fn target() -> V3ResponsesProviderTarget {
         V3ResponsesProviderTarget {
             provider_id: "neutral-provider".into(),
@@ -923,3 +984,20 @@ mod tests {
     }
 }
 
+/// thinking 模式判定：`reasoning.effort` 或顶层 `reasoning_effort` 非空且
+/// 非 "none" 才视为 thinking（`{"effort":"none"}` 显式关闭推理不是 thinking）。
+fn v3_wire_payload_is_thinking_mode(body: &Value) -> bool {
+    let effort = body
+        .get("reasoning")
+        .and_then(|reasoning| reasoning.get("effort"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "none");
+    if effort.is_some() {
+        return true;
+    }
+    body.get("reasoning_effort")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty() && value != "none")
+}

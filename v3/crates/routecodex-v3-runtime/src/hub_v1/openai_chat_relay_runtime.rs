@@ -455,6 +455,8 @@ fn project_sse_stream(
                             .and_then(Err);
                         return Some((result, state));
                     }
+                    // 合法 terminal finish_reason 已收到：provider 可在 [DONE] 前
+                    // 关闭流（部分实现 EOF 即终态），[DONE] 不必须；缺失不惩罚。
                     return match state.provider_outcome.record_success() {
                         Ok(()) => None,
                         Err(error) => Some((Err(error), state)),

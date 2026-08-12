@@ -525,10 +525,7 @@ targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key
             V3OpenAiChatRelayClientBody::Json(value) => value,
             V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON error body"),
         };
-        assert_eq!(
-            client_response["error"]["error_node"],
-            "V3Error06ClientProjected"
-        );
+        assert!(client_response["error"].get("error_node").is_none());
     }
 
 struct SseTransport;
@@ -887,17 +884,10 @@ data: [DONE]
 }
 
 #[tokio::test]
-async fn sse_done_before_terminal_and_terminal_without_done_fail_explicitly() {
+async fn sse_done_before_terminal_fails_and_terminal_without_done_succeeds() {
     use futures_util::StreamExt;
-    let cases = [
+    let failing_cases = [
         (vec![b"data: [DONE]\n\n".to_vec()], "before terminal"),
-        (
-            vec![br#"data: {"id":"bad","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
-
-"#
-            .to_vec()],
-            "or [DONE]",
-        ),
         (
             vec![
                 br#"data: {"id":"bad","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
@@ -912,7 +902,7 @@ async fn sse_done_before_terminal_and_terminal_without_done_fail_explicitly() {
             "after terminal finish_reason",
         ),
     ];
-    for (chunks, expected) in cases {
+    for (chunks, expected) in failing_cases {
         let transport = StaticSseTransport {
             chunks: Mutex::new(Some(chunks)),
         };
@@ -946,6 +936,47 @@ async fn sse_done_before_terminal_and_terminal_without_done_fail_explicitly() {
             .iter()
             .any(|item| item.as_ref().is_err_and(|error| error.contains(expected))));
     }
+
+    // 合法 terminal finish_reason 后 EOF（无 [DONE]）：provider 合法关闭流，
+    // 必须投影成功（[DONE] 不必须，缺失不惩罚）。
+    let transport = StaticSseTransport {
+        chunks: Mutex::new(Some(vec![
+            br#"data: {"id":"ok","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+"#
+            .to_vec(),
+        ])),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest(),
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-sse-terminal-no-done".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"terminal stream"}],
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    let stream = match output.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
+    };
+    let items = stream.collect::<Vec<_>>().await;
+    assert!(
+        items.iter().all(|item| item.is_ok()),
+        "terminal finish_reason without [DONE] must project success: {items:?}"
+    );
 }
 
 #[tokio::test]
