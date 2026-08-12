@@ -22,6 +22,12 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/kernel/tests.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs',
+  'v3/crates/routecodex-v3-server/src/console/impl_bulk.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs',
@@ -177,7 +183,7 @@ const cases = [
   },
   {
     name: 'Responses Relay success release bypasses the retained recovery generation',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
     mutate: (source) => source.replace(
       'V3ProviderActionRecoveryTransition::ReleasedBySuccess(ticket) => {',
       'V3ProviderActionRecoveryTransition::ReleasedBySuccess(_ticket) => {',
@@ -246,7 +252,7 @@ const cases = [
   },
   {
     name: 'server post-commit SSE closeout fabricates Error06 again',
-    path: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    path: 'v3/crates/routecodex-v3-server/src/console/impl_bulk.rs',
     mutate: (source) => source.replaceAll(
       'emit_v3_post_commit_sse_source_console_line_for_context',
       'emit_v3_error_console_line_for_context',
@@ -430,7 +436,7 @@ const cases = [
   },
   {
     name: 'Responses Relay target projection error bypasses request-local fail-fast',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
     mutate: (source) => source.replace(
       'let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {\n            Ok(req_compat) => req_compat,\n            Err(error) => {\n                handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(\n                    error\n                ));\n            }\n        };',
       'let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();',
@@ -439,7 +445,7 @@ const cases = [
   },
   {
     name: 'Responses Relay wire encoding failure bypasses typed provider failure handling',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
     mutate: (source) => source.replace(
       'handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Provider(error));',
       'bypass_provider_request_failure!(V3ResponsesRelayRuntimeError::Provider(error));',
@@ -511,8 +517,8 @@ const cases = [
     name: 'Responses Relay failure handler returns before shared provider failure policy',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     mutate: (source) => source.replace(
-      '    let result = run_v3_relay_provider_failure_policy(\n',
-      '    if failure.terminal_projection.is_none() {\n        return Ok(Some(failure));\n    }\n    let result = run_v3_relay_provider_failure_policy(\n',
+      'if failure.terminal_projection.is_some() {\n        return Ok(Some(failure));\n    }\n    let result = run_v3_relay_provider_failure_policy(',
+      'if failure.terminal_projection.is_some() {\n        return Ok(Some(failure));\n    }\n    return Ok(None);\n    let result = run_v3_relay_provider_failure_policy(',
     ),
     diagnostic: /must enter run_v3_relay_provider_failure_policy immediately after its existing terminal projection guard/u,
   },
