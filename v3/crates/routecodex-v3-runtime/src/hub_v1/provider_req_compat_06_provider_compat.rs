@@ -54,40 +54,50 @@ fn apply_v3_provider_req_compat(
     input: &V3HubReqOutbound07ProviderSemantic,
     profile: &V3ProviderCompatProfileId,
 ) -> Result<Value, V3ProviderCompatError> {
-    let selected = input.selected_target();
-    let reasoning_effort_explicit = input
-        .provider_semantic_payload()
-        .get("reasoning_effort")
-        .or_else(|| {
-            input
-                .provider_semantic_payload()
-                .get("reasoning")
-                .and_then(Value::as_object)
-                .and_then(|reasoning| reasoning.get("effort"))
-        })
-        .is_some();
+    let reasoning_effort_explicit =
+        provider_req_compat_reasoning_effort_explicit(input.provider_semantic_payload());
+    let payload =
+        build_v3_provider_standard_protocol_payload_from_req07(input).map_err(|reason| {
+            V3ProviderCompatError {
+                stage: "request_protocol",
+                profile: profile.as_str().to_string(),
+                reason,
+            }
+        })?;
+    apply_v3_provider_req_compat_to_provider_payload(
+        payload,
+        input.selected_target(),
+        input.provider_protocol,
+        profile,
+        reasoning_effort_explicit,
+    )
+}
+
+pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
+    payload: Value,
+    selected: &routecodex_v3_target::V3TargetCandidate,
+    provider_protocol: V3HubProviderWireProtocol,
+    profile: &V3ProviderCompatProfileId,
+    reasoning_effort_explicit: bool,
+) -> Result<Value, V3ProviderCompatError> {
     let provider_key = format!(
         "{}:{}:{}",
         selected.provider_id, selected.auth_alias, selected.model_id
     );
-    run_req_outbound_stage3_compat(ReqOutboundCompatInput {
-        payload: build_v3_provider_standard_protocol_payload_from_req07(input).map_err(
-            |reason| V3ProviderCompatError {
-                stage: "request_protocol",
-                profile: profile.as_str().to_string(),
-                reason,
-            },
-        )?,
+    let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+        payload,
         adapter_context: AdapterContext {
             compatibility_profile: profile.as_optional_string(),
-            provider_protocol: Some(provider_protocol_compat_id(input.provider_protocol)),
+            provider_protocol: Some(provider_protocol_compat_id(provider_protocol)),
             reasoning_effort_explicit: Some(reasoning_effort_explicit),
             model_id: Some(selected.model_id.clone()),
             original_model_id: Some(selected.wire_model.clone()),
             provider_id: Some(selected.provider_id.clone()),
             provider_key: Some(provider_key.clone()),
             runtime_key: Some(provider_key),
-            web_search_execution_mode: Some(selected.web_search_execution_mode.as_str().to_string()),
+            web_search_execution_mode: Some(
+                selected.web_search_execution_mode.as_str().to_string(),
+            ),
             ..Default::default()
         },
         explicit_profile: profile.as_optional_string(),
@@ -97,7 +107,22 @@ fn apply_v3_provider_req_compat(
         stage: "request",
         profile: profile.as_str().to_string(),
         reason,
-    })
+    })?;
+    let mut result = result;
+    normalize_deepseek_thinking_stopless_tool_choice(&mut result, selected, provider_protocol);
+    Ok(result)
+}
+
+pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> bool {
+    payload
+        .get("reasoning_effort")
+        .or_else(|| {
+            payload
+                .get("reasoning")
+                .and_then(Value::as_object)
+                .and_then(|reasoning| reasoning.get("effort"))
+        })
+        .is_some()
 }
 
 fn build_v3_provider_standard_protocol_payload_from_req07(
@@ -135,6 +160,46 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
     };
     bind_v3_selected_provider_model(provider_protocol_payload, selected)
         .map(V3SelectedProviderModelBinding::into_payload)
+}
+
+fn normalize_deepseek_thinking_stopless_tool_choice(
+    payload: &mut Value,
+    selected: &routecodex_v3_target::V3TargetCandidate,
+    provider_protocol: V3HubProviderWireProtocol,
+) {
+    if !matches!(
+        provider_protocol,
+        V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Responses
+    ) || (selected.model_id != "deepseek-v4-flash" && selected.wire_model != "deepseek-v4-flash")
+        || !payload_is_thinking_mode(payload)
+    {
+        return;
+    }
+    let has_reasoning_stop = payload
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| {
+            tools.iter().any(|tool| {
+                tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
+                    || tool.pointer("/function/name").and_then(Value::as_str)
+                        == Some("reasoningStop")
+            })
+        });
+    if has_reasoning_stop {
+        if let Some(object) = payload.as_object_mut() {
+            object.remove("tool_choice");
+        }
+    }
+}
+
+fn payload_is_thinking_mode(payload: &Value) -> bool {
+    let effort = payload
+        .get("reasoning_effort")
+        .and_then(Value::as_str)
+        .or_else(|| payload.pointer("/reasoning/effort").and_then(Value::as_str))
+        .map(str::trim)
+        .unwrap_or_default();
+    !effort.is_empty() && !effort.eq_ignore_ascii_case("none")
 }
 
 #[cfg(test)]
@@ -274,6 +339,106 @@ mod tests {
         assert_eq!(
             req_compat.provider_semantic_payload()["messages"][0]["role"],
             "user"
+        );
+    }
+
+    #[test]
+    fn deepseek_openai_chat_stopless_tool_choice_is_omitted_on_provider_wire() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::OpenAiChat,
+            json!({
+                "model": "client-route-alias",
+                "messages": [{"role":"user","content":"continue"}],
+                "reasoning_effort": "high",
+                "tools": [{"type":"function","name":"reasoningStop"}],
+                "tool_choice": "required"
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_type = "openai_chat".to_string();
+        req07.previous.selected_target.model_id = "deepseek-v4-flash".to_string();
+        req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("DeepSeek thinking tool choice must remain provider-valid");
+        assert!(req_compat
+            .provider_semantic_payload()
+            .get("tool_choice")
+            .is_none());
+    }
+
+    #[test]
+    fn deepseek_openai_chat_stopless_tool_choice_object_is_omitted_on_provider_wire() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::OpenAiChat,
+            json!({
+                "model": "client-route-alias",
+                "messages": [{"role":"user","content":"continue"}],
+                "reasoning_effort": "high",
+                "tools": [{"type":"function","name":"reasoningStop"}],
+                "tool_choice": {"type":"required"}
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_type = "openai_chat".to_string();
+        req07.previous.selected_target.model_id = "deepseek-v4-flash".to_string();
+        req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("DeepSeek thinking object tool choice must remain provider-valid");
+        assert!(req_compat
+            .provider_semantic_payload()
+            .get("tool_choice")
+            .is_none());
+    }
+
+    #[test]
+    fn deepseek_openai_chat_type_alias_omits_stopless_tool_choice_provider_field() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::OpenAiChat,
+            json!({
+                "model": "client-route-alias",
+                "messages": [{"role":"user","content":"continue"}],
+                "reasoning_effort": "high",
+                "tools": [{"type":"function","name":"reasoningStop"}],
+                "tool_choice": "required"
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_type = "openai-chat-completions".to_string();
+        req07.previous.selected_target.model_id = "deepseek-v4-flash".to_string();
+        req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("DeepSeek provider type alias must use provider-valid tool choice");
+        assert!(req_compat
+            .provider_semantic_payload()
+            .get("tool_choice")
+            .is_none());
+    }
+
+    #[test]
+    fn deepseek_openai_chat_non_thinking_stopless_keeps_required_tool_choice() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::OpenAiChat,
+            json!({
+                "model": "client-route-alias",
+                "messages": [{"role":"user","content":"continue"}],
+                "reasoning_effort": "none",
+                "tools": [{"type":"function","name":"reasoningStop"}],
+                "tool_choice": "required"
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_type = "openai_chat".to_string();
+        req07.previous.selected_target.model_id = "deepseek-v4-flash".to_string();
+        req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("non-thinking DeepSeek stopless request must preserve required choice");
+        assert_eq!(
+            req_compat.provider_semantic_payload()["tool_choice"],
+            "required"
         );
     }
 

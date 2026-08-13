@@ -193,6 +193,18 @@ pub(crate) fn responses_direct_request_projection_hook(
     policy: &V3ResponsesDirect11Policy,
 ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
     let candidate = &policy.target.candidate;
+    let provider_protocol = crate::hub_v1::provider_wire_protocol_for_selected_candidate(candidate)
+        .map_err(|error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ResponsesDirect11Policy",
+                "responses_provider_protocol_resolution_failed",
+                error,
+                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            )
+        })?;
+    let reasoning_effort_explicit =
+        crate::hub_v1::provider_req_compat_reasoning_effort_explicit(&policy.request_body);
     let request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
         policy.request_body.clone(),
         candidate,
@@ -207,7 +219,54 @@ pub(crate) fn responses_direct_request_projection_hook(
             V3InternalErrorCode::V3Provider12ResponsesWirePayload,
         )
     })?;
-    let mut request_body = request_body;
+    let mut request_body = match provider_protocol {
+        crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat => {
+            crate::hub_v1::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
+                &request_body,
+            )
+            .and_then(|canonical| {
+                crate::hub_v1::build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+            })
+            .map_err(|error| {
+                build_v3_error_01_source_raised_internal(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3ResponsesDirect11Policy",
+                    "responses_openai_chat_wire_projection_failed",
+                    error,
+                    V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                )
+            })?
+        }
+        crate::hub_v1::V3HubProviderWireProtocol::Anthropic => {
+            return Err(build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ResponsesDirect11Policy",
+                "responses_direct_cross_protocol_projection_unsupported",
+                "Responses direct does not have a response-side Anthropic projection contract",
+                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            ));
+        }
+        _ => request_body,
+    };
+    let profile = crate::hub_v1::V3ProviderCompatProfileId::from_config(
+        candidate.compatibility_profile.as_deref(),
+    );
+    request_body = crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload(
+        request_body,
+        candidate,
+        provider_protocol,
+        &profile,
+        reasoning_effort_explicit,
+    )
+    .map_err(|error| {
+        build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ResponsesDirect11Policy",
+            "responses_direct_provider_compat_failed",
+            format!("{}", error),
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+        )
+    })?;
     if request_body.get("previous_response_id").is_some() {
         return Err(build_v3_error_01_source_raised_internal(
             V3ErrorSourceKind::RuntimeFailure,
@@ -281,8 +340,29 @@ pub(crate) fn responses_direct_request_projection_hook(
 pub(crate) fn responses_direct_provider_transport_hook(
     wire: V3Provider12ResponsesWirePayload,
 ) -> Result<V3Transport13ResponsesHttpRequest, V3Error01SourceRaised> {
-    build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)
-        .map_err(provider_error_source("V3Transport13ResponsesHttpRequest"))
+    let provider_protocol = crate::hub_v1::provider_wire_protocol_for_provider_type(
+        wire.target().provider_id.as_str(),
+        wire.target().provider_type.as_str(),
+    )
+    .map_err(|error| {
+        build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Transport13ResponsesHttpRequest",
+            "responses_provider_protocol_resolution_failed",
+            error,
+            V3InternalErrorCode::V3Transport13ResponsesHttpRequest,
+        )
+    })?;
+    crate::hub_v1::build_v3_provider_transport_request_for_protocol(provider_protocol, wire)
+        .map_err(|error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Transport13ResponsesHttpRequest",
+                "responses_provider_transport_error",
+                error,
+                V3InternalErrorCode::V3Transport13ResponsesHttpRequest,
+            )
+        })
 }
 
 fn responses_direct_response_projection_hook(raw: V3ProviderResp14Raw) -> ResponseProjectionFuture {
@@ -739,6 +819,73 @@ mod tests {
 
         assert_eq!(wire.body()["model"], "provider-wire-model");
         assert_ne!(wire.body()["model"], "client-route-alias");
+    }
+
+    #[test]
+    fn responses_direct_openai_chat_target_uses_chat_transport_contract() {
+        let registry = register_responses_direct_hooks();
+        let mut policy = direct_policy_with_models(
+            "client-route-alias",
+            "deepseek-v4-flash",
+            "deepseek-v4-flash",
+        );
+        policy.target.candidate.provider_type = "openai_chat".to_string();
+        policy.request_body = json!({
+            "model": "client-route-alias",
+            "input": "hello",
+            "reasoning": {"effort": "high"},
+            "tools": [
+                {"type": "function", "name": "reasoningStop"},
+                {"type": "namespace", "name": "multi_agent_v1", "tools": [
+                    {"type": "function", "name": "spawn_agent", "parameters": {"type": "object"}}
+                ]}
+            ],
+            "tool_choice": "required"
+        });
+
+        let wire = registry
+            .run_request_projection(&policy)
+            .expect("direct OpenAI Chat target must build provider wire");
+        assert!(wire.body().get("input").is_none());
+        assert_eq!(wire.body()["messages"][0]["role"], "user");
+        assert_eq!(wire.body()["messages"][0]["content"], "hello");
+        assert!(
+            wire.body().get("tool_choice").is_none(),
+            "direct DeepSeek thinking wire must apply ProviderReqCompat06: {}",
+            wire.body()
+        );
+        assert_eq!(wire.body()["tools"][1]["type"], "function");
+        assert_eq!(wire.body()["tools"][1]["function"]["name"], "spawn_agent");
+        let transport = registry
+            .run_provider_transport(wire)
+            .expect("direct OpenAI Chat target must use Chat transport");
+        assert!(transport.url().ends_with("/chat/completions"));
+    }
+
+    #[test]
+    fn responses_direct_responses_target_applies_deepseek_thinking_compat() {
+        let registry = register_responses_direct_hooks();
+        let mut policy = direct_policy_with_models(
+            "client-route-alias",
+            "deepseek-v4-flash",
+            "deepseek-v4-flash",
+        );
+        policy.request_body = json!({
+            "model": "client-route-alias",
+            "input": "hello",
+            "reasoning": {"effort": "high"},
+            "tools": [{"type": "function", "name": "reasoningStop"}],
+            "tool_choice": "required"
+        });
+
+        let wire = registry
+            .run_request_projection(&policy)
+            .expect("direct Responses target must build provider wire");
+        assert!(
+            wire.body().get("tool_choice").is_none(),
+            "direct Responses DeepSeek thinking wire must apply ProviderReqCompat06: {}",
+            wire.body()
+        );
     }
 
     #[test]
