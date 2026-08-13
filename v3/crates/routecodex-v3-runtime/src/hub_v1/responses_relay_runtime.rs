@@ -777,7 +777,12 @@ fn validate_v3_responses_relay_provider_request_transport_intent(
 fn project_v3_responses_relay_client_body(
     client_response_transport_intent: V3HubTransportIntent,
     finalized_response: Value,
+    strip_client_response_id: bool,
 ) -> V3ResponsesRelayClientBody {
+    let mut finalized_response = finalized_response;
+    if strip_client_response_id {
+        crate::shared::strip_v3_response_id_from_json_body(&mut finalized_response);
+    }
     match client_response_transport_intent {
         V3HubTransportIntent::Json => V3ResponsesRelayClientBody::Json(finalized_response),
         V3HubTransportIntent::Sse => V3ResponsesRelayClientBody::Sse(

@@ -1599,6 +1599,222 @@ async fn p6_models_endpoint_lists_gpt55_without_gpt56_catalog() {
 }
 
 #[tokio::test]
+async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabilities() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) = start_controlled_upstream().await;
+    let mut manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    // provider A（test）承载 model1/model2（单 provider 路由目标）与 shared（双 provider）；
+    // provider B（other）承载 other-model（单 provider）与 shared（双 provider）。
+    let mut model1 = manifest.providers["test"].models["test"].clone();
+    model1.id = "model1".to_string();
+    model1.wire_name = "model1".to_string();
+    model1.aliases = Vec::new();
+    model1.capabilities = vec![
+        "text".to_string(),
+        "reasoning".to_string(),
+        "tools".to_string(),
+        "web_search".to_string(),
+    ];
+    let mut model2 = model1.clone();
+    model2.id = "model2".to_string();
+    model2.wire_name = "model2".to_string();
+    let mut shared = model1.clone();
+    shared.id = "shared".to_string();
+    shared.wire_name = "shared".to_string();
+    manifest
+        .providers
+        .get_mut("test")
+        .unwrap()
+        .models
+        .insert("model1".to_string(), model1);
+    manifest
+        .providers
+        .get_mut("test")
+        .unwrap()
+        .models
+        .insert("model2".to_string(), model2);
+    manifest
+        .providers
+        .get_mut("test")
+        .unwrap()
+        .models
+        .insert("shared".to_string(), shared);
+    manifest.providers.insert(
+        "other".to_string(),
+        routecodex_v3_config::V3ProviderManifest {
+            id: "other".to_string(),
+            default_model: "other-model".to_string(),
+            models: std::collections::BTreeMap::from([
+                (
+                    "other-model".to_string(),
+                    routecodex_v3_config::V3ProviderModelManifest {
+                        id: "other-model".to_string(),
+                        wire_name: "other-model".to_string(),
+                        aliases: Vec::new(),
+                        capabilities: vec![
+                            "text".to_string(),
+                            "reasoning".to_string(),
+                            "tools".to_string(),
+                            "web_search".to_string(),
+                        ],
+                        supports_streaming: true,
+                        supports_thinking: true,
+                        thinking: None,
+                        max_tokens: Some(8192),
+                        max_context_tokens: Some(262144),
+                        web_search_execution_mode: manifest.providers["test"].models["test"]
+                            .web_search_execution_mode
+                            .clone(),
+                        web_search_backend_binding: manifest.providers["test"].models["test"]
+                            .web_search_backend_binding
+                            .clone(),
+                        features: std::collections::BTreeMap::new(),
+                    },
+                ),
+                (
+                    "shared".to_string(),
+                    routecodex_v3_config::V3ProviderModelManifest {
+                        id: "shared".to_string(),
+                        wire_name: "shared".to_string(),
+                        aliases: Vec::new(),
+                        capabilities: vec![
+                            "text".to_string(),
+                            "reasoning".to_string(),
+                            "tools".to_string(),
+                            "web_search".to_string(),
+                        ],
+                        supports_streaming: true,
+                        supports_thinking: true,
+                        thinking: None,
+                        max_tokens: Some(8192),
+                        max_context_tokens: Some(262144),
+                        web_search_execution_mode: manifest.providers["test"].models["test"]
+                            .web_search_execution_mode
+                            .clone(),
+                        web_search_backend_binding: manifest.providers["test"].models["test"]
+                            .web_search_backend_binding
+                            .clone(),
+                        features: std::collections::BTreeMap::new(),
+                    },
+                ),
+            ]),
+            responses: manifest.providers["test"].responses.clone(),
+            concurrency: manifest.providers["test"].concurrency.clone(),
+            health: manifest.providers["test"].health.clone(),
+            provider_request_cleanup: manifest.providers["test"]
+                .provider_request_cleanup
+                .clone(),
+            compatibility_profile: manifest.providers["test"]
+                .compatibility_profile
+                .clone(),
+            features: std::collections::BTreeMap::new(),
+            request_timeout_ms: manifest.providers["test"].request_timeout_ms,
+            ..manifest.providers["test"].clone()
+        },
+    );
+    let pools = manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap();
+    pools.targets = vec![
+        routecodex_v3_config::V3RoutePoolTargetManifest {
+            kind: routecodex_v3_config::V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("test".to_string()),
+            model: Some("model1".to_string()),
+            key: Some("key".to_string()),
+            priority: Some(1),
+            weight: None,
+        },
+        routecodex_v3_config::V3RoutePoolTargetManifest {
+            kind: routecodex_v3_config::V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("test".to_string()),
+            model: Some("model2".to_string()),
+            key: Some("key".to_string()),
+            priority: Some(2),
+            weight: None,
+        },
+        routecodex_v3_config::V3RoutePoolTargetManifest {
+            kind: routecodex_v3_config::V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("test".to_string()),
+            model: Some("shared".to_string()),
+            key: Some("key".to_string()),
+            priority: Some(3),
+            weight: None,
+        },
+        routecodex_v3_config::V3RoutePoolTargetManifest {
+            kind: routecodex_v3_config::V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("other".to_string()),
+            model: Some("shared".to_string()),
+            key: Some("key".to_string()),
+            priority: Some(4),
+            weight: None,
+        },
+    ];
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let response: Value = client
+        .get(format!("http://{}/v1/models", handle.listeners[0].addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let data = response["data"].as_array().unwrap();
+    // model1/model2 由单一 provider 承载：高级有状态能力打开。
+    for id in ["model1", "model2"] {
+        let model = data
+            .iter()
+            .find(|model| model["id"] == id)
+            .unwrap_or_else(|| panic!("{id} must be listed"));
+        assert_eq!(model["support_verbosity"], true, "{id} single provider");
+        assert_eq!(model["supports_reasoning_summaries"], true, "{id} single provider");
+        assert_eq!(model["default_verbosity"], "low", "{id} single provider");
+        assert_eq!(model["reasoning_summary_format"], "experimental", "{id} single provider");
+    }
+    // shared 被两个 provider 承载：多路由目标，只保留无状态请求能力。
+    let shared_entry = data
+        .iter()
+        .find(|model| model["id"] == "shared")
+        .expect("shared must be listed");
+    assert_eq!(shared_entry["support_verbosity"], false, "shared multi-provider");
+    assert_eq!(
+        shared_entry["supports_reasoning_summaries"],
+        false,
+        "shared multi-provider"
+    );
+    assert_eq!(shared_entry["default_verbosity"], "none", "shared multi-provider");
+    assert_eq!(
+        shared_entry["reasoning_summary_format"],
+        "none",
+        "shared multi-provider"
+    );
+    // direct 条目（provider.model）恒为单 provider 直连：高级能力始终打开。
+    for direct_id in ["test.model1", "test.model2", "test.shared", "other.shared"] {
+        let direct = data
+            .iter()
+            .find(|model| model["id"] == direct_id)
+            .unwrap_or_else(|| panic!("{direct_id} must be listed as direct route"));
+        assert_eq!(direct["direct_route"], true, "{direct_id}");
+        assert_eq!(direct["support_verbosity"], true, "{direct_id} direct");
+        assert_eq!(
+            direct["supports_reasoning_summaries"],
+            true,
+            "{direct_id} direct"
+        );
+    }
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
 async fn responses_relay_client_metadata_cannot_authorize_continuation_control_scope() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =

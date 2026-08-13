@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
+    mut input: V3ResponsesRelayRuntimeInput,
     transport: &T,
     local: Option<V3ResponsesRelayLocalContinuationExecution<'_>>,
     stopless_control: Option<V3ResponsesRelayStoplessControlExecution<'_>>,
@@ -41,6 +41,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         // 本地 continuation 关闭：不按 previous_response_id 恢复上下文，
         // 请求按全量新请求处理（tool output 仍正常透传）。
         local_tool_output_ids.restore_ids.clear();
+        if let Some(object) = input.payload.as_object_mut() {
+            // 同时从 provider wire 剥离 previous_response_id，避免上游按
+            // 该 id 续接已禁用的 continuation（重放 provider 400）。
+            object.remove("previous_response_id");
+        }
     }
     let protocol_switch_allowed =
         responses_relay_protocol_switch_allowed(&input.payload, &local_tool_output_ids);
@@ -909,6 +914,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 let client_body = project_v3_responses_relay_client_body(
                     client_response_transport_intent,
                     finalized_provider_value,
+                    crate::shared::v3_strip_client_response_id_enabled_for_server(
+                        manifest,
+                        &input.server_id,
+                    ),
                 );
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
@@ -1266,6 +1275,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 let client_body = project_v3_responses_relay_client_body(
                     client_response_transport_intent,
                     finalized_provider_value,
+                    crate::shared::v3_strip_client_response_id_enabled_for_server(
+                        manifest,
+                        &input.server_id,
+                    ),
                 );
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
