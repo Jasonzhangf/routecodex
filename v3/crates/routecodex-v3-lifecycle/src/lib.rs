@@ -1212,6 +1212,12 @@ async fn release_listener_set_for_start(
     let occupied_ports = occupied_listener_ports(&declaration.listeners);
     let terminate_pids = explicit_listener_pids_for_ports(&occupied_ports)?;
     guard_explicit_listener_pids_are_scoped_to_target_ports(&terminate_pids, &occupied_ports)?;
+    let mut terminate_pids = BTreeSet::from_iter(terminate_pids.iter().copied());
+    terminate_pids.extend(instance_residual_pids_for_listener_set(
+        state_root,
+        &declaration.listeners,
+    )?);
+    let terminate_pids = terminate_pids.into_iter().collect::<Vec<_>>();
     signal_explicit_listener_pids(&terminate_pids, V3LifecycleSignal::Terminate)?;
     if wait_for_listener_set_available(&declaration.listeners, graceful_timeout).await {
         return Ok(());
@@ -1220,6 +1226,12 @@ async fn release_listener_set_for_start(
     let occupied_ports = occupied_listener_ports(&declaration.listeners);
     let kill_pids = explicit_listener_pids_for_ports(&occupied_ports)?;
     guard_explicit_listener_pids_are_scoped_to_target_ports(&kill_pids, &occupied_ports)?;
+    let mut kill_pids = BTreeSet::from_iter(kill_pids.iter().copied());
+    kill_pids.extend(instance_residual_pids_for_listener_set(
+        state_root,
+        &declaration.listeners,
+    )?);
+    let kill_pids = kill_pids.into_iter().collect::<Vec<_>>();
     signal_explicit_listener_pids(&kill_pids, V3LifecycleSignal::Kill)?;
     if wait_for_listener_set_available(&declaration.listeners, force_timeout).await {
         return Ok(());

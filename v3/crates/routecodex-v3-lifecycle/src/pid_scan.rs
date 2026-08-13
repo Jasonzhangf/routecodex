@@ -1,6 +1,8 @@
 use super::*;
 
-pub(crate) fn explicit_listener_pids_for_ports(ports: &BTreeSet<u16>) -> Result<Vec<u32>, V3LifecycleError> {
+pub(crate) fn explicit_listener_pids_for_ports(
+    ports: &BTreeSet<u16>,
+) -> Result<Vec<u32>, V3LifecycleError> {
     let mut pids = BTreeSet::new();
     for port in ports {
         for pid in listening_pids_for_port(*port)? {
@@ -10,6 +12,55 @@ pub(crate) fn explicit_listener_pids_for_ports(ports: &BTreeSet<u16>) -> Result<
         }
     }
     Ok(pids.into_iter().collect())
+}
+
+/// 收集与目标 listener 端口重叠、pid.cache 记录存活、但当前不再监听目标端口的
+/// 残留 managed child PID。start 抢占实例后，旧 run-managed-child 可能已释放端口
+/// 但进程仍存活并保持 tty 前台进程组（导致 Ctrl+C 信号发到错误进程）；这类残留
+/// 无法通过按端口 lsof 发现，必须按 instance pid.cache 补全。
+pub(crate) fn instance_residual_pids_for_listener_set(
+    state_root: &Path,
+    listeners: &[V3ManagedListenerDeclaration],
+) -> Result<Vec<u32>, V3LifecycleError> {
+    let target_ports = listeners
+        .iter()
+        .map(|listener| listener.port)
+        .collect::<BTreeSet<_>>();
+    let instances_root = state_root.join("instances");
+    if !instances_root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut residual = BTreeSet::new();
+    for entry in fs::read_dir(&instances_root)? {
+        let path = entry?.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let pid_path = path.join("pid.cache");
+        let Ok(pid_cache) = read_json::<V3ManagedPidCache>(&pid_path) else {
+            continue;
+        };
+        if !pid_is_alive(pid_cache.pid) || pid_cache.pid == std::process::id() {
+            continue;
+        }
+        let declaration_path = path.join("instance.json");
+        let Ok(published) = read_json::<V3ManagedInstanceDeclaration>(&declaration_path) else {
+            continue;
+        };
+        let overlaps = published
+            .listeners
+            .iter()
+            .any(|listener| target_ports.contains(&listener.port));
+        if !overlaps {
+            continue;
+        }
+        let listening = listening_ports_for_pid(pid_cache.pid)?;
+        let still_listening_target = listening.iter().any(|port| target_ports.contains(port));
+        if !still_listening_target {
+            residual.insert(pid_cache.pid);
+        }
+    }
+    Ok(residual.into_iter().collect())
 }
 
 pub(crate) fn listening_pids_for_port(port: u16) -> Result<Vec<u32>, V3LifecycleError> {
