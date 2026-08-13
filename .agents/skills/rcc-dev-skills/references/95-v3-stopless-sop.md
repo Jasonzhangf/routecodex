@@ -325,7 +325,7 @@ Req04 Chat Process:
 - 查 `~/.rcc/codex-samples/openai-responses/ports/<port>/<requestId>/` 时，必须同时比较 `request.json`、`provider-request.json`、`provider-response.json`、`response.json`；不能只看 raw client request 里有/没有 stopless artifacts。
 - `request.json` 可能保留客户端回传的历史 `call_stopless_reasoning` no-op call/output；这只能说明客户端历史里有桥接轮，不等于 provider 看到这些 artifacts。
 - 判断工具列表是否被清理，真证据是 `provider-request.json`：原始工具必须保留，且 managed relay 只追加 exactly-one `reasoningStop`。若 provider wire 仍有 `call_stopless_reasoning`、CLI stdout、`routecodex hook run reasoningStop` 历史消息，才是 Req04 清理失败。
-- 判断 stopless 是否失效，必须按轮次看：provider 原始 `finish_reason`、Resp03 是否投影 `call_stopless_reasoning`、下一轮 provider request 是否注入完整 guideline + tools、以及 guard 是否达到。默认预算 3 表示第 1、2、3 次连续自然 stop 都应投影 no-op，第 4 次才是 guard pass-through；guard 不是“工具列表丢失”，也不能当完成证据。
+- 判断 stopless 是否失效，必须按轮次看：provider 原始 `finish_reason`、Resp03 是否投影 `call_stopless_reasoning`、下一轮 provider request 是否注入完整 guideline + tools、以及 guard 是否达到。默认预算 3，runtime 经 `with_max_stop_budget_floor(4)` 提升为 4，第 1、2、3、4 次连续自然 stop 都投影 no-op，第 5 次才是 guard pass-through；guard 不是“工具列表丢失”，也不能当完成证据。
 - 最新真实样本出现“工具列表存在但模型连续自然 stop”时，优先区分三类：模型未按 guidance 调工具、guard 预算/重置策略不适合当前任务、或 Req04 没把 active no-op state 转成 provider-visible guideline。不要先改 SSE/handler/outbound。
 
 ### Guard
