@@ -198,11 +198,29 @@ fn strip_v3_request_encrypted_reasoning(body: &mut Value) {
             continue;
         }
         strip_v3_cipher_field(obj);
+        // 现象：Codex 客户端历史里的 reasoning 常为 `{"type":"reasoning","summary":[]}`
+        // （密文已剥离或本就无明文）。opencode.ai zen/go 网关在 thinking 模式要求每条
+        // assistant reasoning 必须携带非空 reasoning_text 表示；空 `summary:[]` 或
+        // `text:""` 都会被上游 400 `reasoning_text must be passed back`。因此**空数组/
+        // 空文本一律补非空占位文本**——实测只有非空 reasoning_text 被上游接受。
+        // 注意：这是有意保留 reasoning item（不删除）并填充占位；删除或留空都会让
+        // 该轮缺 reasoning 表示，触发 400。wire.rs 测试
+        // `wire_keeps_encrypted_only_reasoning_as_empty_text_placeholder` 锁住该行为；
+        // 后续任何"清理空 reasoning"的修改都会破坏 opencode DeepSeek 链路。
         let has_plain_content = ["summary", "content", "text", "reasoning_content"]
             .iter()
-            .any(|key| obj.get(*key).is_some_and(|value| !value.is_null()));
+            .any(|key| {
+                obj.get(*key).is_some_and(|value| {
+                    !value.is_null()
+                        && !(value.is_array() && value.as_array().is_some_and(Vec::is_empty))
+                        && !(value.as_str().is_some_and(str::is_empty))
+                })
+            });
         if !has_plain_content {
-            obj.insert("text".to_string(), Value::String(String::new()));
+            obj.insert(
+                "text".to_string(),
+                Value::String("[thinking redacted]".to_string()),
+            );
         }
     }
 }
@@ -1093,7 +1111,7 @@ mod tests {
         assert_eq!(
             input.len(),
             3,
-            "encrypted-only reasoning item is kept as empty-text placeholder (opencode DeepSeek requires reasoning on every assistant turn)"
+            "encrypted-only reasoning item is kept as non-empty text placeholder (opencode DeepSeek requires non-empty reasoning_text on every assistant reasoning item)"
         );
         assert_eq!(input[0]["type"], "reasoning");
         assert_eq!(
@@ -1106,8 +1124,8 @@ mod tests {
         );
         assert_eq!(input[1]["type"], "reasoning");
         assert_eq!(
-            input[1]["text"], "",
-            "encrypted-only reasoning item becomes empty-text reasoning placeholder"
+            input[1]["text"], "[thinking redacted]",
+            "empty reasoning item becomes non-empty text placeholder; empty or missing reasoning_text triggers upstream 400 `reasoning_text must be passed back`"
         );
         assert!(
             input[1].get("encrypted_content").is_none(),

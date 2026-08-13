@@ -1,5 +1,7 @@
 use super::*;
 use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
+// Relay→Direct handoff 时撤销 relay 注入的 stopless 合约（Direct 按自身配置决定注入）。
+use super::stopless_injection::strip_v3_stopless_contract_for_relay_direct_handoff;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 
@@ -59,6 +61,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         resolve_request_web_search_execution_mode(manifest, &input.payload);
     let request_web_search_backend_binding =
         resolve_request_web_search_backend_binding(manifest, &input.payload);
+    // SameProtocolDirect handoff 边界需要恢复原始 tool_choice；在 payload
+    // move 进 ReqInbound 之前保存引用值。
+    let original_tool_choice = input.payload.get("tool_choice").cloned();
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
         V3HubEntryProtocol::Responses,
@@ -286,11 +291,19 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     finalized_response: None,
                     provider_snapshots: None,
                     protocol_direct_handoff: Some(V3ResponsesProtocolDirectHandoff {
-                        request_payload:
+                        request_payload: {
+                            // Relay 当前轮注入的 stopless 合约不得跨执行模式延续：
+                            // handoff 到 Direct 后由 Direct 按自身配置决定注入。
+                            let mut handoff_chat_payload = (*provider_semantic_body).clone();
+                            strip_v3_stopless_contract_for_relay_direct_handoff(
+                                &mut handoff_chat_payload,
+                                original_tool_choice.as_ref(),
+                            );
                             build_v3_openai_responses_standard_request_from_chat_canonical(
-                                &provider_semantic_body,
+                                &handoff_chat_payload,
                             )
-                            .map_err(V3ResponsesRelayRuntimeError::ProviderWireEncoding)?,
+                            .map_err(V3ResponsesRelayRuntimeError::ProviderWireEncoding)?
+                        },
                         plan: V3ResponsesProtocolExecutionPlan {
                             decision,
                             node_trace: vec![

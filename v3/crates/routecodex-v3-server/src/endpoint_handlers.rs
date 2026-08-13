@@ -810,6 +810,46 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                         &mut frame,
                         handoff.provider_failure_events,
                     );
+                    // 可观测性：handoff direct 分支与纯 direct 分支对齐——status>=400
+                    // 或 provider 失败时无条件落盘 request.json + error.json（绕过
+                    // codex_samples 开关）。此前该分支只落 response.json，400/5xx
+                    // 样本全部丢失，无法事后诊断（770577 等 400 无 error 样本）。
+                    let has_provider_failure = frame.observability.as_ref().is_some_and(
+                        |observability| !observability.provider_failure_events.is_empty(),
+                    );
+                    if frame.status >= 400 || has_provider_failure {
+                        let _ = persist_v3_error_evidence_payload(
+                            &state,
+                            &entry_protocol,
+                            &path,
+                            &request_id,
+                            "request.json",
+                            &state
+                                .debug
+                                .project_payload_verbatim(handoff.request_payload.clone()),
+                            (frame.status >= 400).then_some(frame.status),
+                        );
+                        let _ = persist_v3_error_evidence_payload(
+                            &state,
+                            &entry_protocol,
+                            &path,
+                            &request_id,
+                            "error.json",
+                            &state
+                                .debug
+                                .project_payload_verbatim(json!({
+                                    "object": "routecodex.v3.error_evidence",
+                                    "stage": "error",
+                                    "status": frame.status,
+                                    "request_id": request_id,
+                                    "endpoint": path,
+                                    "node_trace": frame.node_trace.clone(),
+                                    "error_chain": frame.error_chain.clone(),
+                                    "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
+                                })),
+                            (frame.status >= 400).then_some(frame.status),
+                        );
+                    }
                     if let Some(response) = capture_v3_responses_direct_response(
                         &state,
                         &entry_protocol,

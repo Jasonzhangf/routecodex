@@ -257,6 +257,86 @@ pub(crate) fn tool_is_reasoning_stop(tool: &Value) -> bool {
             == Some("reasoningStop")
 }
 
+/// Relay→Direct handoff 边界：撤销当前轮 relay 注入的 stopless 合约
+/// （推进准则、reasoningStop tool、tool_choice 提升），使 handoff payload
+/// 回到"未注入"语义，由 Direct 侧按自身配置决定是否注入。
+///
+/// 只操作当前轮注入的精确文本/声明（尾部精确匹配或 exactly-one 声明），
+/// 历史与无关内容原样保留；tool_choice 恢复为原始客户端请求值。
+pub(crate) fn strip_v3_stopless_contract_for_relay_direct_handoff(
+    payload: &mut Value,
+    original_tool_choice: Option<&Value>,
+) {
+    if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
+        messages.retain_mut(|message| {
+            message.get("role").and_then(Value::as_str) != Some("system")
+                || !strip_v3_injected_guidance_from_system(message)
+        });
+    }
+    if let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) {
+        tools.retain(|tool| !tool_is_reasoning_stop(tool));
+    }
+    if payload.get("tools").and_then(Value::as_array).is_some_and(Vec::is_empty) {
+        if let Some(object) = payload.as_object_mut() {
+            object.remove("tools");
+        }
+    }
+    match original_tool_choice {
+        Some(choice) => {
+            if let Some(object) = payload.as_object_mut() {
+                object.insert("tool_choice".to_string(), choice.clone());
+            }
+        }
+        None => {
+            if let Some(object) = payload.as_object_mut() {
+                object.remove("tool_choice");
+            }
+        }
+    }
+}
+
+/// 返回 true 表示整条 system 消息是 relay 注入新建的（应移除该消息）。
+fn strip_v3_injected_guidance_from_system(message: &mut Value) -> bool {
+    let Some(content) = message.get("content") else {
+        return false;
+    };
+    match content {
+        Value::String(text) if text == STOPLESS_PROVIDER_GUIDANCE => true,
+        Value::String(_) => {
+            if let Some(Value::String(text)) = message.get_mut("content") {
+                if let Some(prefix) = text.strip_suffix(STOPLESS_PROVIDER_GUIDANCE_WITH_HEADER) {
+                    *text = prefix.to_string();
+                }
+            }
+            false
+        }
+        Value::Array(_) => {
+            let only_injected = content.as_array().is_some_and(|parts| {
+                parts.len() == 1 && part_is_injected_stopless_guidance(&parts[0])
+            });
+            if only_injected {
+                return true;
+            }
+            if let Some(Value::Array(parts)) = message.get_mut("content") {
+                if let Some(last) = parts.last_mut() {
+                    if part_is_injected_stopless_guidance(last) {
+                        parts.pop();
+                    }
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn part_is_injected_stopless_guidance(part: &Value) -> bool {
+    part.get("type").and_then(Value::as_str) == Some("text")
+        && part.get("text").and_then(Value::as_str).is_some_and(|text| {
+            text == STOPLESS_PROVIDER_GUIDANCE_WITH_HEADER || text == STOPLESS_PROVIDER_GUIDANCE
+        })
+}
+
 #[cfg(test)]
 mod stopless_injection_tests {
     use super::*;
@@ -358,6 +438,62 @@ mod stopless_injection_tests {
             payload["tools"].as_array().unwrap().len(),
             2,
             "other tools must be preserved"
+        );
+    }
+
+    #[test]
+    fn strip_relay_handoff_removes_injected_contract_and_restores_tool_choice() {
+        // system content 为注入新建的整条准则（字符串形态）。
+        let mut payload = json!({
+            "model": "m",
+            "messages": [
+                {"role": "system", "content": STOPLESS_PROVIDER_GUIDANCE},
+                {"role": "user", "content": "hi"}
+            ],
+            "tools": [v3_stopless_reasoning_stop_tool(), json!({"type":"function","name":"exec","parameters":{"type":"object"}})],
+            "tool_choice": "required"
+        });
+        strip_v3_stopless_contract_for_relay_direct_handoff(
+            &mut payload,
+            Some(&json!("none")),
+        );
+        let messages = payload["messages"].as_array().unwrap();
+        assert!(
+            messages.iter().all(|m| m.get("role").and_then(Value::as_str) != Some("system")),
+            "injected system guidance message must be removed: {payload}"
+        );
+        assert_eq!(payload["messages"][0]["role"], "user");
+        assert_eq!(payload["tool_choice"], "none", "original tool_choice restored");
+        let tools = payload["tools"].as_array().unwrap();
+        assert!(
+            tools.iter().all(|t| !tool_is_reasoning_stop(t)),
+            "reasoningStop tool must be stripped: {payload}"
+        );
+        assert_eq!(tools.len(), 1, "ordinary tool preserved");
+
+        // 追加形态：system content 尾部追加注入段，剥离只截掉尾部。
+        let mut appended = json!({
+            "model": "m",
+            "messages": [
+                {"role": "system", "content": format!("base{}", STOPLESS_PROVIDER_GUIDANCE_WITH_HEADER)},
+                {"role": "user", "content": "hi"}
+            ],
+            "tools": [v3_stopless_reasoning_stop_tool()],
+            "tool_choice": "required"
+        });
+        strip_v3_stopless_contract_for_relay_direct_handoff(&mut appended, None);
+        assert_eq!(
+            appended["messages"][0]["content"],
+            "base",
+            "tail-injected guidance must be truncated"
+        );
+        assert!(
+            appended.get("tools").is_none(),
+            "empty tools after strip must remove the field"
+        );
+        assert!(
+            appended.get("tool_choice").is_none(),
+            "missing original tool_choice must remove the field"
         );
     }
 }
