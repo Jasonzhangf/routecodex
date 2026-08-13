@@ -386,6 +386,8 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
     input: Value,
 ) -> Result<Value, V3AnthropicCodecError> {
     reject_side_channel_fields(&input)?;
+    let mut input = input;
+    strip_unmapped_responses_reasoning_extensions(&mut input);
     let object = input
         .as_object()
         .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
@@ -690,20 +692,37 @@ fn responses_reasoning_fields_as_anthropic_thinking(
     Ok(Some(Value::Object(thinking)))
 }
 
+fn strip_unmapped_responses_reasoning_extensions(input: &mut Value) {
+    const RESPONSES_ONLY_REASONING_KEYS: &[&str] = &[
+        "reasoning_context_policy",
+        "reasoning_mode",
+        "reasoning_include_thoughts",
+    ];
+    let Some(object) = input.as_object_mut() else {
+        return;
+    };
+    let mut stripped = Vec::new();
+    for key in RESPONSES_ONLY_REASONING_KEYS {
+        if object.remove(*key).is_some() {
+            stripped.push((*key).to_string());
+        }
+    }
+    if !stripped.is_empty() {
+        // Side-channel diagnostic only: stripped Responses-only reasoning fields
+        // never enter provider wire or response payload. An unmapped Responses
+        // semantic must not collapse a whole request into 502.
+        eprintln!(
+            "[routecodex] anthropic_outbound_stripped_responses_only_reasoning_fields fields={}",
+            stripped.join(",")
+        );
+    }
+}
+
 fn reject_unmapped_anthropic_payload_extensions(
     object: &Map<String, Value>,
     extension: Option<&Map<String, Value>>,
 ) -> Result<(), V3AnthropicCodecError> {
     let mut paths = Vec::new();
-    for key in [
-        "reasoning_context_policy",
-        "reasoning_mode",
-        "reasoning_include_thoughts",
-    ] {
-        if object.contains_key(key) {
-            paths.push(format!("$.request.{key}"));
-        }
-    }
     if let Some(extension) = extension {
         for key in extension.keys() {
             if !matches!(

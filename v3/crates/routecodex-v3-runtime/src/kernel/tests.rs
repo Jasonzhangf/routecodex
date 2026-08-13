@@ -201,6 +201,7 @@ async fn direct_sse_runtime_timing_publishes_only_after_clean_eof() {
         source,
         observation.clone(),
         runtime_timing.clone(),
+        false,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -223,6 +224,58 @@ async fn direct_sse_runtime_timing_publishes_only_after_clean_eof() {
 }
 
 #[tokio::test]
+async fn direct_sse_strip_client_response_id_empties_nested_response_id() {
+    let observation = V3RuntimeStreamObservation::default();
+    let runtime_timing = V3RuntimeTimingState::start();
+    let source = Box::pin(stream::iter(vec![Ok(
+        b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\"}}\n\n"
+            .to_vec(),
+    )]));
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(
+        source,
+        observation.clone(),
+        runtime_timing.clone(),
+        true,
+    );
+    let mut observed = observed;
+    let mut first = observed.next().await.unwrap().unwrap();
+    assert!(
+        String::from_utf8_lossy(&first).contains("event: response.created"),
+        "event line must be preserved"
+    );
+    assert!(
+        String::from_utf8_lossy(&first).contains("\"id\":\"\""),
+        "nested response.id must be emptied"
+    );
+    assert!(
+        !String::from_utf8_lossy(&first).contains("\"id\":\"resp_1\""),
+        "original response id must not leak"
+    );
+}
+
+#[tokio::test]
+async fn direct_sse_strip_disabled_passes_chunk_through_unchanged() {
+    let observation = V3RuntimeStreamObservation::default();
+    let runtime_timing = V3RuntimeTimingState::start();
+    let source = Box::pin(stream::iter(vec![Ok(
+        b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\"}}\n\n"
+            .to_vec(),
+    )]));
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(
+        source,
+        observation.clone(),
+        runtime_timing.clone(),
+        false,
+    );
+    let mut observed = observed;
+    let first = observed.next().await.unwrap().unwrap();
+    assert!(
+        String::from_utf8_lossy(&first).contains("\"id\":\"resp_1\""),
+        "strip disabled must keep original id"
+    );
+}
+
+#[tokio::test]
 async fn direct_sse_terminal_event_before_eof_does_not_publish_runtime_timing() {
     let runtime_timing = V3RuntimeTimingState::start();
     runtime_timing.start_external().unwrap();
@@ -238,6 +291,7 @@ async fn direct_sse_terminal_event_before_eof_does_not_publish_runtime_timing() 
         source,
         observation.clone(),
         runtime_timing.clone(),
+        false,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -268,6 +322,7 @@ async fn direct_sse_malformed_tail_does_not_publish_runtime_timing() {
         source,
         observation.clone(),
         runtime_timing.clone(),
+        false,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -305,6 +360,7 @@ async fn direct_sse_response_done_without_completed_is_terminal_missing() {
         source,
         observation.clone(),
         runtime_timing.clone(),
+        false,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -341,6 +397,7 @@ async fn direct_sse_failed_event_without_error_code_is_protocol_invalid() {
         source,
         observation.clone(),
         runtime_timing.clone(),
+        false,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -376,6 +433,7 @@ async fn direct_sse_incomplete_event_without_error_message_is_protocol_invalid()
         source,
         observation.clone(),
         runtime_timing.clone(),
+        false,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -434,6 +492,7 @@ async fn direct_sse_failed_event_accepts_top_level_error_envelope() {
         source,
         observation.clone(),
         runtime_timing.clone(),
+        false,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -465,6 +524,7 @@ async fn direct_sse_json_type_remains_provider_semantic_source() {
         source,
         observation.clone(),
         runtime_timing.clone(),
+        false,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -501,6 +561,7 @@ async fn red_sse_semantics_must_use_json_type_not_event_name() {
         source,
         observation.clone(),
         runtime_timing.clone(),
+        false,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -535,6 +596,7 @@ async fn red_sse_semantics_ignore_event_name_when_json_is_completed() {
         source,
         observation.clone(),
         runtime_timing.clone(),
+        false,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -566,6 +628,7 @@ async fn direct_sse_failure_after_client_commit_does_not_reselect_current_reques
         source,
         observation.clone(),
         runtime_timing.clone(),
+        false,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,

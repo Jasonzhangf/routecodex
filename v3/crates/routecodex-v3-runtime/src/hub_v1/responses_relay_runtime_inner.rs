@@ -36,7 +36,12 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let client_response_transport_intent =
         v3_responses_relay_transport_intent_from_stream_field(&input.payload);
     let provider_request_transport_intent = client_response_transport_intent;
-    let local_tool_output_ids = find_responses_tool_output_ids(&input.payload)?;
+    let mut local_tool_output_ids = find_responses_tool_output_ids(&input.payload)?;
+    if crate::shared::v3_responses_continuation_disabled_for_server(manifest, &input.server_id) {
+        // 本地 continuation 关闭：不按 previous_response_id 恢复上下文，
+        // 请求按全量新请求处理（tool output 仍正常透传）。
+        local_tool_output_ids.restore_ids.clear();
+    }
     let protocol_switch_allowed =
         responses_relay_protocol_switch_allowed(&input.payload, &local_tool_output_ids);
     apply_v3_responses_relay_web_search_control_completion(
@@ -862,6 +867,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     provider_semantic_body.as_ref(),
                     &finalized_provider_value,
                     action,
+                    crate::shared::v3_responses_continuation_disabled_for_server(
+                        manifest,
+                        &input.server_id,
+                    ),
                 )?;
                 handle_error_before_resp03!(provider_health
                     .record_provider_success_in_failure_scope(
@@ -888,10 +897,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         });
                 observability.response_status = response_status;
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
+                // 拦截语义：Resp03 续杯投影（natural stop / reasoningStop continue）
+                // 才打印 stopless 控制台行；Terminal/Blocked/guard/inactive 放行不打印。
                 observability.stopless_activation = response_stopless_state
                     .as_ref()
-                    .and_then(V3StoplessCenterState::last_provider_stopless_call_id)
-                    .is_some();
+                    .is_some_and(V3StoplessCenterState::need_continue);
                 observability.timing = Some(handle_error_before_resp03!(runtime_timing
                     .finish_runtime()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming)));
@@ -1184,6 +1194,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     provider_semantic_body.as_ref(),
                     &finalized_provider_value,
                     action,
+                    crate::shared::v3_responses_continuation_disabled_for_server(
+                        manifest,
+                        &input.server_id,
+                    ),
                 )?;
                 handle_error_before_resp03!(provider_health
                     .record_provider_success_in_failure_scope(
@@ -1234,10 +1248,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             .ok()
                             .and_then(|snapshot| snapshot.usage)
                     });
+                // 拦截语义：Resp03 续杯投影（natural stop / reasoningStop continue）
+                // 才打印 stopless 控制台行；Terminal/Blocked/guard/inactive 放行不打印。
                 observability.stopless_activation = response_stopless_state
                     .as_ref()
-                    .and_then(V3StoplessCenterState::last_provider_stopless_call_id)
-                    .is_some();
+                    .is_some_and(V3StoplessCenterState::need_continue);
                 let timing = handle_error_before_resp03!(runtime_timing
                     .finish_runtime()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));

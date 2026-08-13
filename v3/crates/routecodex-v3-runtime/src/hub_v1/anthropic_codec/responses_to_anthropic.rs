@@ -920,42 +920,49 @@ fn responses_custom_tool_as_anthropic_compatibility_tool(
         }
         None => None,
     };
-    let format = tool.get("format").and_then(Value::as_object).ok_or(
-        V3AnthropicCodecError::MalformedField {
-            field: "tools[].format",
-        },
-    )?;
-    let format_type = format.get("type").and_then(Value::as_str).ok_or(
-        V3AnthropicCodecError::MalformedField {
-            field: "tools[].format.type",
-        },
-    )?;
-    let compatibility_note = match format_type {
-        "text" if format.len() == 1 => format!(
+    let compatibility_note = match tool.get("format") {
+        Some(Value::String(format)) if format == "custom" => format!(
             "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: Anthropic does not natively enforce the source free-form custom-tool format; provide the exact raw string in the input field."
         ),
-        "grammar" if format.len() == 3 => {
-            let syntax = format
-                .get("syntax")
-                .and_then(Value::as_str)
-                .ok_or(V3AnthropicCodecError::MalformedField {
-                    field: "tools[].format.syntax",
-                })?;
-            let definition = format
-                .get("definition")
-                .and_then(Value::as_str)
-                .ok_or(V3AnthropicCodecError::MalformedField {
-                    field: "tools[].format.definition",
-                })?;
-            format!(
-                "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: source grammar syntax={} definition={}; Anthropic does not natively enforce this grammar; provide the exact raw string in the input field.",
-                serde_json::to_string(syntax).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools[].format.syntax" })?,
-                serde_json::to_string(definition).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools[].format.definition" })?
-            )
+        Some(Value::Object(format)) => {
+            let format_type = format.get("type").and_then(Value::as_str).ok_or(
+                V3AnthropicCodecError::MalformedField {
+                    field: "tools[].format.type",
+                },
+            )?;
+            match format_type {
+                "text" if format.len() == 1 => format!(
+                    "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: Anthropic does not natively enforce the source free-form custom-tool format; provide the exact raw string in the input field."
+                ),
+                "grammar" if format.len() == 3 => {
+                    let syntax = format
+                        .get("syntax")
+                        .and_then(Value::as_str)
+                        .ok_or(V3AnthropicCodecError::MalformedField {
+                            field: "tools[].format.syntax",
+                        })?;
+                    let definition = format
+                        .get("definition")
+                        .and_then(Value::as_str)
+                        .ok_or(V3AnthropicCodecError::MalformedField {
+                            field: "tools[].format.definition",
+                        })?;
+                    format!(
+                        "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: source grammar syntax={} definition={}; Anthropic does not natively enforce this grammar; provide the exact raw string in the input field.",
+                        serde_json::to_string(syntax).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools[].format.syntax" })?,
+                        serde_json::to_string(definition).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools[].format.definition" })?
+                    )
+                }
+                _ => {
+                    return Err(V3AnthropicCodecError::UnmappedOutboundFields {
+                        paths: "$.request.tools[].format".to_string(),
+                    })
+                }
+            }
         }
         _ => {
-            return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-                paths: "$.request.tools[].format".to_string(),
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "tools[].format",
             })
         }
     };

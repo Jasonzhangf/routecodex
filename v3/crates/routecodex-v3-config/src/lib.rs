@@ -228,6 +228,109 @@ pub fn collect_v3_route_group_catalog_model_refs(
     out
 }
 
+/// 路由组内"独立单 provider 承载"的模型判定：某个 visible_id 在路由组所有
+/// 池（含 forwarder 展开）中只被一个 provider 引用时返回 true。能力面
+/// （/v1/models catalog）据此条件化高级有状态能力（websocket / multi-agent /
+/// responses-lite 等）：多路由目标只保留无状态请求能力，独立单 provider 才
+/// 打开高级有状态能力。
+pub fn is_v3_route_group_single_provider_visible_model(
+    manifest: &V3Config05ManifestPublished,
+    routing_group: &str,
+    visible_id: &str,
+) -> bool {
+    let Some(group) = manifest.route_groups.get(routing_group) else {
+        return false;
+    };
+    let mut providers_by_visible: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut visiting_forwarders = BTreeSet::new();
+    for pool in group.pools.values() {
+        for target in &pool.targets {
+            collect_v3_visible_provider_ids_from_target(
+                manifest,
+                target,
+                None,
+                &mut visiting_forwarders,
+                &mut providers_by_visible,
+            );
+        }
+    }
+    providers_by_visible
+        .get(visible_id)
+        .is_some_and(|providers| providers.len() == 1)
+}
+
+fn collect_v3_visible_provider_ids_from_target(
+    manifest: &V3Config05ManifestPublished,
+    target: &V3RoutePoolTargetManifest,
+    visible_ids_override: Option<&[String]>,
+    visiting_forwarders: &mut BTreeSet<String>,
+    out: &mut BTreeMap<String, BTreeSet<String>>,
+) {
+    match target.kind {
+        V3RouteTargetKind::ProviderModel => {
+            let (Some(provider_id), Some(model_id)) =
+                (target.provider.as_ref(), target.model.as_ref())
+            else {
+                return;
+            };
+            let Some(provider) = manifest.providers.get(provider_id) else {
+                return;
+            };
+            if !provider.enabled {
+                return;
+            }
+            let Some(model) = provider.models.get(model_id) else {
+                return;
+            };
+            let visible_ids = visible_ids_override
+                .map(|ids| ids.to_vec())
+                .unwrap_or_else(|| v3_model_catalog_visible_ids(&model.id, &model.aliases));
+            for visible_id in visible_ids {
+                out.entry(visible_id)
+                    .or_default()
+                    .insert(provider_id.clone());
+            }
+        }
+        V3RouteTargetKind::Forwarder => {
+            let Some(forwarder_id) = target.id.as_ref() else {
+                return;
+            };
+            if !visiting_forwarders.insert(forwarder_id.clone()) {
+                return;
+            }
+            if let Some(forwarder) = manifest.forwarders.get(forwarder_id) {
+                if forwarder.enabled {
+                    let visible_ids =
+                        visible_ids_override
+                            .map(|ids| ids.to_vec())
+                            .unwrap_or_else(|| {
+                                v3_model_catalog_visible_ids(&forwarder.model, &forwarder.aliases)
+                            });
+                    for child in &forwarder.targets {
+                        let route_target = V3RoutePoolTargetManifest {
+                            kind: child.kind.clone(),
+                            id: child.id.clone(),
+                            provider: child.provider.clone(),
+                            model: child.model.clone(),
+                            key: child.key.clone(),
+                            priority: child.priority,
+                            weight: child.weight,
+                        };
+                        collect_v3_visible_provider_ids_from_target(
+                            manifest,
+                            &route_target,
+                            Some(&visible_ids),
+                            visiting_forwarders,
+                            out,
+                        );
+                    }
+                }
+            }
+            visiting_forwarders.remove(forwarder_id);
+        }
+    }
+}
+
 fn collect_v3_catalog_model_refs_from_target(
     manifest: &V3Config05ManifestPublished,
     target: &V3RoutePoolTargetManifest,

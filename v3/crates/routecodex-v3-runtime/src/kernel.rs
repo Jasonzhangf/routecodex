@@ -46,7 +46,10 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
-    build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
+    build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
+    build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
+    build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField, SseIncrementalDecoder,
+    SseTransportIn02DecodedFrame, SseTransportLimits,
 };
 use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
@@ -145,11 +148,25 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
     let mut direct_stopless_control_prepared = false;
     let mut direct_stopless_request_state: Option<V3StoplessCenterState> = None;
     let previous_response_id = standardized.protocol_context.previous_response_id.clone();
+    let continuation_disabled = crate::shared::v3_responses_continuation_disabled_for_server(
+        manifest,
+        &standardized.protocol_context.server_id,
+    );
     let pinned = match (
         &previous_response_id,
         continuation_state,
         continuation_scope.as_ref(),
     ) {
+        (Some(_), _, _) if continuation_disabled => {
+            return error_output(
+                runtime_source(
+                    "V3HubReqContinuation03Classified",
+                    "responses continuation disabled: previous_response_id restore rejected",
+                ),
+                trace,
+                &hook_registry,
+            )
+        }
         (Some(response_id), Some(state), Some(scope)) => {
             let locator = match state.store.lock() {
                 Ok(store) => store
@@ -1123,6 +1140,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             _ => None,
         };
         if let V3ClientBody::Json(body) = &mut response_projection.client_payload.body {
+            if crate::shared::v3_strip_client_response_id_enabled_for_server(
+                manifest,
+                &standardized.protocol_context.server_id,
+            ) {
+                crate::shared::strip_v3_response_id_from_json_body(body);
+            }
             if v3_responses_direct_stopless_center_enabled_for_server(
                 manifest,
                 &standardized.protocol_context.server_id,
@@ -1266,6 +1289,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         stream,
                         stream_observation.clone(),
                         runtime_timing.clone(),
+                        crate::shared::v3_strip_client_response_id_enabled_for_server(
+                            manifest,
+                            &standardized.protocol_context.server_id,
+                        ),
                     );
                     V3ClientBody::Sse(stream)
                 }
@@ -1308,18 +1335,23 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             );
         }
         if let (Some(_state), Some(scope)) = (continuation_state, continuation_scope.as_ref()) {
-            if let Err(projected) = commit_or_release_v3_direct_continuation(
-                continuation_state,
-                scope,
-                &response_projection.remote_continuation,
-                previous_response_id.as_deref(),
-                &selected_pin,
-                &selected_capability_revision,
-                now_epoch_ms,
-                &mut trace,
-                &hook_registry,
+            if !crate::shared::v3_responses_continuation_disabled_for_server(
+                manifest,
+                &standardized.protocol_context.server_id,
             ) {
-                return projected;
+                if let Err(projected) = commit_or_release_v3_direct_continuation(
+                    continuation_state,
+                    scope,
+                    &response_projection.remote_continuation,
+                    previous_response_id.as_deref(),
+                    &selected_pin,
+                    &selected_capability_revision,
+                    now_epoch_ms,
+                    &mut trace,
+                    &hook_registry,
+                ) {
+                    return projected;
+                }
             }
         }
         if !provider_health_neutral {

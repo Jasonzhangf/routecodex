@@ -766,12 +766,14 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
     source: V3ClientSseStream,
     stream_observation: V3RuntimeStreamObservation,
     runtime_timing: V3RuntimeTimingState,
+    strip_client_response_id: bool,
 ) -> V3ClientSseStream {
     struct StreamState {
         source: V3ClientSseStream,
         decoder: SseIncrementalDecoder,
         stream_observation: V3RuntimeStreamObservation,
         runtime_timing: V3RuntimeTimingState,
+        strip_client_response_id: bool,
         done: bool,
     }
 
@@ -781,6 +783,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
             decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
             stream_observation,
             runtime_timing,
+            strip_client_response_id,
             done: false,
         },
         |mut state| async move {
@@ -793,8 +796,9 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
                         &chunk,
                         &mut state.decoder,
                         &state.stream_observation,
+                        state.strip_client_response_id,
                     )
-                    .map(|()| chunk);
+                    .map(|out| out.unwrap_or(chunk));
                     if result.is_err() {
                         state.done = true;
                     }
@@ -829,18 +833,79 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
 }
 
 /// Usage-observation-only SSE wrap：只把 provider SSE 事件 JSON 写入
+/// 观测；开启 strip_client_response_id 时，把事件 data 中嵌套
+/// `response.id` 替换为空串后重编码返回（客户端拿不到 previous_response_id）。
 fn record_direct_sse_provider_event_json_chunk(
     chunk: &[u8],
     decoder: &mut SseIncrementalDecoder,
     stream_observation: &V3RuntimeStreamObservation,
-) -> Result<(), V3Error01SourceRaised> {
+    strip_client_response_id: bool,
+) -> Result<Option<Vec<u8>>, V3Error01SourceRaised> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
         .map_err(|error| runtime_source("V3ProviderResp14Raw", error))?;
+    if frames.is_empty() {
+        return Ok(None);
+    }
+    if !strip_client_response_id {
+        for frame in &frames {
+            record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
+        }
+        return Ok(None);
+    }
+    let mut rewritten = Vec::new();
+    let mut any_rewritten = false;
     for frame in frames {
         record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
+        if let Some((event_name, data)) = rewritten_v3_sse_frame_data_response_id(frame.frame()) {
+            if !event_name.is_empty() {
+                rewritten.extend_from_slice(b"event: ");
+                rewritten.extend_from_slice(event_name.as_bytes());
+                rewritten.push(b'\n');
+            }
+            rewritten.extend_from_slice(b"data: ");
+            rewritten.extend_from_slice(data.as_bytes());
+            rewritten.push(b'\n');
+            rewritten.push(b'\n');
+            any_rewritten = true;
+        } else {
+            rewritten.extend_from_slice(
+                build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame).as_bytes(),
+            );
+        }
     }
-    Ok(())
+    if any_rewritten {
+        Ok(Some(rewritten))
+    } else {
+        Ok(None)
+    }
+}
+
+/// 若帧 data 中的 `response.id` 被替换，返回 (event 名, 改写后 data)；
+/// 未改写返回 None。
+fn rewritten_v3_sse_frame_data_response_id(
+    frame: &SseTransportIn02DecodedFrame,
+) -> Option<(String, String)> {
+    let mut event_name = String::new();
+    let mut rewritten_data = None;
+    for field in frame.fields() {
+        let SseField::Named { name, value } = field else {
+            continue;
+        };
+        match name.as_str() {
+            "event" => event_name = value.clone(),
+            "data" if !value.is_empty() => {
+                let Ok(mut parsed) = serde_json::from_str::<Value>(value.as_str()) else {
+                    continue;
+                };
+                if crate::shared::strip_v3_response_id_from_json_body(&mut parsed) {
+                    rewritten_data = serde_json::to_string(&parsed).ok();
+                }
+            }
+            _ => {}
+        }
+    }
+    rewritten_data.map(|data| (event_name, data))
 }
 
 fn record_direct_sse_provider_event_json_frame(

@@ -979,3 +979,42 @@ fn live_5555_web_search_call_history_indexes_project_to_stable_tool_pairs() {
         json!("web_search")
     );
 }
+
+#[test]
+fn anthropic_outbound_strips_responses_only_reasoning_policy_fields_without_failing() {
+    // Codex 10000 `/v1/responses` 入口命中 anthropic 兼容 provider（如 minimax_anthropic）
+    // 时，responses_openai_codec 会把 Responses `reasoning.context/mode/include_thoughts`
+    // 落到 chat canonical body。这些字段在 anthropic 出站白名单允许通过，但 anthropic
+    // 出站 codec 二次硬护栏会把它们当 unmapped fail-fast。本测试要求改为：strip 字段、
+    // 不报错、不进 provider wire、不进 response payload，只走一次 side-channel 诊断。
+    let chat = json!({
+        "model": "MiniMax-M3",
+        "messages": [{"role": "user", "content": "hi"}],
+        "reasoning_effort": "medium",
+        "reasoning_context_policy": "all_turns",
+        "reasoning_mode": "standard",
+        "reasoning_include_thoughts": true,
+    });
+
+    let wire = encode_v3_responses_semantic_as_anthropic_request(chat)
+        .expect("responses-only reasoning policy fields must be stripped, not failed");
+
+    let wire_object = wire.as_object().expect("wire must be an object");
+    assert!(
+        !wire_object.contains_key("reasoning_context_policy"),
+        "reasoning_context_policy must be stripped from anthropic wire: {wire}"
+    );
+    assert!(
+        !wire_object.contains_key("reasoning_mode"),
+        "reasoning_mode must be stripped from anthropic wire: {wire}"
+    );
+    assert!(
+        !wire_object.contains_key("reasoning_include_thoughts"),
+        "reasoning_include_thoughts must be stripped from anthropic wire: {wire}"
+    );
+    assert_eq!(wire_object["model"], json!("MiniMax-M3"));
+    assert!(
+        wire_object["messages"].is_array(),
+        "messages must remain projected to anthropic wire"
+    );
+}

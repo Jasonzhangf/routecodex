@@ -340,6 +340,46 @@ fn responses_custom_tool_projects_registered_anthropic_wrapper() {
 }
 
 #[test]
+fn responses_custom_tool_string_format_custom_projects_registered_anthropic_wrapper() {
+    // Codex client 实际发送 `{"type":"custom","name":"apply_patch","format":"custom"}`
+    // （字符串简写），见 live 10000 请求 767870。anthropic 无法强制 free-form
+    // grammar，按注册字符串 input wrapper 兼容投影；不允许把整请求打成 502。
+    let raw_patch = "*** Begin Patch\n*** End Patch";
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "tools":[{
+            "type":"custom",
+            "name":"apply_patch",
+            "description":"Apply a patch",
+            "format":"custom"
+        }],
+        "input":[
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"patch"}]},
+            {"type":"custom_tool_call","call_id":"call_patch","name":"apply_patch","input":raw_patch},
+            {"type":"custom_tool_call_output","call_id":"call_patch","output":"done"}
+        ]
+    }))
+    .expect("string format=custom must project to Anthropic compatibility wrapper");
+
+    let tool = &provider_request["tools"][0];
+    assert_eq!(tool["name"], "apply_patch");
+    assert_eq!(
+        tool["input_schema"]["properties"]["input"]["type"],
+        "string"
+    );
+    let description = tool["description"].as_str().expect("tool description");
+    assert!(description.contains("Apply a patch"), "{description}");
+    assert!(
+        description.contains("v3.custom_tool.anthropic_string_input_wrapper.v1"),
+        "{description}"
+    );
+    assert_eq!(
+        provider_request["messages"][1]["content"][0]["input"],
+        json!({"input":raw_patch})
+    );
+}
+
+#[test]
 fn anthropic_registered_custom_wrapper_restores_exact_responses_raw_input() {
     let raw = "*** Begin Patch\n*** Update File: a.txt\n*** End Patch";
     let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({

@@ -17,6 +17,11 @@
     prefix = "gpt-"
     exact = ["gpt"]
 
+  # deepseek 家族：DeepSeek 模型族。用途：能力面（/v1/models catalog）判定
+  # 独立单 provider 路由目标时是否打开高级有状态能力（如 WebSocket）。
+  [model_families.deepseek]
+    prefix = "deepseek-"
+
 # 内置 Codex 目录模型清单与默认元数据：路由组内存在对应模型引用时以
 # builtin 目录入口暴露（能力面用 defaults 构建内置条目的能力 / 上下文窗口 /
 # 描述 / reasoning 预设）；路由候选展开对 builtin 模型跳过 requested-model

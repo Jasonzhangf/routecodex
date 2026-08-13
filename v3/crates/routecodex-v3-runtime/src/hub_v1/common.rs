@@ -24,7 +24,7 @@ pub(crate) fn v3_responses_direct_stopless_center_enabled_for_server(
         )
 }
 
-fn v3_feature_enabled_for_server(
+pub(crate) fn v3_feature_enabled_for_server(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
     feature: &str,

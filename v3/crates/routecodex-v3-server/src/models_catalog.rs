@@ -4,7 +4,7 @@ use routecodex_v3_config::{
         is_v3_hidden_codex_future_model, v3_builtin_catalog_model_ids, v3_builtin_model_defaults,
         V3BuiltinModelDefaults,
     },
-    V3Config05ManifestPublished,
+    is_v3_route_group_single_provider_visible_model, V3Config05ManifestPublished,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
@@ -47,6 +47,7 @@ pub fn build_v3_models_catalog(
             builtin_model_id,
             None,
             Some(&capabilities),
+            is_v3_route_group_single_provider_visible_model(manifest, routing_group, builtin_model_id),
         );
         item.insert("owned_by".to_string(), json!("openai"));
         seen.insert(builtin_model_id.to_string());
@@ -78,6 +79,11 @@ pub fn build_v3_models_catalog(
             &model.id,
             model.max_context_tokens,
             Some(&model_ref.capabilities),
+            is_v3_route_group_single_provider_visible_model(
+                manifest,
+                routing_group,
+                &model_ref.visible_id,
+            ),
         );
         item.insert(
             "owned_by".to_string(),
@@ -130,6 +136,7 @@ pub fn build_v3_models_catalog(
                 &model.id,
                 model.max_context_tokens,
                 Some(&capabilities),
+                true,
             );
             item.insert(
                 "owned_by".to_string(),
@@ -262,6 +269,7 @@ fn build_v3_codex_model_metadata(
     canonical_model_id: &str,
     max_context_tokens: Option<u64>,
     capabilities: Option<&BTreeSet<String>>,
+    single_provider: bool,
 ) -> Map<String, Value> {
     let preset = v3_builtin_model_defaults(canonical_model_id);
     let is_builtin_bare = visible_id == canonical_model_id && preset.is_some();
@@ -301,8 +309,11 @@ fn build_v3_codex_model_metadata(
         ("base_instructions".to_string(), json!("")),
         ("description".to_string(), json!(description)),
         ("prefer_websockets".to_string(), json!(false)),
-        ("support_verbosity".to_string(), json!(true)),
-        ("default_verbosity".to_string(), json!("low")),
+        ("support_verbosity".to_string(), json!(single_provider)),
+        (
+            "default_verbosity".to_string(),
+            json!(if single_provider { "low" } else { "none" }),
+        ),
         ("apply_patch_tool_type".to_string(), json!("freeform")),
         (
             "web_search_tool_type".to_string(),
@@ -327,10 +338,20 @@ fn build_v3_codex_model_metadata(
         ("supports_parallel_tool_calls".to_string(), json!(true)),
         (
             "reasoning_summary_format".to_string(),
-            json!("experimental"),
+            json!(if single_provider {
+                "experimental"
+            } else {
+                "none"
+            }),
         ),
-        ("supports_reasoning_summaries".to_string(), json!(true)),
-        ("default_reasoning_summary".to_string(), json!("none")),
+        (
+            "supports_reasoning_summaries".to_string(),
+            json!(single_provider),
+        ),
+        (
+            "default_reasoning_summary".to_string(),
+            json!(if single_provider { "none" } else { "off" }),
+        ),
         (
             "default_reasoning_level".to_string(),
             json!(default_reasoning_level),

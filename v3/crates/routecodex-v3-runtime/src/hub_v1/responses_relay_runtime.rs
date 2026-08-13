@@ -675,11 +675,15 @@ fn commit_or_release_responses_local_continuation(
     canonical_request: &Value,
     canonical_response: &Value,
     action: V3HubContinuationCommit,
+    continuation_disabled: bool,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
     let Some(local) = local else {
         return Ok(());
     };
     if !local.commit_resp04_effects {
+        return Ok(());
+    }
+    if continuation_disabled {
         return Ok(());
     }
     let canonical_context = if action == V3HubContinuationCommit::LocalContext {
