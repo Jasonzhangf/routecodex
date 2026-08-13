@@ -219,3 +219,50 @@ targets = [{ kind = "provider_model", provider = "default", model = "test", key 
     .unwrap();
     compile_v3_config_05_manifest(authoring).unwrap()
 }
+
+/// 两个 gpt 候选的 default 池：`is_v3_retain_response_cipher(candidates=2, "gpt-...")`
+/// 为 false——多 provider 场景响应密文必须剥离（direct JSON 响应剥离测试用）。
+pub(super) fn multi_candidate_test_manifest() -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[providers.openai]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
+[providers.openai.models.gpt-test]
+supports_streaming = true
+capabilities = ["text", "vision"]
+
+[providers.openai2]
+type = "responses"
+base_url = "http://127.0.0.1:10/v1"
+default_model = "gpt-test2"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
+[providers.openai2.models.gpt-test2]
+supports_streaming = true
+capabilities = ["text", "vision"]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "openai", model = "gpt-test", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "openai2", model = "gpt-test2", key = "key1", priority = 2 },
+]
+"#,
+    )
+    .unwrap();
+    compile_v3_config_05_manifest(authoring).unwrap()
+}

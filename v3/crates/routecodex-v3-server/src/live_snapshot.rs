@@ -708,6 +708,22 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             (output.status >= 400).then_some(output.status),
         );
     }
+    for node_id in &output.node_trace {
+        if let Err(error) = state.debug.record_node_event(
+            trace_scope,
+            *node_id,
+            "executed",
+            output
+                .error_chain
+                .as_ref()
+                .map(|chain| json!({"error_chain": chain})),
+        ) {
+            return foundation_output_response(project_v3_debug_failure(
+                "V3Debug01NodeEventRegistered",
+                error,
+            ));
+        }
+    }
     if let Some(response) = capture_v3_responses_relay_provider_snapshots(
         state,
         entry_protocol,

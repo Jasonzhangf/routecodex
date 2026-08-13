@@ -1104,7 +1104,8 @@ fn attachment_history_is_preserved_without_placeholder_cleanup() {
         .expect("Req04 attachment history governance");
     let serialized = serde_json::to_string(outcome.payload()).unwrap();
 
-    assert!(serialized.contains("HISTORY"));
+    assert!(!serialized.contains("HISTORY"));
+    assert!(serialized.contains("[Image]"));
     assert!(serialized.contains("data:image/png;base64,CURRENT"));
 }
 

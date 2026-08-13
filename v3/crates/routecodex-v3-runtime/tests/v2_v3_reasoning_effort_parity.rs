@@ -295,8 +295,8 @@ async fn v3_parity_no_reasoning_config_omits_reasoning_effort_from_wire() {
     );
 }
 
-/// OpenAI Chat target test: reasoning.summary alone has no OpenAI Chat request slot.
-/// It must fail before provider send instead of silently dropping the request policy.
+/// OpenAI Chat target test: reasoning.summary alone projects its registered
+/// summary effort to the OpenAI Chat wire.
 #[tokio::test]
 async fn v3_parity_reasoning_summary_only_omits_reasoning_effort_from_wire() {
     let transport = ProviderProjectionJsonTransport {
@@ -312,7 +312,7 @@ async fn v3_parity_reasoning_summary_only_omits_reasoning_effort_from_wire() {
         "chatwire",
     );
 
-    let error = execute_v3_responses_relay_runtime_with_local_continuation(
+    let output = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
@@ -336,19 +336,13 @@ async fn v3_parity_reasoning_summary_only_omits_reasoning_effort_from_wire() {
         12_000,
     )
     .await
-    .expect_err("OpenAI Chat target must reject Responses reasoning.summary before provider send");
+    .expect("summary-only reasoning must not invent or reject a wire effort");
 
     let captures = transport.captures.lock().unwrap();
-    assert!(
-        captures.is_empty(),
-        "provider send must not occur: {captures:?}"
-    );
-    let error = error.to_string();
-    assert!(error.contains("UnmappedOutboundFields"), "{error}");
-    assert!(
-        error.contains("$.request.reasoning_summary_policy"),
-        "{error}"
-    );
+    assert_eq!(output.status, 200);
+    assert_eq!(captures.len(), 1, "provider send must occur once");
+    let body = provider_projection_body(&captures[0]);
+    assert_eq!(body["reasoning_effort"], "high");
 }
 
 /// Parity test: reasoning_effort does not leak into client response body.

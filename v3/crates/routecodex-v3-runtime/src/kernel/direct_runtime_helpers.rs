@@ -767,6 +767,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
     stream_observation: V3RuntimeStreamObservation,
     runtime_timing: V3RuntimeTimingState,
     strip_client_response_id: bool,
+    retain_response_cipher: bool,
 ) -> V3ClientSseStream {
     struct StreamState {
         source: V3ClientSseStream,
@@ -774,6 +775,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
         stream_observation: V3RuntimeStreamObservation,
         runtime_timing: V3RuntimeTimingState,
         strip_client_response_id: bool,
+        retain_response_cipher: bool,
         done: bool,
     }
 
@@ -784,6 +786,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
             stream_observation,
             runtime_timing,
             strip_client_response_id,
+            retain_response_cipher,
             done: false,
         },
         |mut state| async move {
@@ -797,6 +800,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
                         &mut state.decoder,
                         &state.stream_observation,
                         state.strip_client_response_id,
+                        state.retain_response_cipher,
                     )
                     .map(|out| out.unwrap_or(chunk));
                     if result.is_err() {
@@ -840,6 +844,7 @@ fn record_direct_sse_provider_event_json_chunk(
     decoder: &mut SseIncrementalDecoder,
     stream_observation: &V3RuntimeStreamObservation,
     strip_client_response_id: bool,
+    retain_response_cipher: bool,
 ) -> Result<Option<Vec<u8>>, V3Error01SourceRaised> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
@@ -847,7 +852,8 @@ fn record_direct_sse_provider_event_json_chunk(
     if frames.is_empty() {
         return Ok(None);
     }
-    if !strip_client_response_id {
+    // 两个改写都关闭：纯 usage 观测，透传原 chunk（direct 字节保真路径）。
+    if !strip_client_response_id && retain_response_cipher {
         for frame in &frames {
             record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
         }
@@ -857,7 +863,22 @@ fn record_direct_sse_provider_event_json_chunk(
     let mut any_rewritten = false;
     for frame in frames {
         record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
-        if let Some((event_name, data)) = rewritten_v3_sse_frame_data_response_id(frame.frame()) {
+        // 帧改写优先级：密文剥离（唯一 hook）优先；同一帧极少同时携带
+        // response.id 与 encrypted_content（created/completed 帧 vs reasoning 帧），
+        // 冲突帧只做密文剥离。
+        let frame_data = if !retain_response_cipher {
+            rewritten_v3_sse_frame_data_cipher(frame.frame())
+        } else {
+            None
+        };
+        let frame_data = match frame_data {
+            Some(pair) => Some(pair),
+            None if strip_client_response_id => {
+                rewritten_v3_sse_frame_data_response_id(frame.frame())
+            }
+            None => None,
+        };
+        if let Some((event_name, data)) = frame_data {
             if !event_name.is_empty() {
                 rewritten.extend_from_slice(b"event: ");
                 rewritten.extend_from_slice(event_name.as_bytes());
@@ -879,6 +900,38 @@ fn record_direct_sse_provider_event_json_chunk(
     } else {
         Ok(None)
     }
+}
+
+/// 若帧 data JSON 中存在 Codex 密文字段（encrypted_content 以 rsn_/gAAAA 开头），
+/// 用唯一剥离 hook（apply_v3_response_cipher_policy）移除后返回 (event 名, 改写后 data)；
+/// 未改写返回 None。retain=false（非单 gpt provider）时由调用方保证进入此分支。
+fn rewritten_v3_sse_frame_data_cipher(
+    frame: &SseTransportIn02DecodedFrame,
+) -> Option<(String, String)> {
+    let mut event_name = String::new();
+    let mut rewritten_data = None;
+    for field in frame.fields() {
+        let SseField::Named { name, value } = field else {
+            continue;
+        };
+        match name.as_str() {
+            "event" => event_name = value.clone(),
+            "data" if !value.is_empty() => {
+                let Ok(mut parsed) = serde_json::from_str::<Value>(value.as_str()) else {
+                    continue;
+                };
+                let original = parsed.clone();
+                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut parsed, false);
+                // 用 Value 相等比较（键序无关），避免 serde_json 重排键序导致
+                // 无密文帧也被误判改写（direct SSE 字节保真）。
+                if parsed != original {
+                    rewritten_data = serde_json::to_string(&parsed).ok();
+                }
+            }
+            _ => {}
+        }
+    }
+    rewritten_data.map(|data| (event_name, data))
 }
 
 /// 若帧 data 中的 `response.id` 被替换，返回 (event 名, 改写后 data)；

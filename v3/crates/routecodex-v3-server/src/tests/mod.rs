@@ -834,6 +834,7 @@ fn request_id_tokens_are_stable_and_path_safe() {
 
 #[test]
 fn request_identity_allocation_keeps_persisted_and_typed_counts_atomic() {
+    let _tz_guard = TEST_TZ_LOCK.lock().unwrap();
     let state_file = std::env::temp_dir().join(format!(
         "routecodex-v3-request-counter-{}-{}.json",
         std::process::id(),

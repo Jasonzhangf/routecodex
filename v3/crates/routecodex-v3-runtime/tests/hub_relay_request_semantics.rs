@@ -553,8 +553,8 @@ fn stopless_request_hook_consumes_noop_cli_from_runtime_control_not_stdout() {
     let messages = governed.payload()["messages"].as_array().unwrap();
     assert_eq!(
         messages.len(),
-        2,
-        "current-turn Stopless pair must be consumed"
+        3,
+        "current-turn Stopless pair must be consumed and guidance injected at the current-turn boundary"
     );
     assert_eq!(messages[0], json!({"role":"user","content":"完成当前目标"}));
     assert_eq!(
@@ -564,6 +564,18 @@ fn stopless_request_hook_consumes_noop_cli_from_runtime_control_not_stdout() {
     assert_eq!(
         messages[1].get("content").and_then(Value::as_str),
         Some("自然停下的可见文本")
+    );
+    let guidance_system = messages.iter().find(|message| {
+        message.get("role").and_then(Value::as_str) == Some("system")
+    });
+    assert!(
+        guidance_system.is_some_and(|message| {
+            message
+                .get("content")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains("当前轮推进准则"))
+        }),
+        "activated Req04 must inject provider-facing stopless guidance into a current-turn system message"
     );
     assert!(!serde_json::to_string(&messages)
         .unwrap()
@@ -580,6 +592,9 @@ fn stopless_request_hook_consumes_noop_cli_from_runtime_control_not_stdout() {
         "<rcc_stop_schema>",
         "stop schema",
         "Chunk ID",
+        "routecodex hook run reasoningStop",
+        "call_stopless_reasoning",
+        "__routecodex_stopless_center",
     ] {
         assert!(
             !serialized.contains(forbidden),
@@ -587,6 +602,20 @@ fn stopless_request_hook_consumes_noop_cli_from_runtime_control_not_stdout() {
         );
     }
     assert!(governed.payload().get("instructions").is_none());
+    let tools = governed.payload()["tools"].as_array().unwrap();
+    assert_eq!(
+        tools
+            .iter()
+            .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
+            .count(),
+        1,
+        "activated Req04 must inject exactly-one provider-visible reasoningStop tool: {serialized}"
+    );
+    assert_eq!(
+        governed.payload()["tool_choice"],
+        json!("required"),
+        "activated Req04 must promote tool_choice to required: {serialized}"
+    );
     assert!(governed
         .hook_events()
         .contains(&V3HubRelayRequestHookEvent::Req04StoplessResultParsed));

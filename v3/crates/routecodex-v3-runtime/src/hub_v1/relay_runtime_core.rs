@@ -864,4 +864,36 @@ mod tests {
             "guard must terminate stream after idle timeout"
         );
     }
+
+    /// 首帧已提交后 provider 再挂起：后续 idle guard 仍必须生效，避免客户端
+    /// 在已收到部分响应后无限等待。
+    #[tokio::test]
+    async fn guard_idle_times_out_after_first_frame() {
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(
+            futures_util::stream::iter(vec![Ok(b"data: first\n\n".to_vec())])
+                .chain(futures_util::stream::pending()),
+        );
+        let mut guarded = guard_v3_provider_sse_idle(
+            "req-idle-after-first",
+            "provider-1",
+            stream,
+            std::time::Duration::from_millis(50),
+        );
+        assert_eq!(
+            guarded
+                .next()
+                .await
+                .expect("first frame")
+                .expect("first frame must pass"),
+            b"data: first\n\n".to_vec()
+        );
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), guarded.next())
+            .await;
+        match outcome {
+            Ok(Some(Err(V3ProviderError::Transport { reason, .. }))) => {
+                assert!(reason.contains("idle timeout"), "unexpected reason: {reason}");
+            }
+            other => panic!("post-first-frame hang must produce Transport error, got {other:?}"),
+        }
+    }
 }

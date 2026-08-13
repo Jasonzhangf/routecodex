@@ -34,10 +34,7 @@ pub(crate) fn responses_effective_execution_mode_for_entry_facts(
     match configured_mode {
         V3EntryProtocolExecutionMode::PendingNotImplemented => configured_mode,
         V3EntryProtocolExecutionMode::Direct | V3EntryProtocolExecutionMode::Relay
-            if responses_entry_facts_allow_fresh_protocol_plan(entry_facts) =>
-        {
-            // Fresh implemented Responses bindings enter Relay as the orchestration
-            // shell, then choose Direct or Relay after ReqChatProcess governance.
+            if responses_entry_facts_allow_fresh_protocol_plan(entry_facts) => {
             V3EntryProtocolExecutionMode::Relay
         }
         V3EntryProtocolExecutionMode::Direct | V3EntryProtocolExecutionMode::Relay => {
@@ -145,7 +142,7 @@ pub(crate) fn request_local_continuation_scope(
             Ok((request_scope.clone(), request_scope))
         }
         _ => Err(
-            "Responses continuation requires typed session and conversation control headers; request payload and client metadata cannot conpub(crate) struct continuation control identity"
+            "Responses continuation requires typed session and conversation control headers; request payload and client metadata cannot construct continuation control identity"
                 .to_string(),
         ),
     }
@@ -451,4 +448,3 @@ pub(crate) fn header_text(headers: &HeaderMap, name: &str) -> Result<Option<Stri
         .transpose()
         .map(|value| value.filter(|value| !value.is_empty()))
 }
-

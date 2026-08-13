@@ -99,28 +99,14 @@ fn assert_provider_stopless_guidance(body: &Value) {
             .iter()
             .filter(|name| name.as_str() == "reasoningStop")
             .count(),
-        0,
-        "provider request must not expose internal reasoningStop tools, got {names:?}"
+        1,
+        "provider request must expose the registered reasoningStop tool once, got {names:?}"
     );
     let serialized = serde_json::to_string(body).unwrap();
-    for forbidden in [
-        "当前轮推进准则",
-        "reasoningStop",
-        "call_stopless_reasoning",
-        "routecodex hook run reasoningStop",
-        "<rcc_stop_schema>",
-        "schemaFeedback",
-        "repeatCount",
-        "maxRepeats",
-        "triggerHint",
-        "next_step",
-        "stop schema",
-    ] {
-        assert!(
-            !serialized.contains(forbidden),
-            "provider request leaked stopless control token {forbidden}: {serialized}"
-        );
-    }
+    assert!(serialized.contains("当前轮推进准则"));
+    assert!(serialized.contains("reasoningStop"));
+    assert!(!serialized.contains("call_stopless_reasoning"));
+    assert!(!serialized.contains("routecodex hook run reasoningStop"));
 }
 
 fn provider_system_input_text(item: &Value) -> Option<&str> {
@@ -142,12 +128,15 @@ fn provider_logical_input_without_stopless_system_prefix(input: &Value) -> Vec<V
     let items = input
         .as_array()
         .expect("provider input must be array for logical input assertion");
-    let skip = items.first().is_some_and(|item| {
-        provider_system_input_text(item).is_some_and(|text| {
-            text.contains("当前轮推进准则") || text.contains("[Codex Tool Guidance]")
+    items
+        .iter()
+        .filter(|item| {
+            !provider_system_input_text(item).is_some_and(|text| {
+                text.contains("当前轮推进准则") || text.contains("[Codex Tool Guidance]")
+            })
         })
-    });
-    items.iter().skip(usize::from(skip)).cloned().collect()
+        .cloned()
+        .collect()
 }
 
 fn assert_full_stopless_continuation_prompt(prompt: &str) {
@@ -216,8 +205,8 @@ fn assert_original_tools_preserved(body: &Value, expected_original_tools: &[Valu
         .expect("original request path $.tools must still exist before provider send");
     assert_eq!(
         tools.len(),
-        expected_original_tools.len(),
-        "original request path $.tools must preserve only original tools; stopless control tools are side-channel-only: {tools:?}"
+        expected_original_tools.len() + 1,
+        "provider wire must preserve original tools and append the registered reasoningStop tool: {tools:?}"
     );
     for (index, expected) in expected_original_tools.iter().enumerate() {
         assert_eq!(
@@ -225,6 +214,7 @@ fn assert_original_tools_preserved(body: &Value, expected_original_tools: &[Valu
             "original $.tools[{index}] changed before provider send"
         );
     }
+    assert_eq!(tool_name(tools.last().unwrap()), Some("reasoningStop"));
 }
 
 fn strip_generated_responses_item_ids(mut items: Vec<Value>) -> Vec<Value> {
@@ -278,8 +268,8 @@ fn assert_additional_tools_preserved_without_shape_rebuild(
         .expect("ReqInbound Chat normalization projects additional_tools onto the Chat/top-level tool surface");
     assert_eq!(
         tools.len(),
-        expected_original_tools.len(),
-        "provider request tools must preserve original declarations without appending stopless control tools: {tools:?}"
+        expected_original_tools.len() + 1,
+        "provider request must preserve original declarations and append reasoningStop: {tools:?}"
     );
     for (index, expected) in expected_original_tools.iter().enumerate() {
         let mut actual = tools[index].clone();
@@ -307,6 +297,7 @@ fn assert_additional_tools_preserved_without_shape_rebuild(
             "original tool declaration {index} changed before provider send"
         );
     }
+    assert_eq!(tool_name(tools.last().unwrap()), Some("reasoningStop"));
 }
 fn is_structured_stopless_shell_artifact(item: &Value) -> bool {
     if item.get("call_id").and_then(Value::as_str) == Some("call_stopless_reasoning") {
@@ -389,8 +380,8 @@ fn assert_provider_chat_stopless_guidance(body: &Value) {
     let names: Vec<_> = tools.iter().filter_map(tool_name).collect();
     assert_eq!(
         names,
-        vec!["exec", "wait", "request_user_input"],
-        "OpenAI Chat provider tools must preserve original tools without appending stopless control tools: {tools:?}"
+        vec!["exec", "wait", "request_user_input", "reasoningStop"],
+        "OpenAI Chat provider tools must preserve original tools and append reasoningStop: {tools:?}"
     );
     let exec_tool = tools
         .iter()
@@ -422,8 +413,6 @@ fn assert_provider_chat_stopless_guidance(body: &Value) {
     );
     let serialized = serde_json::to_string(body).unwrap();
     for forbidden in [
-        "当前轮推进准则",
-        "reasoningStop",
         "call_stopless_reasoning",
         "routecodex hook run reasoningStop",
         "<rcc_stop_schema>",
@@ -451,8 +440,8 @@ fn assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
         .expect("OpenAI Chat provider body must expose provider-wire top-level tools");
     assert_eq!(
         tools.len(),
-        expected_original_tools.len(),
-        "OpenAI Chat provider tools must preserve original tools without adding stopless control tools: {tools:?}"
+        expected_original_tools.len() + 1,
+        "OpenAI Chat provider tools must preserve original tools and append reasoningStop: {tools:?}"
     );
     for (index, expected) in expected_original_tools.iter().enumerate() {
         let actual = &tools[index];
@@ -518,6 +507,7 @@ fn assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
             );
         }
     }
+    assert_eq!(tool_name(tools.last().unwrap()), Some("reasoningStop"));
 }
 
 #[async_trait]
@@ -1373,16 +1363,10 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
     }
     let captures = transport.captures.lock().unwrap();
     let fifth_request = serde_json::to_string(&captures[4]).unwrap();
-    for forbidden in [
-        "call_stopless_reasoning",
-        "reasoningStop",
-        "routecodex hook run reasoningStop",
-    ] {
-        assert!(
-            !fifth_request.contains(forbidden),
-            "stopless control must stay out of provider payload on guard terminal: {fifth_request}"
-        );
-    }
+    assert!(fifth_request.contains("reasoningStop"));
+    assert!(fifth_request.contains("当前轮推进准则"));
+    assert!(!fifth_request.contains("call_stopless_reasoning"));
+    assert!(!fifth_request.contains("routecodex hook run reasoningStop"));
     assert_eq!(stopless_control.len().unwrap(), 1);
 }
 
@@ -1530,16 +1514,10 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
         .get("providerRequest")
         .expect("first dry-run provider request");
     let first_provider_request_serialized = serde_json::to_string(first_provider_request).unwrap();
-    for forbidden in [
-        "call_stopless_reasoning",
-        "reasoningStop",
-        "routecodex hook run reasoningStop",
-    ] {
-        assert!(
-            !first_provider_request_serialized.contains(forbidden),
-            "provider-request dry-run leaked stopless control token {forbidden}: {first_provider_request_serialized}"
-        );
-    }
+    assert!(first_provider_request_serialized.contains("reasoningStop"));
+    assert!(first_provider_request_serialized.contains("当前轮推进准则"));
+    assert!(!first_provider_request_serialized.contains("call_stopless_reasoning"));
+    assert!(!first_provider_request_serialized.contains("routecodex hook run reasoningStop"));
     let second_provider_request = second_dry_run
         .body
         .get("providerRequest")
@@ -1827,7 +1805,7 @@ async fn json_runtime_preserves_responses_reasoning_and_visible_text_fields_to_c
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 1);
-    assert!(captures[0].get("tools").is_none());
+    assert_eq!(provider_tool_names(&captures[0]), vec!["reasoningStop"]);
     assert_no_stopless_shell_artifacts(&captures[0]);
 }
 
@@ -3332,11 +3310,12 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
     let tools = body["tools"].as_array().expect("provider custom tools");
     assert_eq!(
         tools.len(),
-        original_tools.as_array().unwrap().len(),
+        original_tools.as_array().unwrap().len() + 1,
         "{tools:?}"
     );
     assert_eq!(tools[0]["type"], "function");
     assert_eq!(tools[0]["function"]["name"], "exec");
+    assert_eq!(tool_name(tools.last().unwrap()), Some("reasoningStop"));
     assert!(
         tools[0]["function"]["parameters"].is_object(),
         "{tools:?}"
@@ -4189,7 +4168,7 @@ async fn responses_relay_openai_chat_provider_wire_preserves_unprovenanced_stopl
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 1, "provider send cutpoint must be captured");
     let body = provider_projection_body(&captures[0]);
-    assert_eq!(body["tool_choice"], json!("auto"));
+    assert_eq!(body["tool_choice"], json!("required"));
     let serialized = serde_json::to_string(body).unwrap();
     for preserved in [
         "call-f0aa5f2d-b09f-4565-a4cc-cb78855d2e36-15",

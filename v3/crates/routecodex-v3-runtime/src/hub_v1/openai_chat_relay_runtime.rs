@@ -264,6 +264,21 @@ fn project_json_response(
             )
             .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?;
         }
+        V3HubProviderWireProtocol::Responses => {
+            // Responses JSON 是 Hub canonical 形状：后续走 resp02 canonical
+            // 与 project_v3_openai_chat_client_response_from_canonical 投影；
+            // 这里只做对象形状校验（fail-fast，不静默跳过）。
+            if provider_value.as_object().is_none()
+                || (provider_value.get("output").is_none()
+                    && provider_value.get("status").is_none()
+                    && provider_value.get("error").is_none())
+            {
+                return Err(V3OpenAiChatRelayRuntimeError::Target(format!(
+                    "OpenAI Chat relay Responses provider JSON must be an object with output/status/error: {}",
+                    serde_json::to_string(&provider_value).unwrap_or_default()
+                )));
+            }
+        }
         unsupported => {
             return Err(V3OpenAiChatRelayRuntimeError::Target(format!(
                 "OpenAI Chat relay response codec has no registered provider protocol: {unsupported:?}"
@@ -455,10 +470,13 @@ fn project_sse_stream(
                             .and_then(Err);
                         return Some((result, state));
                     }
-                    // 合法 terminal finish_reason 已收到：provider 可在 [DONE] 前
-                    // 关闭流（部分实现 EOF 即终态），[DONE] 不必须；缺失不惩罚。
+                    // provider 可在 [DONE] 前关闭流；客户端协议仍必须收到终止帧。
+                    if !state.seen_done {
+                        state.seen_done = true;
+                        state.pending.push_back(Ok(b"data: [DONE]\n\n".to_vec()));
+                    }
                     return match state.provider_outcome.record_success() {
-                        Ok(()) => None,
+                        Ok(()) => state.pending.pop_front().map(|item| (item, state)),
                         Err(error) => Some((Err(error), state)),
                     };
                 };

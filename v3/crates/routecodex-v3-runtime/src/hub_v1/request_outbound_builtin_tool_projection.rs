@@ -1,4 +1,5 @@
 use serde_json::{Map, Value};
+use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
 
 use routecodex_v3_config::V3WebSearchExecutionMode;
 
@@ -39,6 +40,13 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     let mut has_web_search = false;
     for (index, tool) in tools.iter().enumerate() {
         let tool_type = tool.get("type").and_then(Value::as_str);
+        if tool_type == Some("namespace") {
+            let flattened = flatten_namespace_tool_for_provider("openai-chat", tool)
+                .map_err(|error| format!("$.tools[{index}]: {error}"))?
+                .ok_or_else(|| format!("$.tools[{index}]: namespace tool was not flattened"))?;
+            normalized_tools.extend(flattened);
+            continue;
+        }
         if matches!(tool_type, Some("web_search" | "web_search_preview")) {
             if web_search_execution_mode == V3WebSearchExecutionMode::NativeRemoteSearchToolMix {
                 has_web_search = true;

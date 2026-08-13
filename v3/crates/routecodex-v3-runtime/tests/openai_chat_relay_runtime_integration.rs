@@ -938,7 +938,7 @@ async fn sse_done_before_terminal_fails_and_terminal_without_done_succeeds() {
     }
 
     // 合法 terminal finish_reason 后 EOF（无 [DONE]）：provider 合法关闭流，
-    // 必须投影成功（[DONE] 不必须，缺失不惩罚）。
+    // 网关必须补齐客户端协议终止帧。
     let transport = StaticSseTransport {
         chunks: Mutex::new(Some(vec![
             br#"data: {"id":"ok","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
@@ -975,7 +975,13 @@ async fn sse_done_before_terminal_fails_and_terminal_without_done_succeeds() {
     let items = stream.collect::<Vec<_>>().await;
     assert!(
         items.iter().all(|item| item.is_ok()),
-        "terminal finish_reason without [DONE] must project success: {items:?}"
+        "terminal finish_reason without upstream [DONE] must project success: {items:?}"
+    );
+    assert!(
+        items
+            .iter()
+            .any(|item| item.as_ref().is_ok_and(|chunk| chunk == b"data: [DONE]\n\n")),
+        "gateway must terminate the client SSE stream with [DONE]: {items:?}"
     );
 }
 

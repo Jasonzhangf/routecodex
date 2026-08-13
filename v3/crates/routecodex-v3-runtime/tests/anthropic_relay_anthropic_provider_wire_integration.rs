@@ -484,8 +484,9 @@ async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() 
 
     assert_eq!(output.status, 502);
     assert_eq!(
-        output.client_response["error"]["error_node"],
-        "V3Error06ClientProjected"
+        output.node_trace.last(),
+        Some(&"V3Error06ClientProjected"),
+        "Anthropic SSE failure must reach typed Error06 projection"
     );
     let message = output.client_response["error"]["message"].as_str().unwrap();
     assert!(
@@ -532,8 +533,9 @@ async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_
 
     assert_eq!(output.status, 502);
     assert_eq!(
-        output.client_response["error"]["error_node"],
-        "V3Error06ClientProjected"
+        output.node_trace.last(),
+        Some(&"V3Error06ClientProjected"),
+        "Anthropic codec failure must reach typed Error06 projection"
     );
     let message = output.client_response["error"]["message"].as_str().unwrap();
     assert!(

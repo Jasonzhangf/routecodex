@@ -347,6 +347,22 @@ impl V3DebugRuntime {
         if retention == 0 {
             return Ok(None);
         }
+        let mut state = self.write_state()?;
+        if let Some(existing) = match kind {
+            "request" => state.raw_requests.iter().find(|capture| {
+                capture.server_id == scope.server_id
+                    && capture.request_id == scope.request_id
+                    && capture.execution_id == scope.execution_id
+            }),
+            "response" => state.raw_responses.iter().find(|capture| {
+                capture.server_id == scope.server_id
+                    && capture.request_id == scope.request_id
+                    && capture.execution_id == scope.execution_id
+            }),
+            _ => unreachable!("fixed raw capture kind"),
+        } {
+            return Ok(Some(existing.clone()));
+        }
         let projection = V3DebugRawCaptureProjection {
             sequence: self.sequence.fetch_add(1, Ordering::SeqCst),
             server_id: scope.server_id.clone(),
@@ -355,7 +371,6 @@ impl V3DebugRuntime {
             kind: kind.to_string(),
             payload: project_debug_value_verbatim(&self.config.redaction, payload),
         };
-        let mut state = self.write_state()?;
         match kind {
             "request" => {
                 state.raw_requests.push_back(projection.clone());

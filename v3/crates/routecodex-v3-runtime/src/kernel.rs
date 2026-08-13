@@ -1126,6 +1126,19 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             };
         trace.push("V3DirectResp14ProviderProjectionPrepared");
         let mut direct_stopless_projected = false;
+        // 响应侧密文保留判定（唯一策略）：仅 gpt 模型且当前候选集合只有单一
+        // provider 时保留 `encrypted_content` 给 Codex 客户端（客户端用自己的
+        // 官方密文重建 reasoning 历史）；其余场景一律在进入客户端前剥离。
+        // 与 relay 响应侧共用同一判定与唯一剥离 hook（apply_v3_response_cipher_policy）。
+        let retain_response_cipher = expanded
+            .as_ref()
+            .map(|expanded| {
+                crate::hub_v1::is_v3_retain_response_cipher(
+                    expanded.candidates.len(),
+                    &policy.target.candidate.model_id,
+                )
+            })
+            .unwrap_or(false);
         let direct_web_search_request_state = match (stopless_control, stopless_scope.as_ref()) {
             (Some(control), Some(scope)) => match control.web_search_load_for_scope(scope) {
                 Ok(state) => state,
@@ -1146,6 +1159,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             ) {
                 crate::shared::strip_v3_response_id_from_json_body(body);
             }
+            // 唯一密文剥离 hook（direct 响应侧）：retain=false 时删除响应中所有
+            // Codex 密文（encrypted_content rsn_/gAAAA），客户端只拿到明文 reasoning；
+            // relay 响应侧（Resp03）复用同一 hook，保证 direct/relay 策略单一实现。
+            routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+                body,
+                retain_response_cipher,
+            );
             if v3_responses_direct_stopless_center_enabled_for_server(
                 manifest,
                 &standardized.protocol_context.server_id,
@@ -1293,6 +1313,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             manifest,
                             &standardized.protocol_context.server_id,
                         ),
+                        retain_response_cipher,
                     );
                     V3ClientBody::Sse(stream)
                 }

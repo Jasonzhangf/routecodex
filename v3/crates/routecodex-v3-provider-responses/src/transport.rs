@@ -245,7 +245,11 @@ impl V3Transport13ResponsesRequest {
                 "method": "POST",
                 "providerId": self.provider_id(),
                 "url": self.url(),
-                "headers": provider_request_headers(self.stream_intent(), self.provider_headers()),
+                "headers": provider_request_headers_for_url(
+                    self.url(),
+                    self.stream_intent(),
+                    self.provider_headers(),
+                ),
                 "body": self.body(),
                 "streamIntent": stream_intent
             }),
@@ -297,6 +301,33 @@ fn provider_request_headers(
             Value::String(header.value().to_string()),
         );
     }
+    Value::Object(headers)
+}
+
+fn provider_request_headers_for_url(
+    url: &str,
+    stream_intent: V3ResponsesStreamIntent,
+    provider_headers: &[V3ProviderRequestHeader],
+) -> Value {
+    let mut headers = match provider_request_headers(stream_intent, &[]) {
+        Value::Object(headers) => headers,
+        _ => unreachable!("provider_request_headers always returns an object"),
+    };
+    if url
+        .split_once('?')
+        .map_or(url, |(path, _)| path)
+        .trim_end_matches('/')
+        .ends_with("/v1/messages")
+    {
+        for header in default_anthropic_messages_compat_headers() {
+            headers.insert(header.name.to_string(), Value::String(header.value.to_string()));
+        }
+    }
+    let provider_headers = match provider_request_headers(stream_intent, provider_headers) {
+        Value::Object(headers) => headers,
+        _ => unreachable!("provider_request_headers always returns an object"),
+    };
+    headers.extend(provider_headers);
     Value::Object(headers)
 }
 

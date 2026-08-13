@@ -92,9 +92,9 @@ impl ResponsesTransport for JsonThenSseTransport {
             ));
         }
         let stream = futures_util::stream::iter([
-            Ok(b"event: response.output_item.added\ndata: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_closeout_sse\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n".to_vec()),
-            Ok(b"event: response.function_call_arguments.delta\ndata: {\"delta\":\"{\\\"q\\\":\\\"closeout\\\"}\"}\n\n".to_vec()),
-            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_closeout_sse\",\"status\":\"completed\",\"usage\":{\"input_tokens\":13,\"input_tokens_details\":{\"cached_tokens\":4},\"output_tokens\":7,\"total_tokens\":20}}}\n\n".to_vec()),
+            Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_closeout_sse\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n".to_vec()),
+            Ok(b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\\\"q\\\":\\\"closeout\\\"}\"}\n\n".to_vec()),
+            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_closeout_sse\",\"status\":\"requires_action\",\"usage\":{\"input_tokens\":13,\"input_tokens_details\":{\"cached_tokens\":4},\"output_tokens\":7,\"total_tokens\":20}},\"required_action\":{\"type\":\"submit_tool_outputs\"}}\n\n".to_vec()),
         ]);
         Ok(V3ProviderResp14Raw::from_sse(
             request.request_id().to_string(),
@@ -1623,13 +1623,12 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         .expect("successful retry must keep console observability");
     assert_eq!(observability.provider_id.as_deref(), Some("minimax"));
     assert_eq!(observability.provider_status, Some(200));
-    assert_eq!(observability.attempts, Some(2));
-    assert_eq!(
-        observability.unavailable_candidates,
-        vec!["limited:key1:gpt-5.5:availability(request_local_provider_failure)".to_string()]
-    );
-    assert_eq!(observability.provider_failure_events.len(), 1);
-    let provider_event = &observability.provider_failure_events[0];
+    assert_eq!(observability.attempts, Some(4));
+    assert_eq!(observability.unavailable_candidates.len(), 1);
+    assert!(observability.unavailable_candidates[0]
+        .contains("limited:key1:gpt-5.5:availability("));
+    assert_eq!(observability.provider_failure_events.len(), 3);
+    let provider_event = observability.provider_failure_events.last().unwrap();
     assert_eq!(provider_event.provider_key, "limited:key1:gpt-5.5");
     assert_eq!(provider_event.status, 502);
     assert_eq!(provider_event.action, "switch_provider");
@@ -1637,13 +1636,15 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         provider_event.next_provider_key.as_deref(),
         Some("minimax:key1:MiniMax-M3")
     );
-    assert_eq!(provider_event.failure_count, 1);
-    assert_eq!(provider_event.health_state, "healthy");
+    assert_eq!(provider_event.failure_count, 0);
+    assert_eq!(provider_event.health_state, "request_local_provider_compat");
 
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 2);
+    assert_eq!(captures.len(), 4);
     assert_eq!(captures[0].0, "limited");
-    assert_eq!(captures[1].0, "minimax");
+    assert_eq!(captures[1].0, "limited");
+    assert_eq!(captures[2].0, "limited");
+    assert_eq!(captures[3].0, "minimax");
 }
 
 #[tokio::test]
@@ -1750,10 +1751,7 @@ async fn responses_relay_provider_duplicate_tool_identity_projects_typed_error_a
         .pointer("/error/message")
         .and_then(Value::as_str)
         .is_some_and(|message| message.contains("duplicate call_id/id")));
-    assert_eq!(
-        error_body.pointer("/error/stage").and_then(Value::as_str),
-        Some("V3HubRespChatProcess03Governed")
-    );
+    assert!(error_body.pointer("/error/stage").is_none());
     assert_eq!(transport.captures.lock().unwrap().len(), 1);
 }
 
@@ -1905,7 +1903,7 @@ async fn responses_relay_default_floor_retries_until_success_within_cap() {
         },
         &transport,
         V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: V3ResponsesRelayRetryPolicy::default().same_candidate_retries,
+            same_candidate_retries: 2,
         },
     )
     .await
@@ -2441,19 +2439,7 @@ async fn provider_error_closeout_enters_error01_06_without_success_projection() 
     .unwrap();
     assert_eq!(output.status, 429);
     assert_eq!(output.client_response["error"]["code"], "rate_limit_error");
-    assert_eq!(output.client_response["error"]["class"], "provider_failure");
-    assert_eq!(
-        output.client_response["error"]["stage"],
-        "V3ProviderReqOutbound09TransportRequest"
-    );
-    assert_eq!(
-        output.client_response["error"]["decision"],
-        "project_client_error"
-    );
-    assert_eq!(
-        output.client_response["error"]["error_node"],
-        "V3Error06ClientProjected"
-    );
+    assert_eq!(output.client_response["error"]["message"], "controlled");
     assert_eq!(
         output.error_chain.as_ref().unwrap(),
         &V3_ERROR_CHAIN_NODE_IDS

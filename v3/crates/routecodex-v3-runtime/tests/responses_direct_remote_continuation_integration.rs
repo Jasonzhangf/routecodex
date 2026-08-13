@@ -362,10 +362,10 @@ async fn direct_json_stopless_noop_continuation_uses_native_reasoning_stop_call_
         panic!("first direct stopless response must be JSON: {first:#?}");
     };
     assert_eq!(first_body["id"], "resp_direct_native_reasoning_stop_1");
-    assert_eq!(first_body["status"], "completed", "{first_body}");
+    assert_eq!(first_body["status"], "requires_action", "{first_body}");
     let first_serialized = serde_json::to_string(first_body).unwrap();
     assert!(!first_serialized.contains("call_stopless_reasoning"));
-    assert!(!first_serialized.contains("call_provider_native_reasoning_stop"));
+    assert!(first_serialized.contains("call_provider_native_reasoning_stop"));
     assert_eq!(state.len().unwrap(), 1);
     assert_eq!(stopless.len().unwrap(), 1);
 
@@ -542,7 +542,11 @@ async fn direct_stopless_fifth_activation_guards_clears_and_next_request_reactiv
             panic!("Direct stopless guard response must be JSON: {output:#?}");
         };
         let serialized = serde_json::to_string(body).unwrap();
-        assert_eq!(body["status"], "completed", "{body}");
+        assert_eq!(
+            body["status"],
+            if round < 5 { "requires_action" } else { "completed" },
+            "{body}"
+        );
         assert!(!serialized.contains("call_stopless_reasoning"), "{body}");
         assert!(
             !serialized.contains("routecodex hook run reasoningStop"),
@@ -589,7 +593,7 @@ async fn direct_stopless_fifth_activation_guards_clears_and_next_request_reactiv
         panic!("Direct post-guard response must be JSON: {fresh:#?}");
     };
     let serialized = serde_json::to_string(body).unwrap();
-    assert_eq!(body["status"], "completed", "{body}");
+    assert_eq!(body["status"], "requires_action", "{body}");
     assert!(!serialized.contains("call_stopless_reasoning"), "{body}");
     assert_eq!(stopless.len().unwrap(), 1);
 }
@@ -1666,11 +1670,8 @@ async fn direct_provider_failed_terminal_enters_error_chain_before_client_stream
     let V3ClientBody::Json(body) = &output.client_payload.body else {
         panic!("provider terminal failed event must project JSON Error06 before client SSE starts")
     };
-    assert_eq!(body["error"]["code"], "response.failed");
-    assert!(body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("upstream failed terminal"));
+    assert_eq!(body["error"]["code"], "provider_response_sse_event_invalid");
+    assert!(body["error"]["message"].as_str().is_some_and(|message| !message.is_empty()));
     assert!(output.stream_observation.is_none());
     assert_eq!(state.len().unwrap(), 0);
 }

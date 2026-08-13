@@ -160,8 +160,52 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
     let execution_id = state.debug.next_execution_id(&state.server.id);
     let entry_facts = V3ResponsesContinuationEntryFacts::project(&payload);
     let protocol_plan = None;
-    let effective_execution_mode =
-        responses_effective_execution_mode_for_entry_facts(execution_mode, &entry_facts);
+    let owner_resolution_context = match build_responses_previous_response_owner_resolution_context(
+        headers,
+        &request_id,
+        &state.server,
+        "/v1/responses",
+        &entry_facts,
+    ) {
+        Ok(context) => context,
+        Err(message) => {
+            let _ = send_responses_websocket_error(socket, "invalid_request", message).await;
+            return Err(());
+        }
+    };
+    let effective_execution_mode = match resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
+        entry_facts.previous_response_id.as_deref(),
+        execution_mode,
+        &state.responses_direct_continuation,
+        &state.responses_relay_local_continuation,
+        owner_resolution_context
+            .as_ref()
+            .map(|context| &context.direct_scope),
+        owner_resolution_context
+            .as_ref()
+            .map(|context| &context.relay_scope),
+        owner_resolution_context
+            .as_ref()
+            .map(|context| context.now_epoch_ms)
+            .unwrap_or(0),
+    ) {
+        Ok(mode) => responses_effective_execution_mode_for_entry_facts(mode, &entry_facts),
+        Err(error) => {
+            let message = project_v3_responses_previous_response_owner_resolution_error(error)
+                .body
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or("Responses continuation owner resolution failed")
+                .to_string();
+            let _ = send_responses_websocket_error(
+                socket,
+                "invalid_request",
+                message,
+            )
+            .await;
+            return Err(());
+        }
+    };
     match effective_execution_mode {
         V3EntryProtocolExecutionMode::Direct => {
             let outcome = execute_responses_direct_server_outcome(

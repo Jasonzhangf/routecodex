@@ -44,36 +44,12 @@ fn strip_v3_resp03_encrypted_reasoning_content(
         // （响应只携带明文 summary/content）。anthropic 链的 thinking signature 载体
         // （redacted_thinking.data / thinking.signature，值不是 rsn_/gAAAA 前缀）不是
         // Codex 密文，必须保留给客户端做签名校验。
+        // 唯一密文剥离 hook（provider-responses）：direct 与 relay 响应侧共用，
+        // 保证"只有单 gpt provider 才进客户端"的密文策略单一实现。
         let payload = std::sync::Arc::make_mut(&mut input.previous.previous.payload.0);
-        strip_v3_resp03_encrypted_fields_recursive(payload);
+        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(payload, false);
     }
     input
-}
-
-fn strip_v3_resp03_encrypted_fields_recursive(value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            // 仅剥离 Codex 密文（值以 `rsn_` / `gAAAA` 开头）：非 gpt / 多 provider /
-            // 跨服务器场景密文不得跨 provider 透传，客户端透明无感知（响应只携带
-            // 明文 summary/content）。anthropic 链的 thinking signature 载体
-            // （redacted_thinking.data / thinking.signature，值不是 rsn_/gAAAA 前缀）
-            // 不是 Codex 密文，必须保留给客户端做签名校验。
-            if let Some(Value::String(cipher)) = map.get("encrypted_content") {
-                if cipher.starts_with("rsn_") || cipher.starts_with("gAAAA") {
-                    map.remove("encrypted_content");
-                }
-            }
-            for child in map.values_mut() {
-                strip_v3_resp03_encrypted_fields_recursive(child);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                strip_v3_resp03_encrypted_fields_recursive(item);
-            }
-        }
-        _ => {}
-    }
 }
 
 impl V3HubRespChatProcess03Governed {
@@ -1325,7 +1301,7 @@ mod tests {
             ]
         });
 
-        strip_v3_resp03_encrypted_fields_recursive(&mut payload);
+        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false);
 
         assert!(!payload.to_string().contains("encrypted_content"));
         assert!(!payload.to_string().contains("rsn_CIPHERTEXT"));
@@ -1352,7 +1328,7 @@ mod tests {
             }]
         });
 
-        strip_v3_resp03_encrypted_fields_recursive(&mut payload);
+        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false);
 
         assert!(!payload.to_string().contains("encrypted_content"));
         assert!(payload.to_string().contains("nested plain"));
@@ -1366,7 +1342,7 @@ mod tests {
         });
         let original = payload.clone();
 
-        strip_v3_resp03_encrypted_fields_recursive(&mut payload);
+        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false);
 
         assert_eq!(payload, original);
     }
@@ -1401,7 +1377,7 @@ mod tests {
         };
         // retain=false（非 gpt / 多 provider）：剥离。
         let mut stripped = build_payload();
-        strip_v3_resp03_encrypted_fields_recursive(&mut stripped);
+        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut stripped, false);
         assert!(
             !stripped.to_string().contains("encrypted_content"),
             "retain=false 必须在 resp_chat_process 剥离 encrypted_content"

@@ -1,6 +1,7 @@
 use crate::V3ProviderError;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
+use routecodex_v3_config::internal::is_v3_gpt_family_model;
 use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
 use serde_json::{Map, Value};
 
@@ -123,12 +124,87 @@ pub fn build_v3_provider_12_responses_wire_payload(
         current_request_body,
     )?;
     normalize_deepseek_thinking_stopless_tool_choice(&mut body, &target);
+    // 请求侧密文兜底：非 gpt 目标不携带 Codex 密文（encrypted_content）——
+    // opencode-go/DeepSeek 等网关不识别加密 reasoning 回传，原样透传会 400
+    // （`reasoning_text must be passed back`）。gpt 官方系接受密文，保留透传。
+    // 响应侧主防线（`apply_v3_response_cipher_policy`，唯一 hook）保证客户端
+    // 正常情况拿不到密文，此兜底只处理历史残留密文跨 provider 回传的窗口。
+    if !is_v3_gpt_family_model(&target.canonical_model_id) {
+        strip_v3_request_encrypted_reasoning(&mut body);
+    }
     Ok(V3Provider12ResponsesWirePayload {
         request_id,
         target,
         stream_intent,
         body,
     })
+}
+
+/// 唯一密文剥离 hook（响应侧，direct 与 relay 共用）：
+/// `retain_response_cipher=true`（仅 gpt 模型且路由只有单一 provider 候选时，
+/// 由调用方 VR 路由决策用 `is_v3_retain_response_cipher` 算好传入）原样保留
+/// `encrypted_content`（Codex 客户端需要官方密文重建 reasoning 历史）；
+/// 其余场景递归删除 payload 中所有 Codex 密文字段，保证密文不进入客户端。
+/// 响应侧是密文治理的唯一入口；本 hook 只消费判定结果，不重复判定。
+pub fn apply_v3_response_cipher_policy(payload: &mut Value, retain_response_cipher: bool) {
+    if !retain_response_cipher {
+        strip_v3_encrypted_fields_recursive(payload);
+    }
+}
+
+/// 递归删除 Codex 密文字段：`encrypted_content` 值以 `rsn_` / `gAAAA` 开头
+/// （Codex 客户端本地密文）一律删除；anthropic 链的 thinking signature 载体
+/// （redacted_thinking.data / thinking.signature，值非 rsn_/gAAAA 前缀）不是
+/// Codex 密文，保留给客户端签名校验。请求侧与响应侧共用此唯一递归剥离器。
+fn strip_v3_encrypted_fields_recursive(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            strip_v3_cipher_field(map);
+            for child in map.values_mut() {
+                strip_v3_encrypted_fields_recursive(child);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                strip_v3_encrypted_fields_recursive(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 单一对象的密文键剥离（请求侧 reasoning 条目与响应侧递归共用同一语义）。
+fn strip_v3_cipher_field(map: &mut Map<String, Value>) {
+    if let Some(Value::String(cipher)) = map.get("encrypted_content") {
+        if cipher.starts_with("rsn_") || cipher.starts_with("gAAAA") {
+            map.remove("encrypted_content");
+        }
+    }
+}
+
+/// 请求侧密文剥离（wire 兜底）：剥离 reasoning 条目的 `encrypted_content` 后，
+/// 若该条目没有任何明文内容（summary/content/text），补空 `text` 占位——
+/// opencode（DeepSeek 上游）要求每条 assistant 消息都必须带 reasoning 表示，
+/// 直接丢弃会让该轮缺 reasoning，触发 `reasoning_content must be passed back` 400。
+fn strip_v3_request_encrypted_reasoning(body: &mut Value) {
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in input.iter_mut() {
+        let Some(obj) = item.as_object_mut() else {
+            continue;
+        };
+        if obj.get("type").and_then(Value::as_str) != Some("reasoning") {
+            continue;
+        }
+        strip_v3_cipher_field(obj);
+        let has_plain_content = ["summary", "content", "text", "reasoning_content"]
+            .iter()
+            .any(|key| obj.get(*key).is_some_and(|value| !value.is_null()));
+        if !has_plain_content {
+            obj.insert("text".to_string(), Value::String(String::new()));
+        }
+    }
 }
 
 fn normalize_deepseek_thinking_stopless_tool_choice(
@@ -138,7 +214,6 @@ fn normalize_deepseek_thinking_stopless_tool_choice(
     if target.provider_type != "openai_chat"
         || (target.canonical_model_id != "deepseek-v4-flash"
             && target.wire_model != "deepseek-v4-flash")
-        || body.get("tool_choice") != Some(&Value::String("required".to_string()))
         || !v3_wire_payload_is_thinking_mode(body)
     {
         return;
@@ -154,9 +229,11 @@ fn normalize_deepseek_thinking_stopless_tool_choice(
                         .and_then(Value::as_str)
                         == Some("reasoningStop")
             })
-        });
+    });
     if has_reasoning_stop {
-        body["tool_choice"] = Value::String("auto".to_string());
+        if let Some(object) = body.as_object_mut() {
+            object.remove("tool_choice");
+        }
     }
 }
 
@@ -927,7 +1004,7 @@ mod tests {
     }
 
     #[test]
-    fn opencode_go_deepseek_responses_wire_accepts_thinking_stopless_tool_choice() {
+    fn opencode_go_deepseek_responses_wire_omits_thinking_stopless_tool_choice() {
         let mut selected = target();
         selected.provider_id = "opencode-go".into();
         selected.provider_type = "openai_chat".into();
@@ -949,7 +1026,7 @@ mod tests {
             }),
         )
         .expect("DeepSeek Responses wire must not reject Stopless thinking mode");
-        assert_eq!(wire.body()["tool_choice"], "auto");
+        assert!(wire.body().get("tool_choice").is_none());
         assert!(wire.body()["tools"].as_array().is_some_and(|tools| {
             tools.iter().any(|tool| {
                 tool.pointer("/function/name").and_then(Value::as_str) == Some("reasoningStop")
@@ -981,6 +1058,133 @@ mod tests {
         target.provider_request_cleanup.historical_fields =
             fields.iter().map(|field| field.to_string()).collect();
         target
+    }
+
+    #[test]
+    fn wire_strips_encrypted_reasoning_content_for_non_gpt_target() {
+        let mut target = target();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "item_rsn_1",
+                    "summary": [{"type": "summary_text", "text": "plain summary"}],
+                    "encrypted_content": "rsn_encrypted",
+                    "content": null
+                },
+                {
+                    "type": "reasoning",
+                    "id": "item_rsn_2",
+                    "encrypted_content": "rsn_only",
+                    "content": null,
+                    "summary": null
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "user turn"}]
+                }
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-1", target, body).unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        assert_eq!(
+            input.len(),
+            3,
+            "encrypted-only reasoning item is kept as empty-text placeholder (opencode DeepSeek requires reasoning on every assistant turn)"
+        );
+        assert_eq!(input[0]["type"], "reasoning");
+        assert_eq!(
+            input[0]["summary"],
+            json!([{"type": "summary_text", "text": "plain summary"}])
+        );
+        assert!(
+            input[0].get("encrypted_content").is_none(),
+            "encrypted_content must be stripped for non-gpt target"
+        );
+        assert_eq!(input[1]["type"], "reasoning");
+        assert_eq!(
+            input[1]["text"], "",
+            "encrypted-only reasoning item becomes empty-text reasoning placeholder"
+        );
+        assert!(
+            input[1].get("encrypted_content").is_none(),
+            "placeholder must not carry encrypted_content"
+        );
+        assert_eq!(input[2]["type"], "message");
+    }
+
+    #[test]
+    fn wire_keeps_encrypted_reasoning_content_for_gpt_target() {
+        let mut target = target();
+        target.canonical_model_id = "gpt-5.6-sol".into();
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "item_rsn_1",
+                    "summary": [{"type": "summary_text", "text": "plain summary"}],
+                    "encrypted_content": "rsn_encrypted"
+                }
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-1", target, body).unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["encrypted_content"], "rsn_encrypted");
+    }
+
+    #[test]
+    fn response_cipher_policy_strips_codex_cipher_but_keeps_anthropic_signature() {
+        let mut payload = json!({
+            "status": "completed",
+            "output": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_rsn",
+                    "encrypted_content": "rsn_CIPHERTEXT",
+                    "summary": [{"type": "summary_text", "text": "plain"}]
+                },
+                {
+                    "type": "reasoning",
+                    "id": "rs_gaaaa",
+                    "encrypted_content": "gAAAA_cipher",
+                    "content": [{"type": "reasoning_text", "text": "visible"}]
+                },
+                {
+                    "type": "reasoning",
+                    "id": "rs_sig",
+                    "encrypted_content": "anthropic-signature-value",
+                    "summary": [{"type": "summary_text", "text": "signed"}]
+                }
+            ]
+        });
+        apply_v3_response_cipher_policy(&mut payload, false);
+        assert!(
+            !payload.to_string().contains("rsn_CIPHERTEXT"),
+            "rsn_ cipher must be stripped"
+        );
+        assert!(
+            !payload.to_string().contains("gAAAA_cipher"),
+            "gAAAA cipher must be stripped"
+        );
+        assert_eq!(
+            payload["output"][2]["encrypted_content"], "anthropic-signature-value",
+            "non-rsn_/gAAAA signature carrier is not Codex cipher and must be kept"
+        );
+        assert_eq!(payload["output"][0]["summary"][0]["text"], "plain");
+        assert_eq!(payload["output"][1]["content"][0]["text"], "visible");
+
+        let mut retained =
+            json!({"output": [{"type": "reasoning", "encrypted_content": "rsn_KEEP"}]});
+        apply_v3_response_cipher_policy(&mut retained, true);
+        assert_eq!(
+            retained["output"][0]["encrypted_content"], "rsn_KEEP",
+            "retain=true must keep cipher verbatim"
+        );
     }
 }
 

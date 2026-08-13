@@ -752,15 +752,40 @@ fn request_consumes_noop_cli_and_uses_runtime_control_not_stdout() {
         .expect("Req04 must keep StoplessCenter state active for the provider turn");
 
     let messages = payload["messages"].as_array().expect("provider messages");
-    assert_eq!(messages.len(), 2);
+    assert_eq!(messages.len(), 3);
     assert_eq!(messages[0], json!({"role":"user","content":"完成当前目标"}));
     assert_eq!(
         messages[1],
         json!({"role":"assistant","content":"自然停下的可见文本"})
     );
+    let guidance_system = messages.iter().find(|message| {
+        message.get("role").and_then(Value::as_str) == Some("system")
+    });
+    assert!(
+        guidance_system.is_some_and(|message| {
+            message
+                .get("content")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains("当前轮推进准则"))
+        }),
+        "activated Req04 must inject provider-facing stopless guidance into a current-turn system message: {serialized}"
+    );
     assert!(
         payload.get("instructions").is_none(),
-        "StoplessCenter control must not inject provider-facing guidance: {serialized}"
+        "chat canonical payload carries stopless guidance in the system message, not instructions: {serialized}"
+    );
+    let tools = payload["tools"].as_array().unwrap();
+    assert_eq!(
+        tools
+            .iter()
+            .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
+            .count(),
+        1,
+        "activated Req04 must inject exactly-one provider-visible reasoningStop tool: {serialized}"
+    );
+    assert_eq!(
+        payload["tool_choice"], json!("required"),
+        "activated Req04 must promote tool_choice to required: {serialized}"
     );
     assert_eq!(state.phase(), V3StoplessCenterPhase::ProviderTurnInFlight);
     assert_eq!(state.consecutive_stop_count(), 1);
@@ -809,6 +834,170 @@ fn request_consumes_noop_cli_and_uses_runtime_control_not_stdout() {
             "provider request leaked old stopless CLI/schema payload {forbidden}: {serialized}"
         );
     }
+}
+
+#[test]
+fn non_completed_stop_with_active_state_preserves_stopless_schema() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_response(json!({
+            "id":"resp_non_completed_stop_markers",
+            "object":"response",
+            "status":"requires_action",
+            "finish_reason":"stop",
+            "instructions":"base\n\n当前轮推进准则：继续推进任务。",
+            "output":[{
+                "type":"message",
+                "role":"assistant",
+                "content":[{"type":"output_text","text":"<rcc_stop_schema>{\"stopreason\":1,\"current_goal\":\"x\",\"next_step\":\"y\"}</rcc_stop_schema>可见文本"}]
+            }]
+        })))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &active_stopless_response_profile(0, "req-non-completed-stop"),
+        )
+        .unwrap();
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.finalized_payload();
+    let serialized = serde_json::to_string(payload).unwrap();
+    assert!(
+        !serialized.contains("<rcc_stop_schema>"),
+        "client projection must consume the Stopless schema: {serialized}"
+    );
+    assert!(
+        !serialized.contains("当前轮推进准则"),
+        "non-completed stop must strip guidance echo: {serialized}"
+    );
+    assert!(
+        serialized.contains("可见文本"),
+        "visible assistant text must survive non-completed stop stripping: {serialized}"
+    );
+}
+
+#[test]
+fn relay_req04_thinking_mode_does_not_promote_tool_choice() {
+    // deepseek-v4-flash 等 openai_chat provider 的 thinking 模式（reasoning_effort
+    // 非 none）拒绝 tool_choice=required（400: Thinking mode does not support this
+    // tool_choice）。stopless 激活时仍注入 guidance + exactly-one reasoningStop 工具，
+    // 但 tool_choice 保持客户端原值（auto），不得提升为 required。
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let payload = json!({
+        "input":[{"role":"user","content":"继续做"}],
+        "tools":[{"type":"function","name":"exec","description":"original tool"}],
+        "instructions":"base instruction",
+        "reasoning":{"effort":"high"}
+    });
+    let governed = hooks
+        .run(
+            raw_request(payload.clone()),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop()
+                .with_stopless_center_state(V3StoplessCenterState::new(
+                    1,
+                    3,
+                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+                ))
+                .with_stopless_transition_context("req-inject-thinking-1", 55_000),
+        )
+        .unwrap();
+    let serialized = serde_json::to_string(governed.payload()).unwrap();
+    assert!(
+        serialized.contains("当前轮推进准则"),
+        "thinking mode must still inject stopless guidance: {serialized}"
+    );
+    let tools = governed.payload()["tools"].as_array().unwrap();
+    assert_eq!(
+        tools
+            .iter()
+            .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
+            .count(),
+        1,
+        "thinking mode must still inject exactly-one reasoningStop tool: {serialized}"
+    );
+    let tool_choice = governed.payload().get("tool_choice");
+    assert!(
+        !tool_choice.is_some_and(|choice| {
+            choice.as_str() == Some("required")
+                || choice.get("type").and_then(Value::as_str) == Some("required")
+        }),
+        "thinking mode must NOT promote tool_choice to required (provider 400): {serialized}"
+    );
+    assert!(
+        governed.stopless_state().is_some(),
+        "thinking mode stopless activation must keep StoplessCenter state"
+    );
+}
+
+#[test]
+fn relay_req04_injects_stopless_contract_when_activated() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let payload = json!({
+        "input":[{"role":"user","content":"继续做"}],
+        "tools":[{"type":"function","name":"exec","description":"original tool"}],
+        "instructions":"base instruction"
+    });
+    let governed = hooks
+        .run(
+            raw_request(payload.clone()),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop()
+                .with_stopless_center_state(V3StoplessCenterState::new(
+                    1,
+                    3,
+                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+                ))
+                .with_stopless_transition_context("req-inject-1", 55_000),
+        )
+        .unwrap();
+    let serialized = serde_json::to_string(governed.payload()).unwrap();
+    assert!(
+        serialized.contains("当前轮推进准则"),
+        "Req04 must inject stopless provider-facing guidance when activated: {serialized}"
+    );
+    let tools = governed.payload()["tools"].as_array().unwrap();
+    let stopless_tool_count = tools
+        .iter()
+        .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
+        .count();
+    assert_eq!(
+        stopless_tool_count, 1,
+        "exactly-one provider-visible reasoningStop tool must be injected: {serialized}"
+    );
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool.get("name").and_then(Value::as_str) == Some("exec")),
+        "original tools must be preserved: {serialized}"
+    );
+    let tool_choice = governed.payload().get("tool_choice");
+    assert!(
+        tool_choice.is_some_and(|choice| {
+            choice.as_str() == Some("required")
+                || choice.get("type").and_then(Value::as_str) == Some("required")
+        }),
+        "tool_choice must be promoted to required for the stopless turn: {serialized}"
+    );
+    for forbidden in [
+        "routecodex hook run reasoningStop",
+        "--input-json",
+        "repeatCount",
+        "schemaFeedback",
+        "runtime_control",
+        "metadata_center",
+        "__routecodex_stopless_center",
+        "call_stopless_reasoning",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "stopless shell/control artifact leaked {forbidden}: {serialized}"
+        );
+    }
+    assert!(
+        governed.stopless_state().is_some(),
+        "activated stopless turn must keep StoplessCenter state"
+    );
 }
 
 struct CaptureJsonTransport {
@@ -908,6 +1097,151 @@ fn valid_stopless_control_scope() -> V3ResponsesRelayStoplessControlScope {
         5555,
         "controlled",
     )
+}
+
+#[tokio::test]
+async fn natural_stop_interception_sets_stopless_console_activation() {
+    // 拦截语义：natural stop（missing summary/schema，active 轮）由 Resp03 续杯
+    // 投影 → 控制台 stopless_activation 必须为 true（拦截时打印）；terminal、
+    // inactive、guard 等放行路径保持 false（不拦截不打印）。
+    let manifest = manifest_with_stopless_center(true);
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let stopless_control = V3ResponsesRelayStoplessControlState::default();
+    let transport = CaptureJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: json!({
+            "id":"resp_natural_stop_console",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{
+                "type":"message",
+                "role":"assistant",
+                "content":[{"type":"output_text","text":"natural stop visible text"}]
+            }]
+        }),
+    };
+    let output = execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".to_string(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-natural-stop-console".to_string(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "input":[{"role":"user","content":"natural stop interception"}],
+                "tools":[{"type":"function","name":"exec","description":"original tool"}]
+            }),
+        },
+        &transport,
+        &provider_health,
+        &stopless_control,
+        valid_stopless_control_scope(),
+    )
+    .await
+    .unwrap();
+    let obs = output
+        .observability
+        .expect("relay runtime must report observability");
+    assert!(
+        obs.stopless_activation,
+        "natural stop interception must set stopless_activation=true (console prints on intercept)"
+    );
+}
+
+#[tokio::test]
+async fn thinking_relay_request_keeps_auto_tool_choice_and_preserves_effort() {
+    // 12:02 线上 400 场景回归：deepseek-v4-flash thinking 模式拒绝
+    // tool_choice=required。thinking 请求（reasoning.effort=high）在 stopless
+    // 激活时必须保留客户端 tool_choice 原值（auto），不得提升为 required，
+    // 同时仍注入 exactly-one reasoningStop 并保留 reasoning_effort。
+    let manifest = manifest_with_stopless_center(true);
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let stopless_control = V3ResponsesRelayStoplessControlState::default();
+    let transport = CaptureJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: json!({
+            "id":"resp_thinking_auto_choice",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{
+                "type":"message",
+                "role":"assistant",
+                "content":[{"type":"output_text","text":"OK"}]
+            }]
+        }),
+    };
+    let output = execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".to_string(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-thinking-auto-choice".to_string(),
+            payload: json!({
+                "model":"deepseek-v4-flash",
+                "reasoning":{"effort":"high"},
+                "input":[{"role":"user","content":"only reply OK"}],
+                "tools":[{"type":"function","name":"exec_command","description":"run"}],
+                "tool_choice":"auto"
+            }),
+        },
+        &transport,
+        &provider_health,
+        &stopless_control,
+        valid_stopless_control_scope(),
+    )
+    .await
+    .unwrap();
+
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("thinking auto-choice test expects JSON body");
+    };
+    assert_eq!(body["status"], "completed");
+    let provider_body = transport.captures.lock().unwrap().first().unwrap().clone();
+    let serialized = serde_json::to_string(&provider_body).unwrap();
+    let tool_choice = provider_body.get("tool_choice");
+    assert!(
+        !tool_choice.is_some_and(|choice| {
+            choice.as_str() == Some("required")
+                || choice.get("type").and_then(Value::as_str) == Some("required")
+        }),
+        "thinking mode must keep client tool_choice (provider 400 regression): {serialized}"
+    );
+    let reasoning_effort = provider_body
+        .get("reasoning_effort")
+        .or_else(|| provider_body.pointer("/reasoning/effort"));
+    assert!(
+        reasoning_effort.is_some_and(|effort| effort.as_str() == Some("high")),
+        "thinking effort must be preserved in provider wire: {serialized}"
+    );
+    let stopless_tool_count = provider_body
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|tool| {
+            tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
+                || tool
+                    .pointer("/function/name")
+                    .and_then(Value::as_str)
+                    == Some("reasoningStop")
+        })
+        .count();
+    assert_eq!(
+        stopless_tool_count, 1,
+        "thinking mode must still inject exactly-one reasoningStop tool: {serialized}"
+    );
 }
 
 #[tokio::test]
@@ -1029,16 +1363,17 @@ async fn omitted_stopless_center_compiles_true_and_injects_guidance_and_projects
         .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
         .count();
     assert_eq!(
-        stopless_tool_count, 0,
-        "omitted feature default true must not inject reasoningStop into provider payload: {provider_body}"
+        stopless_tool_count, 1,
+        "omitted feature default true with client session scope must inject exactly-one reasoningStop into provider payload: {provider_body}"
     );
     assert!(
-        !serialized.contains("reasoningStop"),
-        "omitted feature default true must not inject stopless reasoningStop tool: {serialized}"
+        serialized.contains("当前轮推进准则"),
+        "omitted feature default true with client session scope must inject stopless provider-facing guidance: {serialized}"
     );
-    assert!(
-        !serialized.contains("当前轮推进准则"),
-        "omitted feature default true must not inject stopless guidance: {serialized}"
+    assert_eq!(
+        provider_body.get("tool_choice"),
+        Some(&json!("required")),
+        "activated stopless turn must promote tool_choice to required: {provider_body}"
     );
     assert!(!serde_json::to_string(&body)
         .unwrap()
@@ -1225,9 +1560,11 @@ async fn server_override_precedence_applies_after_compiled_global_default() {
         panic!("server-enabled stopless test expects JSON body");
     };
     assert_eq!(enabled_body["status"], "completed");
+    let enabled_provider_body =
+        serde_json::to_string(enabled_transport.captures.lock().unwrap().first().unwrap())
+            .unwrap();
     assert!(
-        !serde_json::to_string(enabled_transport.captures.lock().unwrap().first().unwrap())
-            .unwrap()
-            .contains("reasoningStop")
+        enabled_provider_body.contains("reasoningStop"),
+        "server override true with valid scope must inject the stopless reasoningStop tool: {enabled_provider_body}"
     );
 }

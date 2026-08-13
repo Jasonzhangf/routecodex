@@ -39,7 +39,7 @@ fn resp03_recursive_strips_codex_ciphers_but_keeps_anthropic_signature() {
         ]
     });
 
-    strip_v3_resp03_encrypted_fields_recursive(&mut payload);
+    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false);
 
     let output = payload["output"].as_array().unwrap();
     // rsn_ / gAAAA Codex 密文剥离，明文 summary 保留。

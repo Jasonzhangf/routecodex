@@ -306,16 +306,21 @@ impl V3ProviderGlobalSubscriptionHealthStore {
 
 fn global_key(
     provider_id: &str,
-    _auth_alias: Option<&str>,
-    _model_id: Option<&str>,
+    auth_alias: Option<&str>,
+    model_id: Option<&str>,
 ) -> V3ProviderGlobalKey {
     V3ProviderGlobalKey {
         provider_id: provider_id.to_string(),
-        auth_alias: None,
-        model_id: None,
+        auth_alias: auth_alias.map(str::to_string),
+        model_id: model_id.map(str::to_string),
     }
 }
 
 fn provider_label(provider: &V3ProviderGlobalKey) -> String {
-    provider.provider_id.clone()
+    format!(
+        "{}:{}:{}",
+        provider.provider_id,
+        provider.auth_alias.as_deref().unwrap_or("-"),
+        provider.model_id.as_deref().unwrap_or("-")
+    )
 }

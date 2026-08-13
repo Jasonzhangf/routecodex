@@ -4,6 +4,7 @@
 // to the former inline `mod tests`.
 
 use super::*;
+use crate::hub_v1::stopless_injection::{inject_v3_stopless_provider_contract, tool_is_reasoning_stop};
 use serde_json::json;
 
 const CMD_ARGS: &str = "{\"cmd\":\"routecodex hook run reasoningStop\"}";
@@ -321,4 +322,84 @@ fn strip_local_websearch_tool_call_removes_anthropic_tool_use() {
     let content = stripped["content"].as_array().expect("content array");
     assert_eq!(content.len(), 1);
     assert!(content.iter().all(|item| item.get("type") != Some(&Value::String("tool_use".into()))));
+}
+
+#[test]
+fn active_stopless_does_not_treat_message_text_as_injected_guidance() {
+    let mut payload = json!({
+        "model": "local-model",
+        "messages": [{
+            "role": "user",
+            "content": "请解释历史中提到的当前轮推进准则，不要执行任何工具"
+        }]
+    });
+
+    inject_v3_stopless_provider_contract(&mut payload, 0)
+        .expect("stopless injection must succeed");
+
+    let tools = payload["tools"].as_array().expect("tools must be injected");
+    assert!(tools.iter().any(|tool| {
+        tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
+    }));
+    assert_eq!(payload["tool_choice"], "required");
+}
+
+#[test]
+fn active_stopless_thinking_replaces_none_tool_choice_when_injecting_control_tool() {
+    let mut payload = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [{"role": "user", "content": "continue"}],
+        "reasoning_effort": "high",
+        "tool_choice": "none"
+    });
+
+    inject_v3_stopless_provider_contract(&mut payload, 0)
+        .expect("thinking-mode stopless injection must succeed");
+
+    assert_eq!(payload["tool_choice"], "auto");
+    assert!(payload["tools"].as_array().is_some_and(|tools| {
+        tools.iter().any(|tool| tool_is_reasoning_stop(tool))
+    }));
+}
+
+#[test]
+fn active_stopless_preserves_nested_reasoning_stop_tool_without_duplicate() {
+    let mut payload = json!({
+        "model": "local-model",
+        "messages": [{"role": "user", "content": "continue"}],
+        "tools": [{
+            "type": "function",
+            "function": {"name": "reasoningStop", "parameters": {"type": "object"}}
+        }]
+    });
+
+    inject_v3_stopless_provider_contract(&mut payload, 0)
+        .expect("stopless injection must succeed");
+
+    let tools = payload["tools"].as_array().expect("tools array");
+    assert_eq!(
+        tools.iter().filter(|tool| tool_is_reasoning_stop(tool)).count(),
+        1
+    );
+    assert_eq!(payload["tool_choice"], "required");
+}
+
+#[test]
+fn active_stopless_ignores_historical_guidance_for_current_turn_contract() {
+    let mut payload = json!({
+        "model": "local-model",
+        "messages": [
+            {"role": "system", "content": crate::hub_v1::stopless_injection::stopless_provider_guidance()},
+            {"role": "user", "content": "continue"}
+        ]
+    });
+
+    inject_v3_stopless_provider_contract(&mut payload, 1)
+        .expect("stopless injection must succeed");
+
+    let messages = payload["messages"].as_array().expect("messages array");
+    assert_eq!(messages[0]["role"], "system");
+    assert_eq!(messages[1]["role"], "system");
+    assert!(messages[1]["content"].as_str().unwrap().contains("当前轮推进准则"));
+    assert_eq!(payload["tool_choice"], "required");
 }

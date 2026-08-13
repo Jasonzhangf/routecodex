@@ -202,6 +202,7 @@ async fn direct_sse_runtime_timing_publishes_only_after_clean_eof() {
         observation.clone(),
         runtime_timing.clone(),
         false,
+        true,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -236,6 +237,7 @@ async fn direct_sse_strip_client_response_id_empties_nested_response_id() {
         observation.clone(),
         runtime_timing.clone(),
         true,
+        true,
     );
     let mut observed = observed;
     let mut first = observed.next().await.unwrap().unwrap();
@@ -266,12 +268,85 @@ async fn direct_sse_strip_disabled_passes_chunk_through_unchanged() {
         observation.clone(),
         runtime_timing.clone(),
         false,
+        true,
     );
     let mut observed = observed;
     let first = observed.next().await.unwrap().unwrap();
     assert!(
         String::from_utf8_lossy(&first).contains("\"id\":\"resp_1\""),
         "strip disabled must keep original id"
+    );
+}
+
+#[tokio::test]
+async fn direct_sse_strips_encrypted_content_when_retain_false() {
+    let observation = V3RuntimeStreamObservation::default();
+    let runtime_timing = V3RuntimeTimingState::start();
+    let source = Box::pin(stream::iter(vec![Ok(
+        b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"rsn_CIPHER\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"plain\"}]}}\n\n".to_vec(),
+    )]));
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(
+        source,
+        observation.clone(),
+        runtime_timing.clone(),
+        false,
+        false,
+    );
+    let mut observed = observed;
+    let first = observed.next().await.unwrap().unwrap();
+    let text = String::from_utf8_lossy(&first);
+    assert!(
+        !text.contains("rsn_CIPHER"),
+        "retain=false 必须剥离密文: {text}"
+    );
+    assert!(text.contains("plain"), "明文 summary 必须保留: {text}");
+    assert!(
+        text.contains("response.output_item.added"),
+        "事件语义必须保留: {text}"
+    );
+}
+
+#[tokio::test]
+async fn direct_sse_keeps_encrypted_content_when_retain_true() {
+    let observation = V3RuntimeStreamObservation::default();
+    let runtime_timing = V3RuntimeTimingState::start();
+    let source = Box::pin(stream::iter(vec![Ok(
+        b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"rsn_KEEP\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"plain\"}]}}\n\n".to_vec(),
+    )]));
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(
+        source,
+        observation.clone(),
+        runtime_timing.clone(),
+        false,
+        true,
+    );
+    let mut observed = observed;
+    let first = observed.next().await.unwrap().unwrap();
+    let text = String::from_utf8_lossy(&first);
+    assert!(
+        text.contains("rsn_KEEP"),
+        "retain=true（单 gpt provider）必须保留密文: {text}"
+    );
+}
+
+#[tokio::test]
+async fn direct_sse_retain_false_passes_cipher_free_frames_byte_for_byte() {
+    let observation = V3RuntimeStreamObservation::default();
+    let runtime_timing = V3RuntimeTimingState::start();
+    let raw = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n".to_vec();
+    let source = Box::pin(stream::iter(vec![Ok(raw.clone())]));
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(
+        source,
+        observation.clone(),
+        runtime_timing.clone(),
+        false,
+        false,
+    );
+    let mut observed = observed;
+    let first = observed.next().await.unwrap().unwrap();
+    assert_eq!(
+        first, raw,
+        "retain=false 且帧无密文时必须逐字节透传（direct SSE 字节保真）"
     );
 }
 
@@ -292,6 +367,7 @@ async fn direct_sse_terminal_event_before_eof_does_not_publish_runtime_timing() 
         observation.clone(),
         runtime_timing.clone(),
         false,
+        true,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -323,6 +399,7 @@ async fn direct_sse_malformed_tail_does_not_publish_runtime_timing() {
         observation.clone(),
         runtime_timing.clone(),
         false,
+        true,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -361,6 +438,7 @@ async fn direct_sse_response_done_without_completed_is_terminal_missing() {
         observation.clone(),
         runtime_timing.clone(),
         false,
+        true,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -398,6 +476,7 @@ async fn direct_sse_failed_event_without_error_code_is_protocol_invalid() {
         observation.clone(),
         runtime_timing.clone(),
         false,
+        true,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -434,6 +513,7 @@ async fn direct_sse_incomplete_event_without_error_message_is_protocol_invalid()
         observation.clone(),
         runtime_timing.clone(),
         false,
+        true,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -493,6 +573,7 @@ async fn direct_sse_failed_event_accepts_top_level_error_envelope() {
         observation.clone(),
         runtime_timing.clone(),
         false,
+        true,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -525,6 +606,7 @@ async fn direct_sse_json_type_remains_provider_semantic_source() {
         observation.clone(),
         runtime_timing.clone(),
         false,
+        true,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -562,6 +644,7 @@ async fn red_sse_semantics_must_use_json_type_not_event_name() {
         observation.clone(),
         runtime_timing.clone(),
         false,
+        true,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -597,6 +680,7 @@ async fn red_sse_semantics_ignore_event_name_when_json_is_completed() {
         observation.clone(),
         runtime_timing.clone(),
         false,
+        true,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -629,6 +713,7 @@ async fn direct_sse_failure_after_client_commit_does_not_reselect_current_reques
         observation.clone(),
         runtime_timing.clone(),
         false,
+        true,
     );
     let mut governed = wrap_direct_sse_provider_outcome_stream(
         observed,
@@ -752,6 +837,60 @@ async fn provider_error_enters_error_chain_not_success() {
         }
         V3ClientBody::Bytes(_) => panic!("error response must be JSON"),
         V3ClientBody::Sse(_) => panic!("error response must be JSON"),
+    }
+}
+
+#[tokio::test]
+async fn direct_json_response_strips_encrypted_content_for_multi_provider_route() {
+    struct CipherTransport;
+    #[async_trait]
+    impl ResponsesTransport for CipherTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                br#"{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"rsn_MULTI","summary":[{"type":"summary_text","text":"plain"}]}]}"#.to_vec(),
+            ))
+        }
+    }
+    // 两个 gpt 候选（多 provider）→ retain=false → 响应密文必须在进客户端前剥离。
+    let manifest = multi_candidate_test_manifest();
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        "default",
+        "req-cipher-json",
+        "exec",
+        json!({"model":"client-model","input":"hello","stream":false}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &CipherTransport,
+    )
+    .await;
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    match output.client_payload.body {
+        V3ClientBody::Json(body) => {
+            assert!(
+                !body.to_string().contains("rsn_MULTI"),
+                "多 provider 场景响应密文必须剥离: {body}"
+            );
+            assert_eq!(body["output"][0]["summary"][0]["text"], "plain");
+        }
+        other => panic!("expected JSON body, got {other:?}"),
     }
 }
 

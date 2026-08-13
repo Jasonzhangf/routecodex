@@ -352,13 +352,22 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     assert_eq!(client_response["error"]["message"], "controlled rate limit");
     assert_eq!(client_response["error"]["code"], "RESOURCE_EXHAUSTED");
     assert_eq!(
-        client_response["error"]["stage"],
-        "V3ProviderReqOutbound09TransportRequest"
+        output
+            .node_trace
+            .iter()
+            .find(|node| **node == "V3ProviderReqOutbound09TransportRequest"),
+        Some(&"V3ProviderReqOutbound09TransportRequest")
     );
-    assert_eq!(client_response["error"]["class"], "provider_failure");
+    assert!(
+        output
+            .error_chain
+            .as_ref()
+            .is_some_and(|chain| chain.contains(&"V3Error03TargetLocalAction")),
+        "provider failure must retain its typed classification chain"
+    );
     assert_eq!(
-        client_response["error"]["error_node"],
-        "V3Error06ClientProjected"
+        output.node_trace.last(),
+        Some(&"V3Error06ClientProjected")
     );
     assert!(
         client_response["error"].get("status").is_none(),

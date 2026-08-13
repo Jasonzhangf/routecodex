@@ -3,9 +3,9 @@
 //! 唯一 owner：`hub.servertool_stopless_cli_continuation`。
 //! 注入只在同轮 `schema_guidance_active` 时发生（由调用方 `govern_v3_servertool_request_at_req04`
 //! 判定）；未激活（缺 scope/request_id）不注入。thinking 模式（`reasoning_effort` 非 none）
-//! 下部分 openai_chat provider（如 deepseek-v4-flash）拒绝 `tool_choice=required`
-//! （400: Thinking mode does not support this tool_choice），因此 thinking 模式不提升
-//! tool_choice，保留客户端原值。
+//! 下部分 provider（如 deepseek-v4-flash）拒绝 `tool_choice=required`
+//! （400: Thinking mode does not support this tool_choice）。续接请求已经带有
+//! function_call_output 时也不生成 required，保留客户端原值。
 
 use crate::hub_v1::V3HubRelayRequestError;
 use serde_json::{json, Value};
@@ -22,7 +22,8 @@ pub(crate) fn stopless_provider_guidance() -> &'static str {
 }
 
 /// Req04 激活路径向当前轮 provider request 注入 stopless 合同：
-/// 完整推进准则 + exactly-one `reasoningStop` tool + `tool_choice=required`。
+/// 完整推进准则 + exactly-one `reasoningStop` tool；仅初始轮且非 thinking
+/// 模式才生成 `tool_choice=required`。
 /// 已含准则（重复进入或历史残留）时幂等跳过；原指令/工具原样保留。
 pub(crate) fn inject_v3_stopless_provider_contract(
     payload: &mut Value,
@@ -99,7 +100,18 @@ fn inject_v3_stopless_responses_contract(payload: &mut Value) {
             }
         }
     }
-    inject_v3_stopless_tools_and_choice(object, thinking);
+    let continuation = object
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|input| {
+            input.iter().any(|item| {
+                matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some("function_call_output" | "tool_call_output")
+                )
+            })
+        });
+    inject_v3_stopless_tools_and_choice(object, thinking, continuation);
 }
 
 fn inject_v3_stopless_chat_contract(payload: &mut Value, current_payload_start: usize) {
@@ -161,12 +173,13 @@ fn inject_v3_stopless_chat_contract(payload: &mut Value, current_payload_start: 
             );
         }
     }
-    inject_v3_stopless_tools_and_choice(object, thinking);
+    inject_v3_stopless_tools_and_choice(object, thinking, false);
 }
 
 fn inject_v3_stopless_tools_and_choice(
     object: &mut serde_json::Map<String, Value>,
     thinking: bool,
+    continuation: bool,
 ) {
     match object.get_mut("tools") {
         Some(Value::Array(tools)) => {
@@ -195,10 +208,10 @@ fn inject_v3_stopless_tools_and_choice(
             );
         }
     }
-    // thinking 模式（reasoning_effort 非 none）下部分 openai_chat provider
+    // thinking 模式（reasoning_effort 非 none）或续接轮下部分 provider
     // （如 deepseek-v4-flash）拒绝 tool_choice=required（400: Thinking mode does
     // not support this tool_choice）。此时保留客户端原值（auto/none），不提升。
-    if thinking {
+    if thinking || continuation {
         let needs_auto = matches!(
             object.get("tool_choice"),
             Some(choice) if choice.as_str() == Some("none")
@@ -301,6 +314,25 @@ mod stopless_injection_tests {
                 .iter()
                 .any(tool_is_reasoning_stop)
         );
+    }
+
+    #[test]
+    fn responses_continuation_does_not_generate_required_tool_choice() {
+        let mut payload = json!({
+            "model": "deepseek-v4-flash",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_stopless",
+                "output": ""
+            }]
+        });
+
+        inject_v3_stopless_provider_contract(&mut payload, 0).expect("inject");
+
+        assert_eq!(payload.get("tool_choice"), None);
+        assert!(payload["tools"].as_array().is_some_and(|tools| {
+            tools.iter().any(tool_is_reasoning_stop)
+        }));
     }
 
     #[test]

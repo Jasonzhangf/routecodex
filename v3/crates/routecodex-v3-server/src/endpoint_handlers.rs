@@ -180,16 +180,18 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                 responses_effective_execution_mode_for_entry_facts(execution_mode, entry_facts);
         }
     }
-    if let Some(response) = capture_v3_live_raw_request(
-        &state,
-        &trace_scope,
-        &entry_protocol,
-        execution_mode,
-        &path,
-        &request_id,
-        &payload,
-    ) {
-        return response;
+    if execution_mode == V3EntryProtocolExecutionMode::Relay {
+        if let Some(response) = capture_v3_live_raw_request(
+            &state,
+            &trace_scope,
+            &entry_protocol,
+            execution_mode,
+            &path,
+            &request_id,
+            &payload,
+        ) {
+            return response;
+        }
     }
     let snapshot_session_id = if entry_protocol == "responses" {
         match start_v3_live_snapshot_session(&state, &trace_scope) {
@@ -252,6 +254,32 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             output.status,
             output.node_trace.len(),
         );
+        if let Err(error) = persist_v3_codex_sample_payload(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            "request.json",
+            &payload,
+        ) {
+            return foundation_output_response(project_v3_debug_failure(
+                "V3DebugProviderRequestCaptured",
+                V3DebugError::Sink(error),
+            ));
+        }
+        if let Err(error) = persist_v3_codex_sample_payload(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            "response.json",
+            &output.body,
+        ) {
+            return foundation_output_response(project_v3_debug_failure(
+                "V3DebugProviderResponseCaptured",
+                V3DebugError::Sink(error),
+            ));
+        }
         if let Some(response) = record_v3_live_snapshot_projection(
             &state,
             &trace_scope,
