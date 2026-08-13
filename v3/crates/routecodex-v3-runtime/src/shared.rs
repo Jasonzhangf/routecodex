@@ -229,7 +229,7 @@ pub(crate) async fn project_provider_raw_to_client_payload(
                 },
             ));
         };
-        let parsed: serde_json::Value = serde_json::from_slice(&body_bytes).map_err(|error| {
+        let mut parsed: serde_json::Value = serde_json::from_slice(&body_bytes).map_err(|error| {
             build_v3_error_01_source_raised_external(
                 V3ErrorSourceKind::ProviderFailure,
                 "V3ProviderResp14Raw",
@@ -245,6 +245,14 @@ pub(crate) async fn project_provider_raw_to_client_payload(
                 },
             )
         })?;
+        // DeepSeek Console Go responses 网关响应侧回射：上游以 function_call 返回
+        // 映射过的 function 工具（exec_command/web_search/reasoningStop 等），客户端
+        // 声明的是 custom 工具形态——必须在进入客户端前回射为 custom_tool_call，
+        // 否则客户端不执行调用、下一轮历史缺 output（孤儿 call）触发上游 400。
+        // 请求侧对应映射见 responses:deepseek-console-go compat。
+        if provider_id == "opencode-go" {
+            parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
+        }
         let observation = observe_json_remote_continuation(&provider_id, status, &parsed)?;
         (V3ClientBody::Json(parsed), observation, None)
     } else {

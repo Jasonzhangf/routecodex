@@ -132,19 +132,19 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
             );
         }
     }
-    ensure_reasoning_text_before_each_tool_call(&mut root)?;
+    ensure_reasoning_text_before_tool_call_group(&mut root)?;
     Ok(Value::Object(root))
 }
 
-/// Console Go thinking 模式约束：上游要求每条 assistant 工具调用前的
+/// Console Go thinking 模式约束：上游要求 assistant 工具调用组前的
 /// `reasoning_text` 必须回传（缺失或为空都会 `reasoning_text must be passed
-/// back` 400）。Codex 客户端历史里的 reasoning 可能是密文（encrypted_content）
-/// 且 wire 层已剥离，或者完全没有 reasoning item。本函数在**每个映射过的
-/// function_call 前**确保存在含非空 `reasoning_text` 的 reasoning item；
-/// 缺失时插入最小占位（明文 `[thinking redacted]`）。**不会在
-/// function_call_output 前插入**（上游要求 tool output 紧跟 tool call，
-/// 中间插入任何 item 会触发 `No tool output found` 400）。
-fn ensure_reasoning_text_before_each_tool_call(
+/// back` 400）。本函数在**每组连续 function_call 前**确保存在含非空
+/// `reasoning_text` 的 reasoning item；缺失时插入最小占位
+/// （明文 `[thinking redacted]`）。**只插在组前，不拆散并行 calls 组**
+/// （Codex 并行工具结果是合法形态 `[c1, c2, o1, o2]`，组前一个 reasoning
+/// 即被上游接受；在 call 与 output 之间插入任何 item 会触发
+/// `No tool output found` 400）。
+fn ensure_reasoning_text_before_tool_call_group(
     root: &mut Map<String, Value>,
 ) -> Result<(), String> {
     let Some(input) = root.get_mut("input").and_then(Value::as_array_mut) else {
@@ -186,9 +186,24 @@ fn ensure_reasoning_text_before_each_tool_call(
                     "content": [{"type": "reasoning_text", "text": "[thinking redacted]"}]
                 }),
             );
-            index += 1;
         }
-        index += 1;
+        // 跳过整个连续 calls 组（含其 outputs），避免在并行组内部插入占位。
+        let mut group_end = index + 1;
+        while group_end < input.len() {
+            let Some(next) = input[group_end].as_object() else {
+                break;
+            };
+            let next_kind = next.get("type").and_then(Value::as_str);
+            if matches!(
+                next_kind,
+                Some("function_call") | Some("function_call_output")
+            ) {
+                group_end += 1;
+            } else {
+                break;
+            }
+        }
+        index = group_end;
     }
     Ok(())
 }
@@ -280,7 +295,7 @@ mod tests {
         assert_eq!(
             input[1]["type"],
             json!("reasoning"),
-            "reasoning placeholder precedes tool call"
+            "reasoning precedes tool call group"
         );
         assert_eq!(input[2]["type"], json!("function_call"));
         assert_eq!(input[2]["name"], json!("exec_command"));
@@ -301,41 +316,41 @@ mod tests {
     }
 
     #[test]
-    fn inserts_reasoning_placeholder_before_tool_call_when_missing() {
+    fn reasoning_placeholder_does_not_split_parallel_call_group() {
+        // Codex 并行工具结果是合法形态 [c1, c2, o1, o2]；reasoning 占位只插在
+        // 组前，不拆散 call 与 output 的配对（拆散会触发上游 No tool output found）。
         let body = json!({
             "model": "m",
             "input": [
                 {"type": "custom_tool_call", "call_id": "c1", "name": "exec_command", "input": "ls"},
-                {"type": "custom_tool_call_output", "call_id": "c1", "output": "f"}
+                {"type": "custom_tool_call", "call_id": "c2", "name": "exec_command", "input": "pwd"},
+                {"type": "custom_tool_call_output", "call_id": "c1", "output": "f1"},
+                {"type": "custom_tool_call_output", "call_id": "c2", "output": "f2"}
             ],
             "tools": []
         });
         let mapped = apply_request_compat(body).unwrap();
         let input = mapped["input"].as_array().unwrap();
-        assert_eq!(input[0]["type"], json!("reasoning"));
-        assert_eq!(input[0]["content"][0]["text"], json!("[thinking redacted]"));
-        assert_eq!(input[1]["type"], json!("function_call"));
+        let types = input
+            .iter()
+            .map(|item| {
+                item.get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
         assert_eq!(
-            input[2]["type"],
-            json!("function_call_output"),
-            "output must immediately follow call"
-        );
-    }
-
-    #[test]
-    fn does_not_insert_reasoning_when_non_empty_text_precedes_tool_call() {
-        let body = json!({
-            "model": "m",
-            "input": [
-                {"type": "reasoning", "id": "rsn_1", "summary": [], "content": [{"type": "reasoning_text", "text": "real thinking"}]},
-                {"type": "custom_tool_call", "call_id": "c1", "name": "exec_command", "input": "ls"}
+            types,
+            vec![
+                "reasoning",
+                "function_call",
+                "function_call",
+                "function_call_output",
+                "function_call_output"
             ],
-            "tools": []
-        });
-        let mapped = apply_request_compat(body).unwrap();
-        let input = mapped["input"].as_array().unwrap();
-        assert_eq!(input.len(), 2, "real reasoning must not be duplicated");
-        assert_eq!(input[0]["content"][0]["text"], json!("real thinking"));
+            "one reasoning before the group, parallel calls and outputs untouched"
+        );
     }
 
     #[test]

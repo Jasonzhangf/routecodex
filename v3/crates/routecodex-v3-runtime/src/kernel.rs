@@ -1305,16 +1305,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             );
             response_projection.client_payload.body = match body {
                 V3ClientBody::Sse(stream) => {
-                    let stream = wrap_direct_sse_provider_event_json_observation_stream(
-                        stream,
-                        stream_observation.clone(),
-                        runtime_timing.clone(),
-                        crate::shared::v3_strip_client_response_id_enabled_for_server(
-                            manifest,
-                            &standardized.protocol_context.server_id,
-                        ),
-                        retain_response_cipher,
-                    );
+                    let stream =
+                        wrap_direct_sse_provider_event_json_observation_stream_with_compat(
+                            stream,
+                            stream_observation.clone(),
+                            runtime_timing.clone(),
+                            crate::shared::v3_strip_client_response_id_enabled_for_server(
+                                manifest,
+                                &standardized.protocol_context.server_id,
+                            ),
+                            retain_response_cipher,
+                            policy.target.candidate.provider_id == "opencode-go",
+                        );
                     V3ClientBody::Sse(stream)
                 }
                 other => other,

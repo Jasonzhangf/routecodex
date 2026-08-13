@@ -14,6 +14,14 @@ mod deepseek_console_go;
 mod minimax_anthropic;
 pub mod namespace_tools;
 
+/// DeepSeek Console Go responses 网关的响应侧 custom/function 工具回射入口：
+/// 上游以 `function_call` 返回映射过的 function 工具（exec_command 等），客户端
+/// 声明的是 custom 工具形态，必须在进入客户端前回射为 `custom_tool_call`，
+/// 否则客户端不执行调用、下一轮历史缺 output（孤儿 call）触发上游 400。
+pub fn apply_deepseek_console_go_response_compat(payload: Value) -> Value {
+    deepseek_console_go::apply_response_compat(payload)
+}
+
 // feature_id: v3.provider_compat_profile_loading
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
