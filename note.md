@@ -35045,3 +35045,60 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - Root cause: `classify_v3_provider_generic_sse_json_data` delegated to the Responses-only classifier, so valid OpenAI Chat chunks without top-level `type` raised `provider_response_sse_event_invalid`.
 - Fix: generic JSON codec accepts recognized Chat chunk shapes (`choices` or `object=chat.completion.chunk`) without inventing a type; Responses events remain strict.
 - Evidence: runtime lib 394/394; global install `rccv3 0.90.4319`; aggregate restart; ports 10000/5520/5555/4444 all HTTP 200; live `/v1/chat/completions` SSE through `opencode-go[key2].deepseek-v4-flash` completed HTTP 200 with `[DONE]`.
+# 2026-08-12 V3 DeepSeek thinking tool_choice diagnosis
+
+- Evidence: live sample `~/.rcc/codex-samples/openai-responses/ports/4444/openai-responses-router-deepseek-v4-flash-20260812T121626221-761469-12548/provider-request.json` sent `openai_chat` `deepseek-v4-flash` with `tool_choice=required` and `reasoningStop`; provider returned `Thinking mode does not support this tool_choice`.
+- Root: Req04 stopless contract can retain/promote `required`; the final Relay Chat provider-wire owner did not normalize the DeepSeek stopless combination. An existing patch only covered the separate Responses wire builder, not Relay Chat.
+- Fix: `provider_req_compat_06_provider_compat.rs` converts only `openai_chat` + DeepSeek v4 Flash + exactly `reasoningStop` + `required` to `auto`; `servertool_hooks.rs` converts thinking-mode `none` to `auto` and never promotes thinking-mode choices to `required`.
+- Verification: targeted runtime tests for provider-wire conversion and thinking stopless injection pass; unrelated existing warnings remain. Global install blocked by pre-existing dirty `web_search_hop.rs` module-boundary gate hit on comment text; no restart/live replay performed.
+## 2026-08-12 DeepSeek thinking tool_choice follow-up
+
+- Latest formal validation: targeted Rust tests for thinking/non-thinking DeepSeek OpenAI Chat stopless choice and active Stopless hook pass; `git diff --check` passes.
+- Installed V3 `0.90.4388` and executed approved aggregate `routecodex restart`; `/health` passes on 10000/5520/5555/4444 with matching build version.
+- Codex review rerun after the fix remains FAIL, but findings are on unrelated dirty relay changes: missing post-first-frame SSE idle timeout and requiring `[DONE]` after a terminal Chat chunk. Do not modify those paths without their owner; delivery gate remains blocked.
+
+## 2026-08-12 V3 debug/image regression follow-up
+
+- Root cause: direct Responses runtime owns raw-request capture, while the server endpoint also captured the same request; provider retry re-entered the runtime and counted the same scoped raw request twice. Pending/fallback routing was not involved.
+- Fix: endpoint capture is relay-only; debug raw capture deduplicates the same `(server_id, request_id, execution_id, kind)` scope. No payload projection, redaction, truncation, or cleanup was added.
+- Test contract: the large-image HTTP compatibility fixture returned a Responses JSON body without required `status`; strict provider codec correctly rejected it. Fixture now returns `status=completed`; image bytes remain >1MiB and are asserted at provider capture.
+- Verification: `routecodex-v3-debug` 21 tests pass; debug endpoint regression passes; >1MiB image regression passes; `git diff --check` passes. Full workspace, global rebuild/install/restart/live DeepSeek replay, audit-lock authorization, review, and commit remain pending.
+- Full `multi_listener_server` serial run after these fixes: 28/49 pass, 21 fail. One source-level corruption was found in `scope_metadata.rs` (`cannot con...`); restored the complete explicit continuation-scope error. Remaining failures are grouped around old response-shape assertions, WebSocket/provider fixtures, sample authorization policy, and provider-health lifecycle; no broad test rewrite or fallback was added.
+- Follow-up: corrected canonical `client_metadata` fixture expectation (preserve client protocol field; do not move it to internal `metadata`), added Responses owner resolution to WebSocket Req03, and made the controlled provider WebSocket fixture accept reconnects. Current server serial result is 41/49 before the latest fixture/JSON-event adjustments; remaining failures are still isolated to direct debug event observability, remote continuation wire fixture, and WebSocket event ordering/transport behavior.
+
+# 2026-08-12 V3 priority remediation server closeout
+
+- Relay debug observability root cause: relay runtime carried the typed node trace into snapshots and response projections, but `finalize_v3_responses_relay_server_output` did not write those nodes to the shared debug event ledger. Added the single relay-output owner recording loop; no payload or SSE semantic path changed.
+- Remote continuation test root cause: `p6_remote_continuation_manifest` uses `process="chat"`, which intentionally selects relay-local continuation semantics. The same-socket provider-owned remote continuation test now uses `process="direct"`; the fixture makes the distinction explicit instead of expecting relay-local materialization to forward the provider response id.
+- Negative scope tests now omit typed session/conversation headers on the second turn; client turn metadata alone is rejected before provider send. This preserves the rule that client metadata cannot construct continuation control identity.
+- WebSocket disconnect test locks the first projected `response.created` frame, then verifies the provider socket observes client disconnect; this matches the transport projection contract while still proving stream teardown.
+- Verification: `cargo test -p routecodex-v3-server --test multi_listener_server -- --test-threads=1` passed 49/49. Targeted direct/relay continuation and disconnect tests also passed. Build/install/restart/live DeepSeek, architecture lock authorization, codex review, and commit remain pending.
+- Delivery gates: `npm run build:dev` passed and generated 0.90.4395; `npm run install:global` passed and installed 0.90.4396; approved `routecodex restart` completed; health 10000/5520/5555/4444 all returned status=ok with build_version 0.90.4396. `node scripts/tests/stopless-5555-final-probe.mjs` remains negative (`status=completed`, no exec_command). `npm run verify:v3-architecture-docs` is blocked only by the existing mainline audit-lock fingerprint mismatch 9982761e... versus locked 645d2d8..., requiring Jason authorization; no lock refresh performed.
+# 2026-08-12 V3 Responses direct ProviderReqCompat follow-up
+
+- Approved design: `/v1/responses` direct must enter the existing Rust `ProviderReqCompat06ProviderCompat` owner before `Provider12` wire.
+- First live probe on 0.90.4416 still returned provider HTTP 400 for `opencode-go.deepseek-v4-flash`; the selected provider used Responses wire, so the prior compat predicate limited to OpenAI Chat aliases did not run.
+- Corrected the shared compat owner to apply the DeepSeek thinking + reasoningStop tool-choice normalization for both `OpenAiChat` and `Responses` provider protocols. Direct Responses and direct OpenAI Chat red/green tests cover the two branches; non-thinking `required` remains unchanged.
+- Installed 0.90.4417, aggregate `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml`, all 10000/5520/5555/4444 health checks returned build 0.90.4417.
+- Same-entry live replay on 5555 with `model=deepseek-v4-flash`, `reasoning.effort=high`, `reasoningStop`, and client `tool_choice=required` returned HTTP 200 completed. Log request `openai-responses-router-deepseek-v4-flash-20260812T194021108-764774-15853` shows direct nodes through Provider12 and status=200; no provider_http_400.
+
+## 2026-08-13 V3 direct compat review fix
+
+- Review P1 found summary-only DeepSeek reasoning effort lost because direct compat inferred explicitness from the post-build payload.
+- Fixed both relay and direct callers to compute explicitness from the original semantic payload before standard-provider payload construction.
+- Targeted tests, install 0.90.4418, aggregate restart, all-port health, and same-entry 5555 Responses replay passed; replay returned HTTP 200 and completed output.
+
+# 2026-08-13 deepseek console-go custom tool 400 修复 + 响应回射教训
+
+- 症状：opencode-go（zen/go responses 网关）对带 exec_command 等 custom 工具请求返回 400 `Unsupported custom tool: '<name>'. Only 'apply_patch' is supported.`；带历史请求额外出现 `No tool output found` / `reasoning_text must be passed back`。
+- 根因（官方 DeepSeek Responses API 文档 + 实测）：
+  1. zen/go 网关只接受 apply_patch 一个 type=custom；其余 custom（exec_command/web_search/reasoningStop）必须 type=function 声明。
+  2. thinking 模式要求 assistant 工具调用组前有非空 reasoning_text（缺失/空 content 都 400）。
+  3. 并行工具组 [c1,c2,o1,o2] 是合法形态；组前一个 reasoning 即被接受，但 call 与 output 之间插入任何 item 会 400 `No tool output found`。
+  4. **孤儿 call 根因是响应侧没回射**：上游返回 function_call，RouteCodex 透传，客户端声明 custom 不执行 → 下一轮历史缺 output。
+- 修复（provider-compat-core `responses:deepseek-console-go` profile）：
+  - 请求侧：custom(≠apply_patch) → function 声明（input string schema）；custom_tool_call.input → function_call.arguments {"input":raw}；custom_tool_call_output → function_call_output；reasoning 占位只插在连续 calls 组前（不拆散并行组）。
+  - 响应侧：function_call(≠apply_patch) → custom_tool_call 回射，在进入客户端前完成（direct JSON shared.rs + direct SSE 帧 direct_runtime_helpers），复用同一 `apply_deepseek_console_go_response_compat`。
+  - opencode-go provider config compatibilityProfile 从 compat:passthrough 改为 responses:deepseek-console-go。
+- 验证：compat 40/40、runtime lib 419、provider-responses 63、server 83；live 0.90.4443 dry-run wire（组前 reasoning + 并行 calls 保留）直连 200；live 请求返回 custom_tool_call。
+- 教训（Jason 纠正）：不要把"孤儿 call"当历史缺陷——是响应未回射导致客户端不执行；不要下结论说"上游不支持并行"——并行组是合法形态，是 reasoning 占位插错位置拆散了配对；请求侧不做历史重排。

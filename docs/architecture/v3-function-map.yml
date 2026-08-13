@@ -2268,8 +2268,7 @@ features:
   notes:
   - Current-turn scope is an ownership boundary, not a license to scan historical payload.
   - Control state must arrive through typed side-channel facts; payload cannot rebuild it.
-  - Source status is not runtime closeout: install, aggregate restart, and
-    exact positive/reverse live replay remain required before delivery.
+  - 'Source status is not runtime closeout: install, aggregate restart, and exact positive/reverse live replay remain required before delivery.'
 - feature_id: v3.protocol_conversion_field_parity
   owner_crates:
   - routecodex-v3-runtime

@@ -26,6 +26,7 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs',
@@ -194,7 +195,7 @@ const cases = [
   },
   {
     name: 'request fallback scope can write StoplessCenter',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs',
     marker: 'session_id.starts_with("request:")',
     replacement: 'session_id.starts_with("routecodex-disabled-request-fallback:")',
     diagnostic: /request-fallback scope guard missing session_id\.starts_with\("request:"\)/u,

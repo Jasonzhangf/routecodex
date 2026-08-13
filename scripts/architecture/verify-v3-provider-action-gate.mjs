@@ -406,7 +406,7 @@ for (const [name, source, rel] of [
 }
 requireText(text.direct, files.direct, 'let mut continuation_provider_action_lookup = previous_response_id.is_some();');
 requireText(text.direct, files.direct, 'wait_for_exact_selected_provider_action');
-requireText(text.directSse, files.directSse, 'classify_v3_provider_responses_json_data(&data)');
+requireText(text.directSse, files.directSse, 'classify_v3_provider_generic_sse_json_data(&data)');
 if (/event_type|event\s*==\s*["']response\./u.test(text.directSse)) {
   failures.push(
     `${files.directSse}: SSE event metadata must not be used as provider semantic source`,

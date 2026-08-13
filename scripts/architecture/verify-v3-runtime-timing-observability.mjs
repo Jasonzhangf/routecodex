@@ -273,7 +273,7 @@ requireMatch(
 );
 requireMatch(
   kernel,
-  /wrap_direct_sse_provider_event_json_observation_stream\([\s\S]*runtime_timing/,
+  /wrap_direct_sse_provider_event_json_observation_stream(?:_with_compat)?\([\s\S]*runtime_timing/,
   "Direct SSE provider decoder must receive the Runtime timing state",
 );
 requireMatch(
@@ -331,7 +331,7 @@ forbidMatch(
 );
 requireMatch(
   directSseOutcome,
-  /classify_v3_provider_responses_json_data\(&data\)[\s\S]*provider_response_sse_event_invalid/,
+  /classify_v3_provider_generic_sse_json_data\(&data\)[\s\S]*provider_response_sse_event_invalid/,
   "Direct SSE provider outcome must consume the typed JSON codec result",
 );
 forbidMatch(

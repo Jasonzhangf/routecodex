@@ -491,9 +491,16 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:9982761ea9e57b3656a362f13352810cb2cb850484067892d1f81ba77986189b
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    last_manual_authorization_id: auth-20260813-v3-provider-global-subscription-probe-fingerprint-refresh
 manual_authorizations:
+  - authorization_id: auth-20260813-v3-provider-global-subscription-probe-fingerprint-refresh
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-13T01:00:00+08:00'
+    reason: "Jason authorized refreshing the audit-lock fingerprint after re-rendering docs/architecture/wiki/v3-mainline-caller-flow.md so the chain re-binds to the post-render mainline caller/callee signatures for v3.provider_global_subscription_probe (v3-runtime::hub_v1 → v3-runtime → v3-provider-responses). No caller/callee/owner/resource semantics changed; only the rendered caller-flow surface was regenerated."
+    fingerprint_before: sha256:9982761ea9e57b3656a362f13352810cb2cb850484067892d1f81ba77986189b
+    fingerprint_after: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
   - authorization_id: auth-20260812-v3-binding-pending-clearance-bind01
     item_id: chain:v3.entry_protocol_endpoint_binding.mainline
     approved_by: Jason

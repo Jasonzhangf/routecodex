@@ -5340,3 +5340,13 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 - `v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs` is the current Responses JSON parser/outcome owner. Direct/shared paths consume `classify_v3_provider_responses_json_data` or `parse_v3_provider_sse_json_data`; websocket projection forwards JSON data without synthesizing `type` from `event:`.
 - `[DONE]` and EOF are not terminal truth. OpenAI Chat relay now succeeds only when JSON `finish_reason` terminal is present; missing `[DONE]` does not convert a JSON terminal into failure. EOF without JSON terminal still fails.
 - Verified targeted: runtime direct_sse 15/15, Responses provider SSE 6/6, server websocket projection 2/2, OpenAI Chat relay 3/3; SSE boundary, resource/module/mainline/rust-only/architecture/provider-action/runtime-timing gates pass. Full workspace test compilation remains blocked by unrelated dirty `routecodex-v3-virtual-router/src/tests/mod.rs` missing two new debug manifest fields; no install/restart/review yet.
+# 2026-08-12 V3 Responses direct compat verified
+
+- Direct Responses request projection now reuses the single Rust `ProviderReqCompat06ProviderCompat` owner after protocol projection and before Provider12 wire.
+- DeepSeek v4 Flash thinking-mode normalization covers both `OpenAiChat` and `Responses` provider wire protocols when the current tool set contains `reasoningStop`; client `tool_choice=required` is omitted on provider wire, while non-thinking `required` is preserved.
+- Verified with runtime unit tests (direct Responses, direct OpenAI Chat, compat positive/reverse cases), direct passthrough integration tests (7/7), install 0.90.4417, aggregate restart, all four listener health checks, and same-entry 5555 live replay returning HTTP 200 completed. Live request: `openai-responses-router-deepseek-v4-flash-20260812T194021108-764774-15853`.
+
+## 2026-08-13 V3 direct compat review fix verified
+
+- ProviderReqCompat explicit reasoning detection now reads the original semantic payload before provider standard-payload defaults are added, preserving summary-only profile projection.
+- Verified the reviewer regression test plus direct/compat suites; installed 0.90.4418, restarted the aggregate V3 instance, all configured ports reported healthy, and the same direct 5555 Responses sample completed HTTP 200.

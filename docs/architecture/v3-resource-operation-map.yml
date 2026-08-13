@@ -853,7 +853,7 @@ resources:
     lifecycle: v3.debug_error_foundation.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderGlobalSubscriptionHealthStore
-    identity: [providerId, sessionScope, errorFingerprint]
+    identity: [providerId, authAlias, modelId, sessionScope, errorFingerprint]
     allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure, V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response, V3ProviderGlobalSubscriptionHealthStore::complete_probe_success, V3ProviderGlobalSubscriptionHealthStore::complete_probe_failure, V3ProviderGlobalSubscriptionHealthStore::reset_after_restart]
     allowed_readers: [V3ProviderGlobalSubscriptionHealthStore::availability, V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-server]
