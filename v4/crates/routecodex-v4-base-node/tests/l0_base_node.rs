@@ -1,4 +1,4 @@
-use routecodex_v4_nodegraph::base_node::{
+use routecodex_v4_base_node::{
     BaseNode, ControlDirection, ControlRecord, DebugSwitchKind, DebugSwitchLevel, HookEffect,
     HookKind, NodeError, NodeIdentity, Scope, SnapshotKind,
 };

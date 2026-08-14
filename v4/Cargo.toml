@@ -1,6 +1,7 @@
 [workspace]
 members = [
-  "crates/routecodex-v4-nodegraph",
+  "crates/routecodex-v4-base-node",
+  "crates/routecodex-v4-edge",
 ]
 resolver = "2"
 

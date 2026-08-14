@@ -1,4 +1,4 @@
-use routecodex_v4_nodegraph::edge::{
+use routecodex_v4_edge::{
     validate_edge, Axis, EdgeError, EdgeKind, EdgeSpec, NodeRef, ResourceRef, ScopeRegistry,
 };
 

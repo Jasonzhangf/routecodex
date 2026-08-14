@@ -1,9 +1,15 @@
 {
   "schema_version": 1,
   "resources": [
-    {"resource_id":"project_contract","owner":"appsdk::project_contract","truth_store":".appsdk/project.json","allowed_operations":["read","validate","write"]},
-    {"resource_id":"lifecycle_records","owner":"appsdk::record_graph","truth_store":".appsdk/records/**","allowed_operations":["read","validate","write"]},
-    {"resource_id":"compiled_artifact","owner":"appsdk::compiler","truth_store":"generated/project.compiled.json","allowed_operations":["read","write"]},
+    {"resource_id":"project_contract","owner":"appsdk::project_contract","truth_store":".appsdk/project.json","allowed_operations":["read","validate","write"],"status":"active"},
+    {"resource_id":"lifecycle_records","owner":"appsdk::record_graph","truth_store":".appsdk/records/**","allowed_operations":["read","validate","write"],"status":"active"},
+    {"resource_id":"compiled_artifact","owner":"appsdk::compiler","truth_store":"generated/project.compiled.json","allowed_operations":["read","write"],"status":"active"},
+    {"resource_id":"base_node_control_record","owner":"routecodex-v4-base-node::BaseNode","truth_store":"crates/routecodex-v4-base-node/src/lib.rs","allowed_operations":["record"],"status":"active"},
+    {"resource_id":"base_node_debug_subscription","owner":"routecodex-v4-base-node::BaseNode","truth_store":"crates/routecodex-v4-base-node/src/lib.rs","allowed_operations":["subscribe","read"],"status":"active"},
+    {"resource_id":"base_node_error_intake","owner":"routecodex-v4-base-node::BaseNode","truth_store":"crates/routecodex-v4-base-node/src/lib.rs","allowed_operations":["record"],"status":"active"},
+    {"resource_id":"edge_contract","owner":"routecodex-v4-edge::validate_edge","truth_store":"crates/routecodex-v4-edge/src/lib.rs","allowed_operations":["validate"],"status":"active"},
+    {"resource_id":"base_node_library","owner":"appsdk::compiler","truth_store":"active/lib/routecodex-v4-base-node/**","allowed_operations":["read"],"status":"active"},
+    {"resource_id":"edge_library","owner":"appsdk::compiler","truth_store":"active/lib/routecodex-v4-edge/**","allowed_operations":["read"],"status":"active"},
     {"resource_id":"v4.request.normal_payload","owner":"v4::request_pipeline","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
     {"resource_id":"v4.request.provider_wire_payload","owner":"v4::provider_codec","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
     {"resource_id":"v4.response.normal_payload","owner":"v4::response_pipeline","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},

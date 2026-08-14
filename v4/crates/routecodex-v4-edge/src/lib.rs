@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use routecodex_v4_base_node::NodeIdentity;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Axis {
     Data,
@@ -9,10 +11,7 @@ pub enum Axis {
 
 #[derive(Debug, Clone)]
 pub struct NodeRef {
-    node_id: String,
-    chain: String,
-    chain_version: String,
-    position: u32,
+    identity: NodeIdentity,
     data_plane: bool,
 }
 
@@ -25,16 +24,42 @@ impl NodeRef {
         data_plane: bool,
     ) -> Self {
         Self {
-            node_id: node_id.to_string(),
-            chain: chain.to_string(),
-            chain_version: chain_version.to_string(),
-            position,
+            identity: NodeIdentity::new(node_id, chain, chain_version, position, "v4"),
             data_plane,
         }
     }
 
+    pub fn from_identity(identity: NodeIdentity, data_plane: bool) -> Self {
+        Self {
+            identity,
+            data_plane,
+        }
+    }
+
+    pub fn node_id(&self) -> &str {
+        self.identity.node_id()
+    }
+
+    pub fn chain(&self) -> &str {
+        self.identity.chain()
+    }
+
+    pub fn chain_version(&self) -> &str {
+        self.identity.chain_version()
+    }
+
+    pub fn position(&self) -> u32 {
+        self.identity.position()
+    }
+
+    pub fn identity(&self) -> &NodeIdentity {
+        &self.identity
+    }
+
     fn matches(&self, node_id: &str, chain: &str, chain_version: &str) -> bool {
-        self.node_id == node_id && self.chain == chain && self.chain_version == chain_version
+        self.identity.node_id() == node_id
+            && self.identity.chain() == chain
+            && self.identity.chain_version() == chain_version
     }
 }
 
@@ -313,7 +338,7 @@ pub fn validate_edge(
                 .iter()
                 .find(|n| n.matches(&edge.to, &edge.chain, &edge.chain_version))
                 .ok_or(EdgeError::UnknownNode)?;
-            if from_node.position.abs_diff(to_node.position) != 1 {
+            if from_node.position().abs_diff(to_node.position()) != 1 {
                 return Err(EdgeError::NonAdjacentEdge);
             }
             for resource_id in [edge.data_in.as_deref(), edge.data_out.as_deref()] {
@@ -333,7 +358,7 @@ pub fn validate_edge(
             if from_node.data_plane || to_node.data_plane {
                 return Err(EdgeError::ResourceAxisMismatch);
             }
-            if from_node.position.abs_diff(to_node.position) != 1 {
+            if from_node.position().abs_diff(to_node.position()) != 1 {
                 return Err(EdgeError::NonAdjacentEdge);
             }
             for resource_id in [edge.info_in.as_deref(), edge.info_out.as_deref()] {
@@ -386,4 +411,9 @@ pub fn validate_edge(
             Ok(())
         }
     }
+}
+
+/// Edge consumes the frozen BaseNode identity contract as its node reference truth.
+pub fn node_identity_contract(node: &NodeRef) -> &NodeIdentity {
+    node.identity()
 }

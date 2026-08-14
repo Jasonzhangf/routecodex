@@ -89,10 +89,10 @@
     "每层 debug 开关 live 修改必须落不可变审计记录"
   ],
   "freeze_regression": {
-    "module_id": "routecodex-v4-nodegraph",
+    "module_id": "routecodex-v4-base-node",
     "foundation_scope": "BaseNode",
     "suite_id": "v4-base-node-l0-regression",
-    "command": "cargo test -p routecodex-v4-nodegraph --test l0_base_node",
+    "command": "cargo test -p routecodex-v4-base-node --test l0_base_node",
     "whitebox_required": true,
     "blackbox_required": true,
     "blackbox_test": "base_node_public_api_blackbox_regression",
