@@ -1,14 +1,6 @@
 {
-  "regression_report_id": "regression-base-node-v1",
-  "module_id": "routecodex-v4-base-node",
-  "source_commit": "fac43e278",
   "artifact_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
-  "public_api_hash": "sha256:95f9248e0568946c686d9e17c809dfb49ad25ba002ed90709102d3f9f7f490f8",
-  "scope_hash": "scope-base-node-v1",
-  "input_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
-  "suite_id": "v4-base-node-l0-regression",
   "command": {
-    "program": "cargo",
     "args": [
       "test",
       "-p",
@@ -16,20 +8,28 @@
       "--test",
       "l0_base_node"
     ],
+    "program": "cargo",
     "working_directory": "."
   },
-  "test_count": 12,
-  "passed": 12,
+  "created_at": "2026-08-14T03:40:00Z",
   "failed": 0,
-  "skipped": 0,
-  "result": "pass",
+  "input_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
+  "module_id": "routecodex-v4-base-node",
+  "passed": 12,
   "producer": {
     "adapter": "cargo",
     "identity": "appsdk-regression-gate"
   },
-  "created_at": "2026-08-14T03:40:00Z",
+  "public_api_hash": "sha256:95f9248e0568946c686d9e17c809dfb49ad25ba002ed90709102d3f9f7f490f8",
+  "regression_report_id": "regression-base-node-v1",
+  "result": "pass",
+  "scope_hash": "scope-base-node-v1",
+  "skipped": 0,
+  "source_commit": "fac43e278",
+  "suite_id": "v4-base-node-l0-regression",
   "test_characteristics": {
-    "whitebox": true,
-    "blackbox": true
-  }
+    "blackbox": true,
+    "whitebox": true
+  },
+  "test_count": 12
 }

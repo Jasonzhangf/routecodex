@@ -2,6 +2,7 @@
 .appsdk-control/
 .appsdk/sdk.bin
 /active/lib/
+/protected/
 /generated/
 target/
 Cargo.lock
