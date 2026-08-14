@@ -5350,3 +5350,44 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 
 - ProviderReqCompat explicit reasoning detection now reads the original semantic payload before provider standard-payload defaults are added, preserving summary-only profile projection.
 - Verified the reviewer regression test plus direct/compat suites; installed 0.90.4418, restarted the aggregate V3 instance, all configured ports reported healthy, and the same direct 5555 Responses sample completed HTTP 200.
+
+## 2026-08-13 snapshot 语义纠正
+
+- Jason 锁定：启动带 `--snap` 时 direct 与 relay 都必须无条件记录成功/失败样本；不带 `--snap` 时只记录错误样本。
+- 因此“没有 codex-samples 目录 => 请求没有完成”是错误推断。带 `--snap` 时缺样本只能证明 snapshot capture/persistence 或生命周期授权链未闭合，不能证明响应终态。
+- 当前代码证据：`configure_v3_snapshot_flags` 只把 `snapall` 映射为 `snapshot_direct=true`；`--snap` 明确写入 `snapshot_direct=false`，而 direct response recorder 由 `v3_codex_sample_scope_allows` 拦截。该现状与 Jason 锁定的 direct/relay 对称合同不一致。
+- 修复：CLI/lifecycle 唯一授权源现在把 `--snap` 与 `--snapall` 都发布为 `snapshot_direct=true`；Server capture/persistence owner 未改。
+- 验证：先改合同测试得到旧源码红测；修复后 managed lifecycle 17/17、Direct scope、Direct JSON/SSE persistence、architecture resource/mainline/function/module gates 全绿；安装 0.90.4452，聚合重启后 10000/5520/5555/4444 的 `codex_samples_enabled` 与 `direct_snapshots_enabled` 均为 `true`。
+
+## 2026-08-13 provider cooldown selection/logging contract
+
+- A provider in cooldown is outside the selection pool. Per-request `unavailable_candidates` output is not a selection event and must not be printed as one.
+- Console behavior: the cooldown failure event is the single entry signal; listener-scoped typed state remembers the cooled provider key. The first later selection of that key is the recovery signal and clears the state, emitting `[provider-recovered]` once. No per-request filtered/unavailable line.
+- Verified with a red-to-green server regression and the runtime session-bound cooldown selection regression. Installed `rccv3 0.90.4460`, restarted the aggregate, and all four listeners are healthy. `/v1/models` on 5555 currently returns an empty catalog and remains a separate unresolved live issue.
+# 2026-08-14: AppSDK freeze requires whitebox + blackbox regression evidence
+
+- Unit and focused tests may be whitebox-only. Regression testing and bug reproduction must combine whitebox internal-contract checks with blackbox public-interface behavior.
+- AppSDK `RegressionReport` is a first-class freeze input. It binds module, source commit, artifact hash, public API hash, scope hash, input hash, suite/command, non-zero passing counts, and whitebox/blackbox characteristics; `FreezeRecord` binds its ID and canonical hash.
+- An unchanged frozen module may disable ordinary repeated full-regression execution to reduce CI cost, but the suite and report remain. Source, contract, public API, artifact, or dependency changes invalidate the report and require regression re-enablement before a new freeze.
+- RouteCodex V4 BaseNode uses suite `v4-base-node-l0-regression`; the current baseline is 12 L0 tests including public API blackbox coverage.
+
+## 2026-08-14 V4 BaseNode frozen as independent compiled library
+- `routecodex-v4-base-node` is the first independently frozen V4 Rust library: crate owns `src/lib.rs` + `tests/l0_base_node.rs` (12 tests, whitebox+blackbox), module `architecture_stable` -> `frozen`, active version `active-v1`, artifact hash `sha256:036daf...`, public API hash `sha256:95f924...`, source commit `2cb72ebab`.
+- `routecodex-v4-edge` (11 L1 tests) remains mutable and compiles against the frozen base-node through Cargo dependency; its AppSDK module declares `dependency_modules:["routecodex-v4-base-node"]`, and `module.compiled.json` records the frozen dependency artifact hash.
+- AppSDK freeze for monorepo subprojects: `assert_vcs_clean` scopes `git status --porcelain` to the absolute project root (git root may be an ancestor). Appsdk commit `f63f6a6`. Without this, a V4 subproject in the routecodex repo cannot freeze.
+- Freeze semantics verified: frozen module rejects recompile; mutated base-node source yields a different rlib sha (positive `8d2c82...` vs mutation `0e6d9c...`); unchanged edge recompile is deterministic and leaves base-node hash untouched.
+- Generated/protected/active outputs are gitignored in `v4/.gitignore` (`/generated/`, `/active/lib/`, `/protected/`, `target/`, `Cargo.lock`, `.appsdk/sdk.bin`); records in `.appsdk/records/` and `.appsdk/project.json` are tracked.
+- Governance module owns `.appsdk/**` + `contracts/**`; base-node owns `crates/routecodex-v4-base-node/**`; edge owns `crates/routecodex-v4-edge/**`. Ownership overlap rules: `owned_paths`/`active_artifact` are exclusive, `contract_paths`/`generated_outputs` may be shared.
+
+## 2026-08-14 BaseNode Protected archive closed (contracts included)
+- AppSDK freeze now archives `contract_paths` into `protected/history/<module>/contracts/` (commit `632e5ba`); `frozen_module_keeps_other_modules_mutable` asserts source/library/contract/module-contract/freeze-artifact all exist after freeze.
+- `routecodex-v4-base-node` Protected history (20 files) contains: source crate, contract files (`node-graph`, `pipeline-abstraction`, `debug-subscription`, `test-layers`, `data-control-boundary`, `records/*`), `library/libroutecodex_v4_base_node.rlib`, `module-contract.json`, `module-artifact.json`, `freeze-artifact.json`, `source-snapshot.json`. Records/hashes remain tracked in `.appsdk/records/`.
+- Regeneration of a frozen module's archive is possible without changing semantics: rewind stage via CLI promotion (artifact stages stay consistent), delete the gitignored `protected/history/<module>` dir, re-freeze with the new binary; artifact/freeze hashes are identical because stage is excluded from artifact hashing.
+- Final: base-node `frozen` active-v1, edge `source_implemented` depends on frozen base-node, governance `source_implemented`; `appsdk verify v4` PASS; `cargo test` 23/23.
+
+## 2026-08-14 V4 ErrorChain and ErrorCenter frozen
+
+- `routecodex-v4-error` is an independently frozen Rust library. It owns the adjacent-only six-stage error chain `SourceRaised -> HostCaptured -> RuntimeClassified -> RouterPolicyApplied -> ExecutionDecision -> ClientProjected` and a separate scope-bound ErrorCenter that classifies and audits typed facts only.
+- Error facts contain error code, Scope, payload hash, and typed context, never business payload content. Payload reconstruction, non-adjacent transitions, message-only projection, duplicate classify, cross-scope intake, and post-terminal mutation fail fast. ErrorCenter has no route, retry, cooldown, reroute, fallback, or payload writer API; `ClientProjection` exposes only `code` and `message`.
+- Module release truth: stage `frozen`, Active version `active-v1`, artifact hash `sha256:a732f26f8e7b430e08f6d0caf6c8957ac4553e0b444260698da55ffece902642`, public API hash `sha256:73b9d5a8b3018b6b76ba44f36e0a9ee1650deaab8d8bf3489599fa55d6a3e3b6`, source commit `ce50527af`. Protected contains source/contracts/library/records; workspace regression baseline is 56 tests.
+- Anchored resources: `v4.control.error_chain`, `v4.control.error_center`, `v4.error.client_projection`, `v4.control.retry_policy`. Router decision and payload-cycle implementation remain separate pending modules.

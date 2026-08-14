@@ -19,6 +19,7 @@ description: P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl�
 - 每个阶段必须保持协议形态：Direct 同协议直连；Relay 只在相邻 inbound/outbound codec 做静态投影；Chat Process 不决定 provider wire shape。
 - 禁止静默丢弃、请求侧 cleanup、handler/SSE/outbound 补偿、fallback/降级、未登记近似投影；错误回唯一 owner 修。
 - 绝对禁止脚本批量替换；跨文件或同文件多位置语义修改只能逐文件读取后用明确、可审查的手工 hunk 修改。
+- AppSDK lifecycle record alignment 也属于 tracked semantic edit：`source_commit` / `reviewed_commit` / `base_commit` / freeze binding 必须逐文件用 `apply_patch` 明确修改。即使字段值相同，也禁止用 Python/Node/shell loop/JSON rewrite 跨记录同步；SDK 自身 canonical record writer 只可生成它声明的 freeze hashes，不豁免手工 source-commit 对齐。
 
 ## P0 架构阻断（先于任何路由）
 
