@@ -16,6 +16,8 @@
     {"from":"routecodex-v4-edge","to":"routecodex-v4-base-node","owner":"routecodex-v4-edge::validate_edge","edge_type":"symbol_dependency","symbols":["NodeIdentity","NodeRef::from_identity"],"path":"crates/routecodex-v4-edge/src/lib.rs","status":"active"},
     {"from":"routecodex-v4-control","to":"routecodex-v4-base-node","owner":"cargo::dependency","edge_type":"cargo_dependency","path":"crates/routecodex-v4-control/Cargo.toml","status":"active"},
     {"from":"routecodex-v4-control","to":"routecodex-v4-base-node","owner":"routecodex-v4-control::metadata_center","edge_type":"symbol_dependency","symbols":["Scope"],"path":"crates/routecodex-v4-control/src/lib.rs","status":"active"},
+    {"from":"routecodex-v4-error","to":"routecodex-v4-base-node","owner":"cargo::dependency","edge_type":"cargo_dependency","path":"crates/routecodex-v4-error/Cargo.toml","status":"active"},
+    {"from":"routecodex-v4-error","to":"routecodex-v4-base-node","owner":"routecodex-v4-error::error_chain","edge_type":"symbol_dependency","symbols":["Scope"],"path":"crates/routecodex-v4-error/src/lib.rs","status":"active"},
     {"from":"routecodex-v4-base-node","to":"appsdk::record_graph","owner":"routecodex-v4-base-node::BaseNode","edge_type":"record_writer","symbols":["control_in","control_out","report_error"],"path":"crates/routecodex-v4-base-node/src/lib.rs","status":"active"}
   ]
 }

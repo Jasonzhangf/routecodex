@@ -3,6 +3,7 @@ members = [
   "crates/routecodex-v4-base-node",
   "crates/routecodex-v4-edge",
   "crates/routecodex-v4-control",
+  "crates/routecodex-v4-error",
 ]
 resolver = "2"
 
