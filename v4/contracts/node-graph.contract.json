@@ -80,6 +80,29 @@
       "chat_process": "supernode group with entry/exit hooks for servertool and cross-cutting processing"
     }
   },
+  "v4_hub_response_chain": {
+    "chain_version": "v4-hub-1",
+    "mirror_of": "v4_hub_request_chain",
+    "nodes": [
+      {"position": 1, "node_id": "V4ProviderSseIn01FrameBoundary", "role_id": "response_inbound", "data_plane": "sse_frame_to_json"},
+      {"position": 2, "node_id": "V4HubRespInbound02Parsed", "role_id": "response_inbound", "data_plane": "json_semantic"},
+      {"position": 3, "node_id": "V4HubRespChatProcess03Governed", "role_id": "response_chat_process", "group": true, "data_plane": "json_semantic"},
+      {"position": 4, "node_id": "V4HubRespOutbound04ClientSemantic", "role_id": "response_outbound", "data_plane": "json_semantic"},
+      {"position": 5, "node_id": "V4ServerSseOut05FrameBoundary", "role_id": "response_outbound", "data_plane": "json_to_sse_frame"},
+      {"position": 6, "node_id": "V4ServerRespOutbound06ClientFrame", "role_id": "response_outbound", "data_plane": "client_frame"}
+    ],
+    "semantics": {
+      "flow": "provider_sse -> inbound -> chat_process(group) -> outbound -> client_sse -> server",
+      "sse_boundary_only": true,
+      "internal_data_plane": "json_semantic",
+      "sse_in_sse_out_coupling": "forbidden; provider SSE must not pipe directly to client SSE",
+      "chat_process": "supernode group with continuation save, response governance, tool harvest, and entry/exit hooks for servertool",
+      "continuation_save_only_at": "V4HubRespChatProcess03Governed",
+      "immutable_interval": "resp_chatprocess save -> next req_chatprocess restore; no semantic transformation in between",
+      "terminal": "V4ServerRespOutbound06ClientFrame is the single success terminal",
+      "direct_also_uses_chain": true
+    }
+  },
   "hook_queue_schema": {
     "required": ["hook_id", "node_id", "kind", "position", "owner", "effect", "resources_read", "resources_written", "control_record_required"],
     "kinds": ["entry", "exit"],
@@ -288,6 +311,8 @@
     "every chain has single entry and single terminal",
     "every published node/group/chain has its standard test surface",
     "v4 hub request chain is fixed: server -> sse_in -> inbound -> chat_process(group) -> outbound -> compat -> provider_sse_out",
+    "v4 hub response chain is the request chain mirror: provider_sse_in -> inbound -> chat_process(group) -> outbound -> client_sse_out -> server",
+    "continuation save occurs only at V4HubRespChatProcess03Governed; resp_chatprocess save -> req_chatprocess restore interval is immutable",
     "sse is transport boundary only; internal data plane is json semantic",
     "sse_in and sse_out cannot be directly coupled",
     "direct and relay share the same chain; they differ only in operator selection and typed facts",

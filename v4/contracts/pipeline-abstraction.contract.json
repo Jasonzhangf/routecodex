@@ -172,11 +172,16 @@
   },
   "v4_hub_chain": {
     "request_chain": "server -> sse_in -> inbound -> chat_process(group) -> outbound -> compat -> provider_sse_out",
+    "response_chain": "provider_sse_in -> inbound -> chat_process(group) -> outbound -> client_sse_out -> server",
+    "response_chain_mirror_of": "request_chain",
     "internal_data_plane": "json_semantic",
     "sse_boundary_only": true,
     "direct_flow": "sse_in -> json_semantic -> sse_out",
     "sse_coupling": "forbidden",
-    "chat_process": "supernode group with entry/exit hook queues"
+    "chat_process": "supernode group with entry/exit hook queues",
+    "continuation_save_only_at": "V4HubRespChatProcess03Governed",
+    "immutable_interval": "resp_chatprocess save -> next req_chatprocess restore; no semantic transformation in between",
+    "response_terminal": "V4ServerRespOutbound06ClientFrame"
   },
   "pipeline_test_semantics": {
     "chain": [
@@ -320,6 +325,7 @@
     {"gate_id":"ABS-GATE-25","name":"error_center_classify_audit_only","rule":"error center receives typed error facts + payload hash + typed context from any node/operator/hook; it classifies and audits only; route operation, retry/cooldown/reroute execution, provider local policy, and payload rewrite are forbidden"},
     {"gate_id":"ABS-GATE-26","name":"route_exit_vr_owned","rule":"route control exit is VR-owned typed decision output; switch/cooldown/reroute exit here; error center cannot route; route exit never patches payload or writes provider/client wire"},
     {"gate_id":"ABS-GATE-27","name":"payload_cycle_contract","rule":"payload cycle starts at request send, ends at response-into-client (next request = new cycle) or error terminal; switch/cooldown/reroute merge into the same cycle; original request payload immutable"},
-    {"gate_id":"ABS-GATE-28","name":"dry_run_chain_contract","rule":"every module supports dry-run with declared chain entry/exit or defaults to the full request/response chain; input is the correct payload fixture; no network, no live input, no provider/client wire, no fallback to live"}
+    {"gate_id":"ABS-GATE-28","name":"dry_run_chain_contract","rule":"every module supports dry-run with declared chain entry/exit or defaults to the full request/response chain; input is the correct payload fixture; no network, no live input, no provider/client wire, no fallback to live"},
+    {"gate_id":"ABS-GATE-29","name":"hub_response_chain_mirror","rule":"v4 hub response chain is fixed as the request chain mirror: provider_sse_in -> inbound -> chat_process(group) -> outbound -> client_sse_out -> server; SSE is transport-only; continuation save only at V4HubRespChatProcess03Governed; single success terminal V4ServerRespOutbound06ClientFrame"}
   ]
 }

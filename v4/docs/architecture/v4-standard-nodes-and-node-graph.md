@@ -211,6 +211,69 @@ Direct/Relay 不改变这条链；它们只影响 operator 选择和 typed facts
 - Relay：RouteCodex 本地治理，chatprocess 选择 relay operator；
 - 两端 SSE 边界永远由传输 adapter 独占，不拥有治理语义。
 
+## V4 Hub 响应链标准流程（请求链镜像）
+
+响应链是请求链的镜像，语义按 Jason 锁定的流程固定为：
+
+```text
+Provider SSE (provider transport boundary; SSE -> JSON semantic)
+  -> Inbound (parse provider JSON semantic / normalize; JSON data plane)
+  -> ChatProcess (超模块 / group supernode)
+  -> Outbound (client semantic projection; JSON data plane)
+  -> Client SSE (client transport boundary; JSON semantic -> SSE)
+  -> Server (HTTP/server terminal frame)
+```
+
+对应节点序列（chain version `v4-hub-1`，响应侧与请求侧共用同一 chain version 的镜像语义）：
+
+| position | node | 角色子类 | 数据面 | 说明 |
+| --- | --- | --- | --- | --- |
+| 01 | `V4ProviderSseIn01FrameBoundary` | `ResponseInboundNode` | provider SSE frame -> JSON semantic | provider SSE 传输边界；只把 SSE 解码为 JSON 语义帧，不解析业务语义 |
+| 02 | `V4HubRespInbound02Parsed` | `ResponseInboundNode` | JSON semantic | 协议解析、raw/decode，进入统一 JSON 数据面 |
+| 03 | `V4HubRespChatProcess03Governed` | `ResponseChatProcessNode`（group 超模块） | JSON semantic | 响应治理、工具收割、continuation save、servertool hook；对外是一个超级节点 |
+| 04 | `V4HubRespOutbound04ClientSemantic` | `ResponseOutboundNode` | JSON semantic | client 协议语义定型；不做 provider 特例、不做 continuation 语义 |
+| 05 | `V4ServerSseOut05FrameBoundary` | `ResponseOutboundNode` | JSON semantic -> SSE frame | 客户端 SSE 传输边界；只把 JSON 语义编码为 client SSE，不做治理 |
+| 06 | `V4ServerRespOutbound06ClientFrame` | `ResponseOutboundNode` | client frame | HTTP/server 终止帧；唯一成功终止点 |
+
+### RespChatProcess 超模块（group）
+
+`V4HubRespChatProcess03Governed` 是响应链上的超模块：它是一个 group（超级节点），对外接口与单节点一致。内部按角色子类继续拆分子节点，例如：
+
+```text
+V4HubRespChatProcess03Governed (group)
+  entry -> continuation commit -> response governance -> tool harvest -> exit
+```
+
+内部子节点：
+
+| 内部 position | node | 角色子类 | 职责 |
+| --- | --- | --- | --- |
+| 03.1 | `V4ChatProcess03ContinuationCommit` | `ResponseContinuationNode` | continuation save（唯一 save 入口；进入不可变区前完成） |
+| 03.2 | `V4ChatProcess03ResponseGovernance` | `ResponseChatProcessNode` | 响应侧治理（internal tool 剥离、provenance 处理） |
+| 03.3 | `V4ChatProcess03ToolHarvest` | `ResponseChatProcessNode` | 工具收割（文本工具、servertool followup 判定） |
+
+约束（与请求侧 group 一致）：
+
+- group 对外只暴露 `V4HubRespChatProcess03Governed` 一个接口；
+- 父链只能连接 group entry/exit；
+- group 内部实现可替换，只要外部接口不变；
+- servertool 等控制处理挂在 group entry/exit hook 上，不是独立流水线节点；
+- continuation save 是响应链唯一允许的 save 点；`resp_chatprocess save -> req_chatprocess restore` 之间的不可变区禁止任何语义转换（沿用 V3 硬锁）。
+
+### 响应链 SSE/JSON 边界
+
+与请求链完全对称：SSE 只出现在两端传输边界，内部统一用 JSON 语义数据面：
+
+```text
+Provider SSE In -> JSON semantic (inbound/chatprocess/outbound) -> Client SSE Out -> Server frame
+```
+
+- provider SSE 入口与 client SSE 出口不直接耦合；禁止把 provider SSE frame 直接 pipe 到 client SSE；
+- 所有响应治理（工具收割、internal tool 剥离、continuation save、servertool followup）都在 JSON 语义面上发生；
+- Direct/Relay 不改变这条链；只影响 operator 选择（direct provider 解析/透传算子 vs relay 本地治理算子）；
+- 两端 SSE 边界永远由传输 adapter 独占，不拥有治理语义；
+- 错误路径显式进入 Error chain，禁止在 SSE 层吞错误或把错误 frame 当成功终态。
+
 ## 节点入口/出口 Hook 队列
 
 每个节点（普通节点和 group）的入口和出口都可以挂 hook 队列，用于 servertool 及其他横切处理：
