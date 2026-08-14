@@ -18,10 +18,11 @@
 
 ### Phase 0 — Bootstrap and baseline
 
-1. 固定外部 AppSDK binary version/digest；项目只保存 `.appsdk/sdk.lock`。
-2. 将现有 RouteCodex resource/function/mainline/verification maps 绑定为业务架构真源。
-3. 建立模块 registry 绑定：每个模块声明 owner、allowed paths、forbidden paths、相邻调用边和 required gates。
-4. 运行 `appsdk verify` 与现有 RouteCodex architecture gates；不改 runtime。
+1. 必须先执行 `appsdk init <project>`；由 SDK 自动创建治理目录并向项目 `.gitignore` 写入受管理的忽略区块。
+2. 固定外部 AppSDK binary version/digest；项目只保存 `.appsdk/sdk.lock`，`.appsdk/sdk.bin` 不提交。
+3. 将现有 RouteCodex resource/function/mainline/verification maps 绑定为业务架构真源。
+4. 建立模块 registry 绑定：每个模块声明 owner、allowed paths、forbidden paths、相邻调用边和 required gates。
+5. 运行 `appsdk verify` 与现有 RouteCodex architecture gates；不改 runtime。
 
 Exit evidence: governance contract valid, SDK pinned, RouteCodex maps readable and current, generated surfaces ignored.
 
