@@ -106,4 +106,4 @@ jobs:
           appsdk version
           test -x "$(command -v appsdk)"
           test "sha256:$(shasum -a 256 "$(command -v appsdk)" | cut -d ' ' -f 1)" = "$(jq -r .digest v4/.appsdk/sdk.lock)"
-          appsdk verify v4
+          appsdk verify --admission v4
