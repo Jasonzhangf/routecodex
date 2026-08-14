@@ -1,0 +1,8 @@
+{
+  "binary_ref": "project-sdk",
+  "compiler_digest": "sha256:ba4e38c879a9b010c200a7a14cf29d4c6e3fa4d25af0efe61b9f16c44bde8754",
+  "contract_schema": 1,
+  "digest": "sha256:ba4e38c879a9b010c200a7a14cf29d4c6e3fa4d25af0efe61b9f16c44bde8754",
+  "sdk": "appsdk",
+  "version": "0.1.0"
+}
