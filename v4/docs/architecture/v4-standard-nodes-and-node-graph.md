@@ -1,6 +1,6 @@
 # V4 Standard Nodes and Machine-Controlled Node Graph
 
-状态：`design`（标准节点族、节点图接线和 debug 订阅关系已按 V3 锁定为目标态合同；实现未落地）
+状态：`design`（标准节点族和固定节点图继续有效；节点内部的 operator/hook/debug/snapshot/control 组合已由 [`v4-cordis-node-plugin-architecture.md`](v4-cordis-node-plugin-architecture.md) 修订为 Cordis NodeContainer 内的有序统一插件链；实现未落地）
 
 ## 目标
 
@@ -128,7 +128,7 @@ BaseNode（根，横切能力）
 | `V4ReqChatProcess03Governed` | `RequestChatProcessNode` | `request_governance.relay.v1`、`request_governance.direct.v1` |
 | `V4ProviderReqOutbound06WirePayload` | `RequestOutboundNode` | `wire_build.responses.v1`、`wire_build.openai_chat.v1`、`wire_build.anthropic.v1`、`wire_build.gemini.v1` |
 
-wiring manifest 为每个节点选择唯一 active operator；选择依据是 typed facts（entry protocol、provider wire protocol、continuation owner），不是 provider id / model 前缀 / payload 猜测。协议 operator 全部输出该角色子类声明的 `data_out_kind`，所以同一个节点实例可以被不同协议算子复用。
+wiring manifest 为每个节点编译一条 ordered active plugin chain。协议 operator 属于显式互斥 `selection_group`，组内按 typed facts（entry protocol、provider wire protocol、continuation owner）恰好选择一个，不能按 provider id、model 前缀或 payload 猜测；组外的 control、governance、validator、debug、snapshot 等插件继续按节点自己的顺序执行。协议 operator 全部输出该角色子类声明的 `data_out_kind`，所以同一个节点实例可以被不同协议算子复用。
 
 ## 节点编号语义
 
@@ -274,9 +274,9 @@ Provider SSE In -> JSON semantic (inbound/chatprocess/outbound) -> Client SSE Ou
 - 两端 SSE 边界永远由传输 adapter 独占，不拥有治理语义；
 - 错误路径显式进入 Error chain，禁止在 SSE 层吞错误或把错误 frame 当成功终态。
 
-## 节点入口/出口 Hook 队列
+## 节点有序插件链
 
-每个节点（普通节点和 group）的入口和出口都可以挂 hook 队列，用于 servertool 及其他横切处理：
+每个节点（普通节点和 group）都是 Cordis NodeContainer。operator、hook、debug、snapshot、control、validator 和 observer 使用统一 NodePlugin 合同；`phase` 和编译顺序表达入口、主体、出口和观测位置。以下旧式 entry/operator/exit 表达仍可作为 authoring 视图，但编译产物必须是一条统一有序插件链：
 
 ```text
 entry hooks（进入节点 operator 之前执行）
@@ -305,7 +305,7 @@ Hook 合同：
 
 规则：
 
-1. hook 不是 operator；operator 是节点主体，hook 是节点边界的横切处理；
+1. hook 与 operator 都是 NodePlugin；`kind/effect/phase` 决定权限和位置，不能形成节点外的第二执行机制；
 2. entry hooks 在 operator 前按 position 顺序执行；exit hooks 在 operator 后按 position 顺序执行；
 3. hook 默认 `effect: read_only`（observability、debug、record）；需要写控制状态或业务语义的 hook 必须显式声明 `effect: control_only` 或 `effect: semantic` 并登记；
 4. servertool 使用 `control_only` hook：在 chat process group 入口挂 Req04 注入、出口挂 Resp03 剥离（沿用 V3 已登记例外，禁止修改历史和 continuation 不可变区）；
@@ -314,15 +314,16 @@ Hook 合同：
 7. hook 配置与注册必须机器声明；未声明 hook 不能执行；
 8. hook 失败必须显式进入错误链，禁止 fallback/静默吞掉。
 
-### Hook 与 operator 的关系
+### 插件种类与执行位置
 
 | 概念 | 拥有者 | 执行时机 | 作用 |
 | --- | --- | --- | --- |
-| operator | 节点 slot（角色子类约束） | 节点主体执行 | 完成该节点声明的主要语义转换 |
-| entry hook | 节点边界 | operator 前 | 横切处理、servertool 注入、debug、policy |
-| exit hook | 节点边界 | operator 后 | 横切处理、servertool 剥离、record、observability |
+| operator plugin | NodeContainer（角色子类约束） | semantic phase | 完成该节点声明的局部语义转换，可有多个且有确定顺序 |
+| control plugin | NodeContainer | admission/control phase | register/consume/release typed 控制资源，不写正常 payload |
+| hook plugin | NodeContainer | entry/semantic/exit phase | 已登记横切处理和 servertool 当前轮投影 |
+| debug/snapshot/observer plugin | NodeContainer | observation phase | 只读诊断、record、observability，不影响结果 |
 
-同一个节点可以同时注册多个 operator（协议/模式变体）和多个 entry/exit hooks；wiring manifest 为节点选一个 active operator，hook 队列按声明顺序全部执行。
+同一个节点可以同时启用多个 operator 和其他插件，wiring manifest 编译节点自己的完整顺序。互斥协议/模式变体放入 selection group，组内恰好一个 active；其他插件不因该选择被排除。完整合同见 [`v4-cordis-node-plugin-architecture.md`](v4-cordis-node-plugin-architecture.md)。
 
 ## Group（聚合超级节点）
 
