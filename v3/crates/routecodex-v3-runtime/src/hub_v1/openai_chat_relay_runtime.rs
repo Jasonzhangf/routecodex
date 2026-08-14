@@ -630,17 +630,14 @@ fn enqueue_sse_client_chunks(
 /// Responses SSE → OpenAI Chat SSE 流式转换器。
 ///
 /// 线上根因（2026-08-14 10000 端口 zterm/opencode 持续 "Connection reset by
-/// server" / undici "socket connection was closed unexpectedly"）：
-/// opencode.ai/zen/go 在 `response.completed` 之后还会发送结算尾部帧
-/// `{"type":"ping","cost":"0"}`（keepalive）。旧实现把 completed 后的任何
-/// data 帧一律判为流错误 → 转换器 Err → io::Error → hyper abort 客户端连接
-/// （chunked 无终止块）→ 客户端 IncompleteRead。此时内容（finish_reason:stop
-/// + [DONE]）已完整发出，纯属传输层被误 abort。
-///
-/// 修复：completed 后容忍非语义结算尾帧（ping / usage / 无 type 帧，见
-/// `is_v3_responses_settlement_tail_frame`），语义帧（输出增量/工具调用参数）
-/// 仍保持 fail-fast。字节级证据见 `~/.rcc/sse-dumps/<endpoint>/ports/<port>/<requestId>/sse-client.bin`
-/// （--sse-dump 启动参数开启）。
+/// server" / undici "socket connection was closed unexpectedly"）：opencode.ai/
+/// zen/go 在 response.completed 后还会发送结算尾部帧 `{"type":"ping","cost":"0"}`
+/// （keepalive）。旧实现把 completed 后的任何 data 帧一律判为流错误 → 转换器
+/// Err → io::Error → hyper abort 客户端连接（chunked 无终止块）→ 客户端
+/// IncompleteRead；此时内容（finish_reason:stop + [DONE]）已完整发出，纯属
+/// 传输层被误 abort。修复：completed 后容忍非语义结算尾帧（ping/usage/无
+/// type 帧，见 `is_v3_responses_settlement_tail_frame`），语义帧仍 fail-fast。
+/// 字节级证据见 ~/.rcc/sse-dumps（--sse-dump 开启）。
 fn project_responses_sse_as_openai_chat_stream(
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
@@ -848,8 +845,7 @@ fn project_sse_event_payload(
         web_search_execution_mode,
         web_search_center_state,
         retain_response_cipher,
-    )
-}
+    )}
 
 /// Anthropic wire SSE stream -> responses canonical -> OpenAI Chat SSE 事件流
 /// （chat 入口 outbound 投影；SSE 仅负责 framing，语义转换走 canonical）。
@@ -1247,15 +1243,8 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         retain_response_cipher: bool,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response(
-            provider_value,
-            provider_wire_protocol,
-            chat_request,
-            transport_intent,
-            trace,
-            compatibility_profile,
-            web_search_execution_mode,
-            web_search_state,
-            retain_response_cipher,
+            provider_value, provider_wire_protocol, chat_request, transport_intent, trace,
+            compatibility_profile, web_search_execution_mode, web_search_state, retain_response_cipher,
         )
         .map_err(|error| match error {
             V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
@@ -1411,16 +1400,7 @@ mod tests {
     async fn responses_sse_ping_tail_after_completed_does_not_error_the_stream() {
         use futures_util::StreamExt;
         let manifest = test_relay_manifest();
-        let outcome = V3OpenAiChatSseProviderOutcome {
-            provider_health: V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
-            failure_session_scope: V3ProviderFailureSessionScope::new("test", "default", "s1")
-                .expect("test scope"),
-            provider_id: "test".to_string(),
-            auth_alias: "key".to_string(),
-            model_id: "model".to_string(),
-            recorded: false,
-            _provider_action_permit: None,
-        };
+        let outcome = test_relay_outcome(&manifest);
         let provider: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
             Ok(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n".to_vec()),
             Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec()),
@@ -1446,16 +1426,7 @@ mod tests {
     async fn responses_sse_semantic_frame_after_completed_errors_the_stream() {
         use futures_util::StreamExt;
         let manifest = test_relay_manifest();
-        let outcome = V3OpenAiChatSseProviderOutcome {
-            provider_health: V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
-            failure_session_scope: V3ProviderFailureSessionScope::new("test", "default", "s1")
-                .expect("test scope"),
-            provider_id: "test".to_string(),
-            auth_alias: "key".to_string(),
-            model_id: "model".to_string(),
-            recorded: false,
-            _provider_action_permit: None,
-        };
+        let outcome = test_relay_outcome(&manifest);
         let provider: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
             Ok(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n".to_vec()),
             Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec()),
@@ -1472,6 +1443,20 @@ mod tests {
             saw_error,
             "semantic frame after response.completed must still fail the stream"
         );
+    }
+
+    fn test_relay_outcome(
+        manifest: &routecodex_v3_config::V3Config05ManifestPublished,
+    ) -> V3OpenAiChatSseProviderOutcome {
+        V3OpenAiChatSseProviderOutcome {
+            provider_health: V3ProviderFailureRuntimeHealth::from_manifest(manifest),
+            failure_session_scope: V3ProviderFailureSessionScope::new("test", "default", "s1")
+                .expect("test scope"),
+            provider_id: "test".to_string(),            auth_alias: "key".to_string(),
+            model_id: "model".to_string(),
+            recorded: false,
+            _provider_action_permit: None,
+        }
     }
 
     fn test_relay_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {

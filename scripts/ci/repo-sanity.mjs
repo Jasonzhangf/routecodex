@@ -116,7 +116,20 @@ function checkRootLayout() {
     '.reasonix',
     'reasonix.toml',
   ]);
-  const temporaryLegacyRoots = new Set([]);
+  const temporaryLegacyRoots = new Set([
+    // 其他工具链/项目遗留在 repo 顶层的条目（appsdk 工具链、v4 项目、
+    // playground 实验、contracts 状态机等）。这些不是 RouteCodex 源码，
+    // 暂允许存在（未来单独清理迁移），不得继续新增。
+    '.appsdk',
+    '.appsdk-control',
+    '.appsdk-prepare.json',
+    'active',
+    'contracts',
+    'generated',
+    'playground',
+    'protected',
+    'v4',
+  ]);
   const allowed = new Set([
     ...sourceRoots,
     ...generatedRoots,

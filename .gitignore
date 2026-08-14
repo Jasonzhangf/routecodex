@@ -167,3 +167,9 @@ __ROUTECODEX_NO_SESSION_DIR_OVERRIDE__/
 /active/lib/
 /generated/
 # END APPSDK MANAGED
+
+# local playground experiments (not versioned)
+/playground/experiments/
+
+# playground is a local experiment workspace (never versioned)
+/playground/

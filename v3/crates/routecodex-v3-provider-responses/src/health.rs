@@ -684,9 +684,10 @@ fn global_availability_projection(
             "configured_disabled:provider_instance:{provider_id}"
         ));
     }
-    if state.health_disabled.contains(provider_id) {
-        blocked_scopes.push(format!("health_disabled:provider_instance:{provider_id}"));
-    }
+    // `health.enabled=false` 表示"不启用 health 跟踪"：provider 视为永远可用
+    // （失败不记录、不冷却、不阻断，与 record_provider_failure 的
+    // health_disabled 短路一致），而不是"被 health 禁用"。只有
+    // `provider.enabled=false`（configured_disabled）才是真正的禁用。
     blocked_scopes.extend(
         keys.iter()
             .filter(|key| {
