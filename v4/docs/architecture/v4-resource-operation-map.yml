@@ -21,7 +21,7 @@ resources:
     owner_node: V4ReqInbound02Normalized
     identity: [requestId, endpoint]
     allowed_writers: [V4ReqInbound02Normalized, V4ReqChatProcess03Governed]
-    allowed_readers: [V4ReqChatProcess03Governed, V4ReqOutbound05ProviderSemantic, V4Error01SourceRaised]
+    allowed_readers: [V4ReqChatProcess03Governed, V4ReqOutbound05ProviderSemantic]
     forbidden_writers: [V4ControlMetadataCenter, V4DebugSnapshotLedger, V4RespOutbound04ClientSemantic, V4ServerFrame]
     may_enter_provider_body: true
     may_enter_client_body: false

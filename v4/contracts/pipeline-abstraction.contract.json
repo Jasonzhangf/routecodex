@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-pipeline-abstraction",
+  "status": "design",
+  "owner_feature_id": "v4.pipeline_abstraction",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-pipeline-abstraction-model.md",
+    "v4/docs/architecture/v4-v3-abstraction-coverage.yml",
+    "v4/docs/architecture/v4-resource-operation-map.yml"
+  ],
+  "evaluation": {
+    "skeleton_vs_v3": "pass",
+    "coverage_v3_resources": {"total": 103, "information": 23, "data": 22, "control": 44, "diagnostic_sub_axis": 14, "unclassified": 0},
+    "coverage_v3_features": {"total": 12, "gaps": 0},
+    "adopted": true
+  },
+  "axes": [
+    {"axis_id": "request", "label": "request chain behavior", "direction": "client-to-provider"},
+    {"axis_id": "response", "label": "response chain behavior", "direction": "provider-to-client"},
+    {"axis_id": "operation", "label": "registered behavior operators", "direction": "node-bound"},
+    {"axis_id": "information", "label": "compiled immutable knowledge", "direction": "read-only"},
+    {"axis_id": "control", "label": "typed side-channel control state", "direction": "never-in-payload"},
+    {"axis_id": "data", "label": "business payload and wire semantics", "direction": "semantic-projection-only"}
+  ],
+  "operator_schema": {
+    "required": [
+      "operator_id",
+      "operator_kind",
+      "chain",
+      "node_id",
+      "version",
+      "consumes",
+      "produces",
+      "compat"
+    ],
+    "compat_required": [
+      "baseline",
+      "target",
+      "status",
+      "evidence"
+    ],
+    "compat_status": ["baseline", "replacing", "active", "retired"],
+    "chains": ["request", "response", "error", "config", "lifecycle", "diagnostic"]
+  },
+  "node_schema": {
+    "required": [
+      "node_id",
+      "chain",
+      "chain_version",
+      "position",
+      "owner",
+      "input_node",
+      "output_node",
+      "control_in",
+      "control_out",
+      "data_in",
+      "data_out",
+      "resources_read",
+      "resources_written",
+      "allowed_operator_kinds"
+    ],
+    "node_extension_rule": "published chain nodes are immutable; new semantics use a new chain_version or a new operator on an existing node slot"
+  },
+  "plugin_schema": {
+    "required": [
+      "operator_id",
+      "operator_kind",
+      "node_id",
+      "version",
+      "control_info",
+      "state_machine",
+      "flow",
+      "compat"
+    ],
+    "control_info_required": ["reads", "writes", "carrier_fields"],
+    "state_machine_required": ["in_events", "out_events", "transitions"],
+    "flow_required": ["data_in", "data_out", "information_read", "control_write"],
+    "closure_rule": "plugin owns node-local typed closure only; runtime kernel remains the only orchestrator"
+  },
+  "wiring_schema": {
+    "required": ["chain_version", "nodes", "edges"],
+    "node_selection_rule": "exactly one active_operator per node slot per compiled manifest",
+    "edge_rule": "edges are adjacent and fixed by chain_version"
+  },
+  "control_center": {
+    "operations": ["register", "consume", "release"],
+    "scope_isolation": ["requestId", "pipelineId", "port", "sessionScope", "conversationScope"],
+    "never_in_payload": true,
+    "payload_reconstruction": "forbidden",
+    "protocol_metadata_as_control": "forbidden"
+  },
+  "message_bus": {
+    "purpose": ["notification", "observability", "diagnostics", "records"],
+    "topics": ["node_event", "state_transition", "diagnostic", "observability", "record"],
+    "decision_plane": "forbidden",
+    "payload_carrier": "forbidden",
+    "failure_behavior": "diagnostic error recorded; business path unchanged"
+  },
+  "invariants": [
+    "control-resources-never-enter-payload",
+    "data-resources-carry-no-control-fields",
+    "diagnostic-resources-never-live-input",
+    "operator-consumes-produces-must-be-registered-resources",
+    "one-active-operator-per-node-slot-per-compiled-manifest",
+    "skeleton-nodes-are-immutable-contract",
+    "plugin-closure-not-independent-lifecycle",
+    "message-bus-is-not-a-decision-plane",
+    "control-center-is-not-data-plane-truth"
+  ],
+  "completeness_gates": [
+    {"gate_id":"ABS-GATE-01","name":"v3_resource_coverage","rule":"all 103 v3 resources classified with axis and operator_kind"},
+    {"gate_id":"ABS-GATE-02","name":"feature_operator_mapping","rule":"every v3 feature maps to >=1 operator; zero GAP"},
+    {"gate_id":"ABS-GATE-03","name":"reference_integrity","rule":"operator consumes/produces reference registered resources"},
+    {"gate_id":"ABS-GATE-04","name":"axis_boundary_machine_checkable","rule":"control/data/diagnostic invariants enforced by red tests"},
+    {"gate_id":"ABS-GATE-05","name":"manifest_selects_active_operator","rule":"compiled operator manifest selects exactly one active operator per node+scope"},
+    {"gate_id":"ABS-GATE-06","name":"node_immutability","rule":"published chain nodes cannot be inserted/reordered/renumbered"},
+    {"gate_id":"ABS-GATE-07","name":"plugin_closure","rule":"plugins own node-local closure only; no second lifecycle"},
+    {"gate_id":"ABS-GATE-08","name":"bus_not_decision_plane","rule":"subscribers cannot mutate control decisions or business outcome"},
+    {"gate_id":"ABS-GATE-09","name":"control_center_scope","rule":"register/consume/release isolated per scope; payload reconstruction forbidden"}
+  ]
+}
