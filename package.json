@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.4443",
+  "version": "0.90.4503",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "bin": {
@@ -113,7 +113,7 @@
     "test:v3-selected-provider-model-binding-red-fixtures": "node scripts/tests/v3-selected-provider-model-binding-red-fixtures.mjs",
     "test:v3-provider-action-gate": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-error && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture",
     "verify:v3-provider-action-gate": "node scripts/architecture/verify-v3-provider-action-gate.mjs",
-    "test:v3-provider-session-cooldown": "node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-provider-responses --lib health::tests -- --nocapture && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test provider_action_gate_session_isolation_contract -- --nocapture && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --lib relay_initial_exhaustion_revives_one_in_plan_provider_from_sibling_success -- --nocapture && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --lib direct_cross_session_revive_failure_sends_once_and_preserves_cooldown_block -- --nocapture && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --lib relay_failed_revive_preserves_deadline_and_returns_no_second_retry -- --nocapture && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-server --test multi_listener_server responses_direct_without_failure_session_header_reaches_provider -- --nocapture",
+    "test:v3-provider-session-cooldown": "node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-provider-responses --lib health::tests -- --nocapture && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test provider_action_gate_session_isolation_contract -- --nocapture && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-server --test multi_listener_server responses_direct_without_failure_session_header_reaches_provider -- --nocapture",
     "verify:v3-provider-session-cooldown": "node scripts/architecture/verify-v3-provider-session-cooldown.mjs",
     "test:v3-provider-session-cooldown-red-fixtures": "node scripts/tests/v3-provider-session-cooldown-red-fixtures.mjs",
     "verify:v3-runtime-timing-observability": "node scripts/architecture/verify-v3-runtime-timing-observability.mjs",

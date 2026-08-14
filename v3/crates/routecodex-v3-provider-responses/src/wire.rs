@@ -92,20 +92,13 @@ pub fn build_v3_provider_12_responses_wire_payload(
     current_request_body: Value,
 ) -> Result<V3Provider12ResponsesWirePayload, V3ProviderError> {
     let request_id = request_id.into();
-    let stream_intent = match current_request_body
-        .as_object()
-        .ok_or_else(|| V3ProviderError::InvalidWireBody {
-            request_id: request_id.clone(),
-        })?
+    let stream_intent = match current_request_body.as_object()
+        .ok_or_else(|| V3ProviderError::InvalidWireBody { request_id: request_id.clone() })?
         .get("stream")
     {
         None | Some(Value::Bool(false)) => V3ResponsesStreamIntent::Json,
         Some(Value::Bool(true)) => V3ResponsesStreamIntent::Sse,
-        Some(_) => {
-            return Err(V3ProviderError::InvalidStreamIntent {
-                request_id: request_id.clone(),
-            })
-        }
+        Some(_) => return Err(V3ProviderError::InvalidStreamIntent { request_id: request_id.clone() }),
     };
     if let Some(field) = find_v3_routecodex_control_payload_key(&current_request_body) {
         return Err(V3ProviderError::ControlFieldInWireBody { request_id, field });
@@ -123,11 +116,7 @@ pub fn build_v3_provider_12_responses_wire_payload(
             actual_model,
         });
     }
-    let mut body = expand_namespace_tools_in_responses_wire_body(
-        &request_id,
-        &target.provider_type,
-        current_request_body,
-    )?;
+    let mut body = expand_namespace_tools_in_responses_wire_body(&request_id, &target.provider_type, current_request_body)?;
     normalize_deepseek_thinking_stopless_tool_choice(&mut body, &target);
     // 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）：
     // 1. 历史密文剥离（encrypted_content）对所有非 gpt 目标统一执行——gpt 官方系
@@ -155,12 +144,7 @@ pub fn build_v3_provider_12_responses_wire_payload(
             insert_v3_deepseek_interleaved_tool_segment_reasoning(&mut body);
         }
     }
-    Ok(V3Provider12ResponsesWirePayload {
-        request_id,
-        target,
-        stream_intent,
-        body,
-    })
+    Ok(V3Provider12ResponsesWirePayload { request_id, target, stream_intent, body })
 }
 
 /// 唯一密文剥离 hook（响应侧，direct 与 relay 共用）：
@@ -232,10 +216,7 @@ fn strip_v3_request_encrypted_reasoning(body: &mut Value, deepseek_compat: bool)
             } else {
                 plain
             };
-            obj.insert(
-                "content".to_string(),
-                json!([{"type": "reasoning_text", "text": text}]),
-            );
+            obj.insert("content".to_string(), json!([{"type": "reasoning_text", "text": text}]));
             obj.remove("summary");
             obj.remove("text");
             obj.remove("reasoning_content");
@@ -243,20 +224,15 @@ fn strip_v3_request_encrypted_reasoning(body: &mut Value, deepseek_compat: bool)
             // 既有窄清理：只剥密文；无任何明文（summary/content/text/
             // reasoning_content 均缺失/空/null）时补 `[thinking redacted]`
             // 占位，保持该条 assistant reasoning 表示存在。
-            let has_plain_content = ["summary", "content", "text", "reasoning_content"]
-                .iter()
-                .any(|key| {
-                    obj.get(*key).is_some_and(|value| {
-                        !value.is_null()
-                            && !(value.is_array() && value.as_array().is_some_and(Vec::is_empty))
-                            && !(value.as_str().is_some_and(str::is_empty))
-                    })
-                });
+            let has_plain_content = ["summary", "content", "text", "reasoning_content"].iter().any(|key| {
+                obj.get(*key).is_some_and(|value| {
+                    !value.is_null()
+                        && !(value.is_array() && value.as_array().is_some_and(Vec::is_empty))
+                        && !(value.as_str().is_some_and(str::is_empty))
+                })
+            });
             if !has_plain_content {
-                obj.insert(
-                    "text".to_string(),
-                    Value::String("[thinking redacted]".to_string()),
-                );
+                obj.insert("text".to_string(), Value::String("[thinking redacted]".to_string()));
             }
         }
     }
@@ -319,19 +295,12 @@ fn insert_v3_deepseek_interleaved_tool_segment_reasoning(body: &mut Value) {
             input[index].get("type").and_then(Value::as_str),
             Some("function_call_output" | "custom_tool_call_output")
         );
-        let next_is_call = input
-            .get(index + 1)
-            .and_then(|item| item.get("type"))
+        let next_is_call = input.get(index + 1).and_then(|item| item.get("type"))
             .and_then(Value::as_str)
             .is_some_and(|kind| matches!(kind, "function_call" | "custom_tool_call"));
         if is_output && next_is_call {
-            let text = last_reasoning_text
-                .clone()
-                .unwrap_or_else(|| "[thinking redacted]".to_string());
-            input.insert(
-                index + 1,
-                json!({"type": "reasoning", "content": [{"type": "reasoning_text", "text": text}]}),
-            );
+            let text = last_reasoning_text.clone().unwrap_or_else(|| "[thinking redacted]".to_string());
+            input.insert(index + 1, json!({"type": "reasoning", "content": [{"type": "reasoning_text", "text": text}]}));
         }
         index += 1;
     }
@@ -383,9 +352,7 @@ fn expand_namespace_tools_in_responses_wire_body(
     let Some(tools) = body.get("tools").and_then(Value::as_array) else {
         return Ok(body);
     };
-    let has_namespace = tools
-        .iter()
-        .any(|tool| tool.get("type").and_then(Value::as_str) == Some("namespace"));
+    let has_namespace = tools.iter().any(|tool| tool.get("type").and_then(Value::as_str) == Some("namespace"));
     if !has_namespace && provider_type != "openai_chat" {
         return Ok(body);
     }
@@ -427,9 +394,7 @@ fn normalize_openai_chat_function_tools(
 ) -> Result<Vec<Value>, V3ProviderError> {
     let mut normalized = Vec::with_capacity(tools.len());
     for (index, tool) in tools.into_iter().enumerate() {
-        let object = tool
-            .as_object()
-            .ok_or_else(|| V3ProviderError::FunctionToolShapeFailed {
+        let object = tool.as_object().ok_or_else(|| V3ProviderError::FunctionToolShapeFailed {
                 request_id: request_id.to_string(),
                 detail: format!("tools[{index}] must be a JSON object"),
             })?;
@@ -440,15 +405,10 @@ fn normalize_openai_chat_function_tools(
             });
         }
         let top_level_name = object.get("name").and_then(Value::as_str);
-        let nested_name = object
-            .get("function")
-            .and_then(Value::as_object)
+        let nested_name = object.get("function").and_then(Value::as_object)
             .and_then(|function| function.get("name"))
             .and_then(Value::as_str);
-        let name = top_level_name
-            .or(nested_name)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
+        let name = top_level_name.or(nested_name).map(str::trim).filter(|value| !value.is_empty())
             .ok_or_else(|| V3ProviderError::FunctionToolShapeFailed {
                 request_id: request_id.to_string(),
                 detail: format!("tools[{index}] requires a non-empty function name"),
@@ -483,18 +443,14 @@ fn validate_current_responses_data_images(
     };
     let Some(latest_user_index) = input.iter().rposition(is_responses_user_input_item) else {
         return Ok(());
-    };
-    for item in input.iter().skip(latest_user_index) {
+    };    for item in input.iter().skip(latest_user_index) {
         validate_data_image_urls_in_value(request_id, item)?;
     }
     Ok(())
 }
 
 fn is_responses_user_input_item(item: &Value) -> bool {
-    item.as_object()
-        .and_then(|object| object.get("role"))
-        .and_then(Value::as_str)
-        == Some("user")
+    item.as_object().and_then(|object| object.get("role")).and_then(Value::as_str) == Some("user")
 }
 
 fn validate_data_image_urls_in_value(
@@ -723,44 +679,21 @@ mod tests {
         let current_user_image = VALID_PNG_DATA_URL;
         let current_tool_image = VALID_PNG_DATA_URL;
         let body = json!({
-            "model": "upstream-model",
-            "stream": true,
-            "input": [
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "old turn"}]
-                },
-                {
-                    "type": "function_call",
-                    "name": "view_image",
-                    "call_id": "call_old",
-                    "arguments": "{}"
-                },
-                {
-                    "type": "function_call_output",
-                    "call_id": "call_old",
-                    "output": [
-                        {"type": "input_image", "image_url": "data:image/png;base64,OLD", "detail": "high"},
-                        {"type": "input_image", "image_url": {"url": "data:image/png;base64,OLD_OBJECT"}, "detail": "low"},
-                        {"type": "input_text", "text": "tool text stays"}
-                    ]
-                },
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": "current turn"},
-                        {"type": "input_image", "image_url": current_user_image}
-                    ]
-                },
-                {
-                    "type": "function_call_output",
-                    "call_id": "call_after_latest_user",
-                    "output": [
-                        {"type": "input_image", "image_url": current_tool_image}
-                    ]
-                }
+            "model": "upstream-model", "stream": true, "input": [
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "old turn"}]},
+                {"type": "function_call", "name": "view_image", "call_id": "call_old", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_old", "output": [
+                    {"type": "input_image", "image_url": "data:image/png;base64,OLD", "detail": "high"},
+                    {"type": "input_image", "image_url": {"url": "data:image/png;base64,OLD_OBJECT"}, "detail": "low"},
+                    {"type": "input_text", "text": "tool text stays"}
+                ]},
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "current turn"},
+                    {"type": "input_image", "image_url": current_user_image}
+                ]},
+                {"type": "function_call_output", "call_id": "call_after_latest_user", "output": [
+                    {"type": "input_image", "image_url": current_tool_image}
+                ]}
             ]
         });
         let expected = body.clone();
@@ -773,26 +706,13 @@ mod tests {
     #[test]
     fn wire_does_not_broadly_replace_text_or_non_data_historical_tool_images() {
         let body = json!({
-            "model": "upstream-model",
-            "input": [
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": "old turn"
-                },
-                {
-                    "type": "function_call_output",
-                    "call_id": "call_old",
-                    "output": [
-                        {"type": "input_text", "text": "literal data:image/png;base64,TEXT stays text"},
-                        {"type": "input_image", "image_url": "https://example.invalid/old.png"}
-                    ]
-                },
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": "latest turn"
-                }
+            "model": "upstream-model", "input": [
+                {"type": "message", "role": "user", "content": "old turn"},
+                {"type": "function_call_output", "call_id": "call_old", "output": [
+                    {"type": "input_text", "text": "literal data:image/png;base64,TEXT stays text"},
+                    {"type": "input_image", "image_url": "https://example.invalid/old.png"}
+                ]},
+                {"type": "message", "role": "user", "content": "latest turn"}
             ]
         });
         let wire =
@@ -811,25 +731,12 @@ mod tests {
     #[test]
     fn wire_preserves_historical_reasoning_even_when_legacy_cleanup_is_configured() {
         let body = json!({
-            "model": "upstream-model",
-            "input": [
+            "model": "upstream-model", "input": [
                 {"type": "message", "role": "user", "content": "old turn"},
-                {
-                    "type": "reasoning",
-                    "summary": [{"type": "summary_text", "text": "old summary"}],
-                    "encrypted_content": "rsn_old_foreign"
-                },
-                {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "literal rsn_text_stays"}]
-                },
+                {"type": "reasoning", "summary": [{"type": "summary_text", "text": "old summary"}], "encrypted_content": "rsn_old_foreign"},
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "literal rsn_text_stays"}]},
                 {"type": "message", "role": "user", "content": "latest turn"},
-                {
-                    "type": "reasoning",
-                    "summary": [{"type": "summary_text", "text": "current summary"}],
-                    "encrypted_content": "rsn_current_same_turn"
-                }
+                {"type": "reasoning", "summary": [{"type": "summary_text", "text": "current summary"}], "encrypted_content": "rsn_current_same_turn"}
             ]
         });
         let expected = body.clone();
@@ -846,8 +753,7 @@ mod tests {
     #[test]
     fn wire_preserves_historical_encrypted_content_when_cleanup_is_not_configured() {
         let body = json!({
-            "model": "upstream-model",
-            "input": [
+            "model": "upstream-model", "input": [
                 {"type": "message", "role": "user", "content": "old turn"},
                 {"type": "reasoning", "encrypted_content": "rsn_old_same_provider"},
                 {"type": "message", "role": "user", "content": "latest turn"}
@@ -867,16 +773,11 @@ mod tests {
     #[test]
     fn current_turn_invalid_png_data_image_is_rejected_before_provider_transport() {
         let body = json!({
-            "model": "upstream-model",
-            "input": [
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": "current turn"},
-                        {"type": "input_image", "image_url": "data:image/png;base64,AAAA"}
-                    ]
-                }
+            "model": "upstream-model", "input": [
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "current turn"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,AAAA"}
+                ]}
             ]
         });
         let error =
@@ -888,32 +789,24 @@ mod tests {
     #[test]
     fn non_object_or_non_boolean_stream_fails_without_rebuilding_payload() {
         let target = V3ResponsesProviderTarget {
-            provider_id: "neutral-provider".into(),
-            provider_type: "responses".into(),
+            provider_id: "neutral-provider".into(), provider_type: "responses".into(),
             base_url: "http://upstream.invalid/v1".into(),
-            canonical_model_id: "model".into(),
-            wire_model: "model".into(),
+            canonical_model_id: "model".into(), wire_model: "model".into(),
             compatibility_profile: None,
             auth: V3ProviderAuthHandle {
                 alias: "primary".into(),
                 secret: V3ProviderAuthSecretHandle::Environment("NEUTRAL_KEY".into()),
             },
-            responses_transport: V3ResponsesTransportKind::Http,
-            websocket_v2_url: None,
+            responses_transport: V3ResponsesTransportKind::Http, websocket_v2_url: None,
             provider_request_cleanup: Default::default(),
-            request_timeout_ms: 300_000,
-            initial_concurrency_budget: 8,
+            request_timeout_ms: 300_000, initial_concurrency_budget: 8,
         };
         assert!(matches!(
             build_v3_provider_12_responses_wire_payload("req-array", target.clone(), json!([])),
             Err(V3ProviderError::InvalidWireBody { .. })
         ));
         assert!(matches!(
-            build_v3_provider_12_responses_wire_payload(
-                "req-stream",
-                target,
-                json!({"stream":"yes"})
-            ),
+            build_v3_provider_12_responses_wire_payload("req-stream", target, json!({"stream":"yes"})),
             Err(V3ProviderError::InvalidStreamIntent { .. })
         ));
     }
@@ -921,10 +814,8 @@ mod tests {
     #[test]
     fn wire_rejects_routecodex_control_keys_before_provider_transport() {
         let body = json!({
-            "model":"upstream-model",
-            "input":[{
-                "role":"user",
-                "content":"hello",
+            "model":"upstream-model", "input":[{
+                "role":"user", "content":"hello",
                 "metadataCenter":{"provider_key":"must-not-leak"}
             }],
             "metadata":{"client":"kept"},
@@ -944,18 +835,12 @@ mod tests {
     #[test]
     fn wire_flattens_namespace_tool_children_into_function_tools() {
         let body = json!({
-            "model": "upstream-model",
-            "input": "hello",
-            "tools": [
+            "model": "upstream-model", "input": "hello", "tools": [
                 {"type": "function", "name": "plain_tool", "description": "d", "parameters": {"type": "object"}},
-                {
-                    "type": "namespace",
-                    "name": "mcp__node_repl",
-                    "tools": [
-                        {"type": "function", "name": "mcp__node_repl__js", "description": "run js", "parameters": {"type": "object", "properties": {}}, "strict": false},
-                        {"type": "function", "name": "mcp__node_repl__npm", "description": "npm", "parameters": {"type": "object", "properties": {}}}
-                    ]
-                }
+                {"type": "namespace", "name": "mcp__node_repl", "tools": [
+                    {"type": "function", "name": "mcp__node_repl__js", "description": "run js", "parameters": {"type": "object", "properties": {}}, "strict": false},
+                    {"type": "function", "name": "mcp__node_repl__npm", "description": "npm", "parameters": {"type": "object", "properties": {}}}
+                ]}
             ]
         });
         let wire =
@@ -967,16 +852,10 @@ mod tests {
             "namespace container must be replaced by its children: {tools:?}"
         );
         assert_eq!(tools[0]["type"], json!("function"));
-        assert_eq!(
-            tools[1],
-            json!({
-                "type": "function",
-                "name": "mcp__node_repl__js",
-                "description": "run js",
-                "parameters": {"type": "object", "properties": {}},
-                "strict": false
-            })
-        );
+        assert_eq!(tools[1], json!({
+            "type": "function", "name": "mcp__node_repl__js", "description": "run js",
+            "parameters": {"type": "object", "properties": {}}, "strict": false
+        }));
         assert_eq!(tools[2]["type"], json!("function"));
         assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
         assert!(
@@ -988,9 +867,7 @@ mod tests {
     #[test]
     fn wire_namespace_tool_empty_children_fails_explicitly() {
         let body = json!({
-            "model": "upstream-model",
-            "input": "hello",
-            "tools": [
+            "model": "upstream-model", "input": "hello", "tools": [
                 {"type": "namespace", "name": "mcp__node_repl", "tools": []}
             ]
         });
@@ -1007,18 +884,12 @@ mod tests {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
         let body = json!({
-            "model": "upstream-model",
-            "input": "hello",
-            "tools": [
+            "model": "upstream-model", "input": "hello", "tools": [
                 {"type": "function", "function": {"name": "plain_tool", "description": "d", "parameters": {"type": "object"}}},
-                {
-                    "type": "namespace",
-                    "name": "mcp__node_repl",
-                    "tools": [
-                        {"type": "function", "name": "mcp__node_repl__js", "description": "run js", "parameters": {"type": "object", "properties": {}}, "strict": false},
-                        {"type": "function", "name": "mcp__node_repl__npm", "description": "npm", "parameters": {"type": "object", "properties": {}}}
-                    ]
-                }
+                {"type": "namespace", "name": "mcp__node_repl", "tools": [
+                    {"type": "function", "name": "mcp__node_repl__js", "description": "run js", "parameters": {"type": "object", "properties": {}}, "strict": false},
+                    {"type": "function", "name": "mcp__node_repl__npm", "description": "npm", "parameters": {"type": "object", "properties": {}}}
+                ]}
             ]
         });
         let wire =
@@ -1029,31 +900,17 @@ mod tests {
             3,
             "namespace container must be replaced by its children: {tools:?}"
         );
-        assert_eq!(
-            tools[0],
-            json!({
-                "type": "function",
-                "name": "plain_tool",
-                "function": {"name": "plain_tool", "description": "d", "parameters": {"type": "object"}}
-            }),
-            "Console Go requires dual-field tools (top-level name + nested function): {:?}",
-            tools[0]
-        );
-        assert_eq!(
-            tools[1],
-            json!({
-                "type": "function",
-                "name": "mcp__node_repl__js",
-                "function": {
-                    "name": "mcp__node_repl__js",
-                    "description": "run js",
-                    "parameters": {"type": "object", "properties": {}},
-                    "strict": false
-                }
-            }),
-            "Console Go requires dual-field tools (top-level name + nested function): {:?}",
-            tools[1]
-        );
+        assert_eq!(tools[0], json!({
+            "type": "function", "name": "plain_tool",
+            "function": {"name": "plain_tool", "description": "d", "parameters": {"type": "object"}}
+        }), "Console Go requires dual-field tools (top-level name + nested function): {:?}", tools[0]);
+        assert_eq!(tools[1], json!({
+            "type": "function", "name": "mcp__node_repl__js",
+            "function": {
+                "name": "mcp__node_repl__js", "description": "run js",
+                "parameters": {"type": "object", "properties": {}}, "strict": false
+            }
+        }), "Console Go requires dual-field tools (top-level name + nested function): {:?}", tools[1]);
         assert_eq!(tools[2]["type"], json!("function"));
         assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
         assert_eq!(tools[2]["function"]["name"], json!("mcp__node_repl__npm"));
@@ -1070,9 +927,7 @@ mod tests {
         // OneStop 会话实际形状：无 namespace、纯嵌套 function（缺顶层 name），
         // 原样透传会导致 Console Go 上游 400 missing field `name`。
         let body = json!({
-            "model": "upstream-model",
-            "input": "say hi in one word",
-            "tools": [
+            "model": "upstream-model", "input": "say hi in one word", "tools": [
                 {"type": "function", "function": {"name": "plain_tool", "description": "d", "parameters": {"properties": {}, "type": "object"}}}
             ]
         });
@@ -1080,43 +935,29 @@ mod tests {
             .unwrap();
         let tools = wire.body()["tools"].as_array().expect("tools array");
         assert_eq!(tools.len(), 1);
-        assert_eq!(
-            tools[0],
-            json!({
-                "type": "function",
-                "name": "plain_tool",
-                "function": {"name": "plain_tool", "description": "d", "parameters": {"properties": {}, "type": "object"}}
-            }),
-            "Console Go rejects nested-only tools; wire must add top-level name: {:?}",
-            tools[0]
-        );
+        assert_eq!(tools[0], json!({
+            "type": "function", "name": "plain_tool",
+            "function": {"name": "plain_tool", "description": "d", "parameters": {"properties": {}, "type": "object"}}
+        }), "Console Go rejects nested-only tools; wire must add top-level name: {:?}", tools[0]);
     }
 
     #[test]
     fn openai_responses_provider_keeps_flat_tool_shape_untouched() {
         let body = json!({
-            "model": "upstream-model",
-            "input": "hello",
-            "tools": [
+            "model": "upstream-model", "input": "hello", "tools": [
                 {"type": "function", "name": "plain_tool", "description": "d", "parameters": {"type": "object", "properties": {}}}
             ]
         });
         let wire = build_v3_provider_12_responses_wire_payload("req-flat", target(), body).unwrap();
-        assert_eq!(
-            wire.body()["tools"],
-            json!([
-                {"type": "function", "name": "plain_tool", "description": "d", "parameters": {"type": "object", "properties": {}}}
-            ]),
-            "standard responses provider must keep flat function shape unchanged"
-        );
+        assert_eq!(wire.body()["tools"], json!([
+            {"type": "function", "name": "plain_tool", "description": "d", "parameters": {"type": "object", "properties": {}}}
+        ]), "standard responses provider must keep flat function shape unchanged");
     }
 
     #[test]
     fn wire_rejects_routing_capability_control_keys_before_provider_transport() {
         let body = json!({
-            "model":"upstream-model",
-            "input":"hello",
-            "request_capabilities":["vision"]
+            "model":"upstream-model", "input":"hello", "request_capabilities":["vision"]
         });
         let error = build_v3_provider_12_responses_wire_payload("req-cap", target(), body)
             .expect_err("request capability facts are control-plane, not provider payload");
@@ -1133,27 +974,16 @@ mod tests {
     fn canonical_control_key_guard_rejects_route_facts_and_keeps_client_metadata_data_plane() {
         assert!(!V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS.contains(&"metadata"));
         assert!(!V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS.contains(&"client_metadata"));
-        assert_eq!(
-            find_v3_routecodex_control_payload_key(&json!({
-                "metadata": {"client": "kept"},
-                "client_metadata": {"session_id": "client-owned"}
-            })),
-            None
-        );
-        assert_eq!(
-            find_v3_routecodex_control_payload_key(&json!({
-                "input": "hello",
-                "routeHint": {"route": "must-not-enter-wire"}
-            })),
-            Some("routeHint")
-        );
-        assert_eq!(
-            find_v3_routecodex_control_payload_key(&json!({
-                "input": "hello",
-                "opaque_target": {"target": "must-not-enter-wire"}
-            })),
-            Some("opaque_target")
-        );
+        assert_eq!(find_v3_routecodex_control_payload_key(&json!({
+            "metadata": {"client": "kept"},
+            "client_metadata": {"session_id": "client-owned"}
+        })), None);
+        assert_eq!(find_v3_routecodex_control_payload_key(&json!({
+            "input": "hello", "routeHint": {"route": "must-not-enter-wire"}
+        })), Some("routeHint"));
+        assert_eq!(find_v3_routecodex_control_payload_key(&json!({
+            "input": "hello", "opaque_target": {"target": "must-not-enter-wire"}
+        })), Some("opaque_target"));
     }
 
     #[test]
@@ -1163,21 +993,11 @@ mod tests {
         selected.provider_type = "openai_chat".into();
         selected.canonical_model_id = "deepseek-v4-flash".into();
         selected.wire_model = "deepseek-v4-flash".into();
-        let wire = build_v3_provider_12_responses_wire_payload(
-            "req-deepseek-stopless",
-            selected,
-            json!({
-                "model": "deepseek-v4-flash",
-                "input": "continue",
-                "reasoning": {"effort": "high"},
-                "tool_choice": "required",
-                "tools": [{
-                    "type": "function",
-                    "name": "reasoningStop",
-                    "description": "stopless control"
-                }]
-            }),
-        )
+        let wire = build_v3_provider_12_responses_wire_payload("req-deepseek-stopless", selected, json!({
+            "model": "deepseek-v4-flash", "input": "continue",
+            "reasoning": {"effort": "high"}, "tool_choice": "required",
+            "tools": [{"type": "function", "name": "reasoningStop", "description": "stopless control"}]
+        }))
         .expect("DeepSeek Responses wire must not reject Stopless thinking mode");
         assert!(wire.body().get("tool_choice").is_none());
         assert!(wire.body()["tools"].as_array().is_some_and(|tools| {
@@ -1219,27 +1039,10 @@ mod tests {
         let mut target = target();
         target.canonical_model_id = "deepseek-v4-flash".into();
         let body = json!({
-            "model": "upstream-model",
-            "input": [
-                {
-                    "type": "reasoning",
-                    "id": "item_rsn_1",
-                    "summary": [{"type": "summary_text", "text": "plain summary"}],
-                    "encrypted_content": "rsn_encrypted",
-                    "content": null
-                },
-                {
-                    "type": "reasoning",
-                    "id": "item_rsn_2",
-                    "encrypted_content": "rsn_only",
-                    "content": null,
-                    "summary": null
-                },
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "user turn"}]
-                }
+            "model": "upstream-model", "input": [
+                {"type": "reasoning", "id": "item_rsn_1", "summary": [{"type": "summary_text", "text": "plain summary"}], "encrypted_content": "rsn_encrypted", "content": null},
+                {"type": "reasoning", "id": "item_rsn_2", "encrypted_content": "rsn_only", "content": null, "summary": null},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user turn"}]}
             ]
         });
         let wire = build_v3_provider_12_responses_wire_payload("req-1", target, body).unwrap();
@@ -1263,11 +1066,7 @@ mod tests {
             "encrypted_content must be stripped for non-gpt target"
         );
         assert_eq!(input[1]["type"], "reasoning");
-        assert_eq!(
-            input[1]["content"],
-            json!([{"type": "reasoning_text", "text": "[thinking redacted]"}]),
-            "empty reasoning item becomes non-empty content.reasoning_text placeholder; empty or missing reasoning_text triggers upstream 400 `reasoning_text must be passed back`"
-        );
+        assert_eq!(input[1]["content"], json!([{"type": "reasoning_text", "text": "[thinking redacted]"}]), "empty reasoning item becomes non-empty content.reasoning_text placeholder; empty or missing reasoning_text triggers upstream 400 `reasoning_text must be passed back`");
         assert!(
             input[1].get("summary").is_none(),
             "empty placeholder must be content-only"
@@ -1284,20 +1083,12 @@ mod tests {
         let mut target = target();
         target.canonical_model_id = "deepseek-v4-flash".into();
         let body = json!({
-            "model": "upstream-model",
-            "input": [
-                {
-                    "type": "reasoning",
-                    "summary": [
-                        {"type": "summary_text", "text": "first summary"},
-                        {"type": "summary_text", "text": " second summary"}
-                    ]
-                },
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "user turn"}]
-                }
+            "model": "upstream-model", "input": [
+                {"type": "reasoning", "summary": [
+                    {"type": "summary_text", "text": "first summary"},
+                    {"type": "summary_text", "text": " second summary"}
+                ]},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user turn"}]}
             ]
         });
         let first =
@@ -1325,22 +1116,12 @@ mod tests {
         let mut target = target();
         target.canonical_model_id = "deepseek-v4-flash".into();
         let body = json!({
-            "model": "upstream-model",
-            "input": [
-                {
-                    "type": "reasoning",
-                    "id": "rs_0c9a07cb4afc20f7016a7e9f3508cc8191901c40907a61bcf9",
-                    "summary": [
-                        {"type": "summary_text", "text": "**Planning task by reading SKILL.md**"},
-                        {"type": "summary_text", "text": "**Preparing parallel reads of project files**"}
-                    ],
-                    "encrypted_content": null
-                },
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "user turn"}]
-                }
+            "model": "upstream-model", "input": [
+                {"type": "reasoning", "id": "rs_0c9a07cb4afc20f7016a7e9f3508cc8191901c40907a61bcf9", "summary": [
+                    {"type": "summary_text", "text": "**Planning task by reading SKILL.md**"},
+                    {"type": "summary_text", "text": "**Preparing parallel reads of project files**"}
+                ], "encrypted_content": null},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user turn"}]}
             ]
         });
         let wire = build_v3_provider_12_responses_wire_payload("req-1", target, body).unwrap();
@@ -1368,23 +1149,12 @@ mod tests {
         let mut target = target();
         target.canonical_model_id = "deepseek-v4-flash".into();
         let body = json!({
-            "model": "upstream-model",
-            "input": [
-                {
-                    "type": "reasoning",
-                    "id": "rs_existing",
-                    "summary": [{"type": "summary_text", "text": "summary text"}],
-                    "content": [
-                        {"type": "reasoning_text", "text": "existing plain content"},
-                        {"type": "reasoning_text", "text": " tail"}
-                    ],
-                    "encrypted_content": "rsn_cipher"
-                },
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "user turn"}]
-                }
+            "model": "upstream-model", "input": [
+                {"type": "reasoning", "id": "rs_existing", "summary": [{"type": "summary_text", "text": "summary text"}], "content": [
+                    {"type": "reasoning_text", "text": "existing plain content"},
+                    {"type": "reasoning_text", "text": " tail"}
+                ], "encrypted_content": "rsn_cipher"},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user turn"}]}
             ]
         });
         let wire = build_v3_provider_12_responses_wire_payload("req-1", target, body).unwrap();
@@ -1404,25 +1174,10 @@ mod tests {
         // 不做 summary -> content.reasoning_text 重写；该重写只在已证明需要的
         // DeepSeek/opencode 链路上执行，避免未经证实的其他 provider 被改写 reasoning 形态。
         let body = json!({
-            "model": "upstream-model",
-            "input": [
-                {
-                    "type": "reasoning",
-                    "id": "rs_summary",
-                    "summary": [{"type": "summary_text", "text": "plain summary"}],
-                    "encrypted_content": "rsn_cipher"
-                },
-                {
-                    "type": "reasoning",
-                    "id": "rs_encrypted_only",
-                    "encrypted_content": "rsn_only",
-                    "summary": null
-                },
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "user turn"}]
-                }
+            "model": "upstream-model", "input": [
+                {"type": "reasoning", "id": "rs_summary", "summary": [{"type": "summary_text", "text": "plain summary"}], "encrypted_content": "rsn_cipher"},
+                {"type": "reasoning", "id": "rs_encrypted_only", "encrypted_content": "rsn_only", "summary": null},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user turn"}]}
             ]
         });
         let wire = build_v3_provider_12_responses_wire_payload("req-1", target(), body).unwrap();
@@ -1464,67 +1219,20 @@ mod tests {
         target.wire_model = "deepseek-v4-flash".into();
         target.compatibility_profile = Some("responses:deepseek-console-go".into());
         let body = json!({
-            "model": "deepseek-v4-flash",
-            "reasoning": {"effort": "high"},
-            "input": [
-                {
-                    "type": "reasoning",
-                    "id": "rs_first",
-                    "summary": [{"type": "summary_text", "text": "plan first tool segment"}]
-                },
-                {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "calling tools"}]
-                },
-                {
-                    "type": "function_call",
-                    "call_id": "call_1",
-                    "name": "exec_command",
-                    "arguments": "{\"cmd\":\"pwd\"}"
-                },
-                {
-                    "type": "function_call_output",
-                    "call_id": "call_1",
-                    "output": "/tmp"
-                },
-                {
-                    "type": "function_call",
-                    "call_id": "call_2",
-                    "name": "exec_command",
-                    "arguments": "{\"cmd\":\"ls\"}"
-                },
-                {
-                    "type": "function_call_output",
-                    "call_id": "call_2",
-                    "output": "src"
-                },
-                {
-                    "type": "custom_tool_call",
-                    "call_id": "call_3",
-                    "name": "apply_patch",
-                    "input": "patch"
-                },
-                {
-                    "type": "custom_tool_call_output",
-                    "call_id": "call_3",
-                    "output": "ok"
-                },
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "continue"}]
-                }
+            "model": "deepseek-v4-flash", "reasoning": {"effort": "high"}, "input": [
+                {"type": "reasoning", "id": "rs_first", "summary": [{"type": "summary_text", "text": "plan first tool segment"}]},
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "calling tools"}]},
+                {"type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "/tmp"},
+                {"type": "function_call", "call_id": "call_2", "name": "exec_command", "arguments": "{\"cmd\":\"ls\"}"},
+                {"type": "function_call_output", "call_id": "call_2", "output": "src"},
+                {"type": "custom_tool_call", "call_id": "call_3", "name": "apply_patch", "input": "patch"},
+                {"type": "custom_tool_call_output", "call_id": "call_3", "output": "ok"},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]}
             ]
         });
-        let first = build_v3_provider_12_responses_wire_payload(
-            "req-junction",
-            target.clone(),
-            body.clone(),
-        )
-        .unwrap();
-        let second =
-            build_v3_provider_12_responses_wire_payload("req-junction-2", target, body).unwrap();
+        let first = build_v3_provider_12_responses_wire_payload("req-junction", target.clone(), body.clone()).unwrap();
+        let second = build_v3_provider_12_responses_wire_payload("req-junction-2", target, body).unwrap();
         let input = first.body()["input"].as_array().unwrap();
         assert_eq!(
             input[0]["content"],
