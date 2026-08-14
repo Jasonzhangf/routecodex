@@ -186,6 +186,45 @@
       "explicit error path into error chain"
     ],
     "test_semantics": {
+      "layers": {
+        "L0_base_node": [
+          "base_node_control_in_out_record",
+          "base_node_debug_subscription_read_only",
+          "base_node_snapshot_subscription_diagnostic",
+          "base_node_statistics_observability_only",
+          "base_node_debug_switch_diagnostic_only",
+          "base_node_dry_run_support",
+          "base_node_no_business_logic"
+        ],
+        "L1_edge": [
+          "edge_data_flow_adjacent_only",
+          "edge_data_flow_resource_axis",
+          "edge_information_flow_adjacent_only",
+          "edge_information_flow_resource_axis",
+          "edge_control_flow_record_required",
+          "edge_control_flow_scope_isolation",
+          "edge_debug_subscription_read_only",
+          "edge_error_intake_typed",
+          "edge_forbidden_edges"
+        ],
+        "L2_module": [
+          "node_entry_contract",
+          "node_exit_contract",
+          "node_success_projection",
+          "node_error_projection",
+          "node_control_record",
+          "node_debug_switch_diagnostic_only",
+          "node_error_intake_typed",
+          "chain_entry_contract",
+          "chain_terminal_contract",
+          "chain_edge_complete",
+          "chain_error_path",
+          "group_external_contract",
+          "group_internal_wiring",
+          "group_no_shortcut",
+          "group_expansion_equivalence"
+        ]
+      },
       "chain_tests": [
         "chain_entry_contract",
         "chain_terminal_contract",
@@ -214,6 +253,11 @@
         "group_encapsulation",
         "group_expansion_equivalence"
       ]
+    },
+    "freeze_order": {
+      "rule": "L0 BaseNode tests pass -> freeze BaseNode; L1 edge tests pass -> freeze edge contracts; L2 module tests pass -> freeze module",
+      "layer_dependency": "upper layers depend on frozen lower layers only; lower layers never depend on derived module implementations",
+      "freeze_scope": "freeze locks contract and implementation baseline; registered operators remain extensible on frozen node slots"
     }
   },
   "base_node_capabilities": [
@@ -329,6 +373,8 @@
     "switch/cooldown/reroute must remain inside the same payload cycle with the original request payload immutable",
     "module debug switch edges are diagnostic-only and cannot touch mainline, payload, MetadataCenter, or error chain",
     "dry-run chains must declare entry/exit or default to the full request/response chain with a correct payload fixture",
+    "tests are layered: L0 base_node tests must pass before BaseNode freezes, L1 edge tests before edge contracts freeze, L2 module tests before a module freezes",
+    "freeze locks contract and implementation baseline only; new operators can still register on frozen node slots",
     "forbidden edges cannot be added",
     "every code-level conversion/subscription/control operation must resolve to a declared edge",
     "every node is a class with role subclass binding",

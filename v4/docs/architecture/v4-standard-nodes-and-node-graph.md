@@ -671,6 +671,78 @@ entry node -> ... -> terminal node（成功路径）
 | `chain_error_path` | 错误显式进入 Error chain | provider 错误进 `V4Error01SourceRaised` | 错误被吞、伪装成成功 |
 | `chain_group_equivalence` | 展开 group 前后行为等价 | 展开后测试结果一致 | 展开改变语义 |
 
+### 分层测试与冻结（BaseNode -> Edge -> 模块派生）
+
+测试按派生层次分层，每一层有自己完整的测试链；**基础层测试通过后冻结，派生层在冻结基础上实现，测试通过后再冻结**。debug 面与测试分层完全一致。
+
+```text
+L0 BaseNode 基础层（横切能力，不绑定任何业务节点）
+  -> 全部测试通过 -> BaseNode 冻结
+L1 Edge 边层（data_flow / information_flow / control_flow / debug_subscription / error_intake）
+  -> 全部测试通过 -> 边合同冻结
+L2 模块派生层（NodeInstance / group / 模块链，绑定已冻结的 L0 + L1）
+  -> 全部测试通过 -> 模块冻结
+```
+
+#### L0：BaseNode 测试链
+
+| 测试 | 语义 |
+| --- | --- |
+| `base_node_control_in_out_record` | control_in/out 每次写不可变 ControlRecord；缺记录即红 |
+| `base_node_debug_subscription_read_only` | debug 订阅只读；不改变业务结果或控制决策 |
+| `base_node_snapshot_subscription_diagnostic` | snapshot 订阅只读诊断；不进 live path |
+| `base_node_statistics_observability_only` | 统计只供观测；不进决策、不进 payload |
+| `base_node_debug_switch_diagnostic_only` | BaseNode 级 debug 开关只影响诊断；live 修改必须落审计 |
+| `base_node_dry_run_support` | BaseNode 声明 dry-run 能力；节点主体可被正确 fixture 驱动，no-network |
+| `base_node_no_business_logic` | BaseNode 无业务逻辑；业务行为只来自注册算子 |
+
+冻结条件：L0 全部通过。冻结后，BaseNode 横切能力只能在 Playground 中修改，派生模块不得绕过。
+
+#### L1：Edge 测试链
+
+| 测试 | 语义 |
+| --- | --- |
+| `edge_data_flow_adjacent_only` | data_flow 只允许相邻节点 |
+| `edge_data_flow_resource_axis` | data_flow 只承载 data 轴资源 |
+| `edge_information_flow_adjacent_only` | information_flow 只允许 data_plane=false 链相邻节点 |
+| `edge_information_flow_resource_axis` | information_flow 只承载 information 轴资源 |
+| `edge_control_flow_record_required` | control_flow 必须 record_required=true |
+| `edge_control_flow_scope_isolation` | control_flow 按 scope 隔离；跨闭环复用即红 |
+| `edge_debug_subscription_read_only` | debug_subscription 边 read_only=true |
+| `edge_error_intake_typed` | error_intake 携带 error_stage + payload_hash + typed_context 并指向错误中心 |
+| `edge_forbidden_edges` | 禁止边全量声明且不可覆盖；未登记新边即红 |
+
+冻结条件：L1 全部通过。冻结后新增边只能走新 chain_version 或已声明边。
+
+#### L2：模块派生测试链
+
+L2 继承 L0 的横切能力测试与 L1 的边合同测试，再加模块自身的：
+
+- `node_entry_contract` / `node_exit_contract` / `node_success_projection` / `node_error_projection` / `node_control_record`；
+- `node_debug_switch_diagnostic_only` / `node_error_intake_typed`；
+- `chain_entry_contract` / `chain_terminal_contract` / `chain_edge_complete` / `chain_error_path`；
+- group 测试（有 group 的模块）：`group_external_contract` / `group_internal_wiring` / `group_no_shortcut` / `group_expansion_equivalence`。
+
+冻结条件：L2 全部通过后模块冻结。冻结只锁合同与实现基线，不锁业务算子；新算子仍可注册到已冻结节点 slot。
+
+#### 分层 debug
+
+debug 与测试分层完全一致，每层有自己的开关面与观测面：
+
+| debug 层 | 观测面 | 开关 |
+| --- | --- | --- |
+| `base_node_debug` | ControlRecord 流、订阅事件、开关状态、dry-run 能力 | `v4.debug.module_switch` scope=base_node |
+| `edge_debug` | 接线命中、相邻性、资源轴校验、error intake 完整性 | `v4.debug.module_switch` scope=edge |
+| `module_debug` | 模块内节点/算子执行、快照、dry-run、route probe | `v4.debug.module_switch` scope=module_id |
+
+规则：
+
+1. 上层 debug 可以订阅下层 debug 事件（只读），下层不得依赖上层观测；
+2. 所有 debug 层禁止进入 live path、payload、MetadataCenter、错误链决策面；
+3. 每层 debug 开关 live 修改必须落不可变审计记录。
+
+机器合同见 `v4/contracts/test-layers.contract.json`。
+
 ### 节点级标准测试语义
 
 每个 NodeInstance（普通节点或 group 超级节点）必须通过：

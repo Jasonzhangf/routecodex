@@ -78,5 +78,57 @@
     "node_route_exit_consumer",
     "node_payload_cycle_boundary"
   ],
+  "test_layers": {
+    "L0_base_node": {
+      "required": [
+        "base_node_control_in_out_record",
+        "base_node_debug_subscription_read_only",
+        "base_node_snapshot_subscription_diagnostic",
+        "base_node_statistics_observability_only",
+        "base_node_debug_switch_diagnostic_only",
+        "base_node_dry_run_support",
+        "base_node_no_business_logic"
+      ],
+      "status": "pending",
+      "freeze_required_before_module": true
+    },
+    "L1_edge": {
+      "required": [
+        "edge_data_flow_adjacent_only",
+        "edge_data_flow_resource_axis",
+        "edge_information_flow_adjacent_only",
+        "edge_information_flow_resource_axis",
+        "edge_control_flow_record_required",
+        "edge_control_flow_scope_isolation",
+        "edge_debug_subscription_read_only",
+        "edge_error_intake_typed",
+        "edge_forbidden_edges"
+      ],
+      "status": "pending",
+      "freeze_required_before_module": true
+    },
+    "L2_module": {
+      "required": [
+        "node_entry_contract",
+        "node_exit_contract",
+        "node_success_projection",
+        "node_error_projection",
+        "node_control_record",
+        "node_debug_switch_diagnostic_only",
+        "node_error_intake_typed",
+        "chain_entry_contract",
+        "chain_terminal_contract",
+        "chain_edge_complete",
+        "chain_error_path"
+      ],
+      "status": "pending",
+      "freeze_required_before_promotion": true
+    },
+    "debug_layers": {
+      "base_node_debug": {"scope": "base_node", "read_only": true, "decision_plane": "forbidden"},
+      "edge_debug": {"scope": "edge", "read_only": true, "decision_plane": "forbidden"},
+      "module_debug": {"scope": "routecodex-v4-config", "read_only": true, "decision_plane": "forbidden"}
+    }
+  },
   "evidence": []
 }

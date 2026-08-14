@@ -213,6 +213,7 @@
       "debug_switch",
       "dry_run_chain",
       "test_semantics",
+      "test_layers",
       "status"
     ],
     "status_values": ["draft", "contract_complete", "mock_verified", "implemented", "active"],
@@ -221,10 +222,56 @@
       "mock 是合同骨架与测试 harness，不是 runtime 路径，不是 fallback",
       "mock 合同完整 = 完整性 gate 全部通过",
       "模块 promotion 前必须有 mock_verified 证据（红测 + 正例）",
-      "资源文件按模块重建，逐模块 anchored"
+      "资源文件按模块重建，逐模块 anchored",
+      "冻结顺序固定：L0 BaseNode 测试通过 -> 冻结；L1 Edge 测试通过 -> 冻结；L2 模块测试通过 -> 模块冻结",
+      "冻结只锁合同与实现基线，不锁业务算子"
     ]
   },
   "pipeline_test_semantics": {
+    "layers": {
+      "L0_base_node": [
+        "base_node_control_in_out_record",
+        "base_node_debug_subscription_read_only",
+        "base_node_snapshot_subscription_diagnostic",
+        "base_node_statistics_observability_only",
+        "base_node_debug_switch_diagnostic_only",
+        "base_node_dry_run_support",
+        "base_node_no_business_logic"
+      ],
+      "L1_edge": [
+        "edge_data_flow_adjacent_only",
+        "edge_data_flow_resource_axis",
+        "edge_information_flow_adjacent_only",
+        "edge_information_flow_resource_axis",
+        "edge_control_flow_record_required",
+        "edge_control_flow_scope_isolation",
+        "edge_debug_subscription_read_only",
+        "edge_error_intake_typed",
+        "edge_forbidden_edges"
+      ],
+      "L2_module": [
+        "node_entry_contract",
+        "node_exit_contract",
+        "node_success_projection",
+        "node_error_projection",
+        "node_control_record",
+        "node_debug_switch_diagnostic_only",
+        "node_error_intake_typed",
+        "chain_entry_contract",
+        "chain_terminal_contract",
+        "chain_edge_complete",
+        "chain_error_path",
+        "group_external_contract",
+        "group_internal_wiring",
+        "group_no_shortcut",
+        "group_expansion_equivalence"
+      ]
+    },
+    "freeze": {
+      "order": ["L0_base_node -> freeze BaseNode", "L1_edge -> freeze edge contracts", "L2_module -> freeze module"],
+      "layer_dependency": "upper layers depend on frozen lower layers; lower layers never depend on derived implementations",
+      "freeze_scope": "freeze locks contract and implementation baseline; operators remain extensible on frozen node slots"
+    },
     "chain": [
       "chain_entry_contract",
       "chain_terminal_contract",
@@ -369,6 +416,8 @@
     {"gate_id":"ABS-GATE-28","name":"dry_run_chain_contract","rule":"every module supports dry-run with declared chain entry/exit or defaults to the full request/response chain; input is the correct payload fixture; no network, no live input, no provider/client wire, no fallback to live"},
     {"gate_id":"ABS-GATE-29","name":"hub_response_chain_mirror","rule":"v4 hub response chain is fixed as the request chain mirror: provider_sse_in -> inbound -> chat_process(group) -> outbound -> client_sse_out -> server; SSE is transport-only; continuation save only at V4HubRespChatProcess03Governed; single success terminal V4ServerRespOutbound06ClientFrame"},
     {"gate_id":"ABS-GATE-30","name":"module_mock_first","rule":"every V4 module must ship a contract-complete mock (nodes/edges/resources/control/error intake/debug switch/dry-run chain/test semantics) before implementation; mock gates must pass before the module leaves playground"},
-    {"gate_id":"ABS-GATE-31","name":"information_flow_edge","rule":"data_plane=false chains (config/lifecycle/diagnostic) use information_flow edges carrying information-axis resources only; control/data never travel information edges"}
+    {"gate_id":"ABS-GATE-31","name":"information_flow_edge","rule":"data_plane=false chains (config/lifecycle/diagnostic) use information_flow edges carrying information-axis resources only; control/data never travel information edges"},
+    {"gate_id":"ABS-GATE-32","name":"layered_test_and_freeze","rule":"tests are layered: L0 BaseNode tests pass -> BaseNode freezes; L1 edge tests pass -> edge contracts freeze; L2 module tests pass -> module freezes; upper layers depend only on frozen lower layers"},
+    {"gate_id":"ABS-GATE-33","name":"layered_debug","rule":"debug is layered exactly like tests: base_node debug / edge debug / module debug; upper debug layers may subscribe to lower layers read-only; all layers stay diagnostic-only and never enter live path, payload, MetadataCenter, or error decision plane"}
   ]
 }
