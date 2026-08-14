@@ -1,0 +1,10 @@
+[workspace]
+members = [
+  "crates/routecodex-v4-nodegraph",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+publish = false

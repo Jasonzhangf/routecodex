@@ -90,6 +90,8 @@
     "statistics_rule": "optional observability; must not enter decisions or payload",
     "debug_switch_rule": "per-module/per-node debug/snapshot/dry_run/route_probe switch is dynamically live-updatable, audited, diagnostic-only, and must not affect business result, control decision, or payload",
     "dry_run_rule": "every module supports dry-run with declared chain entry/exit or defaults to the full request/response chain; input is the correct payload fixture; no network, no live input, no fallback to live",
+    "error_intake_rule": "node errors enter through a typed BaseNode error intake (stage + code + payload_hash + typed_context + scope); intake records are immutable, fail-fast, and never participate in routing decisions",
+    "hook_queue_rule": "node entry/exit hook queues are machine declared with kind/position/owner/effect, ordered by position, no duplicate positions; hooks never alter the business result",
     "business_logic_rule": "BaseNode carries no business logic; behavior comes from registered operators"
   },
   "plugin_schema": {
@@ -236,6 +238,8 @@
         "base_node_statistics_observability_only",
         "base_node_debug_switch_diagnostic_only",
         "base_node_dry_run_support",
+        "base_node_error_intake_typed",
+        "base_node_hook_queue_contract",
         "base_node_no_business_logic"
       ],
       "L1_edge": [

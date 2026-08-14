@@ -5,6 +5,8 @@
     {"gate_id":"sdk_pinned","command":"appsdk pin-lock <project> --binary <sdk>","required_for":["compile","promotion","freeze"]},
     {"gate_id":"record_graph","command":"appsdk verify <project>","required_for":["architecture_stable","freeze","publish"]},
     {"gate_id":"vcs_clean","command":"appsdk verify <project>","required_for":["freeze"]},
+    {"gate_id":"regression_report","command":"appsdk verify <project>","required_for":["freeze","frozen_integrity"]},
+    {"gate_id":"v4_base_node_l0_regression","command":"cargo test -p routecodex-v4-nodegraph --test l0_base_node","required_for":["routecodex-v4-nodegraph:architecture_stable","routecodex-v4-nodegraph:freeze"]},
     {"gate_id":"node_graph_edges","command":"appsdk verify <project> --node-graph v4/contracts/node-graph.contract.json","required_for":["compile","architecture_stable"]},
     {"gate_id":"control_record_required","command":"appsdk verify <project> --control-record v4/contracts/pipeline-abstraction.contract.json","required_for":["compile","architecture_stable"]},
     {"gate_id":"debug_subscription_read_only","command":"appsdk verify <project> --debug-subscription v4/contracts/debug-subscription.contract.json","required_for":["compile","architecture_stable"]},

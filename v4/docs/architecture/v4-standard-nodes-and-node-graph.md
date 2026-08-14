@@ -735,6 +735,12 @@ debug 与测试分层完全一致，每层有自己的开关面与观测面：
 | `edge_debug` | 接线命中、相邻性、资源轴校验、error intake 完整性 | `v4.debug.module_switch` scope=edge |
 | `module_debug` | 模块内节点/算子执行、快照、dry-run、route probe | `v4.debug.module_switch` scope=module_id |
 
+### BaseNode freeze regression
+
+BaseNode freeze admission requires the `v4-base-node-l0-regression` report. Unit and focused tests may use whitebox-only checks; freeze regression and bug reproduction must include both whitebox internal-contract evidence and blackbox public-node behavior evidence. The report binds the exact source, contracts, public API, artifact, and dependency inputs.
+
+After BaseNode is frozen, ordinary CI may disable repeated execution of this unchanged full suite. The suite and report remain present and verifiable. Any source, contract, public API, artifact, or dependency change invalidates the report and re-enables the regression gate before a new freeze.
+
 规则：
 
 1. 上层 debug 可以订阅下层 debug 事件（只读），下层不得依赖上层观测；

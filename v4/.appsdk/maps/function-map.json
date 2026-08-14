@@ -3,7 +3,8 @@
   "functions": [
     {"function_id":"goal_clarification","owner":"appsdk::goal","entry_symbols":["clarify"],"required_gates":["goal_confirmed"]},
     {"function_id":"compile_artifact","owner":"appsdk::compiler","entry_symbols":["compile"],"required_gates":["contract_valid","sdk_pinned"]},
-    {"function_id":"promote_freeze_publish","owner":"appsdk::lifecycle","entry_symbols":["promote_module","freeze_module","publish_active"],"required_gates":["record_graph","artifact_hash","vcs_clean"]},
+    {"function_id":"promote_freeze_publish","owner":"appsdk::lifecycle","entry_symbols":["promote_module","freeze_module","publish_active"],"required_gates":["record_graph","artifact_hash","vcs_clean","regression_report"]},
+    {"function_id":"v4.base_node","owner":"routecodex-v4-nodegraph::base_node","entry_symbols":["BaseNode"],"required_gates":["v4_base_node_l0_regression"]},
     {"function_id":"v4.node_graph","owner":"v4::architecture_gate","entry_symbols":["validate_node_graph"],"required_gates":["node_graph_edges","control_record_required","debug_subscription_read_only"]},
     {"function_id":"v4.debug_subscription","owner":"v4::debug","entry_symbols":["subscribe_debug","subscribe_snapshot"],"required_gates":["debug_subscription_read_only","snapshot_subscription_diagnostic","debug_never_live_path"]}
   ]

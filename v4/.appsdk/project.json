@@ -42,6 +42,7 @@
       "contracts/records/goal-clarification-record.schema.json",
       "contracts/records/review-record.schema.json",
       "contracts/records/promotion-record.schema.json",
+      "contracts/records/regression-report.schema.json",
       "contracts/records/freeze-record.schema.json",
       "contracts/records/record-graph.contract.json"
     ],
@@ -64,7 +65,7 @@
     {
       "active_artifact": "active/lib/routecodex-v4-governance/**",
       "generated_outputs": [
-        "generated/**"
+        "generated/governance/**"
       ],
       "module_id": "routecodex-v4-governance",
       "owned_paths": [
@@ -73,6 +74,53 @@
         "tests/core/**"
       ],
       "source_owner": "routecodex-v4-governance",
+      "regression": {
+        "required_before_freeze": true,
+        "suite_id": "v4-governance-regression",
+        "command": {
+          "program": "appsdk",
+          "args": ["verify", "."],
+          "working_directory": "."
+        },
+        "input_paths": ["contracts/**", ".appsdk/**"],
+        "minimum_test_count": 1,
+        "allow_skipped": false,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": ["source_change", "contract_change", "public_api_change", "artifact_change", "dependency_change"]
+      },
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/routecodex-v4-nodegraph/**",
+      "generated_outputs": [
+        "generated/nodegraph/**"
+      ],
+      "module_id": "routecodex-v4-nodegraph",
+      "owned_paths": [
+        "crates/routecodex-v4-nodegraph/**",
+        "tests/nodegraph/**"
+      ],
+      "source_owner": "routecodex-v4-nodegraph",
+      "regression": {
+        "required_before_freeze": true,
+        "suite_id": "v4-base-node-l0-regression",
+        "command": {
+          "program": "cargo",
+          "args": ["test", "-p", "routecodex-v4-nodegraph", "--test", "l0_base_node"],
+          "working_directory": "."
+        },
+        "input_paths": [
+          "crates/routecodex-v4-nodegraph/src/base_node.rs",
+          "crates/routecodex-v4-nodegraph/tests/l0_base_node.rs",
+          "contracts/node-graph.contract.json",
+          "contracts/pipeline-abstraction.contract.json",
+          "contracts/test-layers.contract.json"
+        ],
+        "minimum_test_count": 12,
+        "allow_skipped": false,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": ["source_change", "contract_change", "public_api_change", "artifact_change", "dependency_change"]
+      },
       "stage": "source_implemented"
     }
   ],

@@ -21,6 +21,8 @@
         {"test_id": "base_node_statistics_observability_only", "semantic": "统计只供观测；不进决策、不进 payload"},
         {"test_id": "base_node_debug_switch_diagnostic_only", "semantic": "BaseNode 级 debug 开关只影响诊断；live 修改必须落审计"},
         {"test_id": "base_node_dry_run_support", "semantic": "BaseNode 声明 dry-run 能力；节点主体可被正确 fixture 驱动，no-network"},
+        {"test_id": "base_node_error_intake_typed", "semantic": "节点错误以 typed error facts + payload hash + typed context 进入 BaseNode 错误入口，记录不可变、fail-fast、不进决策"},
+        {"test_id": "base_node_hook_queue_contract", "semantic": "节点 entry/exit hook 队列机器声明、position 排序、effect 分类、禁止重复位置；hook 不改变业务结果"},
         {"test_id": "base_node_no_business_logic", "semantic": "BaseNode 本身无业务逻辑；业务行为只来自注册算子"}
       ],
       "freeze": "L0 全部测试通过后 BaseNode 冻结；冻结后不得在业务节点派生之外修改横切能力"
@@ -85,5 +87,17 @@
     "上层 debug 可以订阅下层 debug 事件（只读），下层不得依赖上层观测",
     "所有 debug 层都禁止进入 live path、payload、MetadataCenter、错误链决策面",
     "每层 debug 开关 live 修改必须落不可变审计记录"
-  ]
+  ],
+  "freeze_regression": {
+    "module_id": "routecodex-v4-nodegraph",
+    "foundation_scope": "BaseNode",
+    "suite_id": "v4-base-node-l0-regression",
+    "command": "cargo test -p routecodex-v4-nodegraph --test l0_base_node",
+    "whitebox_required": true,
+    "blackbox_required": true,
+    "blackbox_test": "base_node_public_api_blackbox_regression",
+    "report_required": true,
+    "ordinary_mode_after_freeze": "disabled",
+    "reenable_on": ["source_change", "contract_change", "public_api_change", "artifact_change", "dependency_change"]
+  }
 }

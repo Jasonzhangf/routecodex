@@ -194,6 +194,8 @@
           "base_node_statistics_observability_only",
           "base_node_debug_switch_diagnostic_only",
           "base_node_dry_run_support",
+          "base_node_error_intake_typed",
+          "base_node_hook_queue_contract",
           "base_node_no_business_logic"
         ],
         "L1_edge": [
@@ -268,7 +270,9 @@
     "snapshot_subscriptions",
     "statistics_optional",
     "debug_switch",
-    "dry_run_support"
+    "dry_run_support",
+    "error_intake",
+    "hook_queue"
   ],
   "edge_kinds": ["data_flow", "information_flow", "control_flow", "debug_subscription", "error_intake"],
   "edges": {

@@ -3,4 +3,6 @@
 .appsdk/sdk.bin
 /active/lib/
 /generated/
+target/
+Cargo.lock
 # END APPSDK MANAGED
