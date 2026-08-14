@@ -318,10 +318,7 @@ async fn direct_sse_terminal_event_before_eof_does_not_publish_runtime_timing() 
     let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_terminal_before_eof"), runtime_timing, observation.clone());
 
     governed.next().await.unwrap().unwrap();
-    assert!(
-        observation.snapshot().unwrap().timing.is_none(),
-        "terminal event without clean EOF must not publish Runtime timing"
-    );
+    assert!(observation.snapshot().unwrap().timing.is_none(), "terminal event without clean EOF must not publish Runtime timing");
     drop(governed);
     assert!(observation.snapshot().unwrap().timing.is_none());
 }
