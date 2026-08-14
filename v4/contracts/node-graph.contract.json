@@ -304,7 +304,7 @@
     "contract_id": "v4-error-center",
     "role": "classify_and_audit_only",
     "intake": "typed error facts from any node/operator/hook via error_intake edge; payload_hash_and_typed_context_only",
-    "output": "classified error facts consumed by v4.control.route_exit decision owner",
+    "output": "immutable classify audit record plus opaque fact-lineage-bound single-use witness; classified facts are consumed by v4.control.route_exit decision owner",
     "forbidden": [
       "route operation",
       "retry/cooldown/reroute execution",
@@ -314,7 +314,7 @@
       "provider wire write",
       "client wire write"
     ],
-    "rule": "error center never makes routing decisions; VR owns the decision using classified error facts and the original request payload reference"
+    "rule": "error center never makes routing decisions; it validates a HostCaptured fact with non-empty payload_hash and typed_context, emits an opaque fact-lineage-bound single-use witness, and VR owns the decision using classified error facts and the original request payload reference"
   },
   "route_exit": {
     "contract_id": "v4-route-control-exit",
@@ -373,6 +373,7 @@
     "config chain is fixed: V4Config01AuthoringFileSource -> V4Config02AuthoringParsed -> V4Config03SchemaValidated -> V4Config04ResourceRegistryBuilt -> V4Config05ManifestPublished",
     "debug subscription edges must be read_only",
     "error_intake edges must target v4.control.error_center, carry payload_hash and typed_context, and have record_required true",
+    "V4Error02HostCaptured -> V4Error03RuntimeClassified requires an opaque ErrorCenter witness bound to the exact ErrorFact lineage; absent witness is type-invalid and mismatched/reused witnesses fail fast",
     "error center must not own route decisions; route decisions must exit via v4.control.route_exit owned by the router",
     "switch/cooldown/reroute must remain inside the same payload cycle with the original request payload immutable",
     "module debug switch edges are diagnostic-only and cannot touch mainline, payload, MetadataCenter, or error chain",

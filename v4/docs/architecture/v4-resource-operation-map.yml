@@ -247,6 +247,9 @@ resources:
       fallback: forbidden
       original_payload_immutable: true
       payload_hash_and_typed_context_only: true
+      intake_stage: V4Error02HostCaptured
+      intake_fields_non_empty: [payload_hash, typed_context]
+      classification_witness: opaque_fact_lineage_bound_single_use
     allowed_writers: [V4Error01SourceRaised, V4ErrorCenter02ClassifyAudit]
     allowed_readers: [V4Router07RouteDecisionExit, V4Error04RouterPolicyApplied]
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame]

@@ -1,4 +1,10 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use routecodex_v4_base_node::Scope;
 
@@ -29,7 +35,7 @@ impl ErrorStage {
 
 /// Immutable typed error fact. It carries only `payload_hash` + `typed_context`;
 /// business payload content is never read or retained.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ErrorFact {
     pub fact_id: String,
     pub stage: ErrorStage,
@@ -39,6 +45,7 @@ pub struct ErrorFact {
     pub typed_context: Option<String>,
     pub sequence: u64,
     pub timestamp_ms: u128,
+    origin: Arc<()>,
 }
 
 impl ErrorFact {
@@ -122,8 +129,49 @@ pub struct ClassifyAuditRecord {
     pub scope: Scope,
     pub payload_hash: Option<String>,
     pub typed_context: Option<String>,
+    pub fact_sequence: u64,
     pub sequence: u64,
     pub timestamp_ms: u128,
+}
+
+/// Opaque single-use capability proving that ErrorCenter audited this exact
+/// ErrorFact lineage. Callers can inspect its immutable audit record but
+/// cannot construct or reset the witness.
+#[derive(Debug, Clone)]
+pub struct ClassifyAuditWitness {
+    record: ClassifyAuditRecord,
+    fact_origin: Arc<()>,
+    consumed: Arc<AtomicBool>,
+}
+
+impl ClassifyAuditWitness {
+    pub fn record(&self) -> &ClassifyAuditRecord {
+        &self.record
+    }
+
+    fn matches(&self, fact: &ErrorFact) -> bool {
+        Arc::ptr_eq(&self.fact_origin, &fact.origin)
+            && self.record.fact_id == fact.fact_id
+            && self.record.code == fact.code
+            && self.record.scope == fact.scope
+            && self.record.payload_hash == fact.payload_hash
+            && self.record.typed_context == fact.typed_context
+            && self.record.fact_sequence == fact.sequence
+    }
+
+    fn ensure_available(&self) -> Result<(), ErrorChainError> {
+        if self.consumed.load(Ordering::Acquire) {
+            return Err(ErrorChainError::AuditWitnessAlreadyConsumed);
+        }
+        Ok(())
+    }
+
+    fn consume(&self) -> Result<(), ErrorChainError> {
+        self.consumed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| ())
+            .map_err(|_| ErrorChainError::AuditWitnessAlreadyConsumed)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +183,11 @@ pub enum ErrorChainError {
     MessageOnlyProjectionForbidden,
     ScopeMismatch,
     AlreadyClassified,
+    MissingPayloadHash,
+    MissingTypedContext,
+    InvalidAuditStage,
+    AuditWitnessMismatch,
+    AuditWitnessAlreadyConsumed,
     ControlNotReconstructibleFromPayload,
 }
 
@@ -184,6 +237,7 @@ impl ErrorChain {
             typed_context: typed_context.map(|c| c.to_string()),
             sequence: self.next_sequence,
             timestamp_ms: now_ms(),
+            origin: Arc::new(()),
         };
         self.append_record(None, fact.clone(), None);
         self.fact = Some(fact.clone());
@@ -195,9 +249,35 @@ impl ErrorChain {
         self.transition(ErrorStage::SourceRaised, None)
     }
 
-    /// `02 -> 03`. Only from HostCaptured.
-    pub fn classify(&mut self) -> Result<ErrorFact, ErrorChainError> {
-        self.transition(ErrorStage::HostCaptured, None)
+    /// `02 -> 03`. The ErrorCenter witness is mandatory, fact-bound, opaque,
+    /// and single-use, so RuntimeClassified cannot bypass classify/audit.
+    ///
+    /// ```compile_fail
+    /// use routecodex_v4_base_node::Scope;
+    /// use routecodex_v4_error::ErrorChain;
+    /// let mut chain = ErrorChain::new(Scope::new("r", "p", 1, "s", "c"));
+    /// chain.classify();
+    /// ```
+    pub fn classify(
+        &mut self,
+        witness: ClassifyAuditWitness,
+    ) -> Result<ErrorFact, ErrorChainError> {
+        if self.is_terminal() {
+            return Err(ErrorChainError::AlreadyTerminal);
+        }
+        let fact = self.fact.clone().ok_or(ErrorChainError::NoActiveFact)?;
+        if fact.stage != ErrorStage::HostCaptured {
+            return Err(ErrorChainError::NonAdjacentTransition);
+        }
+        witness.ensure_available()?;
+        if !witness.matches(&fact) {
+            return Err(ErrorChainError::AuditWitnessMismatch);
+        }
+        witness.consume()?;
+        self.transition(
+            ErrorStage::HostCaptured,
+            Some(witness.record.record_id.clone()),
+        )
     }
 
     /// `03 -> 04`. Only from RuntimeClassified; policy is typed and passive.
@@ -309,12 +389,36 @@ impl ErrorCenter {
     }
 
     /// Classify a typed error fact and append an immutable audit record.
-    /// Cross-scope fact and duplicate fact_id are red.
-    pub fn classify(&mut self, fact: ErrorFact) -> Result<ClassifyAuditRecord, ErrorChainError> {
+    /// Cross-scope, incomplete, non-HostCaptured, and duplicate facts are red.
+    pub fn classify(&mut self, fact: ErrorFact) -> Result<ClassifyAuditWitness, ErrorChainError> {
         if fact.scope != self.scope {
             return Err(ErrorChainError::ScopeMismatch);
         }
-        if self.records.iter().any(|r| r.fact_id == fact.fact_id) {
+        if fact.stage != ErrorStage::HostCaptured {
+            return Err(ErrorChainError::InvalidAuditStage);
+        }
+        if !fact
+            .payload_hash
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+        {
+            return Err(ErrorChainError::MissingPayloadHash);
+        }
+        if !fact
+            .typed_context
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+        {
+            return Err(ErrorChainError::MissingTypedContext);
+        }
+        if self.records.iter().any(|record| {
+            record.fact_id == fact.fact_id
+                && record.code == fact.code
+                && record.scope == fact.scope
+                && record.payload_hash == fact.payload_hash
+                && record.typed_context == fact.typed_context
+                && record.fact_sequence == fact.sequence
+        }) {
             return Err(ErrorChainError::AlreadyClassified);
         }
         self.next_sequence += 1;
@@ -326,11 +430,16 @@ impl ErrorCenter {
             scope: fact.scope.clone(),
             payload_hash: fact.payload_hash.clone(),
             typed_context: fact.typed_context.clone(),
+            fact_sequence: fact.sequence,
             sequence: self.next_sequence,
             timestamp_ms: now_ms(),
         };
         self.records.push(record.clone());
-        Ok(record)
+        Ok(ClassifyAuditWitness {
+            record,
+            fact_origin: fact.origin,
+            consumed: Arc::new(AtomicBool::new(false)),
+        })
     }
 
     pub fn records(&self) -> impl Iterator<Item = &ClassifyAuditRecord> {

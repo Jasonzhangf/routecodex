@@ -40,7 +40,7 @@ execution decision -> client projected），以及 intake/classify/audit-only �
 ErrorChain::new(scope: Scope) -> Self
 raise(&mut self, code, payload_hash, typed_context) -> Result<ErrorFact, ErrorChainError>   // -> 01
 capture(&mut self) -> Result<ErrorFact, ErrorChainError>                                    // 01 -> 02
-classify(&mut self) -> Result<ErrorFact, ErrorChainError>                                   // 02 -> 03
+classify(&mut self, witness: ClassifyAuditWitness) -> Result<ErrorFact, ErrorChainError>    // 02 -> 03
 apply_policy(&mut self, policy: RetryPolicy) -> Result<ErrorFact, ErrorChainError>          // 03 -> 04
 decide(&mut self, decision: ExecutionDecision) -> Result<ErrorFact, ErrorChainError>        // 04 -> 05
 project(&mut self, message) -> Result<ClientProjection, ErrorChainError>                    // 05 -> 06，终止
@@ -49,7 +49,7 @@ current_stage(&self) -> Option<ErrorStage>
 is_terminal(&self) -> bool
 
 ErrorCenter::new(scope: Scope) -> Self
-classify(&mut self, fact: ErrorFact) -> Result<ClassifyAuditRecord, ErrorChainError>         // audit + category
+classify(&mut self, fact: ErrorFact) -> Result<ClassifyAuditWitness, ErrorChainError>        // audit + category
 records(&self) -> impl Iterator<Item = &ClassifyAuditRecord>
 
 ErrorFact::try_reconstruct_from_payload(...) -> Result<Self, ErrorChainError>                // 恒 Err（RED-04）
@@ -66,6 +66,8 @@ ErrorFact::try_reconstruct_from_payload(...) -> Result<Self, ErrorChainError>   
 | RetryPolicy 消费位 | 03 后 apply_policy 成功 | 01/02 后 apply_policy 红；decide 重复红 |
 | scope 隔离 | 同 scope chain + center 成功 | 跨 scope fact 进 center 红 |
 | ErrorCenter audit-only | classify 写不可变审计（category） | 重复 classify 同一 fact 红 |
+| ErrorCenter intake 完整性 | HostCaptured + payload hash + typed context 产出 witness | 缺/空 hash、缺/空 context、非 HostCaptured 红 |
+| Error03 审计准入 | 消费同一 ErrorFact lineage 的 opaque witness | 无 witness 编译失败；错 witness / clone 重复消费红 |
 | payload 重建 | typed facts 独立 | try_reconstruct_from_payload 恒 Err |
 | 审计不可变 | 记录含 scope/sequence/timestamp | 只读查询不改变记录数 |
 | blackbox 回归 | 公共 API 全量可用 | — |
