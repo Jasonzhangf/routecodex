@@ -547,6 +547,22 @@ pub(crate) fn colorize_v3_error_console_line(
     colorize_v3_layered_console_line(block, ANSI_ERROR_RED, ANSI_DEBUG_DIM)
 }
 
+pub(crate) fn colorize_v3_single_error_console_line(
+    human_prefix: &str,
+    headline: &str,
+) -> String {
+    let line = if human_prefix.is_empty() {
+        headline.to_string()
+    } else {
+        format!("{human_prefix} {headline}")
+    };
+    if is_v3_console_color_enabled() {
+        format!("{ANSI_ERROR_RED}{line}{ANSI_RESET}")
+    } else {
+        line
+    }
+}
+
 /// 行内局部错误着色：只把错误段（provider 名 + 错误详情）染红，
 /// 行的其余部分（req/selected/reason 等）保持正常色，避免整行一片红。
 pub(crate) fn colorize_v3_console_error_segment(segment: &str) -> String {
