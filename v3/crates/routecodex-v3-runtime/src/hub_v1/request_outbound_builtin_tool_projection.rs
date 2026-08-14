@@ -49,12 +49,18 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
         }
         if matches!(tool_type, Some("web_search" | "web_search_preview")) {
             if web_search_execution_mode == V3WebSearchExecutionMode::NativeRemoteSearchToolMix {
-                has_web_search = true;
-                merge_openai_chat_web_search_options(
-                    &mut web_search_options,
-                    tool,
-                    &format!("$.tools[{index}]"),
-                )?;
+                // Mode A 与 Mode B 共用同一 capability 护栏：provider 未声明
+                // web_search 能力时不保留 hosted web_search 声明（工具与
+                // web_search_options 一并移除），避免无能力 provider 收到
+                // 未知字段或误调用。
+                if has_web_search_capability {
+                    has_web_search = true;
+                    merge_openai_chat_web_search_options(
+                        &mut web_search_options,
+                        tool,
+                        &format!("$.tools[{index}]"),
+                    )?;
+                }
             } else if web_search_execution_mode.is_metadata_center_local_search() || !is_gpt_model {
                 // Mode B（显式内部路由，如 MiniMax 走标准 web search 内部路由）
                 // 或非 gpt 模型：标准 web_search 声明投影为本地 websearch
@@ -224,10 +230,17 @@ fn merge_openai_chat_web_search_options(
                 "MalformedOutboundField target_protocol=openai_chat path={path}.search_content_types"
             )
         })?;
-        if values.as_slice() != [Value::String("text".to_string())] {
-            return Err(format!(
-                "UnmappedOutboundFields target_protocol=openai_chat paths={path}.search_content_types"
-            ));
+        // openai_chat hosted web_search 只能表达文本结果（web_search_options 无
+        // search_content_types 字段）。Codex 标准声明 ["text","image"]（生产样本
+        // tools[13]）：image 是已知合法内容类型但协议无法表达 → 显式剥离
+        // （降级 text 投影，对齐图片附件在无 vision provider 的剥离语义）；
+        // 未知内容类型（如 video）保持 fail-fast，禁止静默丢弃。
+        for value in values {
+            if !matches!(value.as_str(), Some("text" | "image")) {
+                return Err(format!(
+                    "UnmappedOutboundFields target_protocol=openai_chat paths={path}.search_content_types"
+                ));
+            }
         }
     }
     for key in ["search_context_size", "user_location"] {

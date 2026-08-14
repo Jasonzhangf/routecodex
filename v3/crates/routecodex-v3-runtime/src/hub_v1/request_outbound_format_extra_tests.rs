@@ -1206,6 +1206,76 @@ fn openai_chat_wire_removes_web_search_for_gpt_without_capability() {
 }
 
 #[test]
+fn openai_chat_wire_mode_a_removes_web_search_for_provider_without_capability() {
+    // Mode A（NativeRemoteSearchToolMix）与 Mode B 共用 capability 护栏：
+    // provider 未声明 web_search 能力时 hosted web_search 声明一并移除，
+    // 不能因为请求级 Mode A 就无条件保留。
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [
+            {
+                "type": "web_search",
+                "external_web_access": true,
+                "search_content_types": ["text", "image"]
+            },
+            {"type": "function", "function": {"name": "read_file"}}
+        ]
+    });
+    let request = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &payload,
+        V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+        false,
+    )
+    .expect("Mode A without capability must strip web_search cleanly");
+    assert!(
+        request.get("web_search_options").is_none(),
+        "no-capability provider must not receive web_search_options under Mode A: {:?}",
+        request.get("web_search_options")
+    );
+    let tools = request["tools"].as_array().expect("tools retained");
+    assert_eq!(tools.len(), 1, "ordinary function tool must remain");
+    assert_eq!(tools[0]["function"]["name"], "read_file");
+    assert!(
+        !tools.iter().any(|tool| tool
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind == "web_search")),
+        "web_search tool declaration must be removed under Mode A without capability"
+    );
+}
+
+#[test]
+fn openai_chat_wire_accepts_standard_text_image_search_content_types() {
+    // Codex 标准 web_search 声明携带 search_content_types ["text","image"]
+    // （生产样本 tools[13]）。openai_chat hosted web_search 只能表达文本结果：
+    // image 是已知合法内容类型但协议无法表达 → 显式剥离（降级 text 投影），
+    // 不得 fail-fast 502。
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [
+            {
+                "type": "web_search",
+                "external_web_access": true,
+                "search_content_types": ["text", "image"]
+            }
+        ]
+    });
+    let request = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &payload,
+        V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+        true,
+    )
+    .expect("standard Codex text+image declaration must project to openai_chat wire");
+    assert!(
+        request.get("web_search_options").is_some(),
+        "capable provider under Mode A must receive web_search_options: {:?}",
+        request
+    );
+}
+
+#[test]
 fn openai_chat_wire_projects_local_websearch_for_non_gpt_without_mode() {
     // 非 gpt 模型（deepseek/plain-model 等）即使未配 Mode B（None）：标准
     // web_search 声明统一替换为内部 websearch 工具（不区分 provider、不依赖
