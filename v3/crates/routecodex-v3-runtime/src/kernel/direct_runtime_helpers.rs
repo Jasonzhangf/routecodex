@@ -169,6 +169,19 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     };
     let mut failed_with_current = state.failed_candidates.clone();
     failed_with_current.insert(failed_key.clone());
+    if source.code == "provider_transport_error" {
+        // 连接层错误是 provider/baseurl 级故障：同 provider 的所有 key
+        // 共用同一 baseURL，全部排除，避免 key2 失败切 key1 的 thrashing。
+        if let Some(expanded_candidates) = expanded_candidates {
+            for candidate in expanded_candidates {
+                if candidate.provider_id == selected.candidate.provider_id {
+                    let key = candidate_key(candidate);
+                    failed_with_current.insert(key.clone());
+                    state.failed_candidates.insert(key);
+                }
+            }
+        }
+    }
     let mut remaining = expanded_candidates.map_or(0, |expanded_candidates| {
         remaining_available_candidates(expanded_candidates, context.availability, &failed_with_current)
     });
@@ -405,6 +418,19 @@ async fn run_v3_direct_transient_failure_policy<R: V3ProviderAvailabilityReader>
     };
     let mut failed_with_current = state.failed_candidates.clone();
     failed_with_current.insert(failed_key.clone());
+    if source.code == "provider_transport_error" {
+        // 连接层错误是 provider/baseurl 级故障：同 provider 的所有 key
+        // 共用同一 baseURL，全部排除，避免 key2 失败切 key1 的 thrashing。
+        if let Some(expanded_candidates) = expanded_candidates {
+            for candidate in expanded_candidates {
+                if candidate.provider_id == selected.candidate.provider_id {
+                    let key = candidate_key(candidate);
+                    failed_with_current.insert(key.clone());
+                    state.failed_candidates.insert(key);
+                }
+            }
+        }
+    }
     let mut remaining = expanded_candidates.map_or(0, |candidates| {
         remaining_available_candidates(candidates, context.availability, &failed_with_current)
     });
@@ -719,7 +745,12 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
     retain_response_cipher: bool,
 ) -> V3ClientSseStream {
     wrap_direct_sse_provider_event_json_observation_stream_with_compat(
-        source, stream_observation, runtime_timing, strip_client_response_id, retain_response_cipher, false,
+        source,
+        stream_observation,
+        runtime_timing,
+        strip_client_response_id,
+        retain_response_cipher,
+        false,
     )
 }
 
@@ -787,19 +818,12 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                         .finish()
                         .map_err(|error| runtime_source("V3ProviderResp14Raw", error))
                     {
-                        Ok(()) => match state.runtime_timing.is_finished() {
-                            Ok(true) => None,
-                            Ok(false) => match state.runtime_timing.finish_external() {
-                                Ok(()) => None,
-                                Err(error) => Some((
-                                    Err(runtime_source("V3RuntimeTimingExternal", error)),
-                                    state,
-                                )),
-                            },
-                            Err(error) => Some((
-                                Err(runtime_source("V3RuntimeTimingExternal", error)),
-                                state,
-                            )),
+                        Ok(()) if state.runtime_timing.is_finished().unwrap_or(false) => None,
+                        Ok(()) => match state.runtime_timing.finish_external() {
+                            Ok(()) => None,
+                            Err(error) => {
+                                Some((Err(runtime_source("V3RuntimeTimingExternal", error)), state))
+                            }
                         },
                         Err(error) => Some((Err(error), state)),
                     }
@@ -1157,7 +1181,13 @@ async fn exact_pin_unavailable_output(
         Ok(terminal) => terminal,
         Err(decision) => {
             return error_output(
-                runtime_source("V3Error05ExecutionDecision", format!("exact-pin availability proof produced nonterminal {:?} Error05", decision.action)),
+                runtime_source(
+                    "V3Error05ExecutionDecision",
+                    format!(
+                        "exact-pin availability proof produced nonterminal {:?} Error05",
+                        decision.action
+                    ),
+                ),
                 node_trace,
                 hook_registry,
             )
