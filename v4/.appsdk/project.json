@@ -48,7 +48,8 @@
     ],
     "runtime_forbidden_roots": [
       "playground/**",
-      "generated/**"
+      "generated/**",
+      "protected/source/**"
     ],
     "zone_transition_contract": "contracts/transitions/zone-transition-manifest.json"
   },
@@ -76,9 +77,8 @@
         "working_directory": "."
       },
       "contract_paths": [
-        "contracts/records/**",
-        "contracts/transitions/**",
-        "contracts/lifecycle-state-machines.manifest.json",
+        ".appsdk/contracts/**",
+        "contracts/records/goal-clarification-record.schema.json",
         "contracts/goal-clarification-state-machine.json"
       ],
       "dependency_modules": [],
@@ -383,7 +383,9 @@
   "project_id": "routecodex-v4",
   "schema_version": 1,
   "sdk": {
+    "bundle_manifest": ".appsdk/contracts/sdk-bundle.manifest.json",
     "name": "appsdk",
+    "resource_record": ".appsdk/sdk-resources.json",
     "version": "0.1.0"
   }
 }

@@ -4,6 +4,8 @@
   "nodes":["clarify","playground","review","promotion","compile","active","protected","verify"],
   "edges":[
     {"from":"clarify","to":"playground","owner":"appsdk::goal"},
+    {"from":"global_appsdk_binary","to":"sdk_bundle_resources","owner":"appsdk::init","edge_type":"governance_install","path":".appsdk/sdk-resources.json","status":"active"},
+    {"from":"sdk_bundle_resources","to":"project_contract","owner":"appsdk::verify","edge_type":"governance_validation","path":".appsdk/project.json","status":"active"},
     {"from":"playground","to":"review","owner":"appsdk::lifecycle"},
     {"from":"review","to":"promotion","owner":"appsdk::lifecycle"},
     {"from":"promotion","to":"regression","owner":"appsdk::regression_gate"},

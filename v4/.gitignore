@@ -4,6 +4,5 @@
 /active/lib/
 /protected/
 /generated/
-target/
 Cargo.lock
 # END APPSDK MANAGED
