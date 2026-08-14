@@ -25,7 +25,7 @@
   "result": "pass",
   "scope_hash": "scope-error-v1",
   "skipped": 0,
-  "source_commit": "f780c4072",
+  "source_commit": "ce50527af",
   "suite_id": "v4-error-l2-regression",
   "test_characteristics": {
     "blackbox": true,

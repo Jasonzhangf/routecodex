@@ -2,7 +2,7 @@
   "active_version": "active-v1",
   "artifact_record_id": "evidence-error-v1",
   "clean_scope": {
-    "base_commit": "f780c4072",
+    "base_commit": "ce50527af",
     "changed_paths": [],
     "generated_policy": "tracked_hash",
     "ignored_paths": []
@@ -28,5 +28,5 @@
   "regression_report_hash": "sha256:placeholder",
   "regression_report_id": "regression-error-v1",
   "review_id": "review-error-v1",
-  "source_commit_or_tag": "f780c4072"
+  "source_commit_or_tag": "ce50527af"
 }

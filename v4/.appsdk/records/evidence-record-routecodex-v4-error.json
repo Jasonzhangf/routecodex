@@ -3,7 +3,7 @@
   "issue_id": "routecodex-v4-foundation",
   "experiment_id": "experiment-error-freeze-v1",
   "kind": "build",
-  "source_commit": "f780c4072",
+  "source_commit": "ce50527af",
   "artifact_hash": "sha256:a732f26f8e7b430e08f6d0caf6c8957ac4553e0b444260698da55ffece902642",
   "scope": {
     "module_id": "routecodex-v4-error"
