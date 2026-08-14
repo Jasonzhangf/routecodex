@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-node-graph",
+  "status": "design",
+  "owner_feature_id": "v4.node_graph",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
+    "v4/docs/architecture/v4-pipeline-abstraction-model.md",
+    "v4/docs/architecture/v4-resource-operation-map.yml"
+  ],
+  "standard_node_families": [
+    {"family": "RequestChainNode", "chain": "request", "data_plane": true},
+    {"family": "ResponseChainNode", "chain": "response", "data_plane": true},
+    {"family": "ErrorChainNode", "chain": "error", "data_plane": false},
+    {"family": "ConfigChainNode", "chain": "config", "data_plane": false},
+    {"family": "LifecycleChainNode", "chain": "lifecycle", "data_plane": false},
+    {"family": "ControlCenterNode", "chain": "control", "data_plane": false},
+    {"family": "DiagnosticChainNode", "chain": "diagnostic", "data_plane": false}
+  ],
+  "node_identity_required": ["node_id", "chain", "chain_version", "position", "owner", "family", "input_node", "output_node"],
+  "base_node_capabilities": [
+    "control_in",
+    "control_out",
+    "control_record",
+    "debug_subscriptions",
+    "snapshot_subscriptions",
+    "statistics_optional"
+  ],
+  "edge_kinds": ["data_flow", "control_flow", "debug_subscription"],
+  "edges": {
+    "data_flow": {
+      "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "data_in", "data_out", "owner", "adjacent_required"],
+      "rule": "only adjacent nodes; resources must be data-axis; one data_in and one data_out per node"
+    },
+    "control_flow": {
+      "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "operation", "control_key", "scope_keys", "owner", "record_required"],
+      "operations": ["register", "consume", "release"],
+      "rule": "record_required must be true; scope isolation enforced; control never enters data axis; release owned by registering node"
+    },
+    "debug_subscription": {
+      "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "topic", "direction", "read_only", "owner"],
+      "topics": ["node_event", "state_transition", "diagnostic"],
+      "snapshot_topics": ["node_entry", "node_exit", "node_error"],
+      "rule": "read_only must be true; no payload; no decision influence"
+    }
+  },
+  "verification_rules": [
+    "all edge from/to must exist in declared nodes",
+    "data edges must be adjacent in chain_version",
+    "data edge resources must belong to data axis",
+    "control edge resources must belong to control axis",
+    "control edge record_required must be true",
+    "debug subscription edges must be read_only",
+    "forbidden edges cannot be added",
+    "every code-level conversion/subscription/control operation must resolve to a declared edge"
+  ]
+}

@@ -6,7 +6,10 @@
   "canonical_docs": [
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
     "v4/docs/architecture/v4-v3-abstraction-coverage.yml",
-    "v4/docs/architecture/v4-resource-operation-map.yml"
+    "v4/docs/architecture/v4-resource-operation-map.yml",
+    "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
+    "v4/contracts/node-graph.contract.json",
+    "v4/contracts/debug-subscription.contract.json"
   ],
   "evaluation": {
     "skeleton_vs_v3": "pass",
@@ -148,6 +151,9 @@
     {"gate_id":"ABS-GATE-10","name":"control_record_required","rule":"every control_in/control_out writes an immutable ControlRecord; missing record fails"},
     {"gate_id":"ABS-GATE-11","name":"debug_subscription_read_only","rule":"debug subscribers cannot mutate execution or decisions"},
     {"gate_id":"ABS-GATE-12","name":"snapshot_subscription_diagnostic","rule":"node snapshots never enter live runtime input"},
-    {"gate_id":"ABS-GATE-13","name":"statistics_observability_only","rule":"statistics cannot affect decisions, payload, or business truth"}
+    {"gate_id":"ABS-GATE-13","name":"statistics_observability_only","rule":"statistics cannot affect decisions, payload, or business truth"},
+    {"gate_id":"ABS-GATE-14","name":"node_graph_machine_controlled","rule":"node graph edges are machine contracts; code-level conversions/subscriptions must resolve to declared edges"},
+    {"gate_id":"ABS-GATE-15","name":"data_control_flow_separated","rule":"data flow edges and control flow edges are separate edge kinds; control never enters data axis"},
+    {"gate_id":"ABS-GATE-16","name":"debug_relations_v3_locked","rule":"v4 debug subscription relations must not relax v3 anchored debug resource relations"}
   ]
 }

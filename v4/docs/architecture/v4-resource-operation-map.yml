@@ -403,6 +403,226 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: design
+  - resource_id: v4.debug.trace_context
+    resource_kind: diagnostic
+    lifecycle: v4.debug.trace
+    owner_crate: routecodex-v4-debug
+    owner_node: V4Debug04TraceContextStarted
+    identity: [serverId, requestId, executionId]
+    v3_baseline: v3.debug.trace_context
+    semantic_contract:
+      derived_consumers: [v4.debug.event_ledger, v4.debug.raw_capture, v4.debug.snapshot_session]
+      may_enter_metadata_center: false
+    allowed_writers: ["V4DebugRuntime::start_trace"]
+    allowed_readers: [v4.debug.event_ledger, v4.debug.raw_capture, v4.debug.snapshot_session]
+    forbidden_writers: [routecodex-v4-server, routecodex-v4-error, routecodex-v4-provider]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.event_ledger
+    resource_kind: diagnostic
+    lifecycle: v4.debug.ledger
+    owner_crate: routecodex-v4-debug
+    owner_node: V4Debug05EventLedgerRecorded
+    identity: [sequence, serverId, requestId, executionId, nodeId]
+    v3_baseline: v3.debug.event_ledger
+    semantic_contract:
+      may_enter_metadata_center: false
+    allowed_writers: ["V4DebugRuntime::record_node_event"]
+    allowed_readers: [developer_diagnostics]
+    forbidden_writers: [routecodex-v4-server, routecodex-v4-error, routecodex-v4-provider]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.raw_capture
+    resource_kind: diagnostic
+    lifecycle: v4.debug.raw_capture
+    owner_crate: routecodex-v4-debug
+    owner_node: V4Debug06RawCaptureStored
+    identity: [sequence, serverId, requestId, executionId, kind]
+    v3_baseline: v3.debug.raw_capture
+    semantic_contract:
+      verbatim_fidelity: true
+      payload_truth: forbidden
+      may_enter_metadata_center: false
+    allowed_writers: ["V4DebugRuntime::capture_raw_request", "V4DebugRuntime::capture_raw_response"]
+    allowed_readers: [developer_diagnostics]
+    forbidden_writers: [routecodex-v4-server, routecodex-v4-error, routecodex-v4-provider]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.snapshot_session
+    resource_kind: diagnostic
+    lifecycle: v4.debug.snapshot_lifecycle
+    owner_crate: routecodex-v4-debug
+    owner_node: V4Debug07SnapshotSessionRegistered
+    identity: [sessionId, serverId, requestId, executionId]
+    v3_baseline: v3.debug.snapshot_session
+    semantic_contract:
+      lifecycle: start_record_release
+      may_enter_metadata_center: false
+    allowed_writers: ["V4DebugRuntime::start_snapshot_session", "V4DebugRuntime::record_snapshot", "V4DebugRuntime::release_snapshot_session"]
+    allowed_readers: [developer_diagnostics]
+    forbidden_writers: [routecodex-v4-server, routecodex-v4-error, routecodex-v4-provider]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.dry_run_fixture
+    resource_kind: diagnostic
+    lifecycle: v4.debug.dry_run
+    owner_crate: routecodex-v4-debug
+    owner_node: V4Debug08DryRunFixture
+    identity: [fixtureId, serverId, endpoint]
+    v3_baseline: v3.debug.dry_run_fixture
+    semantic_contract:
+      may_enter_metadata_center: false
+    allowed_writers: ["V4DebugRuntime::register_dry_run_fixture"]
+    allowed_readers: ["V4DebugRuntime::build_dry_run_execution_plan"]
+    forbidden_writers: [routecodex-v4-server, routecodex-v4-error, routecodex-v4-provider]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.dry_run_execution
+    resource_kind: diagnostic
+    lifecycle: v4.debug.dry_run
+    owner_crate: routecodex-v4-runtime
+    owner_node: V4Debug09DryRunNoNetworkTerminalEffect
+    identity: [fixtureId, serverId, requestId, executionId]
+    v3_baseline: v3.debug.dry_run_execution
+    semantic_contract:
+      no_network_only: true
+      may_enter_metadata_center: false
+    allowed_writers: ["V4DebugRuntime::execute_dry_run_no_network_effect"]
+    allowed_readers: [developer_diagnostics]
+    forbidden_writers: [routecodex-v4-server, routecodex-v4-provider]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.codex_sample_authorization
+    resource_kind: diagnostic_control
+    lifecycle: v4.config.compile
+    owner_crate: routecodex-v4-config
+    owner_node: V4Config05ManifestPublished
+    identity: [managedInstanceId, codexSamplesEnabled, directSnapshotsEnabled, snapshotStages]
+    v3_baseline: v3.debug.codex_sample_authorization
+    semantic_contract:
+      may_enter_metadata_center: false
+    allowed_writers: [V4Config05ManifestPublished]
+    allowed_readers: ["V4DebugRuntime::should_capture_snapshot_stage"]
+    forbidden_writers: [routecodex-v4-runtime, routecodex-v4-provider, V4ControlMetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.payload_budget
+    resource_kind: diagnostic_side_channel
+    lifecycle: v4.debug.sample_retention
+    owner_crate: routecodex-v4-debug
+    owner_node: V4Debug10PayloadBudget
+    identity: [serverId, requestId, executionId, artifactKind]
+    v3_baseline: v3.debug.payload_budget
+    semantic_contract:
+      verbatim_fidelity: true
+      error_force_write: true
+      retention_cap: 200
+      may_enter_metadata_center: false
+    allowed_writers: ["V4DebugRuntime::project_payload_verbatim", "V4DebugRuntime::append_bounded_text", "V4DebugRuntime::persist"]
+    allowed_readers: [developer_diagnostics]
+    forbidden_writers: [routecodex-v4-server, routecodex-v4-error, routecodex-v4-provider, V4ControlMetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.codex_sample_filesystem
+    resource_kind: bounded_diagnostic_artifact
+    lifecycle: v4.debug.sample_retention
+    owner_crate: routecodex-v4-debug
+    owner_node: V4Debug11CodexSampleStore
+    identity: [entryProtocol, endpoint, port, requestId, artifactName]
+    v3_baseline: v3.debug.codex_sample_filesystem
+    semantic_contract:
+      may_enter_metadata_center: false
+    allowed_writers: ["V4DebugRuntime::persist", "V4DebugRuntime::enforce_listener_retention"]
+    allowed_readers: [developer_diagnostics, replay_codex_sample]
+    forbidden_writers: [routecodex-v4-runtime, routecodex-v4-provider, V4ControlMetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.observability
+    resource_kind: diagnostic_side_channel
+    lifecycle: v4.debug.observability
+    owner_crate: routecodex-v4-runtime
+    owner_node: V4RuntimeObservability
+    identity: [requestId, entryProtocol, executionMode, routingGroupId, providerId, modelId]
+    v3_baseline: v3.runtime.responses_observability
+    semantic_contract:
+      may_enter_metadata_center: false
+    allowed_writers: [V4RuntimeObservabilityAccumulator]
+    allowed_readers: [v4.console.terminal_output]
+    forbidden_writers: [routecodex-v4-provider, routecodex-v4-server, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.timing_observability
+    resource_kind: diagnostic_side_channel
+    lifecycle: v4.debug.timing
+    owner_crate: routecodex-v4-runtime
+    owner_node: V4RuntimeTimingSummary
+    identity: [requestId, attempt, timingPhase]
+    v3_baseline: v3.runtime.responses_timing_observability
+    semantic_contract:
+      may_enter_metadata_center: false
+    allowed_writers: [V4RuntimeTimingState]
+    allowed_readers: [v4.debug.observability, v4.console.terminal_output]
+    forbidden_writers: [routecodex-v4-server, routecodex-v4-provider, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.console.terminal_output
+    resource_kind: diagnostic
+    lifecycle: v4.console.projection
+    owner_crate: routecodex-v4-server
+    owner_node: V4ConsoleTerminalOutput
+    identity: [serverId, requestId, entryProtocol, severity]
+    v3_baseline: v3.console.terminal_output
+    semantic_contract:
+      may_enter_metadata_center: false
+    allowed_writers: [V4ConsoleProjection]
+    allowed_readers: [developer_terminal]
+    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.server.request_identity
+    resource_kind: runtime_identity_counter
+    lifecycle: v4.server.request_identity
+    owner_crate: routecodex-v4-server
+    owner_node: V4RequestIdCounter
+    identity: [serverId, localDay, sequence, requestId]
+    v3_baseline: v3.server.request_identity
+    semantic_contract:
+      may_enter_metadata_center: false
+    allowed_writers: ["V4RequestIdCounter::next_request_identity"]
+    allowed_readers: [v4.console.terminal_output]
+    forbidden_writers: [routecodex-v4-runtime, routecodex-v4-provider, V4ReqChatProcess03Governed]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.error.raw_wire_evidence
+    resource_kind: failure_scoped_diagnostic_artifact
+    lifecycle: v4.error.raw_wire_evidence
+    owner_crate: routecodex-v4-server
+    owner_node: V4ErrorEvidenceFlushOnTerminalFailure
+    identity: [entryProtocol, endpoint, port, requestId, artifactName]
+    v3_baseline: v3.error.raw_wire_evidence
+    semantic_contract:
+      failure_terminal_only: true
+      release_point: V4ServerRespOutbound06ClientFrameBodyEofErrorOrDrop
+      may_enter_metadata_center: false
+    allowed_writers: [V4ErrorEvidenceFlushOnTerminalFailure]
+    allowed_readers: [developer_diagnostics, incident_replay]
+    forbidden_writers: [routecodex-v4-runtime, routecodex-v4-provider, V4ControlMetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
 forbidden_direct_edges:
   - from: v4.config.manifest
     to: v4.request.normal_payload

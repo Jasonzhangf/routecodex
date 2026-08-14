@@ -384,3 +384,5 @@ publisher（节点 operator / Control Center 状态机）
 2. 建立 `v4-v3-abstraction-coverage.yml`，覆盖 103 个 V3 资源（本轮已完成分类汇总，文件级映射下一步落地）。
 3. 为每个 chain 建立 V4 target node 列表，与 `v4-resource-operation-map.yml` 的 21 个 target 资源核对。
 4. 只有 coverage = 103/103、GAP = 0、red gate 接线后，才进入 module/function/mainline registry 与 Rust 实现。
+
+标准节点族、节点图机器接线（data flow / control flow / debug subscription）和 debug 订阅按 V3 锁定的资源关系见 `v4-standard-nodes-and-node-graph.md`、`v4/contracts/node-graph.contract.json` 和 `v4/contracts/debug-subscription.contract.json`。
