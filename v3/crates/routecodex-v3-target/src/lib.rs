@@ -125,6 +125,7 @@ impl V3TargetInterpreter {
             Some(provider_id),
             Some(model_id),
             Some(auth_alias),
+            0,
             V3TargetExpansionScope {
                 path: vec!["continuation:exact_pin".to_string()],
                 pool_ids: vec!["continuation_exact_pin".to_string()],
@@ -169,6 +170,7 @@ impl V3TargetInterpreter {
                     Some(provider_id),
                     Some(model_id),
                     None,
+                    deterministic_sample,
                     V3TargetExpansionScope {
                         path: vec![format!("direct:{provider_id}.{model_id}")],
                         pool_ids: vec![entry.pool_id.clone()],
@@ -330,6 +332,7 @@ impl V3TargetInterpreter {
                 target.provider.as_deref(),
                 target.model.as_deref(),
                 target.key.as_deref(),
+                sample,
                 scope,
             ),
             V3RouteTargetKind::Forwarder => self.expand_forwarder(
@@ -393,6 +396,7 @@ impl V3TargetInterpreter {
                     target.provider.as_deref(),
                     target.model.as_deref().or(Some(forwarder.model.as_str())),
                     target.key.as_deref(),
+                    sample.wrapping_add(index as u64),
                     scope.clone(),
                 ),
                 V3RouteTargetKind::Forwarder => self.expand_forwarder(
@@ -425,6 +429,7 @@ impl V3TargetInterpreter {
         provider_id: Option<&str>,
         model_id: Option<&str>,
         key: Option<&str>,
+        sample: u64,
         mut scope: V3TargetExpansionScope,
     ) -> Result<Vec<V3TargetCandidate>, V3TargetError> {
         let provider_id = provider_id.ok_or(V3TargetError::ProviderTargetIncomplete)?;
@@ -466,7 +471,14 @@ impl V3TargetInterpreter {
                     auth_alias: key.to_string(),
                 })?]
         } else {
-            provider.auth.entries.iter().collect()
+            // 不指明 key：展开 provider 全部 auth entries（key1/key2/...）。
+            // 同 priority 候选按序选第一个可用（select_available），若不轮换
+            // 起点会永远命中第一个 key——用每请求 deterministic_sample
+            // （request_id FNV hash）旋转展开起点，使多 key 轮流成为首选。
+            let mut entries: Vec<_> = provider.auth.entries.iter().collect();
+            let offset = (sample % entries.len() as u64) as usize;
+            entries.rotate_left(offset);
+            entries
         };
         Ok(entries
             .into_iter()

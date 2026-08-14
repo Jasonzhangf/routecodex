@@ -1482,3 +1482,45 @@ targets = [{ kind = "forwarder", id = "fwd_free", priority = 1 }]
         .iter()
         .any(|id| id == "gpt-5.6-sol"));
 }
+
+#[test]
+fn keyless_provider_target_rotates_auth_entry_start_by_sample() {
+    // target 不指明 key：展开 provider 全部 auth entries（key1/key2/key3 同
+    // priority 候选）。select_available 选第一个可用 → 固定顺序永远命中 key1；
+    // 按每请求 deterministic_sample 旋转展开起点，使多 key 轮流成为首选。
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.multi]
+type = "responses"
+base_url = "http://multi.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [
+  { alias = "key1", env = "M_KEY1" },
+  { alias = "key2", env = "M_KEY2" },
+  { alias = "key3", env = "M_KEY3" }
+] }
+[providers.multi.models.m]
+capabilities = ["text", "tools"]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "multi", model = "m", priority = 1 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let target = V3TargetInterpreter::default();
+    let aliases_at = |sample: u64| -> Vec<String> {
+        expanded_with(&manifest, &target, sample)
+            .candidates
+            .iter()
+            .map(|candidate| candidate.auth_alias.clone())
+            .collect()
+    };
+    assert_eq!(aliases_at(0), vec!["key1", "key2", "key3"]);
+    assert_eq!(aliases_at(1), vec!["key2", "key3", "key1"]);
+    assert_eq!(aliases_at(2), vec!["key3", "key1", "key2"]);
+    assert_eq!(aliases_at(6), aliases_at(0), "rotation is periodic in entry count");
+}
