@@ -314,7 +314,7 @@
         "suite_id": "v4-control-l2-regression"
       },
       "source_owner": "routecodex-v4-control",
-      "stage": "source_implemented"
+      "stage": "architecture_stable"
     }
   ],
   "project_id": "routecodex-v4",
