@@ -272,12 +272,7 @@ fn configured_health_policy_for_failure(
 ) -> Option<V3ProviderFailurePolicy> {
     let policy = manifest.error.provider_error_action_policy.iter().find(|policy| {
         provider_error_policy_matches_source_failure(
-            policy,
-            provider_id,
-            provider_type,
-            model_id,
-            status,
-            error_type,
+            policy, provider_id, provider_type, model_id, status, error_type,
         ) && (policy.matcher.content_contains_any.is_empty()
             || policy
                 .matcher
@@ -565,6 +560,33 @@ impl V3ProviderFailureRuntimeHealth {
             .map_err(|error| error.to_string())
     }
 
+    /// provider 级冷却的后台 probe：到期且 probe 到期的 provider 最小 ping，
+    /// 通过才恢复，失败保持冷却并推后探针。
+    pub async fn run_due_provider_cooldown_probes<F, Fut>(
+        &self,
+        now_ms: u64,
+        probe: F,
+    ) -> Result<(), String>
+    where
+        F: Fn(String, Option<String>, Option<String>) -> Fut,
+        Fut: Future<Output = Result<(), String>>,
+    {
+        let provider_keys = self.store.provider_cooldown_probe_keys_due(now_ms).map_err(|error| error.to_string())?;
+        for (provider_id, auth_alias, model_id) in provider_keys {
+            if !self.store.try_acquire_provider_cooldown_probe(&provider_id, auth_alias.as_deref(), model_id.as_deref()).map_err(|error| error.to_string())? {
+                continue;
+            }
+            match probe(provider_id.clone(), auth_alias.clone(), model_id.clone()).await {
+                Ok(()) => self.store.complete_provider_cooldown_probe_success(&provider_id, auth_alias.as_deref(), model_id.as_deref()).map_err(|error| error.to_string())?,
+                Err(error) => {
+                    self.store.complete_provider_cooldown_probe_failure(&provider_id, auth_alias.as_deref(), model_id.as_deref(), now_ms).map_err(|error| error.to_string())?;
+                    return Err(format!("provider cooldown probe failed for {provider_id}: {error}"));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn record_provider_failure_record_with_policy(
         &self,
         manifest: &V3Config05ManifestPublished,
@@ -587,15 +609,7 @@ impl V3ProviderFailureRuntimeHealth {
                 model_id,
                 reason,
                 now_ms,
-                configured_health_policy_for_failure(
-                    manifest,
-                    provider_id,
-                    provider_type,
-                    model_id,
-                    status,
-                    error_type,
-                    message,
-                ),
+                configured_health_policy_for_failure(manifest, provider_id, provider_type, model_id, status, error_type, message),
             )
             .map_err(|error| error.to_string())
     }
@@ -733,6 +747,18 @@ impl V3ProviderFailureRuntimeHealth {
         error_family: &str,
         reason: &str,
     ) -> Result<(), String> {
+        // post-commit SSE 流失败是强故障信号（流已开始却中断/malformed）：
+        // 直接写 provider 级冷却（不等 session 计数达阈值），冷却到期后由
+        // 后台 probe 复活，避免"每请求都试"持续命中故障 provider。
+        self.store
+            .record_provider_stream_failure_in_provider_scope(
+                provider_id,
+                auth_alias,
+                model_id,
+                error_family,
+                v3_relay_provider_policy_now_epoch_ms()?,
+            )
+            .map_err(|error| error.to_string())?;
         self.record_provider_failure_record(
             failure_session_scope,
             provider_id,
@@ -761,11 +787,7 @@ impl V3ProviderFailureRuntimeHealth {
                 witness,
                 V3ProviderActionProviderScope::new(
                     witness.failure_session_scope(),
-                    v3_relay_provider_candidate_key_parts(
-                        &selected.candidate.provider_id,
-                        Some(&selected.candidate.auth_alias),
-                        Some(&selected.candidate.model_id),
-                    ),
+                    v3_relay_provider_candidate_key_parts(&selected.candidate.provider_id, Some(&selected.candidate.auth_alias), Some(&selected.candidate.model_id)),
                 )?,
             )
             .await
@@ -779,11 +801,7 @@ impl V3ProviderFailureRuntimeHealth {
         self.action_gate
             .wait_for_exact_provider_action(&V3ProviderActionProviderScope::new(
                 failure_session_scope,
-                v3_relay_provider_candidate_key_parts(
-                    &selected.candidate.provider_id,
-                    Some(&selected.candidate.auth_alias),
-                    Some(&selected.candidate.model_id),
-                ),
+                v3_relay_provider_candidate_key_parts(&selected.candidate.provider_id, Some(&selected.candidate.auth_alias), Some(&selected.candidate.model_id)),
             )?)
             .await
     }
@@ -1620,11 +1638,7 @@ pub(crate) fn v3_relay_provider_target_selection_sample(request_id: &str) -> u64
 }
 
 pub(crate) fn v3_relay_provider_candidate_key(candidate: &V3TargetCandidate) -> String {
-    v3_relay_provider_candidate_key_parts(
-        &candidate.provider_id,
-        Some(&candidate.auth_alias),
-        Some(&candidate.model_id),
-    )
+    v3_relay_provider_candidate_key_parts(&candidate.provider_id, Some(&candidate.auth_alias), Some(&candidate.model_id))
 }
 
 pub(crate) fn v3_relay_provider_candidate_key_parts(
