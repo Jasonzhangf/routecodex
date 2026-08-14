@@ -55,10 +55,14 @@ pub fn build_v3_provider_global_probe_target(
         .iter()
         .find(|entry| auth_alias.is_none_or(|alias| entry.alias == alias))
         .ok_or_else(|| format!("probe provider {provider_id} has no auth entry"))?;
-    let secret = match (&auth.env, &auth.token_file, &auth.api_key) {
-        (Some(env), None, None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
-        (None, Some(path), None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
-        (None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
+    let secret = match (&auth.env, &auth.token_file, &auth.secret_file, &auth.secret_key, &auth.api_key) {
+        (Some(env), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
+        (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
+        (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
+            path: path.clone(),
+            key: key.clone(),
+        },
+        (None, None, None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
         _ => return Err(format!("probe provider {provider_id} auth entry is invalid")),
     };
     let model = provider

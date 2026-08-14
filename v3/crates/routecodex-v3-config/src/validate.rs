@@ -858,12 +858,50 @@ fn compile_auth(
         }
         let handle_count = usize::from(entry.env.is_some())
             + usize::from(entry.token_file.is_some())
+            + usize::from(entry.secret_file.is_some())
             + usize::from(entry.api_key.is_some());
         if handle_count != 1 {
             return Err(validation(format!(
-                "provider {provider_id} auth {} must define exactly one of env, token_file, or api_key",
+                "provider {provider_id} auth {} must define exactly one of env, token_file, secret_file, or api_key",
                 entry.alias
             )));
+        }
+        if entry.secret_file.is_some() != entry.secret_key.is_some() {
+            return Err(validation(format!(
+                "provider {provider_id} auth {} secret_file and secret_key must be declared together",
+                entry.alias
+            )));
+        }
+        if entry
+            .secret_file
+            .as_deref()
+            .is_some_and(|path| path.trim().is_empty())
+        {
+            return Err(validation(format!(
+                "provider {provider_id} auth {} secret_file cannot be empty",
+                entry.alias
+            )));
+        }
+        if entry
+            .secret_key
+            .as_deref()
+            .is_some_and(|key| key.trim().is_empty())
+        {
+            return Err(validation(format!(
+                "provider {provider_id} auth {} secret_key cannot be empty",
+                entry.alias
+            )));
+        }
+        if let (Some(secret_file), Some(secret_key)) = (&entry.secret_file, &entry.secret_key) {
+            // 集中 secret 文件在编译期解析校验：文件必须可读、key 必须存在、
+            // 值必须非空——fail-fast 在 config check / 启动阶段暴露，而不是
+            // 运行时请求才失败。值不写入 manifest（避免 secret 明文进快照）。
+            crate::read_v3_secret_file_key(secret_file, secret_key).map_err(|error| {
+                validation(format!(
+                    "provider {provider_id} auth {} secret_file validation failed: {error}",
+                    entry.alias
+                ))
+            })?;
         }
         if let Some(env) = &entry.env {
             if env.trim().is_empty() || looks_like_secret_literal(env) {
@@ -897,6 +935,8 @@ fn compile_auth(
             alias: entry.alias,
             env: entry.env,
             token_file: entry.token_file,
+            secret_file: entry.secret_file,
+            secret_key: entry.secret_key,
             api_key: entry.api_key,
         });
     }
@@ -1461,5 +1501,77 @@ mod dev_sample_default_tests {
         })
         .unwrap();
         assert!(!manifest.codex_samples);
+    }
+}
+
+#[cfg(test)]
+mod secret_file_compile_tests {
+    use super::*;
+    use std::fs;
+
+    fn authoring_with(entry: V3ProviderAuthEntryAuthoringConfig) -> V3ProviderAuthAuthoringConfig {
+        V3ProviderAuthAuthoringConfig {
+            auth_type: V3ProviderAuthType::ApiKey,
+            entries: vec![entry],
+        }
+    }
+
+    #[test]
+    fn compile_auth_validates_secret_file_key_at_config_time() {
+        let dir = std::env::temp_dir().join(format!("rcc-secret-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("secrets.conf");
+        fs::write(&file, "opencode-go.key1 = \"sk-one\"\n").unwrap();
+        let file_str = file.display().to_string();
+
+        let ok = compile_auth(
+            "p",
+            authoring_with(V3ProviderAuthEntryAuthoringConfig {
+                alias: "key1".to_string(),
+                env: None,
+                token_file: None,
+                api_key: None,
+                secret_file: Some(file_str.clone()),
+                secret_key: Some("opencode-go.key1".to_string()),
+            }),
+        )
+        .unwrap();
+        assert_eq!(ok.entries[0].secret_file.as_deref(), Some(file_str.as_str()));
+        assert_eq!(ok.entries[0].secret_key.as_deref(), Some("opencode-go.key1"));
+
+        let err = compile_auth(
+            "p",
+            authoring_with(V3ProviderAuthEntryAuthoringConfig {
+                alias: "key1".to_string(),
+                env: None,
+                token_file: None,
+                api_key: None,
+                secret_file: Some(file_str),
+                secret_key: Some("missing.key".to_string()),
+            }),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("secret_file validation failed"),
+            "{err}"
+        );
+
+        let pair_err = compile_auth(
+            "p",
+            authoring_with(V3ProviderAuthEntryAuthoringConfig {
+                alias: "key1".to_string(),
+                env: None,
+                token_file: None,
+                api_key: None,
+                secret_file: Some("x".to_string()),
+                secret_key: None,
+            }),
+        )
+        .unwrap_err();
+        assert!(
+            pair_err.to_string().contains("declared together"),
+            "{pair_err}"
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

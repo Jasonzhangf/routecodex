@@ -13,6 +13,8 @@ const RESPONSES_WIRE_PROTOCOL_NAME: &str = "openai-responses";
 pub enum V3ProviderAuthSecretHandle {
     Environment(String),
     TokenFile(String),
+    /// 集中 secret 文件（每行 `name = value`），按 key 名取值。
+    SecretFile { path: String, key: String },
     ApiKey(String),
 }
 

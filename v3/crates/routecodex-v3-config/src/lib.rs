@@ -468,6 +468,52 @@ pub fn looks_like_secret_literal(value: &str) -> bool {
         || trimmed.len() > 128
 }
 
+/// 从集中 secret 文件内容解析指定 key 的值。文件格式：每行 `name = value`，
+/// 支持 `#` 注释、空行、值两端引号（`"..."` / `'...'`）。key 名精确匹配。
+/// 解析归 config 层：编译时校验（文件可读 + key 存在 + 值非空）与运行时
+/// 取值（transport）共用同一实现，禁止在消费方重复解析。
+pub fn resolve_v3_secret_file_key(content: &str, key: &str) -> Result<String, String> {
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        if name.trim() != key {
+            continue;
+        }
+        let value = value.trim();
+        let unquoted = match value.as_bytes().first() {
+            Some(b'"') if value.ends_with('"') && value.len() >= 2 => {
+                value[1..value.len() - 1].to_string()
+            }
+            Some(b'\'') if value.ends_with('\'') && value.len() >= 2 => {
+                value[1..value.len() - 1].to_string()
+            }
+            _ => value.to_string(),
+        };
+        if unquoted.is_empty() {
+            return Err(format!("secret file key {key} has an empty value"));
+        }
+        return Ok(unquoted);
+    }
+    Err(format!("secret file key {key} not found"))
+}
+
+/// 读取集中 secret 文件并解析指定 key 的值（编译期校验辅助）。
+pub fn read_v3_secret_file_key(
+    path: &str,
+    key: &str,
+) -> Result<String, V3ConfigError> {
+    let content = std::fs::read_to_string(path).map_err(|error| {
+        validation(format!("secret file {path} is unreadable: {error}"))
+    })?;
+    resolve_v3_secret_file_key(&content, key)
+        .map_err(validation)
+}
+
 pub fn resolve_routecodex_package_version_from_executable(_executable: &Path) -> Option<String> {
     let embedded = option_env!("ROUTECODEX_BUILD_VERSION")
         .map(str::trim)
@@ -483,6 +529,31 @@ pub(crate) fn validation(message: impl Into<String>) -> V3ConfigError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secret_file_key_resolution_parses_key_value_lines() {
+        let content = "# comment\n\nopencode-go.key1 = \"sk-one\"\nopencode-go.key2 = 'sk-two'\nopencode-go.key3 = sk-three\n";
+        assert_eq!(
+            resolve_v3_secret_file_key(content, "opencode-go.key1").unwrap(),
+            "sk-one"
+        );
+        assert_eq!(
+            resolve_v3_secret_file_key(content, "opencode-go.key2").unwrap(),
+            "sk-two"
+        );
+        assert_eq!(
+            resolve_v3_secret_file_key(content, "opencode-go.key3").unwrap(),
+            "sk-three"
+        );
+        assert!(resolve_v3_secret_file_key(content, "missing.key").is_err());
+        assert!(resolve_v3_secret_file_key(content, "opencode-go.key1").is_ok());
+    }
+
+    #[test]
+    fn secret_file_key_resolution_rejects_empty_value() {
+        assert!(resolve_v3_secret_file_key("a.key = \"\"\n", "a.key").is_err());
+        assert!(resolve_v3_secret_file_key("a.key =\n", "a.key").is_err());
+    }
 
     fn compile_catalog_scope_manifest() -> V3Config05ManifestPublished {
         let source = r#"

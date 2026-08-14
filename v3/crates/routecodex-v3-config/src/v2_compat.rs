@@ -532,6 +532,8 @@ fn compile_v2_auth(
             api_key: auth.api_key,
             env: auth.env,
             token_file: auth.token_file,
+            secret_file: None,
+            secret_key: None,
         }]
     };
     let mut v3_entries = Vec::new();
@@ -539,10 +541,16 @@ fn compile_v2_auth(
         let alias = entry.alias.unwrap_or_else(|| "key1".to_string());
         let handle_count = usize::from(entry.env.is_some())
             + usize::from(entry.token_file.is_some())
+            + usize::from(entry.secret_file.is_some())
             + usize::from(entry.api_key.is_some());
         if handle_count != 1 {
             return Err(validation(format!(
-                "v2 provider {provider_id} auth {alias} must declare exactly one of apiKey, env, or tokenFile"
+                "v2 provider {provider_id} auth {alias} must declare exactly one of apiKey, env, tokenFile, or secretFile"
+            )));
+        }
+        if entry.secret_file.is_some() != entry.secret_key.is_some() {
+            return Err(validation(format!(
+                "v2 provider {provider_id} auth {alias} secretFile and secretKey must be declared together"
             )));
         }
         if let Some(env) = entry.env {
@@ -551,6 +559,36 @@ fn compile_v2_auth(
                 env: Some(env),
                 token_file: None,
                 api_key: None,
+                secret_file: None,
+                secret_key: None,
+            });
+            continue;
+        }
+        if let Some(secret_file) = entry.secret_file {
+            let secret_key = entry.secret_key.ok_or_else(|| {
+                validation(format!(
+                    "v2 provider {provider_id} auth {alias} secretFile requires secretKey"
+                ))
+            })?;
+            let secret_file = secret_file.trim();
+            if secret_file.is_empty() {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth {alias} secretFile is empty"
+                )));
+            }
+            let secret_key = secret_key.trim();
+            if secret_key.is_empty() {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth {alias} secretKey is empty"
+                )));
+            }
+            v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
+                alias,
+                env: None,
+                token_file: None,
+                api_key: None,
+                secret_file: Some(secret_file.to_string()),
+                secret_key: Some(secret_key.to_string()),
             });
             continue;
         }
@@ -566,6 +604,8 @@ fn compile_v2_auth(
                 env: None,
                 token_file: Some(token_file.to_string()),
                 api_key: None,
+                secret_file: None,
+                secret_key: None,
             });
             continue;
         }
@@ -584,6 +624,8 @@ fn compile_v2_auth(
             env: None,
             token_file: None,
             api_key: Some(api_key),
+            secret_file: None,
+            secret_key: None,
         });
     }
     Ok(V3ProviderAuthAuthoringConfig {
@@ -799,6 +841,8 @@ struct V2ProviderAuthEntry {
     api_key: Option<String>,
     env: Option<String>,
     token_file: Option<String>,
+    secret_file: Option<String>,
+    secret_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

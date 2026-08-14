@@ -1245,6 +1245,25 @@ async fn resolve_secret(
                 auth_alias: auth.alias.clone(),
                 reason: error.to_string(),
             })?,
+        V3ProviderAuthSecretHandle::SecretFile { path, key } => {
+            let content = tokio::fs::read_to_string(path)
+                .await
+                .map_err(|error| V3ProviderError::AuthSecretRead {
+                    request_id: request_id.to_string(),
+                    provider_id: provider_id.to_string(),
+                    auth_alias: auth.alias.clone(),
+                    reason: error.to_string(),
+                })?;
+            // 解析归 config 层（编译期已校验 key 存在），运行时只取值。
+            routecodex_v3_config::resolve_v3_secret_file_key(&content, key).map_err(|reason| {
+                V3ProviderError::AuthSecretRead {
+                    request_id: request_id.to_string(),
+                    provider_id: provider_id.to_string(),
+                    auth_alias: auth.alias.clone(),
+                    reason,
+                }
+            })?
+        }
         V3ProviderAuthSecretHandle::ApiKey(value) => expand_env_vars(value),
     };
     let secret = secret.trim().to_string();
@@ -1258,8 +1277,7 @@ async fn resolve_secret(
     Ok(secret)
 }
 
-fn expand_env_vars(input: &str) -> String {
-    let bytes = input.as_bytes();
+fn expand_env_vars(input: &str) -> String {    let bytes = input.as_bytes();
     let mut result = String::with_capacity(input.len());
     let mut i = 0;
     while i < bytes.len() {

@@ -7,12 +7,20 @@ pub(crate) fn validate_auth_handles(manifest: &V3Config05ManifestPublished) -> R
         .filter(|provider| provider.enabled)
     {
         for entry in &provider.auth.entries {
-            // Support three auth handle shapes:
+            // Support four auth handle shapes:
             // 1. env: read from environment variable (checked at runtime)
             // 2. token_file: read from file (file must be non-empty)
-            // 3. api_key: inline literal (always valid, no runtime check needed)
-            match (&entry.env, &entry.token_file, &entry.api_key) {
-                (Some(name), None, None) => {
+            // 3. secret_file + secret_key: read key from centralized secret file
+            //    (file must be readable and the key must resolve non-empty)
+            // 4. api_key: inline literal (always valid, no runtime check needed)
+            match (
+                &entry.env,
+                &entry.token_file,
+                &entry.secret_file,
+                &entry.secret_key,
+                &entry.api_key,
+            ) {
+                (Some(name), None, None, None, None) => {
                     if std::env::var_os(name).is_none() {
                         return Err(V3LifecycleError::Validation(format!(
                             "provider {} auth {} environment handle {} is unavailable",
@@ -20,7 +28,7 @@ pub(crate) fn validate_auth_handles(manifest: &V3Config05ManifestPublished) -> R
                         )));
                     }
                 }
-                (None, Some(path), None) => {
+                (None, Some(path), None, None, None) => {
                     let mut file = File::open(path).map_err(|error| {
                         V3LifecycleError::Validation(format!(
                             "provider {} auth {} token-file handle is unreadable: {error}",
@@ -35,12 +43,32 @@ pub(crate) fn validate_auth_handles(manifest: &V3Config05ManifestPublished) -> R
                         )));
                     }
                 }
+                (None, None, Some(path), Some(key), None) => {
+                    // 集中 secret 文件：文件读取与解析归 config crate（模块边界
+                    // gate：config authoring file IO 只能在 config crate），
+                    // lifecycle 只做 fail-fast 校验。
+                    let value =
+                        routecodex_v3_config::read_v3_secret_file_key(path, key).map_err(
+                            |error| {
+                                V3LifecycleError::Validation(format!(
+                                    "provider {} auth {} secret-file handle is invalid: {error}",
+                                    provider.id, entry.alias
+                                ))
+                            },
+                        )?;
+                    if value.trim().is_empty() {
+                        return Err(V3LifecycleError::Validation(format!(
+                            "provider {} auth {} secret-file handle is empty",
+                            provider.id, entry.alias
+                        )));
+                    }
+                }
                 // api_key: inline literal is always valid, no runtime check needed
-                (None, None, Some(_)) => {}
+                (None, None, None, None, Some(_)) => {}
                 // Explicit empty entries are invalid
-                (None, None, None) => {
+                (None, None, None, None, None) => {
                     return Err(V3LifecycleError::Validation(format!(
-                        "provider {} auth {} has no auth handle (env, token_file, or api_key)",
+                        "provider {} auth {} has no auth handle (env, token_file, secret_file, or api_key)",
                         provider.id, entry.alias
                     )))
                 }

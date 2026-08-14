@@ -249,6 +249,8 @@ mod tests {
             compatibility_profile: None,
             env_name: Some("TEST_KEY".to_string()),
             token_file: None,
+            secret_file: None,
+            secret_key: None,
             api_key: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["default".to_string()],

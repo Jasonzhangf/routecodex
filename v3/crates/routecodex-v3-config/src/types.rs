@@ -581,6 +581,13 @@ pub struct V3ProviderAuthEntryAuthoringConfig {
     pub token_file: Option<String>,
     #[serde(default, alias = "apiKey")]
     pub api_key: Option<String>,
+    /// 集中 secret 文件（一个文件管理该 provider 的全部 key，每行 `name = value`）。
+    /// 与 `secret_key` 成对使用：读取文件后按 name 取对应值。
+    #[serde(default, alias = "secretFile")]
+    pub secret_file: Option<String>,
+    /// 集中 secret 文件内本 entry 对应的 key 名（`name` 行）。
+    #[serde(default, alias = "secretKey")]
+    pub secret_key: Option<String>,
 }
 
 impl fmt::Debug for V3ProviderAuthEntryAuthoringConfig {
@@ -589,6 +596,8 @@ impl fmt::Debug for V3ProviderAuthEntryAuthoringConfig {
             .field("alias", &self.alias)
             .field("env", &self.env)
             .field("token_file", &self.token_file)
+            .field("secret_file", &self.secret_file)
+            .field("secret_key", &self.secret_key)
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
             .finish()
     }
@@ -1072,6 +1081,8 @@ pub struct V3ProviderAuthEntryManifest {
     pub alias: String,
     pub env: Option<String>,
     pub token_file: Option<String>,
+    pub secret_file: Option<String>,
+    pub secret_key: Option<String>,
     pub api_key: Option<String>,
 }
 
@@ -1081,6 +1092,8 @@ impl fmt::Debug for V3ProviderAuthEntryManifest {
             .field("alias", &self.alias)
             .field("env", &self.env)
             .field("token_file", &self.token_file)
+            .field("secret_file", &self.secret_file)
+            .field("secret_key", &self.secret_key)
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
             .finish()
     }
