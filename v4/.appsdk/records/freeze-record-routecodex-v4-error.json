@@ -23,9 +23,9 @@
   "previous_active_immutable": true,
   "previous_active_version": "active-v1",
   "promotion_id": "promotion-error-v2",
-  "promotion_record_hash": "sha256:pending-canonical-freeze-write",
+  "promotion_record_hash": "sha256:c9d74266cd294fbff3519a0fcc98ff20814fc6312c861114c0cbb7a9a3a1d8a4",
   "public_api_hash": "sha256:161e6ca746410fd1a7d9fb38fa6eecd1f8d518ee85492eb90ca369757dfeac6f",
-  "regression_report_hash": "sha256:pending-canonical-freeze-write",
+  "regression_report_hash": "sha256:cf4ba4dc7e55c39070f19c964ec1630238fba589f8e5ba281e1a78764b358a9d",
   "regression_report_id": "regression-error-v2",
   "review_id": "review-error-v2",
   "source_commit_or_tag": "dc52f4772"
