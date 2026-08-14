@@ -818,7 +818,6 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                         .finish()
                         .map_err(|error| runtime_source("V3ProviderResp14Raw", error))
                     {
-                        Ok(()) if state.runtime_timing.is_finished().unwrap_or(false) => None,
                         Ok(()) => match state.runtime_timing.finish_external() {
                             Ok(()) => None,
                             Err(error) => {
