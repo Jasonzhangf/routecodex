@@ -1012,8 +1012,8 @@ fn top_level_start_snap_forces_debug_snapshots() {
     assert_eq!(debug["debug"]["snapshots_enabled"], true);
     assert_eq!(debug["debug"]["codex_samples_enabled"], true);
     assert_eq!(
-        debug["debug"]["direct_snapshots_enabled"], false,
-        "--snap must retain Relay samples without persisting Direct samples"
+        debug["debug"]["direct_snapshots_enabled"], true,
+        "--snap must persist both Relay and Direct samples"
     );
     let expected_log_file = home
         .join(".rcc")
