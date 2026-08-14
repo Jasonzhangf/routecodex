@@ -266,3 +266,42 @@ targets = [
     .unwrap();
     compile_v3_config_05_manifest(authoring).unwrap()
 }
+
+pub(super) fn deepseek_console_go_profile_manifest() -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[providers.ds]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "deepseek-v4-flash"
+compatibility_profile = "responses:deepseek-console-go"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
+[providers.ds.models.deepseek-v4-flash]
+supports_streaming = true
+capabilities = ["text", "vision"]
+
+[forwarders.responses]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "ds", model = "deepseek-v4-flash", priority = 1 }]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
+"#,
+    )
+    .unwrap();
+    compile_v3_config_05_manifest(authoring).unwrap()
+}

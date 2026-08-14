@@ -2410,3 +2410,86 @@ message_mode = "code_only"
         routecodex_v3_config::V3ClientErrorProjectionMessageMode::CodeOnly
     );
 }
+
+#[test]
+fn v3_native_inline_opencode_go_defaults_to_deepseek_console_go_compat_profile() {
+    // v3-native inline provider 与 v2 provider-directory 路径共享同一份
+    // compatibility profile 默认映射：opencode-go 未显式声明
+    // compatibilityProfile 时也必须解析到 responses:deepseek-console-go，
+    // wire 层按该契约激活交错工具段 reasoning 注入。
+    let source = r#"
+version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4556
+routing_group = "primary"
+endpoints = ["responses"]
+
+[providers.opencode-go]
+type = "responses"
+base_url = "https://opencode.invalid/v1"
+default_model = "deepseek-v4-flash"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "OPENCODE_GO_KEY" }] }
+responses = { process = "chat", streaming = "always" }
+
+[providers.opencode-go.models."deepseek-v4-flash"]
+wire_name = "deepseek-v4-flash"
+capabilities = ["text", "reasoning", "tools"]
+supports_streaming = true
+supports_thinking = true
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "opencode-go", model = "deepseek-v4-flash", priority = 1 }]
+"#;
+
+    let authoring = parse_v3_config_02_authoring(source).unwrap();
+    let manifest = compile_v3_config_05_manifest(authoring).unwrap();
+    assert_eq!(
+        manifest.providers["opencode-go"]
+            .compatibility_profile
+            .as_deref(),
+        Some("responses:deepseek-console-go")
+    );
+}
+
+#[test]
+fn v3_native_inline_other_provider_ids_do_not_inherit_v2_directory_defaults() {
+    // v3-native inline 路径的 compatibility profile 默认只允许已登记给
+    // v3-native 的条目（opencode-go -> responses:deepseek-console-go）；
+    // v2 provider-directory 表里的 cc/lmstudio/minimax 等默认不得静默注入
+    // 到 v3-native 配置（否则 [providers.cc] 这种既有配置会在未声明时
+    // 被改写成 responses:cc 的 wire 行为）。
+    let source = r#"
+version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4557
+routing_group = "primary"
+endpoints = ["responses"]
+
+[providers.cc]
+type = "responses"
+base_url = "https://cc.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "CC_KEY" }] }
+
+[providers.cc.models.gpt-test]
+capabilities = ["text"]
+supports_streaming = true
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "cc", model = "gpt-test", priority = 1 }]
+"#;
+
+    let authoring = parse_v3_config_02_authoring(source).unwrap();
+    let manifest = compile_v3_config_05_manifest(authoring).unwrap();
+    assert_eq!(
+        manifest.providers["cc"].compatibility_profile.as_deref(),
+        None,
+        "v3-native provider cc must stay passthrough unless it declares a profile explicitly"
+    );
+}

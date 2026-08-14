@@ -12,6 +12,7 @@ fn target() -> V3ResponsesProviderTarget {
         base_url: "https://provider.invalid/v1".to_string(),
         canonical_model_id: "provider-model-id".to_string(),
         wire_model: "provider-wire-model".to_string(),
+        compatibility_profile: None,
         auth: V3ProviderAuthHandle {
             alias: "primary".to_string(),
             secret: V3ProviderAuthSecretHandle::Environment("TEST_KEY".to_string()),

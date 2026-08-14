@@ -141,6 +141,7 @@ fn target_with_auth(
         base_url: base_url.to_string(),
         canonical_model_id: wire_model.to_string(),
         wire_model: wire_model.to_string(),
+        compatibility_profile: None,
         auth: V3ProviderAuthHandle {
             alias: auth_alias.to_string(),
             secret,

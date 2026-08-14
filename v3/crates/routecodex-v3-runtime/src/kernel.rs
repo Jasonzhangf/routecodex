@@ -1315,7 +1315,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                                 &standardized.protocol_context.server_id,
                             ),
                             retain_response_cipher,
-                            policy.target.candidate.provider_id == "opencode-go",
+                            policy.target.candidate.compatibility_profile.as_deref()
+                                == Some("responses:deepseek-console-go"),
                         );
                     V3ClientBody::Sse(stream)
                 }

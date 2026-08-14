@@ -18,7 +18,8 @@
     { "providerId": "cc-sol", "compatibilityProfile": "responses:cc" },
     { "providerId": "lmstudio", "compatibilityProfile": "responses:lmstudio" },
     { "providerId": "minimax", "compatibilityProfile": "chat:minimax" },
-    { "providerId": "minimonth", "compatibilityProfile": "chat:minimax" }
+    { "providerId": "minimonth", "compatibilityProfile": "chat:minimax" },
+    { "providerId": "opencode-go", "compatibilityProfile": "responses:deepseek-console-go" }
   ],
   "defaultCompatibilityProfile": "compat:passthrough"
 }

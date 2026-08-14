@@ -13,6 +13,7 @@ fn responses_http_target() -> V3ResponsesProviderTarget {
         base_url: "https://api2.orangeai.cc/v1".into(),
         canonical_model_id: "glm-5.2".into(),
         wire_model: "glm-5.2".into(),
+        compatibility_profile: None,
         auth: V3ProviderAuthHandle {
             alias: "key1".into(),
             secret: V3ProviderAuthSecretHandle::Environment("ORANGEAI_KEY".into()),
@@ -414,4 +415,58 @@ fn responses_http_submit_tool_outputs_uses_native_response_endpoint() {
     assert_eq!(request.body()["stream"], true);
     assert!(request.body().get("response_id").is_none());
     assert!(request.body().get("responseId").is_none());
+}
+
+async fn spawn_http_success_response(body: &[u8]) -> std::net::SocketAddr {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = body.to_vec();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = [0_u8; 4096];
+        let _ = stream.read(&mut request).await.unwrap();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            body.len()
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+        stream.write_all(&body).await.unwrap();
+    });
+    addr
+}
+
+#[tokio::test]
+async fn transport_response_carries_target_compatibility_profile() {
+    // 契约：wire target 声明的 compatibility_profile 必须随 transport 流到
+    // V3ProviderResp14Raw，响应侧能力回射按 profile 门控而不是 provider_id。
+    std::env::set_var("ORANGEAI_KEY", "sk-test-profile-carry");
+    let body =
+        br#"{"id":"resp_1","output":[{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":"{\"input\":\"ls\"}"}]}"#;
+    let addr = spawn_http_success_response(body).await;
+    let target = V3ResponsesProviderTarget {
+        base_url: format!("http://{addr}/v1"),
+        canonical_model_id: "glm-5.2".into(),
+        wire_model: "glm-5.2".into(),
+        compatibility_profile: Some("responses:deepseek-console-go".into()),
+        ..responses_http_target()
+    };
+    let wire = build_v3_provider_12_responses_wire_payload(
+        "req-profile-carry",
+        target,
+        json!({"model":"glm-5.2","input":"hello","stream":false}),
+    )
+    .unwrap();
+    let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
+    let raw = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect("successful provider response");
+    std::env::remove_var("ORANGEAI_KEY");
+
+    assert_eq!(
+        raw.compatibility_profile(),
+        Some("responses:deepseek-console-go")
+    );
 }

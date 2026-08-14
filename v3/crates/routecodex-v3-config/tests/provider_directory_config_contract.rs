@@ -307,3 +307,60 @@ fn provider_directory_identity_mismatch_is_rejected() {
     assert!(error.to_string().contains("identity mismatch"));
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn opencode_go_directory_provider_defaults_to_deepseek_console_go_compat_profile() {
+    // opencode-go 未显式声明 compatibilityProfile 时，也必须解析到
+    // responses:deepseek-console-go 编译默认映射；wire 层按该契约激活
+    // 交错工具段 reasoning 注入。显式 provider 声明仍优先于默认映射。
+    let root = temp_root("opencode-go-default-profile");
+    let token = write_token(&root, "opencode-go");
+    let path = root
+        .join("provider")
+        .join("opencode-go")
+        .join("config.v2.toml");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        &path,
+        format!(
+            r#"version = "2.0.0"
+providerId = "opencode-go"
+
+[provider]
+id = "opencode-go"
+enabled = true
+type = "responses"
+baseURL = "https://opencode.invalid/v1"
+defaultModel = "deepseek-v4-flash"
+
+[provider.auth]
+type = "apikey"
+entries = [{{ alias = "key1", tokenFile = "{}" }}]
+
+[provider.models."deepseek-v4-flash"]
+wireName = "deepseek-v4-flash"
+capabilities = ["text", "reasoning", "thinking", "tools"]
+supportsStreaming = true
+supportsThinking = true
+"#,
+            token.display()
+        ),
+    )
+    .unwrap();
+    let config_path = root.join("config.v3.toml");
+    fs::write(
+        &config_path,
+        directory_root_config("opencode-go", "deepseek-v4-flash"),
+    )
+    .unwrap();
+
+    let snapshot = V3ConfigStore::new(&config_path)
+        .load_snapshot_with_source_identity()
+        .unwrap();
+    let provider = &snapshot.manifest.providers["opencode-go"];
+    assert_eq!(
+        provider.compatibility_profile.as_deref(),
+        Some("responses:deepseek-console-go")
+    );
+    fs::remove_dir_all(root).unwrap();
+}

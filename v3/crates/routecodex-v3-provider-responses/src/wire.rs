@@ -29,6 +29,9 @@ pub struct V3ResponsesProviderTarget {
     pub base_url: String,
     pub canonical_model_id: String,
     pub wire_model: String,
+    /// 配置声明的 provider 兼容契约（如 opencode-go 的
+    /// `responses:deepseek-console-go`）；wire 层按契约能力分支，不按部署身份分支。
+    pub compatibility_profile: Option<String>,
     pub auth: V3ProviderAuthHandle,
     pub responses_transport: V3ResponsesTransportKind,
     pub websocket_v2_url: Option<String>,
@@ -137,6 +140,18 @@ pub fn build_v3_provider_12_responses_wire_payload(
         let deepseek_compat = target.canonical_model_id == "deepseek-v4-flash"
             || target.wire_model == "deepseek-v4-flash";
         strip_v3_request_encrypted_reasoning(&mut body, deepseek_compat);
+        // junction 合成 reasoning 只属于已证实的 opencode-go/Console Go 网关：
+        // compatibility profile（responses:deepseek-console-go）锁网关契约
+        // （请求侧 custom->function 工具映射 + 响应侧回射也按同一 profile
+        // 门控），deepseek-v4-flash 额外锁 400 的已证实载体——该失败只在
+        // deepseek thinking 模式下被证实，其他模型即使走同一网关也不追加
+        // 未经证明的条目。
+        if deepseek_compat
+            && target.compatibility_profile.as_deref() == Some("responses:deepseek-console-go")
+            && v3_wire_payload_is_thinking_mode(&body)
+        {
+            insert_v3_deepseek_interleaved_tool_segment_reasoning(&mut body);
+        }
     }
     Ok(V3Provider12ResponsesWirePayload {
         request_id,
@@ -269,6 +284,55 @@ fn join_v3_reasoning_plain_text(obj: &Map<String, Value>) -> String {
         }
     }
     String::new()
+}
+
+/// DeepSeek thinking mode 的交错工具段兼容：opencode-go Console Go 网关把
+/// Responses input 转 Chat 时，`function_call_output/custom_tool_call_output`
+/// 后直接跟随的 `function_call/custom_tool_call` 会生成新的 assistant tool_calls
+/// 消息，thinking mode 下该消息必须附着 reasoning（官方 400
+/// `reasoning_text must be passed back`）。在 output->call 交界插入继承最近一条
+/// reasoning 明文（无前文时用确定性占位符）的 reasoning 条目；规则只依赖相邻
+/// item 类型，纯函数、确定性，同一请求重复构建 wire 字节不变。
+fn insert_v3_deepseek_interleaved_tool_segment_reasoning(body: &mut Value) {
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let mut last_reasoning_text: Option<String> = None;
+    let mut index = 0;
+    while index < input.len() {
+        // 跨轮边界不继承 reasoning：user 消息后的工具段属于新一轮，上一轮明文
+        // 不能错配到当前轮（否则 provider 会把该工具段归因到旧 turn）。
+        if input[index].get("type").and_then(Value::as_str) == Some("message")
+            && input[index].get("role").and_then(Value::as_str) == Some("user")
+        {
+            last_reasoning_text = None;
+        }
+        if input[index].get("type").and_then(Value::as_str) == Some("reasoning") {
+            if let Some(object) = input[index].as_object() {
+                let text = join_v3_reasoning_plain_text(object);
+                last_reasoning_text = if text.is_empty() { None } else { Some(text) };
+            }
+        }
+        let is_output = matches!(
+            input[index].get("type").and_then(Value::as_str),
+            Some("function_call_output" | "custom_tool_call_output")
+        );
+        let next_is_call = input
+            .get(index + 1)
+            .and_then(|item| item.get("type"))
+            .and_then(Value::as_str)
+            .is_some_and(|kind| matches!(kind, "function_call" | "custom_tool_call"));
+        if is_output && next_is_call {
+            let text = last_reasoning_text
+                .clone()
+                .unwrap_or_else(|| "[thinking redacted]".to_string());
+            input.insert(
+                index + 1,
+                json!({"type": "reasoning", "content": [{"type": "reasoning_text", "text": text}]}),
+            );
+        }
+        index += 1;
+    }
 }
 
 fn normalize_deepseek_thinking_stopless_tool_choice(
@@ -631,6 +695,7 @@ mod tests {
                 base_url: "http://upstream.invalid/v1".into(),
                 canonical_model_id: "canonical-model".into(),
                 wire_model: "upstream-model".into(),
+                compatibility_profile: None,
                 auth: V3ProviderAuthHandle {
                     alias: "primary".into(),
                     secret: V3ProviderAuthSecretHandle::Environment("NEUTRAL_KEY".into()),
@@ -826,6 +891,7 @@ mod tests {
             base_url: "http://upstream.invalid/v1".into(),
             canonical_model_id: "model".into(),
             wire_model: "model".into(),
+            compatibility_profile: None,
             auth: V3ProviderAuthHandle {
                 alias: "primary".into(),
                 secret: V3ProviderAuthSecretHandle::Environment("NEUTRAL_KEY".into()),
@@ -1126,6 +1192,7 @@ mod tests {
             base_url: "http://upstream.invalid/v1".into(),
             canonical_model_id: "canonical-model".into(),
             wire_model: "upstream-model".into(),
+            compatibility_profile: None,
             auth: V3ProviderAuthHandle {
                 alias: "primary".into(),
                 secret: V3ProviderAuthSecretHandle::Environment("NEUTRAL_KEY".into()),
@@ -1378,6 +1445,256 @@ mod tests {
             "encrypted-only item keeps the previous narrow placeholder"
         );
         assert!(input[1].get("content").is_none());
+    }
+
+    #[test]
+    fn wire_inserts_reasoning_before_interleaved_deepseek_tool_segments() {
+        // 交错工具段（function_call_output/custom_tool_call_output 后直接跟随
+        // function_call/custom_tool_call）经 Console Go 转 Chat 时会产生新的
+        // assistant tool_calls 消息；thinking mode 下该消息必须附着 reasoning，
+        // 否则上游 400 `reasoning_text must be passed back`。wire 必须在每个
+        // output->call 交界插入继承前文明文（无前文时用确定性占位符）的 reasoning
+        // 条目，且重复构建字节不变。
+        let mut target = target();
+        target.provider_id = "opencode-go".into();
+        target.provider_type = "responses".into();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        target.wire_model = "deepseek-v4-flash".into();
+        target.compatibility_profile = Some("responses:deepseek-console-go".into());
+        let body = json!({
+            "model": "deepseek-v4-flash",
+            "reasoning": {"effort": "high"},
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_first",
+                    "summary": [{"type": "summary_text", "text": "plan first tool segment"}]
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "calling tools"}]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "/tmp"
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"ls\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_2",
+                    "output": "src"
+                },
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_3",
+                    "name": "apply_patch",
+                    "input": "patch"
+                },
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_3",
+                    "output": "ok"
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "continue"}]
+                }
+            ]
+        });
+        let first = build_v3_provider_12_responses_wire_payload(
+            "req-junction",
+            target.clone(),
+            body.clone(),
+        )
+        .unwrap();
+        let second =
+            build_v3_provider_12_responses_wire_payload("req-junction-2", target, body).unwrap();
+        let input = first.body()["input"].as_array().unwrap();
+        assert_eq!(
+            input[0]["content"],
+            json!([{"type": "reasoning_text", "text": "plan first tool segment"}])
+        );
+        assert_eq!(
+            input[4]["type"], "reasoning",
+            "output->call junction must carry an inherited reasoning item before the next tool segment"
+        );
+        assert_eq!(
+            input[4]["content"],
+            json!([{"type": "reasoning_text", "text": "plan first tool segment"}])
+        );
+        assert_eq!(input[5]["type"], "function_call");
+        assert_eq!(
+            input[7]["type"], "reasoning",
+            "second output->call junction (custom_tool_call) must also carry reasoning"
+        );
+        assert_eq!(input[8]["type"], "custom_tool_call");
+        assert_eq!(
+            first.body(),
+            second.body(),
+            "interleaved tool segment reasoning insertion must be deterministic so repeated requests keep the same upstream cache prefix"
+        );
+    }
+
+    #[test]
+    fn wire_keeps_deepseek_model_interleaved_tools_untouched_for_unproven_provider() {
+        // junction 兼容只属于已证实的 opencode-go/Console Go 网关；其他持
+        // deepseek-v4-flash 模型的 Responses provider 没有证明需要合成 reasoning，
+        // wire 不得按模型名对它们追加条目。
+        let mut target = target();
+        target.provider_id = "some-other-responses".into();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        target.wire_model = "deepseek-v4-flash".into();
+        let body = json!({
+            "model": "deepseek-v4-flash",
+            "reasoning": {"effort": "high"},
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_first",
+                    "summary": [{"type": "summary_text", "text": "plan first tool segment"}]
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "calling tools"}]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "/tmp"
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"ls\"}"
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "continue"}]
+                }
+            ]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-unproven", target, body).unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        assert_eq!(
+            input[4]["type"], "function_call",
+            "unproven provider must keep the client's output->call sequence untouched (reasoning_text shape rewrite still applies)"
+        );
+    }
+
+    #[test]
+    fn wire_junction_reasoning_does_not_inherit_across_user_turn_boundary() {
+        // 上一轮 reasoning 明文不能错配到新一轮工具段：user 消息边界后的
+        // output->call 交界必须用确定性占位符（无当前轮 reasoning），否则
+        // provider 会把新一轮工具段归因到旧 turn。
+        let mut target = target();
+        target.provider_id = "opencode-go".into();
+        target.provider_type = "responses".into();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        target.wire_model = "deepseek-v4-flash".into();
+        target.compatibility_profile = Some("responses:deepseek-console-go".into());
+        let body = json!({
+            "model": "deepseek-v4-flash",
+            "reasoning": {"effort": "high"},
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "turn one"}]
+                },
+                {
+                    "type": "reasoning",
+                    "id": "rs_turn_one",
+                    "content": [{"type": "reasoning_text", "text": "plan turn one"}]
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "calling tool one"}]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "/tmp"
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "turn two"}]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"ls\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_2",
+                    "output": "src"
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_3",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"git status\"}"
+                }
+            ]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-cross-turn", target, body).unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        let junction_idx = input
+            .iter()
+            .enumerate()
+            .find_map(|(idx, item)| {
+                let prev = idx.checked_sub(1).and_then(|prev| input[prev].get("type"));
+                let next = input.get(idx + 1).and_then(|next| next.get("type"));
+                let is_inserted = item["type"] == "reasoning"
+                    && prev.and_then(serde_json::Value::as_str)
+                        .is_some_and(|kind| {
+                            matches!(kind, "function_call_output" | "custom_tool_call_output")
+                        })
+                    && next.and_then(serde_json::Value::as_str)
+                        .is_some_and(|kind| matches!(kind, "function_call" | "custom_tool_call"));
+                is_inserted.then_some(idx)
+            })
+            .expect("output_2->call_3 junction must carry an inserted reasoning item");
+        assert_eq!(input[junction_idx - 1]["type"], "function_call_output");
+        assert_eq!(input[junction_idx + 1]["type"], "function_call");
+        assert_eq!(
+            input[junction_idx]["content"],
+            json!([{"type": "reasoning_text", "text": "[thinking redacted]"}])
+        );
     }
 
     #[test]

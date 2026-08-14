@@ -73,6 +73,7 @@ enum V3Transport13ResponsesRequestKind {
         timeout: Option<Duration>,
         initial_concurrency_budget: u32,
         cancellation: Option<V3ProviderCancellation>,
+        compatibility_profile: Option<String>,
     },
     WebSocketV2 {
         request_id: String,
@@ -84,6 +85,7 @@ enum V3Transport13ResponsesRequestKind {
         event: Value,
         initial_concurrency_budget: u32,
         cancellation: Option<V3ProviderCancellation>,
+        compatibility_profile: Option<String>,
     },
 }
 
@@ -378,6 +380,7 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
     let provider_id = target.provider_id;
     let request_timeout_ms = target.request_timeout_ms;
     let initial_concurrency_budget = target.initial_concurrency_budget;
+    let compatibility_profile = target.compatibility_profile.clone();
     match target.responses_transport {
         V3ResponsesTransportKind::Http => {
             let mut body = body;
@@ -402,10 +405,12 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
             )?;
             if let V3Transport13ResponsesRequestKind::Http {
                 initial_concurrency_budget: budget,
+                compatibility_profile: request_compatibility_profile,
                 ..
             } = &mut request.kind
             {
                 *budget = initial_concurrency_budget;
+                *request_compatibility_profile = compatibility_profile;
             }
             Ok(request)
         }
@@ -441,6 +446,7 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                     event: body,
                     initial_concurrency_budget,
                     cancellation: None,
+                    compatibility_profile,
                 },
             ))
         }
@@ -565,6 +571,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
             timeout,
             initial_concurrency_budget: 8,
             cancellation: None,
+            compatibility_profile: None,
         },
     ))
 }
@@ -673,6 +680,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 timeout,
                 initial_concurrency_budget: _,
                 cancellation,
+                compatibility_profile,
             } => {
                 self.send_http(
                     request_id,
@@ -684,6 +692,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     provider_headers,
                     timeout,
                     cancellation,
+                    compatibility_profile,
                 )
                 .await
             }
@@ -697,6 +706,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 event,
                 initial_concurrency_budget: _,
                 cancellation,
+                compatibility_profile,
             } => {
                 self.send_websocket_v2(
                     request_id,
@@ -707,6 +717,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     stream_intent,
                     event,
                     cancellation,
+                    compatibility_profile,
                 )
                 .await
             }
@@ -785,6 +796,7 @@ fn hold_sse_lease(
     controller: V3AdaptiveConcurrencyController,
     permit: V3AdaptiveConcurrencyPermit,
 ) -> V3ProviderResp14Raw {
+    let compatibility_profile = raw.compatibility_profile().map(ToOwned::to_owned);
     let (request_id, provider_id, status, headers, body) = raw.into_parts();
     let V3ProviderResponseBody::Sse(stream) = body else {
         unreachable!("SSE lease must only wrap an SSE response");
@@ -795,6 +807,7 @@ fn hold_sse_lease(
         |(mut stream, guard)| async move { stream.next().await.map(|item| (item, (stream, guard))) },
     ));
     V3ProviderResp14Raw::from_sse(request_id, provider_id, status, headers, stream)
+        .with_compatibility_profile(compatibility_profile)
 }
 
 impl ProviderResponsesTransport {
@@ -810,6 +823,7 @@ impl ProviderResponsesTransport {
         provider_headers: Vec<V3ProviderRequestHeader>,
         timeout: Option<Duration>,
         cancellation: Option<V3ProviderCancellation>,
+        compatibility_profile: Option<String>,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
         let secret = resolve_secret(&request_id, &provider_id, &auth).await?;
@@ -911,7 +925,8 @@ impl ProviderResponsesTransport {
                 status,
                 headers,
                 body,
-            ));
+            )
+            .with_compatibility_profile(compatibility_profile));
         }
 
         match stream_intent {
@@ -938,7 +953,8 @@ impl ProviderResponsesTransport {
                     status,
                     headers,
                     stream,
-                ))
+                )
+                .with_compatibility_profile(compatibility_profile))
             }
             V3ResponsesStreamIntent::Sse => Err(V3ProviderError::UnexpectedContentType {
                 request_id,
@@ -960,6 +976,7 @@ impl ProviderResponsesTransport {
         stream_intent: V3ResponsesStreamIntent,
         event: Value,
         cancellation: Option<V3ProviderCancellation>,
+        compatibility_profile: Option<String>,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
         let secret = resolve_secret(&request_id, &provider_id, &auth).await?;
@@ -1031,7 +1048,8 @@ impl ProviderResponsesTransport {
                 200,
                 vec![content_type_header("text/event-stream")],
                 websocket::websocket_sse_stream(connection, request_id, provider_id, cancellation),
-            ));
+            )
+            .with_compatibility_profile(compatibility_profile));
         }
 
         let mut json_events = websocket::V3ResponsesWebSocketProtocolAggregate::default();
@@ -1150,7 +1168,8 @@ impl ProviderResponsesTransport {
                 200,
                 vec![content_type_header("application/json")],
                 body,
-            ));
+            )
+            .with_compatibility_profile(compatibility_profile));
         }
     }
 }

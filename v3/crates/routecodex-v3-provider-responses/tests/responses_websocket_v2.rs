@@ -246,6 +246,7 @@ fn target_with_env(url: &str, env: &str) -> V3ResponsesProviderTarget {
         base_url: "https://http-endpoint.invalid/v1".into(),
         canonical_model_id: "model".into(),
         wire_model: "model".into(),
+        compatibility_profile: None,
         auth: V3ProviderAuthHandle {
             alias: "primary".into(),
             secret: V3ProviderAuthSecretHandle::Environment(env.into()),

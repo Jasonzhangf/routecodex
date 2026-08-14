@@ -138,6 +138,7 @@ pub fn provider_target(
         base_url: selected.base_url.clone(),
         canonical_model_id: selected.model_id.clone(),
         wire_model: selected.wire_model.clone(),
+        compatibility_profile: provider.compatibility_profile.clone(),
         auth: V3ProviderAuthHandle {
             alias: selected.auth_alias.clone(),
             secret,

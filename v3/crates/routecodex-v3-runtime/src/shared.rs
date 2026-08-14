@@ -181,6 +181,9 @@ pub(crate) async fn project_provider_raw_to_client_payload(
     // 避免透传非标准状态码让客户端误判（如 Codex 收到 201 → 无可见答案 →
     // 无限重试）；>=400 已在上方进入错误链（切 provider）。
     let status = if status == 201 { 200 } else { status };
+    // 响应侧能力回射按 target 声明并编译出的 compatibility profile 门控，
+    // 不按 provider_id 部署身份分支（与请求侧 wire 层同一契约）。
+    let compatibility_profile = raw.compatibility_profile().map(ToOwned::to_owned);
     let content_type = raw
         .header_text("content-type")
         .map_err(provider_body_source)?
@@ -250,7 +253,7 @@ pub(crate) async fn project_provider_raw_to_client_payload(
         // 声明的是 custom 工具形态——必须在进入客户端前回射为 custom_tool_call，
         // 否则客户端不执行调用、下一轮历史缺 output（孤儿 call）触发上游 400。
         // 请求侧对应映射见 responses:deepseek-console-go compat。
-        if provider_id == "opencode-go" {
+        if compatibility_profile.as_deref() == Some("responses:deepseek-console-go") {
             parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
         }
         let observation = observe_json_remote_continuation(&provider_id, status, &parsed)?;
@@ -1116,5 +1119,60 @@ mod tests {
         let first = guarded.next().await.expect("replayed first chunk");
         assert!(first.is_ok());
         assert!(guarded.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn direct_json_deepseek_console_go_compat_requires_profile_not_provider_id() {
+        // 反向：provider_id 是 opencode-go 但 raw 未携带
+        // responses:deepseek-console-go profile 时不得做响应回射——
+        // 能力按配置声明的 compatibility profile 门控，不按部署身份分支。
+        let raw = V3ProviderResp14Raw::from_json(
+            "req",
+            "opencode-go",
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_1","output":[{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":"{\"input\":\"ls -la\"}"}]}"#
+                .to_vec(),
+        );
+        let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
+        let V3ClientBody::Json(body) = &projection.client_payload.body else {
+            panic!("expected JSON client body");
+        };
+        assert_eq!(
+            body["output"][0]["type"], "function_call",
+            "no profile must keep function_call untouched: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn direct_json_deepseek_console_go_compat_follows_compatibility_profile() {
+        // 正向：provider_id 不是 opencode-go，但声明了
+        // responses:deepseek-console-go profile，function_call 必须回射为
+        // custom_tool_call（客户端声明的 custom 工具形态）。
+        let raw = V3ProviderResp14Raw::from_json(
+            "req",
+            "ds-provider",
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_1","output":[{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":"{\"input\":\"ls -la\"}"}]}"#
+                .to_vec(),
+        )
+        .with_compatibility_profile(Some("responses:deepseek-console-go".to_string()));
+        let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
+        let V3ClientBody::Json(body) = &projection.client_payload.body else {
+            panic!("expected JSON client body");
+        };
+        assert_eq!(
+            body["output"][0]["type"], "custom_tool_call",
+            "profile compat must rewrite function_call: {body}"
+        );
+        assert_eq!(body["output"][0]["input"], "ls -la");
+        assert!(body["output"][0].get("arguments").is_none());
     }
 }

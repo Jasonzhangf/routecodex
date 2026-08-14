@@ -81,7 +81,6 @@ pub(crate) fn publish_manifest(
 }
 const HUB_V1_ENTRY_PROTOCOLS: [&str; 4] = ["responses", "anthropic", "gemini", "openai_chat"];
 use crate::entry_protocol_validation::{endpoint_patterns as expected_entry_protocol_endpoint_patterns, execution_modes as expected_entry_protocol_execution_modes};
-
 fn compile_hub_v1(
     authoring: Option<V3HubV1AuthoringConfig>,
 ) -> Result<Option<V3HubV1Manifest>, V3ConfigError> {
@@ -634,8 +633,15 @@ fn compile_providers(
         let health = compile_provider_health(&id, provider.health)?;
         let provider_request_cleanup =
             compile_provider_request_cleanup(&id, provider.provider_request_cleanup)?;
-        let compatibility_profile =
-            normalize_v3_provider_compatibility_profile(provider.compatibility_profile);
+        // v3-native inline provider 只消费已登记给 v3-native 的默认映射
+        // （opencode-go -> responses:deepseek-console-go）；v2
+        // provider-directory 表里的 cc/lmstudio/minimax 等默认不得静默注入
+        // v3-native 配置。显式声明仍优先于编译默认。
+        let compatibility_profile = normalize_v3_provider_compatibility_profile(
+            provider
+                .compatibility_profile
+                .or_else(|| resolve_v3_native_provider_default_compatibility_profile(&id)),
+        );
         let semantic_error_policy = provider.semantic_error_policy;
         provider_error_action_policies.extend(semantic_error_policy.into_iter().map(|policy| {
             V3ProviderErrorActionPolicyAuthoringConfig {
@@ -681,6 +687,20 @@ fn normalize_v3_provider_compatibility_profile(profile: Option<String>) -> Optio
     profile
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+/// v3-native inline provider 的 compatibility profile 编译默认：只允许已
+/// 登记给 v3-native 的条目，避免 v2 provider-directory 的整表默认静默改变
+/// v3-native 既有配置的 wire 行为。当前唯一已登记条目是 opencode-go 的
+/// `responses:deepseek-console-go`（Console Go 网关工具映射 + 交错工具段
+/// reasoning 注入契约）。
+fn resolve_v3_native_provider_default_compatibility_profile(
+    provider_id: &str,
+) -> Option<String> {
+    match provider_id.trim() {
+        "opencode-go" => Some("responses:deepseek-console-go".to_string()),
+        _ => None,
+    }
 }
 
 fn compile_provider_responses(

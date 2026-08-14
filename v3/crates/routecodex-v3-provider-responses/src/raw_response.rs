@@ -38,6 +38,10 @@ impl fmt::Debug for V3ProviderResponseBody {
 pub struct V3ProviderResp14Raw {
     request_id: String,
     provider_id: String,
+    /// 该 provider target 声明并编译出的 compatibility profile（如
+    /// `responses:deepseek-console-go`）；响应侧能力回射按契约门控，
+    /// 不得按 provider_id 部署身份分支。
+    compatibility_profile: Option<String>,
     status: u16,
     headers: Vec<V3ProviderResponseHeader>,
     body: V3ProviderResponseBody,
@@ -54,6 +58,7 @@ impl V3ProviderResp14Raw {
         Self {
             request_id: request_id.into(),
             provider_id: provider_id.into(),
+            compatibility_profile: None,
             status,
             headers,
             body: V3ProviderResponseBody::Json(body),
@@ -70,10 +75,16 @@ impl V3ProviderResp14Raw {
         Self {
             request_id,
             provider_id,
+            compatibility_profile: None,
             status,
             headers,
             body: V3ProviderResponseBody::Sse(body),
         }
+    }
+
+    pub fn with_compatibility_profile(mut self, profile: Option<String>) -> Self {
+        self.compatibility_profile = profile;
+        self
     }
 
     pub fn request_id(&self) -> &str {
@@ -82,6 +93,10 @@ impl V3ProviderResp14Raw {
 
     pub fn provider_id(&self) -> &str {
         &self.provider_id
+    }
+
+    pub fn compatibility_profile(&self) -> Option<&str> {
+        self.compatibility_profile.as_deref()
     }
 
     pub fn status(&self) -> u16 {
