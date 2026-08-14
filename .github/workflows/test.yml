@@ -65,6 +65,8 @@ jobs:
         run: npm run test:v3-console-request-count-visibility-red-fixtures
       - name: V2 and V3 route-classifier semantic gate
         run: npm run test:route-classifier-semantics
+      - name: V4 frozen foundation regression
+        run: cargo test --workspace --manifest-path v4/Cargo.toml
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
       - name: Fetch Rust dependencies for offline builds

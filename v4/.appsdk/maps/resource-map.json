@@ -19,8 +19,9 @@
     {"resource_id":"v4.control.route_facts","owner":"v4::router","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
     {"resource_id":"v4.control.target_selection","owner":"v4::router","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
     {"resource_id":"v4.control.availability","owner":"v4::provider_runtime","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
-    {"resource_id":"v4.control.error_chain","owner":"v4::error","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
-    {"resource_id":"v4.control.retry_policy","owner":"v4::error","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.control.error_chain","owner":"routecodex-v4-error::ErrorChain","truth_store":"crates/routecodex-v4-error/src/lib.rs","allowed_operations":["read","validate","write"],"status":"active"},
+    {"resource_id":"v4.control.error_center","owner":"routecodex-v4-error::ErrorCenter","truth_store":"crates/routecodex-v4-error/src/lib.rs","allowed_operations":["read","validate","write"],"status":"active"},
+    {"resource_id":"v4.control.retry_policy","owner":"routecodex-v4-error::RetryPolicy","truth_store":"crates/routecodex-v4-error/src/lib.rs","allowed_operations":["read","validate"],"status":"active"},
     {"resource_id":"v4.scope.session","owner":"v4::control_plane","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
     {"resource_id":"v4.control.stopless_state","owner":"v4::control_plane","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
     {"resource_id":"v4.config.authoring","owner":"v4::config_compiler","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
@@ -46,6 +47,6 @@
     {"resource_id":"v4.console.terminal_output","owner":"v4::server","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
     {"resource_id":"v4.server.request_identity","owner":"v4::server","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
     {"resource_id":"v4.error.raw_wire_evidence","owner":"v4::server","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
-    {"resource_id":"v4.error.client_projection","owner":"v4::error","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"}
+    {"resource_id":"v4.error.client_projection","owner":"routecodex-v4-error::ClientProjection","truth_store":"crates/routecodex-v4-error/src/lib.rs","allowed_operations":["read","validate","write"],"status":"active"}
   ]
 }
