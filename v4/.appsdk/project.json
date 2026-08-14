@@ -247,7 +247,7 @@
         "suite_id": "v4-edge-l1-regression"
       },
       "source_owner": "routecodex-v4-edge",
-      "stage": "source_implemented"
+      "stage": "architecture_stable"
     }
   ],
   "project_id": "routecodex-v4",
