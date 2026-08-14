@@ -36,7 +36,7 @@ cargo build --release --workspace
 
 ## CI Admission
 
-`.github/workflows/test.yml` must run the `global_sdk_only` gate against the globally installed AppSDK binary in CI. The gate fails when `appsdk` is absent, when its digest does not match `v4/.appsdk/sdk.lock`, or when `appsdk verify v4` fails. Wiring depends on how CI obtains the AppSDK binary (release artifact, source build, or preinstalled runner image).
+`.github/workflows/test.yml` runs the `v4-appsdk-admission` job on `macos-14` (same arm64 platform as the pinned artifact). The job downloads the public release artifact `appsdk-0.1.0-macos-arm64` from `Jasonzhangf/appsdk` tag `v0.1.0`, installs it as `~/.local/bin/appsdk`, and executes the `global_sdk_only` gate. The gate fails when `appsdk` is absent, when its digest does not match `v4/.appsdk/sdk.lock`, or when `appsdk verify v4` fails. Dev machine and CI consume the identical release artifact, so `sdk.lock` pins a single digest for both.
 
 Negative checks cover Bundle/resource tampering, path traversal, symlink resources, Active artifact mismatch, review rejection, missing FreezeRecord, and local witness execution.
 

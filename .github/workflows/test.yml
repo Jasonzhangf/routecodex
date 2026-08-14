@@ -85,3 +85,25 @@ jobs:
         env:
           ROUTECODEX_SKIP_AUTO_BUMP: "1"
         run: npm run test:v3-workspace
+
+  v4-appsdk-admission:
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install global AppSDK from release artifact
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/appsdk" \
+            https://github.com/Jasonzhangf/appsdk/releases/download/v0.1.0/appsdk-0.1.0-macos-arm64
+          chmod +x "$HOME/.local/bin/appsdk"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: V4 AppSDK admission
+        run: |
+          command -v appsdk
+          appsdk version
+          test -x "$(command -v appsdk)"
+          test "sha256:$(shasum -a 256 "$(command -v appsdk)" | cut -d ' ' -f 1)" = "$(jq -r .digest v4/.appsdk/sdk.lock)"
+          appsdk verify v4
