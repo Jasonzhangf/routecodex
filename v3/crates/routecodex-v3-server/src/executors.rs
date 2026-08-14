@@ -107,6 +107,7 @@ pub(crate) fn wrap_v3_relay_sse_console_stream(
             wrap_v3_relay_sse_closeout_stream(stream, move |terminal| match terminal {
                 V3SseConsoleStreamTerminal::Completed => finalizer.complete_relay_sse(),
                 V3SseConsoleStreamTerminal::Dropped => finalizer.client_disconnected(),
+                V3SseConsoleStreamTerminal::Failed(message) => finalizer.provider_stream_failed(&message),
             })
         }
         None => stream,
@@ -139,7 +140,7 @@ impl futures_util::Stream for V3SseConsoleCloseoutStream {
         match this.stream.as_mut().poll_next(cx) {
             Poll::Ready(Some(Ok(chunk))) => Poll::Ready(Some(Ok(chunk))),
             Poll::Ready(Some(Err(error))) => {
-                this.closeout.take();
+                this.emit_terminal(V3SseConsoleStreamTerminal::Failed(error.clone()));
                 Poll::Ready(Some(Err(error)))
             }
             Poll::Ready(None) => {
@@ -193,7 +194,9 @@ impl futures_util::Stream for V3DirectSseConsoleCloseoutStream {
         match this.stream.as_mut().poll_next(cx) {
             Poll::Ready(Some(Ok(chunk))) => Poll::Ready(Some(Ok(chunk))),
             Poll::Ready(Some(Err(error))) => {
-                this.closeout.take();
+                this.emit_terminal(V3SseConsoleStreamTerminal::Failed(
+                    error.message.clone(),
+                ));
                 Poll::Ready(Some(Err(error)))
             }
             Poll::Ready(None) => {
@@ -343,6 +346,13 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
         rx,
         |mut rx| async move { rx.recv().await.map(|item| (item, rx)) },
     ));
+    let client_stream = wrap_v3_sse_io_dump_stream(
+        client_stream,
+        state.sse_dump_enabled,
+        state.server.port,
+        "/v1/chat/completions",
+        &request_id,
+    );
     let body = v3_io_sse_body(client_stream, None);
     Response::builder()
         .status(StatusCode::OK)
@@ -508,6 +518,16 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
     }
     let stream_console_finalizer =
         emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
+    if let V3Server16Body::Sse(stream) = &mut frame.body {
+        let wrapped = std::mem::replace(stream, Box::pin(futures_util::stream::pending()));
+        *stream = wrap_v3_sse_client_dump_stream(
+            wrapped,
+            state.sse_dump_enabled,
+            state.server.port,
+            &path,
+            &request_id,
+        );
+    }
     responses_direct_output_response_with_console(
         frame,
         stream_console_finalizer,

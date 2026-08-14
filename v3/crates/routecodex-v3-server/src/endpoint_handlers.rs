@@ -1,7 +1,7 @@
 use crate::*;
+use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, Response};
-use axum::body::Body;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Instant;
@@ -814,9 +814,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                     // 或 provider 失败时无条件落盘 request.json + error.json（绕过
                     // codex_samples 开关）。此前该分支只落 response.json，400/5xx
                     // 样本全部丢失，无法事后诊断（770577 等 400 无 error 样本）。
-                    let has_provider_failure = frame.observability.as_ref().is_some_and(
-                        |observability| !observability.provider_failure_events.is_empty(),
-                    );
+                    let has_provider_failure =
+                        frame.observability.as_ref().is_some_and(|observability| {
+                            !observability.provider_failure_events.is_empty()
+                        });
                     if frame.status >= 400 || has_provider_failure {
                         let _ = persist_v3_error_evidence_payload(
                             &state,
@@ -948,9 +949,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                 // 可观测性：direct 分支对齐 relay——status>=400 或 provider 失败时
                 // 无条件落盘 request.json + error.json（绕过 codex_samples 开关），
                 // 否则 direct 错误只在内存 trace，无法事后诊断。
-                let has_provider_failure = frame.observability.as_ref().is_some_and(
-                    |observability| !observability.provider_failure_events.is_empty(),
-                );
+                let has_provider_failure = frame
+                    .observability
+                    .as_ref()
+                    .is_some_and(|observability| !observability.provider_failure_events.is_empty());
                 if frame.status >= 400 || has_provider_failure {
                     let _ = persist_v3_error_evidence_payload(
                         &state,
@@ -1013,6 +1015,19 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                 );
                 let stream_console_finalizer =
                     emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
+                if let V3Server16Body::Sse(stream) = &mut frame.body {
+                    let wrapped = std::mem::replace(
+                        stream,
+                        Box::pin(futures_util::stream::pending()),
+                    );
+                    *stream = wrap_v3_sse_client_dump_stream(
+                        wrapped,
+                        state.sse_dump_enabled,
+                        state.server.port,
+                        &path,
+                        &request_id,
+                    );
+                }
                 responses_direct_output_response_with_console(
                     frame,
                     stream_console_finalizer,

@@ -38,6 +38,8 @@ enum Command {
         snap_stages: Option<String>,
         #[arg(long, default_value_t = false)]
         debug: bool,
+        #[arg(long, default_value_t = false)]
+        sse_dump: bool,
     },
     Status {
         #[arg(short, long)]
@@ -56,6 +58,8 @@ enum Command {
         snap_stages: Option<String>,
         #[arg(long, default_value_t = false)]
         debug: bool,
+        #[arg(long, default_value_t = false)]
+        sse_dump: bool,
     },
     Stop {
         #[arg(short, long)]
@@ -112,6 +116,8 @@ enum ServerCommand {
         snap_stages: Option<String>,
         #[arg(long, default_value_t = false)]
         debug: bool,
+        #[arg(long, default_value_t = false)]
+        sse_dump: bool,
     },
     Status {
         #[arg(short, long)]
@@ -130,6 +136,8 @@ enum ServerCommand {
         snap_stages: Option<String>,
         #[arg(long, default_value_t = false)]
         debug: bool,
+        #[arg(long, default_value_t = false)]
+        sse_dump: bool,
     },
     Stop {
         #[arg(short, long)]
@@ -149,6 +157,8 @@ enum ServerCommand {
         snap_stages: Option<String>,
         #[arg(long, default_value_t = false)]
         console: bool,
+        #[arg(long, default_value_t = false)]
+        sse_dump: bool,
     },
 }
 
@@ -214,6 +224,7 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             snapall,
             snap_stages,
             debug,
+            sse_dump,
         } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
@@ -237,6 +248,7 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 snap_flags.snap_stages,
             )
             .with_console_enabled(true)
+            .with_sse_dump_enabled(sse_dump)
             .start_foreground(&executable)
             .await?;
         }
@@ -249,6 +261,7 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     snapall,
                     snap_stages,
                     debug,
+                    sse_dump,
                 },
         } => {
             let config = resolve_config_path(config)?;
@@ -272,6 +285,7 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     snap_flags.snap_stages,
                 )
                 .with_console_enabled(debug)
+                .with_sse_dump_enabled(sse_dump)
                 .start_foreground(&executable)
                 .await?;
             } else {
@@ -293,6 +307,7 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     snap_flags.snap_stages,
                 )
                 .with_console_enabled(debug)
+                .with_sse_dump_enabled(sse_dump)
                 .start(&executable, Duration::from_secs(15))
                 .await?;
                 emit_v3_cli_start_completed_console_line(&status);
@@ -325,6 +340,7 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     snapall,
                     snap_stages,
                     debug,
+                    sse_dump,
                 },
         } => {
             let config = resolve_config_path(config)?;
@@ -338,6 +354,7 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 snap_flags.snap_stages,
             )
             .with_console_enabled(debug)
+            .with_sse_dump_enabled(sse_dump)
             .restart(&executable, Duration::from_millis(timeout_ms))
             .await?;
             println!("{}", serde_json::to_string(&status)?);
@@ -349,6 +366,7 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             snapall,
             snap_stages,
             debug,
+            sse_dump,
         } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
@@ -371,6 +389,7 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 snap_flags.snap_stages,
             )
             .with_console_enabled(debug)
+            .with_sse_dump_enabled(sse_dump)
             .restart_with_observer(
                 &executable,
                 Duration::from_millis(timeout_ms),
@@ -402,10 +421,14 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     snapall,
                     snap_stages,
                     console,
+                    sse_dump,
                 },
         } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
+            if sse_dump {
+                std::env::set_var("ROUTECODEX_V3_SSE_DUMP", "1");
+            }
             configure_v3_snapshot_flags(
                 V3ManagedLifecycle::new(config)?,
                 snap,
@@ -483,7 +506,7 @@ fn configure_v3_snapshot_flags(
     let enabled = snap || snapall || snapshot_stages.is_some();
     lifecycle
         .with_snapshots_enabled(enabled)
-        .with_direct_snapshots_enabled(snapall)
+        .with_direct_snapshots_enabled(snap || snapall)
         .with_snapshot_stages(snapshot_stages)
 }
 

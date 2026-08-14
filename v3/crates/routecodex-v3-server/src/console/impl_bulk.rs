@@ -49,38 +49,46 @@ pub(crate) fn emit_v3_provider_observability_console_lines(
     let route = resolve_v3_console_route_projection(observability);
     for event in &observability.provider_failure_events {
         emit_v3_provider_failure_console_event(context, observability, event);
+        if event.health_state == "cooldown" {
+            context
+                .state
+                .realtime_cooled_provider_keys
+                .lock()
+                .expect("V3 console cooled-provider mutex poisoned")
+                .insert(event.provider_key.clone());
+        }
     }
-    if observability.provider_failure_events.is_empty()
-        && !observability.unavailable_candidates.is_empty()
-    {
-        let selected = format_v3_console_provider_target(observability);
-        // 局部着色：unavailable 错误段（provider 名 + 错误详情）染红，
-        // req / selected / reason 保持正常色，避免整行一片红不易读。
-        let provider_errors =
-            colorize_v3_console_error_segment(&observability.unavailable_candidates.join(","));
-        let content = format_v3_console_timed_content(
-            "[provider-unavailable]",
-            &format!(
-                "req={} unavailable={} selected={} reason=availability",
-                context.request_identity.request_id,
-                provider_errors,
-                selected
-            ),
-        );
-        let human_prefix = format_v3_console_human_prefix_for_observability(
-            &context.state.server.port.to_string(),
-            &context.entry_protocol,
-            identity.project_path.as_deref(),
-            observability,
-            &route.label,
-        );
-        let line = if human_prefix.is_empty() {
-            content
-        } else {
-            format!("{human_prefix} {content}")
-        };
-        append_v3_human_console_line(&context.state, &line);
-        eprintln!("{line}");
+    if let Some(provider_key) = observability.provider_key.as_deref() {
+        let recovered = context
+            .state
+            .realtime_cooled_provider_keys
+            .lock()
+            .expect("V3 console cooled-provider mutex poisoned")
+            .remove(provider_key);
+        if recovered {
+            let content = format_v3_console_timed_content(
+                "[provider-recovered]",
+                &format!(
+                    "req={} provider={} reason=cooldown_expired",
+                    context.request_identity.request_id,
+                    format_v3_console_provider_target(observability)
+                ),
+            );
+            let human_prefix = format_v3_console_human_prefix_for_observability(
+                &context.state.server.port.to_string(),
+                &context.entry_protocol,
+                identity.project_path.as_deref(),
+                observability,
+                &route.label,
+            );
+            let line = if human_prefix.is_empty() {
+                content
+            } else {
+                format!("{human_prefix} {content}")
+            };
+            append_v3_human_console_line(&context.state, &line);
+            eprintln!("{line}");
+        }
     }
 }
 
@@ -157,34 +165,12 @@ pub(crate) fn emit_v3_provider_failure_console_event(
         &event_observability,
         &route.label,
     );
-    let colorized_error = colorize_v3_error_console_line(
+    let colorized_error = colorize_v3_single_error_console_line(
         &error_human_prefix,
         &colorize_v3_provider_failure_console_content(error_content_str, event),
-        &colorize_v3_provider_failure_console_content(error_content_str, event),
-        &identity.session_id,
     );
     append_v3_human_console_line(&context.state, &colorized_error);
     eprintln!("{colorized_error}");
-    if event.action == "switch_provider" {
-        let switch_content =
-            format_v3_provider_switch_console_content(&context.request_identity.request_id, event);
-        let switch_content_str = switch_content.as_str();
-        let switch_human_prefix = format_v3_console_human_prefix_for_observability(
-            &context.state.server.port.to_string(),
-            &context.entry_protocol,
-            identity.project_path.as_deref(),
-            &event_observability,
-            &route.label,
-        );
-        let colorized_switch = colorize_v3_error_console_line(
-            &switch_human_prefix,
-            &colorize_v3_provider_failure_console_content(switch_content_str, event),
-            &colorize_v3_provider_failure_console_content(switch_content_str, event),
-            &identity.session_id,
-        );
-        append_v3_human_console_line(&context.state, &colorized_switch);
-        eprintln!("{colorized_switch}");
-    }
 }
 
 pub(crate) fn mark_v3_provider_failure_console_event_once(
@@ -289,33 +275,6 @@ pub(crate) fn format_v3_provider_failure_console_content(
         format_v3_console_single_line_message(&event.message)
     ));
     format_v3_console_timed_content("❌ [provider-error]", &fields)
-}
-
-pub(crate) fn format_v3_provider_switch_console_content(
-    request_id: &str,
-    event: &V3RuntimeProviderFailureObservation,
-) -> String {
-    let from = format_v3_console_provider_key_label(&event.provider_key);
-    let target = event
-        .next_provider_key
-        .as_deref()
-        .map(format_v3_console_provider_key_label)
-        .unwrap_or_else(|| "-".to_string());
-    format_v3_console_timed_content(
-        "[provider-switch]",
-        &format!(
-            "req={} [switch to:{}] [switch from:{}] model={} result={} reason=provider_failure causeStatus={} failures={} health={} message={}",
-            request_id,
-            target,
-            from,
-            event.model_id,
-            event.action,
-            event.status,
-            event.failure_count,
-            event.health_state,
-            format_v3_console_single_line_message(&event.message)
-        ),
-    )
 }
 
 pub(crate) fn colorize_v3_provider_failure_console_content(
@@ -894,9 +853,8 @@ pub(crate) struct V3DirectSseConsoleFinalizer {
 pub(crate) enum V3SseConsoleStreamTerminal {
     Completed,
     Dropped,
-}
-
-impl V3SseConsoleFinalizer {
+    Failed(String),
+}impl V3SseConsoleFinalizer {
     pub(crate) fn complete_relay_sse(mut self) {
         if let Err(error) = merge_v3_runtime_stream_observation(
             &mut self.observability,

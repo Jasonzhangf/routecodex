@@ -154,13 +154,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         return run_v3_direct_transient_failure_policy(context, selected, source, status, state)
             .await;
     }
-    let health_record = record_v3_direct_provider_failure_record(
-        context.provider_health,
-        context.failure_session_scope,
-        selected,
-        &source,
-        context.now_epoch_ms,
-    )?;
+    let health_record = record_v3_direct_provider_failure_record(context.provider_health, context.failure_session_scope, selected, &source, context.now_epoch_ms)?;
 
     let failed_key = candidate_key(&selected.candidate);
     let expanded_candidates = match (context.expanded, context.provider_pinned) {
@@ -192,11 +186,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         remaining_available_candidates(expanded_candidates, context.availability, &failed_with_current)
     });
     let mut next_provider_key = expanded_candidates.and_then(|expanded_candidates| {
-        first_remaining_available_candidate_key(
-            expanded_candidates,
-            context.availability,
-            &failed_with_current,
-        )
+        first_remaining_available_candidate_key(expanded_candidates, context.availability, &failed_with_current)
     });
     if remaining == 0 {
         if let Some(candidates) = expanded_candidates {
@@ -445,11 +435,7 @@ async fn run_v3_direct_transient_failure_policy<R: V3ProviderAvailabilityReader>
         remaining_available_candidates(candidates, context.availability, &failed_with_current)
     });
     let mut next_provider_key = expanded_candidates.and_then(|candidates| {
-        first_remaining_available_candidate_key(
-            candidates,
-            context.availability,
-            &failed_with_current,
-        )
+        first_remaining_available_candidate_key(candidates, context.availability, &failed_with_current)
     });
     if remaining == 0 {
         if let Some(candidates) = expanded_candidates {
@@ -521,14 +507,7 @@ async fn run_v3_direct_transient_failure_policy<R: V3ProviderAvailabilityReader>
     // 避免 health-neutral 导致反复命中同一失败 provider；不触发 15 分钟冷却。
     context
         .provider_health
-        .record_provider_transient_bypass_in_session(
-            context.failure_session_scope,
-            &selected.candidate.provider_id,
-            Some(&selected.candidate.auth_alias),
-            Some(&selected.candidate.model_id),
-            Some(&source.message),
-            context.now_epoch_ms,
-        )
+        .record_provider_transient_bypass_in_session(context.failure_session_scope, &selected.candidate.provider_id, Some(&selected.candidate.auth_alias), Some(&selected.candidate.model_id), Some(&source.message), context.now_epoch_ms)
         .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))?;
     state.failed_candidates.insert(failed_key.clone());
     state.trace.push("V3TargetLocalReselected");
@@ -540,11 +519,7 @@ async fn run_v3_direct_transient_failure_policy<R: V3ProviderAvailabilityReader>
         false,
         Some(recovery),
     );
-    let health_record = build_v3_transient_failure_record(
-        &failed_key,
-        (retries_done + 1) as u32,
-        Some(&source.message),
-    );
+    let health_record = build_v3_transient_failure_record(&failed_key, (retries_done + 1) as u32, Some(&source.message));
     Ok(V3DirectProviderFailurePolicyResult {
         decision,
         retry_selected: None,
@@ -1112,7 +1087,6 @@ impl V3DirectSseRemoteContinuationPolicy {
     }
 }
 
-
 fn capability_revision_for_pin(
     manifest: &V3Config05ManifestPublished,
     pin: &V3RemoteContinuationPin,
@@ -1147,12 +1121,7 @@ fn capability_revision_for_pin(
 }
 
 pub(crate) fn runtime_source(stage: &'static str, error: impl std::fmt::Display) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised(
-        V3ErrorSourceKind::RuntimeFailure,
-        stage,
-        "v3_route_target_runtime_failure",
-        error.to_string(),
-    )
+    build_v3_error_01_source_raised(V3ErrorSourceKind::RuntimeFailure, stage, "v3_route_target_runtime_failure", error.to_string())
 }
 
 struct V3ExactPinAvailabilityExhaustion<'pin> {
@@ -1224,13 +1193,7 @@ async fn exact_pin_unavailable_output(
         }
     };
     match provider_health
-        .wait_for_terminal_provider_projection_in_scope(
-            failure_session_scope,
-            &pin.provider_id,
-            Some(&pin.auth_handle_id),
-            Some(&pin.model_id),
-            "continuation_exact_pin_unavailable",
-        )
+        .wait_for_terminal_provider_projection_in_scope(failure_session_scope, &pin.provider_id, Some(&pin.auth_handle_id), Some(&pin.model_id), "continuation_exact_pin_unavailable")
         .await
     {
         Ok(_) => {}
@@ -1372,12 +1335,7 @@ fn debug_error_output(
     hook_registry: &V3HookRegistry,
 ) -> V3ResponsesDirectRuntimeOutput {
     error_output(
-        build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            stage,
-            "v3_debug_failure",
-            error.to_string(),
-        ),
+        build_v3_error_01_source_raised(V3ErrorSourceKind::RuntimeFailure, stage, "v3_debug_failure", error.to_string()),
         vec![stage],
         hook_registry,
     )

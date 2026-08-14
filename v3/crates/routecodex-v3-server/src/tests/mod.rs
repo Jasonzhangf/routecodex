@@ -160,6 +160,7 @@ fn test_v3_listener_state_with_debug(
         manifest: Arc::clone(&manifest),
         debug,
         console_enabled: true,
+        sse_dump_enabled: false,
         request_counter: Arc::new(Mutex::new(V3RequestIdCounter {
             state_file: log_file.with_extension("request-id-counter.json"),
             state: V3RequestCounterState::default(),
@@ -182,6 +183,7 @@ fn test_v3_listener_state_with_debug(
         provider_health: Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
             &manifest,
         )),
+        realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
     })
 }
@@ -439,6 +441,68 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
     assert!(terminal["rawSse"]
         .as_str()
         .is_some_and(|value| value.contains("response.completed")));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn codex_sample_sse_recorder_persists_drop_artifact_with_stream_error() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-dropped-sse-sample-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        5555,
+        true,
+        true,
+        Some("client-response".to_string()),
+        true,
+    );
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "text/event-stream".to_string(),
+        body: V3Server16Body::Bytes(Vec::new()),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        node_trace: vec!["V3Server16HttpFrame"],
+        observability: None,
+        stream_observation: None,
+    };
+    let recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
+        Arc::clone(&state),
+        "responses".to_string(),
+        "/v1/responses".to_string(),
+        "dropped-before-terminal".to_string(),
+        &frame,
+    );
+    recorder.persist_initial().unwrap();
+    let response_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/dropped-before-terminal/response.json",
+    );
+    let mut stream = recorder.wrap(Box::pin(stream::iter(vec![Ok::<
+        Vec<u8>,
+        V3Error01SourceRaised,
+    >(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\"}\n\n"
+        .to_vec())])));
+    assert!(stream.next().await.unwrap().is_ok());
+    drop(stream);
+
+    let dropped: Value =
+        serde_json::from_str(&fs::read_to_string(&response_path).unwrap()).unwrap();
+    assert!(dropped["rawSse"]
+        .as_str()
+        .is_some_and(|value| value.contains("response.output_text.delta")));
+    assert_eq!(
+        dropped["streamError"],
+        "client disconnected before SSE stream terminal"
+    );
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -1475,24 +1539,6 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
     assert!(error_content.contains("external=transport"));
     assert!(error_content.contains("externalCode=TRANSPORT_ERROR"));
     assert!(error_content.contains("model=gpt-5.5"));
-    let switch_content = format_v3_provider_switch_console_content("req-provider-switch", &event);
-    assert!(switch_content.contains("[provider-switch]"));
-    assert!(switch_content.contains(
-        "[switch to:minimax[key1].MiniMax-M3] [switch from:limited[key1].gpt-5.5] model=gpt-5.5 result=switch_provider"
-    ));
-    assert!(switch_content.contains("model=gpt-5.5"));
-    assert!(
-        switch_content
-            .find("[switch to:minimax[key1].MiniMax-M3]")
-            .unwrap()
-            < switch_content.find("reason=provider_failure").unwrap()
-    );
-    // switch 行必须自带错误详情，单行即可观测切换原因
-    assert!(switch_content.contains("causeStatus=502"));
-    assert!(switch_content.contains("failures=3"));
-    assert!(switch_content.contains("health=cooldown"));
-    assert!(switch_content.contains("message=provider response event codec failed"));
-
     let colored = colorize_v3_layered_console_line(
         V3ConsoleLayeredBlock::new("", &error_content, &error_content, ""),
         ANSI_ERROR_RED,
@@ -1581,7 +1627,7 @@ fn direct_frame_console_emits_provider_switch_complete_and_usage() {
             && !log.contains("[gpt-5.5")
             && !log.contains("[pending")
             && log.contains("❌ [provider-error]")
-            && log.contains("[provider-switch]")
+            && !log.contains("[provider-switch]")
             && log.contains("event=route_selected")
             && log.contains("event=completed")
             && log.contains("[usage]")
@@ -1638,10 +1684,12 @@ fn realtime_provider_failure_sink_prints_before_final_and_final_dedupes() {
         provider_error_line.contains("[switch to:second[key].gpt-5.5]"),
         "provider failure line must label the selected next provider: {provider_error_line}"
     );
-    assert!(
-        after_realtime.contains("[provider-switch]"),
-        "{after_realtime}"
+    assert_eq!(
+        after_realtime.matches("[switch from:first[key].gpt-5.5]").count(),
+        1,
+        "one provider switch must emit one failed-provider line: {after_realtime}"
     );
+    assert!(!after_realtime.contains("[provider-switch]"), "{after_realtime}");
     assert!(
         !after_realtime.contains("event=completed"),
         "{after_realtime}"
@@ -1649,7 +1697,6 @@ fn realtime_provider_failure_sink_prints_before_final_and_final_dedupes() {
 
     let realtime_route_hits = after_realtime.matches("[virtual-router-hit]").count();
     let realtime_provider_errors = after_realtime.matches("❌ [provider-error]").count();
-    let realtime_provider_switches = after_realtime.matches("[provider-switch]").count();
     emit_v3_provider_observability_console_lines(&context, &observability);
     let after_final = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
     assert_eq!(
@@ -1662,10 +1709,55 @@ fn realtime_provider_failure_sink_prints_before_final_and_final_dedupes() {
         realtime_provider_errors,
         "final observability must not reprint realtime provider-error blocks: {after_final}"
     );
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[test]
+fn cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_lines() {
+    let log_file = test_v3_console_log_file("provider-cooldown-transition");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 5555);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-provider-transition",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let mut cooldown = test_provider_failure_observation();
+    cooldown.health_state = "cooldown".to_string();
+    cooldown.failure_count = 3;
+    cooldown.cooldown_until_ms = Some(900_000);
+    emit_v3_provider_observability_console_lines(
+        &context,
+        &test_direct_observability(vec![cooldown]),
+    );
+    let mut observability = test_direct_observability(Vec::new());
+    observability.unavailable_candidates = vec![
+        "first:key:gpt-5.5:availability(provider_failure_session:cooldown)".to_string(),
+    ];
+    emit_v3_provider_observability_console_lines(&context, &observability);
+    let mut recovered = test_direct_observability(Vec::new());
+    recovered.provider_id = Some("first".to_string());
+    recovered.provider_key = Some("first:key:gpt-5.5".to_string());
+    recovered.target_path = vec!["direct".to_string(), "first".to_string()];
+    emit_v3_provider_observability_console_lines(&context, &recovered);
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(
+        log.contains("health=cooldown") && log.contains("cooldownUntilMs=900000"),
+        "cooldown entry must be logged by the failure transition: {log}"
+    );
     assert_eq!(
-        after_final.matches("[provider-switch]").count(),
-        realtime_provider_switches,
-        "final observability must not reprint realtime provider-switch blocks: {after_final}"
+        log.matches("[provider-recovered]").count(),
+        1,
+        "cooldown recovery must be logged once when the provider is selected again: {log}"
+    );
+    assert!(
+        !log.contains("provider-filtered") && !log.contains("provider-unavailable"),
+        "cooldown must not emit a per-request filtered/unavailable line: {log}"
     );
     let _ = std::fs::remove_file(&log_file);
 }
@@ -2142,9 +2234,9 @@ async fn direct_sse_console_closeout_abruptly_closes_without_fabricating_error06
     drop(client);
 
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap_or_default());
-    assert!(!log.contains("V3Error06ClientProjected"), "{log}");
-    assert!(!log.contains("event=failed"), "{log}");
-    assert!(!log.contains("provider_response_sse_stream"), "{log}");
+    assert!(log.contains("event=failed"), "{log}");
+    assert!(log.contains("V3Error06ClientProjected"), "{log}");
+    assert!(log.contains("provider_response_sse_stream"), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
 
@@ -2424,8 +2516,9 @@ async fn direct_sse_body_error_propagates_without_fabricated_error06() {
     );
 
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap_or_default());
-    assert!(!log.contains("event=failed"), "{log}");
-    assert!(!log.contains("V3Error06ClientProjected"), "{log}");
+    assert!(log.contains("event=failed"), "{log}");
+    assert!(log.contains("V3Error06ClientProjected"), "{log}");
+    assert!(log.contains("provider_response_sse_stream"), "{log}");
     assert!(!log.contains("provider_stream_error"), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
@@ -2642,6 +2735,7 @@ fn error_projection_appends_human_console_failure_line() {
         manifest: Arc::clone(&manifest),
         debug: debug.clone(),
         console_enabled: true,
+        sse_dump_enabled: false,
         request_counter: Arc::new(Mutex::new(V3RequestIdCounter::new())),
         codex_sample_store: Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
             manifest.debug.codex_samples,
@@ -2660,6 +2754,7 @@ fn error_projection_appends_human_console_failure_line() {
         provider_health: Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
             &manifest,
         )),
+        realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
     };
     let trace_scope = state
@@ -2883,6 +2978,68 @@ async fn relay_sse_body_abruptly_closes_without_fabricating_error_event() {
 }
 
 #[tokio::test]
+async fn relay_sse_closeout_emits_failed_terminal_on_stream_error() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&events);
+    let mut stream = wrap_v3_relay_sse_closeout_stream(
+        Box::pin(futures_util::stream::iter(vec![
+            Ok(b"data: partial\n\n".to_vec()),
+            Err("provider relay stream reset".to_string()),
+        ])),
+        move |terminal| recorded.lock().unwrap().push(terminal),
+    );
+
+    assert!(stream.next().await.unwrap().is_ok());
+    let error = stream.next().await.unwrap().unwrap_err();
+    assert_eq!(error, "provider relay stream reset");
+    drop(stream);
+
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![V3SseConsoleStreamTerminal::Failed(
+            "provider relay stream reset".to_string()
+        )]
+    );
+}
+
+#[tokio::test]
+async fn direct_sse_closeout_emits_failed_terminal_on_stream_error() {
+    use routecodex_v3_error::{
+        build_v3_error_01_source_raised, V3ErrorSourceKind,
+    };
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&events);
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderRespInbound01Raw",
+        "provider_response_sse_stream",
+        "provider SSE stream reset mid-stream",
+    );
+    let mut stream = wrap_v3_direct_sse_closeout_stream(
+        Box::pin(futures_util::stream::iter(vec![
+            Ok(b"data: partial\n\n".to_vec()),
+            Err(source),
+        ])),
+        move |terminal| recorded.lock().unwrap().push(terminal),
+    );
+
+    assert!(stream.next().await.unwrap().is_ok());
+    let error = stream.next().await.unwrap().unwrap_err();
+    assert_eq!(
+        error.message,
+        "provider SSE stream reset mid-stream"
+    );
+    drop(stream);
+
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![V3SseConsoleStreamTerminal::Failed(
+            "provider SSE stream reset mid-stream".to_string()
+        )]
+    );
+}
+
+#[tokio::test]
 async fn successful_responses_sse_emits_immediate_and_idle_periodic_keepalive_comments() {
     let provider = futures_util::stream::pending::<Result<Vec<u8>, io::Error>>();
     let body = v3_io_sse_body(Box::pin(provider), Some(Duration::from_millis(10)));
@@ -3046,7 +3203,7 @@ async fn error06_responses_sse_starts_with_error_and_never_receives_keepalive() 
 }
 
 #[tokio::test]
-async fn relay_sse_closeout_stream_error_does_not_fabricate_terminal() {
+async fn relay_sse_closeout_stream_error_reports_failed_terminal_without_fabricating_semantic_terminal() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let recorded = Arc::clone(&events);
     let mut stream = wrap_v3_relay_sse_closeout_stream(
@@ -3059,9 +3216,10 @@ async fn relay_sse_closeout_stream_error_does_not_fabricate_terminal() {
     assert_eq!(stream.next().await.unwrap().unwrap_err(), "provider boom");
     drop(stream);
 
-    assert!(
-        events.lock().unwrap().is_empty(),
-        "relay SSE body transport error must not fabricate semantic closeout terminal"
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![V3SseConsoleStreamTerminal::Failed("provider boom".to_string())],
+        "relay SSE body transport error must report Failed terminal instead of being silently dropped"
     );
 }
 

@@ -140,6 +140,22 @@ fn scoped_test_manifest(
     manifest
 }
 
+fn test_plan_http_request(
+    routing_group: &str,
+    request_id: &str,
+    execution_id: &str,
+) -> V3Server03HttpRequestRaw {
+    V3Server03HttpRequestRaw {
+        server_id: "test".to_string(),
+        failure_session_scope: test_failure_session_scope(routing_group),
+        request_id: request_id.to_string(),
+        execution_id: execution_id.to_string(),
+        method: "POST".to_string(),
+        path: "/v1/responses".to_string(),
+        body: json!({"model":"client-model","input":"hello"}),
+    }
+}
+
 fn test_responses_raw(
     routing_group: &str,
     request_id: &str,
@@ -197,19 +213,8 @@ async fn direct_sse_runtime_timing_publishes_only_after_clean_eof() {
         b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
             .to_vec(),
     )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_runtime_timing_clean_eof"),
-        runtime_timing,
-        observation.clone(),
-    );
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
+    let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_runtime_timing_clean_eof"), runtime_timing, observation.clone());
 
     while governed.next().await.is_some() {}
 
@@ -232,14 +237,7 @@ async fn direct_sse_strip_client_response_id_empties_nested_response_id() {
         b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\"}}\n\n"
             .to_vec(),
     )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        true,
-        true,
-    );
-    let mut observed = observed;
+    let mut observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), true, true);
     let mut first = observed.next().await.unwrap().unwrap();
     assert!(
         String::from_utf8_lossy(&first).contains("event: response.created"),
@@ -263,14 +261,7 @@ async fn direct_sse_strip_disabled_passes_chunk_through_unchanged() {
         b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\"}}\n\n"
             .to_vec(),
     )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut observed = observed;
+    let mut observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, false);
     let first = observed.next().await.unwrap().unwrap();
     assert!(
         String::from_utf8_lossy(&first).contains("\"id\":\"resp_1\""),
@@ -285,14 +276,7 @@ async fn direct_sse_strips_encrypted_content_when_retain_false() {
     let source = Box::pin(stream::iter(vec![Ok(
         b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"rsn_CIPHER\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"plain\"}]}}\n\n".to_vec(),
     )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        false,
-    );
-    let mut observed = observed;
+    let mut observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, false);
     let first = observed.next().await.unwrap().unwrap();
     let text = String::from_utf8_lossy(&first);
     assert!(
@@ -313,14 +297,7 @@ async fn direct_sse_keeps_encrypted_content_when_retain_true() {
     let source = Box::pin(stream::iter(vec![Ok(
         b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"rsn_KEEP\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"plain\"}]}}\n\n".to_vec(),
     )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut observed = observed;
+    let mut observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
     let first = observed.next().await.unwrap().unwrap();
     let text = String::from_utf8_lossy(&first);
     assert!(
@@ -335,14 +312,7 @@ async fn direct_sse_retain_false_passes_cipher_free_frames_byte_for_byte() {
     let runtime_timing = V3RuntimeTimingState::start();
     let raw = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n".to_vec();
     let source = Box::pin(stream::iter(vec![Ok(raw.clone())]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        false,
-    );
-    let mut observed = observed;
+    let mut observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
     let first = observed.next().await.unwrap().unwrap();
     assert_eq!(
         first, raw,
@@ -362,19 +332,8 @@ async fn direct_sse_terminal_event_before_eof_does_not_publish_runtime_timing() 
         )])
         .chain(stream::pending()),
     );
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_terminal_before_eof"),
-        runtime_timing,
-        observation.clone(),
-    );
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
+    let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_terminal_before_eof"), runtime_timing, observation.clone());
 
     governed.next().await.unwrap().unwrap();
     assert!(
@@ -394,19 +353,8 @@ async fn direct_sse_malformed_tail_does_not_publish_runtime_timing() {
         b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\ndata: {"
             .to_vec(),
     )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_malformed_tail"),
-        runtime_timing,
-        observation.clone(),
-    );
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
+    let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_malformed_tail"), runtime_timing, observation.clone());
 
     let mut saw_error = false;
     while let Some(result) = governed.next().await {
@@ -433,19 +381,8 @@ async fn direct_sse_response_done_without_completed_is_terminal_missing() {
     )
     .as_bytes()
     .to_vec())]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_done_without_completed"),
-        runtime_timing,
-        observation.clone(),
-    );
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
+    let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_done_without_completed"), runtime_timing, observation.clone());
 
     let mut error = None;
     while let Some(result) = governed.next().await {
@@ -471,19 +408,8 @@ async fn direct_sse_failed_event_without_error_code_is_protocol_invalid() {
         b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"message\":\"quota exhausted\"}}}\n\n"
             .to_vec(),
     )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_failed_missing_error_code"),
-        runtime_timing,
-        observation.clone(),
-    );
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
+    let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_failed_missing_error_code"), runtime_timing, observation.clone());
 
     let error = governed
         .next()
@@ -508,19 +434,8 @@ async fn direct_sse_incomplete_event_without_error_message_is_protocol_invalid()
         b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"error\":{\"code\":\"HTTP_429\"}}}\n\n"
             .to_vec(),
     )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_incomplete_missing_error_message"),
-        runtime_timing,
-        observation.clone(),
-    );
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
+    let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_incomplete_missing_error_message"), runtime_timing, observation.clone());
 
     let error = governed
         .next()
@@ -544,12 +459,7 @@ async fn direct_sse_incomplete_details_reason_is_a_valid_json_failure() {
     let source = Box::pin(stream::iter(vec![Ok(
         b"data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n".to_vec(),
     )]));
-    let stream = wrap_direct_sse_provider_outcome_stream(
-        source,
-        test_direct_sse_provider_outcome("direct_sse_incomplete_details_reason"),
-        runtime_timing,
-        observation,
-    );
+    let stream = wrap_direct_sse_provider_outcome_stream(source, test_direct_sse_provider_outcome("direct_sse_incomplete_details_reason"), runtime_timing, observation);
     let items = stream.collect::<Vec<_>>().await;
     let error = items
         .into_iter()
@@ -568,19 +478,8 @@ async fn direct_sse_failed_event_accepts_top_level_error_envelope() {
         b"event: response.failed\ndata: {\"type\":\"response.failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"alternate envelope\"}}\n\n"
             .to_vec(),
     )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_failed_top_level_error"),
-        runtime_timing,
-        observation.clone(),
-    );
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
+    let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_failed_top_level_error"), runtime_timing, observation.clone());
 
     let error = governed
         .next()
@@ -601,19 +500,8 @@ async fn direct_sse_json_type_remains_provider_semantic_source() {
         b"event: response.completed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"quota exhausted\"}}}\n\n"
             .to_vec(),
     )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_event_type_mismatch"),
-        runtime_timing,
-        observation.clone(),
-    );
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
+    let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_event_type_mismatch"), runtime_timing, observation.clone());
 
     let mut error = None;
     while let Some(result) = governed.next().await {
@@ -639,19 +527,8 @@ async fn red_sse_semantics_must_use_json_type_not_event_name() {
         b"event: response.created\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"quota exhausted\"}}}\n\n"
             .to_vec(),
     )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("red_json_type_authority"),
-        runtime_timing,
-        observation,
-    );
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
+    let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("red_json_type_authority"), runtime_timing, observation);
 
     let mut error = None;
     while let Some(result) = governed.next().await {
@@ -675,19 +552,8 @@ async fn red_sse_semantics_ignore_event_name_when_json_is_completed() {
         b"event: provider-specific-label\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
             .to_vec(),
     )]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("red_json_completed_authority"),
-        runtime_timing,
-        observation,
-    );
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
+    let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("red_json_completed_authority"), runtime_timing, observation);
 
     let mut results = Vec::new();
     while let Some(result) = governed.next().await {
@@ -708,19 +574,8 @@ async fn direct_sse_failure_after_client_commit_does_not_reselect_current_reques
         Ok(b"event: provider-label\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"committed\"}\n\n".to_vec()),
         Ok(b"event: provider-label\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"after commit\"}}}\n\n".to_vec()),
     ]));
-    let observed = wrap_direct_sse_provider_event_json_observation_stream(
-        source,
-        observation.clone(),
-        runtime_timing.clone(),
-        false,
-        true,
-    );
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        observed,
-        test_direct_sse_provider_outcome("direct_sse_failure_after_commit"),
-        runtime_timing,
-        observation,
-    );
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
+    let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_failure_after_commit"), runtime_timing, observation);
 
     assert!(governed.next().await.expect("committed frame").is_ok());
     let error = governed
@@ -1218,15 +1073,7 @@ fn responses_provider_process_chat_forces_hub_relay() {
     let manifest = scoped_test_manifest(responses_process_chat_manifest(), routing_group);
     let plan = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope(routing_group),
-            request_id: "req-process-chat".to_string(),
-            execution_id: "exec-process-chat".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({"model":"client-model","input":"hello"}),
-        },
+        test_plan_http_request(routing_group, "req-process-chat", "exec-process-chat"),
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         0,
     )
@@ -1260,15 +1107,7 @@ fn responses_provider_process_direct_keeps_same_protocol_direct() {
         .process = "direct".to_string();
     let plan = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope(routing_group),
-            request_id: "req-process-direct".to_string(),
-            execution_id: "exec-process-direct".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({"model":"client-model","input":"hello"}),
-        },
+        test_plan_http_request(routing_group, "req-process-direct", "exec-process-direct"),
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         0,
     )
@@ -1298,15 +1137,11 @@ fn responses_provider_process_chat_without_relay_fails_fast() {
         .allowed_modes = vec!["direct".to_string()];
     let error = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope(routing_group),
-            request_id: "req-process-chat-direct-only".to_string(),
-            execution_id: "exec-process-chat-direct-only".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({"model":"client-model","input":"hello"}),
-        },
+        test_plan_http_request(
+            routing_group,
+            "req-process-chat-direct-only",
+            "exec-process-chat-direct-only",
+        ),
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         0,
     )

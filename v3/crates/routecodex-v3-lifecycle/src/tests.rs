@@ -160,6 +160,7 @@ fn restart_control_operation_is_explicit_protocol() {
         snapshots: true,
         snapshot_direct: false,
         snapshot_stages: Some("provider-request".to_string()),
+        sse_dump: false,
     };
 
     let rendered = serde_json::to_string(&request).unwrap();
@@ -188,6 +189,7 @@ fn managed_child_reentry_removes_restart_plan_from_previous_control_identity() {
             snapshots: true,
             snapshot_direct: false,
             snapshot_stages: None,
+            sse_dump: false,
         },
     )
     .unwrap();
@@ -656,6 +658,7 @@ fn restart_plan_omits_false_snapshot_direct_for_previous_release_child_compat() 
         snapshots: false,
         snapshot_direct: false,
         snapshot_stages: None,
+        sse_dump: false,
     };
 
     let encoded = serde_json::to_value(&plan).unwrap();
@@ -679,6 +682,7 @@ fn restart_plan_keeps_true_snapshot_direct_for_snapall_restart() {
         snapshots: true,
         snapshot_direct: true,
         snapshot_stages: None,
+        sse_dump: false,
     };
 
     let encoded = serde_json::to_value(&plan).unwrap();

@@ -170,6 +170,8 @@ struct V3ManagedRestartPlanRecord {
     #[serde(default, skip_serializing_if = "bool_is_false")]
     snapshot_direct: bool,
     snapshot_stages: Option<String>,
+    #[serde(default, skip_serializing_if = "bool_is_false")]
+    sse_dump: bool,
 }
 
 fn bool_is_false(value: &bool) -> bool {
@@ -183,6 +185,7 @@ struct ControlRestartPlan {
     snapshots: bool,
     snapshot_direct: bool,
     snapshot_stages: Option<String>,
+    sse_dump: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -193,6 +196,7 @@ pub struct V3ManagedLifecycle {
     force_snapshot_direct: bool,
     force_snapshot_stages: Option<String>,
     force_console: bool,
+    force_sse_dump: bool,
 }
 #[derive(Debug)]
 struct OperationLock {
@@ -227,6 +231,7 @@ impl V3ManagedLifecycle {
             force_snapshot_direct: false,
             force_snapshot_stages: None,
             force_console: false,
+            force_sse_dump: false,
         })
     }
 
@@ -241,6 +246,7 @@ impl V3ManagedLifecycle {
             force_snapshot_direct: false,
             force_snapshot_stages: None,
             force_console: false,
+            force_sse_dump: false,
         }
     }
 
@@ -269,6 +275,11 @@ impl V3ManagedLifecycle {
 
     pub fn with_console_enabled(mut self, enabled: bool) -> Self {
         self.force_console = enabled;
+        self
+    }
+
+    pub fn with_sse_dump_enabled(mut self, enabled: bool) -> Self {
+        self.force_sse_dump = enabled;
         self
     }
 
@@ -348,7 +359,7 @@ impl V3ManagedLifecycle {
         if self.force_snapshots {
             manifest.debug.codex_samples = true;
             manifest.debug.snapshots = true;
-            manifest.debug.snapshot_direct = false;
+            manifest.debug.snapshot_direct = true;
             // 显式 --snap：全量样本（成功+错误），关闭 internal 默认只落错误样本。
             manifest.debug.full_codex_sampling = true;
         }
@@ -414,6 +425,9 @@ impl V3ManagedLifecycle {
         }
         if self.force_console {
             command.arg("--console");
+        }
+        if self.force_sse_dump {
+            command.arg("--sse-dump");
         }
         let log_path = instance_dir.join("server.log");
         let stdout = private_log_file(&log_path)?;
@@ -650,6 +664,7 @@ impl V3ManagedLifecycle {
             self.force_snapshots,
             self.force_snapshot_direct,
             self.force_snapshot_stages.clone(),
+            self.force_sse_dump,
         )
         .await
         {
@@ -764,6 +779,9 @@ impl V3ManagedLifecycle {
         declaration: V3ManagedInstanceDeclaration,
         manifest: V3Config05ManifestPublished,
     ) -> Result<(), V3LifecycleError> {
+        if self.force_sse_dump {
+            std::env::set_var("ROUTECODEX_V3_SSE_DUMP", "1");
+        }
         validate_auth_handles(&manifest)?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
@@ -1110,12 +1128,14 @@ fn control_restart_plan(
         .filter(|value| !value.is_empty());
     let snapshots = record.as_ref().is_some_and(|record| record.snapshots);
     let snapshot_direct = record.as_ref().is_some_and(|record| record.snapshot_direct);
+    let sse_dump = record.as_ref().is_some_and(|record| record.sse_dump);
     Ok(Some(ControlRestartPlan {
         declaration,
         executable_path,
         snapshots: snapshots || snapshot_stages.is_some(),
         snapshot_direct,
         snapshot_stages,
+        sse_dump,
     }))
 }
 

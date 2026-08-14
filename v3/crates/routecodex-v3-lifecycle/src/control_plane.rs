@@ -68,6 +68,9 @@ pub(crate) async fn restart_managed_runtime_in_place(
     if console {
         command.arg("--console");
     }
+    if restart_plan.sse_dump {
+        command.arg("--sse-dump");
+    }
     let error = command.exec();
     let _ = write_status(
         instance_dir,
@@ -122,6 +125,7 @@ pub(crate) async fn send_restart_control(
     snapshots: bool,
     snapshot_direct: bool,
     snapshot_stages: Option<String>,
+    sse_dump: bool,
 ) -> Result<ControlResponse, V3LifecycleError> {
     let published: V3ManagedInstanceDeclaration = read_json(&instance_dir.join("instance.json"))?;
     let needs_restart_plan = published.executable_path != declaration.executable_path
@@ -129,7 +133,8 @@ pub(crate) async fn send_restart_control(
         || snapshot_direct
         || snapshot_stages
             .as_ref()
-            .is_some_and(|value| !value.trim().is_empty());
+            .is_some_and(|value| !value.trim().is_empty())
+        || sse_dump;
     let control: V3ManagedControlRecord = read_json(&instance_dir.join("control.json"))?;
     if needs_restart_plan {
         write_json_atomic(
@@ -142,6 +147,7 @@ pub(crate) async fn send_restart_control(
                 snapshots,
                 snapshot_direct,
                 snapshot_stages,
+                sse_dump,
             },
         )?;
     } else {

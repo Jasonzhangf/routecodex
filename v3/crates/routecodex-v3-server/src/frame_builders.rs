@@ -3,6 +3,8 @@ use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, Response, StatusCode};
 use serde_json::{json, Value};
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -258,6 +260,9 @@ pub(crate) fn wrap_v3_direct_sse_console_stream(
             wrap_v3_direct_sse_closeout_stream(stream, move |terminal| match terminal {
                 V3SseConsoleStreamTerminal::Completed => finalizer.complete(),
                 V3SseConsoleStreamTerminal::Dropped => finalizer.client_disconnected(),
+                V3SseConsoleStreamTerminal::Failed(message) => {
+                    finalizer.provider_stream_failed(&message)
+                }
             })
         }
         None => stream,
@@ -296,6 +301,140 @@ pub(crate) fn v3_client_sse_body(stream: V3ClientSseStream, keepalive_interval: 
         }
     });
     v3_io_sse_body(Box::pin(stream), keepalive_interval)
+}
+
+pub(crate) fn wrap_v3_sse_io_dump_stream(
+    stream: V3IoSseStream,
+    sse_dump_enabled: bool,
+    port: u16,
+    endpoint: &str,
+    request_id: &str,
+) -> V3IoSseStream {
+    if !sse_dump_enabled {
+        return stream;
+    }
+    let Some(home) = std::env::var_os("HOME") else {
+        return stream;
+    };
+    let endpoint_segment = endpoint.trim_start_matches('/');
+    let dump_dir = PathBuf::from(home.as_os_str())
+        .join(".rcc")
+        .join("sse-dumps")
+        .join(endpoint_segment)
+        .join("ports")
+        .join(port.to_string())
+        .join(request_id);
+    if let Err(error) = std::fs::create_dir_all(&dump_dir) {
+        eprintln!("[v3-sse-dump] create_dir_all failed: {error}");
+        return stream;
+    }
+    let dump_path = dump_dir.join("sse-client.bin");
+    let mut file = match std::fs::File::create(&dump_path) {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("[v3-sse-dump] create failed: {error}");
+            return stream;
+        }
+    };
+    if let Err(error) = file.write_all(format!("# sse dump start endpoint={endpoint} port={port} request_id={request_id}\n").as_bytes())
+    {
+        eprintln!("[v3-sse-dump] header write failed: {error}");
+        return stream;
+    }
+    Box::pin(stream::unfold(
+        (stream, Some(file)),
+        |(mut stream, mut file)| async move {
+            match stream.next().await {
+                Some(Ok(chunk)) => {
+                    if let Some(file) = file.as_mut() {
+                        let _ = file.write_all(&chunk);
+                    }
+                    Some((Ok(chunk), (stream, file)))
+                }
+                Some(Err(error)) => {
+                    if let Some(file) = file.as_mut() {
+                        let _ = file.write_all(
+                            format!("\n# sse stream error: {error}\n").as_bytes(),
+                        );
+                    }
+                    Some((Err(error), (stream, file)))
+                }
+                None => {
+                    if let Some(file) = file.as_mut() {
+                        let _ = file.write_all(b"\n# sse stream eof\n");
+                    }
+                    None
+                }
+            }
+        },
+    ))
+}
+
+pub(crate) fn wrap_v3_sse_client_dump_stream(
+    stream: V3ClientSseStream,
+    sse_dump_enabled: bool,
+    port: u16,
+    endpoint: &str,
+    request_id: &str,
+) -> V3ClientSseStream {
+    if !sse_dump_enabled {
+        return stream;
+    }
+    let Some(home) = std::env::var_os("HOME") else {
+        return stream;
+    };
+    let endpoint_segment = endpoint.trim_start_matches('/');
+    let dump_dir = PathBuf::from(home.as_os_str())
+        .join(".rcc")
+        .join("sse-dumps")
+        .join(endpoint_segment)
+        .join("ports")
+        .join(port.to_string())
+        .join(request_id);
+    if let Err(error) = std::fs::create_dir_all(&dump_dir) {
+        eprintln!("[v3-sse-dump] create_dir_all failed: {error}");
+        return stream;
+    }
+    let dump_path = dump_dir.join("sse-client.bin");
+    let mut file = match std::fs::File::create(&dump_path) {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("[v3-sse-dump] create failed: {error}");
+            return stream;
+        }
+    };
+    if let Err(error) = file.write_all(format!("# sse dump start endpoint={endpoint} port={port} request_id={request_id}\n").as_bytes())
+    {
+        eprintln!("[v3-sse-dump] header write failed: {error}");
+        return stream;
+    }
+    Box::pin(stream::unfold(
+        (stream, Some(file)),
+        |(mut stream, mut file)| async move {
+            match stream.next().await {
+                Some(Ok(chunk)) => {
+                    if let Some(file) = file.as_mut() {
+                        let _ = file.write_all(&chunk);
+                    }
+                    Some((Ok(chunk), (stream, file)))
+                }
+                Some(Err(error)) => {
+                    if let Some(file) = file.as_mut() {
+                        let _ = file.write_all(
+                            format!("\n# sse stream error code={} stage={} message={}\n", error.code, error.source_stage, error.message).as_bytes(),
+                        );
+                    }
+                    Some((Err(error), (stream, file)))
+                }
+                None => {
+                    if let Some(file) = file.as_mut() {
+                        let _ = file.write_all(b"\n# sse stream eof\n");
+                    }
+                    None
+                }
+            }
+        },
+    ))
 }
 
 pub(crate) fn v3_io_sse_body(stream: V3IoSseStream, keepalive_interval: Option<Duration>) -> Body {

@@ -237,10 +237,7 @@ fn normalize_chat_content_parts(message: &mut Value) {
 fn strip_v3_embedded_image_bytes(value: &mut Value, changed: &mut bool) {
     match value {
         Value::Object(map) => {
-            let is_image_carrier = map.contains_key("image_url")
-                || map.contains_key("data")
-                || map.contains_key("file_id");
-            if is_image_carrier {
+            if is_v3_embedded_image_carrier(map) {
                 *value = serde_json::json!({"type":"text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
                 *changed = true;
                 return;
@@ -262,6 +259,32 @@ fn strip_v3_embedded_image_bytes(value: &mut Value, changed: &mut bool) {
         }
         _ => {}
     }
+}
+
+/// 判定 JSON 对象是否为图片载体 part：`image_url` / `data` / `file_id` 键的
+/// **值**必须是图片引用形态（字符串或含 `url` 的对象），才视为图片 part。
+///
+/// 反向边界（2026-08-13 线上 400 根因）：工具 JSON Schema 的属性定义对象
+/// （如 spawn_agent 的 `parameters.properties.items.items.properties`）可能
+/// **恰好含 `image_url` / `data` / `file_id` 键名**，但值是
+/// `{"description": "...", "type": "string"}` 这类 schema 定义，不是图片载体。
+/// 只按 `contains_key` 判定会把整个 schema 对象替换成 `[Image]` 占位符 →
+/// 上游 400 "Invalid schema for function 'spawn_agent'"。
+fn is_v3_embedded_image_carrier(map: &serde_json::Map<String, Value>) -> bool {
+    if let Some(image_url) = map.get("image_url") {
+        return match image_url {
+            Value::String(value) => !value.trim().is_empty(),
+            Value::Object(inner) => inner.contains_key("url"),
+            _ => false,
+        };
+    }
+    if let Some(data) = map.get("data") {
+        return data.as_str().is_some_and(|value| !value.trim().is_empty());
+    }
+    if let Some(file_id) = map.get("file_id") {
+        return file_id.as_str().is_some_and(|value| !value.trim().is_empty());
+    }
+    false
 }
 
 fn normalize_responses_content_parts(item: &mut Value) {
@@ -747,6 +770,70 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn tool_schema_image_url_property_definition_is_not_mistaken_for_image_carrier() {
+        // 真实 OneStop 样本（2026-08-13 17:16 10000 端口）：tool_search_output 的
+        // spawn_agent 工具 schema 的 parameters.properties.items.items.properties
+        // 对象含 image_url 键（作为 schema 属性定义，值是 {"description", "type"}
+        // 对象）。history_image_cleanup 的 strip_v3_embedded_image_bytes 递归清洗
+        // 字符串 content 时曾把该 properties 对象误判为图片载体，整体替换为
+        // [Image] 占位符 → 上游 400 "Invalid schema for function
+        // 'spawn_agent': 'text' is not of type 'object', 'boolean'"。
+        let spawn_agent = json!({
+            "type": "function",
+            "name": "spawn_agent",
+            "defer_loading": true,
+            "description": "spawn sub-agent",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "description": "Structured input items.",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "audio_url": {"description": "Audio data URL when type is audio.", "type": "string"},
+                                "image_url": {"description": "Image URL when type is image.", "type": "string"},
+                                "name": {"description": "Display name.", "type": "string"},
+                                "path": {"description": "Path.", "type": "string"},
+                                "text": {"description": "Text content when type is text.", "type": "string"},
+                                "type": {"description": "Input item type.", "type": "string"}
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        let tools = json!([
+            {"type": "namespace", "name": "tools", "tools": [spawn_agent]}
+        ]);
+        let mut body = json!({
+            "messages": [
+                {"role": "user", "content": "history"},
+                {"role": "tool", "tool_call_id": "call_ts", "content": serde_json::to_string(&tools).unwrap()},
+                {"role": "user", "content": "current turn"}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        let tool_content = body["messages"][1]["content"].as_str().unwrap();
+        let parsed: Value = serde_json::from_str(tool_content).unwrap();
+        let tool = &parsed[0]["tools"][0];
+        assert_eq!(tool["name"], "spawn_agent");
+        assert_eq!(
+            tool["parameters"]["properties"]["items"]["items"]["properties"]["image_url"]["type"],
+            "string",
+            "tool schema image_url property definition must survive normalization"
+        );
+        assert_eq!(
+            tool["parameters"]["properties"]["items"]["items"]["properties"]["text"]["type"],
+            "string",
+            "tool schema text property definition must survive normalization"
+        );
     }
 
     #[test]

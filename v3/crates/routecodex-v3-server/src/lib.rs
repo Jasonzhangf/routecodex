@@ -151,6 +151,7 @@ struct V3ListenerState {
     manifest: Arc<V3Config05ManifestPublished>,
     debug: V3DebugRuntime,
     console_enabled: bool,
+    sse_dump_enabled: bool,
     request_counter: Arc<Mutex<V3RequestIdCounter>>,
     codex_sample_store: Arc<routecodex_v3_debug::V3CodexSampleStore>,
     responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>,
@@ -158,6 +159,7 @@ struct V3ListenerState {
     responses_relay_local_continuation: Arc<V3ResponsesRelayLocalContinuationState>,
     responses_relay_stopless_control: Arc<V3ResponsesRelayStoplessControlState>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
+    realtime_cooled_provider_keys: Arc<Mutex<BTreeSet<String>>>,
     responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
 }
 
@@ -263,6 +265,7 @@ impl V3ServerAggregateHandle {
 pub async fn spawn_v3_server_aggregate(
     manifest: V3Config05ManifestPublished,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
+    let sse_dump_enabled = v3_sse_dump_env_flag();
     let console_enabled = manifest.debug.log_console;
     let mut debug_manifest = manifest.debug.clone();
     debug_manifest.log_console = false;
@@ -311,6 +314,7 @@ pub async fn spawn_v3_server_aggregate(
             manifest: manifest.clone(),
             debug: debug.clone(),
             console_enabled,
+            sse_dump_enabled,
             request_counter: Arc::clone(&request_counter),
             codex_sample_store: codex_sample_store.clone(),
             responses_direct_continuation: responses_direct_continuation.clone(),
@@ -318,6 +322,7 @@ pub async fn spawn_v3_server_aggregate(
             responses_relay_local_continuation: responses_relay_local_continuation.clone(),
             responses_relay_stopless_control: responses_relay_stopless_control.clone(),
             provider_health: provider_health.clone(),
+            realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
             responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -405,6 +410,16 @@ pub async fn serve_v3_server_aggregate_until_shutdown(
     tokio::signal::ctrl_c().await?;
     handle.shutdown().await;
     Ok(())
+}
+
+fn v3_sse_dump_env_flag() -> bool {
+    let Ok(value) = std::env::var("ROUTECODEX_V3_SSE_DUMP") else {
+        return false;
+    };
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 fn build_v3_listener_router(state: V3ListenerState) -> Router {
@@ -773,6 +788,8 @@ async fn pending_endpoint(
 }
 
 
+/// v3.protocol.pending_projection：尚未实现协议绑定的客户端响应统一由
+/// foundation pending 投影出站（见 v3-resource-operation-map.yml 同名资源）。
 fn pending_binding_output_response(
     output: V3FoundationRuntimeOutput,
     _entry_protocol: &str,
