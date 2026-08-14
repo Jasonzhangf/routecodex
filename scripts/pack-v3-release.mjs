@@ -62,6 +62,12 @@ function buildV3Cli() {
   }
   env.ROUTECODEX_BUILD_VERSION = readPackageVersion();
   run('cargo', ['build', '--manifest-path', manifestPath, '-p', 'routecodex-v3-cli'], { env });
+  const targetBin = path.join(repoRoot, 'v3', 'target', 'debug', 'rccv3');
+  if (!fs.existsSync(targetBin)) {
+    fail(`missing built target binary: ${targetBin}`);
+  }
+  fs.mkdirSync(path.dirname(repoBin), { recursive: true });
+  fs.copyFileSync(targetBin, repoBin);
   if (!fs.existsSync(repoBin)) {
     fail(`missing built binary: ${repoBin}`);
   }
