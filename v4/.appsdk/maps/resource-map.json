@@ -3,6 +3,25 @@
   "resources": [
     {"resource_id":"project_contract","owner":"appsdk::project_contract","truth_store":".appsdk/project.json","allowed_operations":["read","validate","write"]},
     {"resource_id":"lifecycle_records","owner":"appsdk::record_graph","truth_store":".appsdk/records/**","allowed_operations":["read","validate","write"]},
-    {"resource_id":"compiled_artifact","owner":"appsdk::compiler","truth_store":"generated/project.compiled.json","allowed_operations":["read","write"]}
+    {"resource_id":"compiled_artifact","owner":"appsdk::compiler","truth_store":"generated/project.compiled.json","allowed_operations":["read","write"]},
+    {"resource_id":"v4.request.normal_payload","owner":"v4::request_pipeline","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.request.provider_wire_payload","owner":"v4::provider_codec","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.response.normal_payload","owner":"v4::response_pipeline","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.response.client_wire_payload","owner":"v4::server","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.control.side_channel","owner":"v4::control_plane","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.control.metadata_center","owner":"v4::control_plane","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.control.route_facts","owner":"v4::router","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.control.target_selection","owner":"v4::router","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.control.availability","owner":"v4::provider_runtime","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.control.error_chain","owner":"v4::error","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.control.retry_policy","owner":"v4::error","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.scope.session","owner":"v4::control_plane","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.control.stopless_state","owner":"v4::control_plane","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.config.authoring","owner":"v4::config_compiler","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.config.manifest","owner":"v4::config_compiler","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.artifact.compiled_index","owner":"v4::compiler","truth_store":"generated/compiled-index.json","allowed_operations":["read","write"],"status":"design"},
+    {"resource_id":"v4.secret.provider_auth_handle","owner":"v4::config_compiler","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.debug.snapshot_ledger","owner":"v4::debug","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
+    {"resource_id":"v4.error.client_projection","owner":"v4::error","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"}
   ]
 }
