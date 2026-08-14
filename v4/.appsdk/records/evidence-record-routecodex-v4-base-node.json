@@ -1,0 +1,22 @@
+{
+  "evidence_id": "evidence-base-node-v1",
+  "issue_id": "routecodex-v4-foundation",
+  "experiment_id": "experiment-base-node-freeze-v1",
+  "kind": "build",
+  "source_commit": "8a771dc70",
+  "artifact_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
+  "scope": {
+    "module_id": "routecodex-v4-base-node"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "appsdk::compiler"
+  },
+  "result": "pass",
+  "created_at": "2026-08-14T03:40:00Z",
+  "expires_at": "2099-01-01T00:00:00Z",
+  "input_hashes": [
+    "input-1"
+  ],
+  "scope_hash": "scope-base-node-v1"
+}
