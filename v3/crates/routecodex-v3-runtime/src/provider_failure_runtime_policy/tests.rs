@@ -559,7 +559,7 @@ targets = [
 }
 
 #[tokio::test]
-async fn transport_error_excludes_all_keys_of_the_same_provider() {
+async fn transport_error_excludes_only_the_failed_provider_key() {
     let manifest = transport_thrash_manifest("transport_thrash");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let selected =
@@ -611,18 +611,18 @@ async fn transport_error_excludes_all_keys_of_the_same_provider() {
         .retry_selected
         .expect("transport failure must reselect");
     assert_eq!(
-        reselected.candidate.provider_id, "second",
-        "transport error is baseurl-level: the same provider's other key must not be selected"
+        reselected.candidate.provider_id, "first",
+        "transport failure must leave the same provider's other key selectable"
     );
     assert_eq!(
         state.failed_candidates.len(),
-        2,
-        "transport error must exclude every key of the failed provider"
+        1,
+        "transport error must exclude only the failed provider key"
     );
     assert!(state
         .failed_candidates
         .contains(&"first:key1:gpt-test".to_string()));
-    assert!(state
+    assert!(!state
         .failed_candidates
         .contains(&"first:key2:gpt-test".to_string()));
 }
