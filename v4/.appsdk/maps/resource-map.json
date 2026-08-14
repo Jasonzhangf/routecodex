@@ -2,6 +2,9 @@
   "schema_version": 1,
   "resources": [
     {"resource_id":"project_contract","owner":"appsdk::project_contract","truth_store":".appsdk/project.json","allowed_operations":["read","validate","write"],"status":"active"},
+    {"resource_id":"sdk_lock","owner":"appsdk::pin_lock","truth_store":".appsdk/sdk.lock","allowed_operations":["read","validate","write"],"status":"active"},
+    {"resource_id":"sdk_bundle_manifest","owner":"appsdk::bundle_verifier","truth_store":".appsdk/contracts/sdk-bundle.manifest.json","allowed_operations":["read","validate"],"status":"active"},
+    {"resource_id":"sdk_bundle_resources","owner":"appsdk::bundle_verifier","truth_store":".appsdk/sdk-resources.json","allowed_operations":["read","validate"],"status":"active"},
     {"resource_id":"lifecycle_records","owner":"appsdk::record_graph","truth_store":".appsdk/records/**","allowed_operations":["read","validate","write"],"status":"active"},
     {"resource_id":"compiled_artifact","owner":"appsdk::compiler","truth_store":"generated/project.compiled.json","allowed_operations":["read","write"],"status":"active"},
     {"resource_id":"base_node_control_record","owner":"routecodex-v4-base-node::BaseNode","truth_store":"crates/routecodex-v4-base-node/src/lib.rs","allowed_operations":["record"],"status":"active"},

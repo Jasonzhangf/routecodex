@@ -2,7 +2,9 @@
   "schema_version": 1,
   "gates":[
     {"gate_id":"contract_valid","command":"appsdk verify <project>","required_for":["compile","promotion","freeze"]},
-    {"gate_id":"sdk_pinned","command":"appsdk pin-lock <project> --binary <sdk>","required_for":["compile","promotion","freeze"]},
+    {"gate_id":"sdk_pinned","command":"appsdk pin-lock <project> --binary \"$(command -v appsdk)\"","required_for":["compile","promotion","freeze"]},
+    {"gate_id":"sdk_bundle_resources","command":"appsdk verify <project>","required_for":["compile","promotion","freeze","publish"]},
+    {"gate_id":"global_sdk_only","command":"command -v appsdk && appsdk version && test ! -x <project>/.appsdk/sdk.bin && test \"sha256:$(shasum -a 256 \"$(command -v appsdk)\" | cut -d ' ' -f 1)\" = \"$(jq -r .digest <project>/.appsdk/sdk.lock)\" && test \"sha256:$(shasum -a 256 <project>/.appsdk/sdk.bin | cut -d ' ' -f 1)\" = \"$(jq -r .compiler_digest <project>/.appsdk/sdk.lock)\"","required_for":["compile","promotion","freeze","publish"]},
     {"gate_id":"record_graph","command":"appsdk verify <project>","required_for":["architecture_stable","freeze","publish"]},
     {"gate_id":"vcs_clean","command":"appsdk verify <project>","required_for":["freeze"]},
     {"gate_id":"regression_report","command":"appsdk verify <project>","required_for":["freeze","frozen_integrity"]},

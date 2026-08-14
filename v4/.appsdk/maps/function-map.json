@@ -3,6 +3,7 @@
   "functions": [
     {"function_id":"goal_clarification","owner":"appsdk::goal","entry_symbols":["clarify"],"required_gates":["goal_confirmed"]},
     {"function_id":"compile_artifact","owner":"appsdk::compiler","entry_symbols":["compile"],"required_gates":["contract_valid","sdk_pinned"]},
+    {"function_id":"global_sdk_bundle_admission","owner":"appsdk::bundle_verifier","entry_symbols":["init","pin_lock","verify"],"required_gates":["sdk_pinned","sdk_bundle_resources","global_sdk_only"]},
     {"function_id":"promote_freeze_publish","owner":"appsdk::lifecycle","entry_symbols":["promote_module","freeze_module","publish_active"],"required_gates":["record_graph","artifact_hash","vcs_clean","regression_report"]},
     {"function_id":"v4.base_node","owner":"routecodex-v4-base-node","entry_symbols":["BaseNode::new","NodeIdentity::new","Scope::new","ControlRecord","subscribe_debug","subscribe_snapshot","report_error","declare_hook","declare_dry_run","execute_dry_run"],"required_gates":["v4_base_node_l0_regression"]},
     {"function_id":"v4.edge","owner":"routecodex-v4-edge","entry_symbols":["validate_edge","EdgeSpec::data_flow","EdgeSpec::information_flow","EdgeSpec::control_flow","EdgeSpec::debug_subscription","EdgeSpec::error_intake","ScopeRegistry::new"],"required_gates":["v4_edge_l1_regression"]},
