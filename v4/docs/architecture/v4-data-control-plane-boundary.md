@@ -34,6 +34,9 @@ V4 从第一行实现开始就锁定数据面与控制面的物理隔离，并�
 - `v4.request.normal_payload` / `v4.response.normal_payload`：数据面；可进入 provider/client wire 语义投影，但绝不含控制字段。
 - `v4.request.provider_wire_payload` / `v4.response.client_wire_payload`：wire 面；只由唯一 codec owner 写入。
 - `v4.control.side_channel` / `v4.control.metadata_center` / `v4.control.error_chain` / `v4.scope.session` / `v4.control.stopless_state`：控制面；`may_enter_provider_body=false`、`may_enter_client_body=false`。
+- `v4.control.error_center`：错误接收/分类/审计中心；只消费 typed error facts + payload hash + typed context，禁止读取业务 payload 决策，禁止路由操作；路由决策唯一 owner 是 VR，经 `v4.control.route_exit` 出口发出。
+- `v4.lifecycle.payload_cycle`：原始请求 payload 生命周期；switch/cooldown/reroute 合并同一周期，原始请求不变；只有响应入客户端或错误终态才终了。
+- `v4.debug.module_switch` / `v4.debug.dry_run_chain`：诊断控制面；动态 live 修改、可审计、禁止进入 live path / payload / MetadataCenter / 错误链。
 - `v4.error.client_projection`：唯一例外，`may_enter_client_body=true`，但只允许 `code` 和 `message`。
 - `v4.debug.snapshot_ledger`：诊断面；只读给开发者诊断，禁止进 live path。
 

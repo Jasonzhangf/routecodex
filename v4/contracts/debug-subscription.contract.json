@@ -32,6 +32,53 @@
     {"topic": "node_exit", "direction": "subscribe", "read_only": true, "diagnostic_only": true, "live_input": false},
     {"topic": "node_error", "direction": "subscribe", "read_only": true, "diagnostic_only": true, "live_input": false}
   ],
+  "module_switch": {
+    "contract_id": "v4-debug-module-switch",
+    "scope": ["module_id", "node_id", "chain_version", "scope"],
+    "kinds": ["debug", "snapshot", "dry_run", "route_probe"],
+    "levels": ["off", "error", "warn", "info", "debug", "trace"],
+    "default_from_manifest": true,
+    "dynamic_live_update": true,
+    "switch_owner": "routecodex-v4-debug",
+    "rules": [
+      "module switch is diagnostic-only; it never affects business result, control decision, or payload",
+      "runtime switches are recorded in the immutable audit ledger with scope, kind, level, and old/new value",
+      "switch scope is per module/node and per closed-loop request scope; it must not leak across loops",
+      "snapshot switch gates snapshot capture only; route_probe gates dry-run/probe observation only",
+      "module switch state must never enter provider wire, client wire, normal payload, MetadataCenter, or the error chain",
+      "failure to apply a switch must fail-fast with an explicit diagnostic record; no silent strip, no fallback"
+    ],
+    "forbidden_edges": [
+      {"from": "v4.debug.module_switch", "to": "v4.pipeline.mainline"},
+      {"from": "v4.debug.module_switch", "to": "v4.control.metadata_center"},
+      {"from": "v4.debug.module_switch", "to": "v4.control.error_chain"},
+      {"from": "v4.debug.module_switch", "to": "v4.request.provider_wire_payload"},
+      {"from": "v4.debug.module_switch", "to": "v4.response.client_wire_payload"}
+    ]
+  },
+  "dry_run_chain": {
+    "contract_id": "v4-debug-dry-run-chain",
+    "per_module": true,
+    "entry_exit": {
+      "entry_defined": "optional",
+      "exit_defined": "optional",
+      "default": "when entry/exit are not defined, the dry-run runs the full request or response chain",
+      "input": "correct payload fixture must be provided as the chain input; fixture must match the declared data_in kind"
+    },
+    "rules": [
+      "every module supports dry-run with an explicit chain entry and exit, or the full request/response chain when unspecified",
+      "dry-run input is the correct payload fixture for the declared chain; no real provider call is allowed",
+      "dry-run chain definitions are diagnostic-only and never consumed as live runtime input",
+      "dry-run execution produces typed evidence (input hash, entry/exit, operator results, terminal state)",
+      "dry-run must not write provider wire or client wire",
+      "dry-run failure is explicit and recorded; no fallback to live execution"
+    ],
+    "forbidden_edges": [
+      {"from": "v4.debug.dry_run_chain", "to": "v4.pipeline.mainline"},
+      {"from": "v4.debug.dry_run_chain", "to": "v4.request.provider_wire_payload"},
+      {"from": "v4.debug.dry_run_chain", "to": "v4.response.client_wire_payload"}
+    ]
+  },
   "forbidden_edges": [
     {"from": "v4.debug.*", "to": "v4.request.provider_wire_payload"},
     {"from": "v4.debug.*", "to": "v4.response.client_wire_payload"},

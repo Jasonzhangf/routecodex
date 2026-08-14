@@ -437,6 +437,102 @@ debug.* -> control decision             （禁止）
 
 机器合同见 `v4/contracts/debug-subscription.contract.json` 和 `v4/contracts/node-graph.contract.json`。
 
+## 模块级 Debug 开关（动态 live 调试）
+
+debug、snapshot、dry-run 与 route probe 都是**按模块/按节点动态可切换**的诊断控制面，不写死在代码里，也不要求重启。编译后的 manifest 只提供默认值；运行期通过控制面接口做 live 修改，每次修改必须落审计记录。
+
+```json
+{
+  "switch_id": "switch.debug.v4_hub_req_chat_process04",
+  "scope": {"module_id": "routecodex-v4-runtime", "node_id": "V4HubReqChatProcess04Governed", "chain_version": "v4-hub-1"},
+  "kind": "debug",
+  "level": "debug",
+  "default_from_manifest": true,
+  "dynamic_live_update": true,
+  "audit_record_required": true
+}
+```
+
+规则：
+
+1. `kind` 只允许 `debug` / `snapshot` / `dry_run` / `route_probe`；`level` 只允许 `off` / `error` / `warn` / `info` / `debug` / `trace`。
+2. 开关只影响诊断订阅的启停和采集范围，**禁止**影响业务结果、控制决策、payload 或路由事实。
+3. 每次 live 修改必须写不可变审计记录（scope、kind、level、old/new 值、修改者、时间）。
+4. 开关作用域按模块/节点 + 请求闭环 scope 隔离；禁止跨闭环泄漏。
+5. 开关状态禁止进入 provider wire、client wire、正常 payload、MetadataCenter 和错误链。
+6. 应用开关失败必须 fail-fast 并显式记录，禁止 silent strip / fallback。
+
+## 错误中心（classify + audit）与路由控制出口
+
+错误处理的职责分工固定为：
+
+```text
+任意节点 / operator / hook 出错
+  -> error_intake（typed error facts + payload hash + typed context）
+  -> V4ErrorCenter（只做 classify + audit，产出 classified error facts）
+  -> V4Router（VR 基于 classified facts + payload cycle 做决策）
+  -> v4.control.route_exit（typed 路由决策出口）
+  -> switch / cooldown / reroute / terminal
+```
+
+错误中心只做两件事：
+
+- **分类（classify）**：把 typed error facts 归一到统一 error class；
+- **审计（audit）**：记录错误来源、stage、payload hash、scope，供可观测与复盘。
+
+错误中心**不拥有**任何路由操作：
+
+- 不选择 target、不切换 provider、不写 cooldown、不执行 retry/reroute；
+- 不读取业务 payload 来补决策；只消费 error intake 的 typed facts + payload hash + typed context；
+- 不写 provider wire / client wire / normal payload。
+
+路由决策唯一 owner 是 VR。VR 拿到请求/响应错误后决定原始请求如何再次处理，决策从 `v4.control.route_exit` 出口发出，outbound 阶段只消费该出口的决策，不重新发明路由。
+
+机器合同见 `v4/contracts/node-graph.contract.json` 的 `error_intake` / `error_center` / `route_exit`。
+
+## Payload 生命周期（请求周期）
+
+原始请求/响应 payload 的生命周期由 `v4.lifecycle.payload_cycle` 统一管理：
+
+```text
+周期开始：请求发出（request_sent）
+  -> 成功终了：响应进入客户端；发出下一个请求 = 新周期开始
+  -> 错误终了：只有错误终态（error terminal）才算周期结束
+  -> switch / cooldown / reroute：全部合并到同一个周期，原始请求不变
+```
+
+规则：
+
+1. 一个请求发出后，无论经过多少次 switch / cooldown / reroute，只要原始请求 payload 不变，都属于同一个 `payload_cycle`。
+2. 成功路径的周期在“响应进入客户端”时终了；下一个请求发出即开启新周期。
+3. 错误路径只有到达错误终态（terminal）才终了；错误处理中的切换/冷却/重路由不是新周期。
+4. 周期内原始请求 payload 禁止修改；重试重放的是同一原始 payload，禁止从控制状态重建 payload。
+5. 周期状态只走 typed control resource，禁止进入 provider/client wire 或正常 payload。
+
+机器合同见 `v4/contracts/node-graph.contract.json` 的 `payload_cycle`。
+
+## 模块级 Dry-run
+
+每个模块都支持 dry-run；dry-run 定义**链的入口和出口**，输入是正确负载 fixture：
+
+```text
+显式定义 entry/exit：
+  module A dry-run: entry = V4HubReqInbound03Normalized, exit = V4HubReqOutbound05ProviderSemantic
+  -> 只跑这一段，输入 fixture 必须是 entry 声明 data_in 的正确负载
+
+不定义 entry/exit：
+  -> 默认跑完整请求链或完整响应链
+  -> 请求链输入 = 原始请求正确负载；响应链输入 = provider 原始响应正确负载
+```
+
+规则：
+
+1. dry-run 是诊断面，禁止作为 live runtime 输入，禁止真实 provider 调用（no-network）。
+2. fixture 必须匹配链入口声明的 `data_in_kind`；入口不匹配即 fail-fast。
+3. dry-run 产出 typed 证据（输入 hash、entry/exit、算子结果、终态），不写 provider wire / client wire。
+4. dry-run 失败显式记录；禁止 fallback 到 live 执行。
+5. dry-run 的启停由模块级 debug 开关（`kind: dry_run`）控制。
+
 ## 流水线显式生命周期与标准测试语义
 
 每条链必须有显式的节点 + 边，从起始节点到终止节点构成完整生命周期：
@@ -469,6 +565,10 @@ entry node -> ... -> terminal node（成功路径）
 | `node_control_record` | 每次 control in/out 写 ControlRecord |
 | `node_debug_subscription_read_only` | debug/快照订阅不改变执行 |
 | `node_statistics_optional` | 统计不进决策、不进 payload |
+| `node_debug_switch_diagnostic_only` | 模块级 debug/snapshot/dry-run/route_probe 开关只影响诊断；live 修改必须落审计 |
+| `node_error_intake_typed` | 节点/operator/hook 出错以 typed error facts + payload hash 进入错误中心，禁止携带完整业务 payload 重建决策 |
+| `node_route_exit_consumer` | 路由决策只消费 `v4.control.route_exit`；节点不得自行发明路由/切换/重试 |
+| `node_payload_cycle_boundary` | 请求 payload 周期内原始 payload 不变；switch/cooldown/reroute 合并同一周期 |
 
 ### Group 级标准测试语义
 
@@ -489,7 +589,9 @@ group 作为超级节点，除继承节点测试外还必须通过：
 
 1. 冻结本文件的 node family / role subclass / group / edge kinds / debug 资源关系；
 2. `node-graph.contract.json` 和 `debug-subscription.contract.json` 作为机器真源；
-3. V4 Rust 实现按 node graph 生成 builder/parser 与订阅注册；
-4. 每个节点/group/chain 生成标准测试面；
-5. 每个 edge 接一个红测（未声明边、非相邻 data edge、control 入 payload、debug 入 live path、group 短路必须红）；
-6. `v4-resource-operation-map.yml` 的 debug 资源从 `design` 提升为 `anchored` 后再允许实现。
+3. 冻结模块级 debug 开关、错误中心（classify + audit）、路由控制出口与 payload 生命周期合同；
+4. 为每个模块落地 dry-run 链入口/出口定义（不定义 = 完整请求/响应链）；
+5. V4 Rust 实现按 node graph 生成 builder/parser 与订阅注册；
+6. 每个节点/group/chain 生成标准测试面；
+7. 每个 edge 接一个红测（未声明边、非相邻 data edge、control 入 payload、debug 入 live path、error intake 不带 typed facts、group 短路必须红）；
+8. `v4-resource-operation-map.yml` 的 debug 资源从 `design` 提升为 `anchored` 后再允许实现。

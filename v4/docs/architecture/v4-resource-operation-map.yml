@@ -163,6 +163,42 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: design
+  - resource_id: v4.control.route_exit
+    resource_kind: control_contract
+    lifecycle: v4.router.mainline
+    owner_crate: routecodex-v4-router
+    owner_node: V4Router07RouteDecisionExit
+    identity: [requestId, serverId, decision, targetId, poolId, reason]
+    semantic_contract:
+      vr_decision_owner_only: true
+      error_center_route_operation: forbidden
+      payload_patch: forbidden
+      original_payload_immutable: true
+      switch_cooldown_reroute_same_cycle: true
+    allowed_writers: [V4Router07RouteDecisionExit]
+    allowed_readers: [V4ReqOutbound05ProviderSemantic, V4Error04RouterPolicyApplied]
+    forbidden_writers: [V4ReqChatProcess03Governed, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.control.route_policy_live
+    resource_kind: control_contract
+    lifecycle: v4.router.mainline
+    owner_crate: routecodex-v4-router
+    owner_node: V4Router08LivePolicyOverride
+    identity: [serverId, routeGroupId, policyVersion, scope]
+    semantic_contract:
+      live_update_allowed: true
+      baseline_from_manifest: true
+      audit_required: true
+      payload_patch: forbidden
+      immutable_history: true
+    allowed_writers: [V4Router08LivePolicyOverride]
+    allowed_readers: [V4Router06SelectionPlan]
+    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
   - resource_id: v4.control.availability
     resource_kind: control_state
     lifecycle: v4.provider.availability
@@ -194,6 +230,45 @@ resources:
     allowed_writers: [V4Error01SourceRaised, V4Error02HostCaptured, V4Error03RuntimeClassified, V4Error04RouterPolicyApplied, V4Error05ExecutionDecision, V4Error06ClientProjected]
     allowed_readers: [V4Target07OpaqueTarget, V4ServerFrame, V4Error06ClientProjected]
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.control.error_center
+    resource_kind: control_contract
+    lifecycle: v4.error.mainline
+    owner_crate: routecodex-v4-error
+    owner_node: V4ErrorCenter02ClassifyAudit
+    identity: [requestId, pipelineId, errorStage, errorCode]
+    semantic_contract:
+      intake_only: true
+      classify_and_audit: true
+      route_decision_owner: v4.control.route_exit
+      provider_local_retry_policy: forbidden
+      fallback: forbidden
+      original_payload_immutable: true
+      payload_hash_and_typed_context_only: true
+    allowed_writers: [V4Error01SourceRaised, V4ErrorCenter02ClassifyAudit]
+    allowed_readers: [V4Router07RouteDecisionExit, V4Error04RouterPolicyApplied]
+    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.lifecycle.payload_cycle
+    resource_kind: control_contract
+    lifecycle: v4.pipeline.request_cycle
+    owner_crate: routecodex-v4-control
+    owner_node: V4PayloadCycleRegistry
+    identity: [requestId, pipelineId, originalRequestHash]
+    semantic_contract:
+      cycle_start: request_sent
+      cycle_success_terminal: response_entered_client
+      cycle_success_terminal_boundary: next_request_sent
+      cycle_error_terminal: error_terminal_only
+      switch_cooldown_reroute: same_cycle_merged
+      original_payload_mutation: forbidden
+    allowed_writers: ["V4PayloadCycleRegistry::open", "V4PayloadCycleRegistry::merge_retry", "V4PayloadCycleRegistry::close_success", "V4PayloadCycleRegistry::close_error"]
+    allowed_readers: [V4Router07RouteDecisionExit, V4ErrorCenter02ClassifyAudit]
+    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: design
@@ -334,6 +409,45 @@ resources:
     allowed_writers: [V4Debug01SnapshotLedger]
     allowed_readers: [developer_diagnostics]
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame, V4ReqChatProcess03Governed]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.module_switch
+    resource_kind: diagnostic_control
+    lifecycle: v4.debug.module_switch
+    owner_crate: routecodex-v4-debug
+    owner_node: V4Debug12ModuleSwitch
+    identity: [moduleId, nodeId, scope, switchKind]
+    semantic_contract:
+      dynamic_live_update: true
+      kinds: [debug, snapshot, dry_run, route_probe]
+      default_from_manifest: true
+      decision_plane: forbidden
+      payload_carrier: forbidden
+      audit_required: true
+      may_enter_metadata_center: false
+    allowed_writers: ["V4Debug12ModuleSwitch::set", "V4Config05ManifestPublished"]
+    allowed_readers: ["V4DebugRuntime::enabled_for_module"]
+    forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.dry_run_chain
+    resource_kind: diagnostic_control
+    lifecycle: v4.debug.dry_run
+    owner_crate: routecodex-v4-debug
+    owner_node: V4Debug13DryRunChain
+    identity: [chainId, moduleId, entryNode, exitNode, fixtureId]
+    semantic_contract:
+      per_module: true
+      entry_exit_defined: optional
+      default_entry_exit: full_request_or_response_chain
+      input: correct_payload_fixture
+      no_network: true
+      may_enter_metadata_center: false
+    allowed_writers: ["V4DebugRuntime::register_dry_run_chain", "V4Debug12ModuleSwitch"]
+    allowed_readers: ["V4DebugRuntime::execute_dry_run_no_network_effect", developer_diagnostics]
+    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: design
@@ -660,6 +774,51 @@ forbidden_direct_edges:
   - from: v4.control.target_selection
     to: v4.request.normal_payload
     reason: opaque target selection must not modify payload
+  - from: v4.control.route_exit
+    to: v4.request.normal_payload
+    reason: route decision output must not modify payload
+  - from: v4.control.route_exit
+    to: v4.request.provider_wire_payload
+    reason: route decision is a typed control resource, never a wire field
+  - from: v4.control.route_exit
+    to: v4.response.client_wire_payload
+    reason: route decision must never project into client body
+  - from: v4.control.route_policy_live
+    to: v4.request.normal_payload
+    reason: live route policy override must not patch payload
+  - from: v4.control.route_policy_live
+    to: v4.request.provider_wire_payload
+    reason: live route policy is control-only
+  - from: v4.control.route_policy_live
+    to: v4.response.client_wire_payload
+    reason: live route policy is control-only
+  - from: v4.control.error_center
+    to: v4.request.normal_payload
+    reason: error center classifies and audits typed error facts; it must not rewrite the original request payload
+  - from: v4.control.error_center
+    to: v4.request.provider_wire_payload
+    reason: error center never writes provider wire
+  - from: v4.control.error_center
+    to: v4.response.client_wire_payload
+    reason: only V4Error06ClientProjected code/message may reach client
+  - from: v4.lifecycle.payload_cycle
+    to: v4.request.provider_wire_payload
+    reason: payload cycle state is control-only
+  - from: v4.lifecycle.payload_cycle
+    to: v4.response.client_wire_payload
+    reason: payload cycle state is control-only
+  - from: v4.debug.module_switch
+    to: v4.pipeline.mainline
+    reason: module debug switch controls diagnostics only; it must not become live runtime input
+  - from: v4.debug.dry_run_chain
+    to: v4.pipeline.mainline
+    reason: dry-run chain definitions are diagnostic-only; runtime never consumes them as live input
+  - from: v4.debug.dry_run_chain
+    to: v4.request.provider_wire_payload
+    reason: dry-run is no-network and never writes provider wire
+  - from: v4.debug.dry_run_chain
+    to: v4.response.client_wire_payload
+    reason: dry-run never writes client wire
   - from: v4.request.normal_payload
     to: v4.control.metadata_center
     reason: payload must not reconstruct control state

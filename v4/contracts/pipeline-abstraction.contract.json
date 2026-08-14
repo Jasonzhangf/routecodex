@@ -88,6 +88,8 @@
     "debug_subscription_rule": "read-only observation; must not alter business result or control decision",
     "snapshot_subscription_rule": "diagnostic only; snapshot must never become live runtime input",
     "statistics_rule": "optional observability; must not enter decisions or payload",
+    "debug_switch_rule": "per-module/per-node debug/snapshot/dry_run/route_probe switch is dynamically live-updatable, audited, diagnostic-only, and must not affect business result, control decision, or payload",
+    "dry_run_rule": "every module supports dry-run with declared chain entry/exit or defaults to the full request/response chain; input is the correct payload fixture; no network, no live input, no fallback to live",
     "business_logic_rule": "BaseNode carries no business logic; behavior comes from registered operators"
   },
   "plugin_schema": {
@@ -191,7 +193,11 @@
       "node_error_projection",
       "node_control_record",
       "node_debug_subscription_read_only",
-      "node_statistics_optional"
+      "node_statistics_optional",
+      "node_debug_switch_diagnostic_only",
+      "node_error_intake_typed",
+      "node_route_exit_consumer",
+      "node_payload_cycle_boundary"
     ]
   },
   "control_center": {
@@ -200,6 +206,64 @@
     "never_in_payload": true,
     "payload_reconstruction": "forbidden",
     "protocol_metadata_as_control": "forbidden"
+  },
+  "error_center": {
+    "role": "classify_and_audit_only",
+    "intake": {
+      "from": "any node/operator/hook error",
+      "carrier": "typed error facts + payload_hash + typed_context",
+      "payload_reread": "forbidden; center never re-reads business payload to make decisions"
+    },
+    "output": "classified error facts to v4.control.route_exit",
+    "route_operation": "forbidden",
+    "retry_cooldown_reroute_execution": "forbidden",
+    "provider_local_retry_policy": "forbidden",
+    "fallback": "forbidden",
+    "original_payload_mutation": "forbidden",
+    "v3_boundary": "ErrorHandlingCenter remains ErrorErr06 client projection; V4 error center is intake/classify/audit only and never participates in provider policy or routing"
+  },
+  "route_exit": {
+    "role": "typed route control decision output boundary",
+    "owner": "routecodex-v4-router",
+    "decision_owner": "VR (virtual router) only",
+    "inputs": ["route_facts", "classified error facts", "payload_cycle"],
+    "consumers": ["req_outbound", "error policy"],
+    "payload_patch": "forbidden",
+    "provider_wire": "forbidden",
+    "client_wire": "forbidden",
+    "error_center_route_operation": "forbidden",
+    "same_cycle_semantics": "switch/cooldown/reroute are merged into the same payload cycle"
+  },
+  "payload_cycle": {
+    "role": "original request/response payload lifecycle",
+    "cycle_start": "request_sent",
+    "success_terminal": "response entered client; next request starts a new cycle",
+    "error_terminal": "error terminal only",
+    "same_cycle_merged": ["switch", "cooldown", "reroute"],
+    "original_payload_immutable": true,
+    "cross_cycle_reuse": "forbidden",
+    "payload_reconstruction_from_control": "forbidden"
+  },
+  "module_debug_switch": {
+    "scope": ["module_id", "node_id", "chain_version", "scope"],
+    "kinds": ["debug", "snapshot", "dry_run", "route_probe"],
+    "levels": ["off", "error", "warn", "info", "debug", "trace"],
+    "dynamic_live_update": true,
+    "default_from_manifest": true,
+    "audit_required": true,
+    "diagnostic_only": true,
+    "decision_plane": "forbidden",
+    "payload_carrier": "forbidden"
+  },
+  "dry_run": {
+    "per_module": true,
+    "entry_exit": "optional per chain; when undefined, run the full request or response chain",
+    "input": "correct payload fixture matching declared data_in kind",
+    "no_network": true,
+    "live_input": "forbidden",
+    "provider_wire": "forbidden",
+    "client_wire": "forbidden",
+    "fallback_to_live": "forbidden"
   },
   "message_bus": {
     "purpose": ["notification", "observability", "diagnostics", "records"],
@@ -221,7 +285,12 @@
     "control-record-every-in-out",
     "debug-subscription-read-only",
     "snapshot-subscription-diagnostic-only",
-    "statistics-never-decision-or-payload"
+    "statistics-never-decision-or-payload",
+    "error-center-classify-audit-only",
+    "route-exit-vr-owned",
+    "payload-cycle-same-cycle",
+    "module-debug-switch-diagnostic-only",
+    "dry-run-per-module"
   ],
   "completeness_gates": [
     {"gate_id":"ABS-GATE-01","name":"v3_resource_coverage","rule":"all 103 v3 resources classified with axis and operator_kind"},
@@ -246,6 +315,11 @@
     {"gate_id":"ABS-GATE-20","name":"standard_test_semantics","rule":"every published node/group/chain has its standard test surface before anchored"},
     {"gate_id":"ABS-GATE-21","name":"hub_chain_fixed","rule":"v4 hub request chain fixed: server -> sse_in -> inbound -> chat_process(group) -> outbound -> compat -> provider_sse_out"},
     {"gate_id":"ABS-GATE-22","name":"sse_boundary_only","rule":"SSE is transport boundary only; internal data plane is JSON semantic; SSE in/out coupling forbidden"},
-    {"gate_id":"ABS-GATE-23","name":"hook_queue_contract","rule":"node entry/exit hook queues are machine declared, ordered, effect-classified, no second lifecycle"}
+    {"gate_id":"ABS-GATE-23","name":"hook_queue_contract","rule":"node entry/exit hook queues are machine declared, ordered, effect-classified, no second lifecycle"},
+    {"gate_id":"ABS-GATE-24","name":"module_debug_switch_contract","rule":"per-module/per-node debug/snapshot/dry-run/route_probe switches are dynamically live-updatable, audited, diagnostic-only, and never affect business path, payload, MetadataCenter, or error chain"},
+    {"gate_id":"ABS-GATE-25","name":"error_center_classify_audit_only","rule":"error center receives typed error facts + payload hash + typed context from any node/operator/hook; it classifies and audits only; route operation, retry/cooldown/reroute execution, provider local policy, and payload rewrite are forbidden"},
+    {"gate_id":"ABS-GATE-26","name":"route_exit_vr_owned","rule":"route control exit is VR-owned typed decision output; switch/cooldown/reroute exit here; error center cannot route; route exit never patches payload or writes provider/client wire"},
+    {"gate_id":"ABS-GATE-27","name":"payload_cycle_contract","rule":"payload cycle starts at request send, ends at response-into-client (next request = new cycle) or error terminal; switch/cooldown/reroute merge into the same cycle; original request payload immutable"},
+    {"gate_id":"ABS-GATE-28","name":"dry_run_chain_contract","rule":"every module supports dry-run with declared chain entry/exit or defaults to the full request/response chain; input is the correct payload fixture; no network, no live input, no provider/client wire, no fallback to live"}
   ]
 }

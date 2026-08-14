@@ -156,7 +156,11 @@
         "node_error_projection",
         "node_control_record",
         "node_debug_subscription_read_only",
-        "node_statistics_optional"
+        "node_statistics_optional",
+        "node_debug_switch_diagnostic_only",
+        "node_error_intake_typed",
+        "node_route_exit_consumer",
+        "node_payload_cycle_boundary"
       ],
       "group_tests": [
         "group_external_contract",
@@ -174,9 +178,11 @@
     "control_record",
     "debug_subscriptions",
     "snapshot_subscriptions",
-    "statistics_optional"
+    "statistics_optional",
+    "debug_switch",
+    "dry_run_support"
   ],
-  "edge_kinds": ["data_flow", "control_flow", "debug_subscription"],
+  "edge_kinds": ["data_flow", "control_flow", "debug_subscription", "error_intake"],
   "edges": {
     "data_flow": {
       "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "data_in", "data_out", "owner", "adjacent_required"],
@@ -192,7 +198,68 @@
       "topics": ["node_event", "state_transition", "diagnostic"],
       "snapshot_topics": ["node_entry", "node_exit", "node_error"],
       "rule": "read_only must be true; no payload; no decision influence"
+    },
+    "error_intake": {
+      "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "error_stage", "payload_hash", "typed_context", "owner", "record_required"],
+      "rule": "any node/operator/hook error enters v4.control.error_center as typed error facts plus payload hash and typed context; the center classifies and audits only; route decision belongs to v4.control.route_exit; original payload is immutable across switch/cooldown/reroute"
     }
+  },
+  "error_center": {
+    "contract_id": "v4-error-center",
+    "role": "classify_and_audit_only",
+    "intake": "typed error facts from any node/operator/hook via error_intake edge; payload_hash_and_typed_context_only",
+    "output": "classified error facts consumed by v4.control.route_exit decision owner",
+    "forbidden": [
+      "route operation",
+      "retry/cooldown/reroute execution",
+      "provider_local_retry_policy",
+      "payload rewrite",
+      "fallback",
+      "provider wire write",
+      "client wire write"
+    ],
+    "rule": "error center never makes routing decisions; VR owns the decision using classified error facts and the original request payload reference"
+  },
+  "route_exit": {
+    "contract_id": "v4-route-control-exit",
+    "role": "typed route decision output boundary",
+    "owner": "routecodex-v4-router",
+    "inputs": ["v4.control.route_facts", "v4.control.error_center classified facts", "v4.lifecycle.payload_cycle"],
+    "outputs": ["v4.control.route_exit decision"],
+    "consumers": ["V4ReqOutbound05ProviderSemantic", "V4Error04RouterPolicyApplied"],
+    "forbidden": [
+      "payload patch",
+      "provider wire write",
+      "client wire write",
+      "error center route operation",
+      "original payload mutation"
+    ],
+    "rule": "switch/cooldown/reroute are all decisions emitted from this exit and remain inside the same request payload cycle"
+  },
+  "payload_cycle": {
+    "contract_id": "v4-payload-cycle",
+    "role": "original request/response payload lifecycle registry",
+    "cycle_start": "request_sent",
+    "success_terminal": "response entered client; the next request begins a new cycle",
+    "error_terminal": "error terminal only; switch/cooldown/reroute are merged into the same cycle",
+    "original_payload": "immutable within a cycle; retries re-execute the same original payload",
+    "forbidden": ["payload mutation", "cross-cycle reuse", "control fields in payload", "payload reconstruction from control state"]
+  },
+  "module_debug_switch": {
+    "contract_id": "v4-module-debug-switch",
+    "scope": ["module_id", "node_id", "chain_version", "scope"],
+    "kinds": ["debug", "snapshot", "dry_run", "route_probe"],
+    "levels": ["off", "error", "warn", "info", "debug", "trace"],
+    "dynamic_live_update": true,
+    "default_from_manifest": true,
+    "rules": [
+      "diagnostic-only; never affects business result, control decision, or payload",
+      "every live switch is recorded in the immutable audit ledger",
+      "switch scope is per module/node and per closed-loop request scope",
+      "dry_run is supported per module with declared chain entry/exit; default is the full request or response chain",
+      "dry-run input is the correct payload fixture; no real provider call",
+      "switch/dry-run state never enters provider wire, client wire, payload, MetadataCenter, or error chain"
+    ]
   },
   "protocol_same_stage_rule": {
     "rule": "different protocols share the same node instance and role subclass; each protocol registers an operator on that slot",
@@ -207,6 +274,11 @@
     "control edge resources must belong to control axis",
     "control edge record_required must be true",
     "debug subscription edges must be read_only",
+    "error_intake edges must target v4.control.error_center, carry payload_hash and typed_context, and have record_required true",
+    "error center must not own route decisions; route decisions must exit via v4.control.route_exit owned by the router",
+    "switch/cooldown/reroute must remain inside the same payload cycle with the original request payload immutable",
+    "module debug switch edges are diagnostic-only and cannot touch mainline, payload, MetadataCenter, or error chain",
+    "dry-run chains must declare entry/exit or default to the full request/response chain with a correct payload fixture",
     "forbidden edges cannot be added",
     "every code-level conversion/subscription/control operation must resolve to a declared edge",
     "every node is a class with role subclass binding",
