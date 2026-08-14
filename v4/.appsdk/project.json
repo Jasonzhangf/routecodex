@@ -181,7 +181,7 @@
         "suite_id": "v4-base-node-l0-regression"
       },
       "source_owner": "routecodex-v4-base-node",
-      "stage": "architecture_stable"
+      "stage": "controlled_verified"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-edge/**",
