@@ -144,6 +144,38 @@
       "group_expansion_equivalence"
     ]
   },
+  "hook_queue_schema": {
+    "required": [
+      "hook_id",
+      "node_id",
+      "kind",
+      "position",
+      "owner",
+      "effect",
+      "resources_read",
+      "resources_written",
+      "control_record_required"
+    ],
+    "kinds": ["entry", "exit"],
+    "effects": ["read_only", "control_only", "semantic"],
+    "rules": [
+      "entry hooks run before operator in position order",
+      "exit hooks run after operator in position order",
+      "hooks cannot create a second lifecycle or shortcut nodes",
+      "hooks must be machine declared",
+      "control in/out requires ControlRecord",
+      "debug/snapshot subscriptions are read-only",
+      "hook failure enters the error chain explicitly; no fallback"
+    ]
+  },
+  "v4_hub_chain": {
+    "request_chain": "server -> sse_in -> inbound -> chat_process(group) -> outbound -> compat -> provider_sse_out",
+    "internal_data_plane": "json_semantic",
+    "sse_boundary_only": true,
+    "direct_flow": "sse_in -> json_semantic -> sse_out",
+    "sse_coupling": "forbidden",
+    "chat_process": "supernode group with entry/exit hook queues"
+  },
   "pipeline_test_semantics": {
     "chain": [
       "chain_entry_contract",
@@ -211,6 +243,9 @@
     {"gate_id":"ABS-GATE-17","name":"node_numbering_contract","rule":"node_id encodes order+function and is immutable after publication"},
     {"gate_id":"ABS-GATE-18","name":"group_node_interface_equivalence","rule":"group external interface equals NodeInstance interface; parent pipeline treats group as one node"},
     {"gate_id":"ABS-GATE-19","name":"pipeline_explicit_lifecycle","rule":"every chain has explicit single-entry single-terminal nodes+edges and explicit error path"},
-    {"gate_id":"ABS-GATE-20","name":"standard_test_semantics","rule":"every published node/group/chain has its standard test surface before anchored"}
+    {"gate_id":"ABS-GATE-20","name":"standard_test_semantics","rule":"every published node/group/chain has its standard test surface before anchored"},
+    {"gate_id":"ABS-GATE-21","name":"hub_chain_fixed","rule":"v4 hub request chain fixed: server -> sse_in -> inbound -> chat_process(group) -> outbound -> compat -> provider_sse_out"},
+    {"gate_id":"ABS-GATE-22","name":"sse_boundary_only","rule":"SSE is transport boundary only; internal data plane is JSON semantic; SSE in/out coupling forbidden"},
+    {"gate_id":"ABS-GATE-23","name":"hook_queue_contract","rule":"node entry/exit hook queues are machine declared, ordered, effect-classified, no second lifecycle"}
   ]
 }

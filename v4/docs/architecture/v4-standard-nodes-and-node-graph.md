@@ -145,6 +145,122 @@ node_id := <Chain><NN><SemanticName>
 
 每个流程上的节点至少是一个类：NodeInstance（继承 ChainFamily + RoleSubclass）加上 BaseNode 横切能力。节点类的实例化、算子注册、接线都受机器合同约束。
 
+## V4 Hub 请求链标准流程
+
+请求链语义按 Jason 锁定的流程固定为：
+
+```text
+Server (HTTP/server adapter)
+  -> SSE In (client transport boundary; SSE -> JSON semantic)
+  -> Inbound (protocol parse / normalize; JSON data plane)
+  -> ChatProcess (超模块 / group supernode)
+  -> Outbound (provider semantic projection)
+  -> Compat (provider compat / wire adaptation)
+  -> Provider SSE Out (provider transport boundary; JSON semantic -> SSE)
+```
+
+对应节点序列（chain version `v4-hub-1`）：
+
+| position | node | 角色子类 | 数据面 | 说明 |
+| --- | --- | --- | --- | --- |
+| 01 | `V4ServerReqInbound01ClientRaw` | `RequestInboundNode` | raw entry | HTTP/server 入口捕获，只做 framing/context，不做语义 |
+| 02 | `V4ServerSseIn02FrameBoundary` | `RequestInboundNode` | SSE frame -> JSON semantic | 客户端 SSE 传输边界；只把 SSE 解码为 JSON 语义帧，不解析业务语义 |
+| 03 | `V4HubReqInbound03Normalized` | `RequestInboundNode` | JSON semantic | 协议解析、normalize，进入统一 JSON 数据面 |
+| 04 | `V4HubReqChatProcess04Governed` | `RequestChatProcessNode`（group 超模块） | JSON semantic | 请求治理、工具治理、continuation restore、servertool hook；对外是一个超级节点 |
+| 05 | `V4HubReqOutbound05ProviderSemantic` | `RequestOutboundNode` | JSON semantic | provider-neutral 出站语义定型 |
+| 06 | `V4ProviderReqCompat06Compat` | `RequestOutboundNode` | JSON semantic | provider compat / wire adaptation，保持同一 JSON 语义面 |
+| 07 | `V4ProviderSseOut07WireBoundary` | `RequestOutboundNode` | JSON semantic -> SSE frame | provider SSE 传输边界；只把 JSON 语义编码为 provider SSE，不做治理 |
+
+### ChatProcess 超模块（group）
+
+`V4HubReqChatProcess04Governed` 是请求链上的超模块：它是一个 group（超级节点），对外接口与单节点一致。内部按角色子类继续拆分子节点，例如：
+
+```text
+V4HubReqChatProcess04Governed (group)
+  entry -> continuation restore -> request governance -> tool governance -> exit
+```
+
+内部子节点：
+
+| 内部 position | node | 角色子类 | 职责 |
+| --- | --- | --- | --- |
+| 04.1 | `V4ChatProcess04ContinuationRestore` | `RequestContinuationNode` | 只读 continuation facts / restore |
+| 04.2 | `V4ChatProcess04RequestGovernance` | `RequestChatProcessNode` | 请求侧治理（工具声明、顺序、规则） |
+| 04.3 | `V4ChatProcess04ToolGovernance` | `RequestChatProcessNode` | 工具治理（servertool/MCP/apply_patch 规则） |
+
+约束：
+
+- group 对外只暴露 `V4HubReqChatProcess04Governed` 一个接口；
+- 父链只能连接 group entry/exit；
+- group 内部实现可替换，只要外部接口不变；
+- servertool 等控制处理挂在 group entry/exit hook 上，不是独立流水线节点。
+
+### Direct 路径的 SSE/JSON 边界
+
+Direct 也走同一条请求链：SSE 只出现在两端传输边界，内部统一用 JSON 语义数据面：
+
+```text
+SSE In (client) -> JSON semantic (inbound/chatprocess/outbound/compat) -> SSE Out (provider)
+```
+
+这样做的原因：SSE 入口与 SSE 出口不直接耦合。SSE 只是传输边界，中间任何治理都在 JSON 语义面上发生；禁止 SSE frame 从入口直接 pipe 到出口，禁止在 SSE 层做业务/控制语义。
+
+Direct/Relay 不改变这条链；它们只影响 operator 选择和 typed facts：
+
+- Direct：同一协议直连，outbound/compat 选择 direct operator；
+- Relay：RouteCodex 本地治理，chatprocess 选择 relay operator；
+- 两端 SSE 边界永远由传输 adapter 独占，不拥有治理语义。
+
+## 节点入口/出口 Hook 队列
+
+每个节点（普通节点和 group）的入口和出口都可以挂 hook 队列，用于 servertool 及其他横切处理：
+
+```text
+entry hooks（进入节点 operator 之前执行）
+  -> operator（节点主体）
+  -> exit hooks（节点 operator 完成之后执行）
+```
+
+Hook 合同：
+
+```json
+{
+  "hook_id": "hook.chatprocess04.entry.servertool",
+  "node_id": "V4HubReqChatProcess04Governed",
+  "kind": "entry",
+  "position": 1,
+  "owner": "routecodex-v4-servertool",
+  "effect": "control_only",
+  "resources_read": ["v4.control.side_channel", "v4.control.metadata_center"],
+  "resources_written": ["v4.control.metadata_center"],
+  "control_record_required": true,
+  "debug_subscription": ["diagnostic"],
+  "snapshot_subscription": ["node_entry"],
+  "statistics_optional": true
+}
+```
+
+规则：
+
+1. hook 不是 operator；operator 是节点主体，hook 是节点边界的横切处理；
+2. entry hooks 在 operator 前按 position 顺序执行；exit hooks 在 operator 后按 position 顺序执行；
+3. hook 默认 `effect: read_only`（observability、debug、record）；需要写控制状态或业务语义的 hook 必须显式声明 `effect: control_only` 或 `effect: semantic` 并登记；
+4. servertool 使用 `control_only` hook：在 chat process group 入口挂 Req04 注入、出口挂 Resp03 剥离（沿用 V3 已登记例外，禁止修改历史和 continuation 不可变区）；
+5. hook 不得产生第二个 lifecycle、不得跨节点短路、不得改变节点编号；
+6. 所有 hook 的 control in/out 都写 ControlRecord；debug/快照订阅只读；
+7. hook 配置与注册必须机器声明；未声明 hook 不能执行；
+8. hook 失败必须显式进入错误链，禁止 fallback/静默吞掉。
+
+### Hook 与 operator 的关系
+
+| 概念 | 拥有者 | 执行时机 | 作用 |
+| --- | --- | --- | --- |
+| operator | 节点 slot（角色子类约束） | 节点主体执行 | 完成该节点声明的主要语义转换 |
+| entry hook | 节点边界 | operator 前 | 横切处理、servertool 注入、debug、policy |
+| exit hook | 节点边界 | operator 后 | 横切处理、servertool 剥离、record、observability |
+
+同一个节点可以同时注册多个 operator（协议/模式变体）和多个 entry/exit hooks；wiring manifest 为节点选一个 active operator，hook 队列按声明顺序全部执行。
+
 ## Group（聚合超级节点）
 
 多个相邻节点可以组成一个 `group`。group 的对外接口与单节点接口完全一致：它实现同一个 NodeInstance 接口，父流水线把它当作一个普通节点来接线、调用、记录和测试。

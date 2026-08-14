@@ -60,6 +60,47 @@
     "rule": "node_id encodes topological order (NN) and semantic function (SemanticName); both are contract and immutable after publication",
     "node_class_required": true
   },
+  "v4_hub_request_chain": {
+    "chain_version": "v4-hub-1",
+    "nodes": [
+      {"position": 1, "node_id": "V4ServerReqInbound01ClientRaw", "role_id": "request_inbound", "data_plane": "raw_entry"},
+      {"position": 2, "node_id": "V4ServerSseIn02FrameBoundary", "role_id": "request_inbound", "data_plane": "sse_frame_to_json"},
+      {"position": 3, "node_id": "V4HubReqInbound03Normalized", "role_id": "request_inbound", "data_plane": "json_semantic"},
+      {"position": 4, "node_id": "V4HubReqChatProcess04Governed", "role_id": "request_chat_process", "group": true, "data_plane": "json_semantic"},
+      {"position": 5, "node_id": "V4HubReqOutbound05ProviderSemantic", "role_id": "request_outbound", "data_plane": "json_semantic"},
+      {"position": 6, "node_id": "V4ProviderReqCompat06Compat", "role_id": "request_outbound", "data_plane": "json_semantic"},
+      {"position": 7, "node_id": "V4ProviderSseOut07WireBoundary", "role_id": "request_outbound", "data_plane": "json_to_sse_frame"}
+    ],
+    "semantics": {
+      "sse_boundary_only": true,
+      "internal_data_plane": "json_semantic",
+      "direct_also_uses_chain": true,
+      "direct_flow": "sse_in -> json_semantic -> sse_out",
+      "sse_in_sse_out_coupling": "forbidden; SSE is transport boundary only",
+      "chat_process": "supernode group with entry/exit hooks for servertool and cross-cutting processing"
+    }
+  },
+  "hook_queue_schema": {
+    "required": ["hook_id", "node_id", "kind", "position", "owner", "effect", "resources_read", "resources_written", "control_record_required"],
+    "kinds": ["entry", "exit"],
+    "effects": ["read_only", "control_only", "semantic"],
+    "rules": [
+      "entry hooks run before operator in position order",
+      "exit hooks run after operator in position order",
+      "hooks are not operators and cannot create a second lifecycle or shortcut nodes",
+      "hooks must be machine declared; undeclared hooks cannot execute",
+      "control in/out requires ControlRecord",
+      "debug/snapshot subscriptions are read-only",
+      "hook failure enters the error chain explicitly; no fallback"
+    ],
+    "servertool_exception": {
+      "rule": "servertool uses control_only hooks at chat process group entry/exit",
+      "req04_injection": "allowed_registered_only",
+      "resp03_stripping": "allowed_matching_provenance_only",
+      "history_mutation": "forbidden",
+      "continuation_immutable_interval_semantics": "forbidden"
+    }
+  },
   "group_schema": {
     "required": [
       "group_id",
@@ -173,6 +214,11 @@
     "every group has exactly one entry and one exit",
     "parent chain cannot connect to group internal nodes",
     "every chain has single entry and single terminal",
-    "every published node/group/chain has its standard test surface"
+    "every published node/group/chain has its standard test surface",
+    "v4 hub request chain is fixed: server -> sse_in -> inbound -> chat_process(group) -> outbound -> compat -> provider_sse_out",
+    "sse is transport boundary only; internal data plane is json semantic",
+    "sse_in and sse_out cannot be directly coupled",
+    "direct and relay share the same chain; they differ only in operator selection and typed facts",
+    "every node entry/exit hook queue is machine declared and ordered"
   ]
 }
