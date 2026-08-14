@@ -198,7 +198,7 @@ fn test_direct_sse_provider_outcome(routing_group: &str) -> V3DirectSseProviderO
 }
 
 #[tokio::test]
-async fn direct_sse_runtime_timing_publishes_at_provider_terminal() {
+async fn direct_sse_runtime_timing_publishes_only_after_clean_eof() {
     let runtime_timing = V3RuntimeTimingState::start();
     runtime_timing.start_external().unwrap();
     let observation = V3RuntimeStreamObservation::default();
@@ -307,7 +307,7 @@ async fn direct_sse_retain_false_passes_cipher_free_frames_byte_for_byte() {
 }
 
 #[tokio::test]
-async fn direct_sse_terminal_event_before_eof_publishes_runtime_timing() {
+async fn direct_sse_terminal_event_before_eof_does_not_publish_runtime_timing() {
     let runtime_timing = V3RuntimeTimingState::start();
     runtime_timing.start_external().unwrap();
     let observation = V3RuntimeStreamObservation::default();
@@ -318,9 +318,12 @@ async fn direct_sse_terminal_event_before_eof_publishes_runtime_timing() {
     let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_terminal_before_eof"), runtime_timing, observation.clone());
 
     governed.next().await.unwrap().unwrap();
-    assert!(observation.snapshot().unwrap().timing.is_some(), "provider terminal must publish Runtime timing before client Drop");
+    assert!(
+        observation.snapshot().unwrap().timing.is_none(),
+        "terminal event without clean EOF must not publish Runtime timing"
+    );
     drop(governed);
-    assert!(observation.snapshot().unwrap().timing.is_some());
+    assert!(observation.snapshot().unwrap().timing.is_none());
 }
 
 #[tokio::test]
