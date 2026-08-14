@@ -130,7 +130,7 @@ resources:
     forbidden_readers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4DebugSnapshotRestore]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.control.route_facts
     resource_kind: control_contract
     lifecycle: v4.router.mainline
