@@ -103,6 +103,27 @@
       "direct_also_uses_chain": true
     }
   },
+  "v4_config_chain": {
+    "chain_version": "v4-config-1",
+    "data_plane": false,
+    "edge_kind": "information_flow",
+    "nodes": [
+      {"position": 1, "node_id": "V4Config01AuthoringFileSource", "role_id": "config_authoring", "info_plane": "authoring_file"},
+      {"position": 2, "node_id": "V4Config02AuthoringParsed", "role_id": "config_authoring", "info_plane": "parsed_authoring"},
+      {"position": 3, "node_id": "V4Config03SchemaValidated", "role_id": "config_authoring", "info_plane": "schema_validated"},
+      {"position": 4, "node_id": "V4Config04ResourceRegistryBuilt", "role_id": "config_registry", "info_plane": "resource_registry"},
+      {"position": 5, "node_id": "V4Config05ManifestPublished", "role_id": "config_manifest", "info_plane": "compiled_manifest"}
+    ],
+    "semantics": {
+      "flow": "authoring_file -> parsed -> schema_validated -> resource_registry -> compiled_manifest",
+      "runtime_writable": "forbidden",
+      "authoring_directory_scan": "forbidden",
+      "secret_in_manifest": "forbidden",
+      "deterministic_output": true,
+      "terminal": "V4Config05ManifestPublished",
+      "module_mock": "v4/contracts/mocks/config.module.mock.json"
+    }
+  },
   "hook_queue_schema": {
     "required": ["hook_id", "node_id", "kind", "position", "owner", "effect", "resources_read", "resources_written", "control_record_required"],
     "kinds": ["entry", "exit"],
@@ -205,11 +226,15 @@
     "debug_switch",
     "dry_run_support"
   ],
-  "edge_kinds": ["data_flow", "control_flow", "debug_subscription", "error_intake"],
+  "edge_kinds": ["data_flow", "information_flow", "control_flow", "debug_subscription", "error_intake"],
   "edges": {
     "data_flow": {
       "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "data_in", "data_out", "owner", "adjacent_required"],
       "rule": "only adjacent nodes; resources must be data-axis; one data_in and one data_out per node"
+    },
+    "information_flow": {
+      "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "info_in", "info_out", "owner", "adjacent_required"],
+      "rule": "only adjacent nodes on data_plane=false chains (config/lifecycle/diagnostic); resources must be information-axis; no control or data resource may travel an information edge"
     },
     "control_flow": {
       "required": ["edge_id", "kind", "chain", "chain_version", "from", "to", "operation", "control_key", "scope_keys", "owner", "record_required"],
@@ -296,6 +321,8 @@
     "data edge resources must belong to data axis",
     "control edge resources must belong to control axis",
     "control edge record_required must be true",
+    "information edges are only valid on data_plane=false chains and must carry information-axis resources only",
+    "config chain is fixed: V4Config01AuthoringFileSource -> V4Config02AuthoringParsed -> V4Config03SchemaValidated -> V4Config04ResourceRegistryBuilt -> V4Config05ManifestPublished",
     "debug subscription edges must be read_only",
     "error_intake edges must target v4.control.error_center, carry payload_hash and typed_context, and have record_required true",
     "error center must not own route decisions; route decisions must exit via v4.control.route_exit owned by the router",

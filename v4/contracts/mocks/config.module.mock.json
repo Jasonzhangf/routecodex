@@ -1,0 +1,82 @@
+{
+  "mock_id": "mock.routecodex-v4-config",
+  "module_id": "routecodex-v4-config",
+  "owner_crate": "routecodex-v4-config",
+  "chain": "config",
+  "chain_version": "v4-config-1",
+  "status": "draft",
+  "baseline_feature_ids": ["v3.config_compile_manifest", "v3.config_source_identity", "v3.provider_error_policy_manifest"],
+  "baseline_resources": [
+    "v3.config.file_source",
+    "v3.config.source_identity",
+    "v3.config.authoring_parsed",
+    "v3.config.schema_validated",
+    "v3.config.resource_registry",
+    "v3.config.published_manifest",
+    "v3.provider_error.policy_manifest",
+    "v3.secret.provider_auth_handle"
+  ],
+  "nodes": [
+    {"position": 1, "node_id": "V4Config01AuthoringFileSource", "role_id": "config_authoring", "allowed_operator_kinds": ["config_parse"], "info_out": "v4.config.parsed"},
+    {"position": 2, "node_id": "V4Config02AuthoringParsed", "role_id": "config_authoring", "allowed_operator_kinds": ["config_parse"], "info_in": "v4.config.parsed", "info_out": "v4.config.parsed"},
+    {"position": 3, "node_id": "V4Config03SchemaValidated", "role_id": "config_authoring", "allowed_operator_kinds": ["config_validate"], "info_in": "v4.config.parsed", "info_out": "v4.config.schema_validated"},
+    {"position": 4, "node_id": "V4Config04ResourceRegistryBuilt", "role_id": "config_registry", "allowed_operator_kinds": ["registry_build"], "info_in": "v4.config.schema_validated", "info_out": "v4.config.resource_registry"},
+    {"position": 5, "node_id": "V4Config05ManifestPublished", "role_id": "config_manifest", "allowed_operator_kinds": ["manifest_publish"], "info_in": "v4.config.resource_registry", "info_out": "v4.config.manifest"}
+  ],
+  "edges": [
+    {"edge_id": "edge.config.authoring.01-to-02", "kind": "information_flow", "from": "V4Config01AuthoringFileSource", "to": "V4Config02AuthoringParsed", "adjacent": true},
+    {"edge_id": "edge.config.parsed.02-to-03", "kind": "information_flow", "from": "V4Config02AuthoringParsed", "to": "V4Config03SchemaValidated", "adjacent": true},
+    {"edge_id": "edge.config.validated.03-to-04", "kind": "information_flow", "from": "V4Config03SchemaValidated", "to": "V4Config04ResourceRegistryBuilt", "adjacent": true},
+    {"edge_id": "edge.config.registry.04-to-05", "kind": "information_flow", "from": "V4Config04ResourceRegistryBuilt", "to": "V4Config05ManifestPublished", "adjacent": true},
+    {"edge_id": "edge.config.error.01-source", "kind": "error_intake", "from": "V4Config01AuthoringFileSource", "to": "v4.control.error_center", "error_stage": "config_source_read", "payload_hash": true, "typed_context": true, "record_required": true},
+    {"edge_id": "edge.config.error.02-parse", "kind": "error_intake", "from": "V4Config02AuthoringParsed", "to": "v4.control.error_center", "error_stage": "config_parse", "payload_hash": true, "typed_context": true, "record_required": true},
+    {"edge_id": "edge.config.error.03-validate", "kind": "error_intake", "from": "V4Config03SchemaValidated", "to": "v4.control.error_center", "error_stage": "config_validate", "payload_hash": true, "typed_context": true, "record_required": true},
+    {"edge_id": "edge.config.error.04-registry", "kind": "error_intake", "from": "V4Config04ResourceRegistryBuilt", "to": "v4.control.error_center", "error_stage": "config_registry_build", "payload_hash": true, "typed_context": true, "record_required": true},
+    {"edge_id": "edge.config.error.05-publish", "kind": "error_intake", "from": "V4Config05ManifestPublished", "to": "v4.control.error_center", "error_stage": "config_manifest_publish", "payload_hash": true, "typed_context": true, "record_required": true}
+  ],
+  "resources_read": ["v4.config.authoring", "v4.secret.provider_auth_handle"],
+  "resources_written": ["v4.config.parsed", "v4.config.schema_validated", "v4.config.resource_registry", "v4.config.manifest", "v4.artifact.compiled_index", "v4.debug.codex_sample_authorization", "v4.config.error_policy_manifest"],
+  "data_in": null,
+  "data_out": null,
+  "control_in": ["v4.control.side_channel"],
+  "control_out": ["v4.control.record_ledger"],
+  "error_intake": {
+    "target": "v4.control.error_center",
+    "carrier": "typed error facts + config source path hash + stage",
+    "decision_plane": "forbidden",
+    "fallback": "forbidden"
+  },
+  "debug_switch": {
+    "module_id": "routecodex-v4-config",
+    "kinds": ["debug", "snapshot", "dry_run", "route_probe"],
+    "levels": ["off", "error", "warn", "info", "debug", "trace"],
+    "dynamic_live_update": true,
+    "default_from_manifest": true,
+    "audit_required": true
+  },
+  "dry_run_chain": {
+    "entry_defined": true,
+    "entry": "V4Config01AuthoringFileSource",
+    "exit": "V4Config05ManifestPublished",
+    "input": "config authoring fixture matching v4.config.authoring schema",
+    "no_network": true,
+    "fallback_to_live": "forbidden"
+  },
+  "test_semantics": [
+    "chain_entry_contract",
+    "chain_terminal_contract",
+    "chain_edge_complete",
+    "chain_error_path",
+    "node_entry_contract",
+    "node_exit_contract",
+    "node_success_projection",
+    "node_error_projection",
+    "node_control_record",
+    "node_debug_subscription_read_only",
+    "node_debug_switch_diagnostic_only",
+    "node_error_intake_typed",
+    "node_route_exit_consumer",
+    "node_payload_cycle_boundary"
+  ],
+  "evidence": []
+}

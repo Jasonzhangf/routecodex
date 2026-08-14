@@ -183,6 +183,47 @@
     "immutable_interval": "resp_chatprocess save -> next req_chatprocess restore; no semantic transformation in between",
     "response_terminal": "V4ServerRespOutbound06ClientFrame"
   },
+  "v4_config_chain": {
+    "chain_version": "v4-config-1",
+    "flow": "authoring_file -> parsed -> schema_validated -> resource_registry -> compiled_manifest",
+    "data_plane": false,
+    "edge_kind": "information_flow",
+    "runtime_writable": "forbidden",
+    "authoring_directory_scan": "forbidden",
+    "secret_in_manifest": "forbidden",
+    "deterministic_output": true,
+    "terminal": "V4Config05ManifestPublished"
+  },
+  "module_mock_contract": {
+    "contract_id": "v4-module-mock",
+    "purpose": "每个模块先出 contract-complete mock（节点/边/资源/控制/错误/debug/dry-run 全声明），mock 验证通过后才允许实现",
+    "mock_required_fields": [
+      "mock_id",
+      "module_id",
+      "owner_crate",
+      "chain",
+      "chain_version",
+      "baseline_feature_ids",
+      "baseline_resources",
+      "nodes",
+      "edges",
+      "resources_read",
+      "resources_written",
+      "error_intake",
+      "debug_switch",
+      "dry_run_chain",
+      "test_semantics",
+      "status"
+    ],
+    "status_values": ["draft", "contract_complete", "mock_verified", "implemented", "active"],
+    "rules": [
+      "mock 先于实现",
+      "mock 是合同骨架与测试 harness，不是 runtime 路径，不是 fallback",
+      "mock 合同完整 = 完整性 gate 全部通过",
+      "模块 promotion 前必须有 mock_verified 证据（红测 + 正例）",
+      "资源文件按模块重建，逐模块 anchored"
+    ]
+  },
   "pipeline_test_semantics": {
     "chain": [
       "chain_entry_contract",
@@ -326,6 +367,8 @@
     {"gate_id":"ABS-GATE-26","name":"route_exit_vr_owned","rule":"route control exit is VR-owned typed decision output; switch/cooldown/reroute exit here; error center cannot route; route exit never patches payload or writes provider/client wire"},
     {"gate_id":"ABS-GATE-27","name":"payload_cycle_contract","rule":"payload cycle starts at request send, ends at response-into-client (next request = new cycle) or error terminal; switch/cooldown/reroute merge into the same cycle; original request payload immutable"},
     {"gate_id":"ABS-GATE-28","name":"dry_run_chain_contract","rule":"every module supports dry-run with declared chain entry/exit or defaults to the full request/response chain; input is the correct payload fixture; no network, no live input, no provider/client wire, no fallback to live"},
-    {"gate_id":"ABS-GATE-29","name":"hub_response_chain_mirror","rule":"v4 hub response chain is fixed as the request chain mirror: provider_sse_in -> inbound -> chat_process(group) -> outbound -> client_sse_out -> server; SSE is transport-only; continuation save only at V4HubRespChatProcess03Governed; single success terminal V4ServerRespOutbound06ClientFrame"}
+    {"gate_id":"ABS-GATE-29","name":"hub_response_chain_mirror","rule":"v4 hub response chain is fixed as the request chain mirror: provider_sse_in -> inbound -> chat_process(group) -> outbound -> client_sse_out -> server; SSE is transport-only; continuation save only at V4HubRespChatProcess03Governed; single success terminal V4ServerRespOutbound06ClientFrame"},
+    {"gate_id":"ABS-GATE-30","name":"module_mock_first","rule":"every V4 module must ship a contract-complete mock (nodes/edges/resources/control/error intake/debug switch/dry-run chain/test semantics) before implementation; mock gates must pass before the module leaves playground"},
+    {"gate_id":"ABS-GATE-31","name":"information_flow_edge","rule":"data_plane=false chains (config/lifecycle/diagnostic) use information_flow edges carrying information-axis resources only; control/data never travel information edges"}
   ]
 }

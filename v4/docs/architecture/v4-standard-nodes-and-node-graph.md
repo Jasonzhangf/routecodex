@@ -596,6 +596,62 @@ debug、snapshot、dry-run 与 route probe 都是**按模块/按节点动态可�
 4. dry-run 失败显式记录；禁止 fallback 到 live 执行。
 5. dry-run 的启停由模块级 debug 开关（`kind: dry_run`）控制。
 
+## 模块 Mock 先行（逐模块重建资源文件）
+
+资源文件（`v4-resource-operation-map.yml`）不再一次性全量重写，而是按功能逐模块重建；每个模块**先出 contract-complete mock**，mock 验证通过后才允许实现。mock 是合同骨架与测试 harness，不是 runtime 路径，也不是 fallback。
+
+### Mock 必须完整声明
+
+```text
+module mock
+  ├─ module_id / owner_crate / chain / chain_version
+  ├─ baseline_feature_ids / baseline_resources（V3 参考，逐条回链）
+  ├─ nodes（node_id + position + role_id + allowed_operator_kinds + info/data I/O）
+  ├─ edges（data_flow / information_flow / control_flow / debug_subscription / error_intake）
+  ├─ resources_read / resources_written（全部命中资源注册表或显式新增回链 V3）
+  ├─ control_in / control_out（BaseNode 能力，ControlRecord 必写）
+  ├─ error_intake（每个节点必须有 typed facts + hash 错误入口）
+  ├─ debug_switch（kinds / levels / dynamic live / audit）
+  ├─ dry_run_chain（entry/exit 定义；不定义 = 完整请求/响应链）
+  └─ test_semantics（标准测试面）
+```
+
+### 完整性 Gate（mock 通过门槛）
+
+| gate | 规则 |
+| --- | --- |
+| `MOCK-GATE-01` | 边 from/to 全部命中本模块 nodes 与已发布 node graph |
+| `MOCK-GATE-02` | resources_read/written 全部命中资源注册表或显式新增并回链 V3 baseline |
+| `MOCK-GATE-03` | 节点 role_id 与 allowed_operator_kinds 命中角色子类合同 |
+| `MOCK-GATE-04` | 同 chain 内信息/数据流只允许相邻节点 |
+| `MOCK-GATE-05` | 每个节点必须声明 error_intake，未声明即红灯 |
+| `MOCK-GATE-06` | 每个模块必须声明 debug_switch 与 dry_run_chain |
+| `MOCK-GATE-07` | 控制资源不得出现在 data/information 边；信息/数据资源不得出现在 control 边 |
+| `MOCK-GATE-08` | 模块 mock 通过标准测试语义 |
+| `MOCK-GATE-09` | mock 禁止进入 runtime 消费路径 |
+| `MOCK-GATE-10` | 新增 V4 资源必须回链 V3 baseline；无 baseline 必须显式标注理由 |
+
+机器合同见 `v4/contracts/module-mock.contract.json`。
+
+### 第一个模块：config（v4-config-1）
+
+config 是第一个重建模块：无业务 payload 依赖、信息轴、V3 已有完整链参考。mock 见 `v4/contracts/mocks/config.module.mock.json`：
+
+```text
+V4Config01AuthoringFileSource
+  -> V4Config02AuthoringParsed
+  -> V4Config03SchemaValidated
+  -> V4Config04ResourceRegistryBuilt
+  -> V4Config05ManifestPublished（唯一终端）
+```
+
+关键点：
+
+- config 链是 `data_plane=false`，节点之间用 **information_flow** 边传递信息轴资源，不走 data/control 边；
+- 每个节点都有 error_intake 进错误中心（config 解析/校验失败显式暴露，无 fallback）；
+- 模块级 debug 开关支持 live 修改；dry-run 定义 `entry=V4Config01AuthoringFileSource`、`exit=V4Config05ManifestPublished`，输入为 config authoring fixture；
+- runtime 只消费 `V4Config05ManifestPublished` 的编译产物；authoring 目录扫描、manifest 写入、secret 入 manifest 全部禁止。
+
 ## 流水线显式生命周期与标准测试语义
 
 每条链必须有显式的节点 + 边，从起始节点到终止节点构成完整生命周期：
