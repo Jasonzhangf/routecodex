@@ -25,7 +25,7 @@
   "result": "pass",
   "scope_hash": "scope-control-v1",
   "skipped": 0,
-  "source_commit": "3872c51bb",
+  "source_commit": "0c7be8d5c",
   "suite_id": "v4-control-l2-regression",
   "test_characteristics": {
     "blackbox": true,

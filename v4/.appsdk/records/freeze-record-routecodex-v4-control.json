@@ -2,7 +2,7 @@
   "active_version": "active-v1",
   "artifact_record_id": "evidence-control-v1",
   "clean_scope": {
-    "base_commit": "3872c51bb",
+    "base_commit": "0c7be8d5c",
     "changed_paths": [],
     "generated_policy": "tracked_hash",
     "ignored_paths": []
@@ -28,5 +28,5 @@
   "regression_report_hash": "sha256:placeholder",
   "regression_report_id": "regression-control-v1",
   "review_id": "review-control-v1",
-  "source_commit_or_tag": "3872c51bb"
+  "source_commit_or_tag": "0c7be8d5c"
 }

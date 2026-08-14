@@ -9,7 +9,7 @@
   "promotion_id": "promotion-control-v1",
   "review_id": "review-control-v1",
   "reviewed_artifact_hash": "sha256:fc1510781b3838bc797aead36703708c1cc8f40165e30195aed16dae13a11cc4",
-  "reviewed_commit": "3872c51bb",
+  "reviewed_commit": "0c7be8d5c",
   "reviewed_scope_hash": "scope-control-v1",
   "reviewer": {
     "adapter": "codex",
