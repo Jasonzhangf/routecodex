@@ -4,7 +4,7 @@
   "owner_crate": "routecodex-v4-config",
   "chain": "config",
   "chain_version": "v4-config-1",
-  "status": "draft",
+  "status": "implemented",
   "baseline_feature_ids": ["v3.config_compile_manifest", "v3.config_source_identity", "v3.provider_error_policy_manifest"],
   "baseline_resources": [
     "v3.config.file_source",
@@ -89,7 +89,7 @@
         "base_node_dry_run_support",
         "base_node_no_business_logic"
       ],
-      "status": "pending",
+      "status": "frozen",
       "freeze_required_before_module": true
     },
     "L1_edge": {
@@ -104,7 +104,7 @@
         "edge_error_intake_typed",
         "edge_forbidden_edges"
       ],
-      "status": "pending",
+      "status": "frozen",
       "freeze_required_before_module": true
     },
     "L2_module": {
@@ -121,7 +121,7 @@
         "chain_edge_complete",
         "chain_error_path"
       ],
-      "status": "pending",
+      "status": "implemented",
       "freeze_required_before_promotion": true
     },
     "debug_layers": {
@@ -130,5 +130,9 @@
       "module_debug": {"scope": "routecodex-v4-config", "read_only": true, "decision_plane": "forbidden"}
     }
   },
-  "evidence": []
+  "evidence": [
+    "cargo test -p routecodex-v4-config --test l2_config: 15 passed",
+    "public API blackbox regression: config_chain_public_api_blackbox_regression",
+    "whitebox boundaries: unknown fields/references, non-adjacent edge, resource axis, payload binding and secret material fail fast"
+  ]
 }

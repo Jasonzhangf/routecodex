@@ -353,7 +353,43 @@ resources:
     forbidden_writers: [routecodex-v4-runtime, routecodex-v4-server, routecodex-v4-provider, routecodex-v4-router]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
+  - resource_id: v4.config.parsed
+    resource_kind: config_information
+    lifecycle: v4.config.compile
+    owner_crate: routecodex-v4-config
+    owner_node: V4Config02AuthoringParsed
+    identity: [configVersion, sourceHash]
+    allowed_writers: [parse_v4_config_02_from_v4_config_01]
+    allowed_readers: [validate_v4_config_03_from_v4_config_02]
+    forbidden_writers: [routecodex-v4-runtime, routecodex-v4-server, routecodex-v4-provider]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v4.config.schema_validated
+    resource_kind: config_information
+    lifecycle: v4.config.compile
+    owner_crate: routecodex-v4-config
+    owner_node: V4Config03SchemaValidated
+    identity: [configVersion, scopeHash]
+    allowed_writers: [validate_v4_config_03_from_v4_config_02]
+    allowed_readers: [build_v4_config_04_from_v4_config_03]
+    forbidden_writers: [routecodex-v4-runtime, routecodex-v4-server, routecodex-v4-provider]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v4.config.resource_registry
+    resource_kind: config_information
+    lifecycle: v4.config.compile
+    owner_crate: routecodex-v4-config
+    owner_node: V4Config04ResourceRegistryBuilt
+    identity: [configVersion, resourceIds]
+    allowed_writers: [build_v4_config_04_from_v4_config_03]
+    allowed_readers: [publish_v4_config_05_from_v4_config_04]
+    forbidden_writers: [routecodex-v4-runtime, routecodex-v4-server, routecodex-v4-provider]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v4.config.manifest
     resource_kind: config_manifest
     lifecycle: v4.config.compile
@@ -370,23 +406,23 @@ resources:
     forbidden_writers: [routecodex-v4-runtime, routecodex-v4-server, routecodex-v4-provider, routecodex-v4-router]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.artifact.compiled_index
     resource_kind: generated_artifact
     lifecycle: v4.config.compile
-    owner_crate: routecodex-v4-compiler
-    owner_node: V4Compiler01DeterministicIndex
+    owner_crate: routecodex-v4-config
+    owner_node: V4Config05ManifestPublished
     identity: [manifestVersion, sha256]
     semantic_contract:
       compiler_generated_only: true
       runtime_writable: forbidden
       manual_edit: forbidden
-    allowed_writers: [V4Compiler01DeterministicIndex]
+    allowed_writers: [publish_v4_config_05_from_v4_config_04]
     allowed_readers: ["appsdk::compiler", routecodex-v4-runtime]
     forbidden_writers: [routecodex-v4-runtime, routecodex-v4-server, routecodex-v4-provider]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.secret.provider_auth_handle
     resource_kind: secret_handle
     lifecycle: v4.config.compile
@@ -398,7 +434,7 @@ resources:
     forbidden_writers: [V4DebugSnapshotLedger, V4Error06ClientProjected, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.snapshot_ledger
     resource_kind: diagnostic
     lifecycle: v4.debug.side_channel

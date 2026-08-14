@@ -13,7 +13,8 @@
     {"gate_id":"v4_control_l2_regression","command":"cargo test -p routecodex-v4-control --test l2_control","required_for":["routecodex-v4-control:architecture_stable","routecodex-v4-control:freeze"]},
     {"gate_id":"v4_error_l2_regression","command":"cargo test -p routecodex-v4-error --test l2_error","required_for":["routecodex-v4-error:architecture_stable","routecodex-v4-error:freeze"]},
     {"gate_id":"v4_error_compile_fail_regression","command":"cargo test -p routecodex-v4-error --doc","required_for":["routecodex-v4-error:architecture_stable","routecodex-v4-error:freeze"]},
-    {"gate_id":"v4_cargo_workspace_build","command":"cargo build --release --manifest-path v4/Cargo.toml","required_for":["routecodex-v4-base-node:compile","routecodex-v4-edge:compile","routecodex-v4-control:compile","routecodex-v4-error:compile"]},
+    {"gate_id":"v4_config_l2_regression","command":"cargo test -p routecodex-v4-config --test l2_config","required_for":["routecodex-v4-config:architecture_stable","routecodex-v4-config:freeze"]},
+    {"gate_id":"v4_cargo_workspace_build","command":"cargo build --release --manifest-path v4/Cargo.toml","required_for":["routecodex-v4-base-node:compile","routecodex-v4-edge:compile","routecodex-v4-control:compile","routecodex-v4-error:compile","routecodex-v4-config:compile"]},
     {"gate_id":"module_artifact_hash","command":"appsdk compile-module <project> --module <id>","required_for":["compile","architecture_stable","freeze"]},
     {"gate_id":"module_freeze","command":"appsdk freeze <project> --module <id>","required_for":["freeze"]},
     {"gate_id":"module_publish_active","command":"appsdk publish-active <project> --module <id> --version <version>","required_for":["active"]}

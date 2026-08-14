@@ -378,12 +378,83 @@
       },
       "source_owner": "routecodex-v4-error",
       "stage": "frozen"
+    },
+    {
+      "active_artifact": "active/lib/routecodex-v4-config/**",
+      "artifact_paths": [
+        "libroutecodex_v4_config.rlib"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo build --release -p routecodex-v4-config && mkdir -p generated/modules/routecodex-v4-config/lib && cp target/release/deps/libroutecodex_v4_config-*.rlib generated/modules/routecodex-v4-config/lib/libroutecodex_v4_config.rlib"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        "contracts/mocks/config.module.mock.json",
+        "contracts/module-mock.contract.json",
+        "contracts/node-graph.contract.json",
+        "contracts/pipeline-abstraction.contract.json",
+        "contracts/test-layers.contract.json",
+        "contracts/data-control-boundary.contract.json",
+        "contracts/records/**"
+      ],
+      "dependency_modules": [
+        "routecodex-v4-base-node",
+        "routecodex-v4-edge"
+      ],
+      "generated_outputs": [
+        "generated/config/**"
+      ],
+      "module_id": "routecodex-v4-config",
+      "owned_paths": [
+        "crates/routecodex-v4-config/**"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "-p",
+            "routecodex-v4-config",
+            "--test",
+            "l2_config"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "crates/routecodex-v4-config/src/lib.rs",
+          "crates/routecodex-v4-config/tests/l2_config.rs",
+          "contracts/mocks/config.module.mock.json",
+          "contracts/node-graph.contract.json",
+          "contracts/pipeline-abstraction.contract.json",
+          "contracts/data-control-boundary.contract.json"
+        ],
+        "minimum_test_count": 15,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-config-l2-regression"
+      },
+      "source_owner": "routecodex-v4-config",
+      "stage": "source_implemented"
     }
   ],
   "project_id": "routecodex-v4",
   "schema_version": 1,
   "sdk": {
+    "bundle_manifest": ".appsdk/contracts/sdk-bundle.manifest.json",
     "name": "appsdk",
+    "resource_record": ".appsdk/sdk-resources.json",
     "version": "0.1.0"
   }
 }
