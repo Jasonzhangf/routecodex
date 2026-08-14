@@ -90,21 +90,33 @@
         ".appsdk/**",
         "contracts/**"
       ],
-      "source_owner": "routecodex-v4-governance",
       "regression": {
-        "required_before_freeze": true,
-        "suite_id": "v4-governance-regression",
+        "allow_skipped": false,
         "command": {
+          "args": [
+            "verify",
+            "."
+          ],
           "program": "appsdk",
-          "args": ["verify", "."],
           "working_directory": "."
         },
-        "input_paths": ["contracts/**", ".appsdk/**"],
+        "input_paths": [
+          "contracts/**",
+          ".appsdk/**"
+        ],
         "minimum_test_count": 1,
-        "allow_skipped": false,
         "ordinary_mode_after_freeze": "disabled",
-        "reenable_on": ["source_change", "contract_change", "public_api_change", "artifact_change", "dependency_change"]
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-governance-regression"
       },
+      "source_owner": "routecodex-v4-governance",
       "stage": "source_implemented"
     },
     {
@@ -136,13 +148,17 @@
       "owned_paths": [
         "crates/routecodex-v4-base-node/**"
       ],
-      "source_owner": "routecodex-v4-base-node",
       "regression": {
-        "required_before_freeze": true,
-        "suite_id": "v4-base-node-l0-regression",
+        "allow_skipped": false,
         "command": {
+          "args": [
+            "test",
+            "-p",
+            "routecodex-v4-base-node",
+            "--test",
+            "l0_base_node"
+          ],
           "program": "cargo",
-          "args": ["test", "-p", "routecodex-v4-base-node", "--test", "l0_base_node"],
           "working_directory": "."
         },
         "input_paths": [
@@ -153,11 +169,19 @@
           "contracts/test-layers.contract.json"
         ],
         "minimum_test_count": 12,
-        "allow_skipped": false,
         "ordinary_mode_after_freeze": "disabled",
-        "reenable_on": ["source_change", "contract_change", "public_api_change", "artifact_change", "dependency_change"]
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-base-node-l0-regression"
       },
-      "stage": "source_implemented"
+      "source_owner": "routecodex-v4-base-node",
+      "stage": "architecture_stable"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-edge/**",
@@ -190,13 +214,17 @@
       "owned_paths": [
         "crates/routecodex-v4-edge/**"
       ],
-      "source_owner": "routecodex-v4-edge",
       "regression": {
-        "required_before_freeze": true,
-        "suite_id": "v4-edge-l1-regression",
+        "allow_skipped": false,
         "command": {
+          "args": [
+            "test",
+            "-p",
+            "routecodex-v4-edge",
+            "--test",
+            "l1_edge"
+          ],
           "program": "cargo",
-          "args": ["test", "-p", "routecodex-v4-edge", "--test", "l1_edge"],
           "working_directory": "."
         },
         "input_paths": [
@@ -207,7 +235,6 @@
           "contracts/test-layers.contract.json"
         ],
         "minimum_test_count": 11,
-        "allow_skipped": false,
         "ordinary_mode_after_freeze": "disabled",
         "reenable_on": [
           "source_change",
@@ -215,8 +242,11 @@
           "public_api_change",
           "artifact_change",
           "dependency_change"
-        ]
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-edge-l1-regression"
       },
+      "source_owner": "routecodex-v4-edge",
       "stage": "source_implemented"
     }
   ],
