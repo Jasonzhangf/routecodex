@@ -39,12 +39,13 @@ config / lifecycle 所有链族共用的控制信号注册与消费资源，也�
 ```rust
 MetadataCenter::new(scope: Scope) -> Self
 register(&mut self, control_key, signal: ControlSignal) -> Result<MetadataRecord, ControlError>
-consume(&self, control_key) -> Result<&ControlSignal, ControlError>
+consume(&mut self, control_key) -> Result<&ControlSignal, ControlError> // 写 Consume 审计，状态不变
 release(&mut self, control_key) -> Result<MetadataRecord, ControlError>
 records(&self) -> impl Iterator<Item = &MetadataRecord>
 is_registered(&self, control_key) -> bool
 is_released(&self, control_key) -> bool
-PayloadGate::write_control(&mut self, signal) -> Result<(), ControlError>  // 恒 Err，fail-fast
+PayloadGate::write_control(&mut self, signal) -> Result<(), ControlError> // 恒 Err，fail-fast + leak 审计
+PayloadGate::leak_attempts(&self) -> impl Iterator<Item = &PayloadLeakRecord> // 只读诊断查询
 ControlSignal::try_from_protocol_metadata(key, value) -> Result<Self, ControlError> // 恒 Err（RED-09）
 ControlSignal::try_reconstruct_from_payload(...) -> Result<Self, ControlError> // 恒 Err（RED-04）
 ```
