@@ -95,6 +95,10 @@ sharedmodule/llmswitch-core/rust-core/note.md
 .local-index/
 .cache/
 
+# AppSDK control plane: local harness, sessions, caches, and worker runtime state.
+# Project governance contracts remain tracked under .appsdk/.
+.appsdk-control/
+
 # RouteCodex multi-worker collaboration runtime state.
 # Keep .agent-collab/PROTOCOL.md, schema/, and examples/ tracked.
 .agent-collab/runs/
