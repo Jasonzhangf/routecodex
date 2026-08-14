@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "functions": [
+    {
+      "function_id": "routecodex_goal_clarification",
+      "owner": "appsdk::goal",
+      "entry_symbols": ["clarify"],
+      "required_gates": ["goal_confirmed"]
+    },
+    {
+      "function_id": "routecodex_architecture_binding",
+      "owner": "routecodex::architecture_registry",
+      "entry_symbols": ["v3-resource-operation-map", "v3-function-map", "v3-mainline-call-map", "v3-verification-map"],
+      "required_gates": ["routecodex_maps_valid"]
+    },
+    {
+      "function_id": "routecodex_module_promotion",
+      "owner": "appsdk::lifecycle",
+      "entry_symbols": ["promote_module", "freeze_module", "publish_active"],
+      "required_gates": ["record_graph", "artifact_hash", "vcs_clean"]
+    }
+  ]
+}

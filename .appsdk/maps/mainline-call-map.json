@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "lifecycle_id": "routecodex-appsdk-migration",
+  "nodes": ["clarify", "map", "playground", "evidence", "promotion", "compile", "active", "protected", "verify"],
+  "edges": [
+    {"from": "clarify", "to": "map", "owner": "appsdk::goal"},
+    {"from": "map", "to": "playground", "owner": "routecodex::architecture_registry"},
+    {"from": "playground", "to": "evidence", "owner": "appsdk::record_graph"},
+    {"from": "evidence", "to": "promotion", "owner": "appsdk::lifecycle"},
+    {"from": "promotion", "to": "compile", "owner": "appsdk::compiler"},
+    {"from": "compile", "to": "active", "owner": "appsdk::publisher"},
+    {"from": "active", "to": "protected", "owner": "appsdk::freezer"},
+    {"from": "protected", "to": "verify", "owner": "appsdk::verifier"},
+    {"from": "verify", "to": "playground", "owner": "appsdk::workspace", "return_path": true}
+  ]
+}

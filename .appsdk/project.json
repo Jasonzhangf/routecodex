@@ -1,0 +1,86 @@
+{
+  "access": {
+    "protected_paths": [
+      ".appsdk/**",
+      "protected/source/**",
+      "protected/contracts/**"
+    ]
+  },
+  "governance": {
+    "active_kind": "immutable_consumable_library",
+    "active_root": "active/lib/**",
+    "debug_merge_comment_required": true,
+    "freeze_requirements": [
+      "git_clean",
+      "source_commit_or_tag",
+      "library_hash",
+      "public_api_hash",
+      "review_pass",
+      "previous_active_immutable"
+    ],
+    "generated_kinds": [
+      "compiler_output",
+      "indexes"
+    ],
+    "generated_root": "generated/**",
+    "playground_retention": "archive_then_remove",
+    "playground_root": "playground/experiments/**",
+    "promotion_requires": [
+      "experiment_evidence",
+      "architecture_review_pass",
+      "unique_owner",
+      "required_gates"
+    ],
+    "protected_kinds": [
+      "source",
+      "contracts",
+      "history"
+    ],
+    "protected_root": "protected/**",
+    "record_contracts": [
+      "contracts/records/evidence-record.schema.json",
+      "contracts/records/goal-clarification-record.schema.json",
+      "contracts/records/review-record.schema.json",
+      "contracts/records/promotion-record.schema.json",
+      "contracts/records/freeze-record.schema.json",
+      "contracts/records/record-graph.contract.json"
+    ],
+    "runtime_forbidden_roots": [
+      "playground/**",
+      "protected/**",
+      "generated/**"
+    ],
+    "zone_transition_contract": "contracts/transitions/zone-transition-manifest.json",
+    "zone_transition_manifest": "contracts/transitions/zone-transition-manifest.json"
+  },
+  "lifecycle": {
+    "stage": "contract_bound"
+  },
+  "lifecycles": {
+    "artifact": "generated",
+    "issue": "open",
+    "library": "draft",
+    "source_snapshot": "mutable"
+  },
+  "modules": [
+    {
+      "active_artifact": "active/lib/routecodex-governance/**",
+      "generated_outputs": [
+        "generated/routecodex-governance/**"
+      ],
+      "module_id": "routecodex-governance",
+      "owned_paths": [
+        ".appsdk/**",
+        "docs/goals/routecodex-appsdk-migration-plan.md"
+      ],
+      "source_owner": "routecodex-governance",
+      "stage": "contract_bound"
+    }
+  ],
+  "project_id": "routecodex",
+  "schema_version": 1,
+  "sdk": {
+    "name": "appsdk",
+    "version": "0.1.0"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "gates": [
+    {
+      "gate_id": "goal_confirmed",
+      "command": "appsdk verify <project>",
+      "required_for": ["playground", "promotion", "freeze"]
+    },
+    {
+      "gate_id": "routecodex_maps_valid",
+      "command": "npm run verify:v3-resource-map && npm run verify:architecture-mainline-call-map",
+      "required_for": ["playground", "promotion", "freeze"]
+    },
+    {
+      "gate_id": "record_graph",
+      "command": "appsdk verify <project>",
+      "required_for": ["promotion", "freeze", "publish"]
+    },
+    {
+      "gate_id": "artifact_hash",
+      "command": "appsdk compile <project>",
+      "required_for": ["promotion", "freeze", "publish"]
+    },
+    {
+      "gate_id": "vcs_clean",
+      "command": "appsdk verify <project>",
+      "required_for": ["freeze"]
+    }
+  ]
+}

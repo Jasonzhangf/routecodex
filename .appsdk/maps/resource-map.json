@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "resources": [
+    {
+      "resource_id": "routecodex_project_contract",
+      "owner": "appsdk::project_contract",
+      "truth_store": ".appsdk/project.json",
+      "allowed_operations": ["read", "validate", "write"]
+    },
+    {
+      "resource_id": "routecodex_architecture_maps",
+      "owner": "routecodex::architecture_registry",
+      "truth_store": "docs/architecture/v3-*-map.yml",
+      "allowed_operations": ["read", "validate", "write"]
+    },
+    {
+      "resource_id": "routecodex_generated_outputs",
+      "owner": "appsdk::compiler",
+      "truth_store": "generated/routecodex-governance/**",
+      "allowed_operations": ["read", "write"]
+    }
+  ]
+}

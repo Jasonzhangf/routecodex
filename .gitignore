@@ -99,6 +99,10 @@ sharedmodule/llmswitch-core/rust-core/note.md
 # Project governance contracts remain tracked under .appsdk/.
 .appsdk-control/
 
+# AppSDK generated/compiled surfaces: never commit build output or indexes.
+/active/lib/
+/generated/
+
 # RouteCodex multi-worker collaboration runtime state.
 # Keep .agent-collab/PROTOCOL.md, schema/, and examples/ tracked.
 .agent-collab/runs/
