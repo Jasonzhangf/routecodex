@@ -4,7 +4,7 @@
   "experiment_id": "experiment-edge-freeze-v1",
   "module_id": "routecodex-v4-edge",
   "base_commit": "2cb72ebab",
-  "source_commit": "48530688f",
+  "source_commit": "8eac65195",
   "previous_active_version": null,
   "new_active_version": "active-v1",
   "artifact_hash": "sha256:1f800dc90551ae1e3ca11b34560f9c967ef68b65eba0956f5f624bfff93cf3af",

@@ -1,0 +1,30 @@
+{
+  "freeze_id": "freeze-edge-v1",
+  "issue_id": "routecodex-v4-foundation",
+  "module_id": "routecodex-v4-edge",
+  "promotion_id": "promotion-edge-v1",
+  "promotion_record_hash": "sha256:6b629d361ce102ad60181ba715729259039eefaaaa4eb740c37792d019a5977d",
+  "artifact_record_id": "evidence-edge-v1",
+  "source_commit_or_tag": "8eac65195",
+  "active_version": "active-v1",
+  "previous_active_version": null,
+  "library_hash": "sha256:1f800dc90551ae1e3ca11b34560f9c967ef68b65eba0956f5f624bfff93cf3af",
+  "public_api_hash": "sha256:ecb7cdb67636cb962cda0024ac17b0a38fe998b94143ffc7dc6526c612714269",
+  "review_id": "review-edge-v1",
+  "previous_active_immutable": false,
+  "git_clean": true,
+  "clean_scope": {
+    "base_commit": "8eac65195",
+    "changed_paths": [],
+    "ignored_paths": [],
+    "generated_policy": "tracked_hash"
+  },
+  "owners": {
+    "vcs": "git",
+    "compiler": "cargo",
+    "api_extractor": "appsdk",
+    "review": "codex",
+    "artifact_registry": "appsdk"
+  },
+  "created_at": "2026-08-14T04:15:00Z"
+}

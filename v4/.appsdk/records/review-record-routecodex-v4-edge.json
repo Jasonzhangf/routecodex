@@ -10,7 +10,7 @@
   "evidence_ids": [
     "evidence-edge-v1"
   ],
-  "reviewed_commit": "48530688f",
+  "reviewed_commit": "8eac65195",
   "reviewed_artifact_hash": "sha256:1f800dc90551ae1e3ca11b34560f9c967ef68b65eba0956f5f624bfff93cf3af",
   "reviewed_scope_hash": "scope-edge-v1",
   "ai_confidence": 1.0,
