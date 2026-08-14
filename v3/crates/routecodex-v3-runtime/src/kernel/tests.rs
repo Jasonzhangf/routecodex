@@ -72,15 +72,8 @@ async fn runtime_executes_adjacent_responses_direct_chain() {
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{output:?}");
-    let timing = output
-        .observability
-        .as_ref()
-        .and_then(|observability| observability.timing)
-        .expect("Direct JSON success must publish Runtime timing");
-    assert_eq!(
-        timing.internal.checked_add(timing.external),
-        Some(timing.runtime_total)
-    );
+    let timing = output.observability.as_ref().and_then(|o| o.timing).expect("Direct JSON success must publish Runtime timing");
+    assert_eq!(timing.internal.checked_add(timing.external), Some(timing.runtime_total));
     match output.client_payload.body {
         V3ClientBody::Json(value) => {
             assert_eq!(value, json!({"id":"resp_test","output_text":"ok"}));
@@ -218,15 +211,8 @@ async fn direct_sse_runtime_timing_publishes_only_after_clean_eof() {
 
     while governed.next().await.is_some() {}
 
-    let timing = observation
-        .snapshot()
-        .unwrap()
-        .timing
-        .expect("clean EOF must publish terminal Runtime timing");
-    assert_eq!(
-        timing.internal.checked_add(timing.external),
-        Some(timing.runtime_total)
-    );
+    let timing = observation.snapshot().unwrap().timing.expect("clean EOF must publish terminal Runtime timing");
+    assert_eq!(timing.internal.checked_add(timing.external), Some(timing.runtime_total));
 }
 
 #[tokio::test]
@@ -326,11 +312,7 @@ async fn direct_sse_terminal_event_before_eof_does_not_publish_runtime_timing() 
     runtime_timing.start_external().unwrap();
     let observation = V3RuntimeStreamObservation::default();
     let source = Box::pin(
-        stream::iter(vec![Ok(
-            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
-                .to_vec(),
-        )])
-        .chain(stream::pending()),
+        stream::iter(vec![Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec())]).chain(stream::pending()),
     );
     let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
     let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_terminal_before_eof"), runtime_timing, observation.clone());
@@ -363,10 +345,7 @@ async fn direct_sse_malformed_tail_does_not_publish_runtime_timing() {
         }
     }
     assert!(saw_error, "malformed SSE tail must fail closeout");
-    assert!(
-        observation.snapshot().unwrap().timing.is_none(),
-        "malformed SSE tail must not publish successful Runtime timing"
-    );
+    assert!(observation.snapshot().unwrap().timing.is_none(), "malformed SSE tail must not publish successful Runtime timing");
 }
 
 #[tokio::test]
@@ -374,13 +353,7 @@ async fn direct_sse_response_done_without_completed_is_terminal_missing() {
     let runtime_timing = V3RuntimeTimingState::start();
     runtime_timing.start_external().unwrap();
     let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(concat!(
-        "event: response.done\n",
-        "data: {\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}\n\n",
-        "data: [DONE]\n\n",
-    )
-    .as_bytes()
-    .to_vec())]));
+    let source = Box::pin(stream::iter(vec![Ok(concat!("event: response.done\n", "data: {\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}\n\n", "data: [DONE]\n\n").as_bytes().to_vec())]));
     let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
     let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_done_without_completed"), runtime_timing, observation.clone());
 
@@ -393,10 +366,7 @@ async fn direct_sse_response_done_without_completed_is_terminal_missing() {
     let error = error.expect("response.done without response.completed must fail closeout");
     assert_eq!(error.code, "provider_response_sse_terminal_missing");
     assert!(error.message.contains("[DONE] without response.completed"));
-    assert!(
-        observation.snapshot().unwrap().timing.is_none(),
-        "terminal-missing provider stream must not publish successful Runtime timing"
-    );
+    assert!(observation.snapshot().unwrap().timing.is_none(), "terminal-missing provider stream must not publish successful Runtime timing");
 }
 
 #[tokio::test]
@@ -411,17 +381,9 @@ async fn direct_sse_failed_event_without_error_code_is_protocol_invalid() {
     let observed = wrap_direct_sse_provider_event_json_observation_stream(source, observation.clone(), runtime_timing.clone(), false, true);
     let mut governed = wrap_direct_sse_provider_outcome_stream(observed, test_direct_sse_provider_outcome("direct_sse_failed_missing_error_code"), runtime_timing, observation.clone());
 
-    let error = governed
-        .next()
-        .await
-        .expect("invalid failure event must terminate the stream")
-        .expect_err("missing provider error.code must fail explicitly");
+    let error = governed.next().await.expect("invalid failure event must terminate the stream").expect_err("missing provider error.code must fail explicitly");
     assert_eq!(error.code, "provider_response_sse_event_invalid");
-    assert!(
-        error.message.contains("non-empty error code"),
-        "{}",
-        error.message
-    );
+    assert!(error.message.contains("non-empty error code"), "{}", error.message);
     assert!(observation.snapshot().unwrap().timing.is_none());
 }
 
@@ -925,9 +887,9 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
         provider_health,
         now + 10,
     )
-    .expect("session B protocol plan should not inherit session A cooldown");
-    assert_eq!(plan_b.decision.target.candidate.provider_id, "first");
-    assert!(plan_b.decision.target.unavailable_candidates.is_empty());
+    .expect("session B protocol plan should inherit provider-level cooldown from session A");
+    assert_eq!(plan_b.decision.target.candidate.provider_id, "second");
+    assert_eq!(plan_b.decision.target.unavailable_candidates.len(), 1);
 }
 
 #[tokio::test]
