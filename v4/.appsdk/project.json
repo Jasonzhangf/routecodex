@@ -380,7 +380,7 @@
         "suite_id": "v4-error-l2-regression"
       },
       "source_owner": "routecodex-v4-error",
-      "stage": "source_implemented"
+      "stage": "architecture_stable"
     }
   ],
   "project_id": "routecodex-v4",
