@@ -232,7 +232,7 @@ resources:
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.control.error_center
     resource_kind: control_contract
     lifecycle: v4.error.mainline
@@ -252,7 +252,7 @@ resources:
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.lifecycle.payload_cycle
     resource_kind: control_contract
     lifecycle: v4.pipeline.request_cycle
@@ -286,7 +286,7 @@ resources:
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: true
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.control.retry_policy
     resource_kind: control_contract
     lifecycle: v4.error.mainline
@@ -302,7 +302,7 @@ resources:
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.scope.session
     resource_kind: control_scope
     lifecycle: v4.control.scope

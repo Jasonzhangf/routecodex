@@ -23,9 +23,9 @@
   "previous_active_immutable": false,
   "previous_active_version": null,
   "promotion_id": "promotion-error-v1",
-  "promotion_record_hash": "sha256:placeholder",
+  "promotion_record_hash": "sha256:5503801a9ae7d82fd76e86bd29c97157849544752751b705f17f4fc2924268cb",
   "public_api_hash": "sha256:73b9d5a8b3018b6b76ba44f36e0a9ee1650deaab8d8bf3489599fa55d6a3e3b6",
-  "regression_report_hash": "sha256:placeholder",
+  "regression_report_hash": "sha256:9152a3dd8536bf3f10c3ff9588904678f188491d7f4ad03477b2e9c4c0d26aac",
   "regression_report_id": "regression-error-v1",
   "review_id": "review-error-v1",
   "source_commit_or_tag": "ce50527af"
