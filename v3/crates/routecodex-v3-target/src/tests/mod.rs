@@ -903,8 +903,8 @@ fn no_image_reasoning_request_does_not_make_text_tool_candidate_capability_misma
 }
 
 #[test]
-fn default_floor_last_candidate_survives_health_cooldown() {
-    let selected = V3TargetInterpreter::default()
+fn health_cooldown_removes_default_floor_candidate_from_selection() {
+    let exhausted = V3TargetInterpreter::default()
         .select_available(
             expanded(),
             &Availability {
@@ -912,17 +912,8 @@ fn default_floor_last_candidate_survives_health_cooldown() {
             },
             0,
         )
-        .expect("default floor last provider must remain selectable while cooled");
-    assert_eq!(selected.route.hit_count, 1);
-    assert_eq!(selected.candidate.provider_id, "b");
-    assert_eq!(selected.attempts, 2);
-    assert!(selected.default_floor_protected);
-    assert!(selected.candidate.default_pool_member);
-    assert!(selected
-        .candidate
-        .pool_ids
-        .iter()
-        .any(|pool_id| pool_id == "default"));
+        .expect_err("health cooldown must remove every cooled candidate");
+    assert_eq!(exhausted.attempted_candidates.len(), 2);
 }
 
 #[test]
@@ -1034,7 +1025,7 @@ targets = [
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected = target
+    let exhausted = target
         .select_available(
             expanded,
             &Availability {
@@ -1042,9 +1033,8 @@ targets = [
             },
             0,
         )
-        .expect("multimodal default floor should protect the last compatible vision target");
-    assert_eq!(selected.candidate.provider_id, "vision");
-    assert!(selected.default_floor_protected);
+        .expect_err("health cooldown must remove the default-floor vision target");
+    assert_eq!(exhausted.attempted_candidates.len(), 2);
 }
 
 #[test]

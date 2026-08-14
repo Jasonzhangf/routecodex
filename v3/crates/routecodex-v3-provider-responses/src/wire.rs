@@ -3,7 +3,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
 use routecodex_v3_config::internal::is_v3_gpt_family_model;
 use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 /// Protocol name recognized by the shared namespace-tool flattener for Responses wire
 /// function shape (`{type:"function", name, description?, parameters?, strict?}`).
@@ -124,13 +124,19 @@ pub fn build_v3_provider_12_responses_wire_payload(
         current_request_body,
     )?;
     normalize_deepseek_thinking_stopless_tool_choice(&mut body, &target);
-    // 请求侧密文兜底：非 gpt 目标不携带 Codex 密文（encrypted_content）——
-    // opencode-go/DeepSeek 等网关不识别加密 reasoning 回传，原样透传会 400
-    // （`reasoning_text must be passed back`）。gpt 官方系接受密文，保留透传。
-    // 响应侧主防线（`apply_v3_response_cipher_policy`，唯一 hook）保证客户端
-    // 正常情况拿不到密文，此兜底只处理历史残留密文跨 provider 回传的窗口。
+    // 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）：
+    // 1. 历史密文剥离（encrypted_content）对所有非 gpt 目标统一执行——gpt 官方系
+    //    接受密文，保留透传；响应侧主防线（`apply_v3_response_cipher_policy`，
+    //    唯一 hook）保证客户端正常情况拿不到密文，此兜底只处理历史残留密文跨
+    //    provider 回传的窗口。
+    // 2. DeepSeek/opencode 目标额外把 reasoning 重写为统一
+    //    `content:[{type:"reasoning_text",text}]` 形态（否则上游 400
+    //    `reasoning_text must be passed back`）；该重写只在已证明需要的模型上
+    //    执行，避免未经证实的其他非 gpt responses provider 被改写 reasoning 形态。
     if !is_v3_gpt_family_model(&target.canonical_model_id) {
-        strip_v3_request_encrypted_reasoning(&mut body);
+        let deepseek_compat = target.canonical_model_id == "deepseek-v4-flash"
+            || target.wire_model == "deepseek-v4-flash";
+        strip_v3_request_encrypted_reasoning(&mut body, deepseek_compat);
     }
     Ok(V3Provider12ResponsesWirePayload {
         request_id,
@@ -182,11 +188,15 @@ fn strip_v3_cipher_field(map: &mut Map<String, Value>) {
     }
 }
 
-/// 请求侧密文剥离（wire 兜底）：剥离 reasoning 条目的 `encrypted_content` 后，
-/// 若该条目没有任何明文内容（summary/content/text），补空 `text` 占位——
-/// opencode（DeepSeek 上游）要求每条 assistant 消息都必须带 reasoning 表示，
-/// 直接丢弃会让该轮缺 reasoning，触发 `reasoning_content must be passed back` 400。
-fn strip_v3_request_encrypted_reasoning(body: &mut Value) {
+/// 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）。
+///
+/// 密文剥离对所有非 gpt 目标统一执行；DeepSeek/opencode 目标（deepseek_compat）
+/// 额外做统一重写：opencode/DeepSeek 网关把 Responses reasoning 转 Chat 时只认
+/// `content:[{type:"reasoning_text",text}]`（对应官方 `reasoning_content` 回传
+/// 规则），`summary`、顶层 `text`、`encrypted_content` 形态都会让上游 400
+/// （`reasoning_text must be passed back`）。重写确定性执行，同一请求反复构建
+/// wire 输出字节不变，保证上游缓存前缀稳定。
+fn strip_v3_request_encrypted_reasoning(body: &mut Value, deepseek_compat: bool) {
     let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
         return;
     };
@@ -197,32 +207,68 @@ fn strip_v3_request_encrypted_reasoning(body: &mut Value) {
         if obj.get("type").and_then(Value::as_str) != Some("reasoning") {
             continue;
         }
-        strip_v3_cipher_field(obj);
-        // 现象：Codex 客户端历史里的 reasoning 常为 `{"type":"reasoning","summary":[]}`
-        // （密文已剥离或本就无明文）。opencode.ai zen/go 网关在 thinking 模式要求每条
-        // assistant reasoning 必须携带非空 reasoning_text 表示；空 `summary:[]` 或
-        // `text:""` 都会被上游 400 `reasoning_text must be passed back`。因此**空数组/
-        // 空文本一律补非空占位文本**——实测只有非空 reasoning_text 被上游接受。
-        // 注意：这是有意保留 reasoning item（不删除）并填充占位；删除或留空都会让
-        // 该轮缺 reasoning 表示，触发 400。wire.rs 测试
-        // `wire_keeps_encrypted_only_reasoning_as_empty_text_placeholder` 锁住该行为；
-        // 后续任何"清理空 reasoning"的修改都会破坏 opencode DeepSeek 链路。
-        let has_plain_content = ["summary", "content", "text", "reasoning_content"]
-            .iter()
-            .any(|key| {
-                obj.get(*key).is_some_and(|value| {
-                    !value.is_null()
-                        && !(value.is_array() && value.as_array().is_some_and(Vec::is_empty))
-                        && !(value.as_str().is_some_and(str::is_empty))
-                })
-            });
-        if !has_plain_content {
+        obj.remove("encrypted_content");
+        if deepseek_compat {
+            let plain = join_v3_reasoning_plain_text(obj);
+            let text = if plain.is_empty() {
+                "[thinking redacted]".to_string()
+            } else {
+                plain
+            };
             obj.insert(
-                "text".to_string(),
-                Value::String("[thinking redacted]".to_string()),
+                "content".to_string(),
+                json!([{"type": "reasoning_text", "text": text}]),
             );
+            obj.remove("summary");
+            obj.remove("text");
+            obj.remove("reasoning_content");
+        } else {
+            // 既有窄清理：只剥密文；无任何明文（summary/content/text/
+            // reasoning_content 均缺失/空/null）时补 `[thinking redacted]`
+            // 占位，保持该条 assistant reasoning 表示存在。
+            let has_plain_content = ["summary", "content", "text", "reasoning_content"]
+                .iter()
+                .any(|key| {
+                    obj.get(*key).is_some_and(|value| {
+                        !value.is_null()
+                            && !(value.is_array() && value.as_array().is_some_and(Vec::is_empty))
+                            && !(value.as_str().is_some_and(str::is_empty))
+                    })
+                });
+            if !has_plain_content {
+                obj.insert(
+                    "text".to_string(),
+                    Value::String("[thinking redacted]".to_string()),
+                );
+            }
         }
     }
+}
+
+/// 提取 reasoning 条目的明文表示，按 content -> summary -> text/reasoning_content
+/// 顺序取第一段非空明文并 join 所有 text 片段；全空返回空串。
+fn join_v3_reasoning_plain_text(obj: &Map<String, Value>) -> String {
+    for key in ["content", "summary"] {
+        if let Some(Value::Array(items)) = obj.get(key) {
+            let mut joined = String::new();
+            for item in items {
+                if let Some(text) = item.get("text").and_then(Value::as_str) {
+                    joined.push_str(text);
+                }
+            }
+            if !joined.is_empty() {
+                return joined;
+            }
+        }
+    }
+    for key in ["text", "reasoning_content"] {
+        if let Some(text) = obj.get(key).and_then(Value::as_str) {
+            if !text.is_empty() {
+                return text.to_string();
+            }
+        }
+    }
+    String::new()
 }
 
 fn normalize_deepseek_thinking_stopless_tool_choice(
@@ -242,12 +288,10 @@ fn normalize_deepseek_thinking_stopless_tool_choice(
         .is_some_and(|tools| {
             tools.iter().any(|tool| {
                 tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
-                    || tool
-                        .pointer("/function/name")
-                        .and_then(Value::as_str)
+                    || tool.pointer("/function/name").and_then(Value::as_str)
                         == Some("reasoningStop")
             })
-    });
+        });
     if has_reasoning_stop {
         if let Some(object) = body.as_object_mut() {
             object.remove("tool_choice");
@@ -317,12 +361,12 @@ fn normalize_openai_chat_function_tools(
 ) -> Result<Vec<Value>, V3ProviderError> {
     let mut normalized = Vec::with_capacity(tools.len());
     for (index, tool) in tools.into_iter().enumerate() {
-        let object = tool.as_object().ok_or_else(|| {
-            V3ProviderError::FunctionToolShapeFailed {
+        let object = tool
+            .as_object()
+            .ok_or_else(|| V3ProviderError::FunctionToolShapeFailed {
                 request_id: request_id.to_string(),
                 detail: format!("tools[{index}] must be a JSON object"),
-            }
-        })?;
+            })?;
         if object.get("type").and_then(Value::as_str) != Some("function") {
             return Err(V3ProviderError::FunctionToolShapeFailed {
                 request_id: request_id.to_string(),
@@ -726,12 +770,9 @@ mod tests {
         // 本测试验证 legacy cleanup 配置不会剥离密文（cleanup 仅处理历史字段名，非密文语义）。
         let mut gpt_target = cleanup_target(&["reasoning.encrypted_content"]);
         gpt_target.canonical_model_id = "gpt-5.6-sol".into();
-        let wire = build_v3_provider_12_responses_wire_payload(
-            "req-encrypted-history",
-            gpt_target,
-            body,
-        )
-        .unwrap();
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-encrypted-history", gpt_target, body)
+                .unwrap();
         assert_eq!(wire.body(), &expected);
     }
 
@@ -748,8 +789,8 @@ mod tests {
         // gpt 目标（OpenAI 官方 canonical）保留 encrypted_content 透传。
         let mut gpt_target = target();
         gpt_target.canonical_model_id = "gpt-5.6-sol".into();
-        let wire =
-            build_v3_provider_12_responses_wire_payload("req-no-cleanup", gpt_target, body).unwrap();
+        let wire = build_v3_provider_12_responses_wire_payload("req-no-cleanup", gpt_target, body)
+            .unwrap();
         assert_eq!(
             wire.body()["input"][1]["encrypted_content"],
             "rsn_old_same_provider"
@@ -852,15 +893,22 @@ mod tests {
         let wire =
             build_v3_provider_12_responses_wire_payload("req-namespace", target(), body).unwrap();
         let tools = wire.body()["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 3, "namespace container must be replaced by its children: {tools:?}");
+        assert_eq!(
+            tools.len(),
+            3,
+            "namespace container must be replaced by its children: {tools:?}"
+        );
         assert_eq!(tools[0]["type"], json!("function"));
-        assert_eq!(tools[1], json!({
-            "type": "function",
-            "name": "mcp__node_repl__js",
-            "description": "run js",
-            "parameters": {"type": "object", "properties": {}},
-            "strict": false
-        }));
+        assert_eq!(
+            tools[1],
+            json!({
+                "type": "function",
+                "name": "mcp__node_repl__js",
+                "description": "run js",
+                "parameters": {"type": "object", "properties": {}},
+                "strict": false
+            })
+        );
         assert_eq!(tools[2]["type"], json!("function"));
         assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
         assert!(
@@ -905,29 +953,39 @@ mod tests {
                 }
             ]
         });
-        let wire = build_v3_provider_12_responses_wire_payload(
-            "req-ns-chat",
-            chat_target,
-            body,
-        )
-        .unwrap();
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-ns-chat", chat_target, body).unwrap();
         let tools = wire.body()["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 3, "namespace container must be replaced by its children: {tools:?}");
-        assert_eq!(tools[0], json!({
-            "type": "function",
-            "name": "plain_tool",
-            "function": {"name": "plain_tool", "description": "d", "parameters": {"type": "object"}}
-        }), "Console Go requires dual-field tools (top-level name + nested function): {:?}", tools[0]);
-        assert_eq!(tools[1], json!({
-            "type": "function",
-            "name": "mcp__node_repl__js",
-            "function": {
+        assert_eq!(
+            tools.len(),
+            3,
+            "namespace container must be replaced by its children: {tools:?}"
+        );
+        assert_eq!(
+            tools[0],
+            json!({
+                "type": "function",
+                "name": "plain_tool",
+                "function": {"name": "plain_tool", "description": "d", "parameters": {"type": "object"}}
+            }),
+            "Console Go requires dual-field tools (top-level name + nested function): {:?}",
+            tools[0]
+        );
+        assert_eq!(
+            tools[1],
+            json!({
+                "type": "function",
                 "name": "mcp__node_repl__js",
-                "description": "run js",
-                "parameters": {"type": "object", "properties": {}},
-                "strict": false
-            }
-        }), "Console Go requires dual-field tools (top-level name + nested function): {:?}", tools[1]);
+                "function": {
+                    "name": "mcp__node_repl__js",
+                    "description": "run js",
+                    "parameters": {"type": "object", "properties": {}},
+                    "strict": false
+                }
+            }),
+            "Console Go requires dual-field tools (top-level name + nested function): {:?}",
+            tools[1]
+        );
         assert_eq!(tools[2]["type"], json!("function"));
         assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
         assert_eq!(tools[2]["function"]["name"], json!("mcp__node_repl__npm"));
@@ -954,11 +1012,16 @@ mod tests {
             .unwrap();
         let tools = wire.body()["tools"].as_array().expect("tools array");
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0], json!({
-            "type": "function",
-            "name": "plain_tool",
-            "function": {"name": "plain_tool", "description": "d", "parameters": {"properties": {}, "type": "object"}}
-        }), "Console Go rejects nested-only tools; wire must add top-level name: {:?}", tools[0]);
+        assert_eq!(
+            tools[0],
+            json!({
+                "type": "function",
+                "name": "plain_tool",
+                "function": {"name": "plain_tool", "description": "d", "parameters": {"properties": {}, "type": "object"}}
+            }),
+            "Console Go rejects nested-only tools; wire must add top-level name: {:?}",
+            tools[0]
+        );
     }
 
     #[test]
@@ -971,9 +1034,13 @@ mod tests {
             ]
         });
         let wire = build_v3_provider_12_responses_wire_payload("req-flat", target(), body).unwrap();
-        assert_eq!(wire.body()["tools"], json!([
-            {"type": "function", "name": "plain_tool", "description": "d", "parameters": {"type": "object", "properties": {}}}
-        ]), "standard responses provider must keep flat function shape unchanged");
+        assert_eq!(
+            wire.body()["tools"],
+            json!([
+                {"type": "function", "name": "plain_tool", "description": "d", "parameters": {"type": "object", "properties": {}}}
+            ]),
+            "standard responses provider must keep flat function shape unchanged"
+        );
     }
 
     #[test]
@@ -1111,12 +1178,16 @@ mod tests {
         assert_eq!(
             input.len(),
             3,
-            "encrypted-only reasoning item is kept as non-empty text placeholder (opencode DeepSeek requires non-empty reasoning_text on every assistant reasoning item)"
+            "both reasoning items are kept (non-gpt wire must carry every assistant reasoning representation)"
         );
         assert_eq!(input[0]["type"], "reasoning");
         assert_eq!(
-            input[0]["summary"],
-            json!([{"type": "summary_text", "text": "plain summary"}])
+            input[0]["content"],
+            json!([{"type": "reasoning_text", "text": "plain summary"}])
+        );
+        assert!(
+            input[0].get("summary").is_none(),
+            "summary must be dropped once mapped into content.reasoning_text"
         );
         assert!(
             input[0].get("encrypted_content").is_none(),
@@ -1124,14 +1195,189 @@ mod tests {
         );
         assert_eq!(input[1]["type"], "reasoning");
         assert_eq!(
-            input[1]["text"], "[thinking redacted]",
-            "empty reasoning item becomes non-empty text placeholder; empty or missing reasoning_text triggers upstream 400 `reasoning_text must be passed back`"
+            input[1]["content"],
+            json!([{"type": "reasoning_text", "text": "[thinking redacted]"}]),
+            "empty reasoning item becomes non-empty content.reasoning_text placeholder; empty or missing reasoning_text triggers upstream 400 `reasoning_text must be passed back`"
+        );
+        assert!(
+            input[1].get("summary").is_none(),
+            "empty placeholder must be content-only"
         );
         assert!(
             input[1].get("encrypted_content").is_none(),
             "placeholder must not carry encrypted_content"
         );
         assert_eq!(input[2]["type"], "message");
+    }
+
+    #[test]
+    fn wire_maps_summary_only_reasoning_to_content_for_non_gpt_target() {
+        let mut target = target();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {
+                    "type": "reasoning",
+                    "summary": [
+                        {"type": "summary_text", "text": "first summary"},
+                        {"type": "summary_text", "text": " second summary"}
+                    ]
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "user turn"}]
+                }
+            ]
+        });
+        let first =
+            build_v3_provider_12_responses_wire_payload("req-1", target.clone(), body.clone())
+                .unwrap();
+        let second = build_v3_provider_12_responses_wire_payload("req-2", target, body).unwrap();
+        assert_eq!(
+            first.body()["input"][0]["content"],
+            json!([{"type": "reasoning_text", "text": "first summary second summary"}])
+        );
+        assert!(
+            first.body()["input"][0].get("summary").is_none(),
+            "summary-only history must become content-only wire shape"
+        );
+        assert!(first.body()["input"][0].get("encrypted_content").is_none());
+        assert_eq!(
+            first.body(),
+            second.body(),
+            "reasoning wire normalization must be deterministic so repeated requests keep the same upstream cache prefix"
+        );
+    }
+
+    #[test]
+    fn wire_removes_null_encrypted_content_and_maps_summary_for_non_gpt_target() {
+        let mut target = target();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_0c9a07cb4afc20f7016a7e9f3508cc8191901c40907a61bcf9",
+                    "summary": [
+                        {"type": "summary_text", "text": "**Planning task by reading SKILL.md**"},
+                        {"type": "summary_text", "text": "**Preparing parallel reads of project files**"}
+                    ],
+                    "encrypted_content": null
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "user turn"}]
+                }
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-1", target, body).unwrap();
+        let reasoning = &wire.body()["input"][0];
+        assert_eq!(
+            reasoning["content"],
+            json!([{"type": "reasoning_text", "text": "**Planning task by reading SKILL.md****Preparing parallel reads of project files**"}])
+        );
+        assert!(
+            reasoning.get("encrypted_content").is_none(),
+            "null encrypted_content key must be removed as part of unified cipher cleanup"
+        );
+        assert!(
+            reasoning.get("summary").is_none(),
+            "summary must not remain next to content"
+        );
+        assert_eq!(
+            reasoning["id"],
+            "rs_0c9a07cb4afc20f7016a7e9f3508cc8191901c40907a61bcf9"
+        );
+    }
+
+    #[test]
+    fn wire_keeps_existing_content_reasoning_and_drops_summary_encrypted_for_non_gpt_target() {
+        let mut target = target();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_existing",
+                    "summary": [{"type": "summary_text", "text": "summary text"}],
+                    "content": [
+                        {"type": "reasoning_text", "text": "existing plain content"},
+                        {"type": "reasoning_text", "text": " tail"}
+                    ],
+                    "encrypted_content": "rsn_cipher"
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "user turn"}]
+                }
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-1", target, body).unwrap();
+        let reasoning = &wire.body()["input"][0];
+        assert_eq!(
+            reasoning["content"],
+            json!([{"type": "reasoning_text", "text": "existing plain content tail"}]),
+            "existing content fragments must be joined into the single canonical reasoning_text wire shape"
+        );
+        assert!(reasoning.get("summary").is_none());
+        assert!(reasoning.get("encrypted_content").is_none());
+    }
+
+    #[test]
+    fn wire_keeps_narrow_encrypted_cleanup_for_other_non_gpt_responses_target() {
+        // 非 deepseek 的 responses 目标只保留既有窄清理（剥历史密文 + 空条目占位），
+        // 不做 summary -> content.reasoning_text 重写；该重写只在已证明需要的
+        // DeepSeek/opencode 链路上执行，避免未经证实的其他 provider 被改写 reasoning 形态。
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_summary",
+                    "summary": [{"type": "summary_text", "text": "plain summary"}],
+                    "encrypted_content": "rsn_cipher"
+                },
+                {
+                    "type": "reasoning",
+                    "id": "rs_encrypted_only",
+                    "encrypted_content": "rsn_only",
+                    "summary": null
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "user turn"}]
+                }
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-1", target(), body).unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        assert_eq!(input.len(), 3);
+        assert!(
+            input[0].get("encrypted_content").is_none(),
+            "cipher cleanup stays universal for non-gpt targets"
+        );
+        assert_eq!(
+            input[0]["summary"],
+            json!([{"type": "summary_text", "text": "plain summary"}]),
+            "non-deepseek targets keep summary untouched"
+        );
+        assert!(
+            input[0].get("content").is_none(),
+            "no deepseek reasoning_text rewrite for unproven targets"
+        );
+        assert!(input[1].get("encrypted_content").is_none());
+        assert_eq!(
+            input[1]["text"], "[thinking redacted]",
+            "encrypted-only item keeps the previous narrow placeholder"
+        );
+        assert!(input[1].get("content").is_none());
     }
 
     #[test]

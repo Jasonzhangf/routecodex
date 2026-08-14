@@ -259,7 +259,6 @@ impl V3TargetInterpreter {
         now_ms: u64,
     ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
         let mut unavailable = Vec::new();
-        let mut default_floor_candidate: Option<(usize, V3TargetCandidate)> = None;
         // An explicit `provider.model` pin is diagnostic intent (V2 semantics):
         // health cooldowns are reported but never veto the pinned provider.
         // Explicit exclusions still block via the exhaustion path below.
@@ -279,13 +278,6 @@ impl V3TargetInterpreter {
                 Some(&candidate.model_id),
                 now_ms,
             );
-            let request_local_failed = projection
-                .blocked_scopes
-                .iter()
-                .any(|scope| scope == "request_local_provider_failure");
-            if candidate.default_pool_member && !request_local_failed {
-                default_floor_candidate = Some((index, candidate.clone()));
-            }
             if projection.available {
                 return Ok(V3Target10ConcreteProviderSelected {
                     route: expanded.route,
@@ -316,15 +308,6 @@ impl V3TargetInterpreter {
                 unavailable_candidates: unavailable,
                 attempts: index + 1,
                 default_floor_protected: false,
-            });
-        }
-        if let Some((index, candidate)) = default_floor_candidate {
-            return Ok(V3Target10ConcreteProviderSelected {
-                route: expanded.route,
-                candidate,
-                unavailable_candidates: unavailable,
-                attempts: index + 1,
-                default_floor_protected: true,
             });
         }
         Err(V3TargetExhaustion {

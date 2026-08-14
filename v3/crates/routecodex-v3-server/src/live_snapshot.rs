@@ -139,6 +139,21 @@ where
     }
 }
 
+impl<S, E, F, O> Drop for V3LiveSnapRecordedStream<S, E, F, O> {
+    fn drop(&mut self) {
+        if self.terminal_persisted {
+            return;
+        }
+        self.terminal_persisted = true;
+        if let Err(error) = self
+            .recorder
+            .persist_current(Some("client disconnected before SSE stream terminal"))
+        {
+            eprintln!("[v3-codex-sample] client-response snapshot persistence failed on stream drop: {error}");
+        }
+    }
+}
+
 pub(crate) struct V3LiveSnapClientResponseSseRecorder {
     core: V3LiveSnapSseRecorderCore,
 }

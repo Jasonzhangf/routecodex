@@ -159,8 +159,10 @@ pub(crate) fn apply_response_compat(payload: Value) -> Value {
                 .get("arguments")
                 .and_then(Value::as_str)
                 .and_then(|text| serde_json::from_str::<Value>(text).ok())
-                .and_then(|arguments| arguments.get("input").cloned())
-                .unwrap_or(Value::Null);
+                .and_then(|arguments| arguments.get("input").cloned());
+            let Some(input) = input else {
+                continue;
+            };
             item_obj.insert(
                 "type".to_string(),
                 Value::String("custom_tool_call".to_string()),
@@ -276,5 +278,17 @@ mod tests {
         });
         let mapped = apply_response_compat(body);
         assert_eq!(mapped["output"][0]["type"], json!("function_call"));
+    }
+
+    #[test]
+    fn keeps_regular_function_call_response_untouched() {
+        let body = json!({
+            "id": "resp_1",
+            "output": [
+                {"type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"}
+            ]
+        });
+        let mapped = apply_response_compat(body.clone());
+        assert_eq!(mapped, body);
     }
 }

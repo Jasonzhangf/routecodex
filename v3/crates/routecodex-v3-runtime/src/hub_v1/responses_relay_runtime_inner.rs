@@ -1,5 +1,5 @@
-use super::*;
 use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
+use super::*;
 // Relay→Direct handoff 时撤销 relay 注入的 stopless 合约（Direct 按自身配置决定注入）。
 use super::stopless_injection::strip_v3_stopless_contract_for_relay_direct_handoff;
 use futures_util::StreamExt;
@@ -690,71 +690,71 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         Some(manifest),
                         Some(&selected_target_provider_id),
                         &hook_provider_value,
-                    ) {
-                        let global_probe_compatible = semantic_error.provider_global_failure
-                            && provider_wire_protocol == V3HubProviderWireProtocol::Responses
-                            && manifest
-                                .providers
-                                .get(&selected_target_provider_id)
-                                .and_then(|provider| provider.responses.as_ref())
-                                .is_some();
-                        if global_probe_compatible {
-                            let fingerprint = routecodex_v3_error::V3ProviderErrorFingerprint::new(
-                                semantic_error.code.clone(),
-                                semantic_error.code.clone(),
-                                provider_status,
-                                semantic_error.code.clone(),
+                    )
+                {
+                    let global_probe_compatible = semantic_error.provider_global_failure
+                        && provider_wire_protocol == V3HubProviderWireProtocol::Responses
+                        && manifest
+                            .providers
+                            .get(&selected_target_provider_id)
+                            .and_then(|provider| provider.responses.as_ref())
+                            .is_some();
+                    if global_probe_compatible {
+                        let fingerprint = routecodex_v3_error::V3ProviderErrorFingerprint::new(
+                            semantic_error.code.clone(),
+                            semantic_error.code.clone(),
+                            provider_status,
+                            semantic_error.code.clone(),
+                        )
+                        .map_err(V3ResponsesRelayRuntimeError::Target)?;
+                        provider_health
+                            .record_provider_global_subscription_failure(
+                                &input.failure_session_scope,
+                                &selected_target_provider_id,
+                                Some(&selected.candidate.auth_alias),
+                                Some(&selected.candidate.model_id),
+                                fingerprint,
+                                semantic_error.cooldown_ms,
+                                v3_relay_provider_policy_now_epoch_ms()
+                                    .map_err(V3ResponsesRelayRuntimeError::Target)?,
                             )
                             .map_err(V3ResponsesRelayRuntimeError::Target)?;
-                            provider_health
-                                .record_provider_global_subscription_failure(
-                                    &input.failure_session_scope,
-                                    &selected_target_provider_id,
-                                    Some(&selected.candidate.auth_alias),
-                                    Some(&selected.candidate.model_id),
-                                    fingerprint,
-                                    semantic_error.cooldown_ms,
-                                    v3_relay_provider_policy_now_epoch_ms()
-                                        .map_err(V3ResponsesRelayRuntimeError::Target)?,
-                                )
-                                .map_err(V3ResponsesRelayRuntimeError::Target)?;
-                        }
-                        let failure = provider_semantic_failure(
-                            provider_status,
-                            semantic_error,
-                            &selected_target_provider_id,
-                            Some(selected_observability.clone()),
-                        );
-                        drop(_provider_action_permit.take());
-                        let terminal_failure = handle_error_before_resp03!(
-                            handle_v3_responses_relay_provider_failure(
-                                &failure_context,
-                                selected,
-                                failure,
-                                &mut V3ResponsesRelayProviderRetryState {
-                                    failed_candidates: &mut failed_candidates,
-                                    same_candidate_retries: &mut same_candidate_retries,
-                                    retry_selected: &mut retry_selected,
-                                    pending_recovery: &mut pending_provider_action_recovery,
-                                    provider_failure_events: &mut provider_failure_events,
-                                    provider_failure_event_sink: provider_failure_event_sink
-                                        .as_ref(),
-                                    selected_observability: &selected_observability,
-                                    trace: &mut trace,
-                                },
-                            )
-                            .await
-                        );
-                        if let Some(failure) = terminal_failure {
-                            clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
-                                manifest,
-                                &input.server_id,
-                                stopless_control.as_ref(),
-                                stopless_state.as_ref(),
-                            )?;
-                            return Ok(provider_failure_output(failure, trace, 0));
-                        }
-                        continue;
+                    }
+                    let failure = provider_semantic_failure(
+                        provider_status,
+                        semantic_error,
+                        &selected_target_provider_id,
+                        Some(selected_observability.clone()),
+                    );
+                    drop(_provider_action_permit.take());
+                    let terminal_failure = handle_error_before_resp03!(
+                        handle_v3_responses_relay_provider_failure(
+                            &failure_context,
+                            selected,
+                            failure,
+                            &mut V3ResponsesRelayProviderRetryState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                retry_selected: &mut retry_selected,
+                                pending_recovery: &mut pending_provider_action_recovery,
+                                provider_failure_events: &mut provider_failure_events,
+                                provider_failure_event_sink: provider_failure_event_sink.as_ref(),
+                                selected_observability: &selected_observability,
+                                trace: &mut trace,
+                            },
+                        )
+                        .await
+                    );
+                    if let Some(failure) = terminal_failure {
+                        clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                            manifest,
+                            &input.server_id,
+                            stopless_control.as_ref(),
+                            stopless_state.as_ref(),
+                        )?;
+                        return Ok(provider_failure_output(failure, trace, 0));
+                    }
+                    continue;
                 }
                 let request_web_search_state = match request_web_search_state.clone() {
                     Some(state) => Some(state),
@@ -863,19 +863,17 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     )?;
                     if let Some(execution) = stopless_control.as_ref() {
                         if execution.commit_effects && execution.scope.has_client_session_scope() {
-                            execution
-                                .control
-                                .web_search_store_for_scope(
-                                    &execution.scope,
-                                    captured,
-                                    V3ServerToolCenterWriteOrigin {
-                                        module: "responses_relay_runtime",
-                                        symbol: "commit_or_release_responses_local_continuation",
-                                        stage: "resp03_commit_effects",
-                                    },
-                                    Some("resp03 commit effects persist captured web_search state"),
-                                    None,
-                                )?;
+                            execution.control.web_search_store_for_scope(
+                                &execution.scope,
+                                captured,
+                                V3ServerToolCenterWriteOrigin {
+                                    module: "responses_relay_runtime",
+                                    symbol: "commit_or_release_responses_local_continuation",
+                                    stage: "resp03_commit_effects",
+                                },
+                                Some("resp03 commit effects persist captured web_search state"),
+                                None,
+                            )?;
                         }
                     }
                 }
@@ -1014,71 +1012,71 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         Some(manifest),
                         Some(&selected_target_provider_id),
                         &provider_value,
-                    ) {
-                        let global_probe_compatible = semantic_error.provider_global_failure
-                            && provider_wire_protocol == V3HubProviderWireProtocol::Responses
-                            && manifest
-                                .providers
-                                .get(&selected_target_provider_id)
-                                .and_then(|provider| provider.responses.as_ref())
-                                .is_some();
-                        if global_probe_compatible {
-                            let fingerprint = routecodex_v3_error::V3ProviderErrorFingerprint::new(
-                                semantic_error.code.clone(),
-                                semantic_error.code.clone(),
-                                provider_status,
-                                semantic_error.code.clone(),
+                    )
+                {
+                    let global_probe_compatible = semantic_error.provider_global_failure
+                        && provider_wire_protocol == V3HubProviderWireProtocol::Responses
+                        && manifest
+                            .providers
+                            .get(&selected_target_provider_id)
+                            .and_then(|provider| provider.responses.as_ref())
+                            .is_some();
+                    if global_probe_compatible {
+                        let fingerprint = routecodex_v3_error::V3ProviderErrorFingerprint::new(
+                            semantic_error.code.clone(),
+                            semantic_error.code.clone(),
+                            provider_status,
+                            semantic_error.code.clone(),
+                        )
+                        .map_err(V3ResponsesRelayRuntimeError::Target)?;
+                        provider_health
+                            .record_provider_global_subscription_failure(
+                                &input.failure_session_scope,
+                                &selected_target_provider_id,
+                                Some(&selected.candidate.auth_alias),
+                                Some(&selected.candidate.model_id),
+                                fingerprint,
+                                semantic_error.cooldown_ms,
+                                v3_relay_provider_policy_now_epoch_ms()
+                                    .map_err(V3ResponsesRelayRuntimeError::Target)?,
                             )
                             .map_err(V3ResponsesRelayRuntimeError::Target)?;
-                            provider_health
-                                .record_provider_global_subscription_failure(
-                                    &input.failure_session_scope,
-                                    &selected_target_provider_id,
-                                    Some(&selected.candidate.auth_alias),
-                                    Some(&selected.candidate.model_id),
-                                    fingerprint,
-                                    semantic_error.cooldown_ms,
-                                    v3_relay_provider_policy_now_epoch_ms()
-                                        .map_err(V3ResponsesRelayRuntimeError::Target)?,
-                                )
-                                .map_err(V3ResponsesRelayRuntimeError::Target)?;
-                        }
-                        let failure = provider_semantic_failure(
-                            provider_status,
-                            semantic_error,
-                            &selected_target_provider_id,
-                            Some(selected_observability.clone()),
-                        );
-                        drop(_provider_action_permit.take());
-                        let terminal_failure = handle_error_before_resp03!(
-                            handle_v3_responses_relay_provider_failure(
-                                &failure_context,
-                                selected,
-                                failure,
-                                &mut V3ResponsesRelayProviderRetryState {
-                                    failed_candidates: &mut failed_candidates,
-                                    same_candidate_retries: &mut same_candidate_retries,
-                                    retry_selected: &mut retry_selected,
-                                    pending_recovery: &mut pending_provider_action_recovery,
-                                    provider_failure_events: &mut provider_failure_events,
-                                    provider_failure_event_sink: provider_failure_event_sink
-                                        .as_ref(),
-                                    selected_observability: &selected_observability,
-                                    trace: &mut trace,
-                                },
-                            )
-                            .await
-                        );
-                        if let Some(failure) = terminal_failure {
-                            clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
-                                manifest,
-                                &input.server_id,
-                                stopless_control.as_ref(),
-                                stopless_state.as_ref(),
-                            )?;
-                            return Ok(provider_failure_output(failure, trace, 0));
-                        }
-                        continue;
+                    }
+                    let failure = provider_semantic_failure(
+                        provider_status,
+                        semantic_error,
+                        &selected_target_provider_id,
+                        Some(selected_observability.clone()),
+                    );
+                    drop(_provider_action_permit.take());
+                    let terminal_failure = handle_error_before_resp03!(
+                        handle_v3_responses_relay_provider_failure(
+                            &failure_context,
+                            selected,
+                            failure,
+                            &mut V3ResponsesRelayProviderRetryState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                retry_selected: &mut retry_selected,
+                                pending_recovery: &mut pending_provider_action_recovery,
+                                provider_failure_events: &mut provider_failure_events,
+                                provider_failure_event_sink: provider_failure_event_sink.as_ref(),
+                                selected_observability: &selected_observability,
+                                trace: &mut trace,
+                            },
+                        )
+                        .await
+                    );
+                    if let Some(failure) = terminal_failure {
+                        clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                            manifest,
+                            &input.server_id,
+                            stopless_control.as_ref(),
+                            stopless_state.as_ref(),
+                        )?;
+                        return Ok(provider_failure_output(failure, trace, 0));
+                    }
+                    continue;
                 }
                 let (
                     action,
@@ -1194,19 +1192,17 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     )?;
                     if let Some(execution) = stopless_control.as_ref() {
                         if execution.commit_effects && execution.scope.has_client_session_scope() {
-                            execution
-                                .control
-                                .web_search_store_for_scope(
-                                    &execution.scope,
-                                    captured,
-                                    V3ServerToolCenterWriteOrigin {
-                                        module: "responses_relay_runtime",
-                                        symbol: "commit_or_release_responses_local_continuation",
-                                        stage: "resp03_commit_effects",
-                                    },
-                                    Some("resp03 commit effects persist captured web_search state"),
-                                    None,
-                                )?;
+                            execution.control.web_search_store_for_scope(
+                                &execution.scope,
+                                captured,
+                                V3ServerToolCenterWriteOrigin {
+                                    module: "responses_relay_runtime",
+                                    symbol: "commit_or_release_responses_local_continuation",
+                                    stage: "resp03_commit_effects",
+                                },
+                                Some("resp03 commit effects persist captured web_search state"),
+                                None,
+                            )?;
                         }
                     }
                 }

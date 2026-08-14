@@ -131,9 +131,11 @@ fn inject_v3_stopless_chat_contract(payload: &mut Value, current_payload_start: 
             // system messages are intentionally ignored here.
         } else if let Some(system) = messages
             .get_mut(current_payload_start..)
-            .and_then(|current| current.iter_mut().find(|message| {
-                message.get("role").and_then(Value::as_str) == Some("system")
-            }))
+            .and_then(|current| {
+                current
+                    .iter_mut()
+                    .find(|message| message.get("role").and_then(Value::as_str) == Some("system"))
+            })
         {
             match system.get_mut("content") {
                 Some(Value::String(text)) => {
@@ -231,7 +233,10 @@ fn inject_v3_stopless_tools_and_choice(
             }
         };
         if needs_promote {
-            object.insert("tool_choice".to_string(), Value::String("required".to_string()));
+            object.insert(
+                "tool_choice".to_string(),
+                Value::String("required".to_string()),
+            );
         }
     }
 }
@@ -251,10 +256,7 @@ pub(crate) fn payload_is_thinking_mode(payload: &Value) -> bool {
 
 pub(crate) fn tool_is_reasoning_stop(tool: &Value) -> bool {
     tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
-        || tool
-            .pointer("/function/name")
-            .and_then(Value::as_str)
-            == Some("reasoningStop")
+        || tool.pointer("/function/name").and_then(Value::as_str) == Some("reasoningStop")
 }
 
 /// Relay→Direct handoff 边界：撤销当前轮 relay 注入的 stopless 合约
@@ -276,7 +278,11 @@ pub(crate) fn strip_v3_stopless_contract_for_relay_direct_handoff(
     if let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) {
         tools.retain(|tool| !tool_is_reasoning_stop(tool));
     }
-    if payload.get("tools").and_then(Value::as_array).is_some_and(Vec::is_empty) {
+    if payload
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty)
+    {
         if let Some(object) = payload.as_object_mut() {
             object.remove("tools");
         }
@@ -332,9 +338,12 @@ fn strip_v3_injected_guidance_from_system(message: &mut Value) -> bool {
 
 fn part_is_injected_stopless_guidance(part: &Value) -> bool {
     part.get("type").and_then(Value::as_str) == Some("text")
-        && part.get("text").and_then(Value::as_str).is_some_and(|text| {
-            text == STOPLESS_PROVIDER_GUIDANCE_WITH_HEADER || text == STOPLESS_PROVIDER_GUIDANCE
-        })
+        && part
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| {
+                text == STOPLESS_PROVIDER_GUIDANCE_WITH_HEADER || text == STOPLESS_PROVIDER_GUIDANCE
+            })
 }
 
 #[cfg(test)]
@@ -363,12 +372,10 @@ mod stopless_injection_tests {
             messages[2]["role"], "system",
             "guidance must be inserted at the current-turn boundary (index 2)"
         );
-        assert!(
-            messages[2]["content"]
-                .as_str()
-                .unwrap()
-                .contains("当前轮推进准则")
-        );
+        assert!(messages[2]["content"]
+            .as_str()
+            .unwrap()
+            .contains("当前轮推进准则"));
         assert_eq!(messages[3]["role"], "user");
         assert_eq!(messages[3]["content"], "current turn");
     }
@@ -387,13 +394,11 @@ mod stopless_injection_tests {
                 .contains("当前轮推进准则"),
             "string Responses input must receive stopless guidance"
         );
-        assert!(
-            payload["tools"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(tool_is_reasoning_stop)
-        );
+        assert!(payload["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(tool_is_reasoning_stop));
     }
 
     #[test]
@@ -410,9 +415,9 @@ mod stopless_injection_tests {
         inject_v3_stopless_provider_contract(&mut payload, 0).expect("inject");
 
         assert_eq!(payload.get("tool_choice"), None);
-        assert!(payload["tools"].as_array().is_some_and(|tools| {
-            tools.iter().any(tool_is_reasoning_stop)
-        }));
+        assert!(payload["tools"]
+            .as_array()
+            .is_some_and(|tools| { tools.iter().any(tool_is_reasoning_stop) }));
     }
 
     #[test]
@@ -433,7 +438,10 @@ mod stopless_injection_tests {
             .iter()
             .filter(|tool| tool_is_reasoning_stop(tool))
             .count();
-        assert_eq!(stop_count, 1, "exactly-one reasoningStop contract must hold");
+        assert_eq!(
+            stop_count, 1,
+            "exactly-one reasoningStop contract must hold"
+        );
         assert_eq!(
             payload["tools"].as_array().unwrap().len(),
             2,
@@ -453,17 +461,19 @@ mod stopless_injection_tests {
             "tools": [v3_stopless_reasoning_stop_tool(), json!({"type":"function","name":"exec","parameters":{"type":"object"}})],
             "tool_choice": "required"
         });
-        strip_v3_stopless_contract_for_relay_direct_handoff(
-            &mut payload,
-            Some(&json!("none")),
-        );
+        strip_v3_stopless_contract_for_relay_direct_handoff(&mut payload, Some(&json!("none")));
         let messages = payload["messages"].as_array().unwrap();
         assert!(
-            messages.iter().all(|m| m.get("role").and_then(Value::as_str) != Some("system")),
+            messages
+                .iter()
+                .all(|m| m.get("role").and_then(Value::as_str) != Some("system")),
             "injected system guidance message must be removed: {payload}"
         );
         assert_eq!(payload["messages"][0]["role"], "user");
-        assert_eq!(payload["tool_choice"], "none", "original tool_choice restored");
+        assert_eq!(
+            payload["tool_choice"], "none",
+            "original tool_choice restored"
+        );
         let tools = payload["tools"].as_array().unwrap();
         assert!(
             tools.iter().all(|t| !tool_is_reasoning_stop(t)),
@@ -483,8 +493,7 @@ mod stopless_injection_tests {
         });
         strip_v3_stopless_contract_for_relay_direct_handoff(&mut appended, None);
         assert_eq!(
-            appended["messages"][0]["content"],
-            "base",
+            appended["messages"][0]["content"], "base",
             "tail-injected guidance must be truncated"
         );
         assert!(
