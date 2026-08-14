@@ -3,7 +3,7 @@
   "issue_id": "routecodex-v4-foundation",
   "experiment_id": "experiment-base-node-freeze-v1",
   "kind": "build",
-  "source_commit": "8a771dc70",
+  "source_commit": "fac43e278",
   "artifact_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
   "scope": {
     "module_id": "routecodex-v4-base-node"

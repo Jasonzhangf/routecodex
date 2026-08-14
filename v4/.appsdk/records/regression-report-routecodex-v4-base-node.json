@@ -1,7 +1,7 @@
 {
   "regression_report_id": "regression-base-node-v1",
   "module_id": "routecodex-v4-base-node",
-  "source_commit": "8a771dc70",
+  "source_commit": "fac43e278",
   "artifact_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
   "public_api_hash": "sha256:95f9248e0568946c686d9e17c809dfb49ad25ba002ed90709102d3f9f7f490f8",
   "scope_hash": "scope-base-node-v1",

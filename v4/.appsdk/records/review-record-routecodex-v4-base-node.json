@@ -10,7 +10,7 @@
   "evidence_ids": [
     "evidence-base-node-v1"
   ],
-  "reviewed_commit": "8a771dc70",
+  "reviewed_commit": "fac43e278",
   "reviewed_artifact_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
   "reviewed_scope_hash": "scope-base-node-v1",
   "ai_confidence": 1.0,
