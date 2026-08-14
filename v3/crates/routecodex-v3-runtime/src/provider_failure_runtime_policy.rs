@@ -58,10 +58,7 @@ pub fn build_v3_provider_global_probe_target(
     let secret = match (&auth.env, &auth.token_file, &auth.secret_file, &auth.secret_key, &auth.api_key) {
         (Some(env), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
         (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
-        (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
-            path: path.clone(),
-            key: key.clone(),
-        },
+        (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile { path: path.clone(), key: key.clone() },
         (None, None, None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
         _ => return Err(format!("probe provider {provider_id} auth entry is invalid")),
     };
@@ -242,14 +239,8 @@ fn configured_retry_budget_for_failure(
     default_budget: usize,
 ) -> usize {
     let Some(policy) = manifest.error.provider_error_action_policy.iter().find(|policy| {
-        provider_error_policy_matches_source_failure(
-            policy,
-            provider_id,
-            provider_type,
-            model_id,
-            status,
-            error_type,
-        ) && (policy.matcher.content_contains_any.is_empty()
+        provider_error_policy_matches_source_failure(policy, provider_id, provider_type, model_id, status, error_type)
+            && (policy.matcher.content_contains_any.is_empty()
             || policy
                 .matcher
                 .content_contains_any
@@ -1039,19 +1030,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     };
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
-    if error_type.as_deref() == Some("provider_transport_error") {
-        // 连接层错误是 provider/baseurl 级故障：同 provider 的所有 key
-        // 共用同一 baseURL，全部排除，避免 key2 失败切 key1 的 thrashing。
-        if let Some(expanded) = context.captured_target_09 {
-            for candidate in &expanded.candidates {
-                if candidate.provider_id == selected.candidate.provider_id {
-                    let key = v3_relay_provider_candidate_key(candidate);
-                    excluded_with_failed.insert(key.clone());
-                    state.failed_candidates.insert(key);
-                }
-            }
-        }
-    }
     let resolution = reselect_from_captured_target_plan(
         context,
         &selected,

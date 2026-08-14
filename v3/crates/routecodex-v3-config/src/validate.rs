@@ -115,9 +115,7 @@ fn compile_hub_v1(
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
     if protocols.len() != authoring.entry_protocols.len() {
-        return Err(validation(
-            "hub_v1 entry_protocols contain duplicate protocol",
-        ));
+        return Err(validation("hub_v1 entry_protocols contain duplicate protocol"));
     }
     for protocol in &protocols {
         if !HUB_V1_ENTRY_PROTOCOLS.contains(protocol) {
@@ -127,9 +125,7 @@ fn compile_hub_v1(
         }
     }
     if protocols.len() != HUB_V1_ENTRY_PROTOCOLS.len() {
-        return Err(validation(
-            "hub_v1 entry_protocols must declare all closed protocols",
-        ));
+        return Err(validation("hub_v1 entry_protocols must declare all closed protocols"));
     }
     if authoring.hook_set_id.trim().is_empty() {
         return Err(validation("hub_v1 hook_set_id is empty"));
@@ -287,9 +283,7 @@ fn compile_entry_protocol_bindings(
     for binding in authoring {
         let entry_protocol = binding.entry_protocol.trim().to_string();
         if entry_protocol.is_empty() {
-            return Err(validation(
-                "entry protocol binding has empty entry_protocol",
-            ));
+            return Err(validation("entry protocol binding has empty entry_protocol"));
         }
         if !HUB_V1_ENTRY_PROTOCOLS.contains(&entry_protocol.as_str()) {
             return Err(validation(format!(
@@ -417,9 +411,7 @@ fn compile_entry_protocol_bindings(
     }
 
     if protocols != declared {
-        return Err(validation(
-            "hub_v1 entry protocol binding registry must declare all hub_v1 entry protocols",
-        ));
+        return Err(validation("hub_v1 entry protocol binding registry must declare all hub_v1 entry protocols"));
     }
     bindings.sort_by(|left, right| {
         let left_index = HUB_V1_ENTRY_PROTOCOLS
@@ -727,9 +719,7 @@ fn compile_provider_responses(
                 .map(str::trim)
                 .filter(|endpoint| !endpoint.is_empty())
                 .ok_or_else(|| {
-                    validation(format!(
-                        "provider {provider_id} websocket_v2_url is required for websocket_v2 transport"
-                    ))
+                    validation(format!("provider {provider_id} websocket_v2_url is required for websocket_v2 transport"))
                 })?;
             if !(endpoint.starts_with("ws://") || endpoint.starts_with("wss://")) {
                 return Err(validation(format!(
@@ -862,45 +852,29 @@ fn compile_auth(
             + usize::from(entry.api_key.is_some());
         if handle_count != 1 {
             return Err(validation(format!(
-                "provider {provider_id} auth {} must define exactly one of env, token_file, secret_file, or api_key",
-                entry.alias
+                "provider {provider_id} auth {} must define exactly one of env, token_file, secret_file, or api_key", entry.alias
             )));
         }
         if entry.secret_file.is_some() != entry.secret_key.is_some() {
             return Err(validation(format!(
-                "provider {provider_id} auth {} secret_file and secret_key must be declared together",
-                entry.alias
+                "provider {provider_id} auth {} secret_file and secret_key must be declared together", entry.alias
             )));
         }
-        if entry
-            .secret_file
-            .as_deref()
-            .is_some_and(|path| path.trim().is_empty())
-        {
+        if entry.secret_file.as_deref().is_some_and(|path| path.trim().is_empty()) {
             return Err(validation(format!(
-                "provider {provider_id} auth {} secret_file cannot be empty",
-                entry.alias
+                "provider {provider_id} auth {} secret_file cannot be empty", entry.alias
             )));
         }
-        if entry
-            .secret_key
-            .as_deref()
-            .is_some_and(|key| key.trim().is_empty())
-        {
+        if entry.secret_key.as_deref().is_some_and(|key| key.trim().is_empty()) {
             return Err(validation(format!(
-                "provider {provider_id} auth {} secret_key cannot be empty",
-                entry.alias
+                "provider {provider_id} auth {} secret_key cannot be empty", entry.alias
             )));
         }
         if let (Some(secret_file), Some(secret_key)) = (&entry.secret_file, &entry.secret_key) {
-            // 集中 secret 文件在编译期解析校验：文件必须可读、key 必须存在、
-            // 值必须非空——fail-fast 在 config check / 启动阶段暴露，而不是
-            // 运行时请求才失败。值不写入 manifest（避免 secret 明文进快照）。
+            // 集中 secret 文件在编译期解析校验：文件可读、key 存在、值非空——fail-fast
+            // 在 config check / 启动阶段暴露；值不写入 manifest（避免明文进快照）。
             crate::read_v3_secret_file_key(secret_file, secret_key).map_err(|error| {
-                validation(format!(
-                    "provider {provider_id} auth {} secret_file validation failed: {error}",
-                    entry.alias
-                ))
+                validation(format!("provider {provider_id} auth {} secret_file validation failed: {error}", entry.alias))
             })?;
         }
         if let Some(env) = &entry.env {
@@ -1076,27 +1050,13 @@ fn compile_forwarders(
                 match target.kind {
                     V3RouteTargetKind::ProviderModel => {
                         let provider = target.provider.as_deref().ok_or_else(|| {
-                            validation(format!(
-                                "forwarder {id} provider_model target missing provider"
-                            ))
+                            validation(format!("forwarder {id} provider_model target missing provider"))
                         })?;
                         let model = target.model.as_deref().ok_or_else(|| {
-                            validation(format!(
-                                "forwarder {id} provider_model target missing model"
-                            ))
+                            validation(format!("forwarder {id} provider_model target missing model"))
                         })?;
-                        validate_provider_model_ref(
-                            &format!("forwarder {id}"),
-                            provider,
-                            model,
-                            providers,
-                        )?;
-                        validate_auth_alias_ref(
-                            &format!("forwarder {id}"),
-                            provider,
-                            target.key.as_deref(),
-                            providers,
-                        )?;
+                        validate_provider_model_ref(&format!("forwarder {id}"), provider, model, providers)?;
+                        validate_auth_alias_ref(&format!("forwarder {id}"), provider, target.key.as_deref(), providers)?;
                         if target.id.is_some() {
                             return Err(validation(format!(
                                 "forwarder {id} provider_model target cannot define id"
@@ -1204,36 +1164,20 @@ fn compile_route_groups(
                         match target.kind {
                             V3RouteTargetKind::ProviderModel => {
                                 let provider = target.provider.as_deref().ok_or_else(|| {
-                                    validation(format!(
-                                        "route group {group_id} pool {pool_id} provider_model target missing provider"
-                                    ))
+                                    validation(format!("route group {group_id} pool {pool_id} provider_model target missing provider"))
                                 })?;
                                 let model = target.model.as_deref().ok_or_else(|| {
-                                    validation(format!(
-                                        "route group {group_id} pool {pool_id} provider_model target missing model"
-                                    ))
+                                    validation(format!("route group {group_id} pool {pool_id} provider_model target missing model"))
                                 })?;
-                                validate_provider_model_ref(
-                                    &format!("route group {group_id} pool {pool_id}"),
-                                    provider,
-                                    model,
-                                    providers,
-                                )?;
-                                validate_auth_alias_ref(
-                                    &format!("route group {group_id} pool {pool_id}"),
-                                    provider,
-                                    target.key.as_deref(),
-                                    providers,
-                                )?;
+                                validate_provider_model_ref(&format!("route group {group_id} pool {pool_id}"), provider, model, providers)?;
+                                validate_auth_alias_ref(&format!("route group {group_id} pool {pool_id}"), provider, target.key.as_deref(), providers)?;
                                 if target.id.is_some() {
                                     return Err(validation(format!("route group {group_id} pool {pool_id} provider_model target cannot define id")));
                                 }
                             }
                             V3RouteTargetKind::Forwarder => {
                                 let id = target.id.as_deref().ok_or_else(|| {
-                                    validation(format!(
-                                        "route group {group_id} pool {pool_id} forwarder target missing id"
-                                    ))
+                                    validation(format!("route group {group_id} pool {pool_id} forwarder target missing id"))
                                 })?;
                                 if !forwarders.contains_key(id) {
                                     return Err(validation(format!(
@@ -1291,9 +1235,7 @@ fn compile_pool_match(
     authoring: V3RoutePoolMatchAuthoringConfig,
 ) -> Result<V3RoutePoolMatchManifest, V3ConfigError> {
     let precedence = authoring.precedence.ok_or_else(|| {
-        validation(format!(
-            "route group {group_id} non-default pool {pool_id} must declare precedence"
-        ))
+        validation(format!("route group {group_id} non-default pool {pool_id} must declare precedence"))
     })?;
     if pool_id == "longcontext" && authoring.min_input_tokens.is_none() {
         return Err(validation(format!(
@@ -1510,10 +1452,7 @@ mod secret_file_compile_tests {
     use std::fs;
 
     fn authoring_with(entry: V3ProviderAuthEntryAuthoringConfig) -> V3ProviderAuthAuthoringConfig {
-        V3ProviderAuthAuthoringConfig {
-            auth_type: V3ProviderAuthType::ApiKey,
-            entries: vec![entry],
-        }
+        V3ProviderAuthAuthoringConfig { auth_type: V3ProviderAuthType::ApiKey, entries: vec![entry] }
     }
 
     #[test]
@@ -1524,54 +1463,27 @@ mod secret_file_compile_tests {
         fs::write(&file, "opencode-go.key1 = \"sk-one\"\n").unwrap();
         let file_str = file.display().to_string();
 
-        let ok = compile_auth(
-            "p",
-            authoring_with(V3ProviderAuthEntryAuthoringConfig {
-                alias: "key1".to_string(),
-                env: None,
-                token_file: None,
-                api_key: None,
-                secret_file: Some(file_str.clone()),
-                secret_key: Some("opencode-go.key1".to_string()),
-            }),
-        )
+        let ok = compile_auth("p", authoring_with(V3ProviderAuthEntryAuthoringConfig {
+            alias: "key1".to_string(), env: None, token_file: None, api_key: None,
+            secret_file: Some(file_str.clone()), secret_key: Some("opencode-go.key1".to_string()),
+        }))
         .unwrap();
         assert_eq!(ok.entries[0].secret_file.as_deref(), Some(file_str.as_str()));
         assert_eq!(ok.entries[0].secret_key.as_deref(), Some("opencode-go.key1"));
 
-        let err = compile_auth(
-            "p",
-            authoring_with(V3ProviderAuthEntryAuthoringConfig {
-                alias: "key1".to_string(),
-                env: None,
-                token_file: None,
-                api_key: None,
-                secret_file: Some(file_str),
-                secret_key: Some("missing.key".to_string()),
-            }),
-        )
+        let err = compile_auth("p", authoring_with(V3ProviderAuthEntryAuthoringConfig {
+            alias: "key1".to_string(), env: None, token_file: None, api_key: None,
+            secret_file: Some(file_str), secret_key: Some("missing.key".to_string()),
+        }))
         .unwrap_err();
-        assert!(
-            err.to_string().contains("secret_file validation failed"),
-            "{err}"
-        );
+        assert!(err.to_string().contains("secret_file validation failed"), "{err}");
 
-        let pair_err = compile_auth(
-            "p",
-            authoring_with(V3ProviderAuthEntryAuthoringConfig {
-                alias: "key1".to_string(),
-                env: None,
-                token_file: None,
-                api_key: None,
-                secret_file: Some("x".to_string()),
-                secret_key: None,
-            }),
-        )
+        let pair_err = compile_auth("p", authoring_with(V3ProviderAuthEntryAuthoringConfig {
+            alias: "key1".to_string(), env: None, token_file: None, api_key: None,
+            secret_file: Some("x".to_string()), secret_key: None,
+        }))
         .unwrap_err();
-        assert!(
-            pair_err.to_string().contains("declared together"),
-            "{pair_err}"
-        );
+        assert!(pair_err.to_string().contains("declared together"), "{pair_err}");
         fs::remove_dir_all(&dir).unwrap();
     }
 }

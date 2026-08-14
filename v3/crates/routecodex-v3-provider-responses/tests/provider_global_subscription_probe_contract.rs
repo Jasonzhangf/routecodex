@@ -21,7 +21,7 @@ fn invalid_subscription_fingerprint(
 }
 
 #[test]
-fn session_success_must_not_clear_another_session_cooldown() {
+fn session_success_clears_shared_provider_cooldown_for_other_sessions() {
     let store = V3ProviderHealthStore::default();
     let session_a = scope("session-a");
     let session_b = scope("session-b");
@@ -59,15 +59,36 @@ fn session_success_must_not_clear_another_session_cooldown() {
                 13,
             )
             .available,
-        "session A remains cooled after session B success"
+        "session A is cooled after three failures"
     );
+
+    // 跨 session 恢复：session B 成功响应清除 provider 级冷却，
+    // session A 一同恢复。
+    store
+        .record_provider_success_in_session(
+            &session_b,
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            14,
+        )
+        .unwrap();
+    assert!(store
+        .availability_for_session(
+            &session_a,
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            15,
+        )
+        .available);
     assert!(store
         .availability_for_session(
             &session_b,
             "provider-a",
             Some("key-a"),
             Some("model-a"),
-            13,
+            15,
         )
         .available);
 }
