@@ -52,6 +52,7 @@
       "chain_version",
       "position",
       "owner",
+      "role_id",
       "input_node",
       "output_node",
       "control_in",
@@ -66,7 +67,8 @@
       "snapshot_subscriptions"
     ],
     "optional": ["statistics_optional"],
-    "node_extension_rule": "published chain nodes are immutable; new semantics use a new chain_version or a new operator on an existing node slot"
+    "node_extension_rule": "published chain nodes are immutable; new semantics use a new chain_version or a new operator on an existing node slot",
+    "role_subclass_rule": "node instances bind exactly one role subclass; allowed operator kinds and config schema come from that role subclass"
   },
   "base_node_schema": {
     "identity_required": ["node_id", "chain", "chain_version", "position", "owner"],
@@ -97,17 +99,68 @@
       "control_info",
       "state_machine",
       "flow",
+      "config",
       "compat"
     ],
     "control_info_required": ["reads", "writes", "carrier_fields"],
     "state_machine_required": ["in_events", "out_events", "transitions"],
     "flow_required": ["data_in", "data_out", "information_read", "control_write"],
-    "closure_rule": "plugin owns node-local typed closure only; runtime kernel remains the only orchestrator"
+    "closure_rule": "plugin owns node-local typed closure only; runtime kernel remains the only orchestrator",
+    "config_validation_rule": "operator config must validate against the node role subclass config_schema"
   },
   "wiring_schema": {
     "required": ["chain_version", "nodes", "edges"],
     "node_selection_rule": "exactly one active_operator per node slot per compiled manifest",
     "edge_rule": "edges are adjacent and fixed by chain_version"
+  },
+  "group_schema": {
+    "required": [
+      "group_id",
+      "chain",
+      "chain_version",
+      "node_id",
+      "position",
+      "external_interface",
+      "entry_node",
+      "exit_node",
+      "nodes",
+      "edges"
+    ],
+    "rules": [
+      "group external interface equals NodeInstance interface",
+      "single entry and single exit",
+      "external data_in = entry data_in, external data_out = exit data_out",
+      "parent connects only through entry/exit",
+      "no second lifecycle inside group",
+      "internal implementation replaceable when external interface unchanged",
+      "expansion is semantically equivalent"
+    ],
+    "test_semantics": [
+      "group_external_contract",
+      "group_internal_wiring",
+      "group_no_shortcut",
+      "group_no_second_lifecycle",
+      "group_encapsulation",
+      "group_expansion_equivalence"
+    ]
+  },
+  "pipeline_test_semantics": {
+    "chain": [
+      "chain_entry_contract",
+      "chain_terminal_contract",
+      "chain_edge_complete",
+      "chain_error_path",
+      "chain_group_equivalence"
+    ],
+    "node": [
+      "node_entry_contract",
+      "node_exit_contract",
+      "node_success_projection",
+      "node_error_projection",
+      "node_control_record",
+      "node_debug_subscription_read_only",
+      "node_statistics_optional"
+    ]
   },
   "control_center": {
     "operations": ["register", "consume", "release"],
@@ -154,6 +207,10 @@
     {"gate_id":"ABS-GATE-13","name":"statistics_observability_only","rule":"statistics cannot affect decisions, payload, or business truth"},
     {"gate_id":"ABS-GATE-14","name":"node_graph_machine_controlled","rule":"node graph edges are machine contracts; code-level conversions/subscriptions must resolve to declared edges"},
     {"gate_id":"ABS-GATE-15","name":"data_control_flow_separated","rule":"data flow edges and control flow edges are separate edge kinds; control never enters data axis"},
-    {"gate_id":"ABS-GATE-16","name":"debug_relations_v3_locked","rule":"v4 debug subscription relations must not relax v3 anchored debug resource relations"}
+    {"gate_id":"ABS-GATE-16","name":"debug_relations_v3_locked","rule":"v4 debug subscription relations must not relax v3 anchored debug resource relations"},
+    {"gate_id":"ABS-GATE-17","name":"node_numbering_contract","rule":"node_id encodes order+function and is immutable after publication"},
+    {"gate_id":"ABS-GATE-18","name":"group_node_interface_equivalence","rule":"group external interface equals NodeInstance interface; parent pipeline treats group as one node"},
+    {"gate_id":"ABS-GATE-19","name":"pipeline_explicit_lifecycle","rule":"every chain has explicit single-entry single-terminal nodes+edges and explicit error path"},
+    {"gate_id":"ABS-GATE-20","name":"standard_test_semantics","rule":"every published node/group/chain has its standard test surface before anchored"}
   ]
 }

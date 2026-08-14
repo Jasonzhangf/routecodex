@@ -9,15 +9,124 @@
     "v4/docs/architecture/v4-resource-operation-map.yml"
   ],
   "standard_node_families": [
-    {"family": "RequestChainNode", "chain": "request", "data_plane": true},
-    {"family": "ResponseChainNode", "chain": "response", "data_plane": true},
-    {"family": "ErrorChainNode", "chain": "error", "data_plane": false},
-    {"family": "ConfigChainNode", "chain": "config", "data_plane": false},
-    {"family": "LifecycleChainNode", "chain": "lifecycle", "data_plane": false},
-    {"family": "ControlCenterNode", "chain": "control", "data_plane": false},
-    {"family": "DiagnosticChainNode", "chain": "diagnostic", "data_plane": false}
+    {"family": "RequestChainNode", "chain": "request", "data_plane": true, "role_subclasses": [
+      {"role_id": "request_inbound", "allowed_operator_kinds": ["entry_capture", "protocol_parse", "normalize"], "data_in_kind": "raw_entry", "data_out_kind": "normalized_request"},
+      {"role_id": "request_continuation", "allowed_operator_kinds": ["continuation_classify", "continuation_restore"], "data_in_kind": "normalized_request", "data_out_kind": "continuation_facts"},
+      {"role_id": "request_chat_process", "allowed_operator_kinds": ["request_governance", "tool_governance"], "data_in_kind": "normalized_request", "data_out_kind": "governed_request"},
+      {"role_id": "request_execution", "allowed_operator_kinds": ["execution_plan", "target_resolve"], "data_in_kind": "governed_request", "data_out_kind": "resolved_target"},
+      {"role_id": "request_outbound", "allowed_operator_kinds": ["semantic_projection", "wire_build", "transport_build"], "data_in_kind": "provider_semantic", "data_out_kind": "provider_wire"}
+    ]},
+    {"family": "ResponseChainNode", "chain": "response", "data_plane": true, "role_subclasses": [
+      {"role_id": "response_inbound", "allowed_operator_kinds": ["raw_parse", "protocol_decode"], "data_in_kind": "provider_raw", "data_out_kind": "parsed_response"},
+      {"role_id": "response_chat_process", "allowed_operator_kinds": ["response_governance", "tool_harvest"], "data_in_kind": "parsed_response", "data_out_kind": "governed_response"},
+      {"role_id": "response_continuation", "allowed_operator_kinds": ["continuation_commit", "continuation_release"], "data_in_kind": "governed_response", "data_out_kind": "continuation_truth"},
+      {"role_id": "response_outbound", "allowed_operator_kinds": ["client_semantic_projection", "frame_build"], "data_in_kind": "client_semantic", "data_out_kind": "client_frame"}
+    ]},
+    {"family": "ErrorChainNode", "chain": "error", "data_plane": false, "role_subclasses": [
+      {"role_id": "error_source", "allowed_operator_kinds": ["error_source_capture"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "error_classify", "allowed_operator_kinds": ["error_classify"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "error_policy", "allowed_operator_kinds": ["error_policy_apply"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "error_decision", "allowed_operator_kinds": ["execution_decision"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "error_projection", "allowed_operator_kinds": ["client_projection"], "data_in_kind": null, "data_out_kind": null}
+    ]},
+    {"family": "ConfigChainNode", "chain": "config", "data_plane": false, "role_subclasses": [
+      {"role_id": "config_authoring", "allowed_operator_kinds": ["config_parse", "config_validate"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "config_registry", "allowed_operator_kinds": ["registry_build"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "config_manifest", "allowed_operator_kinds": ["manifest_publish"], "data_in_kind": null, "data_out_kind": null}
+    ]},
+    {"family": "LifecycleChainNode", "chain": "lifecycle", "data_plane": false, "role_subclasses": [
+      {"role_id": "lifecycle_declare", "allowed_operator_kinds": ["instance_declare"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "lifecycle_lock", "allowed_operator_kinds": ["operation_lock"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "lifecycle_identity", "allowed_operator_kinds": ["identity_publish"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "lifecycle_control", "allowed_operator_kinds": ["controlled_runtime"], "data_in_kind": null, "data_out_kind": null}
+    ]},
+    {"family": "ControlCenterNode", "chain": "control", "data_plane": false, "role_subclasses": [
+      {"role_id": "control_center", "allowed_operator_kinds": ["register", "consume", "release"], "data_in_kind": null, "data_out_kind": null}
+    ]},
+    {"family": "DiagnosticChainNode", "chain": "diagnostic", "data_plane": false, "role_subclasses": [
+      {"role_id": "diagnostic_trace", "allowed_operator_kinds": ["trace_start", "trace_release"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "diagnostic_ledger", "allowed_operator_kinds": ["record_node_event", "query_ledger"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "diagnostic_capture", "allowed_operator_kinds": ["raw_capture", "payload_project"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "diagnostic_snapshot", "allowed_operator_kinds": ["snapshot_start", "snapshot_record", "snapshot_release"], "data_in_kind": null, "data_out_kind": null},
+      {"role_id": "diagnostic_observability", "allowed_operator_kinds": ["observe", "timing"], "data_in_kind": null, "data_out_kind": null}
+    ]}
   ],
-  "node_identity_required": ["node_id", "chain", "chain_version", "position", "owner", "family", "input_node", "output_node"],
+  "node_identity_required": ["node_id", "chain", "chain_version", "position", "owner", "family", "role_id", "input_node", "output_node"],
+  "role_subclass_contract": {
+    "required": ["role_id", "family", "allowed_operator_kinds", "config_schema"],
+    "rule": "node instances can only register operators and consume configs allowed by their role subclass; operator kind and config must both validate"
+  },
+  "node_numbering": {
+    "rule": "node_id encodes topological order (NN) and semantic function (SemanticName); both are contract and immutable after publication",
+    "node_class_required": true
+  },
+  "group_schema": {
+    "required": [
+      "group_id",
+      "group_kind",
+      "chain",
+      "chain_version",
+      "node_id",
+      "position",
+      "external_interface",
+      "entry_node",
+      "exit_node",
+      "nodes",
+      "edges"
+    ],
+    "external_interface_required": [
+      "data_in",
+      "data_out",
+      "control_in",
+      "control_out",
+      "control_record_required",
+      "debug_subscriptions",
+      "snapshot_subscriptions"
+    ],
+    "rules": [
+      "group external interface equals NodeInstance interface",
+      "exactly one entry_node and one exit_node",
+      "external data_in equals entry node data_in; external data_out equals exit node data_out",
+      "parent chain only connects to group entry/exit; internal nodes are not visible to parent",
+      "group is not a second lifecycle; errors still enter parent error chain",
+      "internal implementation is replaceable while external interface is unchanged",
+      "expansion must be semantically equivalent"
+    ]
+  },
+  "pipeline_lifecycle": {
+    "chain_must_have": [
+      "single entry node",
+      "single terminal node",
+      "declared adjacent edges entry-to-terminal",
+      "explicit error path into error chain"
+    ],
+    "test_semantics": {
+      "chain_tests": [
+        "chain_entry_contract",
+        "chain_terminal_contract",
+        "chain_edge_complete",
+        "chain_error_path",
+        "chain_group_equivalence"
+      ],
+      "node_tests": [
+        "node_entry_contract",
+        "node_exit_contract",
+        "node_success_projection",
+        "node_error_projection",
+        "node_control_record",
+        "node_debug_subscription_read_only",
+        "node_statistics_optional"
+      ],
+      "group_tests": [
+        "group_external_contract",
+        "group_internal_wiring",
+        "group_no_shortcut",
+        "group_no_second_lifecycle",
+        "group_encapsulation",
+        "group_expansion_equivalence"
+      ]
+    }
+  },
   "base_node_capabilities": [
     "control_in",
     "control_out",
@@ -44,6 +153,12 @@
       "rule": "read_only must be true; no payload; no decision influence"
     }
   },
+  "protocol_same_stage_rule": {
+    "rule": "different protocols share the same node instance and role subclass; each protocol registers an operator on that slot",
+    "wiring_selection": "exactly one active operator per node instance per compiled manifest",
+    "selection_facts": ["entry_protocol", "provider_wire_protocol", "continuation_owner", "execution_mode"],
+    "forbidden_selection_facts": ["provider_id", "model_prefix", "payload_shape_guess"]
+  },
   "verification_rules": [
     "all edge from/to must exist in declared nodes",
     "data edges must be adjacent in chain_version",
@@ -52,6 +167,12 @@
     "control edge record_required must be true",
     "debug subscription edges must be read_only",
     "forbidden edges cannot be added",
-    "every code-level conversion/subscription/control operation must resolve to a declared edge"
+    "every code-level conversion/subscription/control operation must resolve to a declared edge",
+    "every node is a class with role subclass binding",
+    "group external interface equals NodeInstance interface",
+    "every group has exactly one entry and one exit",
+    "parent chain cannot connect to group internal nodes",
+    "every chain has single entry and single terminal",
+    "every published node/group/chain has its standard test surface"
   ]
 }

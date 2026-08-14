@@ -216,7 +216,14 @@ node_id := <Module><Chain><NN><Node>
 
 ### 2.1 BaseNode（原始节点基类）
 
-所有节点共享同一个原始基类 `BaseNode`。业务节点只在基类上绑定节点语义（chain、position、operator、state machine），四个横切能力由基类内置，不允许具体节点各自实现一份：
+所有节点共享同一个原始基类 `BaseNode`。业务节点只在基类上绑定节点语义（chain、position、operator、state machine），四个横切能力由基类内置，不允许具体节点各自实现一份。节点语义不是“链族直接实例化”，而是四层：
+
+```text
+BaseNode（横切能力）
+  -> ChainFamily（request / response / error / config / lifecycle / control / diagnostic）
+     -> RoleSubclass（inbound / chat process / outbound / ...，每个角色子类有自己的 allowed operators 与 config schema）
+        -> NodeInstance（唯一 node_id，绑定唯一角色子类）
+```
 
 ```text
 BaseNode
