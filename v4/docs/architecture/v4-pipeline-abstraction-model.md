@@ -214,6 +214,62 @@ node_id := <Module><Chain><NN><Node>
 }
 ```
 
+### 2.1 BaseNode（原始节点基类）
+
+所有节点共享同一个原始基类 `BaseNode`。业务节点只在基类上绑定节点语义（chain、position、operator、state machine），四个横切能力由基类内置，不允许具体节点各自实现一份：
+
+```text
+BaseNode
+  ├─ identity: node_id / chain / chain_version / position（不可变 contract）
+  ├─ control_in: 接入 typed 控制信息
+  ├─ control_out: 输出 typed 控制信息
+  ├─ control_record: 每次 control_in / control_out 都写入不可变记录
+  ├─ debug_subscriptions: 订阅 debug/诊断事件（只读通知）
+  ├─ snapshot_subscriptions: 订阅节点生命周期快照（entry/exit/error，只读诊断）
+  └─ statistics(optional): 可选节点统计（计数/耗时/错误/算子命中）
+```
+
+基类合同：
+
+| 能力 | 语义 | 禁止 |
+| --- | --- | --- |
+| `control_in` | 节点从 Control Center 接入 typed 控制信息；接入即记录 | 直接从 payload 重建控制状态 |
+| `control_out` | 节点向 Control Center 输出 typed 控制信息；输出即记录 | 把控制信息写入 payload |
+| `control_record` | 每次接入/输出产生一条不可变 `ControlRecord`（node_id、direction、control_key、scope、payload_hash、sequence、timestamp） | 无记录执行、静默覆盖、跨闭环复用 |
+| `debug_subscriptions` | 订阅 debug/诊断 topic，观察节点运行事实 | 订阅事件改变业务结果或控制决策 |
+| `snapshot_subscriptions` | 订阅节点生命周期快照（entry/exit/error），诊断回放 | 快照进入 live path、由快照重建请求/响应 |
+| `statistics` | 可选统计（调用次数、耗时、错误次数、算子命中），供 observability | 统计进入决策、进入 payload、成为业务 truth |
+
+BaseNode 不拥有业务逻辑。具体节点的业务行为由该节点 slot 上注册的 operator 提供；BaseNode 只保证“每个节点都有统一的控制接入/输出、记录、订阅、统计”能力，且这些能力全部走 typed side-channel / diagnostic 面。
+
+### 2.2 BaseNode 机器合同
+
+```json
+{
+  "node_id": "V4ReqChatProcess03Governed",
+  "chain": "request",
+  "chain_version": "v4-hub-1",
+  "position": 3,
+  "owner": "routecodex-v4-runtime",
+  "input_node": "V4ReqInbound02Normalized",
+  "output_node": "V4ReqExecution04Planned",
+  "control_in": ["v4.control.side_channel", "v4.control.metadata_center"],
+  "control_out": ["v4.control.metadata_center", "v4.control.route_facts"],
+  "control_record_required": true,
+  "debug_subscriptions": ["node_event", "state_transition", "diagnostic"],
+  "snapshot_subscriptions": ["node_entry", "node_exit", "node_error"],
+  "statistics_optional": true,
+  "allowed_operator_kinds": ["chat_process"]
+}
+```
+
+规则：
+
+1. `control_record_required=true` 表示该节点每次 `control_in` / `control_out` 都必须先写入 `v4.control.record_ledger`，没有记录的接入/输出视为泄漏，必须 fail-fast。
+2. `debug_subscriptions` / `snapshot_subscriptions` 只能消费 `v4.debug.bus_subscription` 和 `v4.debug.snapshot_subscription` 的只读事件，不得反向影响执行。
+3. `statistics_optional` 为 `false` 的节点必须接入统计；统计值只允许 observability/records 读取。
+4. 具体节点语义（data_in/data_out、resources、state machine）在基类之上继续按第 2 节声明；BaseNode 不增加业务字段。
+
 ### 3. 插件（operator）合同
 
 插件是绑定到唯一节点的完整响应闭环，注册时必须声明：

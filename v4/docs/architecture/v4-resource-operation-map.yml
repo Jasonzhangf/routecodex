@@ -337,6 +337,72 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: design
+  - resource_id: v4.control.record_ledger
+    resource_kind: control_record
+    lifecycle: v4.control.node_records
+    owner_crate: routecodex-v4-control
+    owner_node: V4Control02RecordLedger
+    identity: [recordId, nodeId, direction, controlKey, scope]
+    semantic_contract:
+      immutable: true
+      every_control_in_out: required
+      cross_closed_loop_reuse: forbidden
+      payload_hash_only: true
+    allowed_writers: ["V4Control02RecordLedger::append"]
+    allowed_readers: [developer_diagnostics, V4ControlCenterAudit]
+    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.bus_subscription
+    resource_kind: diagnostic
+    lifecycle: v4.debug.bus
+    owner_crate: routecodex-v4-debug
+    owner_node: V4Debug02BusSubscription
+    identity: [subscriberId, topic, scope]
+    semantic_contract:
+      read_only: true
+      decision_plane: forbidden
+      payload_carrier: forbidden
+    allowed_writers: ["V4Debug02BusSubscription::subscribe"]
+    allowed_readers: ["V4Debug02BusSubscription::observe"]
+    forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.debug.snapshot_subscription
+    resource_kind: diagnostic
+    lifecycle: v4.debug.snapshot_subscription
+    owner_crate: routecodex-v4-debug
+    owner_node: V4Debug03SnapshotSubscription
+    identity: [subscriberId, nodeId, snapshotKind, scope]
+    semantic_contract:
+      diagnostic_only: true
+      live_runtime_input: forbidden
+      payload_reconstruction: forbidden
+    allowed_writers: ["V4Debug03SnapshotSubscription::subscribe"]
+    allowed_readers: ["V4Debug03SnapshotSubscription::observe", developer_diagnostics]
+    forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
+  - resource_id: v4.node.statistics
+    resource_kind: diagnostic_observability
+    lifecycle: v4.node.statistics
+    owner_crate: routecodex-v4-control
+    owner_node: V4Control03NodeStatistics
+    identity: [nodeId, operatorId, scope]
+    semantic_contract:
+      optional: true
+      observability_only: true
+      decision_plane: forbidden
+      payload_carrier: forbidden
+    allowed_writers: ["V4Control03NodeStatistics::record"]
+    allowed_readers: [developer_diagnostics, "V4Debug02BusSubscription"]
+    forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
 forbidden_direct_edges:
   - from: v4.config.manifest
     to: v4.request.normal_payload
@@ -389,3 +455,21 @@ forbidden_direct_edges:
   - from: v4.control.error_chain
     to: v4.response.client_wire_payload
     reason: only V4Error06ClientProjected code/message may reach client
+  - from: v4.control.record_ledger
+    to: v4.request.provider_wire_payload
+    reason: control records must never enter provider body
+  - from: v4.control.record_ledger
+    to: v4.response.client_wire_payload
+    reason: control records must never enter client body
+  - from: v4.debug.bus_subscription
+    to: v4.pipeline.mainline
+    reason: debug bus events must not become live runtime input
+  - from: v4.debug.snapshot_subscription
+    to: v4.pipeline.mainline
+    reason: node snapshots must never become live runtime input
+  - from: v4.node.statistics
+    to: v4.request.provider_wire_payload
+    reason: statistics must never enter provider body
+  - from: v4.node.statistics
+    to: v4.response.client_wire_payload
+    reason: statistics must never enter client body

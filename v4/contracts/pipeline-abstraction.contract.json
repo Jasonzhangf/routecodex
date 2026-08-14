@@ -57,9 +57,33 @@
       "data_out",
       "resources_read",
       "resources_written",
-      "allowed_operator_kinds"
+      "allowed_operator_kinds",
+      "control_record_required",
+      "debug_subscriptions",
+      "snapshot_subscriptions"
     ],
+    "optional": ["statistics_optional"],
     "node_extension_rule": "published chain nodes are immutable; new semantics use a new chain_version or a new operator on an existing node slot"
+  },
+  "base_node_schema": {
+    "identity_required": ["node_id", "chain", "chain_version", "position", "owner"],
+    "control_in_required": true,
+    "control_out_required": true,
+    "control_record_required": true,
+    "control_record_fields": [
+      "record_id",
+      "node_id",
+      "direction",
+      "control_key",
+      "scope",
+      "payload_hash",
+      "sequence",
+      "timestamp"
+    ],
+    "debug_subscription_rule": "read-only observation; must not alter business result or control decision",
+    "snapshot_subscription_rule": "diagnostic only; snapshot must never become live runtime input",
+    "statistics_rule": "optional observability; must not enter decisions or payload",
+    "business_logic_rule": "BaseNode carries no business logic; behavior comes from registered operators"
   },
   "plugin_schema": {
     "required": [
@@ -105,7 +129,11 @@
     "skeleton-nodes-are-immutable-contract",
     "plugin-closure-not-independent-lifecycle",
     "message-bus-is-not-a-decision-plane",
-    "control-center-is-not-data-plane-truth"
+    "control-center-is-not-data-plane-truth",
+    "control-record-every-in-out",
+    "debug-subscription-read-only",
+    "snapshot-subscription-diagnostic-only",
+    "statistics-never-decision-or-payload"
   ],
   "completeness_gates": [
     {"gate_id":"ABS-GATE-01","name":"v3_resource_coverage","rule":"all 103 v3 resources classified with axis and operator_kind"},
@@ -116,6 +144,10 @@
     {"gate_id":"ABS-GATE-06","name":"node_immutability","rule":"published chain nodes cannot be inserted/reordered/renumbered"},
     {"gate_id":"ABS-GATE-07","name":"plugin_closure","rule":"plugins own node-local closure only; no second lifecycle"},
     {"gate_id":"ABS-GATE-08","name":"bus_not_decision_plane","rule":"subscribers cannot mutate control decisions or business outcome"},
-    {"gate_id":"ABS-GATE-09","name":"control_center_scope","rule":"register/consume/release isolated per scope; payload reconstruction forbidden"}
+    {"gate_id":"ABS-GATE-09","name":"control_center_scope","rule":"register/consume/release isolated per scope; payload reconstruction forbidden"},
+    {"gate_id":"ABS-GATE-10","name":"control_record_required","rule":"every control_in/control_out writes an immutable ControlRecord; missing record fails"},
+    {"gate_id":"ABS-GATE-11","name":"debug_subscription_read_only","rule":"debug subscribers cannot mutate execution or decisions"},
+    {"gate_id":"ABS-GATE-12","name":"snapshot_subscription_diagnostic","rule":"node snapshots never enter live runtime input"},
+    {"gate_id":"ABS-GATE-13","name":"statistics_observability_only","rule":"statistics cannot affect decisions, payload, or business truth"}
   ]
 }
