@@ -10,11 +10,11 @@ use routecodex_v3_config_mgmt::ConfigMgmtStore;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub const STATIC_INDEX_HTML: &str = include_str!("static/index.html");
-pub const STATIC_ROUTES_HTML: &str = include_str!("static/routes.html");
-pub const STATIC_PROVIDERS_HTML: &str = include_str!("static/providers.html");
-pub const STATIC_APP_JS: &str = include_str!("static/app.js");
-pub const STATIC_STYLE_CSS: &str = include_str!("static/styles.css");
+pub const STATIC_INDEX_HTML: &str = include_str!("../../../../admin-webui/index.html");
+pub const STATIC_ROUTES_HTML: &str = include_str!("../../../../admin-webui/routes.html");
+pub const STATIC_PROVIDERS_HTML: &str = include_str!("../../../../admin-webui/providers.html");
+pub const STATIC_APP_JS: &str = include_str!("../../../../admin-webui/app.js");
+pub const STATIC_STYLE_CSS: &str = include_str!("../../../../admin-webui/styles.css");
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProviderHealthEntry {
