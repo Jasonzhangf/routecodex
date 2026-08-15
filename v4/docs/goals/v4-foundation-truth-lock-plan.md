@@ -58,9 +58,18 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
 - 完成标准 1（coverage 103/103）机器化：新增
   `v4/docs/architecture/v4-v3-abstraction-coverage.yml`（103 条六轴归类，
   information 23 / data 22 / control 44 / diagnostic 14）与
-  `v4_parity_gate_v3_resource_coverage` 机器 gate（4/4 红测），校验
+  `v4_parity_gate_v3_resource_coverage` 机器 gate（10/10 红测），校验
   v3 resource map 全量覆盖、kind_rules 一致性、轴计数与
   pipeline-abstraction.contract.json / parity map 声明一致。
+- DSH review coverage-gate r1（commit `05648667a`）FAIL：P1 六轴不变量未在 V3 覆盖层
+  校验（gate 只读 axis/operator_kind/status，未触碰 V3 的 may_enter_provider_body /
+  may_enter_client_body / allowed_writers / allowed_readers）；P2 duplicate resource_id
+  检查为死代码（Map 构造已去重）；P2 红测只覆盖 4 类，contract/parity 漂移分支无红测；
+  P2 readYaml/readJson 未容错。修复 commit 内容见本行提交（git log
+  `fix(v4): enforce six-axis plane invariants in v3 resource coverage gate`）：
+  gate 现校验控制轴禁入 provider/client body、数据轴 allowed_writers 禁控制/调试 owner、
+  诊断轴禁 live path 读取（已登记 dry-run / timing 两个诊断投影例外），红测扩展到 10/10。
+  需 coverage-gate r2 重审。
 - 已记录 known gaps：target_triple、public_api_hash（派生非真 API 提取）、edge 再冻结、
   workspace gate 修正：runtime/config/control/error 四个 anchored crate 依赖
   `--extern` 注入，只经 build-link test-consumer 编译（CI `v4-active-link`

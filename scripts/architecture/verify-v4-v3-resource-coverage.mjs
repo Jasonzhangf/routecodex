@@ -12,6 +12,16 @@
  * 4. Axis counts match the coverage matrix and the declared evaluation in
  *    pipeline-abstraction.contract.json (23 / 22 / 44 / 14 = 103, gap=0).
  * 5. Parity map coverage claim v3_resources total=103 mapped=103 gap=0.
+ * 6. Six-axis plane isolation invariants (v4-pipeline-abstraction-model.md):
+ *    - control axis: may_enter_provider_body=false and may_enter_client_body=false
+ *      (registered exception: v3.error.client_projection client error projection);
+ *    - data axis: no control/diagnostic owner may be an allowed writer
+ *      (control fields and debug-snapshot rebuild must never enter data payload);
+ *    - diagnostic axis: may_enter_provider_body=false and may_enter_client_body=false,
+ *      and no live-path owner in allowed_readers except registered projections:
+ *      v3.debug.dry_run_execution -> V3Server16HttpFrame,
+ *      v3.runtime.responses_timing_observability ->
+ *      V3ResponsesProtocolRelayHandoff / V3ResponsesProtocolDirectHandoff.
  *
  * Run with --red-self-test to prove the gate fails on each negative class.
  */
@@ -20,22 +30,60 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 
 const root = process.cwd();
-const readJson = (file) => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
-const readYaml = (file) => yaml.load(fs.readFileSync(path.join(root, file), 'utf8'));
+
+const readJson = (file) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
+  } catch (error) {
+    console.error(`[v4_parity_gate_v3_resource_coverage] ${file}: cannot read/parse: ${error.message}`);
+    return null;
+  }
+};
+
+const readYaml = (file) => {
+  try {
+    return yaml.load(fs.readFileSync(path.join(root, file), 'utf8'));
+  } catch (error) {
+    console.error(`[v4_parity_gate_v3_resource_coverage] ${file}: cannot read/parse: ${error.message}`);
+    return null;
+  }
+};
 
 const VALID_AXES = ['information', 'data', 'control', 'diagnostic'];
 const EXPECTED_AXIS_COUNTS = { information: 23, data: 22, control: 44, diagnostic: 14 };
 
+// Live-path owner vocabulary for the diagnostic "never read by live path" invariant.
+const LIVE_OWNER_PATTERN =
+  /^V3Server|^V3Router|^V3VirtualRouter|^V3Execution|^V3ResponsesDirect|^V3ResponsesProtocol|^V3Provider|^V3Transport|^V3Target|^V3Resp|^V3Req|^V3Hub|^V3Runtime|^routecodex-v3-/;
+
+// Control/debug owner vocabulary: a data resource must never be written by these owners.
+const CONTROL_DEBUG_WRITER_PATTERN =
+  /^V3Router|^V3VirtualRouter|^V3Execution|^V3ResponsesDirect|^V3Error|^V3Control|^V3Scope|^V3Target|^V3Debug|^V3HubReqContinuation|^V3HubRespContinuation|^V3ProviderAction|^MetadataCenter/;
+
+// Registered diagnostic -> live-path projections (six-axis invariant clause 3).
+const DIAGNOSTIC_LIVE_READER_EXCEPTIONS = {
+  'v3.debug.dry_run_execution': ['V3Server16HttpFrame'],
+  'v3.runtime.responses_timing_observability': ['V3ResponsesProtocolRelayHandoff', 'V3ResponsesProtocolDirectHandoff'],
+};
+
+// Registered control -> client-body exception (six-axis invariant clause 1).
+const CONTROL_CLIENT_BODY_EXCEPTIONS = new Set(['v3.error.client_projection']);
+
 function validate(v3Map, coverage, parity, abstractionContract) {
   const failures = [];
-  const v3ById = new Map((v3Map.resources ?? []).map((resource) => [resource.resource_id, resource.resource_kind]));
-  const coveredById = new Map((coverage.resources ?? []).map((entry) => [entry.resource_id, entry]));
+  const v3ById = new Map((v3Map.resources ?? []).map((resource) => [resource.resource_id, resource]));
+  const v3Kinds = new Set((v3Map.resources ?? []).map((resource) => resource.resource_kind));
+  const coveredIds = (coverage.resources ?? []).map((entry) => entry.resource_id);
+  const coveredById = new Map(coveredIds.map((id, index) => [id, coverage.resources[index]]));
 
   if (v3Map.resources.length !== 103) {
     failures.push(`v3 resource map count=${v3Map.resources.length} (must be 103)`);
   }
   if (coverage.resources.length !== 103) {
     failures.push(`coverage matrix count=${coverage.resources.length} (must be 103)`);
+  }
+  if (new Set(coveredIds).size !== coveredIds.length) {
+    failures.push('coverage matrix contains duplicate resource_id');
   }
 
   for (const id of v3ById.keys()) {
@@ -48,25 +96,22 @@ function validate(v3Map, coverage, parity, abstractionContract) {
       failures.push(`coverage declares unknown v3 resource ${id}`);
     }
   }
-  if (new Set(coveredById.keys()).size !== coveredById.size) {
-    failures.push('coverage matrix contains duplicate resource_id');
-  }
 
   const kindRules = coverage.kind_rules ?? {};
-  for (const kind of new Set(v3ById.values())) {
+  for (const kind of v3Kinds) {
     if (!kindRules[kind]) {
       failures.push(`v3 resource_kind ${kind} has no kind_rule`);
     }
   }
   for (const kind of Object.keys(kindRules)) {
-    if (!new Set(v3ById.values()).has(kind)) {
+    if (!v3Kinds.has(kind)) {
       failures.push(`kind_rule for ${kind} has no v3 resource of that kind`);
     }
   }
 
   const counts = { information: 0, data: 0, control: 0, diagnostic: 0 };
   for (const entry of coverage.resources ?? []) {
-    const kind = v3ById.get(entry.resource_id);
+    const resource = v3ById.get(entry.resource_id);
     if (!VALID_AXES.includes(entry.axis)) {
       failures.push(`${entry.resource_id}: axis ${entry.axis} not in ${VALID_AXES.join('|')}`);
     }
@@ -76,12 +121,43 @@ function validate(v3Map, coverage, parity, abstractionContract) {
     if (entry.status === 'unclassified') {
       failures.push(`${entry.resource_id}: status unclassified`);
     }
-    const rule = kindRules[kind];
+    const rule = kindRules[resource?.resource_kind];
     if (rule && (rule[0] !== entry.axis || rule[1] !== entry.operator_kind)) {
       failures.push(
-        `${entry.resource_id}: classified ${entry.axis}/${entry.operator_kind} but kind_rule ${kind} requires ${rule[0]}/${rule[1]}`,
+        `${entry.resource_id}: classified ${entry.axis}/${entry.operator_kind} but kind_rule ${resource.resource_kind} requires ${rule[0]}/${rule[1]}`,
       );
     }
+    if (!resource) {
+      continue; // unknown resource_id already reported above
+    }
+
+    // Six-axis plane isolation invariants (v4-pipeline-abstraction-model.md clause 3).
+    if (entry.axis === 'control') {
+      const clientBodyAllowed =
+        CONTROL_CLIENT_BODY_EXCEPTIONS.has(entry.resource_id) && resource.may_enter_client_body === true;
+      if (resource.may_enter_provider_body !== false || (resource.may_enter_client_body !== false && !clientBodyAllowed)) {
+        failures.push(`${entry.resource_id}: control axis resource must never enter provider/client body`);
+      }
+    }
+    if (entry.axis === 'data') {
+      const controlWriter = (resource.allowed_writers ?? []).find((writer) => CONTROL_DEBUG_WRITER_PATTERN.test(writer));
+      if (controlWriter) {
+        failures.push(`${entry.resource_id}: data axis resource has control/debug writer ${controlWriter}`);
+      }
+    }
+    if (entry.axis === 'diagnostic') {
+      if (resource.may_enter_provider_body !== false || resource.may_enter_client_body !== false) {
+        failures.push(`${entry.resource_id}: diagnostic axis resource must never enter provider/client body`);
+      }
+      const exceptions = DIAGNOSTIC_LIVE_READER_EXCEPTIONS[entry.resource_id] ?? [];
+      const liveReader = (resource.allowed_readers ?? []).find(
+        (reader) => LIVE_OWNER_PATTERN.test(reader) && !exceptions.includes(reader),
+      );
+      if (liveReader) {
+        failures.push(`${entry.resource_id}: diagnostic axis resource read by live path owner ${liveReader}`);
+      }
+    }
+
     if (VALID_AXES.includes(entry.axis)) {
       counts[entry.axis] += 1;
     }
@@ -119,33 +195,71 @@ function validate(v3Map, coverage, parity, abstractionContract) {
   return failures;
 }
 
-function runSelfTest() {
+function loadInputs() {
   const v3Map = readYaml('docs/architecture/v3-resource-operation-map.yml');
-  const baseCoverage = readYaml('v4/docs/architecture/v4-v3-abstraction-coverage.yml');
+  const coverage = readYaml('v4/docs/architecture/v4-v3-abstraction-coverage.yml');
   const parity = readYaml('v4/docs/architecture/v3-v4-semantic-parity-map.yml');
   const contract = readJson('v4/contracts/pipeline-abstraction.contract.json');
+  if (!v3Map || !coverage || !parity || !contract) {
+    console.error('[v4_parity_gate_v3_resource_coverage] FAIL: input source unreadable');
+    process.exit(1);
+  }
+  return { v3Map, coverage, parity, contract };
+}
+
+function runSelfTest() {
+  const { v3Map, coverage, parity, contract } = loadInputs();
   const clone = (value) => JSON.parse(JSON.stringify(value));
 
+  const controlId = coverage.resources.find((entry) => entry.axis === 'control').resource_id;
+  const dataId = coverage.resources.find((entry) => entry.axis === 'data').resource_id;
+  const diagnosticId = coverage.resources.find((entry) => entry.axis === 'diagnostic').resource_id;
+
   const cases = [
-    ['unclassified status', (c) => {
+    ['unclassified status', ({ coverage: c }) => {
       c.resources[0].status = 'unclassified';
     }],
-    ['extra resource', (c) => {
+    ['extra resource', ({ coverage: c }) => {
       c.resources.push({ resource_id: 'v3.unknown.extra', axis: 'data', operator_kind: 'normalize', status: 'classified' });
     }],
-    ['missing resource', (c) => {
+    ['missing resource', ({ coverage: c }) => {
       c.resources = c.resources.slice(1);
     }],
-    ['axis vs kind rule mismatch', (c) => {
+    ['axis vs kind rule mismatch', ({ coverage: c }) => {
       c.resources[0].axis = 'data';
+    }],
+    ['duplicate resource_id', ({ coverage: c }) => {
+      c.resources.push(clone(c.resources[0]));
+    }],
+    ['control body flag violation', ({ v3Map: v }) => {
+      v.resources.find((resource) => resource.resource_id === controlId).may_enter_provider_body = true;
+    }],
+    ['data control/debug writer violation', ({ v3Map: v }) => {
+      const resource = v.resources.find((r) => r.resource_id === dataId);
+      resource.allowed_writers = [...(resource.allowed_writers ?? []), 'V3Error06ClientProjected'];
+    }],
+    ['diagnostic live reader violation', ({ v3Map: v }) => {
+      const resource = v.resources.find((r) => r.resource_id === diagnosticId);
+      resource.allowed_readers = [...(resource.allowed_readers ?? []), 'V3Server16HttpFrame'];
+    }],
+    ['contract drift', ({ contract: ct }) => {
+      ct.evaluation.coverage_v3_resources.control = 43;
+    }],
+    ['parity drift', ({ parity: p }) => {
+      p.coverage.v3_resources.gap = 1;
     }],
   ];
 
   let failed = 0;
   for (const [name, mutate] of cases) {
-    const coverage = clone(baseCoverage);
-    mutate(coverage);
-    const failures = validate(v3Map, coverage, parity, contract);
+    const inputs = {
+      v3Map: clone(v3Map),
+      coverage: clone(coverage),
+      parity: clone(parity),
+      contract: clone(contract),
+    };
+    mutate(inputs);
+    const failures = validate(inputs.v3Map, inputs.coverage, inputs.parity, inputs.contract);
     if (failures.length === 0) {
       console.error(`[v4_parity_gate_v3_resource_coverage] red self-test ${name}: expected FAIL, got PASS`);
       failed += 1;
@@ -164,10 +278,7 @@ if (process.argv.includes('--red-self-test')) {
   process.exit(0);
 }
 
-const v3Map = readYaml('docs/architecture/v3-resource-operation-map.yml');
-const coverage = readYaml('v4/docs/architecture/v4-v3-abstraction-coverage.yml');
-const parity = readYaml('v4/docs/architecture/v3-v4-semantic-parity-map.yml');
-const contract = readJson('v4/contracts/pipeline-abstraction.contract.json');
+const { v3Map, coverage, parity, contract } = loadInputs();
 const failures = validate(v3Map, coverage, parity, contract);
 if (failures.length > 0) {
   console.error('[v4_parity_gate_v3_resource_coverage] FAIL');

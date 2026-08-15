@@ -17,6 +17,9 @@ notes: |
   - 每条 axis/operator_kind 必须命中 kind_rules 的 kind 级规则；
   - 轴计数必须与 pipeline-abstraction.contract.json evaluation 声明一致
     （information 23 / data 22 / control 44 / diagnostic 14 = 103）。
+  - 六轴平面不变量（控制轴禁入 provider/client body、数据轴禁控制/调试 owner 写入、
+    诊断轴禁 live path 读取；已登记例外见 v4-pipeline-abstraction-model.md）由同一
+    gate 对 V3 源图逐条机器校验。
 axis_counts:
   information: 23
   data: 22

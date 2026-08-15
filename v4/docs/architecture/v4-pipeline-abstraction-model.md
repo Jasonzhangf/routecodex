@@ -103,7 +103,17 @@ baseline（V3 现状，只读对照）
 
 1. `v4-v3-abstraction-coverage.yml` 覆盖 V3 全部 103 个资源，每个资源有唯一 axis 分类与 operator_kind，且 `status` 不等于 `unclassified`。
 2. 每个 V3 关键行为（function map 中的 feature）能映射为至少一个 operator 注册；无法映射的 feature 记为 `GAP`，GAP 为 0 才能进入实现。
-3. 六轴不变量机器可检查：控制轴资源 `may_enter_provider_body=false`、`may_enter_client_body=false`（`error.client_projection` 是唯一已登记例外）；数据轴资源不得声明控制字段；诊断资源不得被 live path 读取。
+3. 六轴不变量机器可检查（`v4_parity_gate_v3_resource_coverage` 对 V3 覆盖层逐条校验，
+   `v4_parity_gate_plane_isolation` 对 V4 目标图校验）：
+   - 控制轴：V3 资源 `may_enter_provider_body=false` 且 `may_enter_client_body=false`
+     （唯一已登记例外：`v3.error.client_projection` 的客户端错误投影）；
+   - 数据轴：V3 资源不得声明控制字段——机器锁为 `allowed_writers` 不得包含控制/诊断轴
+     owner（控制状态不得写入数据资源，debug/snapshot 不得重建数据资源）；
+   - 诊断轴：`may_enter_provider_body=false` 且 `may_enter_client_body=false`，且
+     `allowed_readers` 不得包含 live path owner；已登记例外仅两个诊断投影：
+     `v3.debug.dry_run_execution -> V3Server16HttpFrame`（dry-run 终态投影）与
+     `v3.runtime.responses_timing_observability -> V3ResponsesProtocolRelayHandoff /
+     V3ResponsesProtocolDirectHandoff`（时序观测，只供 handoff 控制决策读取）。
 4. operator registry 的 `consumes` / `produces` 引用完整性通过验证：每个引用的 resource_id 必须存在于资源注册表。
 5. 当前 V4 资源图（21 个 target 资源）只是六轴模型的子集，必须与 coverage matrix 一起评审，不能单独作为全项目真源。
 
