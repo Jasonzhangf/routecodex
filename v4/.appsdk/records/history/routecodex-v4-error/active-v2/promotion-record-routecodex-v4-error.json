@@ -1,0 +1,42 @@
+{
+  "artifact_hash": "sha256:23e7b9950ef2f0c2c6767c573371a1d29c82050f11ddbe6593932822fce45bb1",
+  "base_artifact_hash": "sha256:a732f26f8e7b430e08f6d0caf6c8957ac4553e0b444260698da55ffece902642",
+  "base_commit": "ce50527af",
+  "change_reason_comment": "A review-proven audit bypass and incomplete ErrorCenter intake allowed Error03 without complete Error02 evidence; active-v2 requires one exact-lineage single-use ErrorCenter witness and non-empty payload hash/context at the unique error owner",
+  "change_set_id": "change-error-audit-intake-v2",
+  "compatibility_level": "breaking",
+  "created_at": "2026-08-14T13:08:19Z",
+  "design_id": "v4-error-active-v2-audit-intake",
+  "evidence_ids": [
+    "evidence-error-v2"
+  ],
+  "experiment_id": "experiment-error-audit-intake-v2",
+  "issue_id": "routecodex-v4-foundation",
+  "module_id": "routecodex-v4-error",
+  "new_active_version": "active-v2",
+  "playground_cleanup_record_id": "cleanup-error-v2",
+  "previous_active_version": "active-v1",
+  "promotion_id": "promotion-error-v2",
+  "public_api_hash": "sha256:161e6ca746410fd1a7d9fb38fa6eecd1f8d518ee85492eb90ca369757dfeac6f",
+  "required_gate_results": [
+    {
+      "gate_id": "v4_error_l2_regression",
+      "producer": "cargo",
+      "result": "pass"
+    },
+    {
+      "gate_id": "v4_error_compile_fail_regression",
+      "producer": "cargo",
+      "result": "pass"
+    },
+    {
+      "gate_id": "v4_cargo_workspace_build",
+      "producer": "cargo",
+      "result": "pass"
+    }
+  ],
+  "review_id": "review-error-v2",
+  "root_cause": "ErrorChain::classify advanced HostCaptured without an ErrorCenter-issued capability, while ErrorCenter accepted missing payload_hash or typed_context; the API contract did not bind classification to complete audited evidence",
+  "scope_hash": "sha256:2e1550f5dc9af889e0079d96dfa7d50440dccfcfec82ef5ee72656d6fa858b34",
+  "source_commit": "dc52f4772"
+}

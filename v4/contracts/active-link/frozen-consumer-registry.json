@@ -20,29 +20,29 @@
     {
       "consumer": "routecodex-v4-control",
       "dependency": "routecodex-v4-base-node",
-      "mode": "source_path",
-      "status": "transitional",
+      "mode": "active_artifact",
+      "status": "migrated",
       "manifest_path": "crates/routecodex-v4-control/Cargo.toml"
     },
     {
       "consumer": "routecodex-v4-error",
       "dependency": "routecodex-v4-base-node",
-      "mode": "source_path",
-      "status": "transitional",
+      "mode": "active_artifact",
+      "status": "migrated",
       "manifest_path": "crates/routecodex-v4-error/Cargo.toml"
     },
     {
       "consumer": "routecodex-v4-config",
       "dependency": "routecodex-v4-base-node",
-      "mode": "source_path",
-      "status": "transitional",
+      "mode": "active_artifact",
+      "status": "migrated",
       "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
     },
     {
       "consumer": "routecodex-v4-config",
       "dependency": "routecodex-v4-edge",
-      "mode": "source_path",
-      "status": "transitional",
+      "mode": "active_artifact",
+      "status": "migrated",
       "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
     }
   ],

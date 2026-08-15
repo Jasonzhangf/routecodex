@@ -1,0 +1,6 @@
+{
+  "cleanup_id": "cleanup-error-v2",
+  "disposition": "archive_then_remove",
+  "removed_paths": ["playground/experiments/v4-error-active-v2"],
+  "created_at": "2026-08-14T13:08:19Z"
+}

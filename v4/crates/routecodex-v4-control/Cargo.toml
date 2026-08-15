@@ -9,6 +9,4 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
-routecodex-v4-base-node = { path = "../routecodex-v4-base-node" }
-
 [dev-dependencies]

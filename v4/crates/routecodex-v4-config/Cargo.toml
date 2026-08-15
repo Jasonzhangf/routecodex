@@ -9,8 +9,6 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
-routecodex-v4-base-node = { path = "../routecodex-v4-base-node" }
-routecodex-v4-edge = { path = "../routecodex-v4-edge" }
 sha2 = "0.10"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
