@@ -1,0 +1,32 @@
+{
+  "active_version": "active-v2",
+  "artifact_record_id": "evidence-error-v2",
+  "clean_scope": {
+    "base_commit": "dc52f4772",
+    "changed_paths": [],
+    "generated_policy": "tracked_hash",
+    "ignored_paths": []
+  },
+  "created_at": "2026-08-14T13:08:19Z",
+  "freeze_id": "freeze-error-v2",
+  "git_clean": true,
+  "issue_id": "routecodex-v4-foundation",
+  "library_hash": "sha256:23e7b9950ef2f0c2c6767c573371a1d29c82050f11ddbe6593932822fce45bb1",
+  "module_id": "routecodex-v4-error",
+  "owners": {
+    "api_extractor": "appsdk",
+    "artifact_registry": "appsdk",
+    "compiler": "cargo",
+    "review": "codex",
+    "vcs": "git"
+  },
+  "previous_active_immutable": true,
+  "previous_active_version": "active-v1",
+  "promotion_id": "promotion-error-v2",
+  "promotion_record_hash": "sha256:c9d74266cd294fbff3519a0fcc98ff20814fc6312c861114c0cbb7a9a3a1d8a4",
+  "public_api_hash": "sha256:161e6ca746410fd1a7d9fb38fa6eecd1f8d518ee85492eb90ca369757dfeac6f",
+  "regression_report_hash": "sha256:cf4ba4dc7e55c39070f19c964ec1630238fba589f8e5ba281e1a78764b358a9d",
+  "regression_report_id": "regression-error-v2",
+  "review_id": "review-error-v2",
+  "source_commit_or_tag": "dc52f4772"
+}

@@ -120,6 +120,60 @@
       "stage": "source_implemented"
     },
     {
+      "active_artifact": "active/lib/routecodex-v4-build-link/**",
+      "artifact_paths": [
+        "build-link.resolver.contract.json"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo build --release -p routecodex-v4-build-link && mkdir -p generated/modules/routecodex-v4-build-link/lib && printf '{\"module_id\":\"routecodex-v4-build-link\",\"artifact_kind\":\"resolver-binary\",\"schema_version\":1}\\n' > generated/modules/routecodex-v4-build-link/lib/build-link.resolver.contract.json"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        "contracts/active-link/**"
+      ],
+      "dependency_modules": [],
+      "generated_outputs": [
+        "generated/build-link/**"
+      ],
+      "module_id": "routecodex-v4-build-link",
+      "owned_paths": [
+        "crates/routecodex-v4-build-link/**"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "-p",
+            "routecodex-v4-build-link"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "crates/routecodex-v4-build-link/src/**",
+          "crates/routecodex-v4-build-link/tests/**"
+        ],
+        "minimum_test_count": 11,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-build-link-resolver-regression"
+      },
+      "source_owner": "routecodex-v4-build-link",
+      "stage": "source_implemented"
+    },
+    {
       "active_artifact": "active/lib/routecodex-v4-base-node/**",
       "artifact_paths": [
         "libroutecodex_v4_base_node.rlib"
@@ -387,7 +441,7 @@
       "build": {
         "args": [
           "-c",
-          "cargo build --release -p routecodex-v4-config && mkdir -p generated/modules/routecodex-v4-config/lib && cp target/release/deps/libroutecodex_v4_config-*.rlib generated/modules/routecodex-v4-config/lib/libroutecodex_v4_config.rlib"
+          "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-config --deps routecodex-v4-base-node,routecodex-v4-edge --out generated/modules/routecodex-v4-config/lib/libroutecodex_v4_config.rlib"
         ],
         "program": "sh",
         "working_directory": "."
@@ -416,11 +470,19 @@
         "allow_skipped": false,
         "command": {
           "args": [
-            "test",
+            "run",
+            "--quiet",
+            "--release",
             "-p",
+            "routecodex-v4-build-link",
+            "--",
+            "test-consumer",
+            "--root",
+            ".",
+            "--consumer",
             "routecodex-v4-config",
-            "--test",
-            "l2_config"
+            "--deps",
+            "routecodex-v4-base-node,routecodex-v4-edge"
           ],
           "program": "cargo",
           "working_directory": "."

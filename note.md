@@ -35359,3 +35359,101 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - AppSDK module stage is `frozen`; Active `active-v1` artifact hash is `sha256:a732f26f8e7b430e08f6d0caf6c8957ac4553e0b444260698da55ffece902642`; Protected archive contains source, 12 contracts/record schemas, library, module artifact, and source snapshot.
 - `v4.control.error_chain`, `v4.control.error_center`, `v4.error.client_projection`, and `v4.control.retry_policy` are anchored. Workspace regressions are 56/56; `appsdk verify v4` passes.
 - Process correction: tracked record source-commit alignment in commit `42b3a125c` used a Python bulk JSON edit, violating the P0 apply_patch-only rule. Values were reviewed and verified, but future record alignment must use explicit per-file `apply_patch` hunks.
+
+# 2026-08-14 502 审计：MiniMax server_tool_use + opencode-go error decoding response body
+- 样本 `784056-5085`（10000 web_search → minimax_anthropic MiniMax-M3）根因闭环：provider-request.json 工具声明 `{"type":"web_search_20250305","name":"web_search"}`（正确 Anthropic Server Tool wire），MiniMax 上游 200 SSE 返回 `message_start → ping → content_block_start {type:"server_tool_use",name:"web_search",input:{}}`；relay Anthropic SSE 物化器 `provider_stream_materialization.rs` 在 content_block_start（~L338-341）与 build（~L766）都只接受 text/thinking/redacted_thinking/tool_use，`server_tool_use` fail-fast → provider_runtime_error 502 → 切 deepseek 400 → terminal。
+- JSON 路径已支持：`anthropic_codec.rs::project_v3_anthropic_message_as_responses_response_with_context` L888-977 把 `server_tool_use` 投影为 `web_search_call` + 配对 `function_call_output`，`tests/v3_web_search_anthropic_wire.rs` 正绿。SSE 与 JSON 两条路径能力不一致是缺口本体。
+- 唯一修改点候选：`responses_relay_runtime/provider_stream_materialization.rs`（start/build 增加 server_tool_use 分支，build 输出与 tool_use 同构的块，delta 视需要接受 input_json_delta）；下游 anthropic_codec 投影已具备，无需改。红测用样本 rawSse 喂 `build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events_with_context`。
+- map 缺口：function/verification map 里 `provider_stream_materialization.rs` 只挂在 `v3.sse_protocol_codec_projection_boundary`（status: design）allowed_paths；`v3.hub_relay_runtime_closeout`（controlled verified）owner_files/allowed_paths 未列该文件。实施前需先补 active owner 绑定（22b）。
+- opencode-go `error decoding response body` 502（04:50:03 等 10+ 例）：本地 read timeout=300s（`V3_PROVIDER_HTTP_READ_TIMEOUT_SECS=300`）非本地超时；直连 zen/go/v1/responses 两次均 61.2s EOF、有 output_text.delta 无 terminal；上游 ~60s 硬截断是根因，RouteCodex 显式 502 fail-fast 正确（无伪造 terminal）。
+
+# 2026-08-14 owner binding + long-stream / OAuth 400 follow-up
+- 按 Jason 指定，先将 `provider_stream_materialization.rs` 绑定到 active `v3.hub_relay_runtime_closeout` 的 `owner_files` / `allowed_paths`，并同步 `v3-verification-map.yml::owner_modules`；`verify:v3-resource-map`、`verify:v3-module-boundaries`、`git diff --check` 通过。
+- 现有 MiniMax SSE 正反测试 2/2 通过：`message_stop` 可关闭 open thinking block；open tool block 仍 fail-fast。尚未改 runtime，因样本 `784056-5085` 的正式 rawSse red test 仍需从 provider-response fixture 精确固化。
+- 截断语义纠正：`guard_v3_provider_sse_idle` 只处理两次 `stream.next()` 间无 chunk 的 idle；`validated_sse_stream` 将上游 reqwest body error 明确映射为 `V3ProviderError::ResponseBody`。已有 output delta 后再 EOF/error 是上游 active stream hard close，不是“空包等待”，不能在 RespOutbound 伪造 terminal。
+- OAuth 标准 Responses 的 `input[69].content` 400 目前只有用户侧错误 body，canonical sample 目录未找到该 exact body；已定位请求生成链为 `request_outbound_format.rs` + profile codec。修复前必须拿同一请求的 `provider-request.json` 验证第 70 项实际 `type/content`，再在响应出站/相邻协议投影 owner 加 red test，禁止先在 Error06 包装。
+
+# 2026-08-15 provider SSE JSON compatibility live closeout
+- 唯一 owner：`v3-runtime/src/hub_v1/provider_sse_json_codec.rs` 聚合/解析 provider SSE JSON；`routecodex-v3-sse` 继续只负责 framing。无 `data:` 前缀的 JSON 续行仅在字符串内或明显 JSON 结构开头时恢复；普通未知 field 不提升；结构性尾随、多对象、截断仍 fail-fast。
+- 定向 codec 测试 15/15；全局 `rccv3 0.90.4513`，10000/5520/5555/4444 `/health` 全部 `0.90.4513`。
+- 同入口旧样本复测：20260814T183906840 与 20260814T184610849（fresh typed session/thread）均 HTTP 200 SSE、`response.completed`、无 `event:error`。复测窗口未新增 `provider_response_sse_stream` / spool error；历史 18:44-18:48 错误保留为旧证据。
+- 仍需：Codex review 明确 PASS 后才可交付；未改变 SSE transport、未做 fallback、未清洗业务 payload。
+- 复测修正：安装/重启 `0.90.4514` 后，同一 18:46 样本 fresh scope 再次出现 `provider_response_sse_event_invalid`（trailing characters line 2 column 1），对应日志新增 malformed at column 11127；因此该兼容修复尚未闭环。Codex review 同时 FAIL：direct SSE 全量 spool 破坏流式边界、Chat `[DONE]` terminal 缺失、Responses 常规通知事件被误判 fatal。不能宣称完成，需回到唯一 owner 设计修复并重新走全套验证。
+- 2026-08-15 最新线上样本进一步分成三类：`trailing characters line 2 column 1`、`expected , or }`/`expected :` 的帧内 JSON 损坏、以及 `SSE stream ended before the final frame delimiter`。日志均在 `V3ProviderResp14Raw -> V3DirectResp15ProviderProjectionPrepared -> V3Server16HttpFrame` 后由 provider response stream 报错；当前没有对应 provider raw body snapshot，不能安全把多对象/截断内容拼接或吞掉。后两类属于 provider body/framing 结构错误，必须保留显式失败；下一步先获取同 requestId 的 provider raw sample，再决定是否存在无损 codec 兼容。
+# 2026-08-14 V4 Error active-v2 review remediation resumed
+- Codex review P1 evidence is accepted as the active red baseline: `ErrorChain::classify` bypasses ErrorCenter audit, and `ErrorCenter::classify` accepts missing `payload_hash` / `typed_context`.
+- Approved fix design `v4-error-active-v2-audit-intake` limits the formal fix to `routecodex-v4-error`: ErrorCenter emits an immutable scope/fact-bound witness; Error03 consumes it exactly once; missing, mismatched, reused, or incomplete intake fails fast. Active/Protected v1 and V3 remain immutable.
+# 2026-08-14 Direct SSE 静默失败根因与最小修复
+- 现象：5555 direct Responses SSE 已向客户端发出 partial chunk 后，provider typed `V3Error01SourceRaised` 在 `v3_client_sse_body` 被转成 `io::Error`，Body 只断流；runtime/console 已记录 Error01-06，但客户端没有 terminal `event: error`。
+- 根因：server client-frame transport boundary 丢失 post-commit Error06 投影；不是 OAuth、客户端/provider 解耦或路由选择问题。
+- 修复：`frame_builders.rs::v3_client_sse_body` 复用 `project_v3_post_commit_sse_source`，将 provider error 投影为一次 Error06 SSE error event 后 EOF；控制链仍是 side-channel，未进入 payload。
+- 红测：先将 `direct_sse_body_error...` 改为 partial + error event 合同，旧实现因 Body error 红；实现后定向 direct_sse 测试 10/10 通过。
+- 未做：三次 retry、安装/重启/在线 5555 重放、codex-review；需后续按运行时闭环执行。
+
+# 2026-08-14 Direct SSE 双终态 review 修复
+- Review 首轮发现 `response.completed` 已发出后，EOF closeout 若再返回 typed error，`v3_client_sse_body` 会追加第二个 `event:error`，客户端收到成功终态后被误判失败。
+- 唯一 owner 修复：server SSE frame boundary 记录已发出的 `response.completed`；其后 closeout error 只保留 Error/console side-channel，不再写客户端帧。未到终态的 provider error 仍投影一次 Error06 `event:error`；client disconnect 仍保持 499。
+- 红测先复现双终态，修复后 `routecodex-v3-server --lib` 90/90 通过；workspace build 通过。安装版本 `0.90.4495`，`routecodex restart` 后 10000/5520/5555/4444 health 均为该版本。
+- 在线 5555 旧 Responses 样本以 typed `session-id` + `thread-id` 重放：request `openai-responses-router-gpt-5.5-20260814T074506972-786753-7782`，日志记录 route tools、provider 200、`responseStatus=completed`、`usage_in=161145`、`usage_out=1555`、`usage_total=162700`，transport=sse；未出现静默 EOF。
+
+# 2026-08-14 Direct SSE retry/usage 与 DeepSeek 400 closeout
+- Direct SSE 的根因是 provider stream 在 Resp15 commit 后才继续读取；后续 body error/EOF/idle 无法重新进入统一 provider retry，客户端只能静默断流。唯一 owner 为 `routecodex-v3-runtime::{shared.rs,kernel.rs}`。
+- 修复为 Resp15 commit 前完整收集单次 SSE attempt；60s chunk idle、body error、malformed/failure event、缺 `response.completed` 均回 Error01，沿既有 Error01-06 与同 key 三次策略重试/切换。成功 attempt 才向客户端投影，避免 partial response 重放污染历史。kernel 复用 projection 的 stream observation，保留 direct usage。
+- DeepSeek 400 的唯一已证实载体是 Console Go thinking mode 下交错 tool output→tool call 时新 assistant tool segment 缺 reasoning；Responses wire owner 只对 `deepseek-v4-flash` 做确定性 reasoning 归一化/继承，其他 provider 不 broad rewrite。
+- 定向验证：runtime direct_sse 23/23，provider SSE failure reselect 1/1，responses wire 26/26；resource/module gates、diff check、stable build 通过。全局安装 `rccv3 0.90.4503`，重启后 10000/5520/5555/4444 health 均为 `0.90.4503`；5555 两个旧样本 typed replay 均 HTTP 200、`response.completed`、有 usage、无 `event:error`。
+- 取舍：direct SSE 先 materialize 成功 attempt 再发客户端帧，牺牲首帧流式性，换取 provider 中途失败可重试且不向客户端发 partial 后重放；仍需 Codex review 与精准提交。
+# 2026-08-14 400 与 SSE 静默失败根因修复
+- 日志证据：`~/.rcc/logs/server-v3-5555.log` 的 400 provider 失败集中在 DeepSeek/Responses 路径；同日志出现 `provider_response_sse_stream` malformed JSON 与未知 Responses 事件风险。
+- 另一类 400（最新 15:58）是 continuation 缺少 typed session/conversation headers；这是 Req03 admission 的正确 fail-fast，禁止从 payload/client metadata 猜控制身份，不能用 fallback“修复”。
+- 根因：`build_responses_input_from_chat_messages` 仅在 assistant 有 `tool_calls` 时携带 `reasoning_content`；compact 后 reasoning-only assistant 被丢成普通 message，DeepSeek wire 缺 reasoning。
+- 修复：Responses outbound 对所有 assistant 先投影 reasoning item，再投影 tool calls/message；新增 reasoning-only wire 正测。
+- 根因：Responses SSE transducer 对未知事件 `_ => Ok(Vec::new())` 静默丢弃；修为显式 unsupported error，沿 provider codec/error chain 暴露；既有未知事件反测通过。
+- 验证：focused Cargo reasoning test 1 passed；unknown SSE event test 1 passed；`verify:sse-architecture-boundary` ok；`verify:function-map-compile-gate` ok；`git diff --check` ok。
+- 未闭环：`npm run build:v3-cli` 被既有 V3 file-size gate 阻断（wire.rs 1625、direct_runtime_helpers.rs 1555、kernel/tests.rs 超 ratchet 3 行），因此未执行全局安装、managed restart、在线旧样本复测。
+
+# 2026-08-14 direct SSE spool collision root cause
+- Exact sample `openai-responses-router-gpt-5.5-20260814T161449241-790882-11911` has `provider_response_sse_spool_error`, HTTP 200, message `File exists (os error 17)`; the malformed-JSON client projection was not the first deviation.
+- Unique owner is `v3/crates/routecodex-v3-runtime/src/shared.rs::collect_v3_direct_sse_attempt`: spool names used only process PID plus a process-local sequence, so an exec/restart preserving PID could reuse a stale temp path after the sequence reset.
+- Formal fix: allocate `create_new` spool paths with PID + nanosecond timestamp + atomic sequence; an `AlreadyExists` result advances allocation and retries, while all other filesystem errors remain explicit `provider_response_sse_spool_error`. No handler/SSE fallback or payload cleanup.
+- Source validation: `git diff --check` passes for the owner file. Focused Cargo test is currently blocked by unrelated dirty compile error in `routecodex-v3-provider-responses/src/health.rs:456` (missing `next_probe_at_ms` and `probe_in_flight` fields).
+
+# 2026-08-15 V4 Plugin M0 contract alignment
+- Baseline red: `appsdk verify v4` failed `ARTIFACT_MODULE_SET_MISMATCH`: project/maps declared Plugin Contract/Catalog/Plan Rust modules and artifact gates while no crates or generated artifacts existed.
+- Jason confirmed the M0-only design: retain the five Plugin/Admin contracts, delete only phantom M1/M2 implementation declarations and Config dependencies, then bind the three contract resources directly to their JSON contracts at `contract_bound`.
+- Green: `appsdk verify v4`; `cargo fmt --all -- --check`; workspace tests (76 + one compile-fail doctest); release workspace build. No runtime, payload, Active, Protected, or Generated artifact mutation.
+- Migration caveat: current global AppSDK `init <v4-root>` requires `<v4-root>/.appsdk-prepare.json`, whereas the previously confirmed attachment contract resides at repository root `.appsdk-prepare.json`; `appsdk init v4` therefore fails `PREPARATION_MISSING`. Do not copy or self-confirm a second preparation record; resolve at the AppSDK admission owner.
+- 2026-08-15 correction: `appsdk init <workspace>` is defined to read `.appsdk-prepare.json` from the workspace argument, then use its `project_root` (`v4`). The objective's `appsdk init .../v4` invocation was wrong; the correct and verified command is `appsdk init /Users/fanzhang/Documents/github/routecodex`, which resolves to `initialized .../v4`. Re-running init from the repo root is idempotent, leaves `.gitignore` aligned with the committed baseline, and `appsdk verify v4` + `appsdk verify --admission v4` both remain ok.
+
+# 2026-08-15 Direct SSE streaming boundary correction
+- Explicit snapshot stages captured Relay provider responses, but the failing 5555 path is Direct; minimal typed-session replay to `opencode-go[key1].deepseek-v4-flash` returned HTTP 200 `response.completed`. A long-context replay selected `cc-sol` and ended with a missing SSE delimiter, so it was excluded from opencode evidence.
+- Root cause confirmed in source/review: `shared.rs::collect_v3_direct_sse_attempt` fully spooled every Direct SSE attempt before returning client bytes, violating Direct streaming and delaying post-header errors. Removed the spool path; first-frame admission remains guarded and client streaming starts immediately, with typed observation/terminal checks preserved.
+- Red/green evidence: added `direct_sse_projection_starts_client_stream_before_provider_eof`; Direct SSE focused tests, provider codec 15/15, `verify:sse-architecture-boundary`, and `verify:function-map-compile-gate` pass. Runtime install/restart/live replay and Codex review remain pending for this new diff.
+
+# 2026-08-15 appsdk 重装后重审计
+- 全局 appsdk 重装，binary digest 由 `sha256:f471df7c...` 变为 `sha256:ff1c5985fbe39c6e4f580f7e42ec5d811a8da4f6b1e3b35ef5c247ba928737bb`；bundle/manifest digest 未变。
+- 审计发现 sdk.lock 已被同步更新；用 `appsdk pin-lock v4 --binary "$(command -v appsdk)"` 复核，输出与现存 lock 逐字节一致（canonical 确认）。sdk.bin witness 与全局 binary 同 digest。
+- `appsdk verify v4`、`appsdk verify --admission v4` 均 ok；已提交 `56a91d479` repin lock + 更新文档 digest。
+- 同日第二次重装：binary digest 变为 `sha256:17b6d2faa8a4a7ae86a6948fa3a60a33799443fdb02c2995992f3db846529141`，sdk.lock 同步更新；`appsdk pin-lock` 复核逐字节一致，verify/admission ok。提交前确认当前全局 binary 与 lock 一致再交付。
+
+# 2026-08-15 V4 Active-link Phase 1 正式实现（design V4-ACTIVE-LINK-001）
+- Jason 对齐并 `继续执行`，按 handoff 视为 design 批准；正式实现完成，未做 edge 再冻结（需 Jason 单独批准）。
+- 结构决策：`routecodex-v4-config` 移出 v4 Cargo workspace members（edge 已移出）；config 保持 source_path transitional，但回归改由 resolver `test-consumer` 驱动；`v4_cargo_workspace_build` 不再要求 config:compile。
+- resolver 新增外部 registry 依赖支持：解析 consumer Cargo.toml 的 `[dependencies]`，在 `v4/build-control/extern-deps`（gitignored）生成 scratch cargo 工程构建 serde/toml/sha2/thiserror，再以 `--extern`/`-L dependency=` 注入 rustc；config l2 15 通过。
+- `v4_edge_l1_regression`/`v4_config_l2_regression` gate 命令改为 resolver test-consumer；新增 `v4_active_index_verify` gate；CI 新增 `v4-active-link` macos-14 job（resolver test、edge/config test-consumer、gen/verify-index、frozen-source gate）。project.json 仅改 config（source_implemented）build/regression；edge 的 frozen 记录保持基线。
+- 验证矩阵全绿：resolver 9、base 12、control 15、error 23(+1 doc compile-fail)、edge 11（Active surface）、config 15（resolver）、release build、fmt、`verify-v4-active-link` gate、`appsdk verify v4` + admission、index gen/verify。BaseNode Active 未动（8d2c8214…）。
+- 待决策：resolver 重建的 edge rlib（35a4070e…）与 frozen Active edge rlib（f2b0118c…）字节不同，按 design §6.5 需 Jason 批准后再冻结。review 门禁（MCP oauth→cc→tcm）尚未跑，未提交。
+- MCP review 5 轮均 FAIL，唯一剩余 P1：frozen edge 的 project.json build/regression 命令指向已移出 workspace 的 `routecodex-v4-edge` 包。appsdk 拒绝 frozen compile-module，frozen module-artifact（verify 比较 build 字段）无法在不再冻结的情况下合法再生成。已修 findings：fixture 扩到 4 个 frozen 模块 + CI restore + index gate；`ActiveLinkErr13RustcMismatch`；gate 全 manifest 扫描 + registry 覆盖；`assert_outside_active` 对不存在目标做父路径 canonicalize（`--out active/lib/escape-test.rlib` 红测）。剩余决策提交 Jason：A) 批准 edge 再冻结并顺带迁移 frozen 记录到 resolver 命令；B) 保留历史记录，resolver 门为活跃真源。edge 再冻结本身仍待批准。
+
+# 2026-08-15 V4 edge active-v2 再冻结（Jason 批准 Option A）
+- Jason 明确回复"批准，继续进行"：批准 edge 再冻结（rlib 字节变化 35a4070e… vs frozen f2b0118c…），并将 frozen edge 的 project.json build/regression 合法迁移为 resolver build-consumer/test-consumer，走完整 appsdk 生命周期（begin-version → compile-module → evidence/review/promotion/regression → promote → freeze → publish-active）。
+- 生命周期顺序（appsdk 0.1.0 全局安装版）：
+  1. E1 提交 Phase 1 实现（resolver/fixture/maps/gate/CI/docs）。
+  2. `appsdk begin-version v4 --module routecodex-v4-edge --from active-v1 --to active-v2`：归档旧记录到 `.appsdk/records/history/routecodex-v4-edge/active-v1/`，`protected/history/routecodex-v4-edge` 改名到 `protected/history-versions/…/active-v1`，project.json edge 回退 source_implemented + version_base。
+  3. apply_patch 迁移 edge build/regression → `cargo run --release -p routecodex-v4-build-link -- build-consumer/test-consumer --root . --consumer routecodex-v4-edge --deps routecodex-v4-base-node`。
+  4. compile-module 生成新 module.compiled.json（rlib + artifact_hash + public_api_hash）。
+  5. 运行 edge test-consumer 11 passed + 全量验证矩阵。
+  6. 写入 v2 记录（evidence/review/promotion/regression/freeze/playground-cleanup）并提交；cleanup 记录负责移除 `playground/experiments/active-link-base-node-v1`。
+  7. promote-module → architecture_stable → freeze → publish-active active-v2。
+  8. 更新 hermetic fixture（edge active-v2 + records + project.json）、resolver 测试期望、设计文档、索引；全量验证。
+  9. MCP review（oauth → cc → tcm）PASS 后提交交付。
+- 约束：P0 记录编辑只用 apply_patch 逐文件；appsdk CLI 只做它声明写出的生命周期状态；不修改 base-node/control/error Active；不修改 sdk.lock/appsdk release；无关 V3 dirty 文件不动。

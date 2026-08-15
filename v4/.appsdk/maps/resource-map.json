@@ -56,6 +56,8 @@
     {"resource_id":"v4.error.client_projection","owner":"routecodex-v4-error::ClientProjection","truth_store":"crates/routecodex-v4-error/src/lib.rs","allowed_operations":["read","validate","write"],"status":"active"},
     {"resource_id":"v4.plugin.node_plugin_contract","owner":"contract:v4-node-plugin","truth_store":"contracts/node-plugin.contract.json","allowed_operations":["read","validate"],"status":"contract_bound"},
     {"resource_id":"v4.plugin.catalog","owner":"contract:v4-plugin-catalog","truth_store":"contracts/plugin-catalog.contract.json","allowed_operations":["read","validate"],"status":"contract_bound"},
-    {"resource_id":"v4.plugin.node_plugin_plan","owner":"contract:v4-node-container","truth_store":"contracts/node-container.contract.json","allowed_operations":["read","validate"],"status":"contract_bound"}
+    {"resource_id":"v4.plugin.node_plugin_plan","owner":"contract:v4-node-container","truth_store":"contracts/node-container.contract.json","allowed_operations":["read","validate"],"status":"contract_bound"},
+    {"resource_id":"v4.build.link_surface","owner":"routecodex-v4-build-link","truth_store":"active/lib/**","allowed_operations":["read","resolve","link"],"status":"active"},
+    {"resource_id":"v4.build.active_artifact_index","owner":"routecodex-v4-build-link","truth_store":"build-control/active-index.json","allowed_operations":["generate","read","validate"],"status":"active"}
   ]
 }

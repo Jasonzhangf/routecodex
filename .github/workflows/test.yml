@@ -107,3 +107,39 @@ jobs:
           test -x "$(command -v appsdk)"
           test "sha256:$(shasum -a 256 "$(command -v appsdk)" | cut -d ' ' -f 1)" = "$(jq -r .digest v4/.appsdk/sdk.lock)"
           appsdk verify --admission v4
+
+  v4-active-link:
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: V4 Active-link resolver regression
+        run: cargo test -p routecodex-v4-build-link --manifest-path v4/Cargo.toml
+      - name: V4 workspace release build
+        run: cargo build --release --manifest-path v4/Cargo.toml
+      - name: V4 workspace tests
+        run: cargo test --workspace --manifest-path v4/Cargo.toml
+      - name: Restore frozen Active artifacts from hermetic fixture
+        run: mkdir -p v4/active/lib && cp -R v4/tests/resources/active-link-fixture/active/lib/. v4/active/lib/
+      - name: V4 edge regression through Active surface
+        run: >-
+          cargo run --quiet --release --manifest-path v4/Cargo.toml
+          -p routecodex-v4-build-link --
+          test-consumer --root v4 --consumer routecodex-v4-edge
+          --deps routecodex-v4-base-node
+      - name: V4 config regression through resolver
+        run: >-
+          cargo run --quiet --release --manifest-path v4/Cargo.toml
+          -p routecodex-v4-build-link --
+          test-consumer --root v4 --consumer routecodex-v4-config
+          --deps routecodex-v4-base-node,routecodex-v4-edge
+      - name: V4 deterministic Active index
+        run: >-
+          cargo run --quiet --release --manifest-path v4/Cargo.toml
+          -p routecodex-v4-build-link -- gen-index --root v4 &&
+          cargo run --quiet --release --manifest-path v4/Cargo.toml
+          -p routecodex-v4-build-link -- verify-index --root v4
+      - name: V4 frozen-source edge gate
+        run: node scripts/architecture/verify-v4-active-link.mjs

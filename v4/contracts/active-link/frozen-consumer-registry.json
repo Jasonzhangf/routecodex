@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "project_id": "routecodex-v4",
+  "design_id": "V4-ACTIVE-LINK-001",
+  "frozen_modules": [
+    "routecodex-v4-base-node",
+    "routecodex-v4-edge",
+    "routecodex-v4-control",
+    "routecodex-v4-error"
+  ],
+  "consumers": [
+    {
+      "consumer": "routecodex-v4-edge",
+      "dependency": "routecodex-v4-base-node",
+      "mode": "active_artifact",
+      "status": "migrated",
+      "link_surface": "rustc_extern",
+      "manifest_path": "crates/routecodex-v4-edge/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-control",
+      "dependency": "routecodex-v4-base-node",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-control/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-error",
+      "dependency": "routecodex-v4-base-node",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-error/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-config",
+      "dependency": "routecodex-v4-base-node",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-config",
+      "dependency": "routecodex-v4-edge",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
+    }
+  ],
+  "forbidden_path_roots": [
+    "playground",
+    "protected",
+    "generated",
+    ".appsdk"
+  ]
+}

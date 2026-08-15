@@ -6,3 +6,7 @@
 /generated/
 Cargo.lock
 # END APPSDK MANAGED
+
+# V4 resolver build work area (deterministic index + per-consumer rustc output)
+/build-control/
+/librust_out.rlib

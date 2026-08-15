@@ -1,0 +1,22 @@
+{
+  "evidence_id": "evidence-edge-v1",
+  "issue_id": "routecodex-v4-foundation",
+  "experiment_id": "experiment-edge-freeze-v1",
+  "kind": "build",
+  "source_commit": "8eac65195",
+  "artifact_hash": "sha256:1f800dc90551ae1e3ca11b34560f9c967ef68b65eba0956f5f624bfff93cf3af",
+  "scope": {
+    "module_id": "routecodex-v4-edge"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "appsdk::compiler"
+  },
+  "result": "pass",
+  "created_at": "2026-08-14T04:10:00Z",
+  "expires_at": "2099-01-01T00:00:00Z",
+  "input_hashes": [
+    "input-1"
+  ],
+  "scope_hash": "scope-edge-v1"
+}
