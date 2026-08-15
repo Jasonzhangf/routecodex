@@ -1,23 +1,23 @@
 {
-  "artifact_hash": "sha256:23e7b9950ef2f0c2c6767c573371a1d29c82050f11ddbe6593932822fce45bb1",
-  "base_artifact_hash": "sha256:a732f26f8e7b430e08f6d0caf6c8957ac4553e0b444260698da55ffece902642",
-  "base_commit": "ce50527af",
-  "change_reason_comment": "A review-proven audit bypass and incomplete ErrorCenter intake allowed Error03 without complete Error02 evidence; active-v2 requires one exact-lineage single-use ErrorCenter witness and non-empty payload hash/context at the unique error owner",
-  "change_set_id": "change-error-audit-intake-v2",
+  "artifact_hash": "sha256:c26ccfc3ee6c847b1b4b2f812b72071a20df81f98fe40e60d457c41b3aed5d3f",
+  "base_artifact_hash": "sha256:23e7b9950ef2f0c2c6767c573371a1d29c82050f11ddbe6593932822fce45bb1",
+  "base_commit": "dc52f4772",
+  "change_reason_comment": "Error re-freeze active-v3: frozen Error build/regression migrated from Cargo path dependency to the routecodex-v4-build-link resolver commands; Error links the frozen base-node Active surface",
+  "change_set_id": "change-error-active-link-v3",
   "compatibility_level": "breaking",
-  "created_at": "2026-08-14T13:08:19Z",
-  "design_id": "v4-error-active-v2-audit-intake",
+  "created_at": "2026-08-15T13:27:00Z",
+  "design_id": "v4-active-artifact-linking-design",
   "evidence_ids": [
-    "evidence-error-v2"
+    "evidence-error-v3"
   ],
-  "experiment_id": "experiment-error-audit-intake-v2",
+  "experiment_id": "experiment-error-active-link-v3",
   "issue_id": "routecodex-v4-foundation",
   "module_id": "routecodex-v4-error",
-  "new_active_version": "active-v2",
-  "playground_cleanup_record_id": "cleanup-error-v2",
-  "previous_active_version": "active-v1",
-  "promotion_id": "promotion-error-v2",
-  "public_api_hash": "sha256:161e6ca746410fd1a7d9fb38fa6eecd1f8d518ee85492eb90ca369757dfeac6f",
+  "new_active_version": "active-v3",
+  "playground_cleanup_record_id": "cleanup-error-v3",
+  "previous_active_version": "active-v2",
+  "promotion_id": "promotion-error-v3",
+  "public_api_hash": "sha256:78b8bce67fedbb5c438c7eff1d405f7c8e0267d9ac7fd6186f9e37576898b4a4",
   "required_gate_results": [
     {
       "gate_id": "v4_error_l2_regression",
@@ -25,7 +25,7 @@
       "result": "pass"
     },
     {
-      "gate_id": "v4_error_compile_fail_regression",
+      "gate_id": "v4_active_link_resolver",
       "producer": "cargo",
       "result": "pass"
     },
@@ -35,8 +35,8 @@
       "result": "pass"
     }
   ],
-  "review_id": "review-error-v2",
-  "root_cause": "ErrorChain::classify advanced HostCaptured without an ErrorCenter-issued capability, while ErrorCenter accepted missing payload_hash or typed_context; the API contract did not bind classification to complete audited evidence",
-  "scope_hash": "sha256:2e1550f5dc9af889e0079d96dfa7d50440dccfcfec82ef5ee72656d6fa858b34",
-  "source_commit": "dc52f4772"
+  "review_id": "review-error-v3",
+  "root_cause": "frozen Error still consumed base-node through a Cargo path dependency; re-freeze binds Error via the resolver Active surface so lifecycle records and compiled artifacts agree",
+  "scope_hash": "sha256:4693a7972e4743e7e0be3f2e6ab48c86039a26e51eb8f590abc40ca70ec42d27",
+  "source_commit": "389bd3cf0"
 }

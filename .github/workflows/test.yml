@@ -135,6 +135,18 @@ jobs:
           -p routecodex-v4-build-link --
           test-consumer --root v4 --consumer routecodex-v4-config
           --deps routecodex-v4-base-node,routecodex-v4-edge
+      - name: V4 control regression through resolver
+        run: >-
+          cargo run --quiet --release --manifest-path v4/Cargo.toml
+          -p routecodex-v4-build-link --
+          test-consumer --root v4 --consumer routecodex-v4-control
+          --deps routecodex-v4-base-node
+      - name: V4 error regression through resolver
+        run: >-
+          cargo run --quiet --release --manifest-path v4/Cargo.toml
+          -p routecodex-v4-build-link --
+          test-consumer --root v4 --consumer routecodex-v4-error
+          --deps routecodex-v4-base-node
       - name: V4 deterministic Active index
         run: >-
           cargo run --quiet --release --manifest-path v4/Cargo.toml

@@ -107,6 +107,52 @@ fn positive_edge_active_identity_resolves_with_dependency_closure() {
 }
 
 #[test]
+fn positive_control_active_identity_resolves_with_dependency_closure() {
+    let host = host_triple().expect("rustc host");
+    let resolution = resolve(&fixture_root(), "routecodex-v4-control", "active-v2", &host)
+        .expect("frozen control Active artifact must resolve");
+    assert_eq!(resolution.identity.module_id, "routecodex-v4-control");
+    assert_eq!(
+        resolution.identity.artifact_hash,
+        "sha256:bf6b8e426f5bda1962b5c0c4b82bde1be090294eed5e44bbfdc49d7cdc0e0103"
+    );
+    assert_eq!(resolution.identity.dependencies.len(), 1);
+    assert_eq!(
+        resolution.identity.dependencies[0].module_id,
+        "routecodex-v4-base-node"
+    );
+    assert_eq!(
+        resolution.identity.dependencies[0].active_version,
+        "active-v1"
+    );
+    assert_eq!(resolution.dependency_resolutions.len(), 1);
+    assert_eq!(emit_link_flags(&resolution).len(), 2);
+}
+
+#[test]
+fn positive_error_active_identity_resolves_with_dependency_closure() {
+    let host = host_triple().expect("rustc host");
+    let resolution = resolve(&fixture_root(), "routecodex-v4-error", "active-v3", &host)
+        .expect("frozen error Active artifact must resolve");
+    assert_eq!(resolution.identity.module_id, "routecodex-v4-error");
+    assert_eq!(
+        resolution.identity.artifact_hash,
+        "sha256:c26ccfc3ee6c847b1b4b2f812b72071a20df81f98fe40e60d457c41b3aed5d3f"
+    );
+    assert_eq!(resolution.identity.dependencies.len(), 1);
+    assert_eq!(
+        resolution.identity.dependencies[0].module_id,
+        "routecodex-v4-base-node"
+    );
+    assert_eq!(
+        resolution.identity.dependencies[0].active_version,
+        "active-v1"
+    );
+    assert_eq!(resolution.dependency_resolutions.len(), 1);
+    assert_eq!(emit_link_flags(&resolution).len(), 2);
+}
+
+#[test]
 fn negative_missing_active_version_fails_fast() {
     let host = host_triple().expect("rustc host");
     let error = resolve(

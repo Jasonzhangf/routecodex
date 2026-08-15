@@ -1,17 +1,17 @@
 {
-  "active_version": "active-v1",
-  "artifact_record_id": "evidence-control-v1",
+  "active_version": "active-v2",
+  "artifact_record_id": "evidence-control-v2",
   "clean_scope": {
-    "base_commit": "0c7be8d5c",
+    "base_commit": "389bd3cf0",
     "changed_paths": [],
     "generated_policy": "tracked_hash",
     "ignored_paths": []
   },
-  "created_at": "2026-08-14T11:36:43Z",
-  "freeze_id": "freeze-control-v1",
+  "created_at": "2026-08-15T13:27:00Z",
+  "freeze_id": "freeze-control-v2",
   "git_clean": true,
   "issue_id": "routecodex-v4-foundation",
-  "library_hash": "sha256:fc1510781b3838bc797aead36703708c1cc8f40165e30195aed16dae13a11cc4",
+  "library_hash": "sha256:bf6b8e426f5bda1962b5c0c4b82bde1be090294eed5e44bbfdc49d7cdc0e0103",
   "module_id": "routecodex-v4-control",
   "owners": {
     "api_extractor": "appsdk",
@@ -20,13 +20,13 @@
     "review": "codex",
     "vcs": "git"
   },
-  "previous_active_immutable": false,
-  "previous_active_version": null,
-  "promotion_id": "promotion-control-v1",
-  "promotion_record_hash": "sha256:9782f358bee3b90e759019804e1822a96463581722833321ff1a6c296a4e9836",
-  "public_api_hash": "sha256:f9d2b698a3f57e01a149f79378d42dc370307984015e44bffc52dfa39e162ee3",
-  "regression_report_hash": "sha256:7fc60eed7c2ebcd26824d0dfb7ca830c3312b8f15f520b10305d77d1ca0f9ac9",
-  "regression_report_id": "regression-control-v1",
-  "review_id": "review-control-v1",
-  "source_commit_or_tag": "0c7be8d5c"
+  "previous_active_immutable": true,
+  "previous_active_version": "active-v1",
+  "promotion_id": "promotion-control-v2",
+  "promotion_record_hash": "sha256:b32966f59df4d18696f88cce079506fc8b119881edc697efc98637a1cb27945c",
+  "public_api_hash": "sha256:7c626cc1a63c57fdc97414aed1f8b06c64b4cea9ef4daff8700eb393487770ed",
+  "regression_report_hash": "sha256:de44ca58f666615de28529fc6a00ba6114984f3363ab8c8b2fc4559c7d2c7faf",
+  "regression_report_id": "regression-control-v2",
+  "review_id": "review-control-v2",
+  "source_commit_or_tag": "389bd3cf0"
 }

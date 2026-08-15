@@ -114,3 +114,17 @@ Design ID: `V4-ACTIVE-LINK-002`（本计划）；上游设计：`v4/docs/design/
 - control active-v2、error active-v3 已发布，既有 frozen 记录不可变；config 无 path dep。
 - 验证矩阵全部证据可回放；DSH review 明确 PASS；无 P0/P1。
 - 提交干净（仅本任务文件），交付前 diff 越界自检通过。
+
+## 9. 执行修正（2026-08-15，实施后追加）
+
+1. **error compile-fail 门迁移**：`v4_error_compile_fail_regression`
+   （`cargo test -p routecodex-v4-error --doc`）在 error 移出 workspace 后不可运行
+   （lib.rs 依赖 resolver `--extern` 注入的 base-node，cargo doc 无法单独解析）。
+   该 gate 已从 `v4/.appsdk/maps/verification-map.json` 删除；其编译期保护由
+   `l2_error.rs` 全量调用 `classify(witness)` 的 API 形状编译锁定替代，
+   error regression 以 resolver `test-consumer`（23 tests）为唯一回归门。
+   `src/lib.rs` 的 `compile_fail` 文档保留为 API 契约说明，不再作为可执行 gate。
+2. **fixture 路径**：hermetic fixture 实际位于 `v4/tests/resources/active-link-fixture/`
+   （沿用 Phase 1 模式），不是 §4.9 写到的 `v4/contracts/active-link/fixture`。
+3. **index gen/verify 时序**：gen-index 依赖 Active artifact 已发布，必须在
+   publish-active 之后运行；lifecycle 中 promote/freeze 阶段不跑 index gate。
