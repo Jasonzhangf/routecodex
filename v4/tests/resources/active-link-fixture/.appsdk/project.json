@@ -3,6 +3,6 @@
   "project_id": "routecodex-v4",
   "sdk": {
     "name": "appsdk",
-    "version": "0.1.0"
+    "version": "0.1.2"
   }
 }

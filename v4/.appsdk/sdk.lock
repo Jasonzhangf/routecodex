@@ -30,5 +30,5 @@
   "contract_schema": 1,
   "digest": "sha256:3685149eab60ed887737e1ff0c9a6ddbbd0add32424d40595e27296ebf7b8686",
   "sdk": "appsdk",
-  "version": "0.1.0"
+  "version": "0.1.2"
 }
