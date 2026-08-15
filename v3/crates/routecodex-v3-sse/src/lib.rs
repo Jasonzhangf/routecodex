@@ -204,12 +204,42 @@ impl SseTransportOut04EncodedChunk {
     }
 }
 
+/// 帧内容（data 行为主）的 JSON 闭合检查：引号/括号平衡（转义感知）。
+/// 用于决定空行是否真的是 SSE 帧分隔——JSON 未闭合时空行是字符串值
+/// 内容的一部分（upstream 未转义的原始换行），继续缓冲直到闭合。
+/// 非 JSON data（如 [DONE]）括号平衡即视为闭合。
+fn sse_frame_json_is_closed(bytes: &[u8]) -> bool {
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut depth: i32 = 0;
+    for &byte in bytes {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match byte {
+            b'\\' if in_string => escaped = true,
+            b'"' => in_string = !in_string,
+            b'{' | b'[' if !in_string => depth += 1,
+            b'}' | b']' if !in_string => {
+                depth -= 1;
+                if depth < 0 {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    !in_string && depth <= 0
+}
+
 #[derive(Debug)]
 pub struct SseIncrementalDecoder {
     limits: SseTransportLimits,
     buffer: Vec<u8>,
     scan_index: usize,
     line_start: usize,
+    frame_start: usize,
 }
 
 impl SseIncrementalDecoder {
@@ -219,6 +249,7 @@ impl SseIncrementalDecoder {
             buffer: Vec::new(),
             scan_index: 0,
             line_start: 0,
+            frame_start: 0,
         }
     }
 
@@ -248,6 +279,17 @@ impl SseIncrementalDecoder {
                         }
                     };
                     if self.scan_index == self.line_start {
+                        // 空行：SSE 帧结束候选。但部分 upstream 把超长 JSON
+                        // 单行发出且字符串值内含原始换行/空行（未按 SSE 规范
+                        // 折成多 data 行）——若当前帧的 JSON 未闭合（引号/括号
+                        // 不平衡，转义感知），该空行是字符串值的一部分，不能
+                        // 当作帧分隔，否则 JSON 被截断（serde 报 expected ':'/
+                        // expected ',' or '}'）。JSON 闭合后才允许帧结束。
+                        if !sse_frame_json_is_closed(&self.buffer[self.frame_start..self.scan_index]) {
+                            self.scan_index += ending_len;
+                            self.line_start = self.scan_index;
+                            continue;
+                        }
                         frame_end = Some(self.scan_index + ending_len);
                         break;
                     }
@@ -263,6 +305,7 @@ impl SseIncrementalDecoder {
                 let raw = self.buffer.drain(..end).collect::<Vec<_>>();
                 self.scan_index = 0;
                 self.line_start = 0;
+                self.frame_start = 0;
                 frames.push(build_sse_transport_in_03_from_sse_transport_in_02(
                     build_sse_transport_in_02_from_sse_transport_in_01(&raw, self.limits)?,
                 )?);
@@ -376,20 +419,45 @@ fn build_sse_transport_in_02_from_sse_transport_in_01(
     raw: &[u8],
     _limits: SseTransportLimits,
 ) -> Result<SseTransportIn02DecodedFrame, SseTransportError> {
-    let text = std::str::from_utf8(raw).map_err(|_| SseTransportError::InvalidUtf8)?;
+    // 容忍流内非法 UTF-8 字节（upstream 可能在 reasoning 文本等字段携带
+    // 编码噪声）：按 U+FFFD 替换后继续解析帧结构（\n 分隔保留），不整体
+    // 拒绝请求；JSON 语义错误仍在后续 classify 层 fail-fast。
+    let text = String::from_utf8_lossy(raw);
     let body = text.trim_end_matches(['\r', '\n']);
     let mut fields = Vec::new();
-    for line in body.split(['\n', '\r']).filter(|line| !line.is_empty()) {
-        if let Some(comment) = line.strip_prefix(':') {
-            fields.push(SseField::Comment(comment.to_string()));
+    let mut pending_blank = false;
+    for line in body.split(['\n', '\r']) {
+        if line.is_empty() {
+            pending_blank = true;
             continue;
         }
-        let (name, value) = line.split_once(':').unwrap_or((line, ""));
-        let value = value.strip_prefix(' ').unwrap_or(value);
-        fields.push(SseField::Named {
-            name: name.to_string(),
-            value: value.to_string(),
-        });
+        if let Some(comment) = line.strip_prefix(':') {
+            fields.push(SseField::Comment(comment.to_string()));
+            pending_blank = false;
+            continue;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            let value = value.strip_prefix(' ').unwrap_or(value);
+            fields.push(SseField::Named {
+                name: name.to_string(),
+                value: value.to_string(),
+            });
+            pending_blank = false;
+            continue;
+        }
+        // 无冒号行：SSE 规范里非法，但部分 upstream 把超长 JSON 折行发出
+        // （续行不带 `data:` 前缀）。作为前一个 Named 字段 value 的续行
+        // 追加（原始换行保留，含续行前的空行），避免上层 codec 因只收集
+        // `data` 字段而静默丢失 JSON 内容；续行若拼出非法 JSON 仍在 parse
+        // 层显式失败。
+        if let Some(SseField::Named { value, .. }) = fields.last_mut() {
+            if pending_blank {
+                value.push('\n');
+            }
+            value.push('\n');
+            value.push_str(line);
+        }
+        pending_blank = false;
     }
     Ok(SseTransportIn02DecodedFrame { fields })
 }
@@ -418,6 +486,115 @@ mod tests {
             assert!(text.contains("data: 你\ndata: 好\n"));
             assert!(text.contains("x-extra: value\n"));
         }
+    }
+
+    #[test]
+    fn colonless_line_continues_previous_data_field_value() {
+        // upstream 把超长 JSON 折行发出（续行无 `data:` 前缀）：续行必须
+        // 追加到前一个 data 字段的 value（原始换行保留），不得变成独立
+        // field name 而被上层 codec 静默丢弃。
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let frames = decoder
+            .push(build_sse_transport_in_01_raw_chunk(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"first\nsecond line\"}\n\n",
+            ))
+            .unwrap();
+        assert_eq!(frames.len(), 1);
+        let frame = frames[0].frame();
+        let data = frame
+            .fields()
+            .iter()
+            .find_map(|field| match field {
+                SseField::Named { name, value } if name == "data" => Some(value.clone()),
+                _ => None,
+            })
+            .expect("data field must be present");
+        assert_eq!(
+            data,
+            "{\"type\":\"response.output_text.delta\",\"delta\":\"first\nsecond line\"}",
+            "colonless continuation must be appended to the previous data value"
+        );
+    }
+
+    #[test]
+    fn colonless_leading_line_without_previous_field_is_dropped_not_crashed() {
+        // 首行即无冒号（无前 field 可续）：非法行被忽略，不 panic、不产生
+        // 幽灵字段；帧其余部分正常解析。
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let frames = decoder
+            .push(build_sse_transport_in_01_raw_chunk(b"orphan line\ndata: {\"ok\":true}\n\n"))
+            .unwrap();
+        assert_eq!(frames.len(), 1);
+        let frame = frames[0].frame();
+        let data = frame
+            .fields()
+            .iter()
+            .find_map(|field| match field {
+                SseField::Named { name, value } if name == "data" => Some(value.clone()),
+                _ => None,
+            })
+            .expect("data field must be present");
+        assert_eq!(data, "{\"ok\":true}");
+    }
+
+    #[test]
+    fn blank_line_inside_open_json_string_does_not_end_the_frame() {
+        // upstream 单行 data 内字符串值含原始空行（\n\n 未转义）：该空行
+        // 是字符串值内容，不得当作 SSE 帧分隔（否则 JSON 被截断报
+        // expected ':'）。JSON 闭合后才允许帧结束。
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let frames = decoder
+            .push(build_sse_transport_in_01_raw_chunk(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"first\n\nsecond\"}\n\n",
+            ))
+            .unwrap();
+        assert_eq!(frames.len(), 1, "blank line inside open JSON must not split the frame");
+        let frame = frames[0].frame();
+        let data = frame
+            .fields()
+            .iter()
+            .find_map(|field| match field {
+                SseField::Named { name, value } if name == "data" => Some(value.clone()),
+                _ => None,
+            })
+            .expect("data field must be present");
+        assert_eq!(
+            data,
+            "{\"type\":\"response.output_text.delta\",\"delta\":\"first\n\nsecond\"}",
+            "JSON value with raw blank line must be preserved as one frame"
+        );
+    }
+
+    #[test]
+    fn closed_json_still_splits_frames_at_blank_lines() {
+        // JSON 闭合后空行仍是帧分隔：一帧结束、下一帧正常开始，不吞帧。
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let frames = decoder
+            .push(build_sse_transport_in_01_raw_chunk(
+                b"data: {\"a\":1}\n\ndata: {\"b\":2}\n\n",
+            ))
+            .unwrap();
+        assert_eq!(frames.len(), 2);
+        let first = frames[0].frame();
+        let first_data = first
+            .fields()
+            .iter()
+            .find_map(|field| match field {
+                SseField::Named { name, value } if name == "data" => Some(value.as_str()),
+                _ => None,
+            })
+            .expect("first data field");
+        assert_eq!(first_data, "{\"a\":1}");
+        let second = frames[1].frame();
+        let second_data = second
+            .fields()
+            .iter()
+            .find_map(|field| match field {
+                SseField::Named { name, value } if name == "data" => Some(value.as_str()),
+                _ => None,
+            })
+            .expect("second data field");
+        assert_eq!(second_data, "{\"b\":2}");
     }
 
     #[test]
@@ -510,9 +687,13 @@ mod tests {
         );
 
         let mut invalid = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let repaired = invalid
+            .push(build_sse_transport_in_01_raw_chunk(b"data: \xff\n\n"))
+            .expect("invalid UTF-8 bytes must be repaired, not rejected");
         assert_eq!(
-            invalid.push(build_sse_transport_in_01_raw_chunk(b"data: \xff\n\n")),
-            Err(SseTransportError::InvalidUtf8)
+            build_sse_transport_out_04_from_sse_transport_in_03(&repaired[0]).as_bytes(),
+            "data: \u{FFFD}\n\n".as_bytes(),
+            "invalid UTF-8 bytes must be replaced with U+FFFD and the frame kept"
         );
 
         let limits = SseTransportLimits {
