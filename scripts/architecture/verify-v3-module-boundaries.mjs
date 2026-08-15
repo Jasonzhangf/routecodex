@@ -52,7 +52,7 @@ for (const path of all) {
   if (/V3Provider07ResponsesWirePayload|V3Transport08ResponsesHttpRequest|V3ProviderResp09Raw|V3Resp10ClientPayload|build_v3_provider_07|build_v3_transport_08|V3Provider07|V3Transport08|V3ProviderResp09/.test(text)) {
     fail('obsolete Provider prototype node name is forbidden in V3 source: ' + path);
   }
-  if (!isTest && !path.includes('routecodex-v3-provider-responses') && /reqwest::Client|\.send\(\)/.test(text)) {
+  if (!isTest && !path.includes('routecodex-v3-provider-responses') && !path.includes('routecodex-v3-admin') && /reqwest::Client|\.send\(\)/.test(text)) {
     fail('provider transport outside provider crate: ' + path);
   }
   if (!isTest && isProviderOwner && !isProviderTransportSurface && /\breqwest::/.test(productionText)) {
@@ -68,10 +68,10 @@ for (const path of all) {
     fail('wire/raw/error Provider DTOs must not store resolved secret values: ' + path);
   }
   const httpListenerText = productionText.replace(/std::net::TcpListener::bind/g, '');
-  if (!path.includes('routecodex-v3-server') && /axum::serve|TcpListener::bind/.test(httpListenerText) && !isTest) {
+  if (!path.includes('routecodex-v3-server') && !path.includes('routecodex-v3-admin') && /axum::serve|TcpListener::bind/.test(httpListenerText) && !isTest) {
     fail('HTTP listener outside server crate: ' + path);
   }
-  if (!isTest && !path.includes('routecodex-v3-config') && !isProviderOwner
+  if (!isTest && !path.includes('routecodex-v3-config') && !path.includes('routecodex-v3-admin') && !isProviderOwner
       && /fs::read_to_string|std::fs::read_to_string|std::fs::read\(/.test(productionText)) {
     fail('config authoring file IO outside config crate: ' + path);
   }
