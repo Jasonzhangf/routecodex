@@ -69,7 +69,19 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
   `fix(v4): enforce six-axis plane invariants in v3 resource coverage gate`）：
   gate 现校验控制轴禁入 provider/client body、数据轴 allowed_writers 禁控制/调试 owner、
   诊断轴禁 live path 读取（已登记 dry-run / timing 两个诊断投影例外），红测扩展到 10/10。
-  需 coverage-gate r2 重审。
+  修复 commit：`e3e8719d5`。
+- DSH review coverage-gate r2（commit `e3e8719d5`）reviewer 终稿为字面
+  `VERDICT: PASS`（仅 P2，无 P0/P1、无“修复后再审”），但 dsh-mcp 裁决解析器误判 FAIL：
+  解析器对 `**VERDICT: PASS**`（markdown 加粗）不识别，且把正文里 “the P0
+  control/payload separation surface is not directly altered” 的 P0 词面误当 blocking
+  finding。已修 dsh-mcp 解析器（去 markdown 强调 + P0/P1 仅按 finding 头行判定）。
+  P2-1：控制轴“client_body 例外”为死分支（V3 源图 v3.error.client_projection 本身
+  false/false），已删除例外分支并修正 model doc 口径（例外只在 V4 目标图
+  v4.error.client_projection 派生投影，由 plane-isolation gate 校验）；
+  P2-2：10/10 红测未接 CI，已新增 `verify:v4-foundation-red` npm script + CI step；
+  P2-3：诊断红测改为显式目标 `v3.debug.artifact`（不再依赖矩阵排序）。
+  修复 commit 见 git log `fix(v4): address dsh coverage-gate r2 P2 findings`；
+  需 coverage-gate r3 重审。
 - 已记录 known gaps：target_triple、public_api_hash（派生非真 API 提取）、edge 再冻结、
   workspace gate 修正：runtime/config/control/error 四个 anchored crate 依赖
   `--extern` 注入，只经 build-link test-consumer 编译（CI `v4-active-link`

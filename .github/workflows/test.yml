@@ -69,6 +69,8 @@ jobs:
         run: cargo test --workspace --manifest-path v4/Cargo.toml
       - name: V4 foundation pipeline gates
         run: npm run verify:v4-foundation
+      - name: V4 foundation red self-tests
+        run: npm run verify:v4-foundation-red
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
       - name: Fetch Rust dependencies for offline builds

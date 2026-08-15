@@ -277,6 +277,7 @@
     "verify:v3-architecture-ci": "node scripts/architecture/verify-v3-architecture-ci.mjs",
     "verify:v4-active-link": "node scripts/architecture/verify-v4-active-link.mjs",
     "verify:v4-foundation": "node scripts/architecture/verify-v4-semantic-parity.mjs && node scripts/architecture/verify-v4-v3-resource-coverage.mjs && node scripts/architecture/verify-v4-plane-isolation.mjs && node scripts/architecture/verify-v4-skeleton-topology.mjs && node scripts/architecture/verify-v4-execution-binding.mjs && node scripts/architecture/verify-v4-capability-isolation.mjs && node scripts/architecture/verify-v4-resource-binding.mjs && node scripts/architecture/verify-v4-responses-direct-compat.mjs",
+    "verify:v4-foundation-red": "node scripts/architecture/verify-v4-v3-resource-coverage.mjs --red-self-test",
     "verify:agent-collab-protocol": "node scripts/architecture/verify-agent-collab-protocol.mjs",
     "test:v3-provider-action-gate-red-fixtures": "node scripts/tests/v3-provider-action-gate-red-fixtures.mjs",
     "pack:v3:dev": "node scripts/pack-v3-release.mjs --mode dev",

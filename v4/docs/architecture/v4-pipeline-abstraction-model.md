@@ -106,7 +106,9 @@ baseline（V3 现状，只读对照）
 3. 六轴不变量机器可检查（`v4_parity_gate_v3_resource_coverage` 对 V3 覆盖层逐条校验，
    `v4_parity_gate_plane_isolation` 对 V4 目标图校验）：
    - 控制轴：V3 资源 `may_enter_provider_body=false` 且 `may_enter_client_body=false`
-     （唯一已登记例外：`v3.error.client_projection` 的客户端错误投影）；
+     （V3 覆盖层所有控制资源均禁入 body；V4 目标图唯一已登记控制→客户端例外是
+     `v4.error.client_projection` 的派生错误投影，由 `v4_parity_gate_plane_isolation`
+     校验 `client_visible_fields` 白名单）；
    - 数据轴：V3 资源不得声明控制字段——机器锁为 `allowed_writers` 不得包含控制/诊断轴
      owner（控制状态不得写入数据资源，debug/snapshot 不得重建数据资源）；
    - 诊断轴：`may_enter_provider_body=false` 且 `may_enter_client_body=false`，且

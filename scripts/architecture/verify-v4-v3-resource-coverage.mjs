@@ -14,7 +14,9 @@
  * 5. Parity map coverage claim v3_resources total=103 mapped=103 gap=0.
  * 6. Six-axis plane isolation invariants (v4-pipeline-abstraction-model.md):
  *    - control axis: may_enter_provider_body=false and may_enter_client_body=false
- *      (registered exception: v3.error.client_projection client error projection);
+ *      (all V3 control resources, including v3.error.client_projection: the
+ *      V4-level v4.error.client_projection is the sanctioned control->client
+ *      projection and is enforced by verify-v4-plane-isolation.mjs instead);
  *    - data axis: no control/diagnostic owner may be an allowed writer
  *      (control fields and debug-snapshot rebuild must never enter data payload);
  *    - diagnostic axis: may_enter_provider_body=false and may_enter_client_body=false,
@@ -65,9 +67,6 @@ const DIAGNOSTIC_LIVE_READER_EXCEPTIONS = {
   'v3.debug.dry_run_execution': ['V3Server16HttpFrame'],
   'v3.runtime.responses_timing_observability': ['V3ResponsesProtocolRelayHandoff', 'V3ResponsesProtocolDirectHandoff'],
 };
-
-// Registered control -> client-body exception (six-axis invariant clause 1).
-const CONTROL_CLIENT_BODY_EXCEPTIONS = new Set(['v3.error.client_projection']);
 
 function validate(v3Map, coverage, parity, abstractionContract) {
   const failures = [];
@@ -133,9 +132,7 @@ function validate(v3Map, coverage, parity, abstractionContract) {
 
     // Six-axis plane isolation invariants (v4-pipeline-abstraction-model.md clause 3).
     if (entry.axis === 'control') {
-      const clientBodyAllowed =
-        CONTROL_CLIENT_BODY_EXCEPTIONS.has(entry.resource_id) && resource.may_enter_client_body === true;
-      if (resource.may_enter_provider_body !== false || (resource.may_enter_client_body !== false && !clientBodyAllowed)) {
+      if (resource.may_enter_provider_body !== false || resource.may_enter_client_body !== false) {
         failures.push(`${entry.resource_id}: control axis resource must never enter provider/client body`);
       }
     }
@@ -213,7 +210,7 @@ function runSelfTest() {
 
   const controlId = coverage.resources.find((entry) => entry.axis === 'control').resource_id;
   const dataId = coverage.resources.find((entry) => entry.axis === 'data').resource_id;
-  const diagnosticId = coverage.resources.find((entry) => entry.axis === 'diagnostic').resource_id;
+  const diagnosticId = 'v3.debug.artifact';
 
   const cases = [
     ['unclassified status', ({ coverage: c }) => {
