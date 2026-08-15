@@ -35577,7 +35577,10 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
   “coordinated collapse across all four sources” 用例，现 11/11。
 - 验证：verify:v4-foundation 9/9；verify:v4-foundation-red（feature-gap
   11/11 + resource-coverage 10/10）；appsdk verify --admission v4
-  contract_bound；cargo test --workspace 绿。改代码/测试后旧 PASS 失效，
-  需 feature-gap r2 DSH 重审（未跑）。
+  contract_bound；cargo test --workspace 绿。DSH feature-gap r2
+  （commit 560cdb8ca）PASS：state=completed, verdict=pass,
+  reason=final_verdict_pass，final 字面 VERDICT: PASS、无 P0/P1；唯一 P2
+  为 review 自读运行中目录的生命周期误报（本 run 已 completed），非阻塞。
+  P2-1 闭环。
 - P2-2（count-only 非语义绑定）文档口径已记录；P2-3（function-map.yml 旧表
   真源歧义）属 V3 侧 supersession，未动 V3。

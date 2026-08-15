@@ -115,6 +115,10 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
     `v4/contracts/v3-feature-baseline.json` 作为独立权威锚，gate 校验
     v3 feature 集合与基线全等；红测新增 “coordinated collapse across all
     four sources” 用例（11/11），四源一致删 feature 不改基线必红。
+    DSH review feature-gap r2（commit `560cdb8ca`）PASS：
+    `state=completed, verdict=pass, reason=final_verdict_pass`，final 字面
+    `VERDICT: PASS`、无 P0/P1、无“修复后再审”；证据在
+    `~/.dsh/reviews/v4-feature-gap-dsh-r2/`。P2-1 闭环。
   - P2-2 gate 只是 count/consistency 锁，不是语义/实现绑定（相对
     semantic-parity gate 缺 resource/gate/evidence 引用）；提交标题
     “machine-lock feature GAP=0” 应记为 count/consistency 口径，

@@ -5487,6 +5487,7 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
   自推导，四源一致删 feature 且同步减 coverage 计数可静默 PASS。
 - 修复：新增 `v4/contracts/v3-feature-baseline.json` 独立冻结锚（64
   feature_id），gate 校验 v3 feature 集合与基线全等；红测新增 coordinated
-  collapse 用例（11/11）。改代码后旧 DSH PASS 失效，需重审后才可交付。
+  collapse 用例（11/11）。DSH feature-gap r2（commit 560cdb8ca）
+  VERDICT: PASS（无 P0/P1），P2-1 闭环。
 - 经验：count/consistency 类 gate 必须有独立权威锚（frozen baseline）而非
   仅从同一来源自推导 actual；协调塌缩是红测必测类，防“一致删减”静默漂移。
