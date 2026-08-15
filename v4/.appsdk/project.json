@@ -384,7 +384,7 @@
         "suite_id": "v4-control-l2-regression"
       },
       "source_owner": "routecodex-v4-control",
-      "stage": "architecture_stable",
+      "stage": "frozen",
       "version_base": {
         "base_artifact_hash": "sha256:fc1510781b3838bc797aead36703708c1cc8f40165e30195aed16dae13a11cc4",
         "base_source_commit": "0c7be8d5c",
