@@ -44,7 +44,7 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
   与 YAML 双源一致由 `v4_parity_gate_resource_binding` 机器锁校验。
 - `v4_parity_gate_resource_binding` 已锁：binding_status 合法性、anchored 准入
   （owner_crate 存在 + gate 注册 + owner_symbols 在 crate 源码顶层声明 +
-  .appsdk status=active）、design 无漂移、.appsdk 未登记 v4 资源（6/6 红测）。
+  .appsdk status=active）、design 无漂移、.appsdk 未登记 v4 资源（7/7 红测）。
 - DSH review r1（commit `4bcf7c48b`）FAIL：P1 anchored 无代码符号绑定、
   P2 自测 case 5 覆盖错分支、计划文档计数过期；修复后需重审。
 - DSH review r2（commit `9cc33f97e`）FAIL：P1 符号绑定是文本正则启发式
