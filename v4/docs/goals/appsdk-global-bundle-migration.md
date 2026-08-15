@@ -2,7 +2,7 @@
 
 ## Scope
 
-Migrate V4 governance to the globally installed `appsdk 0.1.0 (rust)` Bundle. This change owns only SDK admission, Bundle resources, lock identity, governance records, and verification wiring.
+Migrate V4 governance to the globally installed `appsdk 0.1.2 (rust)` Bundle. This change owns only SDK admission, Bundle resources, lock identity, governance records, and verification wiring.
 
 ## Invariants
 

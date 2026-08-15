@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "preparation_id": "prepare-routecodex-v4-global-appsdk-bundle-0.1.0",
+  "preparation_id": "prepare-routecodex-v4-global-appsdk-bundle-0.1.2",
   "status": "confirmed",
-  "objective": "将 RouteCodex v4 的治理执行入口迁移到全局 AppSDK 0.1.0 Rust Bundle，同时保持现有业务、pipeline、payload、模块职责、Active artifact 和 Protected history 不变。",
+  "objective": "将 RouteCodex v4 的治理执行入口迁移到全局 AppSDK 0.1.2 Rust Bundle，同时保持现有业务、pipeline、payload、模块职责、Active artifact 和 Protected history 不变。",
   "change_kind": "project_refactor",
   "project_root": "v4",
   "legacy_roots": ["v4/.appsdk/sdk.bin", "v4/contracts/records/**", "v4/contracts/transitions/**", "v4/contracts/lifecycle-state-machines.manifest.json"],
@@ -14,7 +14,7 @@
     "forbidden_paths": ["v3/**", "src/**", "sharedmodule/**", "v4/crates/**", "v4/protected/**", "v4/active/lib/**", "v4/generated/**"],
     "payload_control_separation": "confirmed: control resources never enter business request/response/provider payload"
   },
-  "acceptance_criteria": ["Global AppSDK 0.1.0 verifies RouteCodex v4.", "sdk.lock matches the global AppSDK binary and Bundle digests.", "Bundle skills, docs, rules and contracts are installed by the global SDK and pass resource validation.", "Active artifact hashes remain unchanged unless an explicit migration contract requires recompilation.", "RouteCodex business regression results do not decrease.", "v4/.appsdk/sdk.bin is never used as an execution entry."],
+  "acceptance_criteria": ["Global AppSDK 0.1.2 verifies RouteCodex v4.", "sdk.lock matches the global AppSDK binary and Bundle digests.", "Bundle skills, docs, rules and contracts are installed by the global SDK and pass resource validation.", "Active artifact hashes remain unchanged unless an explicit migration contract requires recompilation.", "RouteCodex business regression results do not decrease.", "v4/.appsdk/sdk.bin is never used as an execution entry."],
   "non_goals": ["Do not modify RouteCodex business logic.", "Do not migrate provider, pipeline, payload or error semantics.", "Do not refactor Rust module ownership.", "Do not change Active library APIs."],
   "assumptions": ["The existing RouteCodex v4 module and lifecycle records are the migration baseline.", "The global AppSDK Bundle is the only compiler, contract, rule and skill distribution source after migration.", "Active and Protected artifacts remain immutable throughout governance-only migration."],
   "questions": [],
