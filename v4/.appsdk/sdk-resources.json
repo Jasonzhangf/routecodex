@@ -1,10 +1,10 @@
 {
-  "bundle_digest": "sha256:1c91fcc629f38663d0f7d3eaa185798bd7b56f66830b7d516227eb3a6dcdf20f",
-  "manifest_digest": "sha256:2b82b87ef07bc31dcb77875f9d3f0405625f963709daed828b64f8eaa8965e95",
+  "bundle_digest": "sha256:1fecd4fc44263ea270d47f096cf40ed1706b659880f808e2d2dcf24b87001b86",
+  "manifest_digest": "sha256:3786ee502e23be59e4583249b80950d422f0c0212feef70554bb84fb62465301",
   "resources": [
     {
       "class": "contracts",
-      "digest": "sha256:2b82b87ef07bc31dcb77875f9d3f0405625f963709daed828b64f8eaa8965e95",
+      "digest": "sha256:3786ee502e23be59e4583249b80950d422f0c0212feef70554bb84fb62465301",
       "path": ".appsdk/contracts/sdk-bundle.manifest.json",
       "source": "contracts/sdk-bundle.manifest.json"
     },
@@ -64,7 +64,7 @@
     },
     {
       "class": "docs",
-      "digest": "sha256:d0cc3c81956e8e39a9a004f0aa33fa20a08b2bb57864f677adce7dce87e89fbb",
+      "digest": "sha256:7f57e92a48321eace456b7c326aa4b2c676cde2c7a2efc4a8815157d2581ca3f",
       "path": ".appsdk/docs/design/appsdk-project-integration.md",
       "source": "docs/design/appsdk-project-integration.md"
     },
@@ -89,5 +89,5 @@
   ],
   "schema_version": 1,
   "sdk": "appsdk",
-  "version": "0.1.0"
+  "version": "0.1.2"
 }

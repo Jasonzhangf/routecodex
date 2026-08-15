@@ -97,7 +97,7 @@ jobs:
         run: |
           mkdir -p "$HOME/.local/bin"
           curl -fsSL -o "$HOME/.local/bin/appsdk" \
-            https://github.com/Jasonzhangf/appsdk/releases/download/v0.1.1/appsdk-0.1.1-macos-arm64
+            https://github.com/Jasonzhangf/appsdk/releases/download/v0.1.2/appsdk-0.1.2-macos-arm64
           chmod +x "$HOME/.local/bin/appsdk"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: V4 AppSDK admission

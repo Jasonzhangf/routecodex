@@ -19,17 +19,15 @@ Migrate V4 governance to the globally installed `appsdk 0.1.0 (rust)` Bundle. Th
 
 ```text
 binary: /Users/fanzhang/.local/bin/appsdk
-version: appsdk 0.1.0 (rust)
-binary/compiler digest: sha256:17b6d2faa8a4a7ae86a6948fa3a60a33799443fdb02c2995992f3db846529141
-bundle digest: sha256:1c91fcc629f38663d0f7d3eaa185798bd7b56f66830b7d516227eb3a6dcdf20f
-bundle manifest digest: sha256:2b82b87ef07bc31dcb77875f9d3f0405625f963709daed828b64f8eaa8965e95
+version: appsdk 0.1.2 (rust)
+binary/compiler digest: sha256:3685149eab60ed887737e1ff0c9a6ddbbd0add32424d40595e27296ebf7b8686
+bundle digest: sha256:1fecd4fc44263ea270d47f096cf40ed1706b659880f808e2d2dcf24b87001b86
+bundle manifest digest: sha256:3786ee502e23be59e4583249b80950d422f0c0212feef70554bb84fb62465301
 ```
 
-The pinned binary is published as `Jasonzhangf/appsdk` release tag `v0.1.1` asset
-`appsdk-0.1.1-macos-arm64`; that asset is byte-identical to the digest in
+The pinned binary is published as `Jasonzhangf/appsdk` release tag `v0.1.2` asset
+`appsdk-0.1.2-macos-arm64`; that asset is byte-identical to the digest in
 `sdk.lock` and to the globally installed binary (`sha256` verified at pin time).
-The release tag `v0.1.1` does not change the binary's self-reported version,
-which remains `appsdk 0.1.0 (rust)`.
 
 ## Verification
 
@@ -43,7 +41,7 @@ cargo build --release --workspace
 
 ## CI Admission
 
-`.github/workflows/test.yml` runs the `v4-appsdk-admission` job on `macos-14` (same arm64 platform as the pinned artifact). The job downloads the public release artifact `appsdk-0.1.1-macos-arm64` from `Jasonzhangf/appsdk` tag `v0.1.1`, installs it as `~/.local/bin/appsdk`, and executes the `global_sdk_only` gate (`appsdk verify --admission v4`). Admission verify covers SDK identity, lock digest, bundle resources, governance contracts, maps, and goal contract without requiring gitignored generated or Active artifacts. Full `appsdk verify v4` remains the local lifecycle gate where generated artifacts exist. The gate fails when `appsdk` is absent or its digest does not match `v4/.appsdk/sdk.lock`. Dev machine and CI consume the identical release artifact, so `sdk.lock` pins a single digest for both.
+`.github/workflows/test.yml` runs the `v4-appsdk-admission` job on `macos-14` (same arm64 platform as the pinned artifact). The job downloads the public release artifact `appsdk-0.1.2-macos-arm64` from `Jasonzhangf/appsdk` tag `v0.1.2`, installs it as `~/.local/bin/appsdk`, and executes the `global_sdk_only` gate (`appsdk verify --admission v4`). Admission verify covers SDK identity, lock digest, bundle resources, governance contracts, maps, and goal contract without requiring gitignored generated or Active artifacts. Full `appsdk verify v4` remains the local lifecycle gate where generated artifacts exist. The gate fails when `appsdk` is absent or its digest does not match `v4/.appsdk/sdk.lock`. Dev machine and CI consume the identical release artifact, so `sdk.lock` pins a single digest for both.
 
 Negative checks cover Bundle/resource tampering, path traversal, symlink resources, Active artifact mismatch, review rejection, missing FreezeRecord, and local witness execution.
 
