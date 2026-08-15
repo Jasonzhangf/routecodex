@@ -1,8 +1,7 @@
 use super::{
     build_v3_chat_canonical_request_from_responses_payload_for_req_inbound,
-    encode_v3_anthropic_request_as_responses_semantic,
-    normalize_v3_history_image_placeholders, V3HubEntryProtocol, V3HubReqInbound01ClientRaw,
-    V3HubRequestSemanticProtocol,
+    encode_v3_anthropic_request_as_responses_semantic, normalize_v3_history_image_placeholders,
+    V3HubEntryProtocol, V3HubReqInbound01ClientRaw, V3HubRequestSemanticProtocol,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -38,10 +37,9 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
         // content 不被 normalize 识别，图片原样进 provider wire → context 400）。
         let raw = Arc::make_mut(&mut input.payload.0);
         normalize_v3_history_image_placeholders(raw);
-        let mut canonical = build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
-            raw,
-        )
-        .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
+        let mut canonical =
+            build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(raw)
+                .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
         normalize_v3_history_image_placeholders(&mut canonical);
         input.payload.0 = Arc::new(canonical);
         return Ok(V3HubReqInbound02Normalized {

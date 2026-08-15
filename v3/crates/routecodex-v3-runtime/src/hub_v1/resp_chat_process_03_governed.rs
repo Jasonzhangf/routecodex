@@ -340,9 +340,10 @@ fn normalize_v3_hub_relay_response(
                 reason: error.to_string(),
             }
         })?;
-    Ok(build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat).map_err(|error| {
-        V3HubRelayResponseError::ProviderCompatFailed { reason: error }
-    })?)
+    Ok(
+        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat)
+            .map_err(|error| V3HubRelayResponseError::ProviderCompatFailed { reason: error })?,
+    )
 }
 
 fn govern_v3_hub_relay_response(
@@ -351,11 +352,13 @@ fn govern_v3_hub_relay_response(
 ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
     // 响应侧密文清理（运行时真路径）：消费请求侧 VR 路由决策写入的
     // retain_response_cipher 标记——仅 gpt 单 provider 保留，其余一律剥离。
-    let input = strip_v3_resp03_encrypted_reasoning_content(input, profile.retain_response_cipher());
+    let input =
+        strip_v3_resp03_encrypted_reasoning_content(input, profile.retain_response_cipher());
     let input = harvest_v3_think_blocks_at_resp03(input);
     let input = complete_or_repair_v3_resp03_tool_frames(input);
-    let _identified_servertool_tool =
-        super::servertool_hooks::inspect_v3_servertool_response_tool(input.provider_payload().as_ref());
+    let _identified_servertool_tool = super::servertool_hooks::inspect_v3_servertool_response_tool(
+        input.provider_payload().as_ref(),
+    );
     let governance = build_v3_resp03_protocol_governance(&input)?;
     let branch = inspect_v3_resp03_finish_reason(&input, &governance);
     let mut stopless_center_state = None;
@@ -1307,8 +1310,7 @@ mod tests {
         assert!(!payload.to_string().contains("rsn_CIPHERTEXT"));
         assert_eq!(payload["output"][0]["type"], "reasoning");
         assert_eq!(
-            payload["output"][0]["summary"][0]["text"],
-            "plain summary",
+            payload["output"][0]["summary"][0]["text"], "plain summary",
             "明文 summary 必须保留"
         );
         assert_eq!(payload["output"][1]["text"], "answer");
@@ -1465,6 +1467,9 @@ mod tests {
             payload.contains("resp04-signature"),
             "anthropic thinking signature 载体不得被剥离: {payload}"
         );
-        assert!(payload.contains("signed"), "明文 summary 必须保留: {payload}");
+        assert!(
+            payload.contains("signed"),
+            "明文 summary 必须保留: {payload}"
+        );
     }
 }

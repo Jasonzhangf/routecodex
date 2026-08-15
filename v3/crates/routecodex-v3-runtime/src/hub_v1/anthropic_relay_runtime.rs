@@ -72,13 +72,15 @@ impl V3AnthropicRelayClientHeader {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct V3AnthropicRelayRuntimeOutput {
     pub status: u16,
     pub client_response: Value,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
     pub servertool_followup_required: bool,
+    pub observability: Option<V3RuntimeObservability>,
+    pub stream_observation: Option<V3RuntimeStreamObservation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -552,7 +554,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         response_hook_profile =
             response_hook_profile.with_web_search_execution_mode(request_web_search_execution_mode);
         if let Some(state) = request_web_search_state.as_ref() {
-            response_hook_profile = response_hook_profile.with_web_search_center_state(state.clone());
+            response_hook_profile =
+                response_hook_profile.with_web_search_center_state(state.clone());
         }
     }
     let req04 = request_outcome.into_governed();
@@ -575,6 +578,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         retry_policy,
         deterministic_sample,
     };
+    // 统一 relay timing（与 relay_runtime_core 同语义）：只写入 typed
+    // observability，不进入 payload。
+    let runtime_timing = crate::runtime_timing::V3RuntimeTimingState::start();
     loop {
         let selected = if let Some(selected) = retry_selected.take() {
             selected
@@ -760,6 +766,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 }
             }
         }
+        if let Err(timing_error) = runtime_timing.start_external() {
+            return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
+        }
         let transport_result = match tokio::time::timeout(
             V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT,
             transport.send(transport_request),
@@ -782,6 +791,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     &response.body,
                     &selected_target_provider_id,
                 );
+                let _ = runtime_timing.finish_external();
                 drop(_provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
                     &failure_context,
@@ -803,6 +813,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             }
             Err(error) => {
                 let failure = provider_runtime_failure(error, &selected_target_provider_id);
+                let _ = runtime_timing.finish_external();
                 drop(_provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
                     &failure_context,
@@ -823,6 +834,10 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 continue;
             }
         };
+        if let Err(timing_error) = runtime_timing.finish_external() {
+            return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
+        }
+        let provider_status = provider_raw.status();
         match provider_raw.into_body() {
             V3ProviderResponseBody::Sse(stream) => {
                 let chunks = match collect_v3_anthropic_relay_provider_sse_chunks(
@@ -833,7 +848,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         crate::hub_v1::relay_runtime_core::V3_RELAY_SSE_STREAM_IDLE_TIMEOUT,
                     ),
                 )
-                .await {
+                .await
+                {
                     Ok(chunks) => chunks,
                     Err(error) => {
                         let failure = provider_runtime_failure(error, &selected_target_provider_id);
@@ -929,12 +945,33 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     &selected_target_auth_alias,
                     &selected_target_model_id,
                 )?;
+                let mut observability =
+                    crate::hub_v1::relay_runtime_shared::build_v3_relay_observability(
+                        "anthropic",
+                        &selected,
+                        if transport_intent == V3HubTransportIntent::Sse {
+                            "sse"
+                        } else {
+                            "json"
+                        },
+                    );
+                observability.provider_status = Some(provider_status);
+                observability.response_status = Some("completed".to_string());
+                observability.finish_reason = read_v3_runtime_finish_reason(&client_response)
+                    .or_else(|| extract_v3_anthropic_relay_finish_reason(&client_response));
+                observability.usage = extract_v3_anthropic_relay_usage_summary(&client_response);
+                observability.timing =
+                    Some(runtime_timing.finish_runtime().map_err(|timing_error| {
+                        V3AnthropicRelayRuntimeError::Target(timing_error)
+                    })?);
                 return Ok(V3AnthropicRelayRuntimeOutput {
                     status: 200,
                     client_response,
                     node_trace: trace,
                     error_chain: None,
                     servertool_followup_required,
+                    observability: Some(observability),
+                    stream_observation: None,
                 });
             }
             V3ProviderResponseBody::Json(bytes) => {
@@ -1087,12 +1124,33 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     &selected_target_auth_alias,
                     &selected_target_model_id,
                 )?;
+                let mut observability =
+                    crate::hub_v1::relay_runtime_shared::build_v3_relay_observability(
+                        "anthropic",
+                        &selected,
+                        if transport_intent == V3HubTransportIntent::Sse {
+                            "sse"
+                        } else {
+                            "json"
+                        },
+                    );
+                observability.provider_status = Some(provider_status);
+                observability.response_status = Some("completed".to_string());
+                observability.finish_reason = read_v3_runtime_finish_reason(&client_response)
+                    .or_else(|| extract_v3_anthropic_relay_finish_reason(&client_response));
+                observability.usage = extract_v3_anthropic_relay_usage_summary(&client_response);
+                observability.timing =
+                    Some(runtime_timing.finish_runtime().map_err(|timing_error| {
+                        V3AnthropicRelayRuntimeError::Target(timing_error)
+                    })?);
                 return Ok(V3AnthropicRelayRuntimeOutput {
                     status: 200,
                     client_response,
                     node_trace: trace,
                     error_chain: None,
                     servertool_followup_required,
+                    observability: Some(observability),
+                    stream_observation: None,
                 });
             }
         }
@@ -1336,100 +1394,6 @@ fn commit_or_release_local_continuation(
     Ok(())
 }
 
-pub fn project_v3_anthropic_relay_runtime_failure(
-    error: V3AnthropicRelayRuntimeError,
-) -> V3AnthropicRelayRuntimeOutput {
-    let display = error.to_string();
-    let source = match error {
-        V3AnthropicRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ModelNotFound,
-            "V3Target10ConcreteProviderSelected",
-            "direct_model_not_found",
-            message,
-        ),
-        error => build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3HubRuntime",
-            "anthropic_relay_runtime_error",
-            error.to_string(),
-        ),
-    };
-    error_output(source, 500, "none", Vec::new())
-}
-
-fn provider_http_failure(
-    status: u16,
-    body: &[u8],
-    _provider_id: &str,
-) -> V3RelayProviderFailure {
-    V3RelayProviderFailure {
-        status,
-        client_response: project_v3_responses_error_as_anthropic_error(body),
-        source_stage: "V3ProviderReqOutbound09TransportRequest",
-        terminal_projection: None,
-        error_type_fn: extract_error_type_style,
-        error_message_fn: extract_message_type_style,
-    }
-}
-
-fn provider_request_failure(
-    source_stage: &'static str,
-    error_type: &'static str,
-    error: impl std::fmt::Display,
-) -> V3RelayProviderFailure {
-    V3RelayProviderFailure {
-        status: 502,
-        client_response: json!({"type":"error","error":{"type":error_type,"message":error.to_string()}}),
-        source_stage,
-        terminal_projection: None,
-        error_type_fn: extract_error_type_style,
-        error_message_fn: extract_message_type_style,
-    }
-}
-
-fn provider_runtime_failure(
-    error: V3ProviderError,
-    provider_id: &str,
-) -> V3RelayProviderFailure {
-    let terminal_projection =
-        matches!(&error, V3ProviderError::ClientDisconnect { .. }).then(|| {
-            project_v3_client_disconnect(
-                provider_id,
-                provider_runtime_failure_stage(&error),
-                error.to_string(),
-            )
-        });
-    V3RelayProviderFailure {
-        status: if terminal_projection.is_some() {
-            499
-        } else {
-            502
-        },
-        client_response: json!({"type":"error","error":{"type":"provider_error","message":error.to_string()}}),
-        source_stage: provider_runtime_failure_stage(&error),
-        terminal_projection,
-        error_type_fn: extract_error_type_style,
-        error_message_fn: extract_message_type_style,
-    }
-}
-
-fn provider_failure_output(
-    failure: V3RelayProviderFailure,
-    mut trace: Vec<&'static str>,
-) -> V3AnthropicRelayRuntimeOutput {
-    let projected = failure
-        .terminal_projection
-        .expect("terminal Anthropic provider failure must carry typed Error06 projection");
-    trace.push("V3Error06ClientProjected");
-    V3AnthropicRelayRuntimeOutput {
-        status: projected.status,
-        client_response: projected.body,
-        node_trace: trace,
-        error_chain: Some(projected.chain.to_vec()),
-        servertool_followup_required: false,
-    }
-}
-
 fn record_provider_success_after_resp04(
     provider_health: &V3ProviderFailureRuntimeHealth,
     failure_session_scope: &V3ProviderFailureSessionScope,
@@ -1449,18 +1413,7 @@ fn record_provider_success_after_resp04(
         .map_err(|error| V3AnthropicRelayRuntimeError::Target(error.to_string()))
 }
 
-fn error_output(
-    source: routecodex_v3_error::V3Error01SourceRaised,
-    status: u16,
-    provider_id: &str,
-    mut trace: Vec<&'static str>,
-) -> V3AnthropicRelayRuntimeOutput {
-    let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
-    V3AnthropicRelayRuntimeOutput {
-        status: projected.status,
-        client_response: projected.body,
-        node_trace: trace,
-        error_chain: Some(projected.chain.to_vec()),
-        servertool_followup_required: false,
-    }
-}
+// Anthropic relay 失败投影与 usage/finish_reason 提取 helper 保持文件尺寸
+// 门限（v3.module_decomposition <=1500）：逻辑仍属于 anthropic relay runtime
+// owner，include! 到同一模块，无独立模块边界。
+include!("anthropic_relay_runtime_helpers.rs");

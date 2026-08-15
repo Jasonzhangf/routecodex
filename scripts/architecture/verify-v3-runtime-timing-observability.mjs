@@ -130,8 +130,22 @@ const kernel = readRequired(kernelPath)
   + '\n' + readRequired(path.join(root, 'v3/crates/routecodex-v3-runtime/src/kernel/direct_resp15_finalize.rs'));
 const directState = readRequired(directStatePath);
 const directSseOutcome = readRequired(directSseOutcomePath);
-const directRuntimeHelpers = readRequired(directRuntimeHelpersPath);
-const kernelTests = readRequired(kernelTestsPath);
+const directRuntimeHelpers = readRequired(directRuntimeHelpersPath)
+  + '\n'
+  + readRequired(
+    path.join(
+      root,
+      'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs',
+    ),
+  );
+const kernelTests = readRequired(kernelTestsPath)
+  + '\n'
+  + readRequired(
+    path.join(
+      root,
+      'v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs',
+    ),
+  );
 const directSseOutcomeWrapper = directSseOutcome.slice(
   directSseOutcome.indexOf("pub(super) fn wrap_direct_sse_provider_outcome_stream("),
 );

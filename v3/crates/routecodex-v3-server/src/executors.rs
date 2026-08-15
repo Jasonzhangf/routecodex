@@ -107,7 +107,9 @@ pub(crate) fn wrap_v3_relay_sse_console_stream(
             wrap_v3_relay_sse_closeout_stream(stream, move |terminal| match terminal {
                 V3SseConsoleStreamTerminal::Completed => finalizer.complete_relay_sse(),
                 V3SseConsoleStreamTerminal::Dropped => finalizer.client_disconnected(),
-                V3SseConsoleStreamTerminal::Failed(message) => finalizer.provider_stream_failed(&message),
+                V3SseConsoleStreamTerminal::Failed(message) => {
+                    finalizer.provider_stream_failed(&message)
+                }
             })
         }
         None => stream,
@@ -194,9 +196,7 @@ impl futures_util::Stream for V3DirectSseConsoleCloseoutStream {
         match this.stream.as_mut().poll_next(cx) {
             Poll::Ready(Some(Ok(chunk))) => Poll::Ready(Some(Ok(chunk))),
             Poll::Ready(Some(Err(error))) => {
-                this.emit_terminal(V3SseConsoleStreamTerminal::Failed(
-                    error.message.clone(),
-                ));
+                this.emit_terminal(V3SseConsoleStreamTerminal::Failed(error.message.clone()));
                 Poll::Ready(Some(Err(error)))
             }
             Poll::Ready(None) => {
@@ -224,7 +224,10 @@ pub(crate) fn wrap_v3_direct_sse_closeout_stream(
     })
 }
 
-pub(crate) fn openai_chat_relay_output_response(output: V3OpenAiChatRelayRuntimeOutput) -> Response<Body> {
+pub(crate) fn openai_chat_relay_output_response(
+    output: V3OpenAiChatRelayRuntimeOutput,
+    stream_console_finalizer: Option<V3SseConsoleFinalizer>,
+) -> Response<Body> {
     let content_type = match &output.client_body {
         V3OpenAiChatRelayClientBody::Json(_) => "application/json",
         V3OpenAiChatRelayClientBody::Sse(_) => "text/event-stream",
@@ -233,7 +236,9 @@ pub(crate) fn openai_chat_relay_output_response(output: V3OpenAiChatRelayRuntime
         .status(StatusCode::from_u16(output.status).expect("typed V3 OpenAI Chat Relay status"))
         .header("content-type", content_type);
     let body = match output.client_body {
-        V3OpenAiChatRelayClientBody::Sse(client_stream) => Body::from_stream(client_stream),
+        V3OpenAiChatRelayClientBody::Sse(client_stream) => Body::from_stream(
+            wrap_v3_relay_sse_console_stream(client_stream, stream_console_finalizer),
+        ),
         V3OpenAiChatRelayClientBody::Json(client_response) => Body::from(
             serde_json::to_vec(&client_response).expect("typed V3 OpenAI Chat Relay projection"),
         ),
@@ -255,6 +260,8 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
     payload: Value,
     request_id: String,
     failure_session_scope: V3ProviderFailureSessionScope,
+    console_context: V3ConsoleEmissionContext,
+    started_at: Instant,
 ) -> Response<Body> {
     use futures_util::StreamExt;
     let manifest = state.manifest.clone();
@@ -291,16 +298,38 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                     // （错误链：handle_provider_failure → 3 次拉黑 15 分钟 → 切 provider），
                     // server 只负责把转换结果喂给客户端（连接与心跳由 server 管理）。
                     match result {
-                        Ok(output) => match output.client_body {
+                        Ok(output) => {
+                            let observability = output.observability.clone();
+                            let stream_observation = output.stream_observation.clone();
+                            let output_status = output.status;
+                            let node_trace = output.node_trace.clone();
+                            match output.client_body {
                             V3OpenAiChatRelayClientBody::Sse(stream) => {
-                                // runtime 已收集完整流（iter），直接透传数据帧。
-                                let mut stream = stream;
-                                while let Some(chunk) = stream.next().await {
-                                    let chunk = chunk.map_err(std::io::Error::other);
-                                    if tx.send(chunk).await.is_err() {
-                                        return;
-                                    }
-                                }
+                                // 与 endpoint_handlers relay 路径同一 closeout
+                                // 收口语义：流 Err → post-commit 502 provider SSE
+                                // 失败；干净 EOF → completed 打印；客户端断连 →
+                                // 499。禁止流失败后仍当成功收口（旧实现把 provider
+                                // 缺终帧误报成 500 runtime_observability_contract）。
+                                let stream_console_finalizer =
+                                    match (stream_observation, observability) {
+                                        (Some(stream_observation), Some(observability)) => {
+                                            Some(V3SseConsoleFinalizer {
+                                                context: console_context.clone(),
+                                                status: output_status,
+                                                node_trace,
+                                                observability,
+                                                stream_observation,
+                                                started_at,
+                                            })
+                                        }
+                                        _ => None,
+                                    };
+                                drain_v3_openai_chat_relay_sse_stream_to_client(
+                                    stream,
+                                    &tx,
+                                    stream_console_finalizer,
+                                )
+                                .await;
                             }
                             V3OpenAiChatRelayClientBody::Json(json) => {
                                 // provider 以 JSON 完成（非 SSE）：包装为 SSE data 帧。
@@ -310,8 +339,17 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                                 frame.extend_from_slice(&bytes);
                                 frame.extend_from_slice(b"\n\n");
                                 let _ = tx.send(Ok(frame)).await;
+                                emit_v3_relay_completed_console_after_stream(
+                                    &console_context,
+                                    output_status,
+                                    &node_trace,
+                                    observability,
+                                    stream_observation,
+                                    started_at,
+                                );
                             }
-                        },
+                            }
+                        }
                         Err(error) => {
                             // 复用 runtime typed 投影（Error01-06 链），禁止
                             // handler 手拼错误帧旁路错误链。
@@ -342,10 +380,10 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
     // 后台任务注入标准 SSE 心跳（`: keepalive` 注释帧，连接保持、不塞语义）并喂入
     // 完整链转换结果——客户端不会因 provider 慢/错误判定连接断或收到半截响应
     // （错误走内部错误链 + 切 provider）。
-    let client_stream: V3IoSseStream = Box::pin(futures_util::stream::unfold(
-        rx,
-        |mut rx| async move { rx.recv().await.map(|item| (item, rx)) },
-    ));
+    let client_stream: V3IoSseStream =
+        Box::pin(futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        }));
     let client_stream = wrap_v3_sse_io_dump_stream(
         client_stream,
         state.sse_dump_enabled,
@@ -359,6 +397,57 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
         .header("content-type", "text/event-stream")
         .body(body)
         .expect("SSE accept response")
+}
+
+/// 透传 OpenAI Chat relay SSE 客户端流并挂统一收口 finalizer。流 Err 由
+/// closeout 包装器投影为 post-commit 502 provider SSE 失败（客户端已收到
+/// 200，不能重排）；流干净 EOF 合并 stream_observation 后打印 completed；
+/// 客户端断连（tx 关闭）走 499。与 endpoint_handlers relay 路径共用
+/// `wrap_v3_relay_sse_console_stream` 语义，禁止在流失败后当成功收口。
+pub(crate) async fn drain_v3_openai_chat_relay_sse_stream_to_client(
+    stream: V3OpenAiChatClientStream,
+    tx: &tokio::sync::mpsc::Sender<Result<Vec<u8>, std::io::Error>>,
+    stream_console_finalizer: Option<V3SseConsoleFinalizer>,
+) {
+    let mut stream = wrap_v3_relay_sse_console_stream(stream, stream_console_finalizer);
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(std::io::Error::other);
+        if tx.send(chunk).await.is_err() {
+            return;
+        }
+    }
+}
+
+/// Relay 完整流收口后的 usage 控制台打印：把 stream_observation（逐帧解码
+/// 客户端 wire 得到）合并进 observability 再打印 completed 行。观测只读，
+/// 不改写业务字节；缺少 observability 时静默跳过（错误链已有独立投影）。
+pub(crate) fn emit_v3_relay_completed_console_after_stream(
+    context: &V3ConsoleEmissionContext,
+    status: u16,
+    node_trace: &[&'static str],
+    observability: Option<V3RuntimeObservability>,
+    stream_observation: Option<V3RuntimeStreamObservation>,
+    started_at: Instant,
+) {
+    let Some(mut observability) = observability else {
+        return;
+    };
+    if let Some(observation) = stream_observation {
+        if let Err(error) =
+            merge_v3_runtime_stream_observation(&mut observability, Some(&observation))
+        {
+            emit_v3_runtime_observability_contract_failure(context, &observability, error);
+            return;
+        }
+    }
+    emit_v3_observability_console_lines(
+        context,
+        status,
+        node_trace,
+        &observability,
+        started_at,
+        true,
+    );
 }
 
 /// OpenAI Chat 入口动态绑定：入口协议与出口 provider 同协议（chat wire）
@@ -401,20 +490,18 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         Ok(duration) => duration.as_millis() as u64,
         Err(_) => 0,
     };
-    let output = routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<
-        V3ChatDirectCodec,
-        _,
-    >(
-        (),
-        &state.manifest,
-        raw,
-        routecodex_v3_runtime::default_responses_transport(),
-        state.provider_health.runtime_health(),
-        now_epoch_ms,
-        Some(&provider_failure_event_sink),
-        Some(&route_selection_event_sink),
-    )
-    .await;
+    let output =
+        routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<V3ChatDirectCodec, _>(
+            (),
+            &state.manifest,
+            raw,
+            routecodex_v3_runtime::default_responses_transport(),
+            state.provider_health.runtime_health(),
+            now_epoch_ms,
+            Some(&provider_failure_event_sink),
+            Some(&route_selection_event_sink),
+        )
+        .await;
     if let Some(handoff) = output.protocol_relay_handoff {
         let relay_trace = handoff.node_trace;
         // SSE 请求：立即 201 + keepalive 维持连接，后台执行完整 relay 链
@@ -425,20 +512,23 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
                 payload.clone(),
                 request_id.clone(),
                 provider_failure_session_scope.clone(),
+                console_context,
+                started_at,
             )
             .await;
         }
-        let relay_result = execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
-            &state.manifest,
-            V3OpenAiChatRelayRuntimeInput {
-                server_id: state.server.id.clone(),
-                failure_session_scope: provider_failure_session_scope,
-                request_id: request_id.clone(),
-                payload,
-            },
-            state.provider_health.runtime_health(),
-        )
-        .await;
+        let relay_result =
+            execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
+                &state.manifest,
+                V3OpenAiChatRelayRuntimeInput {
+                    server_id: state.server.id.clone(),
+                    failure_session_scope: provider_failure_session_scope,
+                    request_id: request_id.clone(),
+                    payload,
+                },
+                state.provider_health.runtime_health(),
+            )
+            .await;
         let mut relay_output = match relay_result {
             Ok(output) => output,
             Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
@@ -461,7 +551,31 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         ) {
             return response;
         }
-        return openai_chat_relay_output_response(relay_output);
+        let stream_console_finalizer = match (
+            relay_output.stream_observation.clone(),
+            relay_output.observability.clone(),
+        ) {
+            (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {
+                context: console_context.clone(),
+                status: relay_output.status,
+                node_trace: relay_output.node_trace.clone(),
+                observability,
+                stream_observation,
+                started_at,
+            }),
+            _ => None,
+        };
+        if let Some(observability) = relay_output.observability.as_ref() {
+            emit_v3_observability_console_lines(
+                &console_context,
+                relay_output.status,
+                &relay_output.node_trace,
+                observability,
+                started_at,
+                relay_output.stream_observation.is_none(),
+            );
+        }
+        return openai_chat_relay_output_response(relay_output, stream_console_finalizer);
     }
     let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(
         output.client_payload,
@@ -470,9 +584,10 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
     );
     frame.observability = output.observability;
     frame.stream_observation = output.stream_observation;
-    let has_provider_failure = frame.observability.as_ref().is_some_and(|observability| {
-        !observability.provider_failure_events.is_empty()
-    });
+    let has_provider_failure = frame
+        .observability
+        .as_ref()
+        .is_some_and(|observability| !observability.provider_failure_events.is_empty());
     if frame.status >= 400 || has_provider_failure {
         let error_status = (frame.status >= 400).then_some(frame.status);
         let _ = persist_v3_error_evidence_payload(
@@ -507,13 +622,9 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             error_status,
         );
     }
-    if let Some(response) = capture_v3_responses_direct_response(
-        state,
-        "openai_chat",
-        &path,
-        &request_id,
-        &mut frame,
-    ) {
+    if let Some(response) =
+        capture_v3_responses_direct_response(state, "openai_chat", &path, &request_id, &mut frame)
+    {
         return response;
     }
     let stream_console_finalizer =
@@ -535,7 +646,10 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
     )
 }
 
-pub(crate) fn gemini_relay_output_response(output: V3GeminiRelayRuntimeOutput) -> Response<Body> {
+pub(crate) fn gemini_relay_output_response(
+    output: V3GeminiRelayRuntimeOutput,
+    stream_console_finalizer: Option<V3SseConsoleFinalizer>,
+) -> Response<Body> {
     let content_type = match &output.client_body {
         V3GeminiRelayClientBody::Json(_) => "application/json",
         V3GeminiRelayClientBody::Sse(_) => "text/event-stream",
@@ -544,7 +658,9 @@ pub(crate) fn gemini_relay_output_response(output: V3GeminiRelayRuntimeOutput) -
         .status(StatusCode::from_u16(output.status).expect("typed V3 Gemini Relay status"))
         .header("content-type", content_type);
     let body = match output.client_body {
-        V3GeminiRelayClientBody::Sse(client_stream) => Body::from_stream(client_stream),
+        V3GeminiRelayClientBody::Sse(client_stream) => Body::from_stream(
+            wrap_v3_relay_sse_console_stream(client_stream, stream_console_finalizer),
+        ),
         V3GeminiRelayClientBody::Json(client_response) => Body::from(
             serde_json::to_vec(&client_response).expect("typed V3 Gemini Relay projection"),
         ),
@@ -599,7 +715,9 @@ pub(crate) fn anthropic_relay_sse_body(client_response: serde_json::Value) -> Bo
     ))
 }
 
-pub(crate) fn anthropic_relay_sse_event_chunk(event: &serde_json::Value) -> Result<Vec<u8>, io::Error> {
+pub(crate) fn anthropic_relay_sse_event_chunk(
+    event: &serde_json::Value,
+) -> Result<Vec<u8>, io::Error> {
     let (Some(name), Some(data)) = (
         event.get("event").and_then(serde_json::Value::as_str),
         event.get("data"),

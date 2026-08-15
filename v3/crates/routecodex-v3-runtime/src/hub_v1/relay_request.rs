@@ -1,11 +1,12 @@
 use super::{
     apply_v3_stopless_request_hook_at_req04, apply_v3_web_search_request_hook_at_req04,
-    build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03, govern_v3_servertool_request_at_req04,
+    build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
     build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
     build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
-    merge_v3_relay_restored_local_context_at_req04, V3HubContinuationOwnership, V3HubEntryProtocol,
-    V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
-    V3HubRequestSemanticProtocol, V3StoplessCenterState, V3WebSearchCenterState,
+    govern_v3_servertool_request_at_req04, merge_v3_relay_restored_local_context_at_req04,
+    V3HubContinuationOwnership, V3HubEntryProtocol, V3HubReqChatProcess04Governed,
+    V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRequestSemanticProtocol,
+    V3StoplessCenterState, V3WebSearchCenterState,
 };
 use crate::{
     V3LocalContinuationError, V3LocalContinuationReq04RestoreRequest, V3LocalContinuationScopeKey,
@@ -198,7 +199,9 @@ impl V3HubServertoolRequestProfile {
         }
         self
     }
-    pub fn web_search_execution_mode(&self) -> Option<routecodex_v3_config::V3WebSearchExecutionMode> {
+    pub fn web_search_execution_mode(
+        &self,
+    ) -> Option<routecodex_v3_config::V3WebSearchExecutionMode> {
         match self {
             Self::Enabled {
                 web_search_execution_mode,
@@ -473,8 +476,7 @@ impl V3HubRelayRequestHooks {
             // 保险：restore 合并后的 payload 再次做历史轮图片占位清理——恢复的
             // 上下文（即使 save 已全清）若含图片 base64，作为历史轮统一替换为
             // [Image]，图片绝不重新注入 provider wire（context 400）。
-            let restored_payload =
-                Arc::make_mut(&mut classified.previous.previous.payload.0);
+            let restored_payload = Arc::make_mut(&mut classified.previous.previous.payload.0);
             crate::hub_v1::normalize_v3_history_image_placeholders(restored_payload);
             // tool-only 轮兜底：合并后若无 user carrier（如 submit_tool_outputs
             // 续接），历史轮判定失效（last user 缺失 → 不清洗）——此时恢复的
@@ -500,9 +502,9 @@ impl V3HubRelayRequestHooks {
             current_payload_start,
             &mut events,
             profile.stopless_reasoning_stop_enabled(),
-            profile
-                .web_search_execution_mode()
-                .is_some_and(routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search),
+            profile.web_search_execution_mode().is_some_and(
+                routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search,
+            ),
             profile.stopless_center_state(),
             profile.stopless_transition_request_id(),
             profile.stopless_transition_updated_at(),

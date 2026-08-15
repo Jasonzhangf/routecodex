@@ -129,9 +129,18 @@ pub(crate) fn classify_v3_provider_responses_json_data(
 pub(crate) fn classify_v3_provider_generic_sse_json_data(
     data: &str,
 ) -> Result<Option<V3ProviderResponsesJsonFrameOutcome>, String> {
+    // 非 JSON 单 token 保活文本（`data: ping` 等）：Direct/Relay 一致忽略，
+    // 必须在 JSON parse 前放行，否则 usage 观测先短路会把保活帧打成
+    // provider SSE event invalid。
+    if is_v3_provider_sse_keepalive_text(data) {
+        return Ok(None);
+    }
     let Some(event) = parse_v3_provider_sse_json_data(data)? else {
         return Ok(None);
     };
+    if is_v3_provider_sse_keepalive_json_event(&event) {
+        return Ok(None);
+    }
     if event
         .get("type")
         .and_then(Value::as_str)
@@ -151,6 +160,35 @@ pub(crate) fn classify_v3_provider_generic_sse_json_data(
         );
     }
     Ok(Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream))
+}
+
+/// Provider SSE keepalive/settlement JSON（无内容语义，Direct/Relay 对称跳过）：
+/// `{"type":"ping"}`、`{"ping":...}`、`{"choices":[],"cost":"0"}` 或空对象。
+/// 这些帧只保活 transport，不产生 output/tool/usage 语义；真 malformed JSON
+/// 仍由 parse 显式失败，不做静默吞并。
+pub(crate) fn is_v3_provider_sse_keepalive_json_event(event: &Value) -> bool {
+    let Some(object) = event.as_object() else {
+        return false;
+    };
+    if matches!(
+        object.get("choices").and_then(Value::as_array),
+        Some(choices) if choices.is_empty()
+    ) {
+        return true;
+    }
+    object.contains_key("ping") || object.is_empty()
+}
+
+/// 非 JSON keepalive data 文本（如 `data: ping` / `data: keep-alive`）：
+/// 无 JSON 结构的单 token 保活帧，Direct/Relay 一致忽略；其余 malformed
+/// JSON 文本保持显式 Error01（不允许静默吞并截断/控制字符污染）。
+pub(crate) fn is_v3_provider_sse_keepalive_text(data: &str) -> bool {
+    let token = data.trim().to_ascii_lowercase();
+    token.is_empty()
+        || matches!(
+            token.as_str(),
+            "ping" | "pong" | "keep-alive" | "keepalive" | "heartbeat" | "ok"
+        )
 }
 
 pub(crate) fn classify_v3_provider_responses_json_event(
@@ -184,18 +222,19 @@ pub(crate) fn classify_v3_provider_responses_json_event(
         });
     }
 
+    // response.incomplete 是 Responses 协议的合法终态（max_output_tokens 截断 /
+    // content_filter 触发），不是 provider 流错误：分类为 Terminal，客户端按协议
+    // 接收 status=incomplete 的完整响应，网关不得 abort 流或记录 provider 失败。
+    // 缺少 incomplete_details.reason 属于畸形终帧，继续走下方失败分组显式报错。
     if event_type == "response.incomplete" {
-        if let Some(reason) = event
+        if event
             .pointer("/response/incomplete_details/reason")
             .or_else(|| event.pointer("/incomplete_details/reason"))
             .and_then(Value::as_str)
             .map(str::trim)
-            .filter(|value| !value.is_empty())
+            .is_some_and(|value| !value.is_empty())
         {
-            return Ok(V3ProviderResponsesJsonFrameOutcome::Failure {
-                code: "response_incomplete".to_string(),
-                message: reason.to_string(),
-            });
+            return Ok(V3ProviderResponsesJsonFrameOutcome::Terminal);
         }
     }
 
@@ -242,6 +281,11 @@ pub(crate) fn record_v3_provider_sse_json_frame(
     stream_observation: &V3RuntimeStreamObservation,
 ) -> Result<(), String> {
     let data = collect_v3_provider_sse_json_data(fields);
+    // keepalive 文本（`data: ping` 等）不是 JSON 载荷：观测直接放行，
+    // 否则 usage 观测会把保活帧打成 provider SSE event invalid。
+    if is_v3_provider_sse_keepalive_text(&data) {
+        return Ok(());
+    }
     let Some(event) = parse_v3_provider_sse_json_data(&data)? else {
         return Ok(());
     };
@@ -286,6 +330,40 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
+    fn response_incomplete_with_reason_is_terminal_not_provider_failure() {
+        for reason in ["max_output_tokens", "content_filter"] {
+            let data = format!(
+                r#"{{"type":"response.incomplete","response":{{"id":"resp_1","status":"incomplete","incomplete_details":{{"reason":"{reason}"}}}}}}"#
+            );
+            let outcome = classify_v3_provider_responses_json_data(&data)
+                .expect("response.incomplete with reason must classify");
+            assert_eq!(
+                outcome,
+                Some(V3ProviderResponsesJsonFrameOutcome::Terminal),
+                "response.incomplete is a valid terminal, not a provider failure: {data}"
+            );
+            let generic = classify_v3_provider_generic_sse_json_data(&data)
+                .expect("generic classifier must accept response.incomplete");
+            assert_eq!(
+                generic,
+                Some(V3ProviderResponsesJsonFrameOutcome::Terminal)
+            );
+        }
+    }
+
+    #[test]
+    fn response_incomplete_without_reason_still_fails_fast() {
+        let error = classify_v3_provider_responses_json_data(
+            r#"{"type":"response.incomplete","response":{"id":"resp_1","status":"incomplete"}}"#,
+        )
+        .expect_err("response.incomplete without incomplete_details.reason is malformed");
+        assert!(
+            error.contains("response.incomplete"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
     fn missing_type_without_frame_event_still_fails_fast() {
         let error = classify_v3_provider_responses_json_data(r#"{"id":"resp_1"}"#)
             .expect_err("data without type must fail fast");
@@ -298,12 +376,24 @@ mod provider_sse_json_codec_tests {
     #[test]
     fn generic_classifier_accepts_openai_chat_chunk_without_type() {
         let outcome = classify_v3_provider_generic_sse_json_data(
-            r#"{"id":"chatcmpl_1","object":"chat.completion.chunk","choices":[]}"#,
+            r#"{"id":"chatcmpl_1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}"#,
         )
         .expect("OpenAI Chat chunks do not require a Responses type");
         assert_eq!(
             outcome,
             Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
+        );
+    }
+
+    #[test]
+    fn generic_classifier_treats_empty_choices_chat_chunk_as_keepalive() {
+        let outcome = classify_v3_provider_generic_sse_json_data(
+            r#"{"id":"chatcmpl_1","object":"chat.completion.chunk","choices":[]}"#,
+        )
+        .expect("empty-choices settlement chunk must classify");
+        assert_eq!(
+            outcome, None,
+            "empty choices carries no content/usage semantics and is keepalive-only"
         );
     }
 

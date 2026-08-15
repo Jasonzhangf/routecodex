@@ -17,8 +17,8 @@ use routecodex_v3_provider_responses::{
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::pin::Pin;
-use std::time::Duration;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub type V3GeminiRelayClientStream =
     Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
@@ -54,6 +54,8 @@ pub struct V3GeminiRelayRuntimeOutput {
     pub client_body: V3GeminiRelayClientBody,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
+    pub observability: Option<V3RuntimeObservability>,
+    pub stream_observation: Option<V3RuntimeStreamObservation>,
 }
 
 impl std::fmt::Debug for V3GeminiRelayRuntimeOutput {
@@ -70,6 +72,8 @@ impl std::fmt::Debug for V3GeminiRelayRuntimeOutput {
             )
             .field("node_trace", &self.node_trace)
             .field("error_chain", &self.error_chain)
+            .field("observability", &self.observability)
+            .field("stream_observation", &self.stream_observation)
             .finish()
     }
 }
@@ -190,9 +194,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
         V3RelayCoreError::ModelNotFound(message) => {
             V3GeminiRelayRuntimeError::ModelNotFound(message)
         }
-        V3RelayCoreError::EndpointPath(message) => {
-            V3GeminiRelayRuntimeError::EndpointPath(message)
-        }
+        V3RelayCoreError::EndpointPath(message) => V3GeminiRelayRuntimeError::EndpointPath(message),
         // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
         V3RelayCoreError::Target(message)
         | V3RelayCoreError::StaticRegistry(message)
@@ -313,30 +315,42 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         _retain_response_cipher: bool,
         outcome: V3GeminiSseProviderOutcome,
     ) -> Result<V3GeminiRelayClientStream, V3RelayCoreError> {
-        Ok(project_sse_stream(provider, compatibility_profile, _retain_response_cipher, outcome))
+        Ok(project_sse_stream(
+            provider,
+            compatibility_profile,
+            _retain_response_cipher,
+            outcome,
+        ))
     }
 
     fn assemble_json_output(
         client_response: Value,
         trace: Vec<&'static str>,
+        observability: V3RuntimeObservability,
     ) -> V3GeminiRelayRuntimeOutput {
         V3GeminiRelayRuntimeOutput {
             status: 200,
             client_body: V3GeminiRelayClientBody::Json(client_response),
             node_trace: trace,
             error_chain: None,
+            observability: Some(observability),
+            stream_observation: None,
         }
     }
 
     fn assemble_sse_output(
-        sse: V3GeminiRelayClientStream,
+        sse: V3RelayClientSseStream,
         trace: Vec<&'static str>,
+        observability: V3RuntimeObservability,
+        stream_observation: V3RuntimeStreamObservation,
     ) -> V3GeminiRelayRuntimeOutput {
         V3GeminiRelayRuntimeOutput {
             status: 200,
             client_body: V3GeminiRelayClientBody::Sse(sse),
             node_trace: trace,
             error_chain: None,
+            observability: Some(observability),
+            stream_observation: Some(stream_observation),
         }
     }
 
@@ -416,6 +430,8 @@ pub fn project_v3_gemini_relay_runtime_failure(
         client_body: V3GeminiRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
+        observability: None,
+        stream_observation: None,
     }
 }
 
@@ -449,8 +465,7 @@ fn project_json_response(
     trace.push("V3HubRespInbound02Normalized");
     let resp03 = hooks.govern(
         resp02,
-        &V3HubRelayResponseHookProfile::empty()
-            .with_retain_response_cipher(retain_response_cipher),
+        &V3HubRelayResponseHookProfile::empty().with_retain_response_cipher(retain_response_cipher),
     )?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
@@ -628,8 +643,11 @@ fn enqueue_sse_client_chunks(
         }
         let Some(data) = data else { continue };
         let payload: Value = serde_json::from_str(&data).map_err(|error| error.to_string())?;
-        let client_payload =
-            project_sse_event_payload(payload, state.compatibility_profile.as_deref(), state.retain_response_cipher)?;
+        let client_payload = project_sse_event_payload(
+            payload,
+            state.compatibility_profile.as_deref(),
+            state.retain_response_cipher,
+        )?;
         state.terminal = gemini_payload_has_terminal_finish_reason(&client_payload)?;
         state
             .pending
@@ -693,6 +711,8 @@ fn provider_failure_output(
         client_body: V3GeminiRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
+        observability: None,
+        stream_observation: None,
     }
 }
 

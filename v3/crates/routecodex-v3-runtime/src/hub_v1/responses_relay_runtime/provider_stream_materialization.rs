@@ -1,5 +1,5 @@
-use super::*;
 use super::responses_relay_diagnostics::anthropic_cyber_refusal_error_from_payload;
+use super::*;
 
 pub(super) async fn build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
     mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
@@ -26,14 +26,74 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_responses_provider_stream_
             terminal_response = Some(response);
         }
     }
-    decoder
-        .finish()
-        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
+    finish_v3_responses_provider_sse_decoder(
+        decoder,
+        observation,
+        &mut response_scaffold,
+        &mut output_items,
+        &mut output_text,
+    )?;
     terminal_response.ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             V3_RESPONSES_RELAY_PROVIDER_EVENT_EOF_WITHOUT_TERMINAL_MESSAGE.to_string(),
         )
     })
+}
+
+/// EOF 收口：transport framing 与 codec 载荷错误的归属必须可判定——
+/// 非法 UTF-8 / 无 data 载荷 / JSON 可解析的未闭合尾帧是 transport 缺陷；
+/// 尾帧 data 是 JSON 但解析失败时归 codec（事件载荷本身 malformed），
+/// 不得被“未闭合帧”误判成 transport 失败。
+fn finish_v3_responses_provider_sse_decoder(
+    decoder: SseIncrementalDecoder,
+    observation: &V3RuntimeStreamObservation,
+    response_scaffold: &mut Option<Value>,
+    output_items: &mut Vec<Value>,
+    output_text: &mut String,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let trailing = match decoder.finish_with_trailing_frame() {
+        Ok(trailing) => trailing,
+        Err(error) => {
+            return Err(V3ResponsesRelayRuntimeError::ProviderSseTransport(
+                error.to_string(),
+            ))
+        }
+    };
+    let Some(trailing) = trailing else {
+        return Ok(());
+    };
+    if !trailing.frame().raw_utf8_valid() {
+        return Err(V3ResponsesRelayRuntimeError::ProviderSseTransport(
+            "SSE input is not valid UTF-8".to_string(),
+        ));
+    }
+    let Some(data) = parse_v3_runtime_sse_frame_fields(&trailing)? else {
+        return Err(V3ResponsesRelayRuntimeError::ProviderSseTransport(
+            "SSE stream ended before the final frame delimiter".to_string(),
+        ));
+    };
+    if data == "[DONE]" {
+        return Err(V3ResponsesRelayRuntimeError::ProviderSseTransport(
+            "SSE stream ended before the final frame delimiter".to_string(),
+        ));
+    }
+    // 尾帧 data 能解析成 JSON：载荷本身没有 codec 错误，缺终帧分隔是
+    // transport framing 缺陷。
+    if serde_json::from_str::<Value>(&data).is_ok() {
+        return Err(V3ResponsesRelayRuntimeError::ProviderSseTransport(
+            "SSE stream ended before the final frame delimiter".to_string(),
+        ));
+    }
+    // 尾帧 data 是 malformed JSON：归 codec 载荷错误，与逐帧 JSON 解析
+    // 失败同一归属，客户端看到 provider response event codec failed。
+    observe_v3_runtime_responses_sse_semantic_frame(
+        &trailing,
+        observation,
+        response_scaffold,
+        output_items,
+        output_text,
+    )
+    .map(|_| ())
 }
 
 pub async fn materialize_v3_responses_provider_sse_as_canonical_response(
@@ -1142,10 +1202,14 @@ mod tests {
 
     #[test]
     fn ping_tail_frame_after_done_is_recognized() {
-        assert!(is_v3_openai_chat_ping_tail_frame(r#"{"type":"ping","cost":"0"}"#));
+        assert!(is_v3_openai_chat_ping_tail_frame(
+            r#"{"type":"ping","cost":"0"}"#
+        ));
         assert!(is_v3_openai_chat_ping_tail_frame(r#"{"type":"ping"}"#));
         // Chat-style gateways settle cost with an empty-choices frame after [DONE].
-        assert!(is_v3_openai_chat_ping_tail_frame(r#"{"choices":[],"cost":"0"}"#));
+        assert!(is_v3_openai_chat_ping_tail_frame(
+            r#"{"choices":[],"cost":"0"}"#
+        ));
         assert!(is_v3_openai_chat_ping_tail_frame(r#"{"choices":[]}"#));
     }
 
@@ -1154,7 +1218,9 @@ mod tests {
         assert!(!is_v3_openai_chat_ping_tail_frame(
             r#"{"type":"response.completed","response":{"status":"completed"}}"#
         ));
-        assert!(!is_v3_openai_chat_ping_tail_frame(r#"{"id":"x","choices":[{}]}"#));
+        assert!(!is_v3_openai_chat_ping_tail_frame(
+            r#"{"id":"x","choices":[{}]}"#
+        ));
         assert!(!is_v3_openai_chat_ping_tail_frame(
             r#"{"choices":[{"index":0,"delta":{"content":"hi"}}]}"#
         ));

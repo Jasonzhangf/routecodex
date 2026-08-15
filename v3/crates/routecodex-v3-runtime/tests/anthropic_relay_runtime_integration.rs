@@ -189,6 +189,20 @@ async fn anthropic_responses_field_parity_request_matrix() {
     .await
     .unwrap();
     assert_eq!(output.status, 200, "runtime output: {output:?}");
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("anthropic relay JSON success must carry typed observability");
+    assert_eq!(observability.entry_protocol, "anthropic");
+    assert_eq!(observability.transport, "json");
+    assert_eq!(observability.response_status.as_deref(), Some("completed"));
+    let usage = observability
+        .usage
+        .as_ref()
+        .expect("anthropic JSON usage must normalize into observability");
+    assert_eq!(usage.input_tokens, Some(11));
+    assert_eq!(usage.output_tokens, Some(7));
+    assert_eq!(usage.total_tokens, Some(18));
     let body = transport.captured.lock().unwrap().clone().unwrap();
     assert_eq!(body["model"], "responses-wire-model");
     assert!(body.get("instructions").is_none());
@@ -508,8 +522,12 @@ async fn provider_error_enters_error01_06_without_success_projection() {
             && output.client_response["error"].get("class").is_none()
             && output.client_response["error"].get("error_node").is_none()
             && output.client_response["error"].get("decision").is_none()
-            && output.client_response["error"].get("target_exhausted").is_none()
-            && output.client_response["error"].get("external_error").is_none(),
+            && output.client_response["error"]
+                .get("target_exhausted")
+                .is_none()
+            && output.client_response["error"]
+                .get("external_error")
+                .is_none(),
         "Error06 body must not carry control-plane fields: {}",
         output.client_response["error"]
     );
@@ -643,7 +661,7 @@ data: {"type":"response.reasoning_summary_text.delta","output_index":0,"item_id"
 "#
             .to_vec()),
             Ok(br#"event: response.completed
-data: {"type":"response.completed","response":{"id":"resp_thinking_sse","status":"completed","output":[{"type":"reasoning","id":"rs_thinking","summary":[{"type":"summary_text","text":"signed thought"}],"encrypted_content":"resp04-signature"}]}}
+data: {"type":"response.completed","response":{"id":"resp_thinking_sse","status":"completed","output":[{"type":"reasoning","id":"rs_thinking","summary":[{"type":"summary_text","text":"signed thought"}],"encrypted_content":"resp04-signature"}],"usage":{"input_tokens":13,"output_tokens":8,"total_tokens":21}}}
 
 "#
             .to_vec()),
@@ -732,6 +750,17 @@ async fn responses_sse_projects_anthropic_thinking_from_resp04_finalized_truth()
                     "signature":"resp04-signature"
                 })
     }));
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("anthropic relay SSE success must carry typed observability");
+    let usage = observability
+        .usage
+        .as_ref()
+        .expect("anthropic SSE usage must normalize into observability");
+    assert_eq!(usage.input_tokens, Some(13));
+    assert_eq!(usage.output_tokens, Some(8));
+    assert_eq!(usage.total_tokens, Some(21));
     assert_eq!(
         output.node_trace.last(),
         Some(&"V3ServerRespOutbound06ClientFrame")

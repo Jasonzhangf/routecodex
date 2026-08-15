@@ -393,6 +393,22 @@ pub async fn spawn_v3_server_aggregate(
                     if let Err(error) = result {
                         eprintln!("provider global probe cycle failed: {error}");
                     }
+                    let manifest_for_probe = Arc::clone(&probe_manifest);
+                    let result = probe_health.run_due_provider_cooldown_probes(now_ms, move |provider_id, auth_alias, model_id| {
+                        let manifest_for_probe = Arc::clone(&manifest_for_probe);
+                        async move {
+                            let target = build_v3_provider_global_probe_target(
+                                &manifest_for_probe,
+                                &provider_id,
+                                auth_alias.as_deref(),
+                                model_id.as_deref(),
+                            )?;
+                            probe_v3_provider_global_target(target).await
+                        }
+                    }).await;
+                    if let Err(error) = result {
+                        eprintln!("provider cooldown probe cycle failed: {error}");
+                    }
                 }
             }
         }

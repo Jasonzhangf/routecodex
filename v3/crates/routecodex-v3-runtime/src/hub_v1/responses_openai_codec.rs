@@ -58,10 +58,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
             }
             "web_search" => {
                 let mut tool = Map::new();
-                tool.insert(
-                    "type".to_string(),
-                    Value::String("web_search".to_string()),
-                );
+                tool.insert("type".to_string(), Value::String("web_search".to_string()));
                 for key in [
                     "search_context_size",
                     "user_location",
@@ -985,10 +982,9 @@ fn copy_v3_responses_item_extension_fields(
 ) {
     for source in ["id", "status", "execution"] {
         if let Some(value) = item.get(source) {
-            if let Some(target) =
-                table_map_field("openai_chat", source, V3TableDirection::Inbound)
-                    .ok()
-                    .flatten()
+            if let Some(target) = table_map_field("openai_chat", source, V3TableDirection::Inbound)
+                .ok()
+                .flatten()
             {
                 extension.insert(target.to_string(), value.clone());
             }

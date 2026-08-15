@@ -535,7 +535,40 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
         ) {
             return response;
         }
-        return openai_chat_relay_output_response(output);
+        let console_payload = payload.clone();
+        let console_context = build_v3_console_emission_context(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_identity,
+            &request_headers,
+            &console_payload,
+        );
+        let stream_console_finalizer = match (
+            output.stream_observation.clone(),
+            output.observability.clone(),
+        ) {
+            (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {
+                context: console_context.clone(),
+                status: output.status,
+                node_trace: output.node_trace.clone(),
+                observability,
+                stream_observation,
+                started_at,
+            }),
+            _ => None,
+        };
+        if let Some(observability) = output.observability.as_ref() {
+            emit_v3_observability_console_lines(
+                &console_context,
+                output.status,
+                &output.node_trace,
+                observability,
+                started_at,
+                output.stream_observation.is_none(),
+            );
+        }
+        return openai_chat_relay_output_response(output, stream_console_finalizer);
     }
     if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let stream = payload.get("stream").and_then(serde_json::Value::as_bool) == Some(true);
@@ -579,6 +612,25 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
         ) {
             return response;
         }
+        let console_payload = payload.clone();
+        let console_context = build_v3_console_emission_context(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_identity,
+            &request_headers,
+            &console_payload,
+        );
+        if let Some(observability) = output.observability.as_ref() {
+            emit_v3_observability_console_lines(
+                &console_context,
+                output.status,
+                &output.node_trace,
+                observability,
+                started_at,
+                output.stream_observation.is_none(),
+            );
+        }
         return anthropic_relay_output_response(output, stream);
     }
     if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -610,7 +662,40 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
         ) {
             return response;
         }
-        return gemini_relay_output_response(output);
+        let console_payload = payload.clone();
+        let console_context = build_v3_console_emission_context(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_identity,
+            &request_headers,
+            &console_payload,
+        );
+        let stream_console_finalizer = match (
+            output.stream_observation.clone(),
+            output.observability.clone(),
+        ) {
+            (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {
+                context: console_context.clone(),
+                status: output.status,
+                node_trace: output.node_trace.clone(),
+                observability,
+                stream_observation,
+                started_at,
+            }),
+            _ => None,
+        };
+        if let Some(observability) = output.observability.as_ref() {
+            emit_v3_observability_console_lines(
+                &console_context,
+                output.status,
+                &output.node_trace,
+                observability,
+                started_at,
+                output.stream_observation.is_none(),
+            );
+        }
+        return gemini_relay_output_response(output, stream_console_finalizer);
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let continuation_scope = match build_responses_relay_local_continuation_scope(
@@ -1016,10 +1101,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                 let stream_console_finalizer =
                     emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
                 if let V3Server16Body::Sse(stream) = &mut frame.body {
-                    let wrapped = std::mem::replace(
-                        stream,
-                        Box::pin(futures_util::stream::pending()),
-                    );
+                    let wrapped =
+                        std::mem::replace(stream, Box::pin(futures_util::stream::pending()));
                     *stream = wrap_v3_sse_client_dump_stream(
                         wrapped,
                         state.sse_dump_enabled,

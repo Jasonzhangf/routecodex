@@ -203,7 +203,9 @@ pub(crate) fn provider_response_stream_failure(
     }
 }
 
-pub(crate) fn is_v3_responses_provider_response_failure(error: &V3ResponsesRelayRuntimeError) -> bool {
+pub(crate) fn is_v3_responses_provider_response_failure(
+    error: &V3ResponsesRelayRuntimeError,
+) -> bool {
     matches!(
         error,
         V3ResponsesRelayRuntimeError::Provider(_)

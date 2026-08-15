@@ -1,5 +1,5 @@
-use serde_json::{Map, Value};
 use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
+use serde_json::{Map, Value};
 
 use routecodex_v3_config::V3WebSearchExecutionMode;
 
@@ -299,7 +299,10 @@ fn normalize_openai_chat_custom_tool(
         })?;
     let mut function = Map::from_iter([
         ("name".to_string(), Value::String(name.to_string())),
-        ("parameters".to_string(), serde_json::json!({"type":"object"})),
+        (
+            "parameters".to_string(),
+            serde_json::json!({"type":"object"}),
+        ),
     ]);
     if let Some(description) = row.get("description") {
         if !description.is_string() {

@@ -10,7 +10,7 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload, ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderError, V3ProviderSseStream, V3ProviderRequestHeader, V3ResponsesProviderTarget,
+    V3ProviderError, V3ProviderRequestHeader, V3ProviderSseStream, V3ResponsesProviderTarget,
     V3Transport13ResponsesHttpRequest,
 };
 use serde_json::{json, Value};
@@ -50,6 +50,8 @@ pub struct V3OpenAiChatRelayRuntimeOutput {
     pub client_body: V3OpenAiChatRelayClientBody,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
+    pub observability: Option<V3RuntimeObservability>,
+    pub stream_observation: Option<V3RuntimeStreamObservation>,
 }
 
 impl std::fmt::Debug for V3OpenAiChatRelayRuntimeOutput {
@@ -66,6 +68,8 @@ impl std::fmt::Debug for V3OpenAiChatRelayRuntimeOutput {
             )
             .field("node_trace", &self.node_trace)
             .field("error_chain", &self.error_chain)
+            .field("observability", &self.observability)
+            .field("stream_observation", &self.stream_observation)
             .finish()
     }
 }
@@ -198,9 +202,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
         V3RelayCoreError::Target(message)
         | V3RelayCoreError::StaticRegistry(message)
-        | V3RelayCoreError::EndpointPath(message) => {
-            V3OpenAiChatRelayRuntimeError::Target(message)
-        }
+        | V3RelayCoreError::EndpointPath(message) => V3OpenAiChatRelayRuntimeError::Target(message),
     })
 }
 
@@ -358,6 +360,9 @@ struct V3OpenAiChatSseState {
     web_search_center_state: Option<V3WebSearchCenterState>,
     /// 请求侧 VR 路由决策算好的"保留响应密文"标记，SSE 帧级 Resp03 消费。
     retain_response_cipher: bool,
+    /// 治理层拒绝（web_search Mode B 无投影路径）typed 标志：这是 RouteCodex
+    /// 控制面决策，不是 provider 流错误，禁止写 provider-health。
+    governance_rejected: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 }
 
@@ -429,6 +434,7 @@ fn project_sse_stream(
         web_search_execution_mode,
         web_search_center_state,
         retain_response_cipher,
+        governance_rejected: false,
         provider_outcome,
     };
     Box::pin(futures_util::stream::unfold(
@@ -494,7 +500,7 @@ fn project_sse_stream(
                 .and_then(|frames| enqueue_sse_client_chunks(&mut state, frames));
                 if let Err(error) = result {
                     state.done = true;
-                    if error.contains("ROUTECODEX_GOVERNANCE_REJECTED") {
+                    if state.governance_rejected {
                         // 治理层拒绝：不记录 provider-health 失败（控制面信号
                         // 只应反映 provider 行为，不反映 RouteCodex 治理决策）。
                         return Some((Err(error), state));
@@ -603,9 +609,12 @@ fn enqueue_sse_client_chunks(
         )
         .map_err(|error| match error {
             // 治理层拒绝（web_search Mode B 无投影路径）：不是 provider 流
-            // 错误，禁止记录 provider-health 失败（会污染后续路由）。
+            // 错误，禁止记录 provider-health 失败（会污染后续路由）；typed
+            // 标志随 state 传递，不用字符串哨兵做控制判定。
             V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
-                "ROUTECODEX_GOVERNANCE_REJECTED".to_string()
+                state.governance_rejected = true;
+                "ROUTECODEX_GOVERNANCE_REJECTED: web_search mode B event is intercepted without a client projection"
+                    .to_string()
             }
             other => other.to_string(),
         })?;
@@ -640,6 +649,10 @@ fn enqueue_sse_client_chunks(
 /// 字节级证据见 ~/.rcc/sse-dumps（--sse-dump 开启）。
 fn project_responses_sse_as_openai_chat_stream(
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+    compatibility_profile: Option<String>,
+    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
+    web_search_center_state: Option<V3WebSearchCenterState>,
+    retain_response_cipher: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3OpenAiChatClientStream {
     use futures_util::StreamExt;
@@ -655,6 +668,10 @@ fn project_responses_sse_as_openai_chat_stream(
             VecDeque::<Vec<u8>>::new(),
             false,
             false,
+            compatibility_profile,
+            web_search_execution_mode,
+            web_search_center_state,
+            retain_response_cipher,
             provider_outcome,
         ),
         |(
@@ -664,6 +681,10 @@ fn project_responses_sse_as_openai_chat_stream(
             mut pending,
             mut done_seen,
             mut finished,
+            compatibility_profile,
+            web_search_execution_mode,
+            web_search_center_state,
+            retain_response_cipher,
             mut provider_outcome,
         )| async move {
             loop {
@@ -677,6 +698,10 @@ fn project_responses_sse_as_openai_chat_stream(
                             pending,
                             done_seen,
                             finished,
+                            compatibility_profile,
+                            web_search_execution_mode,
+                            web_search_center_state,
+                            retain_response_cipher,
                             provider_outcome,
                         ),
                     ));
@@ -707,6 +732,10 @@ fn project_responses_sse_as_openai_chat_stream(
                                 pending,
                                 done_seen,
                                 finished,
+                                compatibility_profile,
+                                web_search_execution_mode,
+                                web_search_center_state,
+                                retain_response_cipher,
                                 provider_outcome,
                             ),
                         ));
@@ -723,6 +752,10 @@ fn project_responses_sse_as_openai_chat_stream(
                                 pending,
                                 done_seen,
                                 finished,
+                                compatibility_profile,
+                                web_search_execution_mode,
+                                web_search_center_state,
+                                retain_response_cipher,
                                 provider_outcome,
                             ),
                         )),
@@ -739,10 +772,7 @@ fn project_responses_sse_as_openai_chat_stream(
                             routecodex_v3_sse::build_v3_sse_transport_in_01_raw_chunk(chunk)
                         }
                     };
-                    for frame in decoder
-                        .push(raw)
-                        .map_err(|error| error.to_string())?
-                    {
+                    for frame in decoder.push(raw).map_err(|error| error.to_string())? {
                         let mut data = None;
                         for field in frame.frame().fields() {
                             if let routecodex_v3_sse::SseField::Named { name, value } = field {
@@ -769,15 +799,28 @@ fn project_responses_sse_as_openai_chat_stream(
                                 "Responses SSE emitted data after response.completed: {preview}"
                             ));
                         }
-                        let event: Value = serde_json::from_str(&data)
-                            .map_err(|error| error.to_string())?;
+                        let event: Value =
+                            serde_json::from_str(&data).map_err(|error| error.to_string())?;
                         let event_type = event
                             .get("type")
                             .and_then(Value::as_str)
                             .unwrap_or_default()
                             .to_string();
                         for payload in transducer.push_event(event)? {
-                            pending.push_back(format!("data: {payload}\n\n").into_bytes());
+                            let governed = project_sse_event_payload(
+                                payload,
+                                compatibility_profile.as_deref(),
+                                web_search_execution_mode,
+                                web_search_center_state.as_ref(),
+                                retain_response_cipher,
+                            )
+                            .map_err(|error| match error {
+                                V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
+                                    "ROUTECODEX_GOVERNANCE_REJECTED".to_string()
+                                }
+                                other => other.to_string(),
+                            })?;
+                            pending.push_back(format!("data: {governed}\n\n").into_bytes());
                         }
                         if event_type == "response.completed" {
                             pending.push_back(b"data: [DONE]\n\n".to_vec());
@@ -803,6 +846,10 @@ fn project_responses_sse_as_openai_chat_stream(
                                     pending,
                                     done_seen,
                                     finished,
+                                    compatibility_profile,
+                                    web_search_execution_mode,
+                                    web_search_center_state,
+                                    retain_response_cipher,
                                     provider_outcome,
                                 ),
                             ));
@@ -817,6 +864,10 @@ fn project_responses_sse_as_openai_chat_stream(
                                 pending,
                                 done_seen,
                                 finished,
+                                compatibility_profile,
+                                web_search_execution_mode,
+                                web_search_center_state,
+                                retain_response_cipher,
                                 provider_outcome,
                             ),
                         ));
@@ -845,13 +896,17 @@ fn project_sse_event_payload(
         web_search_execution_mode,
         web_search_center_state,
         retain_response_cipher,
-    )}
+    )
+}
 
 /// Anthropic wire SSE stream -> responses canonical -> OpenAI Chat SSE 事件流
 /// （chat 入口 outbound 投影；SSE 仅负责 framing，语义转换走 canonical）。
 fn project_anthropic_sse_as_openai_chat_stream(
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+    compatibility_profile: Option<String>,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
+    web_search_center_state: Option<V3WebSearchCenterState>,
+    retain_response_cipher: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3OpenAiChatClientStream {
     use futures_util::StreamExt;
@@ -869,6 +924,10 @@ fn project_anthropic_sse_as_openai_chat_stream(
             VecDeque::<Vec<u8>>::new(),
             false,
             false,
+            compatibility_profile,
+            web_search_execution_mode,
+            web_search_center_state,
+            retain_response_cipher,
             provider_outcome,
         ),
         |(
@@ -878,6 +937,10 @@ fn project_anthropic_sse_as_openai_chat_stream(
             mut pending,
             mut done_seen,
             mut finished,
+            compatibility_profile,
+            web_search_execution_mode,
+            web_search_center_state,
+            retain_response_cipher,
             mut provider_outcome,
         )| async move {
             loop {
@@ -891,6 +954,10 @@ fn project_anthropic_sse_as_openai_chat_stream(
                             pending,
                             done_seen,
                             finished,
+                            compatibility_profile,
+                            web_search_execution_mode,
+                            web_search_center_state,
+                            retain_response_cipher,
                             provider_outcome,
                         ),
                     ));
@@ -921,6 +988,10 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 pending,
                                 done_seen,
                                 finished,
+                                compatibility_profile,
+                                web_search_execution_mode,
+                                web_search_center_state,
+                                retain_response_cipher,
                                 provider_outcome,
                             ),
                         ));
@@ -946,6 +1017,10 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                     pending,
                                     done_seen,
                                     finished,
+                                    compatibility_profile,
+                                    web_search_execution_mode,
+                                    web_search_center_state,
+                                    retain_response_cipher,
                                     provider_outcome,
                                 ),
                             ));
@@ -961,6 +1036,10 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 pending,
                                 done_seen,
                                 finished,
+                                compatibility_profile,
+                                web_search_execution_mode,
+                                web_search_center_state,
+                                retain_response_cipher,
                                 provider_outcome,
                             ),
                         )),
@@ -1007,7 +1086,20 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 let event: Value = serde_json::from_str(data)
                                     .map_err(|error| error.to_string())?;
                                 for payload in transducer.push_event(event)? {
-                                    pending.push_back(format!("data: {payload}\n\n").into_bytes());
+                                    let governed = project_sse_event_payload(
+                                        payload,
+                                        compatibility_profile.as_deref(),
+                                        web_search_execution_mode,
+                                        web_search_center_state.as_ref(),
+                                        retain_response_cipher,
+                                    )
+                                    .map_err(|error| match error {
+                                        V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
+                                            "ROUTECODEX_GOVERNANCE_REJECTED".to_string()
+                                        }
+                                        other => other.to_string(),
+                                    })?;
+                                    pending.push_back(format!("data: {governed}\n\n").into_bytes());
                                 }
                             }
                             Ok(())
@@ -1030,6 +1122,10 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                     pending,
                                     done_seen,
                                     finished,
+                                    compatibility_profile,
+                                    web_search_execution_mode,
+                                    web_search_center_state,
+                                    retain_response_cipher,
                                     provider_outcome,
                                 ),
                             ));
@@ -1044,6 +1140,10 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 pending,
                                 done_seen,
                                 finished,
+                                compatibility_profile,
+                                web_search_execution_mode,
+                                web_search_center_state,
+                                retain_response_cipher,
                                 provider_outcome,
                             ),
                         ));
@@ -1108,6 +1208,8 @@ fn provider_failure_output(
         client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
+        observability: None,
+        stream_observation: None,
     }
 }
 
@@ -1123,6 +1225,8 @@ fn error_output(
         client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
+        observability: None,
+        stream_observation: None,
     }
 }
 
@@ -1160,8 +1264,10 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             None => routecodex_v3_config::V3WebSearchExecutionMode::None,
         };
         if request_web_search_execution_mode.is_metadata_center_local_search() {
-            Ok(V3HubServertoolRequestProfile::enabled(["servertool.request"])
-                .with_web_search_execution_mode(request_web_search_execution_mode))
+            Ok(
+                V3HubServertoolRequestProfile::enabled(["servertool.request"])
+                    .with_web_search_execution_mode(request_web_search_execution_mode),
+            )
         } else {
             Ok(V3HubServertoolRequestProfile::disabled())
         }
@@ -1220,11 +1326,9 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         _provider_header_overrides: Vec<V3ProviderRequestHeader>,
     ) -> Result<V3Transport13ResponsesHttpRequest, V3RelayCoreError> {
         // wire protocol 从 target.provider_type 推断（与 selected candidate 推断一致）。
-        let wire_protocol = provider_wire_protocol_for_provider_type(
-            &target.provider_id,
-            &target.provider_type,
-        )
-        .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
+        let wire_protocol =
+            provider_wire_protocol_for_provider_type(&target.provider_id, &target.provider_type)
+                .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
         let wire = build_v3_provider_12_responses_wire_payload(request_id, target, body)
             .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
         build_v3_provider_transport_request_for_protocol(wire_protocol, wire)
@@ -1243,8 +1347,15 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         retain_response_cipher: bool,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response(
-            provider_value, provider_wire_protocol, chat_request, transport_intent, trace,
-            compatibility_profile, web_search_execution_mode, web_search_state, retain_response_cipher,
+            provider_value,
+            provider_wire_protocol,
+            chat_request,
+            transport_intent,
+            trace,
+            compatibility_profile,
+            web_search_execution_mode,
+            web_search_state,
+            retain_response_cipher,
         )
         .map_err(|error| match error {
             V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
@@ -1288,7 +1399,10 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
             return Ok(project_anthropic_sse_as_openai_chat_stream(
                 provider,
+                compatibility_profile,
                 web_search_execution_mode,
+                web_search_state,
+                _retain_response_cipher,
                 outcome,
             ));
         }
@@ -1299,6 +1413,10 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             // 当 chat SSE 透传（缺 choices 会让 chat 状态机 fail-fast）。
             return Ok(project_responses_sse_as_openai_chat_stream(
                 provider,
+                compatibility_profile,
+                web_search_execution_mode,
+                web_search_state,
+                _retain_response_cipher,
                 outcome,
             ));
         }
@@ -1319,24 +1437,31 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     fn assemble_json_output(
         client_response: Value,
         trace: Vec<&'static str>,
+        observability: V3RuntimeObservability,
     ) -> V3OpenAiChatRelayRuntimeOutput {
         V3OpenAiChatRelayRuntimeOutput {
             status: 200,
             client_body: V3OpenAiChatRelayClientBody::Json(client_response),
             node_trace: trace,
             error_chain: None,
+            observability: Some(observability),
+            stream_observation: None,
         }
     }
 
     fn assemble_sse_output(
-        sse: V3OpenAiChatClientStream,
+        sse: V3RelayClientSseStream,
         trace: Vec<&'static str>,
+        observability: V3RuntimeObservability,
+        stream_observation: V3RuntimeStreamObservation,
     ) -> V3OpenAiChatRelayRuntimeOutput {
         V3OpenAiChatRelayRuntimeOutput {
             status: 200,
             client_body: V3OpenAiChatRelayClientBody::Sse(sse),
             node_trace: trace,
             error_chain: None,
+            observability: Some(observability),
+            stream_observation: Some(stream_observation),
         }
     }
 
@@ -1354,143 +1479,4 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn settlement_tail_frame_after_done_is_ignored() {
-        assert!(is_v3_openai_chat_settlement_tail_frame(r#"{"choices":[],"cost":"0"}"#));
-        assert!(is_v3_openai_chat_settlement_tail_frame(r#"{"choices":[]}"#));
-        assert!(is_v3_openai_chat_settlement_tail_frame(r#"{"type":"ping","cost":"0"}"#));
-    }
-
-    #[test]
-    fn semantic_frames_after_done_still_fail() {
-        assert!(!is_v3_openai_chat_settlement_tail_frame("[DONE]"));
-        assert!(!is_v3_openai_chat_settlement_tail_frame(
-            r#"{"choices":[{"index":0,"delta":{"content":"hi"}}]}"#
-        ));
-        assert!(!is_v3_openai_chat_settlement_tail_frame("not json"));
-    }
-
-    #[test]
-    fn responses_settlement_tail_frames_after_completed_are_benign() {
-        assert!(is_v3_responses_settlement_tail_frame(
-            r#"{"type":"ping","cost":"0"}"#
-        ));
-        assert!(is_v3_responses_settlement_tail_frame(r#"{"usage":{"total_tokens":1}}"#));
-        assert!(is_v3_responses_settlement_tail_frame(r#"{"cost":"0"}"#));
-    }
-
-    #[test]
-    fn responses_semantic_frames_after_completed_still_fail() {
-        assert!(!is_v3_responses_settlement_tail_frame(
-            r#"{"type":"response.output_text.delta","delta":"late text"}"#
-        ));
-        assert!(!is_v3_responses_settlement_tail_frame(
-            r#"{"type":"response.function_call_arguments.delta","delta":"late args"}"#
-        ));
-        assert!(!is_v3_responses_settlement_tail_frame(
-            r#"{"type":"response.completed","response":{"status":"completed"}}"#
-        ));
-    }
-
-    #[tokio::test]
-    async fn responses_sse_ping_tail_after_completed_does_not_error_the_stream() {
-        use futures_util::StreamExt;
-        let manifest = test_relay_manifest();
-        let outcome = test_relay_outcome(&manifest);
-        let provider: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
-            Ok(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n".to_vec()),
-            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec()),
-            Ok(b"data: {\"type\":\"ping\",\"cost\":\"0\"}\n\n".to_vec()),
-        ]));
-        let mut stream = project_responses_sse_as_openai_chat_stream(provider, outcome);
-        let mut chunks = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(bytes) => chunks.push(bytes),
-                Err(error) => panic!("ping tail after completed must not error the stream: {error}"),
-            }
-        }
-        let joined = chunks.concat();
-        assert!(
-            String::from_utf8_lossy(&joined).contains("data: [DONE]"),
-            "chat stream must terminate with [DONE]: {}",
-            String::from_utf8_lossy(&joined)
-        );
-    }
-
-    #[tokio::test]
-    async fn responses_sse_semantic_frame_after_completed_errors_the_stream() {
-        use futures_util::StreamExt;
-        let manifest = test_relay_manifest();
-        let outcome = test_relay_outcome(&manifest);
-        let provider: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
-            Ok(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n".to_vec()),
-            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec()),
-            Ok(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"late text\"}\n\n".to_vec()),
-        ]));
-        let mut stream = project_responses_sse_as_openai_chat_stream(provider, outcome);
-        let mut saw_error = false;
-        while let Some(chunk) = stream.next().await {
-            if chunk.is_err() {
-                saw_error = true;
-            }
-        }
-        assert!(
-            saw_error,
-            "semantic frame after response.completed must still fail the stream"
-        );
-    }
-
-    fn test_relay_outcome(
-        manifest: &routecodex_v3_config::V3Config05ManifestPublished,
-    ) -> V3OpenAiChatSseProviderOutcome {
-        V3OpenAiChatSseProviderOutcome {
-            provider_health: V3ProviderFailureRuntimeHealth::from_manifest(manifest),
-            failure_session_scope: V3ProviderFailureSessionScope::new("test", "default", "s1")
-                .expect("test scope"),
-            provider_id: "test".to_string(),            auth_alias: "key".to_string(),
-            model_id: "model".to_string(),
-            recorded: false,
-            _provider_action_permit: None,
-        }
-    }
-
-    fn test_relay_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
-        let authoring = routecodex_v3_config::parse_v3_config_02_authoring(
-            r#"
-version = 3
-
-[servers.test]
-bind = "127.0.0.1"
-port = 4444
-routing_group = "default"
-
-[providers.openai]
-type = "responses"
-base_url = "http://127.0.0.1:9/v1"
-default_model = "gpt-test"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
-
-[providers.openai.models.gpt-test]
-supports_streaming = true
-capabilities = ["text"]
-
-[forwarders.responses]
-model = "client-model"
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "openai", model = "gpt-test", priority = 1 }]
-
-[route_groups.default.pools.default]
-selection = { strategy = "priority" }
-targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
-"#,
-        )
-        .expect("test manifest authoring parses");
-        routecodex_v3_config::compile_v3_config_05_manifest(authoring)
-            .expect("test manifest compiles")
-    }
-}
+include!("../../tests/support/openai_chat_relay_runtime_unit.rs");

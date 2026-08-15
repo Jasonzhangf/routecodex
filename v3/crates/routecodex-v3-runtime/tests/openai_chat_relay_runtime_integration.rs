@@ -166,6 +166,23 @@ async fn run_openai_chat_same_protocol_field_parity_request_response_matrix() {
         .node_trace
         .contains(&"ProviderRespCompat02ProviderCompat"));
     assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("chat relay JSON success must carry typed observability");
+    assert_eq!(observability.entry_protocol, "openai_chat");
+    assert_eq!(observability.execution_mode, "relay");
+    assert_eq!(observability.transport, "json");
+    assert_eq!(observability.response_status.as_deref(), Some("completed"));
+    assert_eq!(observability.finish_reason.as_deref(), Some("tool_calls"));
+    let usage = observability
+        .usage
+        .as_ref()
+        .expect("chat JSON usage must normalize into observability");
+    assert_eq!(usage.input_tokens, Some(10));
+    assert_eq!(usage.output_tokens, Some(4));
+    assert_eq!(usage.cached_tokens, Some(6));
+    assert_eq!(usage.total_tokens, Some(14));
     let client_response = match output.client_body {
         V3OpenAiChatRelayClientBody::Json(value) => value,
         V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON client body"),
@@ -431,39 +448,39 @@ async fn provider_error_enters_error01_06_without_success_projection() {
 
 #[tokio::test]
 async fn malformed_anthropic_response_enters_typed_error_chain_not_panic() {
-        // 红测：malformed Anthropic 响应（content 缺 type / 非法 type）经
-        // RespInbound02 归一化失败时必须走 typed Error01-06 链（ErrorErr06
-        // 投影），禁止 .expect() stack panic 绕过错误链。
-        struct MalformedAnthropicTransport;
-        #[async_trait]
-        impl ResponsesTransport for MalformedAnthropicTransport {
-            async fn send(
-                &self,
-                request: V3Transport13ResponsesHttpRequest,
-            ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-                Ok(V3ProviderResp14Raw::from_json(
-                    request.request_id().to_string(),
-                    request.provider_id().to_string(),
-                    200,
-                    vec![V3ProviderResponseHeader {
-                        name: "content-type".to_string(),
-                        value: b"application/json".to_vec(),
-                    }],
-                    serde_json::to_vec(&json!({
-                        "id": "msg_malformed",
-                        "type": "message",
-                        "role": "assistant",
-                        "model": "MiniMax-M3",
-                        "content": [{"type": "bogus", "text": "x"}],
-                        "stop_reason": "end_turn",
-                        "usage": {"input_tokens": 1, "output_tokens": 1}
-                    }))
-                    .unwrap(),
-                ))
-            }
+    // 红测：malformed Anthropic 响应（content 缺 type / 非法 type）经
+    // RespInbound02 归一化失败时必须走 typed Error01-06 链（ErrorErr06
+    // 投影），禁止 .expect() stack panic 绕过错误链。
+    struct MalformedAnthropicTransport;
+    #[async_trait]
+    impl ResponsesTransport for MalformedAnthropicTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                serde_json::to_vec(&json!({
+                    "id": "msg_malformed",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "MiniMax-M3",
+                    "content": [{"type": "bogus", "text": "x"}],
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 1, "output_tokens": 1}
+                }))
+                .unwrap(),
+            ))
         }
+    }
 
-        let manifest = compile_v3_config_05_manifest(
+    let manifest = compile_v3_config_05_manifest(
             parse_v3_config_02_authoring(
                 r#"
 version = 3
@@ -489,47 +506,46 @@ targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key
         )
         .unwrap();
 
-        let output = execute_v3_openai_chat_relay_runtime(
-            &manifest,
-            V3OpenAiChatRelayRuntimeInput {
-                server_id: "s".into(),
-                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
-                    "openai-chat-malformed-anthropic",
-                )
-                .expect("scope"),
-                request_id: "openai-chat-malformed-anthropic-1".into(),
-                payload: json!({
-                    "model": "MiniMax-M3",
-                    "messages": [{"role": "user", "content": "hi"}],
-                    "stream": false
-                }),
-            },
-            &MalformedAnthropicTransport,
-        )
-        .await
-        .expect("malformed provider response must project a typed terminal, not panic");
-        assert_eq!(output.status, 502);
-        assert_eq!(
-            output.error_chain.as_ref().unwrap().len(),
-            6,
-            "malformed Anthropic response must travel the typed Error01-06 chain"
-        );
-        assert_eq!(
-            output.node_trace.last(),
-            Some(&"V3Error06ClientProjected"),
-            "terminal node must be Error06 projection, not a panic"
-        );
-        let client_response = match output.client_body {
-            V3OpenAiChatRelayClientBody::Json(value) => value,
-            V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON error body"),
-        };
-        assert!(client_response["error"].get("error_node").is_none());
-    }
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "s".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "openai-chat-malformed-anthropic",
+            )
+            .expect("scope"),
+            request_id: "openai-chat-malformed-anthropic-1".into(),
+            payload: json!({
+                "model": "MiniMax-M3",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": false
+            }),
+        },
+        &MalformedAnthropicTransport,
+    )
+    .await
+    .expect("malformed provider response must project a typed terminal, not panic");
+    assert_eq!(output.status, 502);
+    assert_eq!(
+        output.error_chain.as_ref().unwrap().len(),
+        6,
+        "malformed Anthropic response must travel the typed Error01-06 chain"
+    );
+    assert_eq!(
+        output.node_trace.last(),
+        Some(&"V3Error06ClientProjected"),
+        "terminal node must be Error06 projection, not a panic"
+    );
+    let client_response = match output.client_body {
+        V3OpenAiChatRelayClientBody::Json(value) => value,
+        V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON error body"),
+    };
+    assert!(client_response["error"].get("error_node").is_none());
+}
 
 struct SseTransport;
-
 
 #[async_trait]
 impl ResponsesTransport for SseTransport {
@@ -978,9 +994,9 @@ async fn sse_done_before_terminal_fails_and_terminal_without_done_succeeds() {
         "terminal finish_reason without upstream [DONE] must project success: {items:?}"
     );
     assert!(
-        items
-            .iter()
-            .any(|item| item.as_ref().is_ok_and(|chunk| chunk == b"data: [DONE]\n\n")),
+        items.iter().any(|item| item
+            .as_ref()
+            .is_ok_and(|chunk| chunk == b"data: [DONE]\n\n")),
         "gateway must terminate the client SSE stream with [DONE]: {items:?}"
     );
 }
@@ -1028,10 +1044,44 @@ async fn post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_requ
     let items = stream.collect::<Vec<_>>().await;
     assert!(items.iter().any(Result::is_err));
 
+    // post-commit SSE 流失败是强故障信号：直接写 provider 级冷却，
+    // fresh 请求被冷却阻断（不再每请求都试），恢复唯一路径是后台 probe。
     let succeeding = JsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
     };
+    let blocked = execute_v3_openai_chat_relay_runtime_with_provider_health(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-blocked-after-post-commit".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"blocked"}],
+                "stream":false
+            }),
+        },
+        &succeeding,
+        provider_health.runtime_health(),
+    )
+    .await;
+    assert!(
+        blocked.is_err(),
+        "fresh request must be blocked while provider cooldown is active"
+    );
+
+    // probe 通过 → provider 恢复 → fresh 成功。
+    provider_health
+        .runtime_health()
+        .run_due_provider_cooldown_probes(u64::MAX, |_, _, _| async { Ok(()) })
+        .await
+        .expect("probe cycle must revive cooled provider");
     let second = execute_v3_openai_chat_relay_runtime_with_provider_health(
         &manifest,
         V3OpenAiChatRelayRuntimeInput {
@@ -1053,7 +1103,7 @@ async fn post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_requ
         provider_health.runtime_health(),
     )
     .await
-    .expect("second provider action");
+    .expect("second provider action after probe pass");
     assert_eq!(second.status, 200);
 }
 
@@ -1112,6 +1162,26 @@ data: [DONE]
     let terminal = ControlledSseTransport {
         receiver: Mutex::new(Some(terminal_receiver)),
     };
+    // post-commit 失败已冷却 provider；probe 通过后 terminal/fresh 请求可达，
+    // 且不占用 Error05 recovery lane（terminal 失败只写冷却，不驻留恢复门）。
+    let probed = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let probed_for_probe = std::sync::Arc::clone(&probed);
+    provider_health
+        .runtime_health()
+        .run_due_provider_cooldown_probes(u64::MAX, move |provider_id, _, _| {
+            let probed_for_probe = std::sync::Arc::clone(&probed_for_probe);
+            async move {
+                probed_for_probe.lock().unwrap().push(provider_id);
+                Ok(())
+            }
+        })
+        .await
+        .expect("probe cycle must revive cooled provider");
+    assert!(
+        !probed.lock().unwrap().is_empty(),
+        "probe cycle must probe the cooled provider, probed: {:?}",
+        probed.lock().unwrap()
+    );
     let successful = execute_v3_openai_chat_relay_runtime_with_provider_health(
         &manifest,
         V3OpenAiChatRelayRuntimeInput {
@@ -1888,12 +1958,10 @@ data: {"type":"message_stop"}
             && joined.contains("\"finish_reason\":\"stop\""),
         "client frames must carry text and terminal finish_reason: {joined:?}"
     );
-    let availability = provider_health.store().availability(
-        "mm",
-        Some("key1"),
-        Some("MiniMax-M3"),
-        u64::MAX,
-    );
+    let availability =
+        provider_health
+            .store()
+            .availability("mm", Some("key1"), Some("MiniMax-M3"), u64::MAX);
     assert!(
         availability.available && availability.blocked_scopes.is_empty(),
         "missing provider [DONE] must not record provider-health failure: {availability:?}"
@@ -2554,8 +2622,7 @@ async fn openai_chat_mode_b_mismatch_without_request_activation_fails_fast_on_we
         .as_array()
         .expect("hosted web_search must project to chat tool_calls");
     assert_eq!(
-        tool_calls[0]["function"]["name"],
-        "web_search",
+        tool_calls[0]["function"]["name"], "web_search",
         "hosted web_search server tool must be transparent to the client: {client_response}"
     );
 }
@@ -2780,8 +2847,7 @@ targets = [{ kind = "provider_model", provider = "text", model = "plain-model", 
         .as_array()
         .expect("hosted web_search must project to chat tool_calls");
     assert_eq!(
-        tool_calls[0]["function"]["name"],
-        "web_search",
+        tool_calls[0]["function"]["name"], "web_search",
         "hosted web_search server tool must be transparent to the client: {client_response}"
     );
 }

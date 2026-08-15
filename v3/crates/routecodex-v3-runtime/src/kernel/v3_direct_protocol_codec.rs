@@ -17,7 +17,10 @@ use crate::{
     nodes::{V3Req04StandardizedResponses, V3ResponsesDirect11Policy},
     shared::project_provider_raw_to_client_payload,
 };
-use routecodex_v3_error::{build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind, V3InternalErrorCode};
+use routecodex_v3_error::{
+    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
+    V3InternalErrorCode,
+};
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload, V3Provider12ResponsesWirePayload,
     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderResp14Raw,
@@ -29,7 +32,11 @@ use std::future::Future;
 use std::pin::Pin;
 
 pub(crate) type V3DirectResponseProjectionFuture = Pin<
-    Box<dyn Future<Output = Result<crate::shared::V3ProviderResponseProjection, V3Error01SourceRaised>> + Send>,
+    Box<
+        dyn Future<
+                Output = Result<crate::shared::V3ProviderResponseProjection, V3Error01SourceRaised>,
+            > + Send,
+    >,
 >;
 
 pub trait V3DirectProtocolCodec {
@@ -67,7 +74,10 @@ pub trait V3DirectProtocolCodec {
 
     fn run_provider_transport(
         wire: V3Provider12ResponsesWirePayload,
-    ) -> Result<routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest, V3Error01SourceRaised>;
+    ) -> Result<
+        routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
+        V3Error01SourceRaised,
+    >;
 
     fn run_response_projection(raw: V3ProviderResp14Raw) -> V3DirectResponseProjectionFuture;
 
@@ -94,7 +104,13 @@ pub trait V3DirectProtocolCodec {
         provider_health: &crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth,
         now_epoch_ms: u64,
     ) -> Result<Option<V3Target10ConcreteProviderSelected>, V3Error01SourceRaised> {
-        let _ = (control, manifest, standardized, provider_health, now_epoch_ms);
+        let _ = (
+            control,
+            manifest,
+            standardized,
+            provider_health,
+            now_epoch_ms,
+        );
         Ok(None)
     }
 
@@ -109,7 +125,15 @@ pub trait V3DirectProtocolCodec {
         now_epoch_ms: u64,
         trace: &mut Vec<&'static str>,
     ) -> Result<bool, V3Error01SourceRaised> {
-        let _ = (control, manifest, server_id, standardized, request_id, now_epoch_ms, trace);
+        let _ = (
+            control,
+            manifest,
+            server_id,
+            standardized,
+            request_id,
+            now_epoch_ms,
+            trace,
+        );
         Ok(false)
     }
 
@@ -123,7 +147,14 @@ pub trait V3DirectProtocolCodec {
         request_id: &str,
         trace: &mut Vec<&'static str>,
     ) -> Result<(), V3Error01SourceRaised> {
-        let _ = (control, manifest, server_id, standardized, request_id, trace);
+        let _ = (
+            control,
+            manifest,
+            server_id,
+            standardized,
+            request_id,
+            trace,
+        );
         Ok(())
     }
 
@@ -136,7 +167,14 @@ pub trait V3DirectProtocolCodec {
         request_id: &str,
         trace: &mut Vec<&'static str>,
     ) -> Result<(), V3Error01SourceRaised> {
-        let _ = (control, manifest, server_id, standardized, request_id, trace);
+        let _ = (
+            control,
+            manifest,
+            server_id,
+            standardized,
+            request_id,
+            trace,
+        );
         Ok(())
     }
 }
@@ -197,14 +235,14 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
 
     fn run_provider_transport(
         wire: V3Provider12ResponsesWirePayload,
-    ) -> Result<routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest, V3Error01SourceRaised>
-    {
+    ) -> Result<
+        routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
+        V3Error01SourceRaised,
+    > {
         crate::hooks::responses_direct_provider_transport_hook(wire)
     }
 
-    fn run_response_projection(
-        raw: V3ProviderResp14Raw,
-    ) -> V3DirectResponseProjectionFuture {
+    fn run_response_projection(raw: V3ProviderResp14Raw) -> V3DirectResponseProjectionFuture {
         Box::pin(project_provider_raw_to_client_payload(raw))
     }
 
@@ -290,14 +328,14 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
 
     fn run_provider_transport(
         wire: V3Provider12ResponsesWirePayload,
-    ) -> Result<routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest, V3Error01SourceRaised>
-    {
+    ) -> Result<
+        routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
+        V3Error01SourceRaised,
+    > {
         crate::hooks::chat_direct_provider_transport_hook(wire)
     }
 
-    fn run_response_projection(
-        raw: V3ProviderResp14Raw,
-    ) -> V3DirectResponseProjectionFuture {
+    fn run_response_projection(raw: V3ProviderResp14Raw) -> V3DirectResponseProjectionFuture {
         Box::pin(project_provider_raw_to_client_payload(raw))
     }
 

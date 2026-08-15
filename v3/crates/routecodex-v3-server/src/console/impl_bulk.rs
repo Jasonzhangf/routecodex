@@ -815,7 +815,7 @@ pub(crate) fn should_emit_v3_request_complete_console_line(
     }
     !matches!(
         observability.response_status.as_deref(),
-        Some("error" | "failed" | "incomplete")
+        Some("error" | "failed")
     )
 }
 
@@ -1083,13 +1083,19 @@ pub(crate) fn merge_v3_runtime_stream_observation(
 }
 
 pub(crate) fn is_v3_sse_terminal_success_status(status: &str) -> bool {
-    matches!(status.trim(), "completed" | "requires_action" | "done")
+    // incomplete 是 Responses 协议合法终态（max_output_tokens / content_filter），
+    // 客户端按协议接收部分输出；只有流自身缺终帧（status 仍为 streaming）才是
+    // provider 流失败。
+    matches!(
+        status.trim(),
+        "completed" | "requires_action" | "done" | "incomplete"
+    )
 }
 
 pub(crate) fn is_v3_sse_terminal_failure_status(status: &str) -> bool {
     matches!(
         status.trim(),
-        "failed" | "incomplete" | "cancelled" | "canceled" | "error"
+        "failed" | "cancelled" | "canceled" | "error"
     )
 }
 

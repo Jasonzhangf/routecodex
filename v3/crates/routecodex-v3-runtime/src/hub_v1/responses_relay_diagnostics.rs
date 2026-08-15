@@ -313,6 +313,9 @@ mod tests {
             ),
             Some("upstream_failed")
         );
-        assert_eq!(provider_payload_provider_code(&json!({"error":{"code":"  "}})), None);
+        assert_eq!(
+            provider_payload_provider_code(&json!({"error":{"code":"  "}})),
+            None
+        );
     }
 }

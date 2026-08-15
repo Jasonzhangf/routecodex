@@ -255,7 +255,8 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
 pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
-    pub(crate) retry_selected: &'state mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    pub(crate) retry_selected:
+        &'state mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     pub(crate) pending_recovery: &'state mut Option<V3Error05RecoveryAdmissionWitness>,
     pub(crate) provider_failure_events: &'state mut Vec<V3RuntimeProviderFailureObservation>,
     pub(crate) provider_failure_event_sink: Option<&'state V3RuntimeProviderFailureEventSink>,
@@ -296,7 +297,17 @@ impl V3RuntimeStreamObservation {
                     event_type,
                     response_status.as_deref(),
                 )
-            });
+            })
+            .or_else(|| infer_v3_runtime_incomplete_finish_reason(event, event_type));
+        // chat/gemini 等非 Responses 客户端 wire 没有 `status` 字段：语义
+        // finish_reason 出现即代表该帧已到终态，推导 `completed` 供 console
+        // 收口打印 usage（只写 observation 侧信道，绝不进入业务 payload）。
+        let response_status = response_status.or_else(|| {
+            finish_reason
+                .as_deref()
+                .filter(|_| event_type.is_none())
+                .map(|_| "completed".to_string())
+        });
         if response_status.is_none() && finish_reason.is_none() && usage.is_none() {
             return Ok(());
         }
@@ -330,6 +341,22 @@ impl V3RuntimeStreamObservation {
             .lock()
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
         snapshot.finish_reason = Some(finish_reason.to_string());
+        Ok(())
+    }
+
+    /// 只记录客户端协议终态状态（chat/gemini 等非 Responses 协议 wire 没有
+    /// `status`/`type` 字段，终态只能由语义 finish_reason 推导；该状态只写
+    /// observation 侧信道，绝不进入业务 payload）。
+    pub(crate) fn record_response_status(&self, status: &str) -> Result<(), String> {
+        let status = status.trim();
+        if status.is_empty() {
+            return Ok(());
+        }
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        snapshot.response_status = Some(status.to_string());
         Ok(())
     }
 
@@ -503,7 +530,9 @@ pub struct V3ResponsesRelayStoplessControlState {
 }
 
 impl V3ResponsesRelayStoplessControlState {
-    pub(crate) fn center_key(scope: &V3ResponsesRelayStoplessControlScope) -> V3ServerToolCenterKey {
+    pub(crate) fn center_key(
+        scope: &V3ResponsesRelayStoplessControlScope,
+    ) -> V3ServerToolCenterKey {
         V3ServerToolCenterKey {
             tool_name: V3ServerToolName::Stopless,
             scope_key: format!(

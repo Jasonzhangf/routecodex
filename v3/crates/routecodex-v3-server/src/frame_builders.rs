@@ -233,16 +233,7 @@ pub(crate) fn responses_direct_output_response_with_console(
         V3Server16Body::Bytes(bytes) => bytes,
         V3Server16Body::Sse(stream) => {
             let stream = wrap_v3_direct_sse_console_stream(stream, stream_console_finalizer);
-            // Direct SSE 投影保真传输 provider 字节，同时由 server 注入 transport
-            // keepalive：客户端 SSE 连接与 provider 状态解耦，provider 静默时
-            // 连接仍存活（错误/超时走 runtime 错误链，不在此层造错误帧）。
-            // Error06 终态错误帧（error_chain 非空）是 terminal 投影，保持
-            // "错误事件即首事件"确定性，不注入 keepalive。
-            let keepalive = if frame.error_chain.is_empty() {
-                Some(keepalive_interval)
-            } else {
-                None
-            };
+            let keepalive = frame.error_chain.is_empty().then_some(keepalive_interval);
             return builder
                 .body(v3_client_sse_body(stream, keepalive))
                 .expect("typed response");
@@ -289,14 +280,23 @@ pub(crate) fn v3_relay_client_sse_body(
     v3_io_sse_body(Box::pin(stream), keepalive_interval)
 }
 
-pub(crate) fn v3_client_sse_body(stream: V3ClientSseStream, keepalive_interval: Option<Duration>) -> Body {
+pub(crate) fn v3_client_sse_body(
+    stream: V3ClientSseStream,
+    keepalive_interval: Option<Duration>,
+) -> Body {
     let stream = stream::unfold((stream, false), |(mut stream, done)| async move {
         if done {
             return None;
         }
         match stream.next().await {
             Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-            Some(Err(error)) => Some((Err(io::Error::other(error.message)), (stream, true))),
+            Some(Err(source)) => Some((
+                Err(io::Error::other(format!(
+                    "{}: {}",
+                    source.code, source.message
+                ))),
+                (stream, true),
+            )),
             None => None,
         }
     });
@@ -336,8 +336,10 @@ pub(crate) fn wrap_v3_sse_io_dump_stream(
             return stream;
         }
     };
-    if let Err(error) = file.write_all(format!("# sse dump start endpoint={endpoint} port={port} request_id={request_id}\n").as_bytes())
-    {
+    if let Err(error) = file.write_all(
+        format!("# sse dump start endpoint={endpoint} port={port} request_id={request_id}\n")
+            .as_bytes(),
+    ) {
         eprintln!("[v3-sse-dump] header write failed: {error}");
         return stream;
     }
@@ -353,9 +355,8 @@ pub(crate) fn wrap_v3_sse_io_dump_stream(
                 }
                 Some(Err(error)) => {
                     if let Some(file) = file.as_mut() {
-                        let _ = file.write_all(
-                            format!("\n# sse stream error: {error}\n").as_bytes(),
-                        );
+                        let _ =
+                            file.write_all(format!("\n# sse stream error: {error}\n").as_bytes());
                     }
                     Some((Err(error), (stream, file)))
                 }
@@ -403,8 +404,10 @@ pub(crate) fn wrap_v3_sse_client_dump_stream(
             return stream;
         }
     };
-    if let Err(error) = file.write_all(format!("# sse dump start endpoint={endpoint} port={port} request_id={request_id}\n").as_bytes())
-    {
+    if let Err(error) = file.write_all(
+        format!("# sse dump start endpoint={endpoint} port={port} request_id={request_id}\n")
+            .as_bytes(),
+    ) {
         eprintln!("[v3-sse-dump] header write failed: {error}");
         return stream;
     }
@@ -421,7 +424,11 @@ pub(crate) fn wrap_v3_sse_client_dump_stream(
                 Some(Err(error)) => {
                     if let Some(file) = file.as_mut() {
                         let _ = file.write_all(
-                            format!("\n# sse stream error code={} stage={} message={}\n", error.code, error.source_stage, error.message).as_bytes(),
+                            format!(
+                                "\n# sse stream error code={} stage={} message={}\n",
+                                error.code, error.source_stage, error.message
+                            )
+                            .as_bytes(),
                         );
                     }
                     Some((Err(error), (stream, file)))

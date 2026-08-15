@@ -50,26 +50,26 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[path = "responses_relay_diagnostics.rs"]
-mod responses_relay_diagnostics;
 #[path = "responses_openai_chat_conversion.rs"]
 mod responses_openai_chat_conversion;
-#[path = "responses_relay_failures.rs"]
-mod responses_relay_failures;
-#[path = "responses_relay_stopless.rs"]
-mod responses_relay_stopless;
+#[path = "responses_relay_diagnostics.rs"]
+mod responses_relay_diagnostics;
 #[path = "responses_relay_dry_run.rs"]
 mod responses_relay_dry_run;
+#[path = "responses_relay_failures.rs"]
+mod responses_relay_failures;
 #[path = "responses_relay_json_hooks.rs"]
 mod responses_relay_json_hooks;
 #[path = "responses_relay_runtime_inner.rs"]
 mod responses_relay_runtime_inner;
+#[path = "responses_relay_stopless.rs"]
+mod responses_relay_stopless;
 #[path = "responses_relay_types.rs"]
 mod responses_relay_types;
+use responses_relay_runtime_inner::execute_v3_responses_relay_runtime_inner;
 pub(crate) use responses_relay_runtime_inner::{
     find_responses_tool_output_ids, V3ResponsesRelayToolOutputIds,
 };
-use responses_relay_runtime_inner::execute_v3_responses_relay_runtime_inner;
 pub use responses_relay_types::*;
 // Provider health store 保持 opaque：health handle 归 Provider runtime boundary
 //（worker 拆分时误入 types.rs，由 module-boundaries gate 强制移回）。
@@ -95,20 +95,20 @@ impl V3ResponsesRelayProviderHealthHandle {
 }
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
-use responses_relay_json_hooks::*;
 pub use responses_relay_dry_run::{
+    execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control,
     execute_v3_responses_relay_dry_run_runtime_with_local_continuation,
     execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control,
-    execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control,
     project_v3_responses_relay_runtime_failure,
 };
 use responses_relay_failures::{
     allowed_execution_modes_for_relay_server, error_output,
     is_v3_responses_provider_response_failure, provider_failure_output, provider_http_failure,
-    provider_response_hook_failure, provider_response_stream_failure,
-    provider_response_stream_relay_failure, provider_request_relay_failure,
+    provider_request_relay_failure, provider_response_hook_failure,
+    provider_response_stream_failure, provider_response_stream_relay_failure,
     provider_runtime_failure, provider_semantic_failure, server_routing_group,
 };
+use responses_relay_json_hooks::*;
 use responses_relay_stopless::*;
 
 const V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
@@ -705,40 +705,17 @@ fn commit_or_release_responses_local_continuation(
     Ok(())
 }
 
-
-
 fn build_v3_relay_observability_from_selected(
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     transport_intent: V3HubTransportIntent,
 ) -> V3RuntimeObservability {
-    V3RuntimeObservability {
-        entry_protocol: "responses".to_string(),
-        execution_mode: "relay".to_string(),
-        transport: v3_transport_intent_label(transport_intent).to_string(),
-        routing_group_id: Some(selected.route.routing_group_id.clone()),
-        pool_id: Some(selected.route.pool_id.clone()),
-        provider_id: Some(selected.candidate.provider_id.clone()),
-        auth_alias: Some(selected.candidate.auth_alias.clone()),
-        provider_key: Some(format!(
-            "{}:{}:{}",
-            selected.candidate.provider_id,
-            selected.candidate.auth_alias,
-            selected.candidate.model_id
-        )),
-        provider_type: Some(selected.candidate.provider_type.clone()),
-        model_id: Some(selected.candidate.model_id.clone()),
-        wire_model: Some(selected.candidate.wire_model.clone()),
-        provider_status: None,
-        response_status: None,
-        finish_reason: None,
-        stopless_activation: false,
-        attempts: Some(selected.attempts),
-        unavailable_candidates: selected.unavailable_candidates.clone(),
-        provider_failure_events: Vec::new(),
-        target_path: selected.candidate.path.clone(),
-        usage: None,
-        timing: None,
-    }
+    // 唯一共享 relay observability 构建器（chat/gemini/anthropic 同源，
+    // 禁止各 runtime 复制字段映射）。
+    super::relay_runtime_shared::build_v3_relay_observability(
+        "responses",
+        selected,
+        v3_transport_intent_label(transport_intent),
+    )
 }
 
 fn v3_transport_intent_label(intent: V3HubTransportIntent) -> &'static str {
@@ -810,7 +787,7 @@ fn read_v3_runtime_response_status(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn read_v3_runtime_finish_reason(value: &Value) -> Option<String> {
+pub(crate) fn read_v3_runtime_finish_reason(value: &Value) -> Option<String> {
     read_v3_runtime_string_path(value, &["finish_reason"])
         .or_else(|| read_v3_runtime_string_path(value, &["finishReason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["stop_reason"]))
@@ -855,6 +832,29 @@ fn infer_v3_runtime_finish_reason_from_provider_event_json(
     }
 }
 
+/// response.incomplete 终帧的 `incomplete_details.reason` -> 观测 finish_reason：
+/// max_output_tokens -> length、content_filter -> content_filter；未知 reason
+/// 原样记录（reason 本身就是可观测的终态信息，观测层不猜测语义）。
+pub(crate) fn infer_v3_runtime_incomplete_finish_reason(
+    event: &Value,
+    event_type: Option<&str>,
+) -> Option<String> {
+    if event_type != Some("response.incomplete") {
+        return None;
+    }
+    let reason = event
+        .pointer("/response/incomplete_details/reason")
+        .or_else(|| event.pointer("/incomplete_details/reason"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())?;
+    Some(match reason {
+        "max_output_tokens" => "length".to_string(),
+        "content_filter" => "content_filter".to_string(),
+        other => other.to_string(),
+    })
+}
+
 fn infer_v3_runtime_finish_reason(
     action: V3HubContinuationCommit,
     response_status: Option<&str>,
@@ -888,21 +888,29 @@ fn read_v3_runtime_string_path(value: &Value, path: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
-fn extract_v3_runtime_usage_summary(value: &Value) -> Option<V3RuntimeUsageSummary> {
-    let usage = value.get("usage")?;
+pub(crate) fn extract_v3_runtime_usage_summary(value: &Value) -> Option<V3RuntimeUsageSummary> {
+    // Responses/OpenAI Chat/Anthropic 均使用顶层 `usage`；Gemini 使用
+    // `usageMetadata`。归一化在唯一共享提取器内完成，禁止各协议 runtime
+    // 各自复制一份 usage 解析。
+    let usage = value.get("usage").or_else(|| value.get("usageMetadata"))?;
     let summary = V3RuntimeUsageSummary {
         input_tokens: read_v3_usage_u64(usage, &["input_tokens"])
-            .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens"])),
+            .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens"]))
+            .or_else(|| read_v3_usage_u64(usage, &["promptTokenCount"])),
         output_tokens: read_v3_usage_u64(usage, &["output_tokens"])
-            .or_else(|| read_v3_usage_u64(usage, &["completion_tokens"])),
-        total_tokens: read_v3_usage_u64(usage, &["total_tokens"]),
+            .or_else(|| read_v3_usage_u64(usage, &["completion_tokens"]))
+            .or_else(|| read_v3_usage_u64(usage, &["candidatesTokenCount"])),
+        total_tokens: read_v3_usage_u64(usage, &["total_tokens"])
+            .or_else(|| read_v3_usage_u64(usage, &["totalTokenCount"])),
         cached_tokens: read_v3_usage_u64(usage, &["input_tokens_details", "cached_tokens"])
             .or_else(|| read_v3_usage_u64(usage, &["input_tokens_details", "cached_read_tokens"]))
             .or_else(|| read_v3_usage_u64(usage, &["input_tokens_details", "cache_read_tokens"]))
             .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens_details", "cached_tokens"]))
             .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens_details", "cached_read_tokens"]))
             .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens_details", "cache_read_tokens"]))
-            .or_else(|| read_v3_usage_u64(usage, &["cache_read_input_tokens"])),
+            .or_else(|| read_v3_usage_u64(usage, &["cache_read_input_tokens"]))
+            .or_else(|| read_v3_usage_u64(usage, &["cache_creation_input_tokens"]))
+            .or_else(|| read_v3_usage_u64(usage, &["cachedContentTokenCount"])),
     };
     if summary.input_tokens.is_some()
         || summary.output_tokens.is_some()
@@ -1132,7 +1140,13 @@ pub(crate) fn provider_target(
         .ok_or_else(|| {
             V3ResponsesRelayRuntimeError::Target("selected auth handle missing".to_string())
         })?;
-    let secret = match (&auth.env, &auth.token_file, &auth.secret_file, &auth.secret_key, &auth.api_key) {
+    let secret = match (
+        &auth.env,
+        &auth.token_file,
+        &auth.secret_file,
+        &auth.secret_key,
+        &auth.api_key,
+    ) {
         (Some(env), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
         (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
         (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
@@ -1164,8 +1178,6 @@ pub(crate) fn provider_target(
         initial_concurrency_budget: selected.initial_concurrency_budget,
     })
 }
-
-
 
 #[cfg(test)]
 #[path = "responses_relay_runtime_tests.rs"]

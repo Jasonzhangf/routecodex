@@ -831,7 +831,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-51',
     from_node: 'V3ProviderResponsesEventCodec',
     to_node: 'V3ProviderResponsesTerminalOrFailureObserved',
-    caller_symbol: 'observe_v3_runtime_responses_sse_transport_chunk',
+    caller_symbol: 'observe_v3_runtime_responses_sse_semantic_frame',
     caller_file: files.responsesCodec,
     callee_symbol: 'apply_v3_runtime_responses_semantic_event',
     callee_file: files.responsesCodec,

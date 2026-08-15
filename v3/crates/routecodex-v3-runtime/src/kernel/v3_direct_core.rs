@@ -147,7 +147,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
                         Some(exhausted_observability),
-                    )
+                    );
                 }
             },
         };
@@ -164,6 +164,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             };
             let mut observability = build_v3_direct_runtime_observability(
                 &selected,
+                C::ENTRY_PROTOCOL,
                 transport_label,
                 None,
                 "in_progress",
@@ -243,8 +244,9 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             }
         };
         trace.push("V3Transport13ResponsesHttpRequest");
-        let mut provider_action_permit: Option<crate::provider_action_gate::V3ProviderActionPermit> =
-            None;
+        let mut provider_action_permit: Option<
+            crate::provider_action_gate::V3ProviderActionPermit,
+        > = None;
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
                 .wait_for_error05_recovery(&recovery, &selected)
@@ -317,10 +319,8 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                         &crate::hooks::register_responses_direct_hooks(),
                     );
                 }
-                let source = build_v3_provider_error_source(
-                    "V3Transport13ResponsesHttpRequest",
-                    error,
-                );
+                let source =
+                    build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);
                 drop(provider_action_permit.take());
                 let policy_result = match run_v3_direct_provider_failure_policy(
                     &V3DirectProviderFailurePolicyContext {
@@ -357,6 +357,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                     publish_v3_direct_provider_failure_event(
                         provider_failure_event_sink,
                         C::policy_target(&policy),
+                        C::ENTRY_PROTOCOL,
                         "json",
                         Some(event.status),
                         &provider_failure_events,
@@ -401,14 +402,14 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                         }
                         let mut observability = build_v3_direct_runtime_observability(
                             C::policy_target(&policy),
+                            C::ENTRY_PROTOCOL,
                             "json",
                             policy_result.event.as_ref().map(|event| event.status),
                             "failed",
                             provider_failure_events.clone(),
                             false,
                         );
-                        observability.attempts =
-                            Some(total_attempts(&accumulator, send_attempts));
+                        observability.attempts = Some(total_attempts(&accumulator, send_attempts));
                         let projected =
                             V3ErrorHandlingCenter::project_terminal(policy_result.decision);
                         return projected_error_output_with_observability(
@@ -500,6 +501,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                 publish_v3_direct_provider_failure_event(
                     provider_failure_event_sink,
                     C::policy_target(&policy),
+                    C::ENTRY_PROTOCOL,
                     "json",
                     Some(event.status),
                     &provider_failure_events,
@@ -544,6 +546,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                     }
                     let mut observability = build_v3_direct_runtime_observability(
                         C::policy_target(&policy),
+                        C::ENTRY_PROTOCOL,
                         "json",
                         Some(provider_raw.status()),
                         "failed",
@@ -561,7 +564,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             }
         }
         let provider_status = provider_raw.status();
-        let mut response_projection = match C::run_response_projection(provider_raw).await {
+        let response_projection = match C::run_response_projection(provider_raw).await {
             Ok(projection) => projection,
             Err(source) => {
                 if let Err(error) = runtime_timing.finish_external() {
@@ -607,6 +610,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                     publish_v3_direct_provider_failure_event(
                         provider_failure_event_sink,
                         C::policy_target(&policy),
+                        C::ENTRY_PROTOCOL,
                         "json",
                         Some(event.status),
                         &provider_failure_events,
@@ -641,14 +645,14 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                         }
                         let mut observability = build_v3_direct_runtime_observability(
                             C::policy_target(&policy),
+                            C::ENTRY_PROTOCOL,
                             "json",
                             policy_result.event.as_ref().map(|event| event.status),
                             "failed",
                             provider_failure_events.clone(),
                             false,
                         );
-                        observability.attempts =
-                            Some(total_attempts(&accumulator, send_attempts));
+                        observability.attempts = Some(total_attempts(&accumulator, send_attempts));
                         let projected =
                             V3ErrorHandlingCenter::project_terminal(policy_result.decision);
                         return projected_error_output_with_observability(
@@ -690,7 +694,8 @@ pub async fn execute_v3_direct_runtime_kernel_core<
         }
         let mut observability = build_v3_direct_runtime_observability(
             C::policy_target(&policy),
-            "json",
+            C::ENTRY_PROTOCOL,
+            v3_direct_client_transport_label(&response_projection.client_payload),
             Some(provider_status),
             "completed",
             provider_failure_events.clone(),

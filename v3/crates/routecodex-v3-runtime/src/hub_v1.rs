@@ -28,15 +28,16 @@ pub(crate) use provider_request_dry_run::V3ProviderRequestDryRunNoNetworkTranspo
 mod provider_compat_shared;
 pub(crate) use provider_compat_shared::{
     build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers,
-    build_v3_provider_transport_request_for_protocol, provider_wire_protocol_for_selected_candidate,
-    provider_protocol_compat_id, provider_wire_protocol_for_provider_type,
-    is_v3_gpt_canonical_model, is_v3_retain_response_cipher,
+    build_v3_provider_transport_request_for_protocol, is_v3_gpt_canonical_model,
+    is_v3_retain_response_cipher, provider_protocol_compat_id,
+    provider_wire_protocol_for_provider_type, provider_wire_protocol_for_selected_candidate,
 };
 mod relay_runtime_shared;
 pub(crate) use relay_runtime_shared::{
-    error_output, extract_error_type_style, extract_message_type_style, handle_provider_failure,
-    provider_request_failure, provider_runtime_failure, provider_target,
-    push_sse_response_chain_trace, server_routing_group, V3RelayProviderFailure,
+    build_v3_relay_observability, error_output, extract_error_type_style,
+    extract_message_type_style, handle_provider_failure, provider_request_failure,
+    provider_runtime_failure, provider_target, push_sse_response_chain_trace, server_routing_group,
+    wrap_v3_relay_client_sse_usage_observation, V3RelayClientSseStream, V3RelayProviderFailure,
 };
 mod relay_runtime_core;
 pub(crate) use relay_runtime_core::{
@@ -58,9 +59,10 @@ mod request_outbound_tool_id;
 pub(crate) use request_outbound_format::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode,
-    build_v3_openai_responses_standard_request_from_chat_canonical,
     build_v3_openai_chat_standard_request_from_chat_canonical,
-}; mod anthropic_codec_tool_projection;
+    build_v3_openai_responses_standard_request_from_chat_canonical,
+};
+mod anthropic_codec_tool_projection;
 mod anthropic_request_field_projection;
 
 mod req_inbound_01_client_raw;
@@ -114,8 +116,8 @@ mod relay_request;
 pub use relay_request::*;
 mod servertool_hooks;
 pub use servertool_hooks::*;
-mod stopless_injection;
 mod anthropic_codec;
+mod stopless_injection;
 pub use anthropic_codec::*;
 mod openai_chat_codec;
 pub use openai_chat_codec::*;

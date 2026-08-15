@@ -100,6 +100,10 @@ pub(crate) fn infer_v3_console_finish_reason_from_response_status(
         Some(status) if status.eq_ignore_ascii_case("requires_action") => {
             Some("tool_calls".to_string())
         }
+        // Responses 协议 response.incomplete 合法终态的观测兜底：reason 通常由
+        // stream_observation 显式记录（max_output_tokens -> length）；JSON 路径
+        // 或未知 reason 时按截断语义投影 length。
+        Some(status) if status.eq_ignore_ascii_case("incomplete") => Some("length".to_string()),
         _ => None,
     }
 }

@@ -166,6 +166,10 @@ pub fn build_v3_sse_transport_in_01_raw_chunk(bytes: &[u8]) -> SseTransportIn01R
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SseTransportIn02DecodedFrame {
     fields: Vec<SseField>,
+    /// 原始帧字节是否全部为合法 UTF-8。framing 层仍按 U+FFFD 修复保留帧结构
+    /// （既有 transport 契约），但语义消费层必须能区分“合法 UTF-8 的 JSON
+    /// 载荷错误”（codec 归属）与“帧字节本身非法 UTF-8”（transport 归属）。
+    raw_utf8_valid: bool,
 }
 
 pub type V3SseTransportIn02DecodedFrame = SseTransportIn02DecodedFrame;
@@ -173,6 +177,10 @@ pub type V3SseTransportIn02DecodedFrame = SseTransportIn02DecodedFrame;
 impl SseTransportIn02DecodedFrame {
     pub fn fields(&self) -> &[SseField] {
         &self.fields
+    }
+
+    pub fn raw_utf8_valid(&self) -> bool {
+        self.raw_utf8_valid
     }
 }
 
@@ -382,7 +390,10 @@ pub fn build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(
 pub fn build_sse_transport_in_02_from_fields(
     fields: Vec<SseField>,
 ) -> Result<SseTransportIn02DecodedFrame, SseTransportError> {
-    Ok(SseTransportIn02DecodedFrame { fields })
+    Ok(SseTransportIn02DecodedFrame {
+        fields,
+        raw_utf8_valid: true,
+    })
 }
 
 pub fn build_v3_sse_transport_in_02_from_fields(
@@ -459,7 +470,10 @@ fn build_sse_transport_in_02_from_sse_transport_in_01(
         }
         pending_blank = false;
     }
-    Ok(SseTransportIn02DecodedFrame { fields })
+    Ok(SseTransportIn02DecodedFrame {
+        fields,
+        raw_utf8_valid: std::str::from_utf8(raw).is_ok(),
+    })
 }
 
 #[cfg(test)]

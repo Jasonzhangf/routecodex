@@ -1025,15 +1025,14 @@ pub(super) fn responses_tool_choice_as_anthropic_tool_choice(
 ) -> Result<Value, V3AnthropicCodecError> {
     // responses tool_choice type -> hub -> anthropic type（查表；未命中与原 match 一致报错/透传）
     let responses_to_anthropic_type = |responses_type: &str| -> Option<&'static str> {
-        let hub =
-            crate::protocol_tables::map_value(
-                crate::protocol_tables::V3TableKind::ToolChoice,
-                "responses",
-                responses_type,
-                crate::protocol_tables::V3TableDirection::Inbound,
-            )
-            .ok()
-            .flatten()?;
+        let hub = crate::protocol_tables::map_value(
+            crate::protocol_tables::V3TableKind::ToolChoice,
+            "responses",
+            responses_type,
+            crate::protocol_tables::V3TableDirection::Inbound,
+        )
+        .ok()
+        .flatten()?;
         crate::protocol_tables::map_value(
             crate::protocol_tables::V3TableKind::ToolChoice,
             "anthropic",
@@ -1154,32 +1153,32 @@ mod tests {
     }
 }
 
-    #[test]
-    fn websearch_function_tool_maps_to_anthropic_hosted_web_search_server_tool() {
-        // chat 入口 client 声明 `{"type":"function","function":{"name":"websearch"}}`，
-        // Anthropic wire 必须以官方 hosted server tool（web_search_20250305）编码，
-        // 否则 MiniMax 等 provider 收不到搜索工具。
-        let tool = json!({
-            "type": "function",
-            "function": {
-                "name": "websearch",
-                "description": "Search the web",
-                "parameters": {"type":"object","properties":{"query":{"type":"string"}}}
-            }
-        });
-        let anthropic =
-            responses_tool_as_anthropic_tool(tool.as_object().unwrap()).expect("map must succeed");
-        assert_eq!(anthropic["type"], "web_search_20250305");
-        assert_eq!(anthropic["name"], "web_search");
-        // 大小写不敏感：WebSearch / WEBSEARCH 同样映射。
-        let upper = json!({"type":"function","function":{"name":"WEBSEARCH"}});
-        let mapped =
-            responses_tool_as_anthropic_tool(upper.as_object().unwrap()).expect("map must succeed");
-        assert_eq!(mapped["name"], "web_search");
-        // web_search 名（hosted 语义）保持官方 server tool。
-        let hosted = json!({"type":"web_search"});
-        let mapped =
-            responses_tool_as_anthropic_tool(hosted.as_object().unwrap()).expect("map must succeed");
-        assert_eq!(mapped["name"], "web_search");
-        assert_eq!(mapped["type"], "web_search_20250305");
-    }
+#[test]
+fn websearch_function_tool_maps_to_anthropic_hosted_web_search_server_tool() {
+    // chat 入口 client 声明 `{"type":"function","function":{"name":"websearch"}}`，
+    // Anthropic wire 必须以官方 hosted server tool（web_search_20250305）编码，
+    // 否则 MiniMax 等 provider 收不到搜索工具。
+    let tool = json!({
+        "type": "function",
+        "function": {
+            "name": "websearch",
+            "description": "Search the web",
+            "parameters": {"type":"object","properties":{"query":{"type":"string"}}}
+        }
+    });
+    let anthropic =
+        responses_tool_as_anthropic_tool(tool.as_object().unwrap()).expect("map must succeed");
+    assert_eq!(anthropic["type"], "web_search_20250305");
+    assert_eq!(anthropic["name"], "web_search");
+    // 大小写不敏感：WebSearch / WEBSEARCH 同样映射。
+    let upper = json!({"type":"function","function":{"name":"WEBSEARCH"}});
+    let mapped =
+        responses_tool_as_anthropic_tool(upper.as_object().unwrap()).expect("map must succeed");
+    assert_eq!(mapped["name"], "web_search");
+    // web_search 名（hosted 语义）保持官方 server tool。
+    let hosted = json!({"type":"web_search"});
+    let mapped =
+        responses_tool_as_anthropic_tool(hosted.as_object().unwrap()).expect("map must succeed");
+    assert_eq!(mapped["name"], "web_search");
+    assert_eq!(mapped["type"], "web_search_20250305");
+}

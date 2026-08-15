@@ -192,4 +192,3 @@ pub(crate) fn responses_relay_response_hook_profile(
         None => profile,
     }
 }
-

@@ -19,10 +19,9 @@ use crate::provider_failure_runtime_policy::{
     V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolution,
     V3RelayProviderTargetResolutionInput,
 };
+use crate::runtime_timing::V3RuntimeTimingState;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
-use routecodex_v3_error::{
-    V3ErrorSourceKind, V3ProviderFailureSessionScope,
-};
+use routecodex_v3_error::{V3ErrorSourceKind, V3ProviderFailureSessionScope};
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderRequestHeader, V3ProviderResponseBody,
     V3ProviderSseStream, V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
@@ -39,21 +38,17 @@ async fn guard_relay_sse_first_frame(
     mut stream: routecodex_v3_provider_responses::V3ProviderSseStream,
 ) -> Result<routecodex_v3_provider_responses::V3ProviderSseStream, V3ProviderError> {
     use futures_util::StreamExt;
-    let first = tokio::time::timeout(
-        V3_RELAY_SSE_FIRST_FRAME_TIMEOUT,
-        stream.next(),
-    )
-    .await
-    .map_err(|_| V3ProviderError::Transport {
-        request_id: request_id.to_string(),
-        provider_id: provider_id.to_string(),
-        reason: "provider SSE stream did not produce a first frame within timeout".to_string(),
-    })?;
+    let first = tokio::time::timeout(V3_RELAY_SSE_FIRST_FRAME_TIMEOUT, stream.next())
+        .await
+        .map_err(|_| V3ProviderError::Transport {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: "provider SSE stream did not produce a first frame within timeout".to_string(),
+        })?;
     match first {
         Some(Ok(chunk)) => {
             // 保真重放首帧后再接 provider 流（语义不变，仅前置首帧检测）。
-            let replay =
-                futures_util::stream::iter(vec![Ok(chunk)]).chain(stream);
+            let replay = futures_util::stream::iter(vec![Ok(chunk)]).chain(stream);
             Ok(Box::pin(replay))
         }
         Some(Err(error @ V3ProviderError::ClientDisconnect { .. })) => {
@@ -114,8 +109,7 @@ pub(crate) fn guard_v3_provider_sse_idle(
 }
 
 /// Relay SSE 首帧超时（与 Direct SSE 首帧守卫一致，30s）。
-const V3_RELAY_SSE_FIRST_FRAME_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(30);
+const V3_RELAY_SSE_FIRST_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Relay transport 响应头等待上限：provider 在窗口内未返回响应头（上游挂起/无响应）
 /// 时归一化为 Transport 错误进入错误链——记录 provider failure（health）+ reselect 切
@@ -178,7 +172,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
     /// 协议 runtime 输出类型（如 `V3GeminiRelayRuntimeOutput`）。
     type Output;
     /// SSE 客户端流类型（如 `V3GeminiRelayClientStream`）。
-    type SseStream: futures_util::Stream<Item = Result<Vec<u8>, String>> + Send + Unpin;
+    type SseStream: futures_util::Stream<Item = Result<Vec<u8>, String>> + Send + Unpin + 'static;
     /// SSE provider outcome（记录 success/failure）。
     type SseOutcome;
 
@@ -204,16 +198,15 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
     fn req_inbound_02(
         req01: V3HubReqInbound01ClientRaw,
     ) -> Result<V3HubReqInbound02Normalized, V3RelayCoreError> {
-        Ok(build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01))
+        Ok(build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(
+            req01,
+        ))
     }
 
     /// HTTP status 失败构造（错误 body 形状是协议 wire 差异：gemini/openai 原样 +
     /// 各自提取 fn；anthropic 需先转换 responses 错误形状）。
-    fn provider_http_failure(
-        status: u16,
-        body: &[u8],
-        provider_id: &str,
-    ) -> V3RelayProviderFailure;
+    fn provider_http_failure(status: u16, body: &[u8], provider_id: &str)
+        -> V3RelayProviderFailure;
 
     /// 从 endpoint path 提取 model。
     fn model_from_endpoint_path(endpoint_path: &str) -> Result<String, V3RelayCoreError>;
@@ -269,10 +262,21 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         retain_response_cipher: bool,
         outcome: Self::SseOutcome,
     ) -> Result<Self::SseStream, V3RelayCoreError>;
-    /// 组装 JSON 成功输出。
-    fn assemble_json_output(client_response: Value, trace: Vec<&'static str>) -> Self::Output;
-    /// 组装 SSE 成功输出。
-    fn assemble_sse_output(sse: Self::SseStream, trace: Vec<&'static str>) -> Self::Output;
+    /// 组装 JSON 成功输出（observability 由骨架统一构建，codec 只负责写入
+    /// 自身 Output 结构；控制语义只走 typed observability，不进 payload）。
+    fn assemble_json_output(
+        client_response: Value,
+        trace: Vec<&'static str>,
+        observability: V3RuntimeObservability,
+    ) -> Self::Output;
+    /// 组装 SSE 成功输出（stream_observation 供 server 在流收口后打印
+    /// usage/终态；观测只读，不改写业务字节）。
+    fn assemble_sse_output(
+        sse: V3RelayClientSseStream,
+        trace: Vec<&'static str>,
+        observability: V3RuntimeObservability,
+        stream_observation: V3RuntimeStreamObservation,
+    ) -> Self::Output;
     /// 从收集的完整字节重建客户端流（非空响应返回给 server；实现方构造自己的流类型）。
     fn sse_from_collected(collected: Vec<Vec<u8>>) -> Self::SseStream;
     /// 组装 provider failure 输出（terminal Error06）。
@@ -317,6 +321,9 @@ where
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3RelayCoreError::StaticRegistry(error.to_string()))?;
     let mut trace = Vec::with_capacity(17);
+    // 统一 relay timing：internal = RouteCodex 处理，external = provider 等待；
+    // 只写入 typed observability，不进入 payload。
+    let runtime_timing = V3RuntimeTimingState::start();
     let transport_intent = if payload.get("stream").and_then(Value::as_bool) == Some(true) {
         V3HubTransportIntent::Sse
     } else {
@@ -381,7 +388,8 @@ where
                 body: routing_payload_ref,
                 request_local_excluded_candidates: &failed_candidates,
                 provider_health: &provider_health,
-                now_ms: v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
+                now_ms: v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(V3RelayCoreError::Target)?,
                 deterministic_sample,
             }) {
                 V3RelayProviderTargetResolution::Selected(selected) => selected,
@@ -396,7 +404,9 @@ where
                         source.code, source.message
                     )))
                 }
-                V3RelayProviderTargetResolution::Exhausted { attempted_candidates } => {
+                V3RelayProviderTargetResolution::Exhausted {
+                    attempted_candidates,
+                } => {
                     return Err(V3RelayCoreError::Target(format!(
                         "selected target exhausted after {attempted_candidates:?}"
                     )))
@@ -450,15 +460,14 @@ where
                 continue;
             }};
         }
-        let req_compat =
-            match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
-                Ok(req_compat) => req_compat,
-                Err(error) => handle_provider_request_failure!(
-                    "ProviderReqCompat06ProviderCompat",
-                    "provider_request_compat_error",
-                    error
-                ),
-            };
+        let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
+            Ok(req_compat) => req_compat,
+            Err(error) => handle_provider_request_failure!(
+                "ProviderReqCompat06ProviderCompat",
+                "provider_request_compat_error",
+                error
+            ),
+        };
         trace.push("ProviderReqCompat06ProviderCompat");
         let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
@@ -491,15 +500,21 @@ where
                     trace.push("V3ProviderActionGateAdmission");
                 }
                 V3ProviderActionRecoveryTransition::Superseded(ticket) => {
-                    pending_provider_action_recovery =
-                        Some(ticket.recovery_witness().map_err(V3RelayCoreError::Target)?);
+                    pending_provider_action_recovery = Some(
+                        ticket
+                            .recovery_witness()
+                            .map_err(V3RelayCoreError::Target)?,
+                    );
                     retry_selected = Some(selected);
                     trace.push("V3ProviderActionGateTerminalReevaluation");
                     continue;
                 }
                 V3ProviderActionRecoveryTransition::ReleasedBySuccess(ticket) => {
-                    pending_provider_action_recovery =
-                        Some(ticket.recovery_witness().map_err(V3RelayCoreError::Target)?);
+                    pending_provider_action_recovery = Some(
+                        ticket
+                            .recovery_witness()
+                            .map_err(V3RelayCoreError::Target)?,
+                    );
                     retry_selected = Some(selected);
                     trace.push("V3ProviderActionGateTerminalReevaluation");
                     continue;
@@ -511,6 +526,9 @@ where
                     continue;
                 }
             }
+        }
+        if let Err(timing_error) = runtime_timing.start_external() {
+            return Err(V3RelayCoreError::Target(timing_error));
         }
         let provider_raw = match tokio::time::timeout(
             V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT,
@@ -534,6 +552,7 @@ where
                     &response.body,
                     &selected_target_provider_id,
                 );
+                let _ = runtime_timing.finish_external();
                 drop(provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
                     &failure_context,
@@ -556,6 +575,7 @@ where
             }
             Err(error) => {
                 let failure = provider_runtime_failure(error, &selected_target_provider_id);
+                let _ = runtime_timing.finish_external();
                 drop(provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
                     &failure_context,
@@ -577,6 +597,10 @@ where
                 continue;
             }
         };
+        if let Err(timing_error) = runtime_timing.finish_external() {
+            return Err(V3RelayCoreError::Target(timing_error));
+        }
+        let provider_status = provider_raw.status();
         match provider_raw.into_body() {
             V3ProviderResponseBody::Json(bytes) => {
                 let provider_value: Value = match serde_json::from_slice(&bytes) {
@@ -664,10 +688,33 @@ where
                         &selected_target_provider_id,
                         Some(&selected_target_auth_alias),
                         Some(&selected_target_model_id),
-                        v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
+                        v3_relay_provider_policy_now_epoch_ms()
+                            .map_err(V3RelayCoreError::Target)?,
                     )
                     .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
-                return Ok(C::assemble_json_output(client_response, trace));
+                let mut observability = build_v3_relay_observability(
+                    C::ENTRY_KIND,
+                    &selected,
+                    if transport_intent == V3HubTransportIntent::Sse {
+                        "sse"
+                    } else {
+                        "json"
+                    },
+                );
+                observability.provider_status = Some(provider_status);
+                observability.response_status = Some("completed".to_string());
+                observability.finish_reason = read_v3_runtime_finish_reason(&client_response);
+                observability.usage = extract_v3_runtime_usage_summary(&client_response);
+                observability.timing = Some(
+                    runtime_timing
+                        .finish_runtime()
+                        .map_err(|timing_error| V3RelayCoreError::Target(timing_error))?,
+                );
+                return Ok(C::assemble_json_output(
+                    client_response,
+                    trace,
+                    observability,
+                ));
             }
             V3ProviderResponseBody::Sse(stream) => {
                 push_sse_response_chain_trace(&mut trace);
@@ -682,8 +729,7 @@ where
                 {
                     Ok(stream) => stream,
                     Err(error) => {
-                        let failure =
-                            provider_runtime_failure(error, &selected_target_provider_id);
+                        let failure = provider_runtime_failure(error, &selected_target_provider_id);
                         drop(provider_action_permit.take());
                         if let Some(failure) = handle_provider_failure(
                             &failure_context,
@@ -730,11 +776,30 @@ where
                         provider_action_permit.take(),
                     ),
                 )?;
+                let mut observability =
+                    build_v3_relay_observability(C::ENTRY_KIND, &selected, "sse");
+                observability.provider_status = Some(provider_status);
+                // SSE 终态由客户端流收口时的 observation 合并决定（chat/gemini
+                // wire 无 status 字段，语义 finish_reason 推导 completed）。
+                observability.response_status = Some("streaming".to_string());
+                let stream_observation = V3RuntimeStreamObservation::default();
+                observability.timing = Some(
+                    runtime_timing
+                        .finish_runtime()
+                        .map_err(|timing_error| V3RelayCoreError::Target(timing_error))?,
+                );
+                let sse =
+                    wrap_v3_relay_client_sse_usage_observation(sse, stream_observation.clone());
                 // Return the projected stream immediately after the first-frame guard.
                 // The client connection must remain independent from provider EOF and
                 // post-commit failures; the codec stream owns those later outcomes and
                 // records them through its typed side-channel.
-                return Ok(C::assemble_sse_output(sse, trace));
+                return Ok(C::assemble_sse_output(
+                    sse,
+                    trace,
+                    observability,
+                    stream_observation,
+                ));
             }
         }
     }
@@ -751,12 +816,8 @@ mod tests {
     async fn guard_rejects_empty_sse_stream() {
         let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
             Box::pin(futures_util::stream::empty());
-        let result =
-            guard_relay_sse_first_frame("req-empty", "provider-1", stream).await;
-        assert!(
-            result.is_err(),
-            "empty SSE stream must fail the guard"
-        );
+        let result = guard_relay_sse_first_frame("req-empty", "provider-1", stream).await;
+        assert!(result.is_err(), "empty SSE stream must fail the guard");
     }
 
     /// provider 首帧正常：guard 必须保真重放首帧后继续 provider 流（语义不变）。
@@ -791,18 +852,15 @@ mod tests {
     /// provider 首帧错误：guard 必须原样上抛（错误链切 provider），不吞错。
     #[tokio::test]
     async fn guard_propagates_first_frame_provider_error() {
-        let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
-            Box::pin(futures_util::stream::iter(vec![Err(V3ProviderError::Transport {
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(
+            futures_util::stream::iter(vec![Err(V3ProviderError::Transport {
                 request_id: "req-err".to_string(),
                 provider_id: "provider-1".to_string(),
                 reason: "upstream reset".to_string(),
-            })]));
-        let result =
-            guard_relay_sse_first_frame("req-err", "provider-1", stream).await;
-        assert!(
-            result.is_err(),
-            "first frame error must propagate"
+            })]),
         );
+        let result = guard_relay_sse_first_frame("req-err", "provider-1", stream).await;
+        assert!(result.is_err(), "first frame error must propagate");
     }
 
     /// 空闲守卫：正常 provider 流逐帧透传、EOF 原样结束（不改变语义）。
@@ -887,11 +945,13 @@ mod tests {
                 .expect("first frame must pass"),
             b"data: first\n\n".to_vec()
         );
-        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), guarded.next())
-            .await;
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), guarded.next()).await;
         match outcome {
             Ok(Some(Err(V3ProviderError::Transport { reason, .. }))) => {
-                assert!(reason.contains("idle timeout"), "unexpected reason: {reason}");
+                assert!(
+                    reason.contains("idle timeout"),
+                    "unexpected reason: {reason}"
+                );
             }
             other => panic!("post-first-frame hang must produce Transport error, got {other:?}"),
         }

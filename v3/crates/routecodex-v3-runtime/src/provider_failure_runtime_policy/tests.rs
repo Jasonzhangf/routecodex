@@ -562,11 +562,10 @@ targets = [
 async fn transport_error_excludes_only_the_failed_provider_key() {
     let manifest = transport_thrash_manifest("transport_thrash");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let selected =
-        match resolve_target(&manifest, "transport_thrash", &BTreeSet::new(), &health) {
-            V3RelayProviderTargetResolution::Selected(selected) => selected,
-            _ => panic!("valid fixture must select the first provider"),
-        };
+    let selected = match resolve_target(&manifest, "transport_thrash", &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select the first provider"),
+    };
     assert_eq!(selected.candidate.provider_id, "first");
     assert_eq!(selected.candidate.auth_alias, "key1");
     let target = V3TargetInterpreter::default();
@@ -673,11 +672,10 @@ message_mode = "code_only"
     )
     .expect("path-project manifest");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let selected =
-        match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
-            V3RelayProviderTargetResolution::Selected(selected) => selected,
-            _ => panic!("valid fixture must select the provider"),
-        };
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select the provider"),
+    };
     let mut failed_candidates = BTreeSet::new();
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
@@ -716,8 +714,7 @@ message_mode = "code_only"
         "project step status must override the terminal projection"
     );
     assert_eq!(
-        projection.body["error"]["code"],
-        "E_PATH_RATE_LIMIT",
+        projection.body["error"]["code"], "E_PATH_RATE_LIMIT",
         "project step public_code must override the projected client code"
     );
 }

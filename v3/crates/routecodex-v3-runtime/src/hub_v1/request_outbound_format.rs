@@ -390,8 +390,10 @@ fn project_chat_canonical_web_search_tools_to_anthropic_wire(
             || name.trim().eq_ignore_ascii_case("websearch")
             || name.trim().eq_ignore_ascii_case("web_search");
         if is_web_search_declaration {
-            let converted = super::anthropic_codec::responses_web_search_tool_as_anthropic_tool(row)
-                .map_err(|error| format!("anthropic web_search tool projection failed: {error}"))?;
+            let converted = super::anthropic_codec::responses_web_search_tool_as_anthropic_tool(
+                row,
+            )
+            .map_err(|error| format!("anthropic web_search tool projection failed: {error}"))?;
             *tool = converted;
         }
     }
@@ -1139,7 +1141,11 @@ fn project_responses_item_extension_fields(
         return;
     };
     // hub 字段 -> openai_chat 字段（互逆字段对查表；与原手写数组一致）
-    for source in ["responses_item_id", "responses_status", "responses_execution"] {
+    for source in [
+        "responses_item_id",
+        "responses_status",
+        "responses_execution",
+    ] {
         if let Some(value) = extension.get(source) {
             if let Some(target) = table_map_field("openai_chat", source, V3TableDirection::Outbound)
                 .ok()
@@ -1171,10 +1177,10 @@ pub(crate) fn build_responses_input_from_chat_messages(
             continue;
         }
         if role.eq_ignore_ascii_case("assistant") {
+            if let Some(reasoning) = chat_assistant_reasoning_to_responses_input_item(row) {
+                output.push(reasoning);
+            }
             if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
-                if let Some(reasoning) = chat_assistant_reasoning_to_responses_input_item(row) {
-                    output.push(reasoning);
-                }
                 let items = tool_calls
                     .iter()
                     .map(chat_tool_call_to_responses_input_item)
@@ -1210,8 +1216,7 @@ fn chat_assistant_reasoning_to_responses_input_item(row: &Map<String, Value>) ->
         .get("reasoning_content")
         .or_else(|| row.get("reasoning_text"))
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
+        .filter(|value| !value.trim().is_empty())?;
     Some(json!({
         "type": "reasoning",
         "summary": [{"type": "summary_text", "text": text}]

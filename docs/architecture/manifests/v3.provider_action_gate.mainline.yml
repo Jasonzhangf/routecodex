@@ -485,7 +485,7 @@ edges:
     to: V3ProviderResponsesTerminalOrFailureObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: observe_v3_runtime_responses_sse_transport_chunk
+    caller_symbol: observe_v3_runtime_responses_sse_semantic_frame
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
     callee_symbol: apply_v3_runtime_responses_semantic_event
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs

@@ -30,6 +30,7 @@ fn finalize_v3_direct_resp15_output(
     trace.push("V3Resp15ClientPayload");
     let mut observability = build_v3_direct_runtime_observability(
         &policy.target,
+        "responses",
         v3_direct_client_transport_label(&response_projection.client_payload),
         Some(provider_status),
         "completed",
@@ -64,6 +65,7 @@ fn finalize_v3_direct_resp15_streaming_output(
     trace.push("V3Resp15ClientPayload");
     let mut observability = build_v3_direct_runtime_observability(
         &policy.target,
+        "responses",
         v3_direct_client_transport_label(&response_projection.client_payload),
         Some(provider_status),
         "streaming",
@@ -136,7 +138,9 @@ fn wrap_v3_direct_sse_remote_stream_for_outcome(
                 now_epoch_ms,
                 committed_pending: false,
             };
-            V3ClientBody::Sse(wrap_direct_sse_remote_continuation_stream(stream, state, policy))
+            V3ClientBody::Sse(wrap_direct_sse_remote_continuation_stream(
+                stream, state, policy,
+            ))
         }
         other => other,
     };

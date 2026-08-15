@@ -34,6 +34,7 @@ pub struct V3ProviderGlobalProbePermit {
     provider: V3ProviderGlobalKey,
     provider_key: String,
     started_at_ms: u64,
+    probe_interval_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,7 +42,6 @@ pub struct V3ProviderGlobalAvailability {
     pub provider_key: String,
     pub available: bool,
     pub blocked_until_ms: Option<u64>,
-    pub probe_suspended_until_restart: bool,
     pub probe_in_flight: bool,
 }
 
@@ -67,8 +67,8 @@ struct V3ProviderGlobalState {
     probe_model_id: Option<String>,
     blocked_until_ms: Option<u64>,
     next_probe_at_ms: Option<u64>,
-    probe_suspended_until_restart: bool,
     probe_in_flight: bool,
+    probe_interval_ms: u64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -121,8 +121,8 @@ impl V3ProviderGlobalSubscriptionHealthStore {
                 probe_model_id: model_id.map(str::to_string),
                 blocked_until_ms: Some(blocked_until_ms),
                 next_probe_at_ms: Some(now_ms.saturating_add(policy.probe_interval_ms)),
-                probe_suspended_until_restart: false,
                 probe_in_flight: false,
+                probe_interval_ms: policy.probe_interval_ms,
             },
         );
         Ok(V3ProviderGlobalSubscriptionDecision::ProviderBlocked { blocked_until_ms })
@@ -142,8 +142,7 @@ impl V3ProviderGlobalSubscriptionHealthStore {
             .map_err(|error| format!("provider global health lock poisoned: {error}"))?;
         let provider_state = state.providers.get(&provider);
         let blocked = provider_state.is_some_and(|value| {
-            value.probe_suspended_until_restart
-                || value.probe_in_flight
+            value.probe_in_flight
                 || value.next_probe_at_ms.is_some()
                 || value
                     .blocked_until_ms
@@ -157,8 +156,6 @@ impl V3ProviderGlobalSubscriptionHealthStore {
                     .blocked_until_ms
                     .filter(|blocked_until_ms| *blocked_until_ms > now_ms)
             }),
-            probe_suspended_until_restart: provider_state
-                .is_some_and(|value| value.probe_suspended_until_restart),
             probe_in_flight: provider_state.is_some_and(|value| value.probe_in_flight),
         })
     }
@@ -178,8 +175,7 @@ impl V3ProviderGlobalSubscriptionHealthStore {
         let Some(provider_state) = state.providers.get_mut(&provider) else {
             return Ok(None);
         };
-        if provider_state.probe_suspended_until_restart
-            || provider_state.probe_in_flight
+        if provider_state.probe_in_flight
             || provider_state.blocked_until_ms.is_none()
             || provider_state
                 .next_probe_at_ms
@@ -189,10 +185,12 @@ impl V3ProviderGlobalSubscriptionHealthStore {
         }
         provider_state.probe_in_flight = true;
         let provider_key = provider_label(&provider);
+        let probe_interval_ms = provider_state.probe_interval_ms.max(1);
         Ok(Some(V3ProviderGlobalProbePermit {
             provider,
             provider_key,
             started_at_ms: now_ms,
+            probe_interval_ms,
         }))
     }
 
@@ -208,8 +206,7 @@ impl V3ProviderGlobalSubscriptionHealthStore {
             .providers
             .iter()
             .filter(|(_, provider_state)| {
-                !provider_state.probe_suspended_until_restart
-                    && !provider_state.probe_in_flight
+                !provider_state.probe_in_flight
                     && provider_state.blocked_until_ms.is_some()
                     && provider_state
                         .next_probe_at_ms
@@ -244,7 +241,6 @@ impl V3ProviderGlobalSubscriptionHealthStore {
         provider_state.probe_in_flight = false;
         provider_state.blocked_until_ms = None;
         provider_state.next_probe_at_ms = None;
-        provider_state.probe_suspended_until_restart = false;
         state.failures.retain(|key, _| key.provider != provider);
         state.providers.remove(&provider);
         Ok(())
@@ -267,8 +263,10 @@ impl V3ProviderGlobalSubscriptionHealthStore {
             return Err("provider global probe is not in flight".to_string());
         }
         provider_state.probe_in_flight = false;
-        provider_state.probe_suspended_until_restart = true;
-        provider_state.next_probe_at_ms = None;
+        // 订阅类故障通常数小时后由上游恢复：失败后不 suspend-until-restart，
+        // 按 probe interval 排下一次探针，探针通过才拉回路由池。
+        provider_state.next_probe_at_ms =
+            Some(permit.started_at_ms.saturating_add(permit.probe_interval_ms));
         Ok(())
     }
 

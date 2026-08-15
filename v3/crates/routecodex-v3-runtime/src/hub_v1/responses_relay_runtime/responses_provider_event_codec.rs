@@ -13,33 +13,9 @@ pub(super) fn observe_v3_runtime_responses_sse_transport_chunk(
         .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
     let mut terminal_response = None;
     for frame in frames {
-        let Some(data) = parse_v3_runtime_sse_frame_fields(&frame)? else {
-            continue;
-        };
-        if data == "[DONE]" {
-            continue;
-        }
-        let event: Value = serde_json::from_str(&data).map_err(|error| {
-            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                "V3 Responses Relay response event payload is malformed: {error}"
-            ))
-        })?;
-        if let Some(message) = extract_v3_provider_event_error_payload_message(&event) {
-            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                message,
-            ));
-        }
-        observation
-            .record_provider_event_json(&event)
-            .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-        collect_v3_runtime_responses_event_payload_evidence(
-            &event,
-            response_scaffold,
-            output_items,
-            output_text,
-        )?;
-        if let Some(response) = apply_v3_runtime_responses_semantic_event(
-            &event,
+        if let Some(response) = observe_v3_runtime_responses_sse_semantic_frame(
+            &frame,
+            observation,
             response_scaffold,
             output_items,
             output_text,
@@ -48,6 +24,54 @@ pub(super) fn observe_v3_runtime_responses_sse_transport_chunk(
         }
     }
     Ok(terminal_response)
+}
+
+/// 单个 SSE 帧的语义消费：非法 UTF-8 帧字节归 transport 失败（显式错误，
+/// 不做 silent 修复透传）；`data` 载荷的 JSON/schema 错误归 codec 失败。
+/// 供逐帧路径与 EOF trailing frame 路径共用，保证两类错误归属一致。
+pub(super) fn observe_v3_runtime_responses_sse_semantic_frame(
+    frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
+    observation: &V3RuntimeStreamObservation,
+    response_scaffold: &mut Option<Value>,
+    output_items: &mut Vec<Value>,
+    output_text: &mut String,
+) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
+    if !frame.frame().raw_utf8_valid() {
+        return Err(V3ResponsesRelayRuntimeError::ProviderSseTransport(
+            "SSE input is not valid UTF-8".to_string(),
+        ));
+    }
+    let Some(data) = parse_v3_runtime_sse_frame_fields(frame)? else {
+        return Ok(None);
+    };
+    if data == "[DONE]" {
+        return Ok(None);
+    }
+    let event: Value = serde_json::from_str(&data).map_err(|error| {
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+            "V3 Responses Relay response event payload is malformed: {error}"
+        ))
+    })?;
+    if let Some(message) = extract_v3_provider_event_error_payload_message(&event) {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            message,
+        ));
+    }
+    observation
+        .record_provider_event_json(&event)
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+    collect_v3_runtime_responses_event_payload_evidence(
+        &event,
+        response_scaffold,
+        output_items,
+        output_text,
+    )?;
+    apply_v3_runtime_responses_semantic_event(
+        &event,
+        response_scaffold,
+        output_items,
+        output_text,
+    )
 }
 
 fn apply_v3_runtime_responses_semantic_event(
@@ -73,22 +97,17 @@ fn apply_v3_runtime_responses_semantic_event(
             Ok(None)
         }
         Some("response.completed") => {
-            let mut response = event
-                .get("response")
-                .cloned()
-                .unwrap_or_else(|| event.clone());
-            merge_v3_runtime_responses_scaffold(&mut response, response_scaffold.as_ref());
-            attach_required_action_from_sse_event(&mut response, event);
-            apply_responses_stream_protocol_events_to_terminal_response(
-                &mut response,
-                output_items,
-                output_text,
-            )?;
-            Ok(Some(response))
+            build_v3_runtime_terminal_response(event, response_scaffold, output_items, output_text)
+        }
+        // response.incomplete 是 Responses 协议合法终态（max_output_tokens 截断 /
+        // content_filter 触发）：与 completed 一样产出 terminal response（保留
+        // status=incomplete + incomplete_details），客户端按协议消费部分输出，
+        // 网关不得把它当 provider 流错误切 provider / 打 502。
+        Some("response.incomplete") => {
+            build_v3_runtime_terminal_response(event, response_scaffold, output_items, output_text)
         }
         Some(
             "response.failed"
-            | "response.incomplete"
             | "response.cancelled"
             | "response.canceled"
             | "response.error",
@@ -96,7 +115,6 @@ fn apply_v3_runtime_responses_semantic_event(
             let message = event
                 .pointer("/response/error/message")
                 .or_else(|| event.pointer("/error/message"))
-                .or_else(|| event.pointer("/response/incomplete_details/reason"))
                 .and_then(Value::as_str)
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or(V3_RESPONSES_RELAY_PROVIDER_EVENT_FAILED_MESSAGE);
@@ -133,6 +151,26 @@ fn apply_v3_runtime_responses_semantic_event(
         }
         _ => Ok(None),
     }
+}
+
+fn build_v3_runtime_terminal_response(
+    event: &Value,
+    response_scaffold: &mut Option<Value>,
+    output_items: &[Value],
+    output_text: &str,
+) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
+    let mut response = event
+        .get("response")
+        .cloned()
+        .unwrap_or_else(|| event.clone());
+    merge_v3_runtime_responses_scaffold(&mut response, response_scaffold.as_ref());
+    attach_required_action_from_sse_event(&mut response, event);
+    apply_responses_stream_protocol_events_to_terminal_response(
+        &mut response,
+        output_items,
+        output_text,
+    )?;
+    Ok(Some(response))
 }
 
 fn merge_v3_runtime_responses_scaffold(response: &mut Value, scaffold: Option<&Value>) {
@@ -1010,6 +1048,56 @@ mod tests {
             output[0]["content"],
             json!([]),
             "response.completed content must remain authoritative"
+        );
+    }
+
+    #[test]
+    fn response_incomplete_is_terminal_response_not_provider_error() {
+        let mut scaffold = None;
+        let terminal = apply_v3_runtime_responses_semantic_event(
+            &json!({
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_incomplete_1",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                }
+            }),
+            &mut scaffold,
+            &[],
+            "",
+        )
+        .expect("response.incomplete must produce a terminal response, not an error")
+        .expect("response.incomplete must be terminal");
+        assert_eq!(terminal["status"], json!("incomplete"));
+        assert_eq!(
+            terminal["incomplete_details"]["reason"],
+            json!("max_output_tokens")
+        );
+        assert_eq!(terminal["usage"]["total_tokens"], json!(15));
+    }
+
+    #[test]
+    fn response_failed_still_errors_as_provider_event_codec_failure() {
+        let mut scaffold = None;
+        let error = apply_v3_runtime_responses_semantic_event(
+            &json!({
+                "type": "response.failed",
+                "response": {
+                    "id": "resp_failed_1",
+                    "status": "failed",
+                    "error": {"message": "upstream model crashed"}
+                }
+            }),
+            &mut scaffold,
+            &[],
+            "",
+        )
+        .expect_err("response.failed must remain an explicit provider event failure");
+        assert!(
+            error.to_string().contains("upstream model crashed"),
+            "unexpected error: {error}"
         );
     }
 }

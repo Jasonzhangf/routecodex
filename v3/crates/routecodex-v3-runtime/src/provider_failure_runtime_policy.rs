@@ -4,21 +4,19 @@ use routecodex_v3_config::{
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope,
-    is_v3_retryable_transient_stage_code,
+    is_v3_retryable_transient_stage_code, V3Error05ExecutionDecision,
+    V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
+    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind,
+    V3ExternalErrorLink, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload,
-    build_v3_transport_13_responses_request_from_v3_provider_12,
-    ReqwestResponsesTransport, ResponsesTransport,
+    build_v3_provider_global_probe_request,
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle,
+    V3ProviderAuthSecretHandle,
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
-    V3ProviderFailurePolicy, V3ProviderFailureRecord, V3ProviderHealthStore,
-    V3ProviderSessionAvailabilityReader,
-    V3ProviderGlobalSubscriptionDecision, V3ProviderGlobalSubscriptionHealthStore,
-    V3ProviderGlobalSubscriptionPolicy,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ResponsesProviderTarget,
+    V3ProviderFailurePolicy, V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
+    V3ProviderGlobalSubscriptionHealthStore, V3ProviderGlobalSubscriptionPolicy,
+    V3ProviderHealthStore, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
 use routecodex_v3_target::{
     V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
@@ -34,94 +32,18 @@ use crate::provider_action_gate::{
     V3ProviderActionGateKey, V3ProviderActionProviderScope, V3ProviderActionRecoveryTransition,
 };
 use crate::provider_error_policy_matching::provider_error_policy_matches_source_failure;
-pub(crate) use crate::provider_failure_runtime_helpers::{
-    build_v3_transient_failure_record, build_v3_transient_recovery_witness,
-    V3_TRANSIENT_RETRY_BUDGET,
-};
-
-pub fn build_v3_provider_global_probe_target(
-    manifest: &V3Config05ManifestPublished,
-    provider_id: &str,
-    auth_alias: Option<&str>,
-    model_id: Option<&str>,
-) -> Result<V3ResponsesProviderTarget, String> {
-    let provider = manifest
-        .providers
-        .get(provider_id)
-        .ok_or_else(|| format!("probe provider {provider_id} missing"))?;
-    let auth = provider
-        .auth
-        .entries
-        .iter()
-        .find(|entry| auth_alias.is_none_or(|alias| entry.alias == alias))
-        .ok_or_else(|| format!("probe provider {provider_id} has no auth entry"))?;
-    let secret = match (&auth.env, &auth.token_file, &auth.secret_file, &auth.secret_key, &auth.api_key) {
-        (Some(env), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
-        (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
-        (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile { path: path.clone(), key: key.clone() },
-        (None, None, None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
-        _ => return Err(format!("probe provider {provider_id} auth entry is invalid")),
-    };
-    let model = provider
-        .models
-        .get(model_id.unwrap_or(&provider.default_model))
-        .ok_or_else(|| format!("probe provider {provider_id} default model missing"))?;
-    let responses = provider.responses.as_ref();
-    Ok(V3ResponsesProviderTarget {
-        provider_id: provider.id.clone(),
-        provider_type: provider.provider_type.clone(),
-        base_url: provider.base_url.clone(),
-        canonical_model_id: model.id.clone(),
-        wire_model: model.wire_name.clone(),
-        compatibility_profile: provider.compatibility_profile.clone(),
-        auth: V3ProviderAuthHandle {
-            alias: auth.alias.clone(),
-            secret,
-        },
-        responses_transport: responses
-            .map(|value| value.transport)
-            .unwrap_or_default(),
-        websocket_v2_url: responses.and_then(|value| value.websocket_v2_url.clone()),
-        provider_request_cleanup: provider.provider_request_cleanup.clone(),
-        request_timeout_ms: provider.request_timeout_ms,
-        initial_concurrency_budget: provider
-            .concurrency
-            .as_ref()
-            .map(|value| value.max_in_flight)
-            .unwrap_or(8),
-    })
-}
+include!("provider_failure_global_probe.rs");
 
 pub async fn probe_v3_provider_global_target(
     target: V3ResponsesProviderTarget,
 ) -> Result<(), String> {
-    let provider_id = target.provider_id.clone();
-    let body = serde_json::json!({
-        "model": target.wire_model,
-        "input": [{
-            "role": "user",
-            "content": [{"type": "input_text", "text": "routecodex health probe"}]
-        }],
-        "max_output_tokens": 1,
-        "stream": false,
-    });
-    let wire = build_v3_provider_12_responses_wire_payload(
-        format!("provider-global-probe-{provider_id}"),
-        target,
-        body,
-    )
-    .map_err(|error| error.to_string())?;
-    let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire)
-        .map_err(|error| error.to_string())?;
-    let response = ReqwestResponsesTransport::default()
-        .send(request)
-        .await
-        .map_err(|error| error.to_string())?;
-    if !(200..=299).contains(&response.status()) {
-        return Err(format!("provider global probe returned {}", response.status()));
-    }
-    Ok(())
+    probe_v3_provider_global_target_impl(target).await
 }
+
+pub(crate) use crate::provider_failure_runtime_helpers::{
+    build_v3_transient_failure_record, build_v3_transient_recovery_witness,
+    V3_TRANSIENT_RETRY_BUDGET,
+};
 
 pub(crate) fn provider_runtime_failure_stage(error: &V3ProviderError) -> &'static str {
     match error {
@@ -238,15 +160,26 @@ fn configured_retry_budget_for_failure(
     message: &str,
     default_budget: usize,
 ) -> usize {
-    let Some(policy) = manifest.error.provider_error_action_policy.iter().find(|policy| {
-        provider_error_policy_matches_source_failure(policy, provider_id, provider_type, model_id, status, error_type)
-            && (policy.matcher.content_contains_any.is_empty()
-            || policy
-                .matcher
-                .content_contains_any
-                .iter()
-                .any(|value| message.contains(value)))
-    }) else {
+    let Some(policy) = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| {
+            provider_error_policy_matches_source_failure(
+                policy,
+                provider_id,
+                provider_type,
+                model_id,
+                status,
+                error_type,
+            ) && (policy.matcher.content_contains_any.is_empty()
+                || policy
+                    .matcher
+                    .content_contains_any
+                    .iter()
+                    .any(|value| message.contains(value)))
+        })
+    else {
         return default_budget;
     };
     policy
@@ -270,21 +203,25 @@ fn configured_health_policy_for_failure(
     error_type: Option<&str>,
     message: &str,
 ) -> Option<V3ProviderFailurePolicy> {
-    let policy = manifest.error.provider_error_action_policy.iter().find(|policy| {
-        provider_error_policy_matches_source_failure(
-            policy,
-            provider_id,
-            provider_type,
-            model_id,
-            status,
-            error_type,
-        ) && (policy.matcher.content_contains_any.is_empty()
-            || policy
-                .matcher
-                .content_contains_any
-                .iter()
-                .any(|value| message.contains(value)))
-    })?;
+    let policy = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| {
+            provider_error_policy_matches_source_failure(
+                policy,
+                provider_id,
+                provider_type,
+                model_id,
+                status,
+                error_type,
+            ) && (policy.matcher.content_contains_any.is_empty()
+                || policy
+                    .matcher
+                    .content_contains_any
+                    .iter()
+                    .any(|value| message.contains(value)))
+        })?;
     let threshold = policy
         .path
         .iter()
@@ -448,7 +385,10 @@ impl V3ProviderAvailabilityReader for V3SessionGlobalAvailabilityReader<'_> {
         let global = self
             .global
             .availability(provider_id, auth_alias, model_id, now_ms);
-        if !global.as_ref().is_ok_and(|availability| availability.available) {
+        if !global
+            .as_ref()
+            .is_ok_and(|availability| availability.available)
+        {
             projection.available = false;
             projection
                 .blocked_scopes
@@ -460,12 +400,15 @@ impl V3ProviderAvailabilityReader for V3SessionGlobalAvailabilityReader<'_> {
 
 impl V3ProviderFailureRuntimeHealth {
     pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
+        let store = V3ProviderHealthStore::from_manifest(manifest);
         Self {
-            store: V3ProviderHealthStore::from_manifest(manifest),
-            global_subscription_store: V3ProviderGlobalSubscriptionHealthStore::default(),
+            global_subscription_store: store.global_subscription_store(),
+            store,
             action_gate: V3ProviderActionGate::process_shared(),
-            default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(manifest)
-                .same_candidate_retries,
+            default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
+                manifest,
+            )
+            .same_candidate_retries,
         }
     }
 
@@ -500,9 +443,7 @@ impl V3ProviderFailureRuntimeHealth {
             )
     }
 
-    pub(crate) fn global_subscription_store(
-        &self,
-    ) -> V3ProviderGlobalSubscriptionHealthStore {
+    pub(crate) fn global_subscription_store(&self) -> V3ProviderGlobalSubscriptionHealthStore {
         self.global_subscription_store.clone()
     }
 
@@ -518,15 +459,14 @@ impl V3ProviderFailureRuntimeHealth {
         let provider_keys = self
             .global_subscription_store
             .provider_keys_with_probe_due(now_ms)?;
+        let mut probe_errors = Vec::new();
         for (provider_id, auth_alias, model_id) in provider_keys {
-            let Some(permit) = self
-                .global_subscription_store
-                .try_acquire_probe(
-                    &provider_id,
-                    auth_alias.as_deref(),
-                    model_id.as_deref(),
-                    now_ms,
-                )?
+            let Some(permit) = self.global_subscription_store.try_acquire_probe(
+                &provider_id,
+                auth_alias.as_deref(),
+                model_id.as_deref(),
+                now_ms,
+            )?
             else {
                 continue;
             };
@@ -537,9 +477,14 @@ impl V3ProviderFailureRuntimeHealth {
                 Err(error) => {
                     self.global_subscription_store
                         .complete_probe_failure(permit)?;
-                    return Err(format!("provider global probe failed for {provider_id}: {error}"));
+                    probe_errors.push(format!(
+                        "provider global probe failed for {provider_id}: {error}"
+                    ));
                 }
             }
+        }
+        if !probe_errors.is_empty() {
+            return Err(probe_errors.join("; "));
         }
         Ok(())
     }
@@ -563,6 +508,64 @@ impl V3ProviderFailureRuntimeHealth {
                 now_ms,
             )
             .map_err(|error| error.to_string())
+    }
+
+    /// provider 级冷却的后台 probe：到期且 probe 到期的 provider 最小 ping，
+    /// 通过才恢复，失败保持冷却并推后探针。
+    pub async fn run_due_provider_cooldown_probes<F, Fut>(
+        &self,
+        now_ms: u64,
+        probe: F,
+    ) -> Result<(), String>
+    where
+        F: Fn(String, Option<String>, Option<String>) -> Fut,
+        Fut: Future<Output = Result<(), String>>,
+    {
+        let provider_keys = self
+            .store
+            .provider_cooldown_probe_keys_due(now_ms)
+            .map_err(|error| error.to_string())?;
+        let mut probe_errors = Vec::new();
+        for (provider_id, auth_alias, model_id) in provider_keys {
+            if !self
+                .store
+                .try_acquire_provider_cooldown_probe(
+                    &provider_id,
+                    auth_alias.as_deref(),
+                    model_id.as_deref(),
+                )
+                .map_err(|error| error.to_string())?
+            {
+                continue;
+            }
+            match probe(provider_id.clone(), auth_alias.clone(), model_id.clone()).await {
+                Ok(()) => self
+                    .store
+                    .complete_provider_cooldown_probe_success(
+                        &provider_id,
+                        auth_alias.as_deref(),
+                        model_id.as_deref(),
+                    )
+                    .map_err(|error| error.to_string())?,
+                Err(error) => {
+                    self.store
+                        .complete_provider_cooldown_probe_failure(
+                            &provider_id,
+                            auth_alias.as_deref(),
+                            model_id.as_deref(),
+                            now_ms,
+                        )
+                        .map_err(|error| error.to_string())?;
+                    probe_errors.push(format!(
+                        "provider cooldown probe failed for {provider_id}: {error}"
+                    ));
+                }
+            }
+        }
+        if !probe_errors.is_empty() {
+            return Err(probe_errors.join("; "));
+        }
+        Ok(())
     }
 
     pub(crate) fn record_provider_failure_record_with_policy(
@@ -617,13 +620,12 @@ impl V3ProviderFailureRuntimeHealth {
                 now_ms,
             )
             .map_err(|error| error.to_string())?;
-        self.global_subscription_store
-            .record_provider_success(
-                provider_id,
-                auth_alias,
-                model_id,
-                failure_session_scope,
-            )?;
+        self.global_subscription_store.record_provider_success(
+            provider_id,
+            auth_alias,
+            model_id,
+            failure_session_scope,
+        )?;
         self.action_gate
             .record_provider_success(&V3ProviderActionProviderScope::new(
                 failure_session_scope,
@@ -733,6 +735,18 @@ impl V3ProviderFailureRuntimeHealth {
         error_family: &str,
         reason: &str,
     ) -> Result<(), String> {
+        // post-commit SSE 流失败是强故障信号（流已开始却中断/malformed）：
+        // 直接写 provider 级冷却（不等 session 计数达阈值），冷却到期后由
+        // 后台 probe 复活，避免"每请求都试"持续命中故障 provider。
+        self.store
+            .record_provider_stream_failure_in_provider_scope(
+                provider_id,
+                auth_alias,
+                model_id,
+                error_family,
+                v3_relay_provider_policy_now_epoch_ms()?,
+            )
+            .map_err(|error| error.to_string())?;
         self.record_provider_failure_record(
             failure_session_scope,
             provider_id,
@@ -809,8 +823,8 @@ impl V3ProviderFailureRuntimeHealth {
 impl From<V3ProviderHealthStore> for V3ProviderFailureRuntimeHealth {
     fn from(store: V3ProviderHealthStore) -> Self {
         Self {
+            global_subscription_store: store.global_subscription_store(),
             store,
-            global_subscription_store: V3ProviderGlobalSubscriptionHealthStore::default(),
             action_gate: V3ProviderActionGate::process_shared(),
             default_same_provider_retries: 0,
         }
@@ -825,9 +839,9 @@ impl V3ProviderAvailabilityReader for V3ProviderFailureRuntimeHealth {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> V3ProviderAvailabilityProjection {
-        let mut projection = self.store
-            .availability(provider_id, auth_alias, model_id, now_ms)
-            ;
+        let mut projection = self
+            .store
+            .availability(provider_id, auth_alias, model_id, now_ms);
         let global_available = self
             .global_subscription_store
             .availability(provider_id, auth_alias, model_id, now_ms)
@@ -940,7 +954,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         state
             .same_candidate_retries
             .insert(candidate_key.clone(), retries_done + 1);
-        state.trace.push("V3RelayTransientRetrySame");        let recovery = build_v3_transient_recovery_witness(
+        state.trace.push("V3RelayTransientRetrySame");
+        let recovery = build_v3_transient_recovery_witness(
             &context.failure_session_scope,
             &candidate_key,
             error_type.as_deref().unwrap_or("provider_failure"),

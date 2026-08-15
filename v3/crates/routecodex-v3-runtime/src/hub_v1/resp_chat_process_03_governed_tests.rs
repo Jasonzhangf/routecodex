@@ -90,8 +90,7 @@ fn resp03_anthropic_signature_survives_govern_path() {
         V3HubInvocationSource::Client,
         V3HubTransportIntent::Json,
     );
-    let compat =
-        build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).unwrap();
+    let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).unwrap();
     let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat).unwrap();
     let stripped = strip_v3_resp03_encrypted_reasoning_content(resp02, false);
 

@@ -4,22 +4,20 @@ use crate::hub_v1::{
     apply_v3_tool_call_servertool_hook_at_resp03,
     build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
     build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
-    build_v3_provider_resp_inbound_01_raw_with_compat_profile,
+    build_v3_provider_resp_inbound_01_raw_with_compat_profile, record_v3_provider_sse_json_frame,
     v3_responses_direct_stopless_center_enabled_for_server, V3HubContinuationOwnership,
     V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
     V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile, V3HubTransportIntent,
     V3ProviderRespInbound01RawContext, V3RuntimeObservability, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
     V3RuntimeStreamObservation, V3ServerToolCenterWriteOrigin, V3StoplessCenterState,
-    record_v3_provider_sse_json_frame,
 };
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     build_v3_transient_failure_record, build_v3_transient_recovery_witness,
-    select_v3_target_with_session_then_global,
-    v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
-    V3_TRANSIENT_RETRY_BUDGET,
+    select_v3_target_with_session_then_global, v3_relay_provider_policy_now_epoch_ms,
+    V3ProviderFailureRuntimeHealth, V3_TRANSIENT_RETRY_BUDGET,
 };
 use crate::remote_continuation::{
     V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,
@@ -37,13 +35,12 @@ use routecodex_v3_error::{
     V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
     V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope,
-    V3_TRANSIENT_TRANSPORT_HANG_CODE, V3_ERROR_CHAIN_NODE_IDS,
+    V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
-    ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
-    V3ProviderFailureRecord, V3ProviderResp14Raw, V3ProviderResponseBodyKind,
-    V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAvailabilityProjection,
+    V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureRecord, V3ProviderResp14Raw,
+    V3ProviderResponseBodyKind, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -62,7 +59,9 @@ use direct_sse_provider_outcome::{
     wrap_direct_sse_provider_outcome_stream, V3DirectSseProviderOutcome,
 };
 mod v3_direct_protocol_codec;
-pub use v3_direct_protocol_codec::{V3ChatDirectCodec, V3DirectProtocolCodec, V3ResponsesDirectCodec};
+pub use v3_direct_protocol_codec::{
+    V3ChatDirectCodec, V3DirectProtocolCodec, V3ResponsesDirectCodec,
+};
 const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
 
 /// Responses direct transport 响应头等待上限：provider 在该窗口内未返回响应头
@@ -73,8 +72,7 @@ const V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(120);
 /// 挂起判定的固定 reason：只有响应头等待超时构造的 Transport 错误才进入
 /// health-neutral 瞬态重试；其余 transport 错误（连接失败等）保持原策略。
-const V3_DIRECT_TRANSPORT_HANG_REASON: &str =
-    "provider response header timed out (suspected hang)";
+const V3_DIRECT_TRANSPORT_HANG_REASON: &str = "provider response header timed out (suspected hang)";
 
 #[cfg(test)]
 mod response_header_timeout_contract_tests {
@@ -463,6 +461,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             };
             let mut observability = build_v3_direct_runtime_observability(
                 &selected,
+                "responses",
                 transport_label,
                 None,
                 "in_progress",
@@ -599,6 +598,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 publish_v3_direct_provider_failure_event(
                     provider_failure_event_sink.as_ref(),
                     &selected,
+                    "responses",
                     "json",
                     Some(event.status),
                     &provider_failure_events,
@@ -853,10 +853,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     V3ProviderError::Transport { reason, .. }
                         if reason == V3_DIRECT_TRANSPORT_HANG_REASON
                 );
-                let source = build_v3_provider_error_source(
-                    "V3Transport13ResponsesHttpRequest",
-                    error,
-                );
+                let source =
+                    build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);
                 // 挂起由错误处理中心按「transport 阶段 + 专属 code」判定为瞬态
                 // （health-neutral 重试 3 次），不在构造处打标记。
                 let source = if hang {
@@ -896,6 +894,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     publish_v3_direct_provider_failure_event(
                         provider_failure_event_sink.as_ref(),
                         &policy.target,
+                        "responses",
                         "json",
                         Some(event.status),
                         &provider_failure_events,
@@ -938,6 +937,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         }
                         let mut observability = build_v3_direct_runtime_observability(
                             &policy.target,
+                            "responses",
                             "json",
                             policy_result.event.as_ref().map(|event| event.status),
                             "failed",
@@ -1046,6 +1046,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         publish_v3_direct_provider_failure_event(
                             provider_failure_event_sink.as_ref(),
                             &policy.target,
+                            "responses",
                             "json",
                             Some(event.status),
                             &provider_failure_events,
@@ -1088,6 +1089,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             }
                             let mut observability = build_v3_direct_runtime_observability(
                                 &policy.target,
+                                "responses",
                                 "json",
                                 policy_result.event.as_ref().map(|event| event.status),
                                 "failed",
@@ -1298,26 +1300,31 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         if let V3RemoteContinuationObservation::Streaming { state } =
             &response_projection.remote_continuation
         {
-            let stream_observation = V3RuntimeStreamObservation::default();
+            // Resp14 projection now materializes the complete provider attempt
+            // before commit, so retain its observation (including usage) instead
+            // of replacing it with a fresh, empty state.
+            let stream_observation = response_projection
+                .stream_observation
+                .clone()
+                .unwrap_or_default();
             let body = std::mem::replace(
                 &mut response_projection.client_payload.body,
                 V3ClientBody::Bytes(Vec::new()),
             );
             response_projection.client_payload.body = match body {
                 V3ClientBody::Sse(stream) => {
-                    let stream =
-                        wrap_direct_sse_provider_event_json_observation_stream_with_compat(
-                            stream,
-                            stream_observation.clone(),
-                            runtime_timing.clone(),
-                            crate::shared::v3_strip_client_response_id_enabled_for_server(
-                                manifest,
-                                &standardized.protocol_context.server_id,
-                            ),
-                            retain_response_cipher,
-                            policy.target.candidate.compatibility_profile.as_deref()
-                                == Some("responses:deepseek-console-go"),
-                        );
+                    let stream = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
+                        stream,
+                        stream_observation.clone(),
+                        runtime_timing.clone(),
+                        crate::shared::v3_strip_client_response_id_enabled_for_server(
+                            manifest,
+                            &standardized.protocol_context.server_id,
+                        ),
+                        retain_response_cipher,
+                        policy.target.candidate.compatibility_profile.as_deref()
+                            == Some("responses:deepseek-console-go"),
+                    );
                     V3ClientBody::Sse(stream)
                 }
                 other => other,
@@ -1330,21 +1337,21 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     continuation_state.clone(),
                     scope,
                     previous_response_id.clone(),
-                selected_pin.clone(),
-                selected_capability_revision.clone(),
-                now_epoch_ms,
-                state.clone(),
-            );
-            wrap_v3_direct_sse_provider_stream_for_outcome(
-                &mut response_projection.client_payload.body,
-                provider_health.clone(),
-                &direct_failure_session_scope,
-                &policy,
-                provider_health_neutral,
-                &mut provider_action_permit,
-                runtime_timing.clone(),
-                stream_observation.clone(),
-            );
+                    selected_pin.clone(),
+                    selected_capability_revision.clone(),
+                    now_epoch_ms,
+                    state.clone(),
+                );
+                wrap_v3_direct_sse_provider_stream_for_outcome(
+                    &mut response_projection.client_payload.body,
+                    provider_health.clone(),
+                    &direct_failure_session_scope,
+                    &policy,
+                    provider_health_neutral,
+                    &mut provider_action_permit,
+                    runtime_timing.clone(),
+                    stream_observation.clone(),
+                );
             }
             return finalize_v3_direct_resp15_streaming_output(
                 &policy,
@@ -1402,6 +1409,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         };
         let mut observability = build_v3_direct_runtime_observability(
             &policy.target,
+            "responses",
             v3_direct_client_transport_label(&response_projection.client_payload),
             Some(provider_status),
             "completed",

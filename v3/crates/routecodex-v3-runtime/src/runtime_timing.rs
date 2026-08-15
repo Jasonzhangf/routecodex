@@ -113,6 +113,10 @@ impl V3RuntimeTimingState {
         })
     }
 
+    pub(crate) fn is_finished(&self) -> Result<bool, String> {
+        Ok(self.lock()?.finished)
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, V3RuntimeTimingStateInner>, String> {
         self.inner
             .lock()

@@ -238,7 +238,11 @@ fn responses_encrypted_only_reasoning_item_keeps_empty_reasoning_content() {
     .expect("encrypted-only reasoning must still project to Chat");
 
     let messages = request["messages"].as_array().expect("messages");
-    assert_eq!(messages.len(), 2, "reasoning+assistant coalesce into one assistant, then user: {request}");
+    assert_eq!(
+        messages.len(),
+        2,
+        "reasoning+assistant coalesce into one assistant, then user: {request}"
+    );
     assert_eq!(messages[0]["role"], json!("assistant"));
     assert_eq!(
         messages[0]["reasoning_content"],

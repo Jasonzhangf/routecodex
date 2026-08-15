@@ -136,6 +136,21 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_gemini_semantics(
         "controlled json"
     );
     assert_eq!(client_response["usageMetadata"]["totalTokenCount"], 5);
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("gemini relay JSON success must carry typed observability");
+    assert_eq!(observability.entry_protocol, "gemini");
+    assert_eq!(observability.transport, "json");
+    assert_eq!(observability.response_status.as_deref(), Some("completed"));
+    assert_eq!(observability.finish_reason.as_deref(), Some("STOP"));
+    let usage = observability
+        .usage
+        .as_ref()
+        .expect("gemini usageMetadata must normalize into observability");
+    assert_eq!(usage.input_tokens, Some(3));
+    assert_eq!(usage.output_tokens, Some(2));
+    assert_eq!(usage.total_tokens, Some(5));
 }
 
 #[tokio::test]
@@ -365,10 +380,7 @@ async fn provider_error_enters_error01_06_without_success_projection() {
             .is_some_and(|chain| chain.contains(&"V3Error03TargetLocalAction")),
         "provider failure must retain its typed classification chain"
     );
-    assert_eq!(
-        output.node_trace.last(),
-        Some(&"V3Error06ClientProjected")
-    );
+    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
     assert!(
         client_response["error"].get("status").is_none(),
         "provider raw Gemini status must not bypass ErrorErr06 projection: {client_response}"
@@ -577,6 +589,24 @@ async fn sse_runtime_enters_response_chat_process_and_preserves_thought_signatur
         payload["candidates"][0]["content"]["parts"][1]["text"],
         "visible"
     );
+    let stream_observation = output
+        .stream_observation
+        .as_ref()
+        .expect("gemini SSE success must carry stream observation");
+    let snapshot = stream_observation.snapshot().unwrap();
+    assert_eq!(
+        snapshot.response_status.as_deref(),
+        Some("completed"),
+        "chat/gemini wire has no status field; finishReason must derive completed"
+    );
+    assert_eq!(snapshot.finish_reason.as_deref(), Some("STOP"));
+    assert_eq!(
+        snapshot
+            .usage
+            .expect("gemini SSE usageMetadata must normalize")
+            .total_tokens,
+        Some(11)
+    );
 }
 
 #[tokio::test]
@@ -764,10 +794,44 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             "{case} must fail explicitly"
         );
 
+        // post-commit SSE 流失败是强故障信号：直接写 provider 级冷却，
+        // fresh 请求被冷却阻断（不再每请求都试），恢复唯一路径是后台 probe。
         let succeeding = JsonTransport {
             captured_url: Mutex::new(None),
             captured_body: Mutex::new(None),
         };
+        let blocked = execute_v3_gemini_relay_runtime_with_provider_health(
+            &manifest,
+            V3GeminiRelayRuntimeInput {
+                server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                request_id: format!("req-gemini-blocked-after-post-commit-{case}"),
+                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                payload: json!({
+                    "contents":[{"role":"user","parts":[{"text":"blocked"}]}],
+                    "stream":false
+                }),
+            },
+            &succeeding,
+            provider_health.runtime_health(),
+        )
+        .await;
+        assert!(
+            blocked.is_err(),
+            "{case} fresh request must be blocked while provider cooldown is active"
+        );
+
+        // probe 通过 → provider 恢复 → fresh 成功。
+        provider_health
+            .runtime_health()
+            .run_due_provider_cooldown_probes(u64::MAX, |_, _, _| async { Ok(()) })
+            .await
+            .expect("probe cycle must revive cooled provider");
         let second = execute_v3_gemini_relay_runtime_with_provider_health(
             &manifest,
             V3GeminiRelayRuntimeInput {
@@ -789,7 +853,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             provider_health.runtime_health(),
         )
         .await
-        .expect("second provider action");
+        .expect("second provider action after probe pass");
         assert_eq!(second.status, 200);
     }
 }
@@ -843,6 +907,26 @@ async fn terminal_sse_recovery_does_not_block_a_fresh_request() {
             .to_vec(),
         ])),
     };
+    // post-commit 失败已冷却 provider；probe 通过后 terminal/fresh 请求可达，
+    // 且不占用 Error05 recovery lane（terminal 失败只写冷却，不驻留恢复门）。
+    let probed = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let probed_for_probe = std::sync::Arc::clone(&probed);
+    provider_health
+        .runtime_health()
+        .run_due_provider_cooldown_probes(u64::MAX, move |provider_id, _, _| {
+            let probed_for_probe = std::sync::Arc::clone(&probed_for_probe);
+            async move {
+                probed_for_probe.lock().unwrap().push(provider_id);
+                Ok(())
+            }
+        })
+        .await
+        .expect("probe cycle must revive cooled provider");
+    assert!(
+        !probed.lock().unwrap().is_empty(),
+        "probe cycle must probe the cooled provider, probed: {:?}",
+        probed.lock().unwrap()
+    );
     let successful = execute_v3_gemini_relay_runtime_with_provider_health(
         &manifest,
         V3GeminiRelayRuntimeInput {

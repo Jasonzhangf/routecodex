@@ -14,15 +14,12 @@ use super::responses_relay_runtime::{
     V3ResponsesRelayStoplessControlExecution, V3ResponsesRelayStoplessControlScope,
     V3ResponsesRelayStoplessControlState,
 };
-use super::{build_v3_provider_transport_request_for_protocol,
-    provider_wire_protocol_for_selected_candidate};
 use super::V3HubRelayResponseError;
 use super::{
     build_provider_req_compat_06_from_v3_hub_req_outbound_07,
     build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
     build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
     build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04,
-    V3ServerToolCenterWriteOrigin,
     build_v3_hub_req_inbound_01_client_raw,
     build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
     build_v3_hub_req_outbound_07_from_v3_hub_req_target_06,
@@ -31,8 +28,11 @@ use super::{
     build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08,
     v3_stopless_center_enabled_for_server, V3HubContinuationOwnership, V3HubEntryProtocol,
     V3HubExecutionMode, V3HubInvocationSource, V3HubTargetResolution, V3HubTransportIntent,
-    V3ServerToolCenterKey, V3ServerToolInstanceState, V3ServerToolName, V3WebSearchCenterPhase,
-    V3WebSearchCenterState,
+    V3ServerToolCenterKey, V3ServerToolCenterWriteOrigin, V3ServerToolInstanceState,
+    V3ServerToolName, V3WebSearchCenterPhase, V3WebSearchCenterState,
+};
+use super::{
+    build_v3_provider_transport_request_for_protocol, provider_wire_protocol_for_selected_candidate,
 };
 use crate::provider_failure_runtime_policy::{
     resolve_v3_relay_target_outcome, v3_relay_provider_policy_now_epoch_ms,
@@ -279,11 +279,13 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
                 &selected.candidate,
                 Some(&timeout_reason),
             );
-            return Err(V3ResponsesRelayRuntimeError::Provider(V3ProviderError::Transport {
-                request_id: request_id.to_string(),
-                provider_id: selected.candidate.provider_id.clone(),
-                reason: timeout_reason,
-            }));
+            return Err(V3ResponsesRelayRuntimeError::Provider(
+                V3ProviderError::Transport {
+                    request_id: request_id.to_string(),
+                    provider_id: selected.candidate.provider_id.clone(),
+                    reason: timeout_reason,
+                },
+            ));
         }
     };
     // 5. 响应归一化：仅接受 JSON body，提取 message 文本作为 text_result。
@@ -489,9 +491,7 @@ pub(crate) fn resolve_web_search_mode_and_backend(
         Option<String>,
     )> = None;
     for forwarder in manifest.forwarders.values() {
-        if forwarder.model != model
-            && !forwarder.aliases.iter().any(|alias| alias == model)
-        {
+        if forwarder.model != model && !forwarder.aliases.iter().any(|alias| alias == model) {
             continue;
         }
         for target in &forwarder.targets {
@@ -542,8 +542,7 @@ pub(crate) fn resolve_web_search_mode_and_backend(
                     .get(provider_id)
                     .and_then(|provider| provider.models.get(model_id))
                     .filter(|model_manifest| {
-                        model_id == model
-                            || (model_manifest.wire_name.trim() == model)
+                        model_id == model || (model_manifest.wire_name.trim() == model)
                     });
                 let Some(model_manifest) = model_manifest else {
                     continue;
@@ -633,19 +632,17 @@ pub(crate) fn apply_v3_responses_relay_web_search_control_completion(
             state.transition_to(V3WebSearchCenterPhase::Completed, "req04_pair_verified")
         })
         .map_err(|reason| V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(reason))?;
-    execution
-        .control
-        .web_search_store_for_scope(
-            &execution.scope,
-            completed,
-            V3ServerToolCenterWriteOrigin {
-                module: "web_search_hop",
-                symbol: "apply_v3_web_search_control_completion_for_hop",
-                stage: "req04_pair_verified",
-            },
-            Some("req04 pair verified, persist completed web_search state"),
-            None,
-        )
+    execution.control.web_search_store_for_scope(
+        &execution.scope,
+        completed,
+        V3ServerToolCenterWriteOrigin {
+            module: "web_search_hop",
+            symbol: "apply_v3_web_search_control_completion_for_hop",
+            stage: "req04_pair_verified",
+        },
+        Some("req04 pair verified, persist completed web_search state"),
+        None,
+    )
 }
 
 #[cfg(test)]
@@ -725,8 +722,8 @@ mod web_search_hop_tests {
             ],
             "stop_reason": "tool_use"
         });
-        let call = first_local_websearch_tool_call(&payload)
-            .expect("Anthropic tool_use shape must parse");
+        let call =
+            first_local_websearch_tool_call(&payload).expect("Anthropic tool_use shape must parse");
         let call = call.expect("Anthropic web_search tool_use must be detected");
         assert_eq!(call.call_id, "call_ws_anthropic");
         assert_eq!(call.query, "RouteCodex docs");
@@ -754,8 +751,7 @@ mod web_search_hop_tests {
                 "finish_reason": null
             }]
         });
-        let call = first_local_websearch_tool_call(&payload)
-            .expect("SSE delta shape must parse");
+        let call = first_local_websearch_tool_call(&payload).expect("SSE delta shape must parse");
         let call = call.expect("SSE delta websearch tool call must be detected");
         assert_eq!(call.call_id, "call_delta_ws");
         assert_eq!(call.query, "");
@@ -1053,12 +1049,13 @@ pub(crate) fn first_local_websearch_tool_call(
             // 首帧 arguments 常为空串（跨帧增量），按空对象处理——拦截判定
             // 只依赖 name + call_id，不要求首帧已含完整参数。
             Some(Value::String(raw)) if raw.trim().is_empty() => json!({}),
-            Some(Value::String(raw)) => raw.parse::<Value>().map_err(|_| {
-                V3HubRelayResponseError::MalformedToolCall {
-                    index,
-                    reason: "websearch tool call arguments must be valid JSON",
-                }
-            })?,
+            Some(Value::String(raw)) => {
+                raw.parse::<Value>()
+                    .map_err(|_| V3HubRelayResponseError::MalformedToolCall {
+                        index,
+                        reason: "websearch tool call arguments must be valid JSON",
+                    })?
+            }
             // Anthropic tool_use：input 是结构化对象。
             Some(value @ (Value::Object(_) | Value::Array(_))) => value.clone(),
             _ => {
@@ -1075,9 +1072,7 @@ pub(crate) fn first_local_websearch_tool_call(
             .filter(|value| !value.is_empty())
             // SSE chunk 首帧可无 query（arguments 空对象，跨帧增量）；此时
             // 仅完成 name 拦截判定，query 由后续帧补齐。
-            .or_else(|| {
-                (arguments.as_object().is_some_and(|row| row.is_empty())).then_some("")
-            })
+            .or_else(|| (arguments.as_object().is_some_and(|row| row.is_empty())).then_some(""))
             .ok_or(V3HubRelayResponseError::MalformedToolCall {
                 index,
                 reason: "websearch tool call requires a non-empty query",

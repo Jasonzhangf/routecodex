@@ -15,19 +15,19 @@ use super::client_metadata_projection::unsupported_client_metadata_paths;
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
+mod message_encoding;
 mod projection_context;
 mod responses_to_anthropic;
-mod message_encoding;
 use message_encoding::non_empty_string;
 pub use projection_context::V3AnthropicResponsesProjectionContext;
-pub(crate) use responses_to_anthropic::{
-    project_v3_responses_reasoning_item_as_anthropic_content,
-    responses_web_search_tool_as_anthropic_tool,
-};
 use responses_to_anthropic::{
     anthropic_usage_as_responses_usage, chat_messages_as_anthropic_messages,
     responses_input_as_anthropic_messages, responses_system_as_anthropic_system,
     responses_tool_choice_as_anthropic_tool_choice, responses_tools_for_anthropic_wire,
+};
+pub(crate) use responses_to_anthropic::{
+    project_v3_responses_reasoning_item_as_anthropic_content,
+    responses_web_search_tool_as_anthropic_tool,
 };
 
 const CLAUDE_CODE_SYSTEM_PROMPT_MD: &str = include_str!("claude_code_system_prompt.md");
@@ -256,12 +256,14 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
     }
     output.insert(
         "input".to_string(),
-        Value::Array(message_encoding::encode_anthropic_messages_as_responses_semantic(
-            object
-                .get("messages")
-                .and_then(Value::as_array)
-                .ok_or(V3AnthropicCodecError::MessagesNotArray)?,
-        )?),
+        Value::Array(
+            message_encoding::encode_anthropic_messages_as_responses_semantic(
+                object
+                    .get("messages")
+                    .and_then(Value::as_array)
+                    .ok_or(V3AnthropicCodecError::MessagesNotArray)?,
+            )?,
+        ),
     );
     if let Some(tools) = object.get("tools").and_then(Value::as_array) {
         output.insert(
@@ -860,7 +862,9 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
         };
         hosted_results_by_call.insert(
             call_id.to_string(),
-            part.get("content").cloned().unwrap_or(Value::Array(Vec::new())),
+            part.get("content")
+                .cloned()
+                .unwrap_or(Value::Array(Vec::new())),
         );
     }
     for part in object
@@ -943,7 +947,10 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
                     "completed"
                 };
                 let mut call = Map::new();
-                call.insert("type".to_string(), Value::String("web_search_call".to_string()));
+                call.insert(
+                    "type".to_string(),
+                    Value::String("web_search_call".to_string()),
+                );
                 call.insert(
                     "id".to_string(),
                     Value::String(if call_id.is_empty() {
@@ -954,10 +961,7 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
                 );
                 call.insert("name".to_string(), Value::String("web_search".to_string()));
                 call.insert("status".to_string(), Value::String(status.to_string()));
-                call.insert(
-                    "action".to_string(),
-                    json!({"type":"search","query":query}),
-                );
+                call.insert("action".to_string(), json!({"type":"search","query":query}));
                 call.insert("results".to_string(), Value::Array(results));
                 output_items.push(Value::Object(call));
                 // 配对 function_call_output（Codex hosted search 在 output
@@ -1399,4 +1403,3 @@ fn side_channel_label(key: &str) -> &'static str {
         _ => "unknown",
     }
 }
-

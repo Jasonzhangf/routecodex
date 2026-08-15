@@ -277,25 +277,31 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
         "choices".to_string(),
         serde_json::json!([{"index": 0, "message": Value::Object(message), "finish_reason": finish_reason}]),
     );
-    if let Some(usage) = object.get("usage").and_then(Value::as_object) {
-        let input_tokens = usage
-            .get("input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let output_tokens = usage
-            .get("output_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        response.insert(
-            "usage".to_string(),
-            serde_json::json!({
-                "prompt_tokens": input_tokens,
-                "completion_tokens": output_tokens,
-                "total_tokens": input_tokens + output_tokens
-            }),
-        );
+    if let Some(usage) = object.get("usage") {
+        if let Some(normalized) = project_v3_chat_usage_from_canonical(usage) {
+            response.insert("usage".to_string(), normalized);
+        }
     }
     Ok(Value::Object(response))
+}
+
+/// Responses 语义 usage -> OpenAI Chat wire usage 唯一归一化入口（JSON 响应与
+/// SSE 终帧共用；禁止在投影层各自复制一份转换）。
+pub(crate) fn project_v3_chat_usage_from_canonical(usage: &Value) -> Option<Value> {
+    let usage = usage.as_object()?;
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    Some(serde_json::json!({
+        "prompt_tokens": input_tokens,
+        "completion_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens
+    }))
 }
 
 /// Incremental Anthropic wire-event to OpenAI Chat client transducer.
@@ -688,6 +694,7 @@ fn require_object(payload: &Value) -> Result<&Map<String, Value>, V3OpenAiChatCo
 pub(crate) struct V3OpenAiChatResponsesSseTransducer {
     response_started: bool,
     completed: bool,
+    incomplete_terminal: bool,
     emitted_content: bool,
     response_id: Option<String>,
     model: Option<String>,
@@ -699,6 +706,7 @@ impl Default for V3OpenAiChatResponsesSseTransducer {
         Self {
             response_started: false,
             completed: false,
+            incomplete_terminal: false,
             emitted_content: false,
             response_id: None,
             model: None,
@@ -811,10 +819,114 @@ impl V3OpenAiChatResponsesSseTransducer {
                 } else {
                     None
                 };
-                Ok(vec![self.chunk(json!({}), finish_reason)])
+                // 终帧必须携带归一化 usage（provider Responses usage -> chat
+                // prompt_tokens/completion_tokens/total_tokens），否则 chat 客户端
+                // 与 console 观测都拿不到 token 消耗；只做语义归一化投影，不改
+                // 控制状态。
+                let mut chunk = self.chunk(json!({}), finish_reason);
+                if let Some(usage) = response.and_then(|response| response.get("usage")) {
+                    if let Some(normalized) = project_v3_chat_usage_from_canonical(usage) {
+                        if let Some(object) = chunk.as_object_mut() {
+                            object.insert("usage".to_string(), normalized);
+                        }
+                    }
+                }
+                Ok(vec![chunk])
             }
-            // 事件通知帧无内容，容错跳过（不丢弃任何实际内容）。
-            "response.output_item.added" => Ok(Vec::new()),
+            // response.incomplete 是 Responses 协议合法终态（max_output_tokens
+            // 截断 / content_filter 触发）：provider 已交付完整（截断）响应，必须
+            // 投影为 Chat 终帧 finish_reason=length/content_filter + usage +
+            // [DONE]，而不是把合法终帧当流错误 abort 客户端连接。
+            "response.incomplete" => {
+                self.completed = true;
+                // content_filter / max_output_tokens 截断时 provider 可能没有任何
+                // content/tool 输出帧；空输出是合法终态，不能触发空响应失败检查。
+                self.incomplete_terminal = true;
+                let response = object.get("response").and_then(Value::as_object);
+                let reason = object
+                    .get("incomplete_details")
+                    .and_then(Value::as_object)
+                    .and_then(|details| details.get("reason"))
+                    .and_then(Value::as_str)
+                    .or_else(|| {
+                        response
+                            .and_then(|response| response.get("incomplete_details"))
+                            .and_then(Value::as_object)
+                            .and_then(|details| details.get("reason"))
+                            .and_then(Value::as_str)
+                    })
+                    .map(str::trim)
+                    .filter(|reason| !reason.is_empty());
+                let finish_reason = match reason {
+                    Some("max_output_tokens") => "length",
+                    Some("content_filter") => "content_filter",
+                    Some(other) => {
+                        return Err(format!(
+                            "Responses SSE response.incomplete carries unsupported incomplete_details.reason {other}"
+                        ));
+                    }
+                    None => {
+                        return Err(
+                            "Responses SSE response.incomplete requires incomplete_details.reason"
+                                .to_string(),
+                        );
+                    }
+                };
+                let mut chunk = self.chunk(json!({}), Some(finish_reason));
+                if let Some(usage) = response.and_then(|response| response.get("usage")) {
+                    if let Some(normalized) = project_v3_chat_usage_from_canonical(usage) {
+                        if let Some(object) = chunk.as_object_mut() {
+                            object.insert("usage".to_string(), normalized);
+                        }
+                    }
+                }
+                Ok(vec![chunk])
+            }
+            // 事件通知/参数收口帧由 Responses 语义层消费；Chat 投影没有
+            // 对应的独立 chunk，但必须接受它们，直到 response.completed。
+            "response.output_item.added"
+            | "response.content_part.added"
+            | "response.content_part.done"
+            | "response.output_text.done"
+            | "response.output_text.annotation.added"
+            | "response.function_call_arguments.delta"
+            | "response.function_call_arguments.done"
+            | "response.reasoning_text.done"
+            | "response.reasoning_summary_part.added"
+            | "response.reasoning_summary_part.done"
+            | "response.reasoning_summary_text.done"
+            | "response.reasoning_signature.delta"
+            | "response.reasoning_image.delta"
+            | "response.custom_tool_call_input.delta"
+            | "response.custom_tool_call_input.done"
+            | "response.refusal.delta"
+            | "response.refusal.done"
+            | "response.web_search_call.in_progress"
+            | "response.web_search_call.searching"
+            | "response.web_search_call.completed"
+            | "response.file_search_call.in_progress"
+            | "response.file_search_call.searching"
+            | "response.file_search_call.completed"
+            | "response.mcp_call.in_progress"
+            | "response.mcp_call.arguments.delta"
+            | "response.mcp_call.arguments.done"
+            | "response.mcp_call.completed"
+            | "response.computer_call.in_progress"
+            | "response.computer_call_output.in_progress"
+            | "response.computer_call_output.completed"
+            | "response.code_interpreter_call.in_progress"
+            | "response.code_interpreter_call_code.delta"
+            | "response.code_interpreter_call_code.done"
+            | "response.code_interpreter_call.completed"
+            | "response.image_generation_call.in_progress"
+            | "response.image_generation_call.partial_image"
+            | "response.image_generation_call.completed"
+            | "response.audio.delta"
+            | "response.audio.done"
+            | "response.audio_transcript.delta"
+            | "response.audio_transcript.done"
+            | "response.requires_action"
+            | "response.done" => Ok(Vec::new()),
             // reasoning 内容必须投影给客户端（与 Anthropic thinking_delta 投影
             // reasoning_content 一致）：reasoning-only 响应不得被当作空响应丢弃。
             "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
@@ -828,8 +940,7 @@ impl V3OpenAiChatResponsesSseTransducer {
                 self.emitted_content = true;
                 Ok(vec![self.chunk(json!({"reasoning_content": delta}), None)])
             }
-            // 未知事件：容错跳过（provider 扩展事件不得破坏 client 流）。
-            _ => Ok(Vec::new()),
+            other => Err(format!("Responses SSE event type {other} is unsupported")),
         }
     }
 
@@ -841,10 +952,10 @@ impl V3OpenAiChatResponsesSseTransducer {
         // 返回了空文本（客户端会判定 "no visible final answer" 并重试）。归一化为
         // provider 失败进入错误链（记录 health → 连续失败达到阈值 → 拉黑 15 分钟
         // → 下次 route 排除/切 provider），而不是把空文本投影给客户端。
-        if !self.emitted_content {
-            return Err(
-                "provider returned empty response (no content, no tool calls)".to_string(),
-            );
+        // response.incomplete（content_filter / max_output_tokens）空输出是合法
+        // 终态，豁免该检查。
+        if !self.emitted_content && !self.incomplete_terminal {
+            return Err("provider returned empty response (no content, no tool calls)".to_string());
         }
         Ok(())
     }
@@ -909,7 +1020,9 @@ mod openai_chat_responses_sse_transducer_tests {
     #[test]
     fn transducer_accepts_official_created_then_in_progress_sequence() {
         let mut with_in_progress = V3OpenAiChatResponsesSseTransducer::new();
-        let created_chunks = with_in_progress.push_event(created_event()).expect("created");
+        let created_chunks = with_in_progress
+            .push_event(created_event())
+            .expect("created");
         let progress_chunks = with_in_progress
             .push_event(in_progress_event())
             .expect("official response.in_progress after response.created must not be rejected");
@@ -922,7 +1035,9 @@ mod openai_chat_responses_sse_transducer_tests {
         with_in_progress.finish().expect("finish");
 
         let mut without_in_progress = V3OpenAiChatResponsesSseTransducer::new();
-        let baseline_created = without_in_progress.push_event(created_event()).expect("created");
+        let baseline_created = without_in_progress
+            .push_event(created_event())
+            .expect("created");
         let baseline_delta = without_in_progress
             .push_event(delta_event("hello"))
             .expect("delta");
@@ -950,7 +1065,9 @@ mod openai_chat_responses_sse_transducer_tests {
     #[test]
     fn transducer_still_rejects_duplicate_created() {
         let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
-        transducer.push_event(created_event()).expect("first created");
+        transducer
+            .push_event(created_event())
+            .expect("first created");
         let error = transducer
             .push_event(created_event())
             .expect_err("a genuinely duplicate response.created must still fail fast");
@@ -966,6 +1083,124 @@ mod openai_chat_responses_sse_transducer_tests {
         let chunks = transducer
             .push_event(in_progress_event())
             .expect("response.in_progress as first event must start the response");
-        assert_eq!(chunks.len(), 1, "in_progress start must emit the assistant role chunk");
+        assert_eq!(
+            chunks.len(),
+            1,
+            "in_progress start must emit the assistant role chunk"
+        );
+    }
+
+    #[test]
+    fn transducer_accepts_known_responses_lifecycle_events() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        for event_type in [
+            "response.content_part.added",
+            "response.content_part.done",
+            "response.output_text.done",
+            "response.output_text.annotation.added",
+            "response.function_call_arguments.delta",
+            "response.function_call_arguments.done",
+        ] {
+            let chunks = transducer
+                .push_event(json!({"type": event_type}))
+                .expect("known Responses lifecycle event must be accepted");
+            assert!(chunks.is_empty(), "{event_type} must not emit a Chat chunk");
+        }
+        transducer.push_event(delta_event("hello")).expect("delta");
+        transducer
+            .push_event(json!({
+                "type": "response.completed",
+                "response": {"id": "resp_test_1", "status": "completed"}
+            }))
+            .expect("completed");
+        transducer.finish().expect("finish");
+    }
+
+    #[test]
+    fn transducer_maps_max_output_tokens_incomplete_to_length_terminal_chunk() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        transducer
+            .push_event(json!({
+                "type": "response.reasoning_text.delta",
+                "delta": "thinking"
+            }))
+            .expect("reasoning delta");
+        let chunks = transducer
+            .push_event(json!({
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_test_1",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "usage": {
+                        "input_tokens": 42,
+                        "output_tokens": 7,
+                        "total_tokens": 49
+                    }
+                }
+            }))
+            .expect("response.incomplete must project a terminal Chat chunk");
+        assert_eq!(chunks.len(), 1);
+        let terminal = &chunks[0];
+        assert_eq!(
+            terminal["choices"][0]["finish_reason"],
+            json!("length"),
+            "max_output_tokens truncation must map to finish_reason=length: {terminal}"
+        );
+        assert_eq!(
+            terminal["usage"]["prompt_tokens"],
+            json!(42),
+            "terminal chunk must carry normalized usage: {terminal}"
+        );
+        transducer.finish().expect("finish accepts incomplete terminal");
+    }
+
+    #[test]
+    fn transducer_maps_content_filter_incomplete_to_content_filter_terminal_chunk() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        let chunks = transducer
+            .push_event(json!({
+                "type": "response.incomplete",
+                "incomplete_details": {"reason": "content_filter"},
+                "response": {
+                    "id": "resp_test_1",
+                    "status": "incomplete"
+                }
+            }))
+            .expect("response.incomplete must project a terminal Chat chunk");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(
+            chunks[0]["choices"][0]["finish_reason"],
+            json!("content_filter")
+        );
+        transducer.finish().expect("finish accepts incomplete terminal");
+    }
+
+    #[test]
+    fn transducer_rejects_incomplete_without_or_unknown_reason() {
+        for payload in [
+            json!({
+                "type": "response.incomplete",
+                "response": {"id": "resp_test_1", "status": "incomplete"}
+            }),
+            json!({
+                "type": "response.incomplete",
+                "incomplete_details": {"reason": "internal_error"},
+                "response": {"id": "resp_test_1", "status": "incomplete"}
+            }),
+        ] {
+            let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+            transducer.push_event(created_event()).expect("created");
+            let error = transducer
+                .push_event(payload)
+                .expect_err("malformed/unknown incomplete terminal must fail fast");
+            assert!(
+                error.contains("response.incomplete"),
+                "unexpected error: {error}"
+            );
+        }
     }
 }

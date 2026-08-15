@@ -2389,8 +2389,10 @@ fn provider_key_consecutive_failures_cool_for_fifteen_minutes_without_cross_mode
             )
             .available
     );
+    // 冷却到期不自动恢复：待探期（probe 间隔内）仍不可用，恢复唯一路径是
+    // 后台 probe 通过（probe_interval = 15min，写入于 3_000）。
     assert!(
-        store
+        !store
             .availability_for_session(
                 &failure_session_scope,
                 "limited",
@@ -2398,8 +2400,39 @@ fn provider_key_consecutive_failures_cool_for_fifteen_minutes_without_cross_mode
                 Some("gpt-5.5"),
                 903_000
             )
-            .available
+            .available,
+        "expired cooldown must stay excluded until probe passes"
     );
+    assert!(
+        store
+            .provider_cooldown_probe_keys_due(903_000)
+            .unwrap()
+            .contains(&(
+                "limited".to_string(),
+                Some("key1".to_string()),
+                Some("gpt-5.5".to_string())
+            )),
+        "cooled provider must be probe-due after cooldown expiry"
+    );
+    assert!(store
+        .try_acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
+        .unwrap());
+    store
+        .complete_provider_cooldown_probe_success("limited", Some("key1"), Some("gpt-5.5"))
+        .unwrap();
+    assert!(
+        store
+            .availability_for_session(
+                &failure_session_scope,
+                "limited",
+                Some("key1"),
+                Some("gpt-5.5"),
+                903_001
+            )
+            .available,
+        "probe success must revive the cooled provider"
+    );
+    // 未达冷却阈值的 key/model 组合不受影响（无 provider 级冷却）。
     assert!(
         store
             .availability("limited", Some("key1"), Some("other-model"), 3_001)

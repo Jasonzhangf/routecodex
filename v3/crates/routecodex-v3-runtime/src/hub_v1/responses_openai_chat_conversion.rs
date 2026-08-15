@@ -127,7 +127,6 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     Ok(Value::Object(response))
 }
 
-
 pub(crate) fn build_v3_responses_reasoning_item_from_openai_chat_message(
     message: &Map<String, Value>,
 ) -> Option<Value> {
@@ -282,7 +281,9 @@ pub(crate) fn v3_reasoning_summary_text_entry(text: String) -> Value {
     json!({"type":"summary_text","text":text})
 }
 
-pub(crate) fn normalize_v3_hub_responses_usage_from_openai_chat_usage(usage: &Value) -> Option<Value> {
+pub(crate) fn normalize_v3_hub_responses_usage_from_openai_chat_usage(
+    usage: &Value,
+) -> Option<Value> {
     let source = usage.as_object()?;
     let mut response = Map::new();
     if let Some(value) = source

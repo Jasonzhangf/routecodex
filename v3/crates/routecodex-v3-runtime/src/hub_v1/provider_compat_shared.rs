@@ -177,9 +177,7 @@ fn apply_v3_opencode_deepseek_reasoning_passthrough(body: &mut Value) {
 }
 
 fn is_v3_deepseek_reasoning_target(canonical_model_id: &str) -> bool {
-    canonical_model_id
-        .to_ascii_lowercase()
-        .contains("deepseek")
+    canonical_model_id.to_ascii_lowercase().contains("deepseek")
 }
 
 /// gpt 目标判定（请求侧路由决策）：canonical model id 以 `gpt-` 开头（OpenAI 官方
@@ -221,7 +219,10 @@ mod tests {
         // 非 assistant 消息不补
         assert_eq!(messages[0]["reasoning_content"], Value::Null);
         // 无 reasoning_content 的 assistant 消息补空占位（opencode 标准：空也回传）
-        assert_eq!(messages[1]["reasoning_content"], Value::String(String::new()));
+        assert_eq!(
+            messages[1]["reasoning_content"],
+            Value::String(String::new())
+        );
         // 已有明文 reasoning_content 保持不变
         assert_eq!(messages[2]["reasoning_content"], "kept");
     }

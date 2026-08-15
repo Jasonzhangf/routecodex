@@ -38,19 +38,17 @@ pub(crate) fn store_v3_responses_relay_stopless_control_state(
     if !stopless_control.scope.has_client_session_scope() {
         return Ok(());
     }
-    stopless_control
-        .control
-        .store_for_scope(
-            &stopless_control.scope,
-            state,
-            V3ServerToolCenterWriteOrigin {
-                module: "responses_relay_runtime",
-                symbol: "store_v3_responses_relay_stopless_control_state",
-                stage: "resp_chat_process_03",
-            },
-            Some("resp03 save stopless state to relay servertool center"),
-            None,
-        )
+    stopless_control.control.store_for_scope(
+        &stopless_control.scope,
+        state,
+        V3ServerToolCenterWriteOrigin {
+            module: "responses_relay_runtime",
+            symbol: "store_v3_responses_relay_stopless_control_state",
+            stage: "resp_chat_process_03",
+        },
+        Some("resp03 save stopless state to relay servertool center"),
+        None,
+    )
 }
 
 pub(crate) fn clear_v3_responses_relay_stopless_control_state(
@@ -70,18 +68,16 @@ pub(crate) fn clear_v3_responses_relay_stopless_control_state(
     if !stopless_control.scope.has_client_session_scope() {
         return Ok(());
     }
-    stopless_control
-        .control
-        .clear_for_scope(
-            &stopless_control.scope,
-            V3ServerToolCenterWriteOrigin {
-                module: "responses_relay_runtime",
-                symbol: "clear_v3_responses_relay_stopless_control_state",
-                stage: "resp_chat_process_03",
-            },
-            Some("resp03 clear stopless state after terminal completion"),
-            None,
-        )
+    stopless_control.control.clear_for_scope(
+        &stopless_control.scope,
+        V3ServerToolCenterWriteOrigin {
+            module: "responses_relay_runtime",
+            symbol: "clear_v3_responses_relay_stopless_control_state",
+            stage: "resp_chat_process_03",
+        },
+        Some("resp03 clear stopless state after terminal completion"),
+        None,
+    )
 }
 
 pub(crate) fn apply_v3_responses_relay_stopless_control_transition(
@@ -145,19 +141,17 @@ pub(crate) fn apply_v3_responses_relay_web_search_control_request_transition(
     if !stopless_control.commit_effects {
         return Ok(());
     }
-    stopless_control
-        .control
-        .web_search_store_for_scope(
-            &stopless_control.scope,
-            state.clone(),
-            V3ServerToolCenterWriteOrigin {
-                module: "responses_relay_runtime",
-                symbol: "apply_v3_responses_relay_web_search_control_request_transition",
-                stage: "req_chat_process",
-            },
-            Some("req04 web_search surface activated, store paired state"),
-            None,
-        )
+    stopless_control.control.web_search_store_for_scope(
+        &stopless_control.scope,
+        state.clone(),
+        V3ServerToolCenterWriteOrigin {
+            module: "responses_relay_runtime",
+            symbol: "apply_v3_responses_relay_web_search_control_request_transition",
+            stage: "req_chat_process",
+        },
+        Some("req04 web_search surface activated, store paired state"),
+        None,
+    )
 }
 
 pub(crate) fn clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(

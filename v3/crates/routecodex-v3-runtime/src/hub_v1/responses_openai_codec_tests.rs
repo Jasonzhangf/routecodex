@@ -17,7 +17,8 @@ fn responses_reasoning_effort_normalizes_whitespace_and_case_like_chat_side() {
     assert_eq!(request["reasoning_effort"], "xhigh");
 }
 #[test]
-fn responses_input_image_url_maps_to_openai_chat_image_url_url() {        let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+fn responses_input_image_url_maps_to_openai_chat_image_url_url() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "model": "gpt-5.5",
         "input": [{
             "type": "message",
@@ -57,9 +58,9 @@ fn responses_web_search_current_turn_item_projects_to_canonical_tools() {
         .get("tools")
         .and_then(Value::as_array)
         .expect("canonical tools");
-    assert!(tools.iter().any(|tool| {
-        tool.get("type").and_then(Value::as_str) == Some("web_search")
-    }));
+    assert!(tools
+        .iter()
+        .any(|tool| { tool.get("type").and_then(Value::as_str) == Some("web_search") }));
 }
 #[test]
 fn responses_web_search_call_projects_to_openai_chat_tool_pair_with_synthetic_id() {
@@ -386,9 +387,7 @@ fn responses_web_search_call_rejects_side_channel_before_tool_result_stringifica
             "action": {"type": "search", "query": "RouteCodex", "_debug": true}
         }]
     }))
-    .expect_err(
-        "private debug fields must fail before provider tool-result JSON stringification",
-    );
+    .expect_err("private debug fields must fail before provider tool-result JSON stringification");
     assert!(
         error.contains("private debug field") && error.contains("_debug"),
         "unexpected error: {error}"

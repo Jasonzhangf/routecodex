@@ -451,8 +451,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:97539300996555e8bcdf5fc24e60a76812f586adccee18319fbfdf37edbb2032
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:f8acb52362dce07c7a21db10822caf5d7249b8c21eb655ab71d5512be4587dba
+    last_manual_authorization_id: auth-20260815-v3-provider-action-gate-51-semantic-frame
   - item_id: chain:v3.build_test_artifact_budget
     chain_id: v3.build_test_artifact_budget
     status: audited_locked
@@ -494,6 +494,13 @@ locked_items:
     fingerprint: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
     last_manual_authorization_id: auth-20260813-v3-provider-global-subscription-probe-fingerprint-refresh
 manual_authorizations:
+  - authorization_id: auth-20260815-v3-provider-action-gate-51-semantic-frame
+    item_id: chain:v3.provider_action_gate.mainline
+    approved_by: Jason
+    approved_at: '2026-08-15T06:30:00+08:00'
+    reason: "Jason approved refreshing the audit-lock fingerprint after the Responses SSE codec refactor converged semantic consumption into observe_v3_runtime_responses_sse_semantic_frame. v3-provider-action-gate-51 caller_symbol changed from observe_v3_runtime_responses_sse_transport_chunk to observe_v3_runtime_responses_sse_semantic_frame; nodes, owner, resources and all other edges are unchanged. This is the single semantic frame consumer shared by the chunk loop and EOF trailing frame path."
+    fingerprint_before: sha256:97539300996555e8bcdf5fc24e60a76812f586adccee18319fbfdf37edbb2032
+    fingerprint_after: sha256:f8acb52362dce07c7a21db10822caf5d7249b8c21eb655ab71d5512be4587dba
   - authorization_id: auth-20260813-v3-provider-global-subscription-probe-fingerprint-refresh
     item_id: chain:v3.provider_global_subscription_probe
     approved_by: Jason

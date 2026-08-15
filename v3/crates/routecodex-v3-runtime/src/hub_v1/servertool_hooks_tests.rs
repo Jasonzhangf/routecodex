@@ -4,7 +4,9 @@
 // to the former inline `mod tests`.
 
 use super::*;
-use crate::hub_v1::stopless_injection::{inject_v3_stopless_provider_contract, tool_is_reasoning_stop};
+use crate::hub_v1::stopless_injection::{
+    inject_v3_stopless_provider_contract, tool_is_reasoning_stop,
+};
 use serde_json::json;
 
 const CMD_ARGS: &str = "{\"cmd\":\"routecodex hook run reasoningStop\"}";
@@ -53,7 +55,10 @@ fn resp03_stopless_reasoning_stop_projects_to_noop_with_visible_text() {
                 && item.get("arguments").is_none()
         })
         .count();
-    assert_eq!(noop_calls, 1, "reasoningStop must project to a parameterless noop call: {projected}");
+    assert_eq!(
+        noop_calls, 1,
+        "reasoningStop must project to a parameterless noop call: {projected}"
+    );
     let has_text = output.iter().any(|item| {
         item.get("type").and_then(Value::as_str) == Some("message")
             && item
@@ -62,19 +67,26 @@ fn resp03_stopless_reasoning_stop_projects_to_noop_with_visible_text() {
                 .is_some_and(|parts| {
                     parts.iter().any(|part| {
                         part.get("type").and_then(Value::as_str) == Some("output_text")
-                            && part.get("text").and_then(Value::as_str).is_some_and(|text| {
-                                text.contains("可见文字") && text.contains("证据内容")
-                            })
+                            && part
+                                .get("text")
+                                .and_then(Value::as_str)
+                                .is_some_and(|text| {
+                                    text.contains("可见文字") && text.contains("证据内容")
+                                })
                     })
                 })
     });
-    assert!(has_text, "visible text and evidence must not be lost: {projected}");
+    assert!(
+        has_text,
+        "visible text and evidence must not be lost: {projected}"
+    );
     assert_eq!(projected["finish_reason"], "tool_calls");
     assert_eq!(projected["status"], "requires_action");
 }
 
 #[test]
-fn dynamic_stopless_cli_pairs_are_exact_json_cmd_only() {        let call = response_call("call-dynamic", CMD_ARGS);
+fn dynamic_stopless_cli_pairs_are_exact_json_cmd_only() {
+    let call = response_call("call-dynamic", CMD_ARGS);
     assert!(output_pairs_immediately_after_stopless_cli_call(
         &response_output("call-dynamic"),
         Some(&call)
@@ -109,8 +121,14 @@ fn web_search_request_hook_activates_local_surface_for_declared_tool() {
     let state = apply_v3_web_search_request_hook_at_req04(&mut payload)
         .expect("hook must not fail")
         .expect("web_search declaration must activate the websearch instance");
-    assert_eq!(state.phase(), V3WebSearchCenterPhase::LocalToolSurfaceActive);
-    assert_eq!(state.transition_reason(), Some("req04_web_search_surface_active"));
+    assert_eq!(
+        state.phase(),
+        V3WebSearchCenterPhase::LocalToolSurfaceActive
+    );
+    assert_eq!(
+        state.transition_reason(),
+        Some("req04_web_search_surface_active")
+    );
 }
 
 #[test]
@@ -123,7 +141,10 @@ fn web_search_request_hook_activates_for_web_search_preview_declaration() {
     let state = apply_v3_web_search_request_hook_at_req04(&mut payload)
         .expect("hook must not fail")
         .expect("web_search_preview declaration must activate the websearch instance");
-    assert_eq!(state.phase(), V3WebSearchCenterPhase::LocalToolSurfaceActive);
+    assert_eq!(
+        state.phase(),
+        V3WebSearchCenterPhase::LocalToolSurfaceActive
+    );
 }
 
 #[test]
@@ -135,16 +156,19 @@ fn web_search_request_hook_stays_idle_without_declaration() {
             {"type": "function", "name": "read_file", "description": "read", "parameters": {"type":"object","properties":{}}}
         ]
     });
-    let state = apply_v3_web_search_request_hook_at_req04(&mut payload)
-        .expect("hook must not fail");
-    assert!(state.is_none(), "ordinary tools must not activate websearch");
+    let state =
+        apply_v3_web_search_request_hook_at_req04(&mut payload).expect("hook must not fail");
+    assert!(
+        state.is_none(),
+        "ordinary tools must not activate websearch"
+    );
 }
 
 #[test]
 fn web_search_request_hook_ignores_tools_missing() {
     let mut payload = json!({"model": "local-model", "input": "hello"});
-    let state = apply_v3_web_search_request_hook_at_req04(&mut payload)
-        .expect("hook must not fail");
+    let state =
+        apply_v3_web_search_request_hook_at_req04(&mut payload).expect("hook must not fail");
     assert!(state.is_none());
 }
 
@@ -321,7 +345,9 @@ fn strip_local_websearch_tool_call_removes_anthropic_tool_use() {
     let stripped = strip_local_websearch_tool_call(&payload, "call_ws_anthropic");
     let content = stripped["content"].as_array().expect("content array");
     assert_eq!(content.len(), 1);
-    assert!(content.iter().all(|item| item.get("type") != Some(&Value::String("tool_use".into()))));
+    assert!(content
+        .iter()
+        .all(|item| item.get("type") != Some(&Value::String("tool_use".into()))));
 }
 
 #[test]
@@ -334,13 +360,12 @@ fn active_stopless_does_not_treat_message_text_as_injected_guidance() {
         }]
     });
 
-    inject_v3_stopless_provider_contract(&mut payload, 0)
-        .expect("stopless injection must succeed");
+    inject_v3_stopless_provider_contract(&mut payload, 0).expect("stopless injection must succeed");
 
     let tools = payload["tools"].as_array().expect("tools must be injected");
-    assert!(tools.iter().any(|tool| {
-        tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
-    }));
+    assert!(tools
+        .iter()
+        .any(|tool| { tool.get("name").and_then(Value::as_str) == Some("reasoningStop") }));
     assert_eq!(payload["tool_choice"], "required");
 }
 
@@ -357,9 +382,9 @@ fn active_stopless_thinking_replaces_none_tool_choice_when_injecting_control_too
         .expect("thinking-mode stopless injection must succeed");
 
     assert_eq!(payload["tool_choice"], "auto");
-    assert!(payload["tools"].as_array().is_some_and(|tools| {
-        tools.iter().any(|tool| tool_is_reasoning_stop(tool))
-    }));
+    assert!(payload["tools"]
+        .as_array()
+        .is_some_and(|tools| { tools.iter().any(|tool| tool_is_reasoning_stop(tool)) }));
 }
 
 #[test]
@@ -373,12 +398,14 @@ fn active_stopless_preserves_nested_reasoning_stop_tool_without_duplicate() {
         }]
     });
 
-    inject_v3_stopless_provider_contract(&mut payload, 0)
-        .expect("stopless injection must succeed");
+    inject_v3_stopless_provider_contract(&mut payload, 0).expect("stopless injection must succeed");
 
     let tools = payload["tools"].as_array().expect("tools array");
     assert_eq!(
-        tools.iter().filter(|tool| tool_is_reasoning_stop(tool)).count(),
+        tools
+            .iter()
+            .filter(|tool| tool_is_reasoning_stop(tool))
+            .count(),
         1
     );
     assert_eq!(payload["tool_choice"], "required");
@@ -394,12 +421,14 @@ fn active_stopless_ignores_historical_guidance_for_current_turn_contract() {
         ]
     });
 
-    inject_v3_stopless_provider_contract(&mut payload, 1)
-        .expect("stopless injection must succeed");
+    inject_v3_stopless_provider_contract(&mut payload, 1).expect("stopless injection must succeed");
 
     let messages = payload["messages"].as_array().expect("messages array");
     assert_eq!(messages[0]["role"], "system");
     assert_eq!(messages[1]["role"], "system");
-    assert!(messages[1]["content"].as_str().unwrap().contains("当前轮推进准则"));
+    assert!(messages[1]["content"]
+        .as_str()
+        .unwrap()
+        .contains("当前轮推进准则"));
     assert_eq!(payload["tool_choice"], "required");
 }

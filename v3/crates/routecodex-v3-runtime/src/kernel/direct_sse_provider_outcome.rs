@@ -1,6 +1,7 @@
 use super::*;
 use crate::hub_v1::{
-    classify_v3_provider_generic_sse_json_data, V3ProviderResponsesJsonFrameOutcome,
+    classify_v3_provider_generic_sse_json_data, collect_v3_provider_sse_json_data,
+    V3ProviderResponsesJsonFrameOutcome,
 };
 pub(super) struct V3DirectSseProviderOutcome {
     pub(super) provider_health: V3ProviderFailureRuntimeHealth,
@@ -41,18 +42,7 @@ impl V3DirectSseProviderOutcome {
         &mut self,
         fields: &[SseField],
     ) -> Result<(), V3Error01SourceRaised> {
-        let mut data = String::new();
-        for field in fields {
-            let SseField::Named { name, value } = field else {
-                continue;
-            };
-            if name == "data" {
-                if !data.is_empty() {
-                    data.push('\n');
-                }
-                data.push_str(value);
-            }
-        }
+        let data = collect_v3_provider_sse_json_data(fields);
         let parsed = classify_v3_provider_generic_sse_json_data(&data).map_err(|message| {
             build_v3_error_01_source_raised(
                 V3ErrorSourceKind::ProviderFailure,
@@ -77,8 +67,8 @@ impl V3DirectSseProviderOutcome {
                 ));
             }
             V3ProviderResponsesJsonFrameOutcome::Terminal => self.terminal = true,
-            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
-            | V3ProviderResponsesJsonFrameOutcome::StartClientStream => {}
+            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering => {}
+            V3ProviderResponsesJsonFrameOutcome::StartClientStream => {}
         }
         Ok(())
     }

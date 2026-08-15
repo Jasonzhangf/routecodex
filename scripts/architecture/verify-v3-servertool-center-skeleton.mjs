@@ -97,8 +97,11 @@ const allRuntime = fs.readdirSync(path.join(root, 'v3/crates/routecodex-v3-runti
   .map((file) => path.join(root, 'v3/crates/routecodex-v3-runtime/src', file));
 const runtimeRoot = path.join(root, 'v3/crates/routecodex-v3-runtime/src');
 for (const file of allRuntime) {
-  const content = fs.readFileSync(file, 'utf8');
   const rel = path.relative(root, file);
+  // Test submodules (e.g. servertool_hooks_tests.rs, hub_v1/tests.rs) invoke the
+  // hook under test via `use super::*`; they are not production call edges.
+  if (rel.endsWith('_tests.rs') || rel.endsWith('/tests.rs')) continue;
+  const content = fs.readFileSync(file, 'utf8');
   if (rel === 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs') continue;
   for (const hook of [...requestHooks, ...responseHooks]) {
     if (!content.includes(hook)) continue;

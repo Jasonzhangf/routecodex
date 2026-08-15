@@ -113,7 +113,8 @@ pub(crate) fn normalize_v3_history_image_placeholders(body: &mut Value) {
             normalize_responses_content_parts(item);
             normalize_responses_output_parts(item);
             if is_top_level_input_image(item) {
-                *item = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
+                *item =
+                    serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
             }
         }
         // 最后 user 之后若没有新的 user carrier（纯工具轮 / 完整历史重放——
@@ -155,7 +156,8 @@ pub(crate) fn normalize_v3_all_images_to_placeholder(body: &mut Value) {
             normalize_responses_content_parts(item);
             normalize_responses_output_parts(item);
             if is_top_level_input_image(item) {
-                *item = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
+                *item =
+                    serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
             }
         }
     }
@@ -282,7 +284,9 @@ fn is_v3_embedded_image_carrier(map: &serde_json::Map<String, Value>) -> bool {
         return data.as_str().is_some_and(|value| !value.trim().is_empty());
     }
     if let Some(file_id) = map.get("file_id") {
-        return file_id.as_str().is_some_and(|value| !value.trim().is_empty());
+        return file_id
+            .as_str()
+            .is_some_and(|value| !value.trim().is_empty());
     }
     false
 }
@@ -375,8 +379,7 @@ mod tests {
             json!({"type":"text","text":"[Image]"})
         );
         assert_eq!(
-            body["messages"][2]["content"][1]["type"],
-            "image_url",
+            body["messages"][2]["content"][1]["type"], "image_url",
             "current turn image must be preserved"
         );
     }
@@ -497,8 +500,7 @@ mod tests {
             json!({"type":"input_text","text":"[Image]"})
         );
         assert_eq!(
-            body["input"][1]["content"][0]["type"],
-            "input_image",
+            body["input"][1]["content"][0]["type"], "input_image",
             "current turn image must be preserved"
         );
     }
@@ -524,8 +526,7 @@ mod tests {
             "history image must become placeholder"
         );
         assert_eq!(
-            body["input"][1]["content"][0]["type"],
-            "input_image",
+            body["input"][1]["content"][0]["type"], "input_image",
             "current turn image must be preserved even with trailing tool output"
         );
     }
@@ -547,8 +548,7 @@ mod tests {
         normalize_v3_history_image_placeholders(&mut body);
         assert_eq!(body["contents"][0]["parts"][1], json!({"text":"[Image]"}));
         assert_eq!(
-            body["contents"][2]["parts"][0]["inline_data"]["data"],
-            "BBBB",
+            body["contents"][2]["parts"][0]["inline_data"]["data"], "BBBB",
             "current turn gemini image must be preserved"
         );
     }
@@ -576,8 +576,7 @@ mod tests {
         });
         normalize_v3_history_image_placeholders(&mut later);
         assert_eq!(
-            earlier["messages"][0]["content"],
-            later["messages"][0]["content"],
+            earlier["messages"][0]["content"], later["messages"][0]["content"],
             "earlier history prefix must normalize identically across requests"
         );
     }
@@ -621,13 +620,11 @@ mod tests {
         });
         normalize_v3_history_image_placeholders(&mut body);
         assert_eq!(
-            body["input"][1]["output"][0]["type"],
-            "input_text",
+            body["input"][1]["output"][0]["type"], "input_text",
             "fco image after last user with no new user must be cleaned to placeholder"
         );
         assert_eq!(
-            body["input"][1]["output"][0]["text"],
-            V3_HISTORY_IMAGE_PLACEHOLDER,
+            body["input"][1]["output"][0]["text"], V3_HISTORY_IMAGE_PLACEHOLDER,
             "cleaned fco image must become placeholder text"
         );
     }
@@ -699,8 +696,7 @@ mod tests {
         });
         normalize_v3_history_image_placeholders(&mut current);
         assert_eq!(
-            current["input"][1]["output"][0]["text"],
-            V3_HISTORY_IMAGE_PLACEHOLDER,
+            current["input"][1]["output"][0]["text"], V3_HISTORY_IMAGE_PLACEHOLDER,
             "fco image after last user with no new user must be cleaned"
         );
     }
@@ -852,13 +848,11 @@ mod tests {
         });
         normalize_v3_history_image_placeholders(&mut body);
         assert_eq!(
-            body["messages"][2]["content"][0]["type"],
-            "text",
+            body["messages"][2]["content"][0]["type"], "text",
             "tool image after last user with no new user must be cleaned"
         );
         assert_eq!(
-            body["messages"][2]["content"][0]["text"],
-            V3_HISTORY_IMAGE_PLACEHOLDER,
+            body["messages"][2]["content"][0]["text"], V3_HISTORY_IMAGE_PLACEHOLDER,
             "cleaned tool image must become placeholder text"
         );
     }

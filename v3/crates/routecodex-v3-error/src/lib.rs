@@ -1090,6 +1090,10 @@ pub fn raise_v3_sse_client_disconnect() -> V3Error01SourceRaised {
     )
 }
 
+pub fn is_v3_client_disconnect_source(source: &V3Error01SourceRaised) -> bool {
+    matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect)
+}
+
 pub fn raise_v3_debug_artifact_failure(message: impl Into<String>) -> V3Error01SourceRaised {
     build_v3_error_01_source_raised_internal(
         V3ErrorSourceKind::RuntimeFailure,
@@ -1115,6 +1119,7 @@ pub fn project_v3_post_commit_sse_source(
     source: V3Error01SourceRaised,
     status: u16,
 ) -> V3Error06ClientProjected {
+    let projected_status = status;
     if matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
         // 例外证明：post-commit 阶段 SSE 事件已向客户端提交（200 + 已流出的
         // 帧），物理上无法 reroute/reselect；此处硬编码 0/false/false 走完整
@@ -1133,7 +1138,7 @@ pub fn project_v3_post_commit_sse_source(
             .try_into_terminal()
             .expect("post-commit provider SSE source must project terminal Error05");
         let mut projected = V3ErrorHandlingCenter::project_terminal_decision(terminal);
-        projected.status = status;
+        projected.status = projected_status;
         projected
     } else {
         let mut projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
@@ -1142,7 +1147,7 @@ pub fn project_v3_post_commit_sse_source(
             candidates_remaining: 0,
             source_status: Some(status),
         });
-        projected.status = status;
+        projected.status = projected_status;
         projected
     }
 }

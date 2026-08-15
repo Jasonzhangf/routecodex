@@ -513,6 +513,7 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
   - v3/crates/routecodex-v3-provider-responses/src/wire.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/support/wire_unit.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
   - v3/crates/routecodex-v3-provider-responses/src/raw_response.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
@@ -1867,6 +1868,7 @@ features:
   - routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/bin/v3-anthropic-relay-driver.rs
@@ -1910,6 +1912,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   - v3/crates/routecodex-v3-runtime/src/nodes.rs
@@ -2066,6 +2069,7 @@ features:
   - routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/tests/support/openai_chat_relay_runtime_unit.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
   - v3.hub.entry_protocol
@@ -2107,6 +2111,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/Cargo.toml
+  - v3/crates/routecodex-v3-runtime/tests/support/openai_chat_relay_runtime_unit.rs
   - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_relay_controlled.rs
@@ -2623,6 +2628,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
   - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
   - docs/goals/v3-openai-chat-sse-reused-tool-index-test-design.md
@@ -2727,6 +2733,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
   - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
@@ -4075,6 +4082,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   owner_scope: Runtime owns one timing state per Direct/Relay request; Direct SSE
@@ -4112,7 +4120,9 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/tests.rs
+  - v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -4561,6 +4571,8 @@ features:
   - routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/probe.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
@@ -4575,6 +4587,8 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/probe.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-error/src/subscription.rs

@@ -504,7 +504,10 @@ fn openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade() {
         message.contains("UnmappedOutboundFields") && message.contains("schema"),
         "unexpected rejection: {message}"
     );
-    assert!(!message.contains("function"), "must not fall back to function: {message}");
+    assert!(
+        !message.contains("function"),
+        "must not fall back to function: {message}"
+    );
 }
 
 #[test]
@@ -544,7 +547,10 @@ fn openai_chat_wire_flattens_custom_grammar_to_function_tool() {
 
     assert_eq!(request["tools"][0]["type"], "function");
     assert_eq!(request["tools"][0]["function"]["name"], "apply_patch");
-    assert_eq!(request["tools"][0]["function"]["description"], "Apply a patch");
+    assert_eq!(
+        request["tools"][0]["function"]["description"],
+        "Apply a patch"
+    );
     assert_eq!(
         request["tools"][0]["function"]["parameters"],
         json!({"type":"object"}),
@@ -565,8 +571,9 @@ fn openai_chat_wire_flattens_any_custom_format_to_function_tool() {
         }]
     });
 
-    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect("the chat wire cannot express custom formats; every custom tool flattens to function");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload).expect(
+        "the chat wire cannot express custom formats; every custom tool flattens to function",
+    );
     assert_eq!(request["tools"][0]["type"], "function");
     assert_eq!(request["tools"][0]["function"]["name"], "apply_patch");
     assert_eq!(
@@ -820,6 +827,35 @@ fn tool_search_chat_extensions_round_trip_to_responses_fields() {
                 "execution": "client"
             }
         ])
+    );
+}
+
+#[test]
+fn responses_wire_preserves_compacted_assistant_reasoning_without_tool_calls() {
+    let payload = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [
+            {"role": "user", "content": "continue"},
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "compact reasoning must reach provider"
+            }
+        ]
+    });
+
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Responses wire projection must preserve compacted reasoning");
+
+    assert_eq!(
+        request["input"][1],
+        json!({
+            "type": "reasoning",
+            "summary": [{
+                "type": "summary_text",
+                "text": "compact reasoning must reach provider"
+            }]
+        })
     );
 }
 
@@ -1353,7 +1389,8 @@ fn continuation_history_prefix_renders_byte_identical_across_requests() {
 
 #[test]
 fn continuation_assistant_reasoning_round_trips_to_wire_reasoning_content() {
-    let reasoning = "1. The user asks to reply with exactly CONTINUE_B. No other content is needed.";
+    let reasoning =
+        "1. The user asks to reply with exactly CONTINUE_B. No other content is needed.";
     let payload = json!({
         "model": "deepseek-v4-flash",
         "messages": [
@@ -1365,8 +1402,7 @@ fn continuation_assistant_reasoning_round_trips_to_wire_reasoning_content() {
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
         .expect("OpenAI Chat wire build");
     assert_eq!(
-        request["messages"][1]["reasoning_content"],
-        reasoning,
+        request["messages"][1]["reasoning_content"], reasoning,
         "client-echoed assistant reasoning must pass to wire reasoning_content untouched"
     );
     assert_eq!(request["messages"][1]["content"], "CONTINUE_A");

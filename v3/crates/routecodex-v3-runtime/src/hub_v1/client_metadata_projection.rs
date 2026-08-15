@@ -53,6 +53,9 @@ mod tests {
             "some_future_opaque_key": {"a": 1}
         });
         let paths = unsupported_client_metadata_paths(metadata.as_object().unwrap());
-        assert_eq!(paths, vec!["$.request.client_metadata.some_future_opaque_key"]);
+        assert_eq!(
+            paths,
+            vec!["$.request.client_metadata.some_future_opaque_key"]
+        );
     }
 }

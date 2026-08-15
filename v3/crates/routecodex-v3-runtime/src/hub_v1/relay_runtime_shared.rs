@@ -9,11 +9,16 @@
 //! 错误统一以 `String` 表达，调用方（协议 runtime）负责 map_err 到自身错误类型；
 //! 统一失败结构 [`V3RelayProviderFailure`] 替代各协议 `V3*RelayProviderFailure` 副本。
 
+use crate::hub_v1::{
+    collect_v3_provider_sse_json_data, parse_v3_provider_sse_json_data, V3RuntimeObservability,
+    V3RuntimeStreamObservation,
+};
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,
     run_v3_relay_provider_failure_policy, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState,
 };
+use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
@@ -22,7 +27,12 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::{
     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ResponsesProviderTarget,
 };
+use routecodex_v3_sse::{
+    build_v3_sse_transport_in_01_raw_chunk, SseIncrementalDecoder, SseTransportLimits,
+};
+use routecodex_v3_target::V3Target10ConcreteProviderSelected;
 use serde_json::{json, Value};
+use std::pin::Pin;
 
 /// 统一的 relay provider 失败结构（替代各协议 `V3*RelayProviderFailure` 副本）。
 ///
@@ -126,7 +136,13 @@ pub fn provider_target(
         .iter()
         .find(|entry| entry.alias == selected.auth_alias)
         .ok_or_else(|| "selected auth handle missing".to_string())?;
-    let secret = match (&auth.env, &auth.token_file, &auth.secret_file, &auth.secret_key, &auth.api_key) {
+    let secret = match (
+        &auth.env,
+        &auth.token_file,
+        &auth.secret_file,
+        &auth.secret_key,
+        &auth.api_key,
+    ) {
         (Some(env), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
         (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
         (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
@@ -322,4 +338,122 @@ pub fn error_output(
     });
     trace.extend(V3_ERROR_CHAIN_NODE_IDS);
     (projected, trace)
+}
+
+/// 唯一共享 relay observability 构建器：Responses / OpenAI Chat / Anthropic /
+/// Gemini 四个 relay runtime 统一从这里构造 `V3RuntimeObservability`，禁止各
+/// runtime 各自复制字段映射。只写入 typed observability 侧信道，绝不进入业务
+/// payload；Server 负责人类可读 console 投影。
+pub(crate) fn build_v3_relay_observability(
+    entry_protocol: &str,
+    selected: &V3Target10ConcreteProviderSelected,
+    transport: &str,
+) -> V3RuntimeObservability {
+    V3RuntimeObservability {
+        entry_protocol: entry_protocol.to_string(),
+        execution_mode: "relay".to_string(),
+        transport: transport.to_string(),
+        routing_group_id: Some(selected.route.routing_group_id.clone()),
+        pool_id: Some(selected.route.pool_id.clone()),
+        provider_id: Some(selected.candidate.provider_id.clone()),
+        auth_alias: Some(selected.candidate.auth_alias.clone()),
+        provider_key: Some(format!(
+            "{}:{}:{}",
+            selected.candidate.provider_id,
+            selected.candidate.auth_alias,
+            selected.candidate.model_id
+        )),
+        provider_type: Some(selected.candidate.provider_type.clone()),
+        model_id: Some(selected.candidate.model_id.clone()),
+        wire_model: Some(selected.candidate.wire_model.clone()),
+        provider_status: None,
+        response_status: None,
+        finish_reason: None,
+        stopless_activation: false,
+        attempts: Some(selected.attempts),
+        unavailable_candidates: selected.unavailable_candidates.clone(),
+        provider_failure_events: Vec::new(),
+        target_path: selected.candidate.path.clone(),
+        usage: None,
+        timing: None,
+    }
+}
+
+/// Chat / Gemini relay 客户端 SSE 流类型（两协议 client stream 是同一个底层
+/// boxed stream 类型；这里用本地别名避免 runtime 模块间循环依赖）。
+pub(crate) type V3RelayClientSseStream =
+    Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
+
+/// 客户端 SSE usage 观测包装：逐帧解码客户端协议 wire（openai_chat chunk /
+/// gemini chunk），把 usage / finish_reason 写入 typed stream observation；
+/// chat/gemini wire 无 `status` 字段，语义 finish_reason 出现即推导
+/// `completed` 终态。只观测，不改写任何业务字节。输入允许任意满足同一
+/// 字节流契约的流类型（codec 投影后的关联类型），内部统一装箱为共享
+/// `V3RelayClientSseStream`。
+pub(crate) fn wrap_v3_relay_client_sse_usage_observation<S>(
+    stream: S,
+    observation: V3RuntimeStreamObservation,
+) -> V3RelayClientSseStream
+where
+    S: futures_util::Stream<Item = Result<Vec<u8>, String>> + Send + 'static,
+{
+    struct StreamState {
+        stream: V3RelayClientSseStream,
+        decoder: SseIncrementalDecoder,
+        observation: V3RuntimeStreamObservation,
+        done: bool,
+    }
+
+    Box::pin(futures_util::stream::unfold(
+        StreamState {
+            stream: Box::pin(stream),
+            decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
+            observation,
+            done: false,
+        },
+        |mut state| async move {
+            if state.done {
+                return None;
+            }
+            match state.stream.next().await {
+                Some(Ok(chunk)) => {
+                    let result = observe_relay_client_sse_usage_chunk(
+                        &chunk,
+                        &mut state.decoder,
+                        &state.observation,
+                    );
+                    match result {
+                        Ok(()) => Some((Ok(chunk), state)),
+                        Err(error) => {
+                            state.done = true;
+                            Some((Err(error), state))
+                        }
+                    }
+                }
+                Some(Err(error)) => {
+                    state.done = true;
+                    Some((Err(error), state))
+                }
+                None => None,
+            }
+        },
+    ))
+}
+
+fn observe_relay_client_sse_usage_chunk(
+    chunk: &[u8],
+    decoder: &mut SseIncrementalDecoder,
+    observation: &V3RuntimeStreamObservation,
+) -> Result<(), String> {
+    let frames = decoder
+        .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
+        .map_err(|error| error.to_string())?;
+    for frame in frames {
+        let data = collect_v3_provider_sse_json_data(frame.frame().fields());
+        let Some(event) = parse_v3_provider_sse_json_data(&data)? else {
+            continue;
+        };
+        observation.record_provider_event_json(&event)?;
+    }
+    Ok(())
 }

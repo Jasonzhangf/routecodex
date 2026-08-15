@@ -1,10 +1,10 @@
+use super::web_search_hop::{first_local_websearch_tool_call, hosted_web_search_result_text};
 use super::{
     V3HubRelayRequestError, V3HubRelayRequestHookEvent, V3HubRelayResponseError,
     V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized, V3ServerToolName,
     V3StoplessCenterState, V3StoplessCenterSteering, V3WebSearchCenterPhase,
     V3WebSearchCenterState,
 };
-use super::web_search_hop::{first_local_websearch_tool_call, hosted_web_search_result_text};
 use serde_json::{json, Value};
 use servertool_core::cli_contract::{
     build_client_exec_cli_projection_output, parse_servertool_cli_projection_tool_arguments,
@@ -54,9 +54,7 @@ pub(crate) fn inspect_v3_servertool_response_tool(payload: &Value) -> Option<V3S
             Some(name) if name.trim().eq_ignore_ascii_case("reasoningStop") => {
                 return Some(V3ServerToolName::Stopless)
             }
-            Some(name)
-                if matches!(name.trim(), "web_search" | "web_search_preview") =>
-            {
+            Some(name) if matches!(name.trim(), "web_search" | "web_search_preview") => {
                 return Some(V3ServerToolName::WebSearch)
             }
             _ => {}
@@ -75,14 +73,14 @@ pub(crate) fn govern_v3_servertool_request_at_req04(
     transition_request_id: Option<&str>,
     transition_updated_at: Option<u64>,
 ) -> Result<
-    (Option<V3StoplessCenterState>, Option<V3WebSearchCenterState>),
+    (
+        Option<V3StoplessCenterState>,
+        Option<V3WebSearchCenterState>,
+    ),
     V3HubRelayRequestError,
 > {
-    let identified = identify_v3_servertool_request_tool(
-        payload,
-        stopless_enabled,
-        web_search_mode_b,
-    );
+    let identified =
+        identify_v3_servertool_request_tool(payload, stopless_enabled, web_search_mode_b);
     let stopless_state = if identified == Some(V3ServerToolName::Stopless) {
         let state = apply_v3_stopless_request_hook_at_req04(
             payload,
@@ -95,8 +93,7 @@ pub(crate) fn govern_v3_servertool_request_at_req04(
         let should_inject_provider_contract = state
             .as_ref()
             .is_some_and(V3StoplessCenterState::schema_guidance_active)
-            || stopless_center_state
-                .is_some_and(|restored| restored.schema_guidance_active())
+            || stopless_center_state.is_some_and(|restored| restored.schema_guidance_active())
                 && transition_request_id
                     .map(str::trim)
                     .is_some_and(|request_id| !request_id.is_empty());
@@ -116,9 +113,7 @@ pub(crate) fn govern_v3_servertool_request_at_req04(
     // web_search 与 stopless 是独立工具：stopless 激活不得吞掉 web_search
     // 激活（否则 Mode B servertool 永不激活）。web_search_mode_b 为真且
     // payload 含 web_search 声明时独立激活 LocalToolSurfaceActive。
-    let web_search_state = if web_search_mode_b
-        && payload_declares_web_search_tool(payload)
-    {
+    let web_search_state = if web_search_mode_b && payload_declares_web_search_tool(payload) {
         apply_v3_web_search_request_hook_at_req04(payload)?
     } else {
         None
@@ -138,7 +133,9 @@ pub fn apply_v3_web_search_request_hook_at_req04(
             V3WebSearchCenterPhase::LocalToolSurfaceActive,
             "req04_web_search_surface_active",
         )
-        .map_err(|reason| V3HubRelayRequestError::WebSearchToolSurfaceActivationFailed { reason })?;
+        .map_err(
+            |reason| V3HubRelayRequestError::WebSearchToolSurfaceActivationFailed { reason },
+        )?;
     Ok(Some(state))
 }
 
@@ -384,7 +381,6 @@ struct V3ReasoningStopToolCall {
     evidence: Option<String>,
 }
 
-
 fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
     let mut projected = payload.clone();
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
@@ -404,10 +400,7 @@ fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
                 .get("type")
                 .and_then(Value::as_str)
                 .is_some_and(|kind| kind == "web_search_tool_result")
-                && item
-                    .get("tool_use_id")
-                    .and_then(Value::as_str)
-                    == Some(call_id);
+                && item.get("tool_use_id").and_then(Value::as_str) == Some(call_id);
             !(is_web_search_call || is_hosted_result)
         });
     }
@@ -417,15 +410,11 @@ fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
             let Some(message) = choice.get_mut("message") else {
                 continue;
             };
-            let Some(tool_calls) = message
-                .get_mut("tool_calls")
-                .and_then(Value::as_array_mut)
+            let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut)
             else {
                 continue;
             };
-            tool_calls.retain(|item| {
-                item.get("id").and_then(Value::as_str) != Some(call_id)
-            });
+            tool_calls.retain(|item| item.get("id").and_then(Value::as_str) != Some(call_id));
         }
     }
     // Anthropic：content[].tool_use 剥离匹配 call_id 的工具调用。
@@ -437,7 +426,6 @@ fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
     }
     projected
 }
-
 
 fn intercept_local_web_search_call(
     mut input: V3HubRespInbound02Normalized,
@@ -488,9 +476,9 @@ fn intercept_local_web_search_call(
                         "resp03_hosted_result_observed",
                     )
                 })
-                .map_err(|reason| {
-                    V3HubRelayResponseError::WebSearchStateTransitionFailed { reason }
-                })?
+                .map_err(
+                    |reason| V3HubRelayResponseError::WebSearchStateTransitionFailed { reason },
+                )?
                 .with_normalized_result(Some(normalized))
         }
         None => observed,
