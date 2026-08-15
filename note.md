@@ -35510,4 +35510,19 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
   test-consumer edge 11 / config 15 / control 15 / error 23；gen/verify-index；
   verify-v4-active-link `V4_ACTIVE_LINK_GATE_OK`（node + npm 两入口）；appsdk verify/admission
   `contract_bound` ok。gen-index 后无 diff（确定性）。
-- 待办：提交后重跑 DSH review（`v4-active-only-phase2-dsh-r3`，base a0bb0481d）→ PASS 后交付。
+- 提交 `d1d96ff94`（5 文件，仅 v4 P2 + note/MEMORY）。
+
+# 2026-08-15 V4 Phase 2 DSH review r4 PASS + dsh skill 工具修复
+- `v4-active-only-phase2-dsh-r4`（base a0bb0481d，dsh/opencode-go/deepseek-v4-flash）：
+  state completed、verdict pass、reason final_verdict_pass、exit 0，字面 `VERDICT: PASS`，
+  recommendation deliver；证据 `~/.dsh/reviews/v4-active-only-phase2-dsh-r4/`。
+- r3 曾机器判 FAIL（final 文本却是 PASS）：`dsh-mcp classifyFinal` 把 reviewer 的
+  “**P0** — none. / **P1** — none.” 标题误当 P0/P1 finding。已修复 classifier
+  （先剥离 `P0/P1: none|无|不存在|没有` 行再测 P0/P1 token；真 FAIL/真 P0/P1 finding 仍 fail，
+  缺失 verdict 仍 unavailable），修复后 r3 final 复分类为 pass。
+- `test-dsh-mcp` 抖动修复：fake DSH 用 `#!/usr/bin/env node` shebang 直接 spawn 在本机约 50%
+  ETIMEDOUT（node 直接 spawn env-shebang 脚本不可靠），改为 `#!/bin/sh` fake（直接 spawn 20/20
+  稳定，test-dsh-mcp 3/3 绿）。两个脚本改动位于 `~/.agents/skills/dsh/scripts/`（非 git 仓库）。
+- r4 P2 非阻塞三条：rustc ABI 与 fixture rlib 耦合（建议 pin toolchain，当前 1.97.1 本地绿）；
+  lib.rs compile_fail doctest 仅文档（建议重标，§9.1/MEMORY 已说明）；verification-map 与 CI
+  命令名耦合（行为已覆盖）。无 P0/P1，无“修复后再审”要求。

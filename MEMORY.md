@@ -5431,3 +5431,16 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
   rustc 负向门模式：对 fixture 中 frozen Active rlib（error active-v3 + base-node active-v1）直接
   `--extern` 编译，无 witness 调用必须失败、带 witness 正向片段必须成功；后续 frozen 模块若
   “编译面 owner 在 resolver”同样优先把负向门安置在 resolver 红测，而不是删除 gate 或改投 l2。
+
+## 2026-08-15 V4 Phase 2 交付：DSH review r4 PASS（追加确证）
+- `v4-active-only-phase2-dsh-r4` 机器与字面双 PASS（`VERDICT: PASS`，exit 0，recommendation
+  deliver），范围 a0bb0481d..d1d96ff94（9 commits，纯 v4 build-governance；无 V3 runtime/
+  payload/control 改动）。r3 机器 FAIL 是 `dsh-mcp classifyFinal` 误判，不是 review 发现。
+- DSH MCP 分类器教训：reviewer 最终文本含 “**P0** — none. / **P1** — none.” 标题时，旧
+  `classifyFinal` 的 p01 正则会把标题当 blocking finding → 机器 FAIL（即使有字面
+  `VERDICT: PASS`）。已在 `~/.agents/skills/dsh/scripts/dsh-mcp` 修复：先剥离显式
+  `P0/P1: none|无|不存在|没有` 行，再测 P0/P1 token；真 FAIL、真 P0/P1 finding、缺失 verdict
+  语义不变。`test-dsh-mcp` fake DSH 的 `#!/usr/bin/env node` 直接 spawn 在本机约 50%
+  ETIMEDOUT，已改 `#!/bin/sh` fake（test 3/3 绿）。
+- 后续遇到 DSH 机器 fail 而 final 文本 PASS 时，先查 status reason / `classifyFinal` 是否误判；
+  不得直接当 PASS 交付，修复工具后必须重跑 review 并复验 `test-dsh-mcp`。
