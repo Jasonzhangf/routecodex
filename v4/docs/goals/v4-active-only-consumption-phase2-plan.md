@@ -117,13 +117,19 @@ Design ID: `V4-ACTIVE-LINK-002`（本计划）；上游设计：`v4/docs/design/
 
 ## 9. 执行修正（2026-08-15，实施后追加）
 
-1. **error compile-fail 门迁移**：`v4_error_compile_fail_regression`
-   （`cargo test -p routecodex-v4-error --doc`）在 error 移出 workspace 后不可运行
+1. **error compile-fail 门迁移并重新安置（DSH review P2 修复）**：原
+   `cargo test -p routecodex-v4-error --doc` 在 error 移出 workspace 后不可运行
    （lib.rs 依赖 resolver `--extern` 注入的 base-node，cargo doc 无法单独解析）。
-   该 gate 已从 `v4/.appsdk/maps/verification-map.json` 删除；其编译期保护由
-   `l2_error.rs` 全量调用 `classify(witness)` 的 API 形状编译锁定替代，
-   error regression 以 resolver `test-consumer`（23 tests）为唯一回归门。
-   `src/lib.rs` 的 `compile_fail` 文档保留为 API 契约说明，不再作为可执行 gate。
+   首次迁移时该 gate 从 verification-map 删除，仅以 l2 全量调用 `classify(witness)`
+   锁定 API 形状；DSH review P2-3 判定负向编译保护丢失，现重新安置为 resolver
+   负向 rustc 门 `negative_error_classify_without_witness_compile_fails`
+   （`v4/crates/routecodex-v4-build-link/tests/resolver_red_tests.rs`）：
+   无 witness 调 `chain.classify()` 必须编译失败，带 witness 的正向片段必须编译成功。
+   `v4_error_compile_fail_regression` 已恢复至 `v4/.appsdk/maps/verification-map.json`，
+   命令改为 `cargo test -p routecodex-v4-build-link --test resolver_red_tests
+   negative_error_classify_without_witness_compile_fails --manifest-path v4/Cargo.toml`；
+   function-map `v4.error.mainline` 对该 gate 的引用随之恢复有效，不删除。
+   `src/lib.rs` 的 `compile_fail` 文档保留为 API 契约说明，不再作为可执行 cargo doc gate。
 2. **fixture 路径**：hermetic fixture 实际位于 `v4/tests/resources/active-link-fixture/`
    （沿用 Phase 1 模式），不是 §4.9 写到的 `v4/contracts/active-link/fixture`。
 3. **index gen/verify 时序**：gen-index 依赖 Active artifact 已发布，必须在

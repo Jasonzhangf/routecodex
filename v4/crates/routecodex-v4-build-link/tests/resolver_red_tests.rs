@@ -6,6 +6,7 @@ use routecodex_v4_build_link::resolver::{
 use routecodex_v4_build_link::IndexBuilder;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// Hermetic fixture root: byte copies of the frozen base-node/edge/control/
 /// error Active artifacts plus their tracked freeze/promotion/review/evidence
@@ -250,6 +251,90 @@ fn negative_dependency_closure_mismatch_fails_fast() {
         error,
         ActiveLinkError::DependencyClosureMismatch(_)
     ));
+}
+
+#[test]
+fn negative_error_classify_without_witness_compile_fails() {
+    // Hermetic negative gate: `ErrorChain::classify` must not be callable
+    // without the mandatory single-use `ClassifyAuditWitness`. The compile
+    // surface owner is the resolver, so the negative assertion lives here as a
+    // rustc gate against the frozen error Active artifact; the l2 regression
+    // locks the positive witness-bearing call shape.
+    let fixture = fixture_root();
+    let base_rlib = fixture
+        .join("active/lib/routecodex-v4-base-node/active-v1/lib/libroutecodex_v4_base_node.rlib");
+    let error_rlib =
+        fixture.join("active/lib/routecodex-v4-error/active-v3/lib/libroutecodex_v4_error.rlib");
+    assert!(base_rlib.is_file(), "fixture base-node rlib missing");
+    assert!(error_rlib.is_file(), "fixture error rlib missing");
+    let dir = std::env::temp_dir().join(format!(
+        "v4-error-compile-gate-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).expect("create compile-gate temp dir");
+    let bad = dir.join("bad.rs");
+    fs::write(
+        &bad,
+        "use routecodex_v4_base_node::Scope;\n\
+         use routecodex_v4_error::ErrorChain;\n\
+         fn main() {\n\
+             let mut chain = ErrorChain::new(Scope::new(\"r\", \"p\", 1, \"s\", \"c\"));\n\
+             chain.classify();\n\
+         }\n",
+    )
+    .expect("write negative snippet");
+    let negative = Command::new("rustc")
+        .arg("--edition=2021")
+        .arg(&bad)
+        .arg("--extern")
+        .arg(format!("routecodex_v4_base_node={}", base_rlib.display()))
+        .arg("--extern")
+        .arg(format!("routecodex_v4_error={}", error_rlib.display()))
+        .arg("-o")
+        .arg(dir.join("bad"))
+        .output()
+        .expect("spawn rustc");
+    assert!(
+        !negative.status.success(),
+        "classify without witness must not compile:\n{}",
+        String::from_utf8_lossy(&negative.stderr)
+    );
+    let good = dir.join("good.rs");
+    fs::write(
+        &good,
+        "use routecodex_v4_base_node::Scope;\n\
+         use routecodex_v4_error::{ErrorCenter, ErrorChain};\n\
+         fn main() {\n\
+             let mut center = ErrorCenter::new(Scope::new(\"r\", \"p\", 1, \"s\", \"c\"));\n\
+             let mut chain = ErrorChain::new(Scope::new(\"r\", \"p\", 1, \"s\", \"c\"));\n\
+             let fact = chain.raise(\"timeout\", Some(\"sha256:p\"), Some(\"ctx\")).unwrap();\n\
+             let captured = chain.capture().unwrap();\n\
+             let witness = center.classify(captured).unwrap();\n\
+             chain.classify(witness).unwrap();\n\
+             let _ = fact;\n\
+         }\n",
+    )
+    .expect("write positive snippet");
+    let positive = Command::new("rustc")
+        .arg("--edition=2021")
+        .arg(&good)
+        .arg("--extern")
+        .arg(format!("routecodex_v4_base_node={}", base_rlib.display()))
+        .arg("--extern")
+        .arg(format!("routecodex_v4_error={}", error_rlib.display()))
+        .arg("-o")
+        .arg(dir.join("good"))
+        .output()
+        .expect("spawn rustc");
+    assert!(
+        positive.status.success(),
+        "classify with witness must compile:\n{}",
+        String::from_utf8_lossy(&positive.stderr)
+    );
 }
 
 #[test]

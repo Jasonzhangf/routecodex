@@ -35489,3 +35489,25 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 门禁修正：`v4_error_compile_fail_regression`（`cargo test -p routecodex-v4-error --doc`）在 error 移出 workspace 后不可运行，从 verification-map 删除；compile-fail 文档保留为 API 契约说明，编译期保护由 l2 全量调用 `classify(witness)` 锁定。CI `v4-active-link` job 增加 control/error test-consumer 步骤。
 - 其他 worker 的 `v4/docs/design/RCC_V4_Config_Management_Design_v1.0.md`（未跟踪）加入 `.git/info/exclude` 避免阻塞 freeze 的 VCS-clean 检查；文件内容未动、未提交。
 - 待办：DSH review（base 86818fa9e..HEAD）→ 通过后交付；note/MEMORY 更新提交。
+
+# 2026-08-15 V4 Phase 2 DSH review P2 修复（function-map / workspace build / compile-fail 负向门）
+- DSH review `v4-active-only-phase2-dsh-r2`（base a0bb0481d）明确 `VERDICT: PASS`，无 P0/P1，P2 三条：
+  1) function-map `v4.error.mainline` 悬挂 `v4_error_compile_fail_regression`；2) verification-map
+  `v4_cargo_workspace_build.required_for` 残留 control/error compile；3) error 移出 workspace 后
+  `cargo test -p routecodex-v4-error --doc` 不可运行，compile-fail 负向门丢失。
+- 修复方式（apply_patch 逐文件，无脚本替换）：
+  - verification-map：恢复 `v4_error_compile_fail_regression`，命令改为 resolver 负向 rustc 门
+    `cargo test -p routecodex-v4-build-link --test resolver_red_tests negative_error_classify_without_witness_compile_fails --manifest-path v4/Cargo.toml`；
+    `v4_cargo_workspace_build.required_for` 只保留 base-node/build-link compile。
+  - 新增测试 `negative_error_classify_without_witness_compile_fails`
+    （`v4/crates/routecodex-v4-build-link/tests/resolver_red_tests.rs`）：对 fixture 的 error
+    active-v3 + base-node active-v1 rlib 跑 rustc，无 witness 调 `chain.classify()` 必须编译失败，
+    带 witness 正向片段必须编译成功；function-map 的 gate 引用随之恢复有效，不删除。
+  - 计划文档 §9.1 同步为“迁移并重新安置”，不再声称 gate 已删除。
+- 红绿证据：旧命令 `cargo test -p routecodex-v4-error --doc` 红（exit 101，package not in workspace）；
+  新负向门绿（1 passed，resolver_red_tests 13→14）。
+- 全矩阵复验绿：fmt check；workspace test（base 12 + resolver 14）；release build；
+  test-consumer edge 11 / config 15 / control 15 / error 23；gen/verify-index；
+  verify-v4-active-link `V4_ACTIVE_LINK_GATE_OK`（node + npm 两入口）；appsdk verify/admission
+  `contract_bound` ok。gen-index 后无 diff（确定性）。
+- 待办：提交后重跑 DSH review（`v4-active-only-phase2-dsh-r3`，base a0bb0481d）→ PASS 后交付。

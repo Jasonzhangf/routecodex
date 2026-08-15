@@ -5420,3 +5420,14 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 - `appsdk` VCS-clean gate runs `git status --porcelain -- v4` and fails on any entry outside `.appsdk/transactions/`; unrelated untracked files under `v4/` (e.g. another worker's design doc) must be locally excluded before freeze, not committed or deleted.
 - `test-consumer` compiles `crates/<consumer>/tests/*.rs` with rustc `--test` + resolver `--extern`; it does not run doc tests. The error `compile_fail` doctest is documentation only after error left the workspace; its compile-time API-shape protection is covered by l2 tests calling `classify(witness)`.
 - Resolver index builds from freeze records + `active/lib/<module>/<version>/artifact.json` (not `current.json`); gen-index/verify-index must run after publish-active. Hermetic fixture intentionally omits base-node `current.json` and legacy error active-v1.
+
+## 2026-08-15 V4 compile-fail 负向门重新安置（DSH review P2 修正，追加确证）
+- error 移出 workspace 后，`cargo test -p routecodex-v4-error --doc` 不可运行（exit 101），
+  `v4_error_compile_fail_regression` 不能只删除：l2 正向形状编译锁不能替代负向编译保护。
+  正式负向门改为 resolver rustc 测试 `negative_error_classify_without_witness_compile_fails`
+  （`v4/crates/routecodex-v4-build-link/tests/resolver_red_tests.rs`），命令：
+  `cargo test -p routecodex-v4-build-link --test resolver_red_tests negative_error_classify_without_witness_compile_fails --manifest-path v4/Cargo.toml`；
+  verification-map 恢复该 gate 条目，function-map `v4.error.mainline` 引用保持有效。
+  rustc 负向门模式：对 fixture 中 frozen Active rlib（error active-v3 + base-node active-v1）直接
+  `--extern` 编译，无 witness 调用必须失败、带 witness 正向片段必须成功；后续 frozen 模块若
+  “编译面 owner 在 resolver”同样优先把负向门安置在 resolver 红测，而不是删除 gate 或改投 l2。
