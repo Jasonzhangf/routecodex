@@ -7,6 +7,7 @@ pub struct V3CurrentTurnSignals {
     pub latest_message_from_user: bool,
     pub has_current_turn_tool_output: bool,
     pub has_current_turn_web_search: bool,
+    pub has_current_turn_image: bool,
     pub last_assistant_tool: Option<RouteToolCallClassification>,
 }
 
@@ -21,6 +22,11 @@ pub fn build_v3_current_turn_route_facts(request: &Value) -> V3CurrentTurnSignal
         && message_signals != V3CurrentTurnSignals::default()
     {
         return message_signals;
+    }
+    if let Some(contents) = request.get("contents").and_then(value_as_array) {
+        if !contents.is_empty() {
+            return extract_gemini_signals(&contents);
+        }
     }
     if !responses_input.is_empty() {
         return extract_responses_signals(&responses_input);
@@ -38,6 +44,26 @@ pub fn build_v3_current_turn_route_facts(request: &Value) -> V3CurrentTurnSignal
         };
     }
     message_signals
+}
+
+fn extract_gemini_signals(contents: &[Value]) -> V3CurrentTurnSignals {
+    let latest_role = contents
+        .iter()
+        .rev()
+        .find_map(|content| content.get("role").and_then(Value::as_str));
+    let latest_user_index = contents
+        .iter()
+        .rposition(|content| content.get("role").and_then(Value::as_str) == Some("user"));
+    let segment_start = latest_user_index.unwrap_or(0);
+    let mut has_current_turn_image = false;
+    for content in contents.iter().skip(segment_start) {
+        has_current_turn_image |= value_contains_image(content);
+    }
+    V3CurrentTurnSignals {
+        latest_message_from_user: latest_role == Some("user"),
+        has_current_turn_image,
+        ..Default::default()
+    }
 }
 
 fn value_as_array(value: &Value) -> Option<Vec<Value>> {
@@ -85,13 +111,20 @@ fn extract_message_signals(messages: &[Value]) -> V3CurrentTurnSignals {
             has_current_turn_web_search: latest_user_index
                 .and_then(|index| messages.get(index))
                 .is_some_and(message_contains_web_search),
+            has_current_turn_image: latest_user_index
+                .and_then(|index| messages.get(index))
+                .is_some_and(message_contains_image),
             ..Default::default()
         };
     };
     let mut has_current_turn_tool_output = false;
     let mut has_current_turn_web_search = false;
+    let mut has_current_turn_image = latest_user_index
+        .and_then(|index| messages.get(index))
+        .is_some_and(message_contains_image);
     let mut last_assistant_tool = None;
     for message in segment {
+        has_current_turn_image |= message_contains_image(message);
         match message_role(message).as_deref() {
             Some("tool") => has_current_turn_tool_output = true,
             Some("assistant") => {
@@ -135,6 +168,7 @@ fn extract_message_signals(messages: &[Value]) -> V3CurrentTurnSignals {
         latest_message_from_user: latest_role.as_deref() == Some("user"),
         has_current_turn_tool_output,
         has_current_turn_web_search,
+        has_current_turn_image,
         last_assistant_tool,
     }
 }
@@ -159,13 +193,21 @@ fn extract_responses_signals(entries: &[Value]) -> V3CurrentTurnSignals {
                     .iter()
                     .any(entry_contains_web_search)
             }),
+            has_current_turn_image: latest_user_index.is_some_and(|index| {
+                entries[current_turn_start..=index]
+                    .iter()
+                    .any(entry_contains_image)
+            }),
             ..Default::default()
         };
     };
     let mut has_current_turn_tool_output = false;
     let mut has_current_turn_web_search = false;
+    let mut has_current_turn_image =
+        latest_user_index.is_some_and(|index| entries[index..].iter().any(entry_contains_image));
     let mut last_assistant_tool = None;
     for entry in segment {
+        has_current_turn_image |= entry_contains_image(entry);
         let kind = entry_type(entry);
         if kind == "web_search" {
             has_current_turn_web_search = true;
@@ -209,6 +251,7 @@ fn extract_responses_signals(entries: &[Value]) -> V3CurrentTurnSignals {
         latest_message_from_user: latest_role.as_deref() == Some("user"),
         has_current_turn_tool_output,
         has_current_turn_web_search,
+        has_current_turn_image,
         last_assistant_tool,
     }
 }
@@ -260,6 +303,52 @@ fn message_contains_web_search(message: &Value) -> bool {
                 .iter()
                 .any(|item| entry_type(item).as_str() == "web_search")
         })
+}
+
+fn message_contains_image(message: &Value) -> bool {
+    message.get("content").is_some_and(value_contains_image)
+}
+
+fn entry_contains_image(entry: &Value) -> bool {
+    value_contains_image(entry)
+}
+
+/// 当前轮图片检测只认协议 media 事实（input_image / image_url / data:image
+/// 内容），不扫描 payload 文本重建意图。历史轮图片不在当前轮段内，
+/// 不会驱动 multimodal 路由。
+fn value_contains_image(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(value_contains_image),
+        Value::Object(values) => {
+            let type_value = values
+                .get("type")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_ascii_lowercase())
+                .unwrap_or_default();
+            if type_value.contains("image") {
+                return true;
+            }
+            if values.contains_key("image_url") {
+                return true;
+            }
+            if values.contains_key("inline_data") || values.contains_key("file_data") {
+                return true;
+            }
+            if values
+                .get("data")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_ascii_lowercase())
+                .is_some_and(|value| value.starts_with("data:image/"))
+            {
+                return true;
+            }
+            ["content", "parts"]
+                .into_iter()
+                .filter_map(|field| values.get(field))
+                .any(value_contains_image)
+        }
+        _ => false,
+    }
 }
 
 fn entry_contains_web_search(entry: &Value) -> bool {

@@ -291,7 +291,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
     let mut capabilities = BTreeSet::from(["text".to_string()]);
     let input_tokens = estimate_v3_routing_input_tokens(body);
     let active_turn = build_v3_current_turn_route_facts(body);
-    let has_image_attachment = has_v3_protocol_image_attachment(body);
+    let has_image_attachment = active_turn.has_current_turn_image;
     // 客户端显式声明 websearch 工具（function/custom 名为 websearch/web_search）
     // 是 typed current-turn 路由事实：候选 Mode B pool 必须据此命中，禁止依赖
     // 请求文本意图推断（r4 typed facts 设计：不扫描 payload 文本重建控制）。
@@ -457,27 +457,6 @@ fn is_v3_client_tool_declaration(tool: &Value) -> bool {
         .map(str::trim)
         .unwrap_or_default();
     !name.is_empty() && matches!(kind.as_str(), "function" | "custom" | "")
-}
-
-fn has_v3_protocol_image_attachment(body: &Value) -> bool {
-    ["messages", "input", "contents"]
-        .into_iter()
-        .filter_map(|field| body.get(field))
-        .any(value_contains_v3_protocol_image)
-}
-
-fn value_contains_v3_protocol_image(value: &Value) -> bool {
-    match value {
-        Value::Array(items) => items.iter().any(value_contains_v3_protocol_image),
-        Value::Object(values) => {
-            detect_v3_media_kind(values) == Some("image")
-                || ["content", "parts"]
-                    .into_iter()
-                    .filter_map(|field| values.get(field))
-                    .any(value_contains_v3_protocol_image)
-        }
-        _ => false,
-    }
 }
 
 pub fn configured_v3_longcontext_threshold_tokens(
@@ -850,8 +829,8 @@ mod tests {
                 ]
             }),
         );
-        let normalized = build_v3_chat_req_04_standardized_from_v3_server_03(raw)
-            .expect("chat req04 normalize");
+        let normalized =
+            build_v3_chat_req_04_standardized_from_v3_server_03(raw).expect("chat req04 normalize");
         let facts = build_v3_router_request_facts_from_v3_req_04_chat(
             &normalized,
             &manifest_mode_b_websearch_for_routing_facts(),
