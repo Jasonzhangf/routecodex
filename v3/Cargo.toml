@@ -12,6 +12,8 @@ members = [
   "crates/routecodex-v3-server",
   "crates/routecodex-v3-lifecycle",
   "crates/routecodex-v3-cli",
+  "crates/routecodex-v3-config-mgmt",
+  "crates/routecodex-v3-admin",
 ]
 resolver = "2"
 

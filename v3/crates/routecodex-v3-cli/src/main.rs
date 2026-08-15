@@ -14,6 +14,8 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod init;
+
 #[derive(Parser)]
 #[command(name = "rccv3")]
 struct Args {
@@ -70,6 +72,26 @@ enum Command {
     Servertool {
         #[command(subcommand)]
         command: ServertoolCommand,
+    },
+    Init {
+        #[arg(short, long)]
+        config: Option<String>,
+        #[arg(long, default_value_t = false)]
+        force: bool,
+        #[arg(long)]
+        provider: Option<String>,
+        #[arg(long)]
+        base_url: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        api_key: Option<String>,
+        #[arg(long)]
+        env: Option<String>,
+        #[arg(long)]
+        token_file: Option<String>,
+        #[arg(long)]
+        port: Option<u16>,
     },
     #[command(hide = true)]
     Server {
@@ -192,6 +214,30 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 manifest.version,
                 manifest.servers.len()
             );
+        }
+        Command::Init {
+            config,
+            force,
+            provider,
+            base_url,
+            model,
+            api_key,
+            env,
+            token_file,
+            port,
+        } => {
+            let config_path = resolve_config_path(config)?;
+            init::run_init(&init::InitOptions {
+                config_path,
+                force,
+                provider,
+                base_url,
+                model,
+                api_key,
+                env,
+                token_file,
+                port,
+            })?;
         }
         Command::Servertool {
             command:

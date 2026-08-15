@@ -12,7 +12,7 @@ use crate::{
     V3SelectionPolicy, V3SelectionStrategy, V3ServerAuthoringConfig, V3StreamingPolicy,
     V3WebSearchExecutionMode,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -782,108 +782,110 @@ struct V2LoadBalancing {
     weights: BTreeMap<String, f64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct V2ProviderConfigFile {
-    provider_id: Option<String>,
-    provider: V2ProviderConfig,
+pub struct V2ProviderConfigFile {
+    #[serde(default)]
+    pub version: Option<String>,
+    pub provider_id: Option<String>,
+    pub provider: V2ProviderConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct V2ProviderConfig {
-    id: String,
-    enabled: Option<bool>,
+pub struct V2ProviderConfig {
+    pub id: String,
+    pub enabled: Option<bool>,
     #[serde(rename = "type")]
-    provider_type: String,
-    #[serde(alias = "baseURL")]
-    base_url: String,
-    default_model: String,
-    auth: V2ProviderAuthConfig,
-    responses: Option<V2ProviderResponsesConfig>,
-    concurrency: Option<V2ProviderConcurrencyConfig>,
+    pub provider_type: String,
+    #[serde(rename = "baseURL")]
+    pub base_url: String,
+    pub default_model: String,
+    pub auth: V2ProviderAuthConfig,
+    pub responses: Option<V2ProviderResponsesConfig>,
+    pub concurrency: Option<V2ProviderConcurrencyConfig>,
     #[serde(default, alias = "compatibilityProfile")]
-    compatibility_profile: Option<String>,
+    pub compatibility_profile: Option<String>,
     #[serde(default)]
-    models: BTreeMap<String, V2ProviderModelConfig>,
+    pub models: BTreeMap<String, V2ProviderModelConfig>,
     #[serde(default)]
-    v3: Option<V2ProviderV3Config>,
+    pub v3: Option<V2ProviderV3Config>,
     /// per-request 总超时（毫秒）；默认 300_000（300s）。覆盖连接、响应头等待与 body 读取。
     #[serde(default)]
-    timeout: Option<u64>,
+    pub timeout: Option<u64>,
     /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30s。本地慢部署按 provider 放宽。
     #[serde(default, alias = "sse_first_frame_timeout_ms")]
-    sse_first_frame_timeout_ms: Option<u64>,
+    pub sse_first_frame_timeout_ms: Option<u64>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct V2ProviderV3Config {
+pub struct V2ProviderV3Config {
     #[serde(default)]
-    health: Option<V3ProviderHealthAuthoringConfig>,
+    pub health: Option<V3ProviderHealthAuthoringConfig>,
     #[serde(default, alias = "semantic_error_policy")]
-    semantic_error_policy: Vec<V3ProviderSemanticErrorPolicyAuthoringConfig>,
+    pub semantic_error_policy: Vec<V3ProviderSemanticErrorPolicyAuthoringConfig>,
     #[serde(default, alias = "provider_request_cleanup")]
-    provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
+    pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
     #[serde(default)]
-    features: BTreeMap<String, bool>,
+    pub features: BTreeMap<String, bool>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct V2ProviderAuthConfig {
-    api_key: Option<String>,
-    env: Option<String>,
-    token_file: Option<String>,
-    entries: Option<Vec<V2ProviderAuthEntry>>,
+pub struct V2ProviderAuthConfig {
+    pub api_key: Option<String>,
+    pub env: Option<String>,
+    pub token_file: Option<String>,
+    pub entries: Option<Vec<V2ProviderAuthEntry>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct V2ProviderAuthEntry {
-    alias: Option<String>,
-    api_key: Option<String>,
-    env: Option<String>,
-    token_file: Option<String>,
-    secret_file: Option<String>,
-    secret_key: Option<String>,
+pub struct V2ProviderAuthEntry {
+    pub alias: Option<String>,
+    pub api_key: Option<String>,
+    pub env: Option<String>,
+    pub token_file: Option<String>,
+    pub secret_file: Option<String>,
+    pub secret_key: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct V2ProviderResponsesConfig {
-    process: String,
-    streaming: Option<String>,
+pub struct V2ProviderResponsesConfig {
+    pub process: String,
+    pub streaming: Option<String>,
     #[serde(default)]
-    transport: Option<V3ResponsesTransportKind>,
+    pub transport: Option<V3ResponsesTransportKind>,
     #[serde(default, alias = "websocket_v2_url", alias = "websocketV2URL")]
-    websocket_v2_url: Option<String>,
+    pub websocket_v2_url: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct V2ProviderConcurrencyConfig {
-    max_in_flight: Option<u32>,
-    acquire_timeout_ms: Option<u64>,
-    stale_lease_ms: Option<u64>,
+pub struct V2ProviderConcurrencyConfig {
+    pub max_in_flight: Option<u32>,
+    pub acquire_timeout_ms: Option<u64>,
+    pub stale_lease_ms: Option<u64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct V2ProviderModelConfig {
+pub struct V2ProviderModelConfig {
     #[serde(default)]
-    wire_name: Option<String>,
+    pub wire_name: Option<String>,
     #[serde(default)]
-    aliases: Vec<String>,
+    pub aliases: Vec<String>,
     #[serde(default)]
-    capabilities: Vec<String>,
-    supports_streaming: Option<bool>,
-    supports_thinking: Option<bool>,
-    thinking: Option<String>,
-    max_tokens: Option<u64>,
-    max_context: Option<u64>,
-    max_context_tokens: Option<u64>,
-    context_window: Option<u64>,
+    pub capabilities: Vec<String>,
+    pub supports_streaming: Option<bool>,
+    pub supports_thinking: Option<bool>,
+    pub thinking: Option<String>,
+    pub max_tokens: Option<u64>,
+    pub max_context: Option<u64>,
+    pub max_context_tokens: Option<u64>,
+    pub context_window: Option<u64>,
     /// Mode B 显式声明（v2 配置可选；缺省时按 `web_search_direct`
     /// capability 兼容推断 Mode A）。生产 v2 配置通过此字段启用
     /// `metadata_center_local_search` 与编译期 backend binding。
@@ -891,11 +893,11 @@ struct V2ProviderModelConfig {
     /// 兼容两种写法：`rename_all = "camelCase"` 的 `webSearchExecutionMode`
     /// 与生产 v2 配置实际使用的 `web_search_execution_mode`（snake_case）。
     #[serde(default, alias = "web_search_execution_mode")]
-    web_search_execution_mode: Option<V3WebSearchExecutionMode>,
+    pub web_search_execution_mode: Option<V3WebSearchExecutionMode>,
     #[serde(default, alias = "web_search_backend")]
-    web_search_backend: Option<String>,
+    pub web_search_backend: Option<String>,
     #[serde(default)]
-    features: BTreeMap<String, bool>,
+    pub features: BTreeMap<String, bool>,
 }
 
 impl V2ProviderModelConfig {
@@ -912,6 +914,18 @@ impl V2ProviderModelConfig {
             }
         })
     }
+}
+
+pub fn parse_v2_provider_config_file(raw: &str) -> Result<V2ProviderConfigFile, V3ConfigError> {
+    toml::from_str(raw)
+        .map_err(|error| validation(format!("provider config file parse failed: {error}")))
+}
+
+pub fn generate_v2_provider_config_file(
+    config: &V2ProviderConfigFile,
+) -> Result<String, V3ConfigError> {
+    toml::to_string_pretty(config)
+        .map_err(|error| validation(format!("provider config file serialize failed: {error}")))
 }
 
 #[cfg(test)]
@@ -1162,5 +1176,101 @@ apiKey = "test-key"
         )
         .expect("parse");
         assert_eq!(absent.provider.timeout, None, "absent timeout must be None (default applies later)");
+    }
+
+    #[test]
+    fn provider_config_file_roundtrip_via_parse_and_generate() {
+        let raw = r#"
+version = "2.0.0"
+providerId = "roundtrip-provider"
+
+[provider]
+id = "roundtrip-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "model-a"
+timeout = 120000
+sse_first_frame_timeout_ms = 600000
+
+[provider.auth]
+env = "ROUNDTRIP_KEY"
+
+[provider.concurrency]
+maxInFlight = 4
+
+[provider.models."model-a"]
+supportsStreaming = true
+supportsThinking = true
+maxTokens = 8192
+maxContext = 262144
+capabilities = ["text", "reasoning", "tools"]
+"#;
+        let parsed = parse_v2_provider_config_file(raw).expect("parse");
+        assert_eq!(parsed.version.as_deref(), Some("2.0.0"));
+        assert_eq!(parsed.provider_id.as_deref(), Some("roundtrip-provider"));
+        assert_eq!(parsed.provider.provider_type, "openai");
+        assert_eq!(parsed.provider.base_url, "http://127.0.0.1:9999/v1");
+        assert_eq!(parsed.provider.default_model, "model-a");
+        assert_eq!(parsed.provider.timeout, Some(120000));
+        assert_eq!(parsed.provider.sse_first_frame_timeout_ms, Some(600000));
+        assert_eq!(parsed.provider.auth.env.as_deref(), Some("ROUNDTRIP_KEY"));
+
+        let generated = generate_v2_provider_config_file(&parsed).expect("generate");
+        let reparsed = parse_v2_provider_config_file(&generated).expect("reparse");
+        assert_eq!(reparsed.provider_id, parsed.provider_id);
+        assert_eq!(reparsed.provider.id, parsed.provider.id);
+        assert_eq!(reparsed.provider.provider_type, "openai");
+        assert_eq!(reparsed.provider.base_url, parsed.provider.base_url);
+        assert_eq!(reparsed.provider.default_model, "model-a");
+        assert_eq!(reparsed.provider.timeout, Some(120000));
+        assert_eq!(reparsed.provider.sse_first_frame_timeout_ms, Some(600000));
+        assert_eq!(reparsed.provider.auth.env.as_deref(), Some("ROUNDTRIP_KEY"));
+        let model = reparsed
+            .provider
+            .models
+            .get("model-a")
+            .expect("model-a present");
+        assert_eq!(model.supports_streaming, Some(true));
+        assert_eq!(model.max_tokens, Some(8192));
+        assert!(generated.contains("sseFirstFrameTimeoutMs = 600000"), "generated toml must serialize the sse timeout key in a runtime-parseable form: {generated}");
+    }
+
+    #[test]
+    fn generate_v2_provider_config_file_writes_camel_case_keys() {
+        let config = V2ProviderConfigFile {
+            version: Some("2.0.0".into()),
+            provider_id: Some("gen-provider".into()),
+            provider: V2ProviderConfig {
+                id: "gen-provider".into(),
+                enabled: Some(true),
+                provider_type: "anthropic".into(),
+                base_url: "https://api.example.com/v1".into(),
+                default_model: "model-x".into(),
+                auth: V2ProviderAuthConfig {
+                    api_key: None,
+                    env: Some("GEN_PROVIDER_KEY".into()),
+                    token_file: None,
+                    entries: None,
+                },
+                responses: None,
+                concurrency: Some(V2ProviderConcurrencyConfig {
+                    max_in_flight: Some(2),
+                    acquire_timeout_ms: None,
+                    stale_lease_ms: None,
+                }),
+                compatibility_profile: None,
+                models: BTreeMap::new(),
+                v3: None,
+                timeout: None,
+                sse_first_frame_timeout_ms: None,
+            },
+        };
+        let generated = generate_v2_provider_config_file(&config).expect("generate");
+        assert!(generated.contains("providerId = \"gen-provider\""), "{generated}");
+        assert!(generated.contains("baseURL = \"https://api.example.com/v1\""), "{generated}");
+        assert!(generated.contains("type = \"anthropic\""), "{generated}");
+        assert!(generated.contains("maxInFlight = 2"), "{generated}");
+        assert!(generated.contains("env = \"GEN_PROVIDER_KEY\""), "{generated}");
     }
 }
