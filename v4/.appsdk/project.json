@@ -316,11 +316,11 @@
       "artifact_paths": [
         "libroutecodex_v4_control.rlib"
       ],
-    "build": {
-      "args": [
-        "-c",
-        "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-control --deps routecodex-v4-base-node --out generated/modules/routecodex-v4-control/lib/libroutecodex_v4_control.rlib"
-      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-control --deps routecodex-v4-base-node --out generated/modules/routecodex-v4-control/lib/libroutecodex_v4_control.rlib"
+        ],
         "program": "sh",
         "working_directory": "."
       },
@@ -344,22 +344,22 @@
       ],
       "regression": {
         "allow_skipped": false,
-    "command": {
-      "args": [
-        "run",
-        "--quiet",
-        "--release",
-        "-p",
-        "routecodex-v4-build-link",
-        "--",
-        "test-consumer",
-        "--root",
-        ".",
-        "--consumer",
-        "routecodex-v4-control",
-        "--deps",
-        "routecodex-v4-base-node"
-      ],
+        "command": {
+          "args": [
+            "run",
+            "--quiet",
+            "--release",
+            "-p",
+            "routecodex-v4-build-link",
+            "--",
+            "test-consumer",
+            "--root",
+            ".",
+            "--consumer",
+            "routecodex-v4-control",
+            "--deps",
+            "routecodex-v4-base-node"
+          ],
           "program": "cargo",
           "working_directory": "."
         },
@@ -384,7 +384,7 @@
         "suite_id": "v4-control-l2-regression"
       },
       "source_owner": "routecodex-v4-control",
-      "stage": "source_implemented",
+      "stage": "architecture_stable",
       "version_base": {
         "base_artifact_hash": "sha256:fc1510781b3838bc797aead36703708c1cc8f40165e30195aed16dae13a11cc4",
         "base_source_commit": "0c7be8d5c",
@@ -397,11 +397,11 @@
       "artifact_paths": [
         "libroutecodex_v4_error.rlib"
       ],
-    "build": {
-      "args": [
-        "-c",
-        "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-error --deps routecodex-v4-base-node --out generated/modules/routecodex-v4-error/lib/libroutecodex_v4_error.rlib"
-      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-error --deps routecodex-v4-base-node --out generated/modules/routecodex-v4-error/lib/libroutecodex_v4_error.rlib"
+        ],
         "program": "sh",
         "working_directory": "."
       },
@@ -425,22 +425,22 @@
       ],
       "regression": {
         "allow_skipped": false,
-    "command": {
-      "args": [
-        "run",
-        "--quiet",
-        "--release",
-        "-p",
-        "routecodex-v4-build-link",
-        "--",
-        "test-consumer",
-        "--root",
-        ".",
-        "--consumer",
-        "routecodex-v4-error",
-        "--deps",
-        "routecodex-v4-base-node"
-      ],
+        "command": {
+          "args": [
+            "run",
+            "--quiet",
+            "--release",
+            "-p",
+            "routecodex-v4-build-link",
+            "--",
+            "test-consumer",
+            "--root",
+            ".",
+            "--consumer",
+            "routecodex-v4-error",
+            "--deps",
+            "routecodex-v4-base-node"
+          ],
           "program": "cargo",
           "working_directory": "."
         },
@@ -461,7 +461,7 @@
         "suite_id": "v4-error-l2-regression"
       },
       "source_owner": "routecodex-v4-error",
-      "stage": "source_implemented",
+      "stage": "architecture_stable",
       "version_base": {
         "base_artifact_hash": "sha256:23e7b9950ef2f0c2c6767c573371a1d29c82050f11ddbe6593932822fce45bb1",
         "base_source_commit": "dc52f4772",
