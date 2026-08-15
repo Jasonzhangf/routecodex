@@ -861,10 +861,7 @@ mod tests {
         }));
         assert_eq!(tools[2]["type"], json!("function"));
         assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
-        assert!(
-            tools.iter().all(|tool| tool["type"] != json!("namespace")),
-            "no namespace container may cross provider wire payload: {tools:?}"
-        );
+        assert!(tools.iter().all(|tool| tool["type"] != json!("namespace")), "no namespace container may cross provider wire payload: {tools:?}");
     }
 
     #[test]
