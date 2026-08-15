@@ -333,10 +333,13 @@ async fn sse_is_streamed_as_validated_raw_events_and_invalid_sse_fails_explicitl
         .send(build_v3_transport_13_responses_http_request_from_v3_provider_12(invalid).unwrap())
         .await
         .unwrap();
-    assert!(matches!(
-        raw.into_body_bytes().await.unwrap_err(),
-        V3ProviderError::MalformedSse { .. }
-    ));
+    // 非法 UTF-8 字节按解析容忍修复（U+FFFD），帧结构保留，transport 不拒绝；
+    // 帧内容若不是合法 JSON 仍在 observe/classify 层 fail-fast。
+    assert_eq!(
+        raw.into_body_bytes().await.unwrap(),
+        b"data: \xef\xbf\xbd\n\n".to_vec(),
+        "invalid UTF-8 bytes must be repaired with U+FFFD, not rejected"
+    );
     let _ = captures.recv().await.unwrap();
 
     std::env::remove_var("V3_GENERAL_SSE_KEY");

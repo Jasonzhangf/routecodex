@@ -376,7 +376,10 @@ fn build_sse_transport_in_02_from_sse_transport_in_01(
     raw: &[u8],
     _limits: SseTransportLimits,
 ) -> Result<SseTransportIn02DecodedFrame, SseTransportError> {
-    let text = std::str::from_utf8(raw).map_err(|_| SseTransportError::InvalidUtf8)?;
+    // 容忍流内非法 UTF-8 字节（upstream 可能在 reasoning 文本等字段携带
+    // 编码噪声）：按 U+FFFD 替换后继续解析帧结构（\n 分隔保留），不整体
+    // 拒绝请求；JSON 语义错误仍在后续 classify 层 fail-fast。
+    let text = String::from_utf8_lossy(raw);
     let body = text.trim_end_matches(['\r', '\n']);
     let mut fields = Vec::new();
     for line in body.split(['\n', '\r']).filter(|line| !line.is_empty()) {
@@ -510,9 +513,13 @@ mod tests {
         );
 
         let mut invalid = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let repaired = invalid
+            .push(build_sse_transport_in_01_raw_chunk(b"data: \xff\n\n"))
+            .expect("invalid UTF-8 bytes must be repaired, not rejected");
         assert_eq!(
-            invalid.push(build_sse_transport_in_01_raw_chunk(b"data: \xff\n\n")),
-            Err(SseTransportError::InvalidUtf8)
+            build_sse_transport_out_04_from_sse_transport_in_03(&repaired[0]).as_bytes(),
+            "data: \u{FFFD}\n\n".as_bytes(),
+            "invalid UTF-8 bytes must be replaced with U+FFFD and the frame kept"
         );
 
         let limits = SseTransportLimits {
