@@ -6,6 +6,7 @@ pub mod routes;
 
 use crate::AppState;
 use axum::Router;
+use axum::routing::get;
 
 pub fn build_router(state: AppState) -> Router {
     Router::new()
@@ -13,7 +14,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::routes())
         .merge(providers::routes())
         .merge(reload::routes())
-        .fallback(static_serve)
+        .route("/{path}", get(static_serve))
+        .route("/", get(static_serve))
         .with_state(state)
 }
 

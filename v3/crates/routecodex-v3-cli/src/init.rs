@@ -87,18 +87,27 @@ pub struct InitOptions {
 
 pub fn run_init(options: &InitOptions) -> Result<(), String> {
     if options.config_path.exists() && !options.force {
-        let raw = std::fs::read_to_string(&options.config_path)
-            .map_err(|error| format!("read existing config failed: {error}"))?;
-        let authoring = routecodex_v3_config::parse_v3_config_02_authoring(&raw)
-            .map_err(|error| format!("existing config parse failed: {error}"))?;
-        println!(
-            "[init] existing config found at {} (version={}, servers={})",
-            options.config_path.display(),
-            authoring.version,
-            authoring.servers.len()
-        );
-        println!("[init] re-run with --force to overwrite or extend the config.");
-        return Err("already initialized".to_string());
+        match routecodex_v3_config_mgmt::ConfigMgmtStore::new(&options.config_path).read_authoring() {
+            Ok(authoring) => {
+                println!(
+                    "[init] existing config found at {} (version={}, servers={})",
+                    options.config_path.display(),
+                    authoring.version,
+                    authoring.servers.len()
+                );
+                println!("[init] re-run with --force to overwrite or extend the config.");
+                return Err("already initialized".to_string());
+            }
+            Err(error) => {
+                println!(
+                    "[init] existing config at {} failed to load: {error}. --force will overwrite.",
+                    options.config_path.display()
+                );
+                if !options.force {
+                    return Err("existing config unreadable; pass --force to reinitialize".to_string());
+                }
+            }
+        }
     }
 
     let preset = resolve_preset(options.provider.as_deref())?;
