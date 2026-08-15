@@ -9,6 +9,7 @@ Migrate V4 governance to the globally installed `appsdk 0.1.0 (rust)` Bundle. Th
 - `command -v appsdk` is the only executable entry.
 - `.appsdk/sdk.bin` is an optional, gitignored digest witness and is never invoked; the running global binary is the only execution truth.
 - Bundle contracts, docs, rules, and skills are installed by `appsdk init`; project code does not maintain independent copies.
+- `appsdk init <workspace>` reads `.appsdk-prepare.json` from the workspace argument and resolves the project via its `project_root` (`v4`). For this repository the confirmed invocation is `appsdk init /Users/fanzhang/Documents/github/routecodex`, not `appsdk init .../v4`; the latter fails `PREPARATION_MISSING` because no second preparation record exists inside `v4/`.
 - Admission gate `global_sdk_only` verifies only the global binary digest against `sdk.lock.digest` and then runs `appsdk verify --admission`; it never requires or executes a local `sdk.bin` and does not require locally generated artifacts that are gitignored.
 - Existing RouteCodex module IDs, Active artifact relationships, Protected history, pipeline semantics, payload semantics, and Rust ownership remain unchanged.
 - Runtime may not read `playground/**`, `generated/**`, or `protected/source/**`.
