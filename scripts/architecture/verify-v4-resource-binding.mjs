@@ -46,7 +46,12 @@ const CRATE_DIRS = fs
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name);
 
-const SYMBOL_RE = /\b(struct|enum|trait|fn|type)\s+([A-Za-z_][A-Za-z0-9_]*)\b|\bimpl\b[^\n]*\b([A-Za-z_][A-Za-z0-9_]*)\b/g;
+// Only crate-level declarations bind a resource: column-0
+// `pub [struct|enum|trait|fn|type|const|static]` items and `pub use`
+// re-exports. Impl-method names (`fn new`, `fn execute`) and locals never
+// count, so `owner_symbols` cannot be satisfied by text presence alone.
+const DECL_RE = /^(?:pub(?:\([^)]*\))?\s+)?(struct|enum|trait|fn|type|const|static)\s+([A-Za-z_][A-Za-z0-9_]*)\b/gm;
+const REUSE_RE = /^pub use [^\n]*\b([A-Za-z_][A-Za-z0-9_]*)\b/gm;
 
 function collectDeclaredSymbols(crate) {
   const crateRoot = path.join(root, 'v4/crates', crate, 'src');
@@ -58,8 +63,14 @@ function collectDeclaredSymbols(crate) {
         walk(full);
       } else if (entry.name.endsWith('.rs')) {
         const source = fs.readFileSync(full, 'utf8');
-        for (const match of source.matchAll(SYMBOL_RE)) {
-          const symbol = match[2] ?? match[3];
+        for (const match of source.matchAll(DECL_RE)) {
+          const symbol = match[2];
+          if (symbol) {
+            symbols.add(symbol);
+          }
+        }
+        for (const match of source.matchAll(REUSE_RE)) {
+          const symbol = match[1];
           if (symbol) {
             symbols.add(symbol);
           }
@@ -175,6 +186,10 @@ function runSelfTest() {
       const resource = m.resources.find((r) => r.binding_status === 'anchored');
       resource.owner_symbols = ['routecodex_v4_symbol_does_not_exist'];
     }],
+    ['method name is not a symbol', (m) => {
+      const resource = m.resources.find((r) => r.binding_status === 'anchored');
+      resource.owner_symbols = ['new'];
+    }],
     ['unregistered .appsdk v4 resource', (appsdk) => {
       appsdk.resources.push({
         resource_id: 'v4.unregistered.resource',
@@ -204,7 +219,7 @@ function runSelfTest() {
   if (failed > 0) {
     process.exit(1);
   }
-  console.log('[v4_parity_gate_resource_binding] OK red self-test 6/6');
+  console.log(`[v4_parity_gate_resource_binding] OK red self-test ${cases.length}/${cases.length}`);
 }
 
 if (process.argv.includes('--red-self-test')) {
