@@ -51,6 +51,10 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
   （method/local 可误通过）、P2 计划文档残留过期断言、P2 anchored crate
   未纳入 `cargo test --workspace`（仅 test-consumer 编译，属已知 workspace
   gate 缺口）。r3 修复：符号声明收窄到列 0 顶层声明 + pub use，文档断言更新。
+- DSH review r3（commit `a9417528b`）PASS（无 P0/P1），唯一 P2 为计划文档
+  红测计数未同步 7/7；由 `40cd8cb9f` 修正。
+- DSH review r4（commit `40cd8cb9f`）PASS（无 P0/P1），仅提示 review 轮次
+  台账需补录；本行即补录 r3/r4 结果，随后 r5 复核。
 - 已记录 known gaps：target_triple、public_api_hash（派生非真 API 提取）、edge 再冻结、
   workspace gate 修正：runtime/config/control/error 四个 anchored crate 依赖
   `--extern` 注入，只经 build-link test-consumer 编译（CI `v4-active-link`
