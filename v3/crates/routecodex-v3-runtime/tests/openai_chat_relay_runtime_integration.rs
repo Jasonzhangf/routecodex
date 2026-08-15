@@ -1028,10 +1028,44 @@ async fn post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_requ
     let items = stream.collect::<Vec<_>>().await;
     assert!(items.iter().any(Result::is_err));
 
+    // post-commit SSE 流失败是强故障信号：直接写 provider 级冷却，
+    // fresh 请求被冷却阻断（不再每请求都试），恢复唯一路径是后台 probe。
     let succeeding = JsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
     };
+    let blocked = execute_v3_openai_chat_relay_runtime_with_provider_health(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-blocked-after-post-commit".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"blocked"}],
+                "stream":false
+            }),
+        },
+        &succeeding,
+        provider_health.runtime_health(),
+    )
+    .await;
+    assert!(
+        blocked.is_err(),
+        "fresh request must be blocked while provider cooldown is active"
+    );
+
+    // probe 通过 → provider 恢复 → fresh 成功。
+    provider_health
+        .runtime_health()
+        .run_due_provider_cooldown_probes(u64::MAX, |_, _, _| async { Ok(()) })
+        .await
+        .expect("probe cycle must revive cooled provider");
     let second = execute_v3_openai_chat_relay_runtime_with_provider_health(
         &manifest,
         V3OpenAiChatRelayRuntimeInput {
@@ -1053,7 +1087,7 @@ async fn post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_requ
         provider_health.runtime_health(),
     )
     .await
-    .expect("second provider action");
+    .expect("second provider action after probe pass");
     assert_eq!(second.status, 200);
 }
 
@@ -1112,6 +1146,26 @@ data: [DONE]
     let terminal = ControlledSseTransport {
         receiver: Mutex::new(Some(terminal_receiver)),
     };
+    // post-commit 失败已冷却 provider；probe 通过后 terminal/fresh 请求可达，
+    // 且不占用 Error05 recovery lane（terminal 失败只写冷却，不驻留恢复门）。
+    let probed = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let probed_for_probe = std::sync::Arc::clone(&probed);
+    provider_health
+        .runtime_health()
+        .run_due_provider_cooldown_probes(u64::MAX, move |provider_id, _, _| {
+            let probed_for_probe = std::sync::Arc::clone(&probed_for_probe);
+            async move {
+                probed_for_probe.lock().unwrap().push(provider_id);
+                Ok(())
+            }
+        })
+        .await
+        .expect("probe cycle must revive cooled provider");
+    assert!(
+        !probed.lock().unwrap().is_empty(),
+        "probe cycle must probe the cooled provider, probed: {:?}",
+        probed.lock().unwrap()
+    );
     let successful = execute_v3_openai_chat_relay_runtime_with_provider_health(
         &manifest,
         V3OpenAiChatRelayRuntimeInput {
