@@ -1430,10 +1430,10 @@ impl ResponsesTransport for ResponsesSseBodyReadErrorTransport {
     }
 }
 
-struct ResponsesSseInvalidUtf8Transport;
+struct ResponsesSseUnterminatedFramingTransport;
 
 #[async_trait]
-impl ResponsesTransport for ResponsesSseInvalidUtf8Transport {
+impl ResponsesTransport for ResponsesSseUnterminatedFramingTransport {
     async fn send(
         &self,
         request: V3Transport13ResponsesHttpRequest,
@@ -1446,7 +1446,11 @@ impl ResponsesTransport for ResponsesSseInvalidUtf8Transport {
                 name: "content-type".to_string(),
                 value: b"text/event-stream".to_vec(),
             }],
-            Box::pin(futures_util::stream::iter([Ok(b"data: \xff\n\n".to_vec())])),
+            // JSON 感知分帧：未闭合 JSON（缺 `}`）时空行不结束帧，流结束
+            // 后仍是 UnterminatedFrame——transport 层 framing 错误。
+            Box::pin(futures_util::stream::iter([Ok(
+                b"data: {\"delta\":\"partial\"\n\n".to_vec(),
+            )])),
         ))
     }
 }
@@ -1468,7 +1472,7 @@ impl ResponsesTransport for ResponsesSseMalformedEventJsonTransport {
                 value: b"text/event-stream".to_vec(),
             }],
             Box::pin(futures_util::stream::iter([Ok(
-                b"event: response.output_item.added\ndata: {\"item\"\n\n".to_vec(),
+                b"event: response.output_item.added\ndata: {\"item\":}\n\n".to_vec(),
             )])),
         ))
     }
@@ -2278,7 +2282,7 @@ async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
                 "stream":true
             }),
         },
-        &ResponsesSseInvalidUtf8Transport,
+        &ResponsesSseUnterminatedFramingTransport,
         V3ResponsesRelayRetryPolicy {
             same_candidate_retries: 0,
         },

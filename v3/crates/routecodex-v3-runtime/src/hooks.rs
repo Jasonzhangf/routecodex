@@ -327,6 +327,7 @@ pub(crate) fn responses_direct_request_projection_hook(
             canonical_model_id: candidate.model_id.clone(),
             wire_model: candidate.wire_model.clone(),
             compatibility_profile: candidate.compatibility_profile.clone(),
+            sse_first_frame_timeout_ms: candidate.sse_first_frame_timeout_ms,
             auth: V3ProviderAuthHandle {
                 alias: candidate.auth_alias.clone(),
                 secret,
@@ -445,6 +446,7 @@ pub(crate) fn chat_direct_request_projection_hook(
             canonical_model_id: candidate.model_id.clone(),
             wire_model: candidate.wire_model.clone(),
             compatibility_profile: candidate.compatibility_profile.clone(),
+            sse_first_frame_timeout_ms: candidate.sse_first_frame_timeout_ms,
             auth: V3ProviderAuthHandle {
                 alias: candidate.auth_alias.clone(),
                 secret,
@@ -782,6 +784,7 @@ mod tests {
                     websocket_v2_url: None,
                     provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
                     request_timeout_ms: 300_000,
+                    sse_first_frame_timeout_ms: None,
                     initial_concurrency_budget: 8,
                     compatibility_profile: None,
                     env_name: Some("TEST_KEY".to_string()),

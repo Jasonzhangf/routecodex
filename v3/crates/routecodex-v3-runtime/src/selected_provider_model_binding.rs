@@ -66,6 +66,7 @@ mod tests {
             websocket_v2_url: None,
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
             request_timeout_ms: 300_000,
+            sse_first_frame_timeout_ms: None,
             initial_concurrency_budget: 8,
             compatibility_profile: None,
             env_name: Some("TEST_KEY".to_string()),

@@ -160,6 +160,7 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
             compatibility_profile: None,
             features: BTreeMap::new(),
             request_timeout_ms: 300_000,
+            sse_first_frame_timeout_ms: None,
         },
     );
     manifest
@@ -1011,6 +1012,7 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
             compatibility_profile: None,
             features: BTreeMap::new(),
             request_timeout_ms: 300_000,
+            sse_first_frame_timeout_ms: None,
         },
     );
     let mut classified = router

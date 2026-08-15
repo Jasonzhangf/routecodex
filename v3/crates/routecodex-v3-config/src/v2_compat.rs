@@ -475,6 +475,7 @@ pub(crate) fn compile_v2_provider_directory(
                 request_timeout_ms: provider
                     .timeout
                     .unwrap_or(DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS),
+                sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
             },
         );
         provider_sources.push(V3ProviderDirectorySource {
@@ -810,6 +811,9 @@ struct V2ProviderConfig {
     /// per-request 总超时（毫秒）；默认 300_000（300s）。覆盖连接、响应头等待与 body 读取。
     #[serde(default)]
     timeout: Option<u64>,
+    /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30s。本地慢部署按 provider 放宽。
+    #[serde(default, alias = "sse_first_frame_timeout_ms")]
+    sse_first_frame_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1025,6 +1029,51 @@ apiKey = "test-key"
             "V2→V3 end-to-end: timeout=900_000 must land in request_timeout_ms (was silently dropped)"
         );
         std::fs::remove_dir_all(&tmp).ok();
+
+        // (2c) sse_first_frame_timeout_ms 端到点：provider 配置的 SSE 首帧
+        //      超时必须写入 authoring（本地慢部署按 provider 放宽）。
+        let tmp_sse = std::env::temp_dir().join(format!(
+            "rccv3-sse-timeout-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let provider_dir_sse = tmp_sse.join("provider").join("test-provider");
+        std::fs::create_dir_all(&provider_dir_sse).expect("create provider dir");
+        let mut file_sse =
+            std::fs::File::create(provider_dir_sse.join("config.v2.toml")).expect("file");
+        file_sse
+            .write_all(
+                br#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "openai"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "model"
+sse_first_frame_timeout_ms = 600000
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+"#,
+            )
+            .expect("write");
+        let (providers_sse, _) =
+            compile_v2_provider_directory(&tmp_sse, &referenced_models).expect("compile");
+        assert_eq!(
+            providers_sse
+                .get("test-provider")
+                .expect("provider compiled")
+                .sse_first_frame_timeout_ms,
+            Some(600_000),
+            "V2→V3 end-to-end: sse_first_frame_timeout_ms=600000 must land in authoring"
+        );
+        std::fs::remove_dir_all(&tmp_sse).ok();
 
         // (2b) 缺省字段端到点：无 timeout 时，V2→V3 fallback 必须等于
         //      DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS（300_000），不能为 0/默认

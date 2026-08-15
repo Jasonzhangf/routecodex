@@ -150,6 +150,7 @@ fn target_with_auth(
         websocket_v2_url: None,
         provider_request_cleanup: Default::default(),
         request_timeout_ms: 300_000,
+        sse_first_frame_timeout_ms: None,
         initial_concurrency_budget: 8,
     }
 }

@@ -84,6 +84,7 @@ pub fn build_v3_provider_global_probe_target(
         websocket_v2_url: responses.and_then(|value| value.websocket_v2_url.clone()),
         provider_request_cleanup: provider.provider_request_cleanup.clone(),
         request_timeout_ms: provider.request_timeout_ms,
+        sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
         initial_concurrency_budget: provider
             .concurrency
             .as_ref()

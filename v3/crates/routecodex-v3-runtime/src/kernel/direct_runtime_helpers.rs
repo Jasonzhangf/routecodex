@@ -169,19 +169,6 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     };
     let mut failed_with_current = state.failed_candidates.clone();
     failed_with_current.insert(failed_key.clone());
-    if source.code == "provider_transport_error" {
-        // 连接层错误是 provider/baseurl 级故障：同 provider 的所有 key
-        // 共用同一 baseURL，全部排除，避免 key2 失败切 key1 的 thrashing。
-        if let Some(expanded_candidates) = expanded_candidates {
-            for candidate in expanded_candidates {
-                if candidate.provider_id == selected.candidate.provider_id {
-                    let key = candidate_key(candidate);
-                    failed_with_current.insert(key.clone());
-                    state.failed_candidates.insert(key);
-                }
-            }
-        }
-    }
     let mut remaining = expanded_candidates.map_or(0, |expanded_candidates| {
         remaining_available_candidates(expanded_candidates, context.availability, &failed_with_current)
     });
@@ -418,19 +405,6 @@ async fn run_v3_direct_transient_failure_policy<R: V3ProviderAvailabilityReader>
     };
     let mut failed_with_current = state.failed_candidates.clone();
     failed_with_current.insert(failed_key.clone());
-    if source.code == "provider_transport_error" {
-        // 连接层错误是 provider/baseurl 级故障：同 provider 的所有 key
-        // 共用同一 baseURL，全部排除，避免 key2 失败切 key1 的 thrashing。
-        if let Some(expanded_candidates) = expanded_candidates {
-            for candidate in expanded_candidates {
-                if candidate.provider_id == selected.candidate.provider_id {
-                    let key = candidate_key(candidate);
-                    failed_with_current.insert(key.clone());
-                    state.failed_candidates.insert(key);
-                }
-            }
-        }
-    }
     let mut remaining = expanded_candidates.map_or(0, |candidates| {
         remaining_available_candidates(candidates, context.availability, &failed_with_current)
     });

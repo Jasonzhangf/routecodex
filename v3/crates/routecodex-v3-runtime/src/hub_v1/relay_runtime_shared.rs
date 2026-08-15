@@ -151,6 +151,7 @@ pub fn provider_target(
         websocket_v2_url: selected.websocket_v2_url.clone(),
         provider_request_cleanup: selected.provider_request_cleanup.clone(),
         request_timeout_ms: provider.request_timeout_ms,
+        sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
         initial_concurrency_budget: selected.initial_concurrency_budget,
     })
 }
