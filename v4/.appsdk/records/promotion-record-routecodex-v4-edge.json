@@ -1,31 +1,42 @@
 {
-  "artifact_hash": "sha256:1f800dc90551ae1e3ca11b34560f9c967ef68b65eba0956f5f624bfff93cf3af",
-  "base_commit": "2cb72ebab",
-  "change_reason_comment": "Edge owns node-graph wiring contracts (data/information/control/debug/error edges) and consumes the frozen BaseNode identity contract through a declared Cargo dependency",
-  "change_set_id": "change-edge-freeze-v1",
-  "compatibility_level": "compatible",
-  "created_at": "2026-08-14T04:10:00Z",
-  "design_id": "v4-base-node-independent-freeze-plan",
+  "artifact_hash": "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593",
+  "base_artifact_hash": "sha256:1f800dc90551ae1e3ca11b34560f9c967ef68b65eba0956f5f624bfff93cf3af",
+  "base_commit": "8eac65195",
+  "change_reason_comment": "Edge re-freeze active-v2: frozen Edge build/regression migrated from Cargo path dependency to the routecodex-v4-build-link resolver commands; Edge links the frozen base-node Active surface and the config regression consumes it through the resolver",
+  "change_set_id": "change-edge-active-link-v2",
+  "compatibility_level": "breaking",
+  "created_at": "2026-08-15T02:40:00Z",
+  "design_id": "v4-active-artifact-linking-design",
   "evidence_ids": [
-    "evidence-edge-v1"
+    "evidence-edge-v2"
   ],
-  "experiment_id": "experiment-edge-freeze-v1",
+  "experiment_id": "experiment-edge-active-link-v2",
   "issue_id": "routecodex-v4-foundation",
   "module_id": "routecodex-v4-edge",
-  "new_active_version": "active-v1",
-  "playground_cleanup_record_id": "cleanup-edge-v1",
-  "previous_active_version": null,
-  "promotion_id": "promotion-edge-v1",
-  "public_api_hash": "sha256:ecb7cdb67636cb962cda0024ac17b0a38fe998b94143ffc7dc6526c612714269",
+  "new_active_version": "active-v2",
+  "playground_cleanup_record_id": "cleanup-edge-v2",
+  "previous_active_version": "active-v1",
+  "promotion_id": "promotion-edge-v2",
+  "public_api_hash": "sha256:08718796c61aac004f5b95ca3046d7123be2791fe0ad3c7d8d5c8dfa59deb7c6",
   "required_gate_results": [
     {
       "gate_id": "v4_edge_l1_regression",
       "producer": "cargo",
       "result": "pass"
+    },
+    {
+      "gate_id": "v4_active_link_resolver",
+      "producer": "cargo",
+      "result": "pass"
+    },
+    {
+      "gate_id": "v4_cargo_workspace_build",
+      "producer": "cargo",
+      "result": "pass"
     }
   ],
-  "review_id": "review-edge-v1",
-  "root_cause": "initial v4 foundation split: Edge became a separately compiled library consuming frozen BaseNode",
-  "scope_hash": "scope-edge-v1",
-  "source_commit": "8eac65195"
+  "review_id": "review-edge-v2",
+  "root_cause": "frozen Edge still consumed base-node through a Cargo path dependency; re-freeze binds Edge via the resolver Active surface so lifecycle records and compiled artifacts agree",
+  "scope_hash": "sha256:944d045b1a1744c2878fa49920a8fae551da912df597979229ee26783bc10279",
+  "source_commit": "d6239b197"
 }

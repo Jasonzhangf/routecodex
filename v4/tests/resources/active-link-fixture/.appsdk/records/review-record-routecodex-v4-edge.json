@@ -1,16 +1,16 @@
 {
-  "ai_confidence": 1.0,
-  "confidence_rationale": "blackbox public API regression plus whitebox invariant tests both pass on the compiled artifact against the frozen base-node",
-  "created_at": "2026-08-14T04:10:00Z",
+  "ai_confidence": 0.99,
+  "confidence_rationale": "resolver hermetic record graph, edge test-consumer regression through the Active surface, workspace tests, release build and admission all pass for active-v2",
+  "created_at": "2026-08-15T02:40:00Z",
   "evidence_ids": [
-    "evidence-edge-v1"
+    "evidence-edge-v2"
   ],
   "issue_id": "routecodex-v4-foundation",
-  "promotion_id": "promotion-edge-v1",
-  "review_id": "review-edge-v1",
-  "reviewed_artifact_hash": "sha256:1f800dc90551ae1e3ca11b34560f9c967ef68b65eba0956f5f624bfff93cf3af",
-  "reviewed_commit": "8eac65195",
-  "reviewed_scope_hash": "scope-edge-v1",
+  "promotion_id": "promotion-edge-v2",
+  "review_id": "review-edge-v2",
+  "reviewed_artifact_hash": "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593",
+  "reviewed_commit": "d6239b197",
+  "reviewed_scope_hash": "sha256:944d045b1a1744c2878fa49920a8fae551da912df597979229ee26783bc10279",
   "reviewer": {
     "adapter": "codex",
     "identity": "codex::architecture-review"
