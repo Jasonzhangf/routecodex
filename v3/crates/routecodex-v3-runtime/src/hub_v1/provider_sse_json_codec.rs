@@ -16,27 +16,30 @@ pub(crate) fn parse_v3_provider_sse_json_data(data: &str) -> Result<Option<Value
     if data.is_empty() || data == "[DONE]" {
         return Ok(None);
     }
-    match serde_json::from_str(data) {
-        Ok(value) => Ok(Some(value)),
-        Err(error) => {
-            // SSE 多行 data 拼接后，reasoning 文本等字符串值可能携带未转义的
-            // 原始控制字符（\u0000-\u001F，serde 报 control character）。
-            // 控制字符在 JSON 里只可能出现在字符串值内，把字符串值内的
-            // 未转义控制字符转义为 \uXXXX 后重试解析；仍失败则原样报错
-            // （不吞错误、不静默降级）。
-            if is_v3_sse_control_character_parse_error(&error) {
-                let normalized = escape_v3_sse_raw_control_characters(data);
-                if let Ok(value) = serde_json::from_str(&normalized) {
-                    return Ok(Some(value));
-                }
-            }
-            Err(format!("provider SSE JSON payload is malformed: {error}"))
+    let last_error = match serde_json::from_str(data) {
+        Ok(value) => return Ok(Some(value)),
+        Err(error) => error,
+    };
+    // 整体解析兼容（不逐个错误形态打补丁）：SSE data 帧可能带多种上游编码
+    // 噪声，按以下策略顺序全部修复后仍失败才原样报错（不吞错误）：
+    // 1. 多行 data 帧：逐行独立 JSON（首行完整 JSON + 尾随残片/第二事件）
+    // 2. 字符串值内未转义控制字符（\u0000-\u001F）→ \uXXXX 转义
+    // 3. 上述组合（先逐行、再对候选行转义）
+    for line in data.lines().filter(|line| !line.trim().is_empty()) {
+        let line = line.trim();
+        if let Ok(value) = serde_json::from_str(line) {
+            return Ok(Some(value));
+        }
+        let normalized = escape_v3_sse_raw_control_characters(line);
+        if let Ok(value) = serde_json::from_str(&normalized) {
+            return Ok(Some(value));
         }
     }
-}
-
-fn is_v3_sse_control_character_parse_error(error: &serde_json::Error) -> bool {
-    error.to_string().contains("control character")
+    let normalized = escape_v3_sse_raw_control_characters(data);
+    if let Ok(value) = serde_json::from_str(&normalized) {
+        return Ok(Some(value));
+    }
+    Err(format!("provider SSE JSON payload is malformed: {last_error}"))
 }
 
 /// 把字符串值内未转义的 \u0000-\u001F 转义为 JSON 合法形式（\n/\r/\t 或
@@ -329,11 +332,14 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
-    fn structural_control_characters_still_fail_fast() {
-        // 结构外（非字符串）的控制字符不是合法 JSON，修复逻辑不得吞掉：
-        // 转义修复后仍失败必须原样报错。
-        let error = parse_v3_provider_sse_json_data("{\"a\":1}\n\u{1}tail")
-            .expect_err("trailing control character outside any string must still fail");
+    fn garbage_without_any_complete_json_still_fails_fast() {
+        // 没有完整 JSON 的纯垃圾（含控制字符）不得被吞掉：整体兼容只容忍
+        // "完整 JSON + 尾随噪声"，纯噪声仍 fail-fast。
+        let error = parse_v3_provider_sse_json_data("\u{1}not json at all")
+            .expect_err("garbage without any JSON must still fail");
+        assert!(error.contains("malformed"));
+        let error = parse_v3_provider_sse_json_data("{\"a\":1")
+            .expect_err("unterminated JSON without a complete value must still fail");
         assert!(error.contains("malformed"));
     }
 
@@ -344,5 +350,36 @@ mod provider_sse_json_codec_tests {
         let value = parse_v3_provider_sse_json_data(data)
             .expect("escaped sequences must parse untouched");
         assert_eq!(value.unwrap()["delta"], "a\\nb");
+    }
+
+    #[test]
+    fn trailing_garbage_after_complete_json_is_ignored() {
+        // 多行 data 帧：首行完整 JSON + 第二行尾随残片（另一事件开头/噪声）：
+        // 逐行策略取首行完整 JSON，忽略尾随，而不是整体拒绝。
+        let data = "{\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\ngarbage tail";
+        let value = parse_v3_provider_sse_json_data(data)
+            .expect("trailing garbage after complete JSON must be tolerated");
+        assert_eq!(
+            value.unwrap()["type"],
+            "response.completed"
+        );
+    }
+
+    #[test]
+    fn multiple_json_objects_take_the_first_complete_one() {
+        // 帧内出现两个 JSON 对象（首行完整 + 第二对象）——取第一个完整对象。
+        let data = "{\"type\":\"response.completed\"}\n{\"type\":\"response.created\"}";
+        let value = parse_v3_provider_sse_json_data(data)
+            .expect("first complete JSON object must be selected");
+        assert_eq!(value.unwrap()["type"], "response.completed");
+    }
+
+    #[test]
+    fn trailing_garbage_with_control_characters_is_repaired_then_parsed() {
+        // 尾随残片 + 字符串值内控制字符的组合：逐行 + 转义双重修复。
+        let data = "{\"type\":\"response.output_text.delta\",\"delta\":\"line\u{1}two\"}\ntail";
+        let value = parse_v3_provider_sse_json_data(data)
+            .expect("combined garbage and control characters must be repaired");
+        assert_eq!(value.unwrap()["delta"], "line\u{1}two");
     }
 }
