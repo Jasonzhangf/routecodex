@@ -20,7 +20,7 @@ Migrate V4 governance to the globally installed `appsdk 0.1.0 (rust)` Bundle. Th
 ```text
 binary: /Users/fanzhang/.local/bin/appsdk
 version: appsdk 0.1.0 (rust)
-binary/compiler digest: sha256:f471df7cb5e532f4313dc988dbceb5bcc6091fe0ab2a64e64a427c9e99199a81
+binary/compiler digest: sha256:ff1c5985fbe39c6e4f580f7e42ec5d811a8da4f6b1e3b35ef5c247ba928737bb
 bundle digest: sha256:1c91fcc629f38663d0f7d3eaa185798bd7b56f66830b7d516227eb3a6dcdf20f
 bundle manifest digest: sha256:2b82b87ef07bc31dcb77875f9d3f0405625f963709daed828b64f8eaa8965e95
 ```
