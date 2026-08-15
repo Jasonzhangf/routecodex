@@ -53,6 +53,9 @@
     {"resource_id":"v4.console.terminal_output","owner":"v4::server","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
     {"resource_id":"v4.server.request_identity","owner":"v4::server","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
     {"resource_id":"v4.error.raw_wire_evidence","owner":"v4::server","truth_store":"v4/docs/architecture/v4-resource-operation-map.yml","allowed_operations":["read","validate","write"],"status":"design"},
-    {"resource_id":"v4.error.client_projection","owner":"routecodex-v4-error::ClientProjection","truth_store":"crates/routecodex-v4-error/src/lib.rs","allowed_operations":["read","validate","write"],"status":"active"}
+    {"resource_id":"v4.error.client_projection","owner":"routecodex-v4-error::ClientProjection","truth_store":"crates/routecodex-v4-error/src/lib.rs","allowed_operations":["read","validate","write"],"status":"active"},
+    {"resource_id":"v4.plugin.node_plugin_contract","owner":"contract:v4-node-plugin","truth_store":"contracts/node-plugin.contract.json","allowed_operations":["read","validate"],"status":"contract_bound"},
+    {"resource_id":"v4.plugin.catalog","owner":"contract:v4-plugin-catalog","truth_store":"contracts/plugin-catalog.contract.json","allowed_operations":["read","validate"],"status":"contract_bound"},
+    {"resource_id":"v4.plugin.node_plugin_plan","owner":"contract:v4-node-container","truth_store":"contracts/node-container.contract.json","allowed_operations":["read","validate"],"status":"contract_bound"}
   ]
 }

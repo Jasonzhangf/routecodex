@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-plugin-management",
+  "status": "design",
+  "owner_feature_id": "v4.plugin.manager",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-cordis-node-plugin-architecture.md",
+    "v4/docs/goals/v4-cordis-plugin-framework-and-webui-plan.md"
+  ],
+  "transaction_rule": "candidate change -> compile -> validate -> isolated mount smoke -> review diff -> explicit publish -> drain/dispose previous container; candidate failure never changes active",
+  "publish_rule": "publish is explicit and requires actor, base active hash, candidate hash, and required gates; stale base hash publish is rejected",
+  "rollback_rule": "published runtime failure enters ErrorChain; automatic rollback to the previous plugin chain is forbidden",
+  "audit_rule": "every install/enable/disable/configure/upgrade/publish/dispose is recorded in an immutable audit ledger without business payload",
+  "scope": "M6 implementation; contract is design-only in M0-M2"
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-admin-api",
+  "status": "design",
+  "owner_feature_id": "v4.admin",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-cordis-node-plugin-architecture.md",
+    "v4/docs/goals/v4-cordis-plugin-framework-and-webui-plan.md"
+  ],
+  "endpoints": [
+    "GET /v4/admin/skeleton",
+    "GET /v4/admin/nodes/:nodeId",
+    "GET /v4/admin/plugins",
+    "POST /v4/admin/candidates",
+    "POST /v4/admin/candidates/:id/compile",
+    "POST /v4/admin/candidates/:id/validate",
+    "POST /v4/admin/candidates/:id/publish",
+    "POST /v4/admin/candidates/:id/discard",
+    "GET /v4/admin/audit"
+  ],
+  "truth_rule": "Admin API and WebUI are projections of the server-side compiled Manifest and Inspector; UI local state is never the source of truth",
+  "payload_rule": "admin surface never carries business payload or secret material",
+  "scope": "M7 implementation; contract is design-only in M0-M2"
+}

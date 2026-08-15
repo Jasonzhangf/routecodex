@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-node-plugin",
+  "status": "contract_bound",
+  "owner_feature_id": "v4.plugin.contract",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-cordis-node-plugin-architecture.md"
+  ],
+  "plugin_identity_required": [
+    "plugin_id",
+    "version",
+    "owner",
+    "artifact_hash",
+    "contract_hash"
+  ],
+  "kinds": [
+    "admission",
+    "control",
+    "operator",
+    "validator",
+    "hook",
+    "debug",
+    "snapshot",
+    "observer"
+  ],
+  "effects": [
+    "read_only",
+    "control_only",
+    "semantic",
+    "diagnostic_only"
+  ],
+  "phases": [
+    "admission",
+    "control",
+    "semantic",
+    "validation",
+    "projection",
+    "observation"
+  ],
+  "node_selector_rule": "selector must match a declared node role from node-graph.contract.json; unknown node or role is rejected; runtime never iterates unknown nodes",
+  "effect_rule": {
+    "read_only": "writes must be empty; plugin may only read current-node data and information",
+    "control_only": "writes must be control or information axis resources; normal payload writes forbidden",
+    "semantic": "may write current-node data and typed control resources; may not write other node data",
+    "diagnostic_only": "writes must be empty; debug/snapshot/observer must not change business output or control flow"
+  },
+  "resource_rule": "reads and writes must resolve against the node allowed resource registry; unknown resource or unauthorized write is rejected",
+  "selection_group_rule": "selection_group selects exactly one active variant; group-external plugins keep executing; zero or multiple active variants are rejected",
+  "failure_rule": "plugin failure enters typed error intake; silent strip, fallback, and skip-continue are forbidden",
+  "ordering_rule": "compile order = phase fixed partial order -> before/after DAG -> order -> stable identity; same phase and order without declared relation is a tie and rejected; dependency cycle rejected",
+  "hash_rule": "contract_hash = sha256 of canonical contract JSON; canonical JSON is byte-stable with sorted keys and fixed separators",
+  "service_rule": "inject is a Service dependency, not a payload field; a plugin can only inject services provided inside its own node container"
+}

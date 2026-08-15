@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-node-container",
+  "status": "contract_bound",
+  "owner_feature_id": "v4.plugin.plan",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-cordis-node-plugin-architecture.md"
+  ],
+  "node_descriptor_required": [
+    "node_id",
+    "role_id",
+    "chain",
+    "chain_version",
+    "position"
+  ],
+  "plan_entry_required": [
+    "plugin_id",
+    "version",
+    "kind",
+    "effect",
+    "phase",
+    "order",
+    "selection_group",
+    "reads",
+    "writes"
+  ],
+  "plan_required": [
+    "node_id",
+    "position",
+    "role_id",
+    "chain",
+    "entries",
+    "selection_groups",
+    "hash"
+  ],
+  "ordering_rule": "phase fixed partial order -> before/after DAG -> order -> stable identity; same phase and order without declared relation is a tie and rejected; cycle rejected",
+  "selection_rule": "each selection group resolves to exactly one active variant in the plan; zero or multiple active variants are rejected; group-external plugins remain active",
+  "hash_rule": "plan hash = sha256 of canonical plan body; Cordis graph hash, compiled Manifest plan hash, and Rust loaded plan hash must match; mismatch fails publish or execute",
+  "single_plan_rule": "a node compiles exactly one immutable NodePluginPlan; the legacy single-operator + separate-hooks model is not publishable"
+}
