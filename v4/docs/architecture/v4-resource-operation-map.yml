@@ -26,6 +26,7 @@ resources:
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
     owner_node: V4ReqInbound02Normalized
+    owner_symbols: [ProtocolParse, Normalize, InputValidate, Governance]
     identity: [requestId, endpoint]
     allowed_writers: [V4ReqInbound02Normalized, V4ReqChatProcess03Governed]
     allowed_readers: [V4ReqChatProcess03Governed, V4ReqOutbound05ProviderSemantic]
@@ -40,6 +41,7 @@ resources:
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
     owner_node: V4ReqOutbound05ProviderSemantic
+    owner_symbols: [SemanticProjection]
     identity: [requestId, targetId, providerId, modelId]
     allowed_writers: [V4ReqOutbound05ProviderSemantic]
     allowed_readers: [V4ProviderReqOutbound06WirePayload]
@@ -86,6 +88,7 @@ resources:
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
     owner_node: V4RespInbound02Parsed
+    owner_symbols: [ProtocolDecode]
     identity: [requestId, endpoint]
     allowed_writers: [V4RespInbound02Parsed, V4RespChatProcess03Governed]
     allowed_readers: [V4RespChatProcess03Governed, V4RespOutbound04ClientSemantic]
@@ -118,6 +121,7 @@ resources:
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-control
     owner_node: V4Control01ScopeBoundCarrier
+    owner_symbols: [ControlSignal, PayloadGate]
     identity: [requestId, pipelineId, port, sessionScope]
     semantic_contract:
       carrier_fields: [requestId, pipelineId, port, sessionScope]
@@ -137,6 +141,7 @@ resources:
     lifecycle: v4.control.metadata_center
     owner_crate: routecodex-v4-control
     owner_node: V4MetadataCenter01ScopeRegistry
+    owner_symbols: [MetadataCenter, ControlSignal]
     identity: [requestId, pipelineId, port, sessionScope, controlKey]
     state_machine_required: true
     semantic_contract:
@@ -253,6 +258,7 @@ resources:
     lifecycle: v4.error.mainline
     owner_crate: routecodex-v4-error
     owner_node: V4Error01SourceRaised
+    owner_symbols: [ErrorChain]
     identity: [requestId, targetId, providerId, errorStage]
     chain: [V4Error01SourceRaised, V4Error02HostCaptured, V4Error03RuntimeClassified, V4Error04RouterPolicyApplied, V4Error05ExecutionDecision, V4Error06ClientProjected]
     semantic_contract:
@@ -273,6 +279,7 @@ resources:
     lifecycle: v4.error.mainline
     owner_crate: routecodex-v4-error
     owner_node: V4ErrorCenter02ClassifyAudit
+    owner_symbols: [ErrorCenter]
     identity: [requestId, pipelineId, errorStage, errorCode]
     semantic_contract:
       intake_only: true
@@ -319,6 +326,7 @@ resources:
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
     owner_node: V4Runtime01MainlineKernel
+    owner_symbols: [SkeletonRuntime, ExecutionContext, NodePluginPlan]
     identity: [requestId, pipelineId, skeletonVersion, planHash]
     semantic_contract:
       live_runtime_input_only: true
@@ -338,6 +346,7 @@ resources:
     lifecycle: v4.error.mainline
     owner_crate: routecodex-v4-error
     owner_node: V4Error06ClientProjected
+    owner_symbols: [ClientProjection]
     identity: [status, code, message]
     semantic_contract:
       client_visible_fields: [code, message]
@@ -355,6 +364,7 @@ resources:
     lifecycle: v4.error.mainline
     owner_crate: routecodex-v4-error
     owner_node: V4Error04RouterPolicyApplied
+    owner_symbols: [RetryPolicy]
     identity: [policyId, providerScope, matcher, actionClass, reasonCode]
     semantic_contract:
       consumed_by_execution_decision_only: true
@@ -413,6 +423,7 @@ resources:
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
     owner_node: V4Config01AuthoringFileSource
+    owner_symbols: [V4Config01AuthoringFileSource]
     identity: [configPath, configVersion]
     allowed_writers: [V4Config01AuthoringFileSource]
     allowed_readers: [V4Config02AuthoringParsed]
@@ -427,6 +438,7 @@ resources:
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
     owner_node: V4Config02AuthoringParsed
+    owner_symbols: [V4Config02AuthoringParsed, parse_v4_config_02_from_v4_config_01]
     identity: [configVersion, sourceHash]
     allowed_writers: [parse_v4_config_02_from_v4_config_01]
     allowed_readers: [validate_v4_config_03_from_v4_config_02]
@@ -441,6 +453,7 @@ resources:
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
     owner_node: V4Config03SchemaValidated
+    owner_symbols: [V4Config03SchemaValidated, validate_v4_config_03_from_v4_config_02]
     identity: [configVersion, scopeHash]
     allowed_writers: [validate_v4_config_03_from_v4_config_02]
     allowed_readers: [build_v4_config_04_from_v4_config_03]
@@ -455,6 +468,7 @@ resources:
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
     owner_node: V4Config04ResourceRegistryBuilt
+    owner_symbols: [V4Config04ResourceRegistryBuilt, build_v4_config_04_from_v4_config_03]
     identity: [configVersion, resourceIds]
     allowed_writers: [build_v4_config_04_from_v4_config_03]
     allowed_readers: [publish_v4_config_05_from_v4_config_04]
@@ -469,6 +483,7 @@ resources:
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
     owner_node: V4Config05ManifestPublished
+    owner_symbols: [V4Config05ManifestPublished, ConfigManifest, publish_v4_config_05_from_v4_config_04]
     identity: [manifestVersion, serverIds, providerIds, routeGroupIds]
     semantic_contract:
       runtime_only_input: true
@@ -488,6 +503,7 @@ resources:
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
     owner_node: V4Config05ManifestPublished
+    owner_symbols: [V4Config05ManifestPublished, ConfigManifest]
     identity: [manifestVersion, sha256]
     semantic_contract:
       compiler_generated_only: true
@@ -506,6 +522,7 @@ resources:
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
     owner_node: V4Config05ManifestPublished
+    owner_symbols: [AuthHandle]
     identity: [providerId, authAlias, envOrTokenFileHandle]
     allowed_writers: [V4Config05ManifestPublished]
     allowed_readers: [V4ProviderTransport07Request]

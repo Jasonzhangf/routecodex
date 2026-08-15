@@ -40,10 +40,11 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
 
 - `v4-resource-operation-map.yml`：49 资源，17 `anchored`（实现落地 + gate 绿），
   32 仍为显式 `design`（计划 owner 或未落地切片，禁止引用为真源）。
-- `.appsdk/maps/resource-map.json`：67 条，31 active / 33 design / 3 contract_bound；
+- `.appsdk/maps/resource-map.json`：67 条，32 active / 32 design / 3 contract_bound；
   与 YAML 双源一致由 `v4_parity_gate_resource_binding` 机器锁校验。
 - `scripts/architecture/verify-v4-*.mjs` 无任何 `binding_status` / 双源一致性检查（无机器锁）。
-- commit `23766d6cf` 尚未跑 DSH review（AGENTS §36 门禁未过）；claim 仍 `implementing`。
+- DSH review r1（commit `4bcf7c48b`）FAIL：P1 anchored 无代码符号绑定、
+  P2 自测 case 5 覆盖错分支、计划文档计数过期；修复后需重审。
 - 已记录 known gaps：target_triple、public_api_hash（派生非真 API 提取）、edge 再冻结、
   workspace gate 修正（见 `v4-active-artifact-linking-test-design.md` §5）。
 

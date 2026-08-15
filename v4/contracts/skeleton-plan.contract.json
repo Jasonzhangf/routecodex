@@ -15,7 +15,7 @@
   },
   "manifest_hash": "sha256:pending-config-v2-manifest",
   "plan_epoch": 1,
-  "plan_hash": "sha256:44bdcf0bd4d4e3081a3cd2fd22aa88082c074495d19356f8b902e33d4eca236a",
+  "plan_hash": "sha256:17c7d0fab2dde169587d41b561f92c358e9ecc7e55a8e93e75903d20c3a5ba05",
   "chains": [
     {
       "chain_id": "request",
@@ -41,13 +41,13 @@
         {"from": "V4ReqProcess02", "to": "V4ReqOutbound03", "direction": "forward"}
       ],
       "checkpoints": [
-        {"node_id": "V4ReqInbound02Normalized", "semantic": "normalized_request_identity_locked", "owner": "routecodex-v4-skeleton::NodeSlot::V4ReqInbound01Raw"},
+        {"node_id": "V4ReqInbound02Normalized", "semantic": "normalized_request_identity_locked", "owner": "routecodex-v4-runtime::Normalize"},
         {"node_id": "V4ReqContinuationClassified", "semantic": "continuation_scope_locked", "owner": "routecodex-v4-skeleton::NodeSlot::V4ReqProcess02"},
         {"node_id": "V4ReqChatProcess03Governed", "semantic": "governed_request", "owner": "routecodex-v4-skeleton::NodeSlot::V4ReqProcess02"},
         {"node_id": "V4ReqExecutionPlan04", "semantic": "immutable_plan", "owner": "routecodex-v4-skeleton::NodeSlot::V4ReqProcess02"},
         {"node_id": "V4Router05RequestClassified", "semantic": "route_facts", "owner": "routecodex-v4-skeleton::NodeSlot::V4ReqProcess02"},
         {"node_id": "V4Router06SelectionPlan", "semantic": "opaque_target_selection", "owner": "routecodex-v4-skeleton::NodeSlot::V4ReqProcess02"},
-        {"node_id": "V4ReqOutbound05ProviderSemantic", "semantic": "provider_semantic", "owner": "routecodex-v4-skeleton::NodeSlot::V4ReqOutbound03"},
+        {"node_id": "V4ReqOutbound05ProviderSemantic", "semantic": "provider_semantic", "owner": "routecodex-v4-runtime::SemanticProjection"},
         {"node_id": "V4ProviderReqOutbound06WirePayload", "semantic": "provider_wire", "owner": "routecodex-v4-skeleton::NodeSlot::V4ReqOutbound03"},
         {"node_id": "V4ProviderTransport07Request", "semantic": "transport_request", "owner": "routecodex-v4-skeleton::NodeSlot::V4ReqOutbound03"}
       ]
@@ -75,7 +75,7 @@
       ],
       "checkpoints": [
         {"node_id": "V4ProviderRespInbound01Raw", "semantic": "provider_raw", "owner": "routecodex-v4-skeleton::NodeSlot::V4RespInbound01Raw"},
-        {"node_id": "V4RespInbound02Parsed", "semantic": "parsed_response", "owner": "routecodex-v4-skeleton::NodeSlot::V4RespInbound01Raw"},
+        {"node_id": "V4RespInbound02Parsed", "semantic": "parsed_response", "owner": "routecodex-v4-runtime::ProtocolDecode"},
         {"node_id": "V4RespChatProcess03Governed", "semantic": "governed_response", "owner": "routecodex-v4-skeleton::NodeSlot::V4RespProcess02"},
         {"node_id": "V4RespContinuationCommitted", "semantic": "continuation_truth", "owner": "routecodex-v4-skeleton::NodeSlot::V4RespProcess02"},
         {"node_id": "V4RespOutbound04ClientSemantic", "semantic": "client_semantic", "owner": "routecodex-v4-skeleton::NodeSlot::V4ClientProjection03"},
