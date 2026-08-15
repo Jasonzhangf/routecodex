@@ -14,7 +14,12 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::routes())
         .merge(providers::routes())
         .merge(reload::routes())
-        .route("/{path}", get(static_serve))
+        .route("/styles.css", get(static_serve))
+        .route("/app.js", get(static_serve))
+        .route("/app.embedded.txt", get(static_serve))
+        .route("/index.html", get(static_serve))
+        .route("/routes.html", get(static_serve))
+        .route("/providers.html", get(static_serve))
         .route("/", get(static_serve))
         .with_state(state)
 }
