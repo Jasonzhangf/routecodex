@@ -82,6 +82,20 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
   P2-3：诊断红测改为显式目标 `v3.debug.artifact`（不再依赖矩阵排序）。
   修复 commit 见 git log `fix(v4): address dsh coverage-gate r2 P2 findings`；
   需 coverage-gate r3 重审。
+- DSH review coverage-gate r3（commit `50d64bf0e`）reviewer 终稿 `VERDICT: PASS`
+  （无 P0/P1，仅一条非阻塞 P2 观察：ledger 声称的 dsh-mcp 解析器修复不在 repo 内，
+  需在工具自身变更控制中留痕），但 dsh-mcp 解析器对 “No P0 or P1 findings.” 仍误判
+  FAIL（否定句中的 P0/P1 词面）；已补修 dsh-mcp 并在工具侧留痕，见
+  `~/.agents/skills/dsh/CHANGELOG.md`。
+- DSH review coverage-gate r4（commit `50d64bf0e`，解析器修复后重跑）机器 PASS：
+  `state=completed, verdict=pass, reason=final_verdict_pass`，final 字面
+  `VERDICT: PASS`、无 P0/P1、无“修复后再审”；唯一 P2 观察（dsh-mcp 修复需工具侧
+  留痕）已由 `~/.agents/skills/dsh/CHANGELOG.md` 落地。完成标准 1
+  （coverage 103/103）DSH 门禁闭环。
+- 完成标准 2（GAP=0）尚未全量机器锁：checkpoint gap（26/26）与资源 gap（103/103）
+  已锁；contract 声明的 feature GAP（`coverage_v3_features total=12 gaps=0`）
+  无独立机器 gate（仅 parity gate 覆盖 26 个 checkpoint），需补 feature-GAP gate
+  才算 criterion 2 完全闭环。
 - 已记录 known gaps：target_triple、public_api_hash（派生非真 API 提取）、edge 再冻结、
   workspace gate 修正：runtime/config/control/error 四个 anchored crate 依赖
   `--extern` 注入，只经 build-link test-consumer 编译（CI `v4-active-link`
