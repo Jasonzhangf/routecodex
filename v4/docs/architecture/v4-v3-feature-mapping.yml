@@ -1,0 +1,276 @@
+version: 1
+status: active
+owner_feature_id: v4.semantic_parity
+canonical_inputs:
+  - docs/architecture/v3-function-map.yml
+  - v4/docs/architecture/v4-v3-abstraction-coverage.yml
+  - v4/docs/architecture/v3-v4-semantic-parity-map.yml
+  - v4/contracts/pipeline-abstraction.contract.json
+notes: |
+  特征级抽象覆盖（machine truth）：V3 function map 的全部 feature（当前 64 条）
+  必须逐条映射到六轴模型的至少一个 operator_kind 与一条 chain（节点 slot），
+  GAP=0 才能进入实现（v4-pipeline-abstraction-model.md 完整性门槛 2）。
+  operator_kind 词汇表唯一来自 v4-v3-abstraction-coverage.yml 的 kind_rules；
+  chain 唯一来自 pipeline-abstraction.contract.json operator_schema.chains
+  （request/response/error/config/lifecycle/diagnostic）。
+  status=mapped 表示抽象层 operator 注册已建立（不表示 V4 已实现）；
+  status=gap 表示尚无 operator 映射，机器 gate 禁止 gap>0。
+coverage:
+  features: {total: 64, mapped: 64, gap: 0}
+features:
+  - feature_id: v3.managed_server_lifecycle
+    chain: lifecycle
+    operator_kinds: [typed_side_channel, config_compiler, build_artifact]
+    status: mapped
+  - feature_id: v3.config_server_full_function
+    chain: config
+    operator_kinds: [config_compiler, protocol_parse, normalize, typed_side_channel]
+    status: mapped
+  - feature_id: v3.config_interpreter_contract
+    chain: config
+    operator_kinds: [config_compiler, secret_handle, typed_side_channel]
+    status: mapped
+  - feature_id: v3.foundation_p0_p2
+    chain: request
+    operator_kinds: [protocol_parse, normalize, typed_side_channel, diagnostic_observer]
+    status: mapped
+  - feature_id: v3.debug_error_foundation
+    chain: error
+    operator_kinds: [typed_side_channel, diagnostic_observer]
+    status: mapped
+  - feature_id: v3.responses_direct_mvp_architecture
+    chain: request
+    operator_kinds: [protocol_parse, normalize, typed_side_channel, raw_parse, semantic_projection]
+    status: mapped
+  - feature_id: v3.responses_provider_runtime
+    chain: request
+    operator_kinds: [wire_build, transport_codec, secret_handle, raw_parse]
+    status: mapped
+  - feature_id: v3.virtual_router_target_interpreter
+    chain: request
+    operator_kinds: [typed_side_channel, normalize, protocol_parse]
+    status: mapped
+  - feature_id: v3.models_capability_catalog
+    chain: config
+    operator_kinds: [catalog, capability_truth, config_compiler]
+    status: mapped
+  - feature_id: v3.entry_protocol_endpoint_binding
+    chain: request
+    operator_kinds: [protocol_parse, semantic_projection, config_compiler]
+    status: mapped
+  - feature_id: v3.protocol_stage_shape_lock
+    chain: request
+    operator_kinds: [protocol_parse, normalize, wire_build, raw_parse, semantic_projection]
+    status: mapped
+  - feature_id: v3.hub_pipeline_static_skeleton
+    chain: request
+    operator_kinds: [typed_side_channel, protocol_parse, normalize, wire_build, raw_parse, semantic_projection]
+    status: mapped
+  - feature_id: v3.hub_relay_hook_resource_contract
+    chain: request
+    operator_kinds: [typed_side_channel, protocol_parse, wire_build, raw_parse, semantic_projection]
+    status: mapped
+  - feature_id: v3.hub_relay_request_semantics
+    chain: request
+    operator_kinds: [normalize, protocol_parse, typed_side_channel]
+    status: mapped
+  - feature_id: v3.hub_relay_response_semantics
+    chain: response
+    operator_kinds: [raw_parse, normalize, semantic_projection, typed_side_channel]
+    status: mapped
+  - feature_id: v3.hub_relay_payload_copy_runtime_probes
+    chain: response
+    operator_kinds: [normalize, semantic_projection, typed_side_channel]
+    status: mapped
+  - feature_id: v3.hub_relay_runtime_resources_hooks
+    chain: request
+    operator_kinds: [typed_side_channel, config_compiler, protocol_parse, wire_build, raw_parse, semantic_projection]
+    status: mapped
+  - feature_id: v3.hub_relay_gate_review_surface
+    chain: response
+    operator_kinds: [semantic_projection, typed_side_channel, raw_parse, wire_build]
+    status: mapped
+  - feature_id: v3.protocol_anthropic_codec_characterization
+    chain: response
+    operator_kinds: [protocol_parse, semantic_projection, wire_build, raw_parse]
+    status: mapped
+  - feature_id: v3.protocol_openai_chat_codec_characterization
+    chain: response
+    operator_kinds: [protocol_parse, semantic_projection, wire_build, raw_parse]
+    status: mapped
+  - feature_id: v3.protocol_gemini_codec_characterization
+    chain: response
+    operator_kinds: [protocol_parse, semantic_projection, wire_build, raw_parse]
+    status: mapped
+  - feature_id: v3.virtual_router_full_function
+    chain: request
+    operator_kinds: [typed_side_channel, config_compiler]
+    status: mapped
+  - feature_id: v3.remote_continuation_contract_store
+    chain: request
+    operator_kinds: [typed_side_channel]
+    status: mapped
+  - feature_id: v3.responses_direct_remote_continuation_integration
+    chain: request
+    operator_kinds: [typed_side_channel, normalize, raw_parse, semantic_projection, transport_codec]
+    status: mapped
+  - feature_id: v3.anthropic_relay_runtime_integration
+    chain: response
+    operator_kinds: [protocol_parse, normalize, wire_build, raw_parse, semantic_projection, typed_side_channel]
+    status: mapped
+  - feature_id: v3.responses_websocket_v2_transport_hardening
+    chain: response
+    operator_kinds: [transport_codec, raw_parse, typed_side_channel]
+    status: mapped
+  - feature_id: v3.anthropic_relay_local_continuation_integration
+    chain: response
+    operator_kinds: [typed_side_channel, normalize, semantic_projection]
+    status: mapped
+  - feature_id: v3.openai_chat_relay_runtime_integration
+    chain: response
+    operator_kinds: [protocol_parse, normalize, wire_build, transport_codec, raw_parse, semantic_projection, typed_side_channel]
+    status: mapped
+  - feature_id: v3.sse_protocol_codec_projection_boundary
+    chain: response
+    operator_kinds: [transport_codec, semantic_projection, protocol_parse]
+    status: mapped
+  - feature_id: vr.current_turn_typed_route_facts
+    chain: request
+    operator_kinds: [typed_side_channel]
+    status: mapped
+  - feature_id: v3.protocol_conversion_field_parity
+    chain: response
+    operator_kinds: [protocol_parse, semantic_projection, wire_build, raw_parse]
+    status: mapped
+  - feature_id: v3.gemini_relay_runtime_integration
+    chain: response
+    operator_kinds: [protocol_parse, normalize, wire_build, transport_codec, raw_parse, semantic_projection, typed_side_channel]
+    status: mapped
+  - feature_id: v3.entry_protocol_registry_contract
+    chain: request
+    operator_kinds: [protocol_parse, config_compiler, typed_side_channel]
+    status: mapped
+  - feature_id: v3.hub_relay_runtime_closeout
+    chain: response
+    operator_kinds: [protocol_parse, normalize, wire_build, transport_codec, raw_parse, semantic_projection, typed_side_channel]
+    status: mapped
+  - feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
+    chain: response
+    operator_kinds: [semantic_projection, typed_side_channel, normalize]
+    status: mapped
+  - feature_id: v3.live_provider_compat_parity_closeout
+    chain: response
+    operator_kinds: [raw_parse, semantic_projection, wire_build, verification]
+    status: mapped
+  - feature_id: v3.responses_inbound_websocket_proxy
+    chain: response
+    operator_kinds: [transport_codec, semantic_projection, normalize]
+    status: mapped
+  - feature_id: v3.resource_relation_edge_lock
+    chain: config
+    operator_kinds: [config_compiler, verification]
+    status: mapped
+  - feature_id: v3.resp03_tool_governance_gap_closeout
+    chain: response
+    operator_kinds: [normalize, semantic_projection, typed_side_channel]
+    status: mapped
+  - feature_id: v3.servertool_hook_skeleton_lifecycle
+    chain: response
+    operator_kinds: [typed_side_channel, normalize, semantic_projection]
+    status: mapped
+  - feature_id: v3.servertool_center_skeleton
+    chain: lifecycle
+    operator_kinds: [typed_side_channel, capability_truth]
+    status: mapped
+  - feature_id: v3.direct_stopless_metadata_center
+    chain: request
+    operator_kinds: [typed_side_channel, normalize, semantic_projection]
+    status: mapped
+  - feature_id: v3.protocol_normalization_tool_governance_boundary
+    chain: request
+    operator_kinds: [protocol_parse, normalize, wire_build, raw_parse, semantic_projection, typed_side_channel]
+    status: mapped
+  - feature_id: v3.sse_transport_core_independent
+    chain: response
+    operator_kinds: [transport_codec, semantic_projection]
+    status: mapped
+  - feature_id: v3.module_decomposition
+    chain: request
+    operator_kinds: [typed_side_channel, verification]
+    status: mapped
+  - feature_id: v3.route_selected_provider_model_binding
+    chain: request
+    operator_kinds: [typed_side_channel, wire_build, capability_truth]
+    status: mapped
+  - feature_id: v3.responses_session_inflight_admission
+    chain: request
+    operator_kinds: [protocol_parse, normalize, typed_side_channel]
+    status: mapped
+  - feature_id: v3.sse_http_keepalive_boundary
+    chain: response
+    operator_kinds: [transport_codec, semantic_projection, config_compiler]
+    status: mapped
+  - feature_id: v3.web_search_servertool_state_machine
+    chain: lifecycle
+    operator_kinds: [typed_side_channel, capability_truth, normalize, semantic_projection]
+    status: mapped
+  - feature_id: v3.console_request_count_visibility
+    chain: diagnostic
+    operator_kinds: [diagnostic_observer]
+    status: mapped
+  - feature_id: v3.console_human_readable_layering
+    chain: diagnostic
+    operator_kinds: [diagnostic_observer]
+    status: mapped
+  - feature_id: v3.runtime_timing_observability
+    chain: diagnostic
+    operator_kinds: [diagnostic_observer, typed_side_channel]
+    status: mapped
+  - feature_id: v3.provider_action_gate
+    chain: error
+    operator_kinds: [typed_side_channel, diagnostic_observer]
+    status: mapped
+  - feature_id: v3.codex_sample_retention_snap_scope
+    chain: diagnostic
+    operator_kinds: [diagnostic_observer, build_artifact]
+    status: mapped
+  - feature_id: v3.error.raw_wire_evidence
+    chain: error
+    operator_kinds: [diagnostic_observer, typed_side_channel, raw_parse]
+    status: mapped
+  - feature_id: v3.build_test_artifact_budget
+    chain: lifecycle
+    operator_kinds: [build_artifact, verification]
+    status: mapped
+  - feature_id: v3.global_binary_install
+    chain: lifecycle
+    operator_kinds: [build_artifact]
+    status: mapped
+  - feature_id: v3.route_classifier_local_owner
+    chain: request
+    operator_kinds: [typed_side_channel]
+    status: mapped
+  - feature_id: v3.relay_runtime_core
+    chain: response
+    operator_kinds: [raw_parse, semantic_projection, normalize, typed_side_channel]
+    status: mapped
+  - feature_id: v3.relay_runtime_shared
+    chain: response
+    operator_kinds: [semantic_projection, typed_side_channel]
+    status: mapped
+  - feature_id: v3.protocol_tables
+    chain: request
+    operator_kinds: [protocol_parse, semantic_projection, capability_truth]
+    status: mapped
+  - feature_id: v3.history_image_cleanup
+    chain: request
+    operator_kinds: [normalize, typed_side_channel]
+    status: mapped
+  - feature_id: v3.direct_runtime_kernel_core
+    chain: request
+    operator_kinds: [normalize, wire_build, raw_parse, semantic_projection, typed_side_channel]
+    status: mapped
+  - feature_id: v3.provider_global_subscription_probe
+    chain: lifecycle
+    operator_kinds: [typed_side_channel, config_compiler, verification]
+    status: mapped

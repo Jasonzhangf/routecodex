@@ -102,7 +102,7 @@ baseline（V3 现状，只读对照）
 继续往下做之前必须满足：
 
 1. `v4-v3-abstraction-coverage.yml` 覆盖 V3 全部 103 个资源，每个资源有唯一 axis 分类与 operator_kind，且 `status` 不等于 `unclassified`。
-2. 每个 V3 关键行为（function map 中的 feature）能映射为至少一个 operator 注册；无法映射的 feature 记为 `GAP`，GAP 为 0 才能进入实现。
+2. 每个 V3 关键行为（function map 中的 feature）能映射为至少一个 operator 注册；无法映射的 feature 记为 `GAP`，GAP 为 0 才能进入实现。机器锁见 `v4-v3-feature-mapping.yml`（V3 function map 全量 64 条逐条归类）与 `v4_parity_gate_feature_gap`。
 3. 六轴不变量机器可检查（`v4_parity_gate_v3_resource_coverage` 对 V3 覆盖层逐条校验，
    `v4_parity_gate_plane_isolation` 对 V4 目标图校验）：
    - 控制轴：V3 资源 `may_enter_provider_body=false` 且 `may_enter_client_body=false`
@@ -170,7 +170,12 @@ V3 的 `V3HubReqChatProcess04Governed` / `V3HubRespChatProcess03Governed`、Stop
 | `control`（诊断子轴） | 14 | diagnostic 8、diagnostic_side_channel 3、diagnostic_control、bounded_diagnostic_artifact、failure_scoped_diagnostic_artifact |
 | **合计** | **103** | 无 unclassified |
 
-V3 function map 的 12 个 feature 全部可以表达为对应节点 slot 上的 operator 注册：config/registry、route classifier、SSE transport、provider compat profile、console/observability、timing、sample retention 等。没有发现六轴无法承载的行为。
+V3 function map 的 64 个 feature（`docs/architecture/v3-function-map.yml` 全量，
+逐条映射见 `v4-v3-feature-mapping.yml`）全部可以表达为对应节点 slot 上的 operator
+注册：config/registry、route classifier、SSE transport、provider compat profile、
+console/observability、timing、sample retention、servertool/stopless、lifecycle 等。
+没有发现六轴无法承载的行为；`v4_parity_gate_feature_gap` 机器锁要求
+`coverage_v3_features {total:64, gaps:0}` 与实际全量集合一致。
 
 **结论：抽象模型符合 V3 行为，可以采用。**
 

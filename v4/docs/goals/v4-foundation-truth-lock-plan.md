@@ -92,10 +92,15 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
   `VERDICT: PASS`、无 P0/P1、无“修复后再审”；唯一 P2 观察（dsh-mcp 修复需工具侧
   留痕）已由 `~/.agents/skills/dsh/CHANGELOG.md` 落地。完成标准 1
   （coverage 103/103）DSH 门禁闭环。
-- 完成标准 2（GAP=0）尚未全量机器锁：checkpoint gap（26/26）与资源 gap（103/103）
-  已锁；contract 声明的 feature GAP（`coverage_v3_features total=12 gaps=0`）
-  无独立机器 gate（仅 parity gate 覆盖 26 个 checkpoint），需补 feature-GAP gate
-  才算 criterion 2 完全闭环。
+- 完成标准 2（GAP=0）机器锁补齐：新增 `v4-v3-feature-mapping.yml`
+  （V3 function map 全量 64 条 feature 逐条归类到 chain + operator_kind，
+  status=mapped）与 `v4_parity_gate_feature_gap` 机器 gate（10/10 红测），
+  校验 feature 集合与 v3-function-map 全等、chain 命中 contract
+  operator_schema.chains、operator_kind 命中六轴词汇表、gap=0、
+  mapping/parity/contract 三处 coverage 声明一致。contract 原占位
+  `coverage_v3_features total=12` 修正为真实全量 64（model doc 原写 “12 个
+  feature” 为未落地的占位数）。gate 已接入 verify:v4-foundation（现 9 gates）
+  与 verify:v4-foundation-red。需 DSH review（feature-gap r1）后更新本台账。
 - 已记录 known gaps：target_triple、public_api_hash（派生非真 API 提取）、edge 再冻结、
   workspace gate 修正：runtime/config/control/error 四个 anchored crate 依赖
   `--extern` 注入，只经 build-link test-consumer 编译（CI `v4-active-link`

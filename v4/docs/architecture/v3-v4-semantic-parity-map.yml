@@ -18,6 +18,7 @@ notes: |
   v4_parity_gate_semantic_parity 保持红。
 coverage:
   v3_resources: {total: 103, mapped: 103, gap: 0}
+  features: {total: 64, mapped: 64, gap: 0}
   stages: {total: 26, mapped: 26, gap: 0}
   request: {total: 9, mapped: 9}
   response: {total: 6, mapped: 6}

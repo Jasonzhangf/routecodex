@@ -19,6 +19,7 @@
     {"gate_id":"v4_active_index_verify","command":"cargo run --quiet --release --manifest-path v4/Cargo.toml -p routecodex-v4-build-link -- verify-index --root v4","required_for":["routecodex-v4-build-link:architecture_stable","routecodex-v4-edge:active_link"]},
     {"gate_id":"v4_frozen_source_edge_forbidden","command":"node scripts/architecture/verify-v4-active-link.mjs","required_for":["routecodex-v4-edge:architecture_stable","routecodex-v4-edge:freeze"]},
     {"gate_id":"v4_parity_gate_semantic_parity","command":"node scripts/architecture/verify-v4-semantic-parity.mjs","required_for":["routecodex-v4-skeleton:architecture_stable","routecodex-v4-runtime:architecture_stable"]},
+    {"gate_id":"v4_parity_gate_feature_gap","command":"node scripts/architecture/verify-v4-feature-gap.mjs","required_for":["routecodex-v4-skeleton:architecture_stable","routecodex-v4-runtime:architecture_stable"]},
     {"gate_id":"v4_parity_gate_skeleton_topology","command":"node scripts/architecture/verify-v4-skeleton-topology.mjs","required_for":["routecodex-v4-skeleton:architecture_stable"]},
     {"gate_id":"v4_parity_gate_plane_isolation","command":"node scripts/architecture/verify-v4-plane-isolation.mjs","required_for":["routecodex-v4-skeleton:architecture_stable","routecodex-v4-runtime:architecture_stable"]},
     {"gate_id":"v4_parity_gate_execution_binding","command":"node scripts/architecture/verify-v4-execution-binding.mjs","required_for":["routecodex-v4-runtime:architecture_stable"]},

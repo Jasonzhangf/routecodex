@@ -14,7 +14,7 @@
   "evaluation": {
     "skeleton_vs_v3": "pass",
     "coverage_v3_resources": {"total": 103, "information": 23, "data": 22, "control": 44, "diagnostic_sub_axis": 14, "unclassified": 0},
-    "coverage_v3_features": {"total": 12, "gaps": 0},
+    "coverage_v3_features": {"total": 64, "gaps": 0},
     "adopted": true
   },
   "axes": [
