@@ -67,6 +67,8 @@ jobs:
         run: npm run test:route-classifier-semantics
       - name: V4 frozen foundation regression
         run: cargo test --workspace --manifest-path v4/Cargo.toml
+      - name: V4 foundation pipeline gates
+        run: npm run verify:v4-foundation
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
       - name: Fetch Rust dependencies for offline builds
@@ -147,6 +149,14 @@ jobs:
           -p routecodex-v4-build-link --
           test-consumer --root v4 --consumer routecodex-v4-error
           --deps routecodex-v4-base-node
+      - name: V4 runtime vertical slice regression
+        run: >-
+          cargo build --release --manifest-path v4/Cargo.toml -p routecodex-v4-skeleton &&
+          cargo run --quiet --release --manifest-path v4/Cargo.toml
+          -p routecodex-v4-build-link -- test-consumer --root v4
+          --consumer routecodex-v4-runtime
+          --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control
+          --source-deps routecodex-v4-skeleton
       - name: V4 deterministic Active index
         run: >-
           cargo run --quiet --release --manifest-path v4/Cargo.toml

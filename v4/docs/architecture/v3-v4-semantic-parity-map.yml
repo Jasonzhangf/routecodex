@@ -1,0 +1,238 @@
+version: 1
+status: active
+owner_feature_id: v4.semantic_parity
+canonical_inputs:
+  - docs/architecture/v3-resource-operation-map.yml
+  - v4/contracts/node-graph.contract.json
+  - v4/contracts/pipeline-abstraction.contract.json
+  - v4/contracts/node-plugin.contract.json
+  - v4/contracts/node-container.contract.json
+  - v4/docs/architecture/v4-resource-operation-map.yml
+  - v4/docs/architecture/v3-reuse-audit-matrix.md
+notes: |
+  V3/V4 semantic truth closure：每条 V3 semantic stage 必须映射到唯一的 V4
+  container（node family/role）、V4 plugin（operator kind）、checkpoint（node id +
+  语义）、resource（v4-resource-operation-map.yml 的 resource_id）与 verification
+  gate。coverage=100%、GAP=0 是进入下一阶段的硬门槛；checkpoint_evidence 为
+  pending_skeleton_vslice 的条目由 Phase 4/5 提供实现证据，证据落地前
+  v4_parity_gate_semantic_parity 保持红。
+coverage:
+  v3_resources: {total: 103, mapped: 103, gap: 0}
+  stages: {total: 26, mapped: 26, gap: 0}
+  request: {total: 9, mapped: 9}
+  response: {total: 6, mapped: 6}
+  error: {total: 6, mapped: 6}
+  config: {total: 5, mapped: 5}
+chains:
+  request:
+    - v3_stage: request.inbound_normalize
+      v3_semantic: raw entry capture -> protocol parse -> normalized request identity
+      container: {family: RequestChainNode, role: request_inbound}
+      plugins: [entry_capture, protocol_parse, normalize]
+      checkpoint: {node_id: V4ReqInbound02Normalized, semantic: normalized_request_identity_locked}
+      resource: v4.request.normal_payload
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation, v4_parity_gate_execution_binding]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime ProtocolParse/Normalize/InputValidate (request chain, runtime test-consumer 9)"
+    - v3_stage: request.continuation_classify
+      v3_semantic: classify entry protocol/continuation owner/scope; never restore history in inbound
+      container: {family: RequestChainNode, role: request_continuation}
+      plugins: [continuation_classify, continuation_restore]
+      checkpoint: {node_id: V4ReqContinuationClassified, semantic: continuation_scope_locked}
+      resource: v4.scope.session
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation, v4_parity_gate_execution_binding]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime ContinuationClassify (request chain, runtime test-consumer 9)"
+    - v3_stage: request.chat_process
+      v3_semantic: request-side tool governance and continuation restore; Rust-only
+      container: {family: RequestChainNode, role: request_chat_process}
+      plugins: [request_governance, tool_governance]
+      checkpoint: {node_id: V4ReqChatProcess03Governed, semantic: governed_request}
+      resource: v4.request.normal_payload
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation, v4_parity_gate_execution_binding, v4_parity_gate_capability_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime Governance (request chain, runtime test-consumer 9)"
+    - v3_stage: request.execution_plan
+      v3_semantic: build immutable execution plan bound to skeleton version and manifest hash
+      container: {family: RequestChainNode, role: request_execution}
+      plugins: [execution_plan]
+      checkpoint: {node_id: V4ReqExecutionPlan04, semantic: immutable_plan}
+      resource: v4.control.route_facts
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_execution_binding]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime ExecutionPlan (request chain, runtime test-consumer 9)"
+    - v3_stage: request.route_facts
+      v3_semantic: route classifier produces typed facts; payload patch forbidden
+      container: {family: RequestChainNode, role: request_execution}
+      plugins: [execution_plan]
+      checkpoint: {node_id: V4Router05RequestClassified, semantic: route_facts}
+      resource: v4.control.route_facts
+      verification_gates: [v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime ExecutionPlan route_facts (request chain, runtime test-consumer 9)"
+    - v3_stage: request.target_resolve
+      v3_semantic: opaque target selection; health mutation forbidden
+      container: {family: RequestChainNode, role: request_execution}
+      plugins: [target_resolve]
+      checkpoint: {node_id: V4Router06SelectionPlan, semantic: opaque_target_selection}
+      resource: v4.control.target_selection
+      verification_gates: [v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime ExecutionPlan target_selection (request chain, runtime test-consumer 9)"
+    - v3_stage: request.provider_semantic
+      v3_semantic: provider semantic envelope only; no internal control fields
+      container: {family: RequestChainNode, role: request_outbound}
+      plugins: [semantic_projection]
+      checkpoint: {node_id: V4ReqOutbound05ProviderSemantic, semantic: provider_semantic}
+      resource: v4.request.provider_semantic
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime SemanticProjection (request chain, runtime test-consumer 9)"
+    - v3_stage: request.wire_build
+      v3_semantic: provider wire payload; control/metadata never in body
+      container: {family: RequestChainNode, role: request_outbound}
+      plugins: [wire_build]
+      checkpoint: {node_id: V4ProviderReqOutbound06WirePayload, semantic: provider_wire}
+      resource: v4.request.provider_wire_payload
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime WireBuild + control-leak red test (request chain, runtime test-consumer 9)"
+    - v3_stage: request.transport
+      v3_semantic: transport/auth only; no hub governance semantics
+      container: {family: RequestChainNode, role: request_outbound}
+      plugins: [transport_build]
+      checkpoint: {node_id: V4ProviderTransport07Request, semantic: transport_request}
+      resource: v4.request.provider_wire_payload
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime OutputValidate (request chain, runtime test-consumer 9)"
+  response:
+    - v3_stage: response.provider_inbound
+      v3_semantic: provider raw response parse; malformed frame fail-fast
+      container: {family: ResponseChainNode, role: response_inbound}
+      plugins: [raw_parse, protocol_decode]
+      checkpoint: {node_id: V4ProviderRespInbound01Raw, semantic: provider_raw}
+      resource: v4.response.provider_raw
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime RawParse (response chain, runtime test-consumer 9)"
+    - v3_stage: response.normalize
+      v3_semantic: normalize provider response to hub semantic; no continuation save here
+      container: {family: ResponseChainNode, role: response_inbound}
+      plugins: [protocol_decode]
+      checkpoint: {node_id: V4RespInbound02Parsed, semantic: parsed_response}
+      resource: v4.response.normal_payload
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime ProtocolDecode (response chain, runtime test-consumer 9)"
+    - v3_stage: response.response_process
+      v3_semantic: response-side tool governance and continuation save; Rust-only
+      container: {family: ResponseChainNode, role: response_chat_process}
+      plugins: [response_governance, tool_harvest]
+      checkpoint: {node_id: V4RespChatProcess03Governed, semantic: governed_response}
+      resource: v4.response.normal_payload
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation, v4_parity_gate_capability_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime ResponseGovernance/ToolHarvest (response chain, runtime test-consumer 9)"
+    - v3_stage: response.continuation_commit
+      v3_semantic: continuation truth saved at chat process exit; immutable interval until next req restore
+      container: {family: ResponseChainNode, role: response_continuation}
+      plugins: [continuation_commit, continuation_release]
+      checkpoint: {node_id: V4RespContinuationCommitted, semantic: continuation_truth}
+      resource: v4.scope.session
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime ContinuationCommit (response chain, runtime test-consumer 9)"
+    - v3_stage: response.client_projection
+      v3_semantic: client protocol projection; no provider-specific branches
+      container: {family: ResponseChainNode, role: response_outbound}
+      plugins: [client_semantic_projection]
+      checkpoint: {node_id: V4RespOutbound04ClientSemantic, semantic: client_semantic}
+      resource: v4.response.normal_payload
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime ClientSemanticProjection (response chain, runtime test-consumer 9)"
+    - v3_stage: response.frame
+      v3_semantic: client frame; error projection only via V4Error06
+      container: {family: ResponseChainNode, role: response_outbound}
+      plugins: [frame_build]
+      checkpoint: {node_id: V4ServerRespOutbound05ClientFrame, semantic: client_frame}
+      resource: v4.response.client_wire_payload
+      verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-runtime FrameBuild + control-leak red test (response chain, runtime test-consumer 9)"
+  error:
+    - v3_stage: error.source
+      v3_semantic: raise typed error fact; first operation only
+      container: {family: ErrorChainNode, role: error_source}
+      plugins: [error_source_capture]
+      checkpoint: {node_id: V4Error01SourceRaised, semantic: source_fact}
+      resource: v4.control.error_chain
+      verification_gates: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-error::ErrorChain::raise (error test-consumer 23)"
+    - v3_stage: error.capture
+      v3_semantic: host capture 01 -> 02; only from SourceRaised
+      container: {family: ErrorChainNode, role: error_source}
+      plugins: [error_source_capture]
+      checkpoint: {node_id: V4Error02HostCaptured, semantic: host_captured}
+      resource: v4.control.error_chain
+      verification_gates: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-error::ErrorChain::capture (error test-consumer 23)"
+    - v3_stage: error.classify
+      v3_semantic: mandatory single-use witness classify + audit; no message-only fork
+      container: {family: ErrorChainNode, role: error_classify}
+      plugins: [error_classify]
+      checkpoint: {node_id: V4Error03RuntimeClassified, semantic: classified_fact}
+      resource: v4.control.error_center
+      verification_gates: [v4_error_l2_regression, v4_error_compile_fail_regression, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-error::ErrorCenter::classify + witness (error test-consumer 23; negative rustc gate)"
+    - v3_stage: error.policy
+      v3_semantic: typed passive policy apply; provider local retry forbidden
+      container: {family: ErrorChainNode, role: error_policy}
+      plugins: [error_policy_apply]
+      checkpoint: {node_id: V4Error04RouterPolicyApplied, semantic: policy_applied}
+      resource: v4.control.retry_policy
+      verification_gates: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-error::ErrorChain::apply_policy (error test-consumer 23)"
+    - v3_stage: error.decision
+      v3_semantic: execution decision consumed only by executor; no hand-built policy
+      container: {family: ErrorChainNode, role: error_decision}
+      plugins: [execution_decision]
+      checkpoint: {node_id: V4Error05ExecutionDecision, semantic: execution_decision}
+      resource: v4.control.error_chain
+      verification_gates: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-error::ErrorChain::decide (error test-consumer 23)"
+    - v3_stage: error.projection
+      v3_semantic: client projection code/message only; internal fields forbidden
+      container: {family: ErrorChainNode, role: error_projection}
+      plugins: [client_projection]
+      checkpoint: {node_id: V4Error06ClientProjected, semantic: client_projection}
+      resource: v4.error.client_projection
+      verification_gates: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
+      checkpoint_evidence: "implemented: routecodex-v4-error::ErrorChain::project (error test-consumer 23)"
+  config:
+    - v3_stage: config.authoring
+      v3_semantic: authoring file source; runtime never scans directories
+      container: {family: ConfigChainNode, role: config_authoring}
+      plugins: [config_parse, config_validate]
+      checkpoint: {node_id: V4Config01AuthoringFileSource, semantic: authoring_source}
+      resource: v4.config.authoring
+      verification_gates: [v4_config_l2_regression, v4_parity_gate_semantic_parity]
+      checkpoint_evidence: "implemented: routecodex-v4-config::V4Config01AuthoringFileSource (config test-consumer 15)"
+    - v3_stage: config.parse
+      v3_semantic: parse authoring to typed parsed form
+      container: {family: ConfigChainNode, role: config_authoring}
+      plugins: [config_parse]
+      checkpoint: {node_id: V4Config02AuthoringParsed, semantic: parsed}
+      resource: v4.config.parsed
+      verification_gates: [v4_config_l2_regression, v4_parity_gate_semantic_parity]
+      checkpoint_evidence: "implemented: routecodex-v4-config::parse_v4_config_02_from_v4_config_01 (config test-consumer 15)"
+    - v3_stage: config.validate
+      v3_semantic: schema validation; unknown fields rejected
+      container: {family: ConfigChainNode, role: config_authoring}
+      plugins: [config_validate]
+      checkpoint: {node_id: V4Config03SchemaValidated, semantic: validated}
+      resource: v4.config.schema_validated
+      verification_gates: [v4_config_l2_regression, v4_parity_gate_semantic_parity]
+      checkpoint_evidence: "implemented: routecodex-v4-config::validate_v4_config_03_from_v4_config_02 (config test-consumer 15)"
+    - v3_stage: config.registry
+      v3_semantic: build resource registry from validated config
+      container: {family: ConfigChainNode, role: config_registry}
+      plugins: [registry_build]
+      checkpoint: {node_id: V4Config04ResourceRegistryBuilt, semantic: registry_built}
+      resource: v4.config.resource_registry
+      verification_gates: [v4_config_l2_regression, v4_parity_gate_semantic_parity]
+      checkpoint_evidence: "implemented: routecodex-v4-config::build_v4_config_04_from_v4_config_03 (config test-consumer 15)"
+    - v3_stage: config.manifest
+      v3_semantic: publish deterministic immutable manifest; runtime-only input
+      container: {family: ConfigChainNode, role: config_manifest}
+      plugins: [manifest_publish]
+      checkpoint: {node_id: V4Config05ManifestPublished, semantic: manifest_published}
+      resource: v4.config.manifest
+      verification_gates: [v4_config_l2_regression, v4_parity_gate_semantic_parity]
+      checkpoint_evidence: "implemented: routecodex-v4-config::publish_v4_config_05_from_v4_config_04 (config test-consumer 15)"

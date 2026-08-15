@@ -7,6 +7,8 @@ use routecodex_v4_edge::{
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+pub mod v2;
+
 pub const CONFIG_CHAIN_VERSION: &str = "v4-config-1";
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

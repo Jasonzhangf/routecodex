@@ -1,9 +1,11 @@
 use routecodex_v4_build_link::error::ActiveLinkError;
 use routecodex_v4_build_link::identity::recompute_artifact_hash;
 use routecodex_v4_build_link::resolver::{
-    assert_outside_active, emit_link_flags, host_triple, resolve,
+    assert_outside_active, emit_link_flags, frozen_module_ids, host_triple, resolve,
+    source_dep_link_args,
 };
 use routecodex_v4_build_link::IndexBuilder;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -45,6 +47,14 @@ fn temp_fixture(tag: &str) -> PathBuf {
     ));
     copy_dir_all(&fixture_root(), &base);
     base
+}
+
+fn v4_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .canonicalize()
+        .expect("v4 root")
 }
 
 #[test]
@@ -371,4 +381,34 @@ fn index_is_deterministic_and_drift_detected() {
     IndexBuilder::verify(&root, "fac43e278").expect("verify same-commit index");
     let drift = IndexBuilder::verify(&root, "different-commit").expect_err("drift must fail");
     assert!(matches!(drift, ActiveLinkError::ManifestInvalid(_)));
+}
+
+#[test]
+fn red_source_deps_rejects_frozen_module() {
+    let root = v4_root();
+    let frozen = frozen_module_ids(&root).expect("frozen registry must parse");
+    assert!(frozen.contains("routecodex-v4-error"));
+    let error = source_dep_link_args(&root, "routecodex-v4-error", &frozen)
+        .expect_err("frozen module must never be linked as a mutable source dep");
+    assert!(
+        matches!(error, ActiveLinkError::LinkFailed(message) if message.contains("Active surface"))
+    );
+}
+
+#[test]
+fn red_source_deps_rejects_unknown_crate() {
+    let root = v4_root();
+    let frozen = HashSet::new();
+    let error = source_dep_link_args(&root, "routecodex-v4-does-not-exist", &frozen)
+        .expect_err("unknown crate must fail");
+    assert!(matches!(error, ActiveLinkError::LinkFailed(_)));
+}
+
+#[test]
+fn red_source_deps_rejects_invalid_name() {
+    let root = v4_root();
+    let frozen = HashSet::new();
+    let error = source_dep_link_args(&root, "../escape", &frozen)
+        .expect_err("invalid crate name must fail");
+    assert!(matches!(error, ActiveLinkError::IdentityMissing(_)));
 }

@@ -60,6 +60,100 @@ pub fn rustc_version() -> Result<String, ActiveLinkError> {
     Ok(rustc_facts()?.release.clone())
 }
 
+/// Frozen module ids declared in `contracts/active-link/frozen-consumer-registry.json`.
+/// These modules may only be consumed through the Active surface.
+pub fn frozen_module_ids(root: &Path) -> Result<HashSet<String>, ActiveLinkError> {
+    let path = root.join("contracts/active-link/frozen-consumer-registry.json");
+    let text = fs::read_to_string(&path).map_err(|e| {
+        ActiveLinkError::ManifestInvalid(format!(
+            "read frozen-consumer-registry {}: {e}",
+            path.display()
+        ))
+    })?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        ActiveLinkError::ManifestInvalid(format!(
+            "parse frozen-consumer-registry {}: {e}",
+            path.display()
+        ))
+    })?;
+    let ids = value
+        .get("frozen_modules")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
+    Ok(ids)
+}
+
+/// Resolve a mutable workspace crate to its cargo-built release rlib and
+/// return rustc `--extern` + `-L dependency` arguments. Frozen modules are
+/// rejected: their only consumption surface is the Active artifact resolver.
+pub fn source_dep_link_args(
+    root: &Path,
+    name: &str,
+    frozen: &HashSet<String>,
+) -> Result<Vec<String>, ActiveLinkError> {
+    if frozen.contains(name) {
+        return Err(ActiveLinkError::LinkFailed(format!(
+            "frozen module {name} must be consumed through the Active surface, not --source-deps"
+        )));
+    }
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(ActiveLinkError::IdentityMissing(format!(
+            "invalid source dependency {name:?}"
+        )));
+    }
+    let source_dir = root.join("crates").join(name);
+    if !source_dir.join("src/lib.rs").is_file() {
+        return Err(ActiveLinkError::LinkFailed(format!(
+            "source dependency {name} has no src/lib.rs at {}",
+            source_dir.display()
+        )));
+    }
+    let rust_name = name.replace('-', "_");
+    let deps_dir = root.join("target/release/deps");
+    let mut candidates: Vec<PathBuf> = fs::read_dir(&deps_dir)
+        .map_err(|e| {
+            ActiveLinkError::LinkFailed(format!(
+                "read {}: {e} (build the workspace crate first with `cargo build --release --manifest-path v4/Cargo.toml -p {name}`)",
+                deps_dir.display()
+            ))
+        })?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .map(|file| {
+                    let file = file.to_string_lossy();
+                    file.starts_with(&format!("lib{rust_name}-")) && file.ends_with(".rlib")
+                })
+                .unwrap_or(false)
+        })
+        .collect();
+    candidates.sort();
+    let rlib = candidates.pop().ok_or_else(|| {
+        ActiveLinkError::LinkFailed(format!(
+            "no release rlib for source dependency {rust_name} in {} (run `cargo build --release --manifest-path v4/Cargo.toml -p {name}` first)",
+            deps_dir.display()
+        ))
+    })?;
+    Ok(vec![
+        "--extern".to_string(),
+        format!("{rust_name}={}", rlib.display()),
+        "-L".to_string(),
+        format!("dependency={}", deps_dir.display()),
+    ])
+}
+
 /// Fail if `path` resolves inside the Active zone (`active/**`).
 pub fn assert_outside_active(root: &Path, path: &Path) -> Result<(), ActiveLinkError> {
     let root = root

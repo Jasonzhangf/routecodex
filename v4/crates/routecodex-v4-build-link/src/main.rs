@@ -10,9 +10,11 @@
 
 use routecodex_v4_build_link::resolver::assert_outside_active;
 use routecodex_v4_build_link::resolver::{emit_link_flags, host_triple, resolve};
+use routecodex_v4_build_link::resolver::{frozen_module_ids, source_dep_link_args};
 use routecodex_v4_build_link::ActiveArtifactResolution;
 use routecodex_v4_build_link::ActiveLinkError;
 use routecodex_v4_build_link::IndexBuilder;
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,6 +33,30 @@ fn arg_value(args: &[String], name: &str) -> Result<String, String> {
     args.get(index + 1)
         .cloned()
         .ok_or_else(|| format!("missing value for {name}"))
+}
+
+/// `--source-deps <crate>[,<crate>...]` (repeatable): mutable workspace crates
+/// linked through the resolver as dev-time rlibs. Frozen modules are rejected
+/// by `source_dep_link_args`; only non-frozen V4 crates may be consumed this way.
+fn parse_source_deps(args: &[String]) -> Result<Vec<String>, String> {
+    let mut deps = Vec::new();
+    for (index, arg) in args.iter().enumerate() {
+        if arg != "--source-deps" {
+            continue;
+        }
+        let value = args
+            .get(index + 1)
+            .ok_or_else(|| "missing value for --source-deps".to_string())?;
+        for part in value.split(',') {
+            let part = part.trim();
+            if !part.is_empty() {
+                deps.push(part.to_string());
+            }
+        }
+    }
+    deps.sort();
+    deps.dedup();
+    Ok(deps)
 }
 
 fn root_from(args: &[String]) -> Result<PathBuf, String> {
@@ -351,6 +377,7 @@ fn build_consumer(
     target: &str,
     out_override: Option<&Path>,
     external: &ExternalLink,
+    source_args: &[String],
 ) -> Result<PathBuf, ActiveLinkError> {
     let dep_resolutions = resolve_dependencies(root, deps, target)?;
     let src = root.join("crates").join(consumer).join("src/lib.rs");
@@ -387,6 +414,7 @@ fn build_consumer(
     rustc_args.extend(dependency_search_args(&dep_resolutions));
     rustc_args.extend(external.extern_args.iter().cloned());
     rustc_args.extend(external.search_args.iter().cloned());
+    rustc_args.extend(source_args.iter().cloned());
     rustc_args.push("-o".to_string());
     rustc_args.push(out.to_str().unwrap_or("").to_string());
     run_rustc(&rustc_args)?;
@@ -398,11 +426,12 @@ fn test_consumer(
     consumer: &str,
     deps: &[String],
     target: &str,
+    source_args: &[String],
 ) -> Result<(), ActiveLinkError> {
     let dep_resolutions = resolve_dependencies(root, deps, target)?;
     let external_crates = parse_external_deps(&root.join("crates").join(consumer))?;
     let external = build_external_deps(root, &external_crates)?;
-    let consumer_lib = build_consumer(root, consumer, deps, target, None, &external)?;
+    let consumer_lib = build_consumer(root, consumer, deps, target, None, &external, source_args)?;
     let tests_dir = root.join("crates").join(consumer).join("tests");
     let mut test_files = fs::read_dir(&tests_dir)
         .map_err(|e| ActiveLinkError::LinkFailed(format!("read {}: {e}", tests_dir.display())))?
@@ -436,6 +465,7 @@ fn test_consumer(
         rustc_args.extend(dependency_search_args(&dep_resolutions));
         rustc_args.extend(external.extern_args.iter().cloned());
         rustc_args.extend(external.search_args.iter().cloned());
+        rustc_args.extend(source_args.iter().cloned());
         rustc_args.push("-o".to_string());
         rustc_args.push(test_bin.to_str().unwrap_or("").to_string());
         run_rustc(&rustc_args)?;
@@ -530,6 +560,9 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
                 .position(|arg| arg == "--out")
                 .and_then(|index| args.get(index + 1))
                 .map(PathBuf::from);
+            let source_deps = parse_source_deps(args).map_err(ActiveLinkError::LinkFailed)?;
+            let frozen = frozen_module_ids(&root)?;
+            let source_args = source_dep_link_args_all(&root, &source_deps, &frozen)?;
             let external_crates = parse_external_deps(&root.join("crates").join(&consumer))?;
             let external = build_external_deps(&root, &external_crates)?;
             let out = build_consumer(
@@ -539,6 +572,7 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
                 &target,
                 out_override.as_deref(),
                 &external,
+                &source_args,
             )?;
             println!(
                 "{consumer} lib built via Active link surface: {}",
@@ -553,7 +587,10 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
                 arg_value(args, "--consumer").map_err(ActiveLinkError::IdentityMissing)?;
             let deps = arg_value(args, "--deps").map_err(ActiveLinkError::IdentityMissing)?;
             let deps = deps.split(',').map(str::to_string).collect::<Vec<_>>();
-            test_consumer(&root, &consumer, &deps, &target)
+            let source_deps = parse_source_deps(args).map_err(ActiveLinkError::LinkFailed)?;
+            let frozen = frozen_module_ids(&root)?;
+            let source_args = source_dep_link_args_all(&root, &source_deps, &frozen)?;
+            test_consumer(&root, &consumer, &deps, &target, &source_args)
         }
         _ => {
             eprintln!("unknown command {command:?}");
@@ -562,6 +599,20 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
             )))
         }
     }
+}
+
+/// Link arguments for every requested workspace source dependency. The loop
+/// lives here so `build-consumer` and `test-consumer` share one resolution.
+fn source_dep_link_args_all(
+    root: &Path,
+    names: &[String],
+    frozen: &HashSet<String>,
+) -> Result<Vec<String>, ActiveLinkError> {
+    let mut args = Vec::new();
+    for name in names {
+        args.extend(source_dep_link_args(root, name, frozen)?);
+    }
+    Ok(args)
 }
 
 fn main() -> ExitCode {

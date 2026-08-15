@@ -40,9 +40,9 @@
   "node_selector_rule": "selector must match a declared node role from node-graph.contract.json; unknown node or role is rejected; runtime never iterates unknown nodes",
   "effect_rule": {
     "read_only": "writes must be empty; plugin may only read current-node data and information",
-    "control_only": "writes must be control or information axis resources; normal payload writes forbidden",
+    "control_only": "control_only: writes must be control or information axis resources; normal payload writes forbidden",
     "semantic": "may write current-node data and typed control resources; may not write other node data",
-    "diagnostic_only": "writes must be empty; debug/snapshot/observer must not change business output or control flow"
+    "diagnostic_only": "diagnostic_only: writes must be empty; debug/snapshot/observer must not change business output or control flow"
   },
   "resource_rule": "reads and writes must resolve against the node allowed resource registry; unknown resource or unauthorized write is rejected",
   "selection_group_rule": "selection_group selects exactly one active variant; group-external plugins keep executing; zero or multiple active variants are rejected",

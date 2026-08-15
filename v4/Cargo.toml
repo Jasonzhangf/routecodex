@@ -2,6 +2,7 @@
 members = [
   "crates/routecodex-v4-base-node",
   "crates/routecodex-v4-build-link",
+  "crates/routecodex-v4-skeleton",
 ]
 resolver = "2"
 

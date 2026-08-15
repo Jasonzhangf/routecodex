@@ -5,7 +5,7 @@
   "owner_feature_id": "v4.pipeline_abstraction",
   "canonical_docs": [
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
-    "v4/docs/architecture/v4-v3-abstraction-coverage.yml",
+    "v4/docs/architecture/v3-v4-semantic-parity-map.yml",
     "v4/docs/architecture/v4-resource-operation-map.yml",
     "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
     "v4/contracts/node-graph.contract.json",

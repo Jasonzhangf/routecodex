@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.4503",
+  "version": "0.90.4549",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "bin": {
@@ -275,6 +275,8 @@
     "verify:agent-p0-payload-control-guard-global": "node scripts/architecture/verify-agent-p0-payload-control-guard.mjs --include-global",
     "test:agent-p0-payload-control-guard-red-fixtures": "node scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs",
     "verify:v3-architecture-ci": "node scripts/architecture/verify-v3-architecture-ci.mjs",
+    "verify:v4-active-link": "node scripts/architecture/verify-v4-active-link.mjs",
+    "verify:v4-foundation": "node scripts/architecture/verify-v4-semantic-parity.mjs && node scripts/architecture/verify-v4-plane-isolation.mjs && node scripts/architecture/verify-v4-skeleton-topology.mjs && node scripts/architecture/verify-v4-execution-binding.mjs && node scripts/architecture/verify-v4-capability-isolation.mjs && node scripts/architecture/verify-v4-responses-direct-compat.mjs",
     "verify:agent-collab-protocol": "node scripts/architecture/verify-agent-collab-protocol.mjs",
     "test:v3-provider-action-gate-red-fixtures": "node scripts/tests/v3-provider-action-gate-red-fixtures.mjs",
     "pack:v3:dev": "node scripts/pack-v3-release.mjs --mode dev",

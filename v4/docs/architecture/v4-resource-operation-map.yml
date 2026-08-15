@@ -12,9 +12,15 @@ notes: |
   已生效边界。每个 resource 的 owner_crate / owner_node 是 V4 计划 owner，
   未实现前不得作为真源引用。binding_status 从 design 变为 anchored 的准入
   条件：对应 V4 实现、机器 gate 与资源关系测试全部落地。
+  Phase 2 追加：每个 resource 必须声明 axis（data/control/information/
+  diagnostic 之一）与 verification_gate（v4/.appsdk/maps/verification-map.json
+  中的 gate_id 或 v4_parity_gate_* 系列）；存在 resource 但无 owner 或无 gate
+  视为注册表缺陷。binding_status 只在对应 gate 绿且实现落地后改为 anchored。
 resources:
   # ---------------- data plane ----------------
   - resource_id: v4.request.normal_payload
+    axis: data
+    verification_gate: [v4_parity_gate_plane_isolation, v4_parity_gate_execution_binding]
     resource_kind: normal_payload
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
@@ -27,6 +33,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.request.provider_semantic
+    axis: data
+    verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: provider_semantic
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
@@ -39,6 +47,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.request.provider_wire_payload
+    axis: data
+    verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: provider_wire
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-provider
@@ -55,6 +65,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.response.provider_raw
+    axis: data
+    verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: provider_response
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-provider
@@ -67,6 +79,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.response.normal_payload
+    axis: data
+    verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: normal_payload
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
@@ -79,6 +93,8 @@ resources:
     may_enter_client_body: true
     binding_status: design
   - resource_id: v4.response.client_wire_payload
+    axis: data
+    verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: client_wire
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-server
@@ -95,6 +111,8 @@ resources:
     binding_status: design
   # ---------------- control plane ----------------
   - resource_id: v4.control.side_channel
+    axis: control
+    verification_gate: [v4_parity_gate_plane_isolation, v4_control_l2_regression]
     resource_kind: control_carrier
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-control
@@ -112,6 +130,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.control.metadata_center
+    axis: control
+    verification_gate: [v4_control_l2_regression, v4_parity_gate_plane_isolation]
     resource_kind: metadata_center_control_signal
     lifecycle: v4.control.metadata_center
     owner_crate: routecodex-v4-control
@@ -132,6 +152,8 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v4.control.route_facts
+    axis: control
+    verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: control_contract
     lifecycle: v4.router.mainline
     owner_crate: routecodex-v4-router
@@ -148,6 +170,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.control.target_selection
+    axis: control
+    verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: control_contract
     lifecycle: v4.router.mainline
     owner_crate: routecodex-v4-router
@@ -164,6 +188,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.control.route_exit
+    axis: control
+    verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: control_contract
     lifecycle: v4.router.mainline
     owner_crate: routecodex-v4-router
@@ -182,6 +208,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.control.route_policy_live
+    axis: control
+    verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: control_contract
     lifecycle: v4.router.mainline
     owner_crate: routecodex-v4-router
@@ -200,6 +228,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.control.availability
+    axis: control
+    verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: control_state
     lifecycle: v4.provider.availability
     owner_crate: routecodex-v4-provider
@@ -216,6 +246,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.control.error_chain
+    axis: control
+    verification_gate: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
     resource_kind: side_channel
     lifecycle: v4.error.mainline
     owner_crate: routecodex-v4-error
@@ -234,6 +266,8 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v4.control.error_center
+    axis: control
+    verification_gate: [v4_error_l2_regression, v4_error_compile_fail_regression]
     resource_kind: control_contract
     lifecycle: v4.error.mainline
     owner_crate: routecodex-v4-error
@@ -257,6 +291,8 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v4.lifecycle.payload_cycle
+    axis: control
+    verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: control_contract
     lifecycle: v4.pipeline.request_cycle
     owner_crate: routecodex-v4-control
@@ -275,7 +311,28 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: design
+  - resource_id: v4.pipeline.mainline
+    axis: control
+    verification_gate: [v4_parity_gate_plane_isolation, v4_parity_gate_execution_binding]
+    resource_kind: runtime_execution_locus
+    lifecycle: v4.pipeline.mainline
+    owner_crate: routecodex-v4-runtime
+    owner_node: V4Runtime01MainlineKernel
+    identity: [requestId, pipelineId, skeletonVersion, planHash]
+    semantic_contract:
+      live_runtime_input_only: true
+      debug_module_switch_input: forbidden
+      dry_run_input: forbidden
+      snapshot_replay_input: forbidden
+    allowed_writers: [V4Runtime01MainlineKernel]
+    allowed_readers: [V4Runtime01MainlineKernel]
+    forbidden_writers: [V4Debug12ModuleSwitch, V4Debug13DryRunChain, V4Debug01SnapshotLedger, V4Debug02BusSubscription, V4Debug03SnapshotSubscription]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design
   - resource_id: v4.error.client_projection
+    axis: control
+    verification_gate: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
     resource_kind: side_channel
     lifecycle: v4.error.mainline
     owner_crate: routecodex-v4-error
@@ -291,6 +348,8 @@ resources:
     may_enter_client_body: true
     binding_status: anchored
   - resource_id: v4.control.retry_policy
+    axis: control
+    verification_gate: [v4_error_l2_regression]
     resource_kind: control_contract
     lifecycle: v4.error.mainline
     owner_crate: routecodex-v4-error
@@ -307,6 +366,8 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v4.scope.session
+    axis: control
+    verification_gate: [v4_parity_gate_execution_binding, v4_parity_gate_plane_isolation]
     resource_kind: control_scope
     lifecycle: v4.control.scope
     owner_crate: routecodex-v4-control
@@ -324,6 +385,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.control.stopless_state
+    axis: control
+    verification_gate: [v4_parity_gate_plane_isolation, v4_parity_gate_capability_isolation]
     resource_kind: metadata_center_control_signal
     lifecycle: v4.control.stopless
     owner_crate: routecodex-v4-control
@@ -343,6 +406,8 @@ resources:
     binding_status: design
   # ---------------- config / artifact / secret / debug ----------------
   - resource_id: v4.config.authoring
+    axis: information
+    verification_gate: [v4_config_l2_regression]
     resource_kind: config_authoring
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
@@ -355,6 +420,8 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v4.config.parsed
+    axis: information
+    verification_gate: [v4_config_l2_regression]
     resource_kind: config_information
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
@@ -367,6 +434,8 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v4.config.schema_validated
+    axis: information
+    verification_gate: [v4_config_l2_regression]
     resource_kind: config_information
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
@@ -379,6 +448,8 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v4.config.resource_registry
+    axis: information
+    verification_gate: [v4_config_l2_regression]
     resource_kind: config_information
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
@@ -391,6 +462,8 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v4.config.manifest
+    axis: information
+    verification_gate: [v4_config_l2_regression]
     resource_kind: config_manifest
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
@@ -408,6 +481,8 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v4.artifact.compiled_index
+    axis: information
+    verification_gate: [v4_active_index_verify]
     resource_kind: generated_artifact
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
@@ -424,6 +499,8 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v4.secret.provider_auth_handle
+    axis: information
+    verification_gate: [v4_config_l2_regression]
     resource_kind: secret_handle
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
@@ -436,6 +513,8 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v4.debug.snapshot_ledger
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation, v4_parity_gate_plane_isolation]
     resource_kind: diagnostic
     lifecycle: v4.debug.side_channel
     owner_crate: routecodex-v4-debug
@@ -445,6 +524,7 @@ resources:
       diagnostic_only: true
       live_runtime_input: forbidden
       payload_semantics_strip: forbidden
+      may_enter_metadata_center: false
     allowed_writers: [V4Debug01SnapshotLedger]
     allowed_readers: [developer_diagnostics]
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame, V4ReqChatProcess03Governed]
@@ -452,6 +532,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.module_switch
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation, v4_parity_gate_plane_isolation]
     resource_kind: diagnostic_control
     lifecycle: v4.debug.module_switch
     owner_crate: routecodex-v4-debug
@@ -472,6 +554,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.dry_run_chain
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation, v4_parity_gate_plane_isolation]
     resource_kind: diagnostic_control
     lifecycle: v4.debug.dry_run
     owner_crate: routecodex-v4-debug
@@ -491,6 +575,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.control.record_ledger
+    axis: control
+    verification_gate: [v4_control_l2_regression, v4_parity_gate_plane_isolation]
     resource_kind: control_record
     lifecycle: v4.control.node_records
     owner_crate: routecodex-v4-control
@@ -508,6 +594,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.bus_subscription
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic
     lifecycle: v4.debug.bus
     owner_crate: routecodex-v4-debug
@@ -517,6 +605,7 @@ resources:
       read_only: true
       decision_plane: forbidden
       payload_carrier: forbidden
+      may_enter_metadata_center: false
     allowed_writers: ["V4Debug02BusSubscription::subscribe"]
     allowed_readers: ["V4Debug02BusSubscription::observe"]
     forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
@@ -524,6 +613,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.snapshot_subscription
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic
     lifecycle: v4.debug.snapshot_subscription
     owner_crate: routecodex-v4-debug
@@ -533,6 +624,7 @@ resources:
       diagnostic_only: true
       live_runtime_input: forbidden
       payload_reconstruction: forbidden
+      may_enter_metadata_center: false
     allowed_writers: ["V4Debug03SnapshotSubscription::subscribe"]
     allowed_readers: ["V4Debug03SnapshotSubscription::observe", developer_diagnostics]
     forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
@@ -540,6 +632,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.node.statistics
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic_observability
     lifecycle: v4.node.statistics
     owner_crate: routecodex-v4-control
@@ -550,6 +644,7 @@ resources:
       observability_only: true
       decision_plane: forbidden
       payload_carrier: forbidden
+      may_enter_metadata_center: false
     allowed_writers: ["V4Control03NodeStatistics::record"]
     allowed_readers: [developer_diagnostics, "V4Debug02BusSubscription"]
     forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
@@ -557,6 +652,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.trace_context
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic
     lifecycle: v4.debug.trace
     owner_crate: routecodex-v4-debug
@@ -573,6 +670,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.event_ledger
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic
     lifecycle: v4.debug.ledger
     owner_crate: routecodex-v4-debug
@@ -588,6 +687,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.raw_capture
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic
     lifecycle: v4.debug.raw_capture
     owner_crate: routecodex-v4-debug
@@ -605,6 +706,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.snapshot_session
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic
     lifecycle: v4.debug.snapshot_lifecycle
     owner_crate: routecodex-v4-debug
@@ -621,6 +724,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.dry_run_fixture
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic
     lifecycle: v4.debug.dry_run
     owner_crate: routecodex-v4-debug
@@ -636,6 +741,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.dry_run_execution
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation, v4_parity_gate_plane_isolation]
     resource_kind: diagnostic
     lifecycle: v4.debug.dry_run
     owner_crate: routecodex-v4-runtime
@@ -652,6 +759,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.codex_sample_authorization
+    axis: diagnostic
+    verification_gate: [v4_config_l2_regression, v4_parity_gate_capability_isolation]
     resource_kind: diagnostic_control
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
@@ -667,6 +776,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.payload_budget
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic_side_channel
     lifecycle: v4.debug.sample_retention
     owner_crate: routecodex-v4-debug
@@ -685,6 +796,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.codex_sample_filesystem
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: bounded_diagnostic_artifact
     lifecycle: v4.debug.sample_retention
     owner_crate: routecodex-v4-debug
@@ -700,6 +813,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.observability
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic_side_channel
     lifecycle: v4.debug.observability
     owner_crate: routecodex-v4-runtime
@@ -715,6 +830,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.debug.timing_observability
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic_side_channel
     lifecycle: v4.debug.timing
     owner_crate: routecodex-v4-runtime
@@ -730,6 +847,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.console.terminal_output
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic
     lifecycle: v4.console.projection
     owner_crate: routecodex-v4-server
@@ -745,6 +864,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.server.request_identity
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_execution_binding]
     resource_kind: runtime_identity_counter
     lifecycle: v4.server.request_identity
     owner_crate: routecodex-v4-server
@@ -760,6 +881,8 @@ resources:
     may_enter_client_body: false
     binding_status: design
   - resource_id: v4.error.raw_wire_evidence
+    axis: diagnostic
+    verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: failure_scoped_diagnostic_artifact
     lifecycle: v4.error.raw_wire_evidence
     owner_crate: routecodex-v4-server
