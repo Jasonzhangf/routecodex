@@ -94,13 +94,35 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
   （coverage 103/103）DSH 门禁闭环。
 - 完成标准 2（GAP=0）机器锁补齐：新增 `v4-v3-feature-mapping.yml`
   （V3 function map 全量 64 条 feature 逐条归类到 chain + operator_kind，
-  status=mapped）与 `v4_parity_gate_feature_gap` 机器 gate（10/10 红测），
+  status=mapped）与 `v4_parity_gate_feature_gap` 机器 gate（11/11 红测），
   校验 feature 集合与 v3-function-map 全等、chain 命中 contract
   operator_schema.chains、operator_kind 命中六轴词汇表、gap=0、
-  mapping/parity/contract 三处 coverage 声明一致。contract 原占位
+  mapping/parity/contract 三处 coverage 声明一致，并新增独立冻结锚
+  `v4/contracts/v3-feature-baseline.json`（64 feature_id 全等校验，
+  四源协调塌缩红测 FAIL）。contract 原占位
   `coverage_v3_features total=12` 修正为真实全量 64（model doc 原写 “12 个
   feature” 为未落地的占位数）。gate 已接入 verify:v4-foundation（现 9 gates）
-  与 verify:v4-foundation-red。需 DSH review（feature-gap r1）后更新本台账。
+  与 verify:v4-foundation-red。DSH review feature-gap r1（commit `3572446de`）
+  PASS：`state=completed, verdict=pass, reason=final_verdict_pass`，final 字面
+  `VERDICT: PASS`、无 P0/P1、无“修复后再审”；证据在
+  `~/.dsh/reviews/v4-feature-gap-dsh-r1/`。完成标准 2（GAP=0 三层：阶段
+  26/26 + 资源 103/103 + feature 64/64）DSH 门禁全部闭环。
+- DSH feature-gap r1 三条非阻塞 P2 随访（不阻塞提交，改代码/测试/构建后需
+  重验重审）：
+  - P2-1 协调塌缩盲区：gate 的 actual 从 `v3-function-map.yml` 自推导，
+    四源一致删 feature + 同步减 coverage 计数可静默 PASS；需独立权威锚点或
+    协调塌缩红测。已修复（feature-gap r2，待 review）：新增冻结基线
+    `v4/contracts/v3-feature-baseline.json` 作为独立权威锚，gate 校验
+    v3 feature 集合与基线全等；红测新增 “coordinated collapse across all
+    four sources” 用例（11/11），四源一致删 feature 不改基线必红。
+  - P2-2 gate 只是 count/consistency 锁，不是语义/实现绑定（相对
+    semantic-parity gate 缺 resource/gate/evidence 引用）；提交标题
+    “machine-lock feature GAP=0” 应记为 count/consistency 口径，
+    mapped ≠ implemented。
+  - P2-3 真源歧义：`docs/architecture/function-map.yml`（12 feature 旧表）
+    仍被 `scripts/architecture/verify-server-function-map-boundary.mjs` 使用，
+    与 `v3-function-map.yml`（64 feature 真源）并存，需声明
+    supersession/reconciliation（属 V3 侧文档，动前须确认 supersession 计划）。
 - 已记录 known gaps：target_triple、public_api_hash（派生非真 API 提取）、edge 再冻结、
   workspace gate 修正：runtime/config/control/error 四个 anchored crate 依赖
   `--extern` 注入，只经 build-link test-consumer 编译（CI `v4-active-link`

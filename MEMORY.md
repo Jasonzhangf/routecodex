@@ -5444,3 +5444,49 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
   ETIMEDOUT，已改 `#!/bin/sh` fake（test 3/3 绿）。
 - 后续遇到 DSH 机器 fail 而 final 文本 PASS 时，先查 status reason / `classifyFinal` 是否误判；
   不得直接当 PASS 交付，修复工具后必须重跑 review 并复验 `test-dsh-mcp`。
+
+## 2026-08-15 V4 范围纠正：只做 v4，交付前必须盘 v4 gap（追加确证）
+- 触发：Jason 明确纠正 "在做 v4，v3 关你屁事"，且要求先看 v4 剩余 gap 再谈下一个目标。
+- 反模式：foundation closure 声称 "resource ownership anchored"，但
+  `v4/docs/architecture/v4-resource-operation-map.yml` 实际 37/49 仍 `binding_status: design`；
+  `.appsdk/maps/resource-map.json` 38 条 design，且 `v4.control.metadata_center` YAML=anchored /
+  JSON=design 双源漂移；commit 23766d6cf 尚未跑 DSH review（AGENTS §36 门禁未过）。
+- 规则：v4 任务禁止拿 v3 文档/工作树当依据或交付；宣称 phase 完成前必须核对
+  binding_status 全 anchored、资源双源一致、verification gate 绿、DSH review 结论。
+
+## 2026-08-15 V4 Foundation Truth Lock 闭环（追加确证）
+- 交付链：4bcf7c48b（v4_parity_gate_resource_binding 双源机器锁）→ 9cc33f97e
+  （anchored 加 owner_symbols，gate 校验符号在 owner crate src 声明）→
+  a9417528b（符号收窄到列 0 顶层声明 + pub use，禁 impl method 误绑，红测 7/7）→
+  40cd8cb9f（计划文档红测计数 6/6→7/7）→ 8df376605（review 台账补录）。
+- 终态：49 资源 17 anchored / 32 design，YAML 与 .appsdk resource-map 双源一致；
+  skeleton-plan.contract.json 三个 checkpoint owner 改为 runtime 真实符号并重算
+  plan_hash（17c7d0fa…）；verify:v4-foundation 7/7；cargo workspace + test-consumer
+  （control 15/error 23/config 9/runtime 12）绿；DSH review r5 VERDICT: PASS
+  （~/.dsh/reviews/v4-foundation-truth-lock-dsh-r5/）。claim 已 closed。
+- 经验：DSH FAIL 轮次必须修 P1/P2 后重验重审；文档计数/台账与 gate 同步是
+  P2 高频来源；符号绑定类 gate 必须用"列 0 顶层声明 + pub use"，不能用
+  impl/method 文本出现；混入 V3 的 commit 用 `git reset --soft` + 逐路径
+  `git commit -- <path>` 修正，V3 工作树内容不受影响。
+
+## 2026-08-15 V4 Feature-GAP 机器锁闭环（追加确证）
+- 完成标准 2（GAP=0）三层机器锁齐：阶段 26/26、资源 103/103、
+  feature 64/64（commit 3572446de，v4-v3-feature-mapping.yml +
+  verify-v4-feature-gap.mjs，10/10 红测）；contract 占位 total=12 修正为 64。
+- DSH feature-gap r1 VERDICT: PASS（无 P0/P1）；三条非阻塞 P2：协调塌缩
+  盲区（actual 自推导，四源一致删可静默 PASS）、count-only 非语义绑定、
+  docs/architecture/function-map.yml 与 v3-function-map.yml 真源歧义待
+  supersession 声明。P2 修代码/测试后旧 PASS 失效需重审。
+- V4 剩余真实 gap（Jason 要求先盘 v4 gap 再谈新目标）：实现层资源
+  32/49 仍 design（17/49 anchored）；4 个 anchored crate 未纳入
+  cargo test --workspace（仅 build-link）；target_triple/public_api_hash/
+  edge 再冻结未做。
+
+## 2026-08-15 V4 Feature-GAP 协调塌缩盲区修复（追加确证）
+- 触发：DSH feature-gap r1 P2-1 —— gate 的 actual 从 v3-function-map.yml
+  自推导，四源一致删 feature 且同步减 coverage 计数可静默 PASS。
+- 修复：新增 `v4/contracts/v3-feature-baseline.json` 独立冻结锚（64
+  feature_id），gate 校验 v3 feature 集合与基线全等；红测新增 coordinated
+  collapse 用例（11/11）。改代码后旧 DSH PASS 失效，需重审后才可交付。
+- 经验：count/consistency 类 gate 必须有独立权威锚（frozen baseline）而非
+  仅从同一来源自推导 actual；协调塌缩是红测必测类，防“一致删减”静默漂移。

@@ -3,6 +3,7 @@ status: active
 owner_feature_id: v4.semantic_parity
 canonical_inputs:
   - docs/architecture/v3-function-map.yml
+  - v4/contracts/v3-feature-baseline.json
   - v4/docs/architecture/v4-v3-abstraction-coverage.yml
   - v4/docs/architecture/v3-v4-semantic-parity-map.yml
   - v4/contracts/pipeline-abstraction.contract.json
@@ -15,6 +16,9 @@ notes: |
   （request/response/error/config/lifecycle/diagnostic）。
   status=mapped 表示抽象层 operator 注册已建立（不表示 V4 已实现）；
   status=gap 表示尚无 operator 映射，机器 gate 禁止 gap>0。
+  `v3-feature-baseline.json` 是独立冻结锚：v3 function map 的 feature 集合
+  必须与基线全等；四源一致删 feature 而不改基线会触发 gate FAIL
+  （协调塌缩盲区已由红测 11/11 锁定）。
 coverage:
   features: {total: 64, mapped: 64, gap: 0}
 features:

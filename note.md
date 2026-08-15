@@ -35526,3 +35526,58 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - r4 P2 非阻塞三条：rustc ABI 与 fixture rlib 耦合（建议 pin toolchain，当前 1.97.1 本地绿）；
   lib.rs compile_fail doctest 仅文档（建议重标，§9.1/MEMORY 已说明）；verification-map 与 CI
   命令名耦合（行为已覆盖）。无 P0/P1，无“修复后再审”要求。
+
+# 2026-08-15 V4 Foundation Closure：Phase 6/7/8 落地（未提交）
+- Phase 6 Config v2：`v4/crates/routecodex-v4-config/src/v2.rs` roles/nodes/selection_groups/
+  capabilities/resource_permissions/checkpoints -> ConfigManifestV2（plan/checkpoint/artifact 三
+  hash + verify）。修 validate 的 SecondTerminal/SecondKernel 计数 bug（原按整链节点数误判）。
+  `l2_config_v2.rs` 9 测试（正：compile/verify/registry/determinism；红：version/multi-active/
+  非相邻/checkpoint 无 owner/capability 越权/hash tamper via verify_against）。config test-consumer
+  15+9=24 绿；function-map/project.json 同步。
+- Phase 7 MetadataCenter 收口：runtime `ExecutionContext` 新增 scope + ControlView.metadata
+  （MetadataCenter owner），runtime 依赖 routecodex-v4-control（Active link）。新增 3 红测：
+  register/consume/release 生命周期、scope 隔离（ScopeMismatch）、跨 request 复用 fail。
+  runtime test-consumer 12 绿；verification-map/mainline-call-map/project.json/CI test.yml 同步。
+- Phase 8 Responses Direct compat slice：`v4/docs/architecture/v4-responses-direct-compatibility-slice.yml`
+  六面（request/response/error/streaming/lifecycle/audit）34 条，unexplained_diff=0；
+  gate `scripts/architecture/verify-v4-responses-direct-compat.mjs`，注册 verification-map +
+  package.json verify:v4-foundation（6/6 绿）。
+- 全量验证绿：cargo fmt --check；workspace test（build-link 17 + skeleton 7）；test-consumer
+  edge 11/control 15/error 23/config 24/runtime 12；verify:v4-foundation 6/6；
+  verify-v4-active-link OK；appsdk verify --admission v4 contract_bound。
+- 未提交：仅 v4 + scripts/architecture/verify-v4-* + package.json + .github/workflows/test.yml；
+  V3 dirty 工作树不裹带。下一步：核对 staged 文件 -> 提交 -> DSH review 门禁。
+- 2026-08-15 Truth Lock 收尾：提交 4bcf7c48b/9cc33f97e/a9417528b/40cd8cb9f/8df376605；
+  DSH r1 FAIL（无符号绑定）→ r2 FAIL（正则启发式可绑 method）→ r3 PASS → r4 PASS →
+  r5 PASS；期间误把 V3 staged 文件卷入 7d5978988，已 `git reset --soft` 拆掉，
+  用 `git commit -- <path>` 逐路径重提，V3 工作树零改动；active-index 为本地生成
+  物（gitignored），plan_hash 变更后已 gen-index 重生成。claim 关闭，下一步进
+  Relay/Continuation slice。
+
+# 2026-08-15 V4 Feature-GAP machine gate（commit 3572446de）
+- 新增 `v4/docs/architecture/v4-v3-feature-mapping.yml`（V3 function map 全量
+  64 feature 逐条 chain + operator_kind + status=mapped）+ gate
+  `scripts/architecture/verify-v4-feature-gap.mjs`（集合全等/chain/kind/status/
+  coverage 三源一致，10/10 红测）；修正 contract 占位 total=12 -> 64；
+  接入 verify:v4-foundation（9 gates）与 verify:v4-foundation-red。
+- 验证：verify:v4-foundation 9/9；red 2 gate 各 10/10；appsdk admission
+  contract_bound；cargo test --workspace 绿。DSH feature-gap r1 PASS
+  （~/.dsh/reviews/v4-feature-gap-dsh-r1/），无 P0/P1；3 条非阻塞 P2：
+  协调塌缩盲区 / count-only 非语义绑定 / function-map.yml 真源歧义。
+- 剩余 v4 gap：32/49 资源仍 design（实现层 anchored 仅 17/49，C3 字面未满）；
+  workspace gate 不统一（config/control/error/runtime 仅 build-link 编译，
+  未入 cargo test --workspace）；target_triple/public_api_hash/edge 再冻结未做；
+  P2 三条随访；台账已补、MEMORY 追加。
+
+# 2026-08-15 V4 Feature-GAP gate 协调塌缩盲区修复（P2-1）
+- DSH feature-gap r1 三条 P2 中的 P2-1（协调塌缩盲区：gate actual 从
+  v3-function-map.yml 自推导，四源一致删 feature + 同步减 coverage 计数可
+  静默 PASS）已修复：新增独立冻结锚 `v4/contracts/v3-feature-baseline.json`
+  （64 feature_id 全等校验），gate 校验 v3 feature 集合与基线全等；红测新增
+  “coordinated collapse across all four sources” 用例，现 11/11。
+- 验证：verify:v4-foundation 9/9；verify:v4-foundation-red（feature-gap
+  11/11 + resource-coverage 10/10）；appsdk verify --admission v4
+  contract_bound；cargo test --workspace 绿。改代码/测试后旧 PASS 失效，
+  需 feature-gap r2 DSH 重审（未跑）。
+- P2-2（count-only 非语义绑定）文档口径已记录；P2-3（function-map.yml 旧表
+  真源歧义）属 V3 侧 supersession，未动 V3。

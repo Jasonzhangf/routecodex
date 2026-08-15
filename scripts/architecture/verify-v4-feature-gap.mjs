@@ -6,11 +6,14 @@
  * (v4-pipeline-abstraction-model.md completeness gate 2):
  * 1. V3 function map features and v4-v3-feature-mapping.yml are exact sets
  *    (no missing / extra / duplicate).
- * 2. Every feature has a chain from the contract operator_schema chains and at
+ * 2. The actual v3 feature set must equal the frozen independent baseline
+ *    (v4/contracts/v3-feature-baseline.json): coordinated removal across all
+ *    four live sources without an explicit baseline change must fail.
+ * 3. Every feature has a chain from the contract operator_schema chains and at
  *    least one operator_kind from the six-axis operator vocabulary
  *    (v4-v3-abstraction-coverage.yml kind_rules values).
- * 3. status=gap counts as GAP; GAP must be 0 before entering implementation.
- * 4. coverage.features in the mapping file, parity map coverage.features, and
+ * 4. status=gap counts as GAP; GAP must be 0 before entering implementation.
+ * 5. coverage.features in the mapping file, parity map coverage.features, and
  *    pipeline-abstraction.contract.json evaluation.coverage_v3_features all
  *    agree with the actual v3 feature count and gap=0.
  *
@@ -40,13 +43,33 @@ const readYaml = (file) => {
   }
 };
 
-function validate(v3Features, mapping, coverage, parity, contract) {
+function validate(v3Features, mapping, coverage, parity, contract, baseline) {
   const failures = [];
   const v3Ids = (v3Features ?? []).map((feature) => feature.feature_id);
   const entries = mapping.features ?? [];
   const mapIds = entries.map((entry) => entry.feature_id);
   const v3Set = new Set(v3Ids);
   const actual = v3Ids.length;
+
+  const baselineIds = baseline?.feature_ids ?? [];
+  const baselineSet = new Set(baselineIds);
+  if (baseline?.total !== baselineIds.length || baselineIds.length === 0) {
+    failures.push(
+      `v3 feature baseline inconsistent (total=${baseline?.total}, ids=${baselineIds.length}; must match and be non-empty)`,
+    );
+  } else if (baselineSet.size !== baselineIds.length) {
+    failures.push('v3 feature baseline contains duplicate feature_id');
+  }
+  for (const id of baselineSet) {
+    if (!v3Set.has(id)) {
+      failures.push(`frozen baseline feature ${id} missing from v3 function map (coordinated collapse detected)`);
+    }
+  }
+  for (const id of v3Set) {
+    if (!baselineSet.has(id)) {
+      failures.push(`v3 function map feature ${id} not in frozen baseline`);
+    }
+  }
 
   if (new Set(mapIds).size !== mapIds.length) {
     failures.push('feature mapping contains duplicate feature_id');
@@ -123,15 +146,16 @@ function loadInputs() {
   const coverage = readYaml('v4/docs/architecture/v4-v3-abstraction-coverage.yml');
   const parity = readYaml('v4/docs/architecture/v3-v4-semantic-parity-map.yml');
   const contract = readJson('v4/contracts/pipeline-abstraction.contract.json');
-  if (!v3Map || !mapping || !coverage || !parity || !contract) {
+  const baseline = readJson('v4/contracts/v3-feature-baseline.json');
+  if (!v3Map || !mapping || !coverage || !parity || !contract || !baseline) {
     console.error('[v4_parity_gate_feature_gap] FAIL: input source unreadable');
     process.exit(1);
   }
-  return { v3Features: v3Map.features ?? [], mapping, coverage, parity, contract };
+  return { v3Features: v3Map.features ?? [], mapping, coverage, parity, contract, baseline };
 }
 
 function runSelfTest() {
-  const { v3Features, mapping, coverage, parity, contract } = loadInputs();
+  const { v3Features, mapping, coverage, parity, contract, baseline } = loadInputs();
   const clone = (value) => JSON.parse(JSON.stringify(value));
 
   const cases = [
@@ -165,6 +189,16 @@ function runSelfTest() {
     ['new v3 feature unmapped', ({ v3Features: v }) => {
       v.push({ feature_id: 'v3.new_unmapped_feature' });
     }],
+    ['coordinated collapse across all four sources', ({ v3Features: v, mapping: m, parity: p, contract: c }) => {
+      const removed = v[0].feature_id;
+      v.splice(0, 1);
+      m.features = m.features.filter((entry) => entry.feature_id !== removed);
+      m.coverage.features.total -= 1;
+      m.coverage.features.mapped -= 1;
+      p.coverage.features.total -= 1;
+      p.coverage.features.mapped -= 1;
+      c.evaluation.coverage_v3_features.total -= 1;
+    }],
   ];
 
   let failed = 0;
@@ -175,9 +209,17 @@ function runSelfTest() {
       coverage: clone(coverage),
       parity: clone(parity),
       contract: clone(contract),
+      baseline: clone(baseline),
     };
     mutate(inputs);
-    const failures = validate(inputs.v3Features, inputs.mapping, inputs.coverage, inputs.parity, inputs.contract);
+    const failures = validate(
+      inputs.v3Features,
+      inputs.mapping,
+      inputs.coverage,
+      inputs.parity,
+      inputs.contract,
+      inputs.baseline,
+    );
     if (failures.length === 0) {
       console.error(`[v4_parity_gate_feature_gap] red self-test ${name}: expected FAIL, got PASS`);
       failed += 1;
@@ -196,8 +238,8 @@ if (process.argv.includes('--red-self-test')) {
   process.exit(0);
 }
 
-const { v3Features, mapping, coverage, parity, contract } = loadInputs();
-const failures = validate(v3Features, mapping, coverage, parity, contract);
+const { v3Features, mapping, coverage, parity, contract, baseline } = loadInputs();
+const failures = validate(v3Features, mapping, coverage, parity, contract, baseline);
 if (failures.length > 0) {
   console.error('[v4_parity_gate_feature_gap] FAIL');
   console.error(failures.join('\n'));
