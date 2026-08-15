@@ -39,6 +39,7 @@ async fn static_serve(
         "routes.html" => (crate::STATIC_ROUTES_HTML, "text/html; charset=utf-8"),
         "providers.html" => (crate::STATIC_PROVIDERS_HTML, "text/html; charset=utf-8"),
         "app.js" => (crate::STATIC_APP_JS, "text/javascript; charset=utf-8"),
+        "app.embedded.txt" => (crate::STATIC_APP_JS, "text/javascript; charset=utf-8"),
         "styles.css" => (crate::STATIC_STYLE_CSS, "text/css; charset=utf-8"),
         _ => {
             return Response::builder()
