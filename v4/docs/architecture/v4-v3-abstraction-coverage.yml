@@ -1,0 +1,184 @@
+version: 1
+status: active
+owner_feature_id: v4.semantic_parity
+canonical_inputs:
+  - docs/architecture/v3-resource-operation-map.yml
+  - v4/contracts/pipeline-abstraction.contract.json
+  - v4/docs/architecture/v4-pipeline-abstraction-model.md
+notes: |
+  六轴抽象覆盖矩阵（machine truth）：对 V3 全部 103 个资源逐条归类到
+  information / data / control / diagnostic 四个可检查轴，并登记每个资源的
+  operator_kind。axis 分类规则见 v4-pipeline-abstraction-model.md；本文件是
+  ABS-GATE-01（v3_resource_coverage）的唯一真源，由
+  v4_parity_gate_v3_resource_coverage 机器 gate 校验：
+  - 覆盖 V3 resource map 全部 103 条，无缺失、无额外、无重复；
+  - 每条 axis ∈ {information, data, control, diagnostic}，operator_kind 非空，
+    status 不等于 unclassified；
+  - 每条 axis/operator_kind 必须命中 kind_rules 的 kind 级规则；
+  - 轴计数必须与 pipeline-abstraction.contract.json evaluation 声明一致
+    （information 23 / data 22 / control 44 / diagnostic 14 = 103）。
+axis_counts:
+  information: 23
+  data: 22
+  control: 44
+  diagnostic: 14
+kind_rules:
+  config_authoring: [information, config_compiler]
+  config_source_identity: [information, config_compiler]
+  config_contract: [information, config_compiler]
+  config_manifest: [information, config_compiler]
+  config_truth: [information, config_compiler]
+  config_transport_interval: [information, config_compiler]
+  side_channel_config: [information, config_compiler]
+  resource_registry: [information, config_compiler]
+  provider_error_policy_manifest: [information, config_compiler]
+  client_catalog_projection: [information, catalog]
+  client_catalog_source_refs: [information, catalog]
+  secret_handle: [information, secret_handle]
+  verification_manifest: [information, verification]
+  compiled_capability_truth: [information, capability_truth]
+  compiled_backend_binding: [information, capability_truth]
+  generated_build_artifact: [information, build_artifact]
+  generated_reusable_build_cache: [information, build_artifact]
+  installed_runtime_executable: [information, build_artifact]
+  normal_payload: [data, normalize]
+  protocol_context: [data, protocol_parse]
+  provider_wire: [data, wire_build]
+  provider_response: [data, raw_parse]
+  transport: [data, transport_codec]
+  client_transport_projection: [data, transport_codec]
+  client_transport_handle: [data, transport_codec]
+  transport_byte_chunk: [data, transport_codec]
+  transport_decoded_frame: [data, transport_codec]
+  transport_validated_frame_stream: [data, transport_codec]
+  transport_encoded_chunk: [data, transport_codec]
+  server_dispatch_projection: [data, semantic_projection]
+  projection_resource: [data, semantic_projection]
+  protocol_projection_resource: [data, semantic_projection]
+  provider_semantic_projection: [data, semantic_projection]
+  side_channel: [control, typed_side_channel]
+  control_contract: [control, typed_side_channel]
+  control: [control, typed_side_channel]
+  metadata_center_control_signal: [control, typed_side_channel]
+  typed_route_fact_carrier: [control, typed_side_channel]
+  error_projection_plan: [control, typed_side_channel]
+  borrowed_view: [control, typed_side_channel]
+  runtime_handle: [control, typed_side_channel]
+  runtime_control_truth: [control, typed_side_channel]
+  transient_runtime_cache: [control, typed_side_channel]
+  runtime_control_channel: [control, typed_side_channel]
+  runtime_control_lock: [control, typed_side_channel]
+  transient_runtime_control_plan: [control, typed_side_channel]
+  internal_control_state: [control, typed_side_channel]
+  runtime_identity_counter: [control, typed_side_channel]
+  listener_scoped_concurrency_gate: [control, typed_side_channel]
+  process_local_control_side_channel: [control, typed_side_channel]
+  diagnostic: [diagnostic, diagnostic_observer]
+  diagnostic_side_channel: [diagnostic, diagnostic_observer]
+  diagnostic_control: [diagnostic, diagnostic_observer]
+  bounded_diagnostic_artifact: [diagnostic, diagnostic_observer]
+  failure_scoped_diagnostic_artifact: [diagnostic, diagnostic_observer]
+resources:
+  - {resource_id: v3.config.file_source, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.config.source_identity, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.config.authoring_parsed, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.config.schema_validated, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.config.resource_registry, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.config.published_manifest, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.provider_error.policy_manifest, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.models.capability_catalog, axis: information, operator_kind: catalog, status: classified}
+  - {resource_id: v3.models.route_group_scoped_refs, axis: information, operator_kind: catalog, status: classified}
+  - {resource_id: v3.secret.provider_auth_handle, axis: information, operator_kind: secret_handle, status: classified}
+  - {resource_id: v3.provider.responses_transport_capability, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.entry_protocol.binding_registry, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.config.hub_pipeline_declarations, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.config.route_pool_match_declarations, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.hub.runtime_resource_declarations, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.protocol_conversion.field_parity_contract, axis: information, operator_kind: verification, status: classified}
+  - {resource_id: v3.live_provider_compat.matrix, axis: information, operator_kind: verification, status: classified}
+  - {resource_id: v3.web_search.execution_mode, axis: information, operator_kind: capability_truth, status: classified}
+  - {resource_id: v3.web_search.backend_binding, axis: information, operator_kind: capability_truth, status: classified}
+  - {resource_id: v3.config.http_sse_keepalive_interval, axis: information, operator_kind: config_compiler, status: classified}
+  - {resource_id: v3.build.test_artifact_store, axis: information, operator_kind: build_artifact, status: classified}
+  - {resource_id: v3.build.dependency_cache, axis: information, operator_kind: build_artifact, status: classified}
+  - {resource_id: v3.global_binary_install, axis: information, operator_kind: build_artifact, status: classified}
+  - {resource_id: v3.request.protocol_context, axis: data, operator_kind: protocol_parse, status: classified}
+  - {resource_id: v3.request.normal_payload, axis: data, operator_kind: normalize, status: classified}
+  - {resource_id: v3.provider.responses_wire_payload, axis: data, operator_kind: wire_build, status: classified}
+  - {resource_id: v3.provider.transport_request, axis: data, operator_kind: transport_codec, status: classified}
+  - {resource_id: v3.response.provider_raw, axis: data, operator_kind: raw_parse, status: classified}
+  - {resource_id: v3.response.client_payload, axis: data, operator_kind: normalize, status: classified}
+  - {resource_id: v3.server.validated_http_input, axis: data, operator_kind: transport_codec, status: classified}
+  - {resource_id: v3.request.provider_semantic, axis: data, operator_kind: normalize, status: classified}
+  - {resource_id: v3.hub.provider_wire_payload, axis: data, operator_kind: wire_build, status: classified}
+  - {resource_id: v3.hub.response_semantic, axis: data, operator_kind: normalize, status: classified}
+  - {resource_id: v3.openai_chat.client_sse_stream, axis: data, operator_kind: transport_codec, status: classified}
+  - {resource_id: v3.responses.inbound_websocket_client_connection, axis: data, operator_kind: transport_codec, status: classified}
+  - {resource_id: v3.responses.inbound_websocket_frame_projection, axis: data, operator_kind: transport_codec, status: classified}
+  - {resource_id: v3.gemini.client_sse_stream, axis: data, operator_kind: transport_codec, status: classified}
+  - {resource_id: v3.sse.transport_raw_chunk, axis: data, operator_kind: transport_codec, status: classified}
+  - {resource_id: v3.sse.transport_decoded_frame, axis: data, operator_kind: transport_codec, status: classified}
+  - {resource_id: v3.sse.transport_validated_frame_stream, axis: data, operator_kind: transport_codec, status: classified}
+  - {resource_id: v3.sse.transport_encoded_chunk, axis: data, operator_kind: transport_codec, status: classified}
+  - {resource_id: v3.server.endpoint_binding_projection, axis: data, operator_kind: semantic_projection, status: classified}
+  - {resource_id: v3.request.response_projection_context, axis: data, operator_kind: semantic_projection, status: classified}
+  - {resource_id: v3.sse.protocol_semantic_projection, axis: data, operator_kind: semantic_projection, status: classified}
+  - {resource_id: v3.request.selected_provider_model_bound, axis: data, operator_kind: semantic_projection, status: classified}
+  - {resource_id: v3.server.listener_set, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.route.request_facts, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.route.selection_plan, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.route.opaque_target, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.target.candidate_set, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.target.concrete_provider, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.execution.protocol_decision, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.responses_direct.policy, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.provider.responses_websocket_connection, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.error.chain, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.hub.entry_protocol, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.hub.continuation_ownership, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.hub.execution_plan, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.hub.resolved_target, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.hub.provider_protocol, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.continuation.remote_binding, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.continuation.local_context_truth, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.metadata.runtime_control_stopless, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.hub.tool_governance_truth, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.hub.static_hook_registry, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.hub.current_node_borrowed_view, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.error.internal_identity, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.error.external_link, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.error.source, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.error.classified, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.error.action_plan, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.error.exhaustion_decision, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.error.execution_decision, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.error.client_projection, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.provider.failure_session_scope, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.provider.health_state, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.provider.global_subscription_health, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.provider.availability_projection, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.lifecycle.instance_declaration, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.lifecycle.pid_cache, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.lifecycle.control_channel, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.lifecycle.operation_lock, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.lifecycle.restart_plan, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.route.current_turn_facts, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.servertool.state_machine_control, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.server.request_identity, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.server.responses_session_admission, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.error.provider_action_gate, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.protocol.pending_projection, axis: control, operator_kind: typed_side_channel, status: classified}
+  - {resource_id: v3.debug.artifact, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.debug.trace_context, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.debug.event_ledger, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.debug.raw_capture, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.debug.snapshot_session, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.debug.dry_run_fixture, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.debug.dry_run_execution, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.console.terminal_output, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.runtime.responses_observability, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.runtime.responses_timing_observability, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.debug.codex_sample_authorization, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.debug.payload_budget, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.debug.codex_sample_filesystem, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}
+  - {resource_id: v3.error.raw_wire_evidence, axis: diagnostic, operator_kind: diagnostic_observer, status: classified}

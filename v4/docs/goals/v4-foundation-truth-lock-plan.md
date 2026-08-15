@@ -55,6 +55,12 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
   红测计数未同步 7/7；由 `40cd8cb9f` 修正。
 - DSH review r4（commit `40cd8cb9f`）PASS（无 P0/P1），仅提示 review 轮次
   台账需补录；本行即补录 r3/r4 结果，随后 r5 复核。
+- 完成标准 1（coverage 103/103）机器化：新增
+  `v4/docs/architecture/v4-v3-abstraction-coverage.yml`（103 条六轴归类，
+  information 23 / data 22 / control 44 / diagnostic 14）与
+  `v4_parity_gate_v3_resource_coverage` 机器 gate（4/4 红测），校验
+  v3 resource map 全量覆盖、kind_rules 一致性、轴计数与
+  pipeline-abstraction.contract.json / parity map 声明一致。
 - 已记录 known gaps：target_triple、public_api_hash（派生非真 API 提取）、edge 再冻结、
   workspace gate 修正：runtime/config/control/error 四个 anchored crate 依赖
   `--extern` 注入，只经 build-link test-consumer 编译（CI `v4-active-link`
