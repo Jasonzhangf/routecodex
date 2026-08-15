@@ -25,6 +25,12 @@ bundle digest: sha256:1c91fcc629f38663d0f7d3eaa185798bd7b56f66830b7d516227eb3a6d
 bundle manifest digest: sha256:2b82b87ef07bc31dcb77875f9d3f0405625f963709daed828b64f8eaa8965e95
 ```
 
+The pinned binary is published as `Jasonzhangf/appsdk` release tag `v0.1.1` asset
+`appsdk-0.1.1-macos-arm64`; that asset is byte-identical to the digest in
+`sdk.lock` and to the globally installed binary (`sha256` verified at pin time).
+The release tag `v0.1.1` does not change the binary's self-reported version,
+which remains `appsdk 0.1.0 (rust)`.
+
 ## Verification
 
 ```text
