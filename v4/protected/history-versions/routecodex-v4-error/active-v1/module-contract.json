@@ -1,0 +1,66 @@
+{
+  "active_artifact": "active/lib/routecodex-v4-error/**",
+  "artifact_paths": [
+    "libroutecodex_v4_error.rlib"
+  ],
+  "build": {
+    "args": [
+      "-c",
+      "cargo build --release -p routecodex-v4-error && mkdir -p generated/modules/routecodex-v4-error/lib && cp target/release/deps/libroutecodex_v4_error-*.rlib generated/modules/routecodex-v4-error/lib/libroutecodex_v4_error.rlib"
+    ],
+    "program": "sh",
+    "working_directory": "."
+  },
+  "contract_paths": [
+    "contracts/node-graph.contract.json",
+    "contracts/pipeline-abstraction.contract.json",
+    "contracts/debug-subscription.contract.json",
+    "contracts/test-layers.contract.json",
+    "contracts/data-control-boundary.contract.json",
+    "contracts/records/**"
+  ],
+  "dependency_modules": [
+    "routecodex-v4-base-node"
+  ],
+  "generated_outputs": [
+    "generated/error/**"
+  ],
+  "module_id": "routecodex-v4-error",
+  "owned_paths": [
+    "crates/routecodex-v4-error/**"
+  ],
+  "regression": {
+    "allow_skipped": false,
+    "command": {
+      "args": [
+        "test",
+        "-p",
+        "routecodex-v4-error",
+        "--test",
+        "l2_error"
+      ],
+      "program": "cargo",
+      "working_directory": "."
+    },
+    "input_paths": [
+      "crates/routecodex-v4-error/src/lib.rs",
+      "crates/routecodex-v4-error/tests/l2_error.rs",
+      "contracts/pipeline-abstraction.contract.json",
+      "contracts/test-layers.contract.json",
+      "contracts/data-control-boundary.contract.json"
+    ],
+    "minimum_test_count": 18,
+    "ordinary_mode_after_freeze": "disabled",
+    "reenable_on": [
+      "source_change",
+      "contract_change",
+      "public_api_change",
+      "artifact_change",
+      "dependency_change"
+    ],
+    "required_before_freeze": true,
+    "suite_id": "v4-error-l2-regression"
+  },
+  "source_owner": "routecodex-v4-error",
+  "stage": "frozen"
+}

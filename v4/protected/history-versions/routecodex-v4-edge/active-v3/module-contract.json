@@ -1,0 +1,80 @@
+{
+  "active_artifact": "active/lib/routecodex-v4-edge/**",
+  "artifact_paths": [
+    "libroutecodex_v4_edge.rlib"
+  ],
+  "build": {
+    "args": [
+      "-c",
+      "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-edge --deps routecodex-v4-base-node --out generated/modules/routecodex-v4-edge/lib/libroutecodex_v4_edge.rlib"
+    ],
+    "program": "sh",
+    "working_directory": "."
+  },
+  "contract_paths": [
+    "contracts/node-graph.contract.json",
+    "contracts/pipeline-abstraction.contract.json",
+    "contracts/debug-subscription.contract.json",
+    "contracts/test-layers.contract.json",
+    "contracts/data-control-boundary.contract.json",
+    "contracts/records/**"
+  ],
+  "dependency_modules": [
+    "routecodex-v4-base-node"
+  ],
+  "generated_outputs": [
+    "generated/edge/**"
+  ],
+  "module_id": "routecodex-v4-edge",
+  "owned_paths": [
+    "crates/routecodex-v4-edge/**"
+  ],
+  "regression": {
+    "allow_skipped": false,
+    "command": {
+      "args": [
+        "run",
+        "--quiet",
+        "--release",
+        "-p",
+        "routecodex-v4-build-link",
+        "--",
+        "test-consumer",
+        "--root",
+        ".",
+        "--consumer",
+        "routecodex-v4-edge",
+        "--deps",
+        "routecodex-v4-base-node"
+      ],
+      "program": "cargo",
+      "working_directory": "."
+    },
+    "input_paths": [
+      "crates/routecodex-v4-edge/src/lib.rs",
+      "crates/routecodex-v4-edge/tests/l1_edge.rs",
+      "contracts/node-graph.contract.json",
+      "contracts/pipeline-abstraction.contract.json",
+      "contracts/test-layers.contract.json"
+    ],
+    "minimum_test_count": 11,
+    "ordinary_mode_after_freeze": "disabled",
+    "reenable_on": [
+      "source_change",
+      "contract_change",
+      "public_api_change",
+      "artifact_change",
+      "dependency_change"
+    ],
+    "required_before_freeze": true,
+    "suite_id": "v4-edge-l1-regression"
+  },
+  "source_owner": "routecodex-v4-edge",
+  "stage": "frozen",
+  "version_base": {
+    "base_artifact_hash": "sha256:1f800dc90551ae1e3ca11b34560f9c967ef68b65eba0956f5f624bfff93cf3af",
+    "base_source_commit": "8eac65195",
+    "new_active_version": "active-v2",
+    "previous_active_version": "active-v1"
+  }
+}

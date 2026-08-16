@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "modules": [
+    {
+      "module_id": "routecodex-v4-governance",
+      "status": "active",
+      "owner": "routecodex-v4-governance",
+      "owned_paths": [".appsdk/**", "contracts/**"],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "crates/**"],
+      "verification_gates": ["contract_valid", "sdk_pinned", "record_graph", "fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "routecodex-v4-build-link",
+      "status": "active",
+      "owner": "routecodex-v4-build-link",
+      "owned_paths": ["crates/routecodex-v4-build-link/**"],
+      "forbidden_paths": [".appsdk/**", "active/lib/**", "protected/**", "generated/**"],
+      "verification_gates": ["contract_valid", "record_graph"]
+    },
+    {
+      "module_id": "routecodex-v4-base-node",
+      "status": "active",
+      "owner": "routecodex-v4-base-node",
+      "owned_paths": ["crates/routecodex-v4-base-node/**"],
+      "forbidden_paths": [".appsdk/**", "active/lib/**", "protected/**", "generated/**"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity", "regression_report"]
+    },
+    {
+      "module_id": "routecodex-v4-edge",
+      "status": "active",
+      "owner": "routecodex-v4-edge",
+      "owned_paths": ["crates/routecodex-v4-edge/**"],
+      "forbidden_paths": [".appsdk/**", "active/lib/**", "protected/**", "generated/**"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity", "regression_report"]
+    },
+    {
+      "module_id": "routecodex-v4-control",
+      "status": "active",
+      "owner": "routecodex-v4-control",
+      "owned_paths": ["crates/routecodex-v4-control/**"],
+      "forbidden_paths": [".appsdk/**", "active/lib/**", "protected/**", "generated/**"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity", "regression_report"]
+    },
+    {
+      "module_id": "routecodex-v4-error",
+      "status": "active",
+      "owner": "routecodex-v4-error",
+      "owned_paths": ["crates/routecodex-v4-error/**"],
+      "forbidden_paths": [".appsdk/**", "active/lib/**", "protected/**", "generated/**"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity", "regression_report"]
+    },
+    {
+      "module_id": "routecodex-v4-config",
+      "status": "active",
+      "owner": "routecodex-v4-config",
+      "owned_paths": ["crates/routecodex-v4-config/**"],
+      "forbidden_paths": [".appsdk/**", "active/lib/**", "protected/**", "generated/**"],
+      "verification_gates": ["contract_valid", "record_graph"]
+    },
+    {
+      "module_id": "routecodex-v4-skeleton",
+      "status": "active",
+      "owner": "routecodex-v4-skeleton",
+      "owned_paths": ["crates/routecodex-v4-skeleton/**"],
+      "forbidden_paths": [".appsdk/**", "active/lib/**", "protected/**", "generated/**"],
+      "verification_gates": ["contract_valid", "record_graph"]
+    },
+    {
+      "module_id": "routecodex-v4-runtime",
+      "status": "active",
+      "owner": "routecodex-v4-runtime",
+      "owned_paths": ["crates/routecodex-v4-runtime/**"],
+      "forbidden_paths": [".appsdk/**", "active/lib/**", "protected/**", "generated/**"],
+      "verification_gates": ["contract_valid", "record_graph"]
+    }
+  ]
+}

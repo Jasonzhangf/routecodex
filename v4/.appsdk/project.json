@@ -38,9 +38,14 @@
     ],
     "protected_root": "protected/**",
     "record_contracts": [
+      "contracts/records/worktree-record.schema.json",
+      "contracts/records/reproduction-record.schema.json",
       "contracts/records/evidence-record.schema.json",
+      "contracts/records/fix-candidate-record.schema.json",
       "contracts/records/goal-clarification-record.schema.json",
       "contracts/records/review-record.schema.json",
+      "contracts/records/effectiveness-record.schema.json",
+      "contracts/records/merge-record.schema.json",
       "contracts/records/promotion-record.schema.json",
       "contracts/records/regression-report.schema.json",
       "contracts/records/freeze-record.schema.json",
@@ -235,7 +240,13 @@
         "suite_id": "v4-base-node-l0-regression"
       },
       "source_owner": "routecodex-v4-base-node",
-      "stage": "frozen"
+      "stage": "source_implemented",
+      "version_base": {
+        "base_artifact_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
+        "base_source_commit": "fac43e278",
+        "new_active_version": "active-v2",
+        "previous_active_version": "active-v1"
+      }
     },
     {
       "active_artifact": "active/lib/routecodex-v4-edge/**",
@@ -309,7 +320,13 @@
         "suite_id": "v4-edge-l1-regression"
       },
       "source_owner": "routecodex-v4-edge",
-      "stage": "frozen"
+      "stage": "source_implemented",
+      "version_base": {
+        "base_artifact_hash": "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0",
+        "base_source_commit": "8bef032e6",
+        "new_active_version": "active-v4",
+        "previous_active_version": "active-v3"
+      }
     },
     {
       "active_artifact": "active/lib/routecodex-v4-control/**",
@@ -384,7 +401,13 @@
         "suite_id": "v4-control-l2-regression"
       },
       "source_owner": "routecodex-v4-control",
-      "stage": "frozen"
+      "stage": "source_implemented",
+      "version_base": {
+        "base_artifact_hash": "sha256:bf6b8e426f5bda1962b5c0c4b82bde1be090294eed5e44bbfdc49d7cdc0e0103",
+        "base_source_commit": "389bd3cf0",
+        "new_active_version": "active-v3",
+        "previous_active_version": "active-v2"
+      }
     },
     {
       "active_artifact": "active/lib/routecodex-v4-error/**",
@@ -455,7 +478,13 @@
         "suite_id": "v4-error-l2-regression"
       },
       "source_owner": "routecodex-v4-error",
-      "stage": "frozen"
+      "stage": "source_implemented",
+      "version_base": {
+        "base_artifact_hash": "sha256:c26ccfc3ee6c847b1b4b2f812b72071a20df81f98fe40e60d457c41b3aed5d3f",
+        "base_source_commit": "389bd3cf0",
+        "new_active_version": "active-v4",
+        "previous_active_version": "active-v3"
+      }
     },
     {
       "active_artifact": "active/lib/routecodex-v4-config/**",
@@ -673,6 +702,6 @@
     "bundle_manifest": ".appsdk/contracts/sdk-bundle.manifest.json",
     "name": "appsdk",
     "resource_record": ".appsdk/sdk-resources.json",
-    "version": "0.1.2"
+    "version": "0.1.3"
   }
 }
