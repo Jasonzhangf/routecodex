@@ -100,6 +100,13 @@
     "mode": "source_path",
     "status": "transitional",
     "manifest_path": "crates/routecodex-v4-cordis-bridge/Cargo.toml"
+  },
+  {
+    "consumer": "routecodex-v4-runtime",
+    "dependency": "routecodex-v4-plugin-contract",
+    "mode": "source_path",
+    "status": "transitional",
+    "manifest_path": "crates/routecodex-v4-runtime/Cargo.toml"
   }
  ],
   "forbidden_path_roots": [

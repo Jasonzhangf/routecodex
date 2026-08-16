@@ -32,19 +32,10 @@ use std::fmt;
 mod control_resources;
 
 pub use control_resources::*;
-
-/// Plugin effect kinds, mirroring `node-plugin.contract.json`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginKind {
-    Admission,
-    Control,
-    Semantic,
-    Validation,
-    Projection,
-    Observation,
-    Debug,
-    Operator,
-}
+// Single source of truth: `PluginKind` is owned by routecodex-v4-plugin-contract
+// (v4/contracts/node-plugin.contract.json kinds). The runtime never defines a
+// second plugin-kind taxonomy; it only re-exports the contract type.
+pub use routecodex_v4_plugin_contract::PluginKind;
 
 /// Typed runtime fault. Never contains business payload content; carries only
 /// stage/code/node identity (error-chain contract).
@@ -698,7 +689,7 @@ impl NodePlugin for ProtocolParse {
         "protocol_parse"
     }
     fn kind(&self) -> PluginKind {
-        PluginKind::Semantic
+        PluginKind::Operator
     }
     fn execute(
         &self,
@@ -728,7 +719,7 @@ impl NodePlugin for Normalize {
         "normalize"
     }
     fn kind(&self) -> PluginKind {
-        PluginKind::Semantic
+        PluginKind::Operator
     }
     fn execute(
         &self,
@@ -751,7 +742,7 @@ impl NodePlugin for InputValidate {
         "input_validate"
     }
     fn kind(&self) -> PluginKind {
-        PluginKind::Validation
+        PluginKind::Validator
     }
     fn execute(
         &self,
@@ -934,7 +925,7 @@ impl NodePlugin for SemanticProjection {
         "semantic_projection"
     }
     fn kind(&self) -> PluginKind {
-        PluginKind::Projection
+        PluginKind::Operator
     }
     fn execute(
         &self,
@@ -956,7 +947,7 @@ impl NodePlugin for WireBuild {
         "wire_build"
     }
     fn kind(&self) -> PluginKind {
-        PluginKind::Semantic
+        PluginKind::Operator
     }
     fn execute(
         &self,
@@ -979,7 +970,7 @@ impl NodePlugin for OutputValidate {
         "output_validate"
     }
     fn kind(&self) -> PluginKind {
-        PluginKind::Validation
+        PluginKind::Validator
     }
     fn execute(
         &self,
@@ -1002,7 +993,7 @@ impl NodePlugin for RawParse {
         "raw_parse"
     }
     fn kind(&self) -> PluginKind {
-        PluginKind::Semantic
+        PluginKind::Operator
     }
     fn execute(
         &self,
@@ -1030,7 +1021,7 @@ impl NodePlugin for ProtocolDecode {
         "protocol_decode"
     }
     fn kind(&self) -> PluginKind {
-        PluginKind::Semantic
+        PluginKind::Operator
     }
     fn execute(
         &self,
@@ -1071,7 +1062,7 @@ impl NodePlugin for ToolHarvest {
         "tool_harvest"
     }
     fn kind(&self) -> PluginKind {
-        PluginKind::Semantic
+        PluginKind::Observer
     }
     fn execute(
         &self,
@@ -1147,7 +1138,7 @@ impl NodePlugin for ClientSemanticProjection {
         "client_semantic_projection"
     }
     fn kind(&self) -> PluginKind {
-        PluginKind::Projection
+        PluginKind::Operator
     }
     fn execute(
         &self,
@@ -1168,7 +1159,7 @@ impl NodePlugin for FrameBuild {
         "frame_build"
     }
     fn kind(&self) -> PluginKind {
-        PluginKind::Projection
+        PluginKind::Operator
     }
     fn execute(
         &self,

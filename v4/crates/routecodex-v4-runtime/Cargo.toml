@@ -9,5 +9,6 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
+routecodex-v4-plugin-contract = { path = "../routecodex-v4-plugin-contract" }
 
 [dev-dependencies]

@@ -35706,3 +35706,11 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - 治理：`playground/**` 归 routecodex-v4-governance 所有（module-registry +
   project.json），否则 isolation gate 对未注册文件 fail。
 - verify:ci 全绿：gates=13 consumers=9 red=6。
+
+# 2026-08-16 V4 closeout DSH r1 三条 P1 修复（worktree codex/v4-node-graph-appsdk013-closeout）
+- DSH r1（v4-node-graph-appsdk013-closeout-dsh-r1）FAIL 三条 P1：execution-binding/node-graph gate 只验注册表自洽不验 Rust 实现；plugin-contract/plan/catalog/cordis-bridge 被 runtime 冷落；runtime 自建 PluginKind 与 node-plugin.contract.json/plugin-contract 重复。
+- 修复：runtime 删除自建 PluginKind，`pub use routecodex_v4_plugin_contract::PluginKind`（唯一真源），17 个 plugin kind 映射到 contract kinds（operator/validator/control/observer）；runtime Cargo.toml 加 plugin-contract path dep，frozen-consumer-registry 加 source_path 边，mainline map 加 symbol_dependency 边（owner routecodex-v4-runtime::NodePlugin），project.json build/regression 加 --source-deps plugin-contract、dependency_modules 加 plugin-contract。
+- execution-binding gate 增 Rust 源码绑定（ExecutionBinding 四字段/execution_binding 消费/SkeletonRuntime/NodePluginPlan/PLUGIN_REGISTRY/run_chain + skeleton SkeletonPlan/plan_hash/from_contract_json/verify）+ 7 个 red self-test，接 RED_SUITES（8 suites）与 verification-map v4_parity_gate_execution_binding_red。
+- node-graph gate 增源码绑定（runtime/skeleton 符号 + skeleton plan 每个 plugin_id 必须在 runtime 静态注册表实现）+ 5 个新 red self-test（30/30）。
+- 验证：`npm run verify:ci` 全绿（red suites=8，admission matrix OK）；`appsdk verify --admission v4` => {ok:true, stage:contract_bound}（AppSDK 0.1.3）；runtime build-consumer 带 plugin-contract source dep 构建 OK；runtime l2 test-consumer 21/21。
+- 未做：真实 Cordis host/NodeContainer（Phase 2 M3+），plugin-catalog 消费方（PluginManager，contract_bound 登记例外）；这些是下一部分目标。

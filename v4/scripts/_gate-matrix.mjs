@@ -24,6 +24,7 @@ export const ARCHITECTURE_GATES = [
 
 export const RED_SUITES = [
   ['verify-v4-cordis-bridge.mjs', '--red-self-test'],
+  ['verify-v4-execution-binding.mjs', '--red-self-test'],
   ['verify-v4-feature-gap.mjs', '--red-self-test'],
   ['verify-v4-node-graph.mjs', '--red-self-test'],
   ['verify-v4-plugin-plan.mjs', '--red-self-test'],
@@ -37,7 +38,7 @@ export const CONSUMER_REGRESSIONS = [
   ['routecodex-v4-config', 'routecodex-v4-base-node,routecodex-v4-edge'],
   ['routecodex-v4-control', 'routecodex-v4-base-node'],
   ['routecodex-v4-error', 'routecodex-v4-base-node'],
-  ['routecodex-v4-runtime', 'routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control', '--source-deps', 'routecodex-v4-skeleton'],
+  ['routecodex-v4-runtime', 'routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control', '--source-deps', 'routecodex-v4-skeleton,routecodex-v4-plugin-contract'],
   ['routecodex-v4-debug', 'routecodex-v4-base-node'],
   ['routecodex-v4-router', 'routecodex-v4-base-node'],
   ['routecodex-v4-provider', 'routecodex-v4-base-node'],

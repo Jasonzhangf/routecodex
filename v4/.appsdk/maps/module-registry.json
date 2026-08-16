@@ -264,6 +264,7 @@
         "record_graph",
         "v4_runtime_l2_regression",
         "v4_parity_gate_execution_binding",
+        "v4_parity_gate_execution_binding_red",
         "v4_parity_gate_resource_binding",
         "v4_compat_gate_responses_direct",
         "v4_compat_gate_relay_continuation"

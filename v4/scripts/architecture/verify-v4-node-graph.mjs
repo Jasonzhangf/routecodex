@@ -37,6 +37,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const readJson = (file) => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
 const readYaml = (file) => yaml.load(fs.readFileSync(path.join(root, file), 'utf8'));
+const readText = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 /** Normative fixed topology from V4-NODE-GRAPH-ACTIVE-20260816. */
 const CHAIN_EXPECTED = {
@@ -147,7 +148,7 @@ function roleCatalog(nodeGraph) {
   return families;
 }
 
-function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline) {
+function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) {
   const failures = [];
   const roleCatalogByFamily = roleCatalog(nodeGraph);
   const chainSections = {};
@@ -405,6 +406,61 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline) {
       }
     }
   }
+
+  // ---- 8. code binding: the registered topology must be implemented ----
+  // Registry self-consistency is not proof (AGENTS §20/§29): the runtime
+  // source must implement the mainline executor, compiled plan and static
+  // plugin registry, and the skeleton source must implement the immutable
+  // plan loader/verifier. Every plugin_id compiled into the skeleton plan
+  // must be resolvable in the runtime's static registry surface.
+  const runtimeSource = sources?.runtime ?? '';
+  const skeletonSource = sources?.skeleton ?? '';
+  if (runtimeSource) {
+    for (const [symbol, label] of [
+      ['pub struct SkeletonRuntime', 'SkeletonRuntime'],
+      ['pub struct NodePluginPlan', 'NodePluginPlan'],
+      ['pub struct NodeContainer', 'NodeContainer'],
+      ['pub static PLUGIN_REGISTRY', 'PLUGIN_REGISTRY'],
+      ['pub const EXTERNAL_CHAIN_PLUGINS', 'EXTERNAL_CHAIN_PLUGINS'],
+      ['pub fn execution_binding(', 'execution_binding'],
+      ['fn run_chain(', 'run_chain'],
+      ['pub struct ExecutionContext', 'ExecutionContext'],
+    ]) {
+      if (!runtimeSource.includes(symbol)) {
+        failures.push(`runtime source missing ${label} (${symbol})`);
+      }
+    }
+  } else {
+    failures.push('runtime source not loaded for code binding');
+  }
+  if (skeletonSource) {
+    for (const [symbol, label] of [
+      ['pub struct SkeletonPlan', 'SkeletonPlan'],
+      ['pub struct PluginBinding', 'PluginBinding'],
+      ['pub fn from_contract_json(', 'SkeletonPlan::from_contract_json'],
+      ['pub fn plan_hash(', 'plan_hash'],
+      ['pub fn verify(', 'SkeletonPlan::verify'],
+    ]) {
+      if (!skeletonSource.includes(symbol)) {
+        failures.push(`skeleton source missing ${label} (${symbol})`);
+      }
+    }
+  } else {
+    failures.push('skeleton source not loaded for code binding');
+  }
+  const planPluginIds = new Set();
+  for (const chain of skeleton.chains ?? []) {
+    for (const node of chain.nodes ?? []) {
+      for (const plugin of node.plugins ?? []) {
+        if (plugin?.plugin_id) planPluginIds.add(plugin.plugin_id);
+      }
+    }
+  }
+  for (const pluginId of planPluginIds) {
+    if (!runtimeSource.includes(`"${pluginId}"`)) {
+      failures.push(`skeleton plugin ${pluginId} has no implementation in the runtime static registry`);
+    }
+  }
   return failures;
 }
 
@@ -414,6 +470,10 @@ function loadCurrent() {
     resourceMap: readYaml('docs/architecture/v4-resource-operation-map.yml'),
     skeleton: readJson('contracts/skeleton-plan.contract.json'),
     mainline: readJson('.appsdk/maps/mainline-call-map.json'),
+    sources: {
+      runtime: readText('crates/routecodex-v4-runtime/src/lib.rs'),
+      skeleton: readText('crates/routecodex-v4-skeleton/src/lib.rs'),
+    },
   };
 }
 
@@ -530,7 +590,10 @@ function makeCleanBase() {
           role_id: chainRole(chainId, index),
           terminal: index === expected.length - 1,
           kernel: index === 0,
-          plugins: [],
+          plugins:
+            chainId === 'request' && index === 0
+              ? [{ plugin_id: 'protocol_parse', effects: ['semantic'] }]
+              : [],
         })),
         edges: expected.slice(0, -1).map((nodeId, index) => ({
           from: nodeId,
@@ -619,7 +682,27 @@ function makeCleanBase() {
       status: 'active',
     });
   }
-  return { nodeGraph, resourceMap, skeleton, mainline };
+  const sources = {
+    runtime: [
+      'pub struct SkeletonRuntime',
+      'pub struct NodePluginPlan',
+      'pub struct NodeContainer',
+      'pub static PLUGIN_REGISTRY',
+      'pub const EXTERNAL_CHAIN_PLUGINS',
+      'pub fn execution_binding(',
+      'fn run_chain(',
+      'pub struct ExecutionContext',
+      '"protocol_parse"',
+    ].join('\n'),
+    skeleton: [
+      'pub struct SkeletonPlan',
+      'pub struct PluginBinding',
+      'pub fn from_contract_json(',
+      'pub fn plan_hash(',
+      'pub fn verify(',
+    ].join('\n'),
+  };
+  return { nodeGraph, resourceMap, skeleton, mainline, sources };
 }
 
 function chainRole(chainId, index) {
@@ -741,12 +824,27 @@ function runSelfTest() {
       (edge) => !(edge.from === 'V4ServerReqInbound01ClientRaw' && edge.to === 'V4ServerSseIn02FrameBoundary'),
     );
   }, 'missing request adjacent edge');
+  add('runtime SkeletonRuntime ghost', (d) => {
+    d.sources.runtime = d.sources.runtime.replace('pub struct SkeletonRuntime', 'pub struct GhostRuntime');
+  }, 'SkeletonRuntime');
+  add('runtime PLUGIN_REGISTRY ghost', (d) => {
+    d.sources.runtime = d.sources.runtime.replace('pub static PLUGIN_REGISTRY', 'pub static GHOST_REGISTRY');
+  }, 'PLUGIN_REGISTRY');
+  add('skeleton plan plugin without runtime implementation', (d) => {
+    d.sources.runtime = d.sources.runtime.replace('"protocol_parse"', '"ghost_plugin"');
+  }, 'has no implementation');
+  add('skeleton SkeletonPlan ghost', (d) => {
+    d.sources.skeleton = d.sources.skeleton.replace('pub struct SkeletonPlan', 'pub struct GhostPlan');
+  }, 'SkeletonPlan');
+  add('skeleton contract loader ghost', (d) => {
+    d.sources.skeleton = d.sources.skeleton.replace('pub fn from_contract_json(', 'pub fn from_contract(');
+  }, 'SkeletonPlan::from_contract_json');
 
   let failed = 0;
   for (const [name, mutate, marker] of cases) {
     const data = makeCleanBase();
     mutate(data);
-    const failures = validateNodeGraph(data.nodeGraph, data.resourceMap, data.skeleton, data.mainline);
+    const failures = validateNodeGraph(data.nodeGraph, data.resourceMap, data.skeleton, data.mainline, data.sources);
     const hit = failures.some((failure) => failure.includes(marker));
     if (failures.length === 0 || !hit) {
       console.error(`[v4_parity_gate_node_graph] red self-test ${name}: expected FAIL, got ${failures.length} failures (marker ${marker})`);
@@ -767,7 +865,7 @@ if (process.argv.includes('--red-self-test')) {
 }
 
 const current = loadCurrent();
-const failures = validateNodeGraph(current.nodeGraph, current.resourceMap, current.skeleton, current.mainline);
+const failures = validateNodeGraph(current.nodeGraph, current.resourceMap, current.skeleton, current.mainline, current.sources);
 if (failures.length > 0) {
   console.error('[v4_parity_gate_node_graph] FAIL');
   console.error(failures.slice(0, 200).join('\n'));

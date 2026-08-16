@@ -836,7 +836,7 @@
       "build": {
         "args": [
           "-c",
-          "cargo build --release -p routecodex-v4-skeleton && cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-skeleton --out generated/modules/routecodex-v4-runtime/lib/libroutecodex_v4_runtime.rlib"
+          "cargo build --release -p routecodex-v4-skeleton && cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-skeleton,routecodex-v4-plugin-contract --out generated/modules/routecodex-v4-runtime/lib/libroutecodex_v4_runtime.rlib"
         ],
         "program": "sh",
         "working_directory": "."
@@ -850,7 +850,8 @@
       "dependency_modules": [
         "routecodex-v4-error",
         "routecodex-v4-base-node",
-        "routecodex-v4-control"
+        "routecodex-v4-control",
+        "routecodex-v4-plugin-contract"
       ],
       "generated_outputs": [
         "generated/runtime/**"
@@ -877,7 +878,7 @@
             "--deps",
             "routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control",
             "--source-deps",
-            "routecodex-v4-skeleton"
+            "routecodex-v4-skeleton,routecodex-v4-plugin-contract"
           ],
           "program": "cargo",
           "working_directory": "."
@@ -885,7 +886,8 @@
         "input_paths": [
           "crates/routecodex-v4-runtime/src/lib.rs",
           "crates/routecodex-v4-runtime/tests/l2_runtime.rs",
-          "contracts/skeleton-plan.contract.json"
+          "contracts/skeleton-plan.contract.json",
+          "contracts/node-plugin.contract.json"
         ],
         "minimum_test_count": 12,
         "ordinary_mode_after_freeze": "disabled",
