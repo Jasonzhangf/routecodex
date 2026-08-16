@@ -1502,9 +1502,14 @@ async fn provider_sse_failure_event_reselects_before_client_stream() {
                         name: "content-type".to_string(),
                         value: b"text/event-stream".to_vec(),
                     }],
-                    Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(
-                        b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"first quota exhausted\"}}}\n\n".to_vec(),
-                    )])),
+                    Box::pin(stream::iter(vec![
+                        Ok::<Vec<u8>, V3ProviderError>(
+                            b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
+                        ),
+                        Ok::<Vec<u8>, V3ProviderError>(
+                            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"first quota exhausted\"}}}\n\n".to_vec(),
+                        ),
+                    ])),
                 ));
             }
             assert_eq!(

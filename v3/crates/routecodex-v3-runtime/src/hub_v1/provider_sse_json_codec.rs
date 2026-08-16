@@ -270,10 +270,39 @@ pub(crate) fn classify_v3_provider_responses_json_event(
     if event_type == "response.completed" {
         return Ok(V3ProviderResponsesJsonFrameOutcome::Terminal);
     }
-    if matches!(event_type, "response.created" | "response.in_progress") {
+    if matches!(event_type, "response.created" | "response.in_progress")
+        || is_empty_v3_provider_responses_output_item_added(event_type, event)
+    {
         return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
     }
     Ok(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
+}
+
+fn is_empty_v3_provider_responses_output_item_added(event_type: &str, event: &Value) -> bool {
+    if event_type != "response.output_item.added" {
+        return false;
+    }
+    let Some(item) = event.get("item").and_then(Value::as_object) else {
+        return false;
+    };
+    if item.get("status").and_then(Value::as_str) != Some("in_progress") {
+        return false;
+    }
+    let content_is_empty = matches!(
+        item.get("content").and_then(Value::as_array),
+        Some(content) if content.is_empty()
+    );
+    match item.get("type").and_then(Value::as_str) {
+        Some("message") => content_is_empty,
+        Some("reasoning") => {
+            content_is_empty
+                && matches!(
+                    item.get("summary").and_then(Value::as_array),
+                    Some(summary) if summary.is_empty()
+                )
+        }
+        _ => false,
+    }
 }
 
 pub(crate) fn record_v3_provider_sse_json_frame(
@@ -325,6 +354,36 @@ mod provider_sse_json_codec_tests {
                     code: "upstream_error".to_string(),
                     message: "bad upstream".to_string(),
                 })
+            );
+        }
+    }
+
+    #[test]
+    fn empty_output_item_lifecycle_frames_do_not_authorize_client_commit() {
+        for data in [
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"message","status":"in_progress","content":[]}}"#,
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","status":"in_progress","content":[],"summary":[]}}"#,
+        ] {
+            assert_eq!(
+                classify_v3_provider_generic_sse_json_data(data)
+                    .expect("empty lifecycle frame must classify"),
+                Some(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering),
+                "empty output item must remain precommit: {data}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_empty_output_items_remain_client_commit_authority() {
+        for data in [
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"message","status":"in_progress","content":[{"type":"output_text","text":"hello"}]}}"#,
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","status":"in_progress","call_id":"call_1","name":"tool","arguments":""}}"#,
+        ] {
+            assert_eq!(
+                classify_v3_provider_generic_sse_json_data(data)
+                    .expect("non-empty output item must classify"),
+                Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream),
+                "business output must authorize streaming: {data}"
             );
         }
     }
