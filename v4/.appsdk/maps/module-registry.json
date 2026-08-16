@@ -156,6 +156,58 @@
       ]
     },
     {
+      "module_id": "routecodex-v4-plugin-contract",
+      "status": "active",
+      "owner": "routecodex-v4-plugin-contract",
+      "owned_paths": [
+        "crates/routecodex-v4-plugin-contract/**"
+      ],
+      "forbidden_paths": [
+        "active/lib/**",
+        "protected/**",
+        "generated/**"
+      ],
+      "verification_gates": [
+        "v4_plugin_contract_l2_regression",
+        "v4_parity_gate_plugin_plan"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-plugin-plan",
+      "status": "active",
+      "owner": "routecodex-v4-plugin-plan",
+      "owned_paths": [
+        "crates/routecodex-v4-plugin-plan/**"
+      ],
+      "forbidden_paths": [
+        "active/lib/**",
+        "protected/**",
+        "generated/**"
+      ],
+      "verification_gates": [
+        "v4_plugin_plan_l2_regression",
+        "v4_parity_gate_plugin_plan",
+        "v4_parity_gate_plugin_plan_red"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-plugin-catalog",
+      "status": "active",
+      "owner": "routecodex-v4-plugin-catalog",
+      "owned_paths": [
+        "crates/routecodex-v4-plugin-catalog/**"
+      ],
+      "forbidden_paths": [
+        "active/lib/**",
+        "protected/**",
+        "generated/**"
+      ],
+      "verification_gates": [
+        "v4_plugin_catalog_l2_regression",
+        "v4_parity_gate_plugin_plan"
+      ]
+    },
+    {
       "module_id": "routecodex-v4-runtime",
       "status": "active",
       "owner": "routecodex-v4-runtime",

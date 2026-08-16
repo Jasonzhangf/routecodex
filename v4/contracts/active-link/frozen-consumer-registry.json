@@ -72,6 +72,20 @@
    "mode": "active_artifact",
    "status": "migrated",
    "manifest_path": "crates/routecodex-v4-server/Cargo.toml"
+  },
+  {
+    "consumer": "routecodex-v4-plugin-plan",
+    "dependency": "routecodex-v4-plugin-contract",
+    "mode": "source_path",
+    "status": "transitional",
+    "manifest_path": "crates/routecodex-v4-plugin-plan/Cargo.toml"
+  },
+  {
+    "consumer": "routecodex-v4-plugin-catalog",
+    "dependency": "routecodex-v4-plugin-contract",
+    "mode": "source_path",
+    "status": "transitional",
+    "manifest_path": "crates/routecodex-v4-plugin-catalog/Cargo.toml"
   }
  ],
   "forbidden_path_roots": [

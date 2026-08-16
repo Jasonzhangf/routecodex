@@ -130,6 +130,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v4-plugin-catalog"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-plugin-contract",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "routecodex-v4-plugin-contract"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "routecodex-v4-plugin-plan"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-plugin-contract",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "routecodex-v4-skeleton"
 version = "0.1.0"
 dependencies = [
