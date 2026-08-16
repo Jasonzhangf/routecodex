@@ -23,14 +23,10 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: |
-            v3/package-lock.json
-            v4/package-lock.json
+          cache-dependency-path: v3/package-lock.json
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: |
-            v3
-            v4
+          workspaces: v3
       - name: Install V3 local build dependencies
         run: npm ci --prefix v3 --ignore-scripts
       - name: Repo sanity (no root junk)
