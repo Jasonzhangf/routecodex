@@ -43,8 +43,9 @@ chains:
     owner_feature_id: v3.v2_config_toml_compat_5555
     semantic_input: config.toml raw bytes with version=2.0.0 and virtualrouterMode=v2
     semantic_output: V3Config02AuthoringParsed with V2 servers/providers/forwarders/route
-      groups plus canonical Hub V1 endpoint bindings and server execution declarations
-      projected into V3 authoring
+      groups plus canonical Hub V1 endpoint bindings, server execution declarations,
+      and provider secretFile key names expanded into secret_file + secret_key auth
+      handles without materializing secret values
     resource_flow:
       consumes:
       - config.authoring_surface

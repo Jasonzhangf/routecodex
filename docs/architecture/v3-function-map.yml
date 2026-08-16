@@ -155,6 +155,7 @@ features:
   - compile_error
   - default_hub_v1_authoring
   - default_server_execution
+  - discover_v3_secret_file_auth_handles
   allowed_paths:
   - v3/crates/routecodex-v3-config
   - docs/architecture/v3-resource-operation-map.yml
@@ -164,6 +165,7 @@ features:
   - docs/architecture/wiki/v3-config-compact-hub-v1-defaults-sop.md
   - docs/architecture/wiki/v3-responses-direct-mainline.md
   - docs/goals/v3-foundation-p0-p2-test-design.md
+  - docs/goals/v3-provider-auth-key-file-expansion-test-design.md
   - scripts/architecture/verify-v3-resource-relation-edge-lock.mjs
   - scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs
   forbidden_paths:
