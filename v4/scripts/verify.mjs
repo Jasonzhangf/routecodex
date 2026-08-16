@@ -2,7 +2,8 @@
 /**
  * Canonical V4 positive verification: workspace release build, hermetic Active
  * restore, all V4 architecture gates, all non-workspace consumer regressions
- * through build-link, and deterministic Active index generation/verification.
+ * through build-link, deterministic Active index generation/verification, and
+ * the isolation positive/red matrix.
  *
  * This is the single owner of the V4 module/gate matrix. Root npm and CI only
  * dispatch to this surface (through verify:ci).
@@ -67,5 +68,6 @@ for (const [consumer, deps, ...extra] of CONSUMER_REGRESSIONS) {
 
 run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- gen-index --root .');
 run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- verify-index --root .');
+run('node scripts/verify-isolation.mjs');
 
-console.log(`[v4 verify] OK gates=${ARCHITECTURE_GATES.length} consumers=${CONSUMER_REGRESSIONS.length} active-index=ok`);
+console.log(`[v4 verify] OK gates=${ARCHITECTURE_GATES.length} consumers=${CONSUMER_REGRESSIONS.length} active-index=ok isolation=ok`);

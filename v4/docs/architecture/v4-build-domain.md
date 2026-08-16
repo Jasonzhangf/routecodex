@@ -53,7 +53,10 @@ V3 input is the immutable, V4-owned baseline bundle under
   digests, canonical identity sets, supersession rule;
 - `v3-function-map.yml` — frozen V3 function map snapshot;
 - `v3-resource-operation-map.yml` — frozen V3 resource map snapshot;
-- `v3-feature-baseline.json` — pre-existing independent feature anchor.
+
+The pre-existing `v3-feature-baseline.json` feature anchor stays at
+`v4/contracts/v3-feature-baseline.json` (contracts root); it is not part of the
+immutable `v3-baseline/` bundle.
 
 Baseline updates require explicit reviewed supersession (new `baseline_id`,
 digest, and `superseded_by`). Missing, altered, or unauthorized baselines are
