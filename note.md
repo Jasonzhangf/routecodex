@@ -35655,3 +35655,14 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
   target-domain intersection checks, with no cleanup, approximation, or MetadataCenter use.
 - Red tests locked inbound and same-protocol outbound rejection before the owner fix;
   reverse tests keep non-string and empty values fail-fast.
+- Final source gates: runtime lib 464/464; protocol conversion parity suite; 107 red
+  mutations; architecture CI 36/36; module/resource/function-map/Rust-only/focused fmt
+  all green. Full build and `install:v3` produced 0.90.4569, SHA-256
+  `73f2bca7cf58e03535cd304ecd67930400b89ed8156a766263a2fb39353de559`.
+- One aggregate restart brought 4444/5555/5520/10000 up healthy on 0.90.4569.
+  Exact old sample provider-request dry-run is HTTP 200 and captures unchanged
+  `reasoning.effort=definitely_invalid` at `V3Transport13ResponsesHttpRequest`, with no
+  provider network send. Real exact replays no longer return local 500/400; upstream
+  opencode-go returned terminal 401/403 while registered `medium` and no-effort controls
+  both returned HTTP 200. Thus the V3 canonicalization defect is closed; current upstream
+  rejection of the deliberately unknown value is external and remains visible.
