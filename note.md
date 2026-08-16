@@ -35614,6 +35614,27 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
   verify:v4-foundation-red 3/3；cargo workspace；appsdk admission contract_bound。
 - 待 DSH r2（base 8a76cbc83 → fix commit，覆盖 044767d2d + 修复）。
 
+# 2026-08-16 DSH r2/r3 结果 + 分类器修复
+- r2（a6d919ec6 vs base 3d449ed66）：reviewer final 明确
+  "No P0/P1 blocking issues found." + 字面 VERDICT: PASS，但 MCP
+  classifyFinal 把 final 中 "**P1-3 (…):** / **P1-4 (…):**" 修复摘要头
+  误判为 blocking finding → status.json verdict=fail（分类器缺陷，非 reviewer
+  FAIL）。
+- 修复 `~/.agents/skills/dsh/scripts/dsh-mcp` classifyFinal：剥离
+  resolution-marker 修复头（now derives/no longer/addressed/fixed/resolved/
+  corrected/implemented）与 “addresses … P1 findings” 修复叙述；另修
+  "- P0: none." 行未剥离的既有 bug（字符类缺 `-`）。回归：r2 final→pass、
+  真实 FAIL final→fail、P0/P1 none→pass、r1 FAIL→fail；node --check +
+  test-dsh-mcp 绿。MCP 重启后跑 r3。
+- r3（同 scope）：state=completed, verdict=pass, reason=final_verdict_pass，
+  recommendation=deliver；无 P0/P1。2 条 P2 非阻塞：
+  - P2-1：relay slice checkpoint semantic `route_exit_bound` vs runtime 值
+    `relay_policy_bound/direct_policy_bound` 字面漂移（gate 只查非空）。
+  - P2-2：sibling responses-direct slice 同 route_exit 条目仍是 doc 式
+    evidence（pre-existing，归 direct slice gate）。
+- 交付状态：slice 两 commit 在 main（044767d2d + a6d919ec6）；MEMORY 已沉淀；
+  worktree 剩余 V3 dirty 属其他 worker。
+
 # 2026-08-16 V3 SSE 交付闭环：8a76cbc83 + 0.90.4563 全局验证 + DSH r2 PASS
 - SSE terminal 修复提交 `8a76cbc83`（base 486d68f68，19 文件 +630/-364）：Responses→Chat SSE `incomplete` 补 `[DONE]`+finish_reason=length；ClientDisconnect 不再写 provider 冷却（chat+anthropic relay）；Responses outbound 只对 `status=failed` 投影 `response.failed`，`incomplete` 独立投影保留部分输出；codec 对缺 reason/未知 reason fail-fast；删 `record_response_status`/`global_subscription_store()` 死代码；`openai_chat_relay_runtime.rs` 拆 `openai_chat_relay_runtime_sse.rs`（include!，父文件 <1500 行）；mainline map/audit-lock/parity gate/红测同步。
 - build：`RUSTUP_TOOLCHAIN=stable CARGO_NET_OFFLINE=true npm run build` 绿（36/36 arch gates，health 8/8，cargo tests 绿）；install:v3 自增版本 0.90.4563（gen-build-info 机械 bump）。

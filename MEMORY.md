@@ -5512,3 +5512,47 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 - 经验：install:v3 的 gen-build-info.mjs 每次自动 bump patch 版本并改写
   package.json/package-lock/src/build-info.ts；安装后这些文件变脏是机械产物，
   交付 commit 需包含该 bump，使 HEAD 版本与已安装/在线验证的运行版本一致。
+
+## 2026-08-16 - V4 Relay + Continuation 最小垂直切片闭环（verified, DSH PASS）
+- 交付：commit 044767d2d + a6d919ec6（base 8a76cbc83 后的两个 v4 commit；中间
+  V3 worker 的 3d449ed66 只动 V3/package/memory，不裹入 v4 slice）。
+  - 六面 compat slice `v4/docs/architecture/v4-relay-continuation-compatibility-slice.yml`
+    （request/response/error/streaming/lifecycle/audit，33 entries，unexplained_diff=0）。
+  - gate `scripts/architecture/verify-v4-relay-continuation.mjs`（17 红自测，
+    含“checkpoint 仅存在于 resource owner_node 必红”防循环）。
+  - Rust runtime：typed-facts relay operator（responses+direct=Direct、
+    非 responses+relay=Relay、矛盾 fail-fast）；三键 ContinuationKey
+    （entry protocol+owner+port/session/conversation）；ScopeRegistry
+    bind/restore/release + 不可变区 double-restore 红；PayloadCycleRegistry
+    open/merge/terminal；route_exit 由 operator 选择派生并进
+    RESERVED_CONTROL_MARKERS；WireBuild/OutputValidate/FrameBuild 保留
+    assert_no_control_leak。
+  - node-graph.contract.json 新增 `registered_nodes` machine 目录（Router07/
+    ScopeRegistry/PayloadCycleRegistry/Debug05/RuntimeObservability），
+    checkpoint 存在性只由 chain+skeleton+registered_nodes 证明，禁止
+    resource owner_node 自证。
+  - 资源 anchored 25/49；本 slice 8 条（scope.session/payload_cycle/
+    route_facts/target_selection/route_exit/provider_wire_payload/provider_raw/
+    client_wire_payload）双源一致，owner 为 routecodex-v4-runtime
+    （计划原写 v4-control，control 已 freeze active-v2，执行偏差记录于
+    slice-plan §9）。
+- 验证：cargo workspace；test-consumer runtime 20/20、edge 11、config 9、
+  control 15、error 23；verify:v4-foundation 10/10；foundation-red 3/3；
+  gen-index/verify-index + active-link gate；appsdk verify --admission v4
+  contract_bound。
+- DSH r1 FAIL（P1-3 route_exit 硬编码 overclaim；P1-4 owner_node 循环）
+  → a6d919ec6 修复 → DSH r3 PASS（state=completed, verdict=pass,
+  final_verdict_pass；`~/.dsh/reviews/v4-relay-continuation-dsh-r3/`），
+  无 P0/P1，2 条 P2：
+  - P2-1：relay slice checkpoint semantic `route_exit_bound` 与 runtime 值
+    `relay_policy_bound/direct_policy_bound` 字面不同（语义字段 vs 值），
+    gate 只查非空；后续可在统一 checkpoint semantic 词汇表时对齐。
+  - P2-2：sibling `v4-responses-direct-compatibility-slice.yml` 的同一
+    route_exit 条目仍是 doc 引用式 evidence（pre-existing，属 direct slice
+    gate 管辖），未在本 slice 改动。
+- 经验：DSH MCP classifyFinal 会把 PASS final 里“P1-3 (fix description)”
+  修复摘要头误判为 blocking finding；已在
+  `~/.agents/skills/dsh/scripts/dsh-mcp` 修分类器（resolution-marker 行/
+  修复叙述 prose 先剥离），node --check + test-dsh-mcp + 4 个历史 final
+  回归（r2 PASS→pass、genuine FAIL→fail、P0/P1 none→pass、r1 FAIL→fail）
+  通过。该工具修复在仓库外，不入 repo commit。
