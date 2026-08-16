@@ -1,0 +1,138 @@
+# V4 资源锚定补齐与构建门禁统一计划（V4-RESOURCE-ANCHOR-COMPLETE-001）
+
+## 1. 目标与验收标准
+
+把 V4 资源注册表从"部分真源"收口为"全部真源"：49/49 资源 `binding_status=anchored`，
+每个资源有唯一 owner crate + owner node + owner symbols + 机器 gate；此前 24 条 design
+资源对应的 owner crate（`routecodex-v4-debug` / `routecodex-v4-router` /
+`routecodex-v4-provider` / `routecodex-v4-server`）以 contract-bound 最小实现落库，
+并按 active-link 模式接入 AppSDK 生命周期与 CI。
+
+验收标准：
+
+1. `v4-resource-operation-map.yml` 49 条全部 anchored，且 `v4/.appsdk/maps/resource-map.json`
+   双源一致；`verify-v4-resource-binding.mjs` 对每一条校验 owner crate 存在、owner node
+   在 node-graph contract 注册、owner symbols 在源码可解析、allowed/forbidden 与
+   data-control-boundary contract 一致。
+2. 新增 crate 全部通过 `appsdk verify --admission v4`（contract_bound），并登记
+   project.json 模块、resource/function/mainline/verification maps、CI job。
+3. 冻结基线不失效：base-node / edge / control / error 的 active artifact 未被修改；
+   若新增资源确需由已冻结 crate 拥有（如 control 的 stopless/record_ledger），走完整
+   begin-version -> re-freeze 生命周期，或按实现证据迁移 owner 到未冻结模块并记录偏差。
+4. 构建门禁统一：`cargo test --workspace --manifest-path v4/Cargo.toml` 覆盖全部
+   workspace 成员；workspace 外 crate 全部经 build-link test-consumer 跑 L2 回归，
+   verification-map 的 `v4_cargo_workspace_build` 与 CI v4-active-link job 不遗漏任何模块。
+5. 所有新 gate 先红后绿：红自测覆盖"资源缺 owner/缺 symbol/owner crate 不存在/
+   node 未注册/双源漂移/控制资源进 payload"等负类。
+6. DSH review（opencode-go/deepseek-v4-flash）语义 PASS，无 P0/P1、无"修复后再审"。
+
+## 2. 范围与边界
+
+### In scope
+
+- 新建 `routecodex-v4-debug`（12 条 design 资源）、`routecodex-v4-router`
+  （`v4.control.route_policy_live`）、`routecodex-v4-provider`
+  （`v4.control.availability`）、`routecodex-v4-server`
+  （`v4.console.terminal_output` / `v4.server.request_identity` /
+  `v4.error.raw_wire_evidence`），均为 contract-bound 最小实现（typed API + 状态机 +
+  正反 L2 测试），不做协议/网络/真实 provider 迁移。
+- `routecodex-v4-runtime` 补齐 `v4.debug.dry_run_execution` /
+  `v4.debug.observability` / `v4.debug.timing_observability`。
+- `routecodex-v4-config` 补齐 `v4.debug.codex_sample_authorization`
+  （ConfigManifestV2 发布面扩展）。
+- 控制面新增资源（`v4.control.stopless_state` / `v4.control.record_ledger` /
+  `v4.node.statistics`）：优先在未冻结 owner 落实现；确需 control crate 时执行
+  active-v2 -> active-v3 re-freeze 生命周期（先获 Jason 批准）。
+- resource/function/mainline/verification map、project.json、package.json、CI 同步；
+- 构建门禁统一与目标模块 freeze（config/runtime 视资源收口证据决定，不强行 freeze）。
+
+### Out of scope
+
+- 修改 V3 任何源码、配置或已发布 runtime；
+- 真实 provider 协议迁移、V3 runtime 接入、新 endpoint、网络请求；
+- Cordis NodePlugin / WebUI 管理面（后续阶段）；
+- 已冻结 active artifact 的静默改写；无批准不做 re-freeze；
+- 不新增未登记资源、不重建等价 DTO / fallback / silent strip。
+
+## 3. 设计原则
+
+- 资源注册表是机器真源：每个资源 = owner crate + owner node + owner symbols + gate；
+  四者互相锚定，禁止仅文档声明。
+- 新增能力走 Rust + typed contract，TS 只留薄壳/桥接/诊断；控制语义只走
+  typed side-channel / MetadataCenter，绝不进 provider/client 正常 payload。
+- 新 crate 全部走 active-link 模式：独立模块注册、build-consumer/test-consumer 构建、
+  frozen 后仅 active artifact 消费，禁止源码 path 依赖 frozen crate。
+- 冻结 crate 需扩展时，先查生命周期 owner；未获批准不 re-freeze。
+- 每次改动只动 v4/ + verify 脚本 + package.json + CI；不裹 V3 dirty worktree。
+
+## 4. 技术方案
+
+### 4.1 资源归属与实施面（24 条 design -> anchored）
+
+| owner crate | 资源 | 实施内容 |
+| --- | --- | --- |
+| routecodex-v4-debug（新建） | snapshot_ledger / module_switch / dry_run_chain / bus_subscription / snapshot_subscription / trace_context / event_ledger / raw_capture / snapshot_session / dry_run_fixture / payload_budget / codex_sample_filesystem | DebugRuntime typed API：trace/ledger/raw/snapshot/dry-run/budget/retention 状态机；debug-subscription.contract.json 已有基线，禁止放宽 |
+| routecodex-v4-router（新建） | v4.control.route_policy_live | LivePolicyOverride：baseline_from_manifest + live_update + audit + immutable history，payload_patch forbidden |
+| routecodex-v4-provider（新建） | v4.control.availability | V4Availability01SessionScoped：session 级 availability 状态机，禁进程全局 cooldown truth、禁 router 写 health |
+| routecodex-v4-server（新建） | v4.console.terminal_output / v4.server.request_identity / v4.error.raw_wire_evidence | ConsoleProjection、V4RequestIdCounter（serverId+localDay+sequence）、terminal-failure 证据 flush |
+| routecodex-v4-runtime（扩展） | v4.debug.dry_run_execution / v4.debug.observability / v4.debug.timing_observability | 仅干跑（no network terminal effect）、observability accumulator、timing summary，全部 diagnostic-only |
+| routecodex-v4-config（扩展） | v4.debug.codex_sample_authorization | ManifestPublished 输出 codex samples 授权面，仅配置信息，进 payload 即红 |
+| routecodex-v4-control（决策点） | v4.control.stopless_state / v4.control.record_ledger / v4.node.statistics | 优先在 runtime/debug 落实现并同步 owner；若证据指向 control，需批准 re-freeze |
+
+### 4.2 Gate 扩展
+
+- `verify-v4-resource-binding.mjs`：从"anchored 25"改为全量 49 校验，新增 owner symbol
+  源码可解析（src 索引）、owner crate 模块注册、node 注册校验；红自测补齐
+  "design 仍被引用"、"owner crate 不存在"、"symbol 缺失"、"node 未注册"、
+  "双源漂移"。
+- `verify-v4-execution-binding.mjs` / `verify-v4-capability-isolation.mjs`：
+  覆盖新 crate 的 allowed/forbidden writer/reader 与 payload 隔离负类。
+- verification-map：新 crate 各注册 `v4_*_l2_regression`（test-consumer）与
+  `v4_*_resource_binding`；`v4_cargo_workspace_build.required_for` 扩展覆盖全部模块。
+- package.json：`verify:v4-foundation` 与 `verify:v4-foundation-red` 追加对应 gate。
+- CI：v4-active-link job 追加新 crate test-consumer 步骤与资源全锚定 gate 步骤。
+
+## 5. 风险与规避
+
+| 风险 | 规避 |
+| --- | --- |
+| debug crate 一次锚 12 资源过大 | 分 3 批红测：ledger/trace/raw -> subscription/snapshot -> dry-run/budget/retention；每批独立 L2 绿后并入 |
+| 冻结 control 需扩展导致 re-freeze | 先按实现证据选 owner；必须 re-freeze 时先报 Jason 批准，禁止静默改 active artifact |
+| 新 crate 与 active-link 约束冲突 | 新 crate 走 build-consumer/test-consumer；不加入 workspace 成员（沿用 config/control/error 模式），workspace gate 统一为"workspace 成员 + 全量 test-consumer" |
+| 资源 self-anchor（gate 用资源自身证明资源） | nodeIds 只来自 node-graph 三链 + skeleton checkpoints + registered_nodes，禁止把 resource.owner_node 并入校验集合 |
+| 控制/诊断字段进 payload | plane-isolation + capability-isolation gate 负类覆盖新 crate 全部资源 |
+| 只加文档不改实现 | 每条 anchored 必须能解析到真实 symbol 与测试；验证栈先行，先红后绿 |
+
+## 6. 测试计划
+
+1. 红测先行：对每条新增资源先写负类（缺 owner / 缺 symbol / 越权 writer /
+   payload 泄漏 / 双源漂移 / 未注册 node），确认当前红。
+2. L2 白盒/黑盒：每 crate 至少覆盖生命周期正向 + 反向（重复 register / 未注册
+   consume / 已释放复用 / 越权写入 / 跨 session 复用），正反成对。
+3. 构建/门禁矩阵：`cargo test --workspace --manifest-path v4/Cargo.toml`、
+   build-link test-consumer（全部模块）、`npm run verify:v4-foundation`、
+   `npm run verify:v4-foundation-red`、`appsdk verify --admission v4`、
+   gen/verify-index、fmt/release build。
+4. 全量验证绿后 DSH review，语义 PASS 后交付。
+
+## 7. 实施步骤（顺序）
+
+1. 资源归属确认：核对 24 条 design 资源与 debug-subscription / data-control-boundary /
+   node-graph contract 基线，锁 owner 与 gate；冻结 crate 冲突先记决策点。
+2. Gate 先行：扩 `verify-v4-resource-binding.mjs`（49 全量 + 红自测），先红后绿；
+   登记 verification-map / package.json / CI。
+3. 新 crate 落库：debug -> router/provider -> server，逐 crate
+   `contract_bound`（project.json + maps + L2 红测 + test-consumer 绿）。
+4. 扩展 runtime/config 资源面（dry-run/observability/timing、codex_sample_authorization）。
+5. 全量 49 anchored 双源同步；处理 control 决策点（owner 迁移或批准 re-freeze）。
+6. 构建门禁统一：`v4_cargo_workspace_build` 覆盖全部模块，CI v4-active-link 完整执行。
+7. 全量验证矩阵绿；提交（显式路径，不裹 V3 dirty）。
+8. DSH review PASS；更新 plan ledger / note / MEMORY。
+
+## 8. 完成定义（DoD）
+
+- 49/49 资源 anchored，双源一致，机器 gate 校验符号/节点/模块真实存在；
+- 新 crate 全部 contract_bound 且 L2 回归挂入 CI；workspace 门禁不遗漏模块；
+- 冻结基线未被静默修改；control 决策点有批准或证据记录；
+- 先红后绿证据在案；全量验证矩阵绿；
+- DSH review 语义 PASS（无 P0/P1、无"修复后再审"）。
