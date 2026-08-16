@@ -5556,3 +5556,21 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
   修复叙述 prose 先剥离），node --check + test-dsh-mcp + 4 个历史 final
   回归（r2 PASS→pass、genuine FAIL→fail、P0/P1 none→pass、r1 FAIL→fail）
   通过。该工具修复在仓库外，不入 repo commit。
+
+## 2026-08-16 V4 Cordis 垂直切片实验确证（M3 设计输入）
+- 真实 Cordis v4.0.0-rc.8（npm）可承载 NodeContainer：Context/plugin/Fiber/
+  provide/inject/isolate/effect/dispose 均为真实生命周期，Rust 只消费编译
+  plan + typed handles；实验 21/21 全绿，证据在
+  `v4/playground/experiments/cordis-node-container-001/evidence/evidence.json`。
+- Cordis 服务隔离规则（P0）：`provide()` 把服务存到首个 provider 的
+  root-level symbol；未对服务名逐节点 `isolate()` 时，外部节点插件可解析并
+  激活（已复现泄漏）。NodeContainer host 必须对标准 node 服务名 +
+  声明 `services_provided` 名逐节点阴影；缺依赖时 fiber 静默 PENDING，
+  `fiber.await()` 对 PENDING 也 resolve，host 必须断言 `state===ACTIVE` 并
+  逆序回滚。
+- 跨插件 dispose 顺序由 host 编排：ACTIVE fiber disposer 只跑一次，PENDING
+  dispose 是 no-op，重复 dispose 幂等。
+- `routecodex-v4-plugin-plan::compile_node_plan` 新增 `container_services`
+  参数：`inject` 对 host 容器服务 + 节点内插件 `services_provided` 联合校验
+  （15 tests）；`playground/**` 归 routecodex-v4-governance 模块。
+Tags: #v4 #cordis #node-container #plugin #isolation #experiment

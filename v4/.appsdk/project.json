@@ -85,11 +85,12 @@
       "generated_outputs": [
         "generated/governance/**"
       ],
-      "module_id": "routecodex-v4-governance",
-      "owned_paths": [
-        ".appsdk/**",
-        "contracts/**"
-      ],
+  "module_id": "routecodex-v4-governance",
+  "owned_paths": [
+    ".appsdk/**",
+    "contracts/**",
+    "playground/**"
+  ],
       "regression": {
         "allow_skipped": false,
         "command": {

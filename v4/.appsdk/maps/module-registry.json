@@ -9,6 +9,7 @@
         ".appsdk/**",
         "contracts/**",
         "docs/**",
+        "playground/**",
         "tests/**",
         "scripts/**",
         "Cargo.toml",

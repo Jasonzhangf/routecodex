@@ -442,7 +442,10 @@ fn reachable<'a>(
 
 /// Compile one node's immutable plugin plan. `allowed_reads` / `allowed_writes`
 /// are the node-scoped resource permissions; `resources` is the global registry
-/// used for axis and effect validation.
+/// used for axis and effect validation. `container_services` are services
+/// provided by the NodeContainer host itself (never by a plugin); every plugin
+/// `inject` entry must resolve against `container_services` or against a
+/// service provided by an enabled plugin inside this node.
 pub fn compile_node_plan(
     node_id: &str,
     role_id: &str,
@@ -452,6 +455,7 @@ pub fn compile_node_plan(
     allowed_reads: &[String],
     allowed_writes: &[String],
     resources: &ResourceRegistry,
+    container_services: &[String],
 ) -> Result<NodePluginPlan, PlanError> {
     let node_roles = vec![role_id.to_string()];
     for plugin in authoring {
@@ -535,6 +539,7 @@ pub fn compile_node_plan(
     let provided_services: HashSet<&str> = enabled
         .iter()
         .flat_map(|plugin| plugin.services_provided.iter().map(String::as_str))
+        .chain(container_services.iter().map(String::as_str))
         .collect();
     for plugin in &enabled {
         for service in &plugin.inject {
@@ -690,6 +695,7 @@ mod tests {
             &allowed_reads(),
             &allowed_writes(),
             &registry(),
+            &[],
         )
         .expect("plan compiles");
         let ids: Vec<&str> = plan.entries.iter().map(|entry| entry.plugin_id.as_str()).collect();
@@ -707,8 +713,8 @@ mod tests {
             authoring_plugin("v4.request.b", PluginPhase::Semantic, 300, true),
             authoring_plugin("v4.request.a", PluginPhase::Semantic, 400, true),
         ];
-        let plan_a = compile_node_plan("node_a", "request_chat_process", "request", 1, &node_a, &allowed_reads(), &allowed_writes(), &registry()).unwrap();
-        let plan_b = compile_node_plan("node_b", "request_chat_process", "request", 2, &node_b, &allowed_reads(), &allowed_writes(), &registry()).unwrap();
+        let plan_a = compile_node_plan("node_a", "request_chat_process", "request", 1, &node_a, &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap();
+        let plan_b = compile_node_plan("node_b", "request_chat_process", "request", 2, &node_b, &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap();
         let ids_a: Vec<&str> = plan_a.entries.iter().map(|entry| entry.plugin_id.as_str()).collect();
         let ids_b: Vec<&str> = plan_b.entries.iter().map(|entry| entry.plugin_id.as_str()).collect();
         assert_eq!(ids_a, vec!["v4.request.a", "v4.request.b"]);
@@ -725,8 +731,8 @@ mod tests {
         ];
         let mut second = first.clone();
         second.reverse();
-        let plan_a = compile_node_plan("node", "request_chat_process", "request", 1, &first, &allowed_reads(), &allowed_writes(), &registry()).unwrap();
-        let plan_b = compile_node_plan("node", "request_chat_process", "request", 1, &second, &allowed_reads(), &allowed_writes(), &registry()).unwrap();
+        let plan_a = compile_node_plan("node", "request_chat_process", "request", 1, &first, &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap();
+        let plan_b = compile_node_plan("node", "request_chat_process", "request", 1, &second, &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap();
         assert_eq!(plan_a.hash, plan_b.hash);
         first.clear();
         let _ = &mut first;
@@ -744,7 +750,7 @@ mod tests {
         validator.descriptor.effect = PluginEffect::ReadOnly;
         validator.descriptor.writes = vec![];
         let authoring = vec![codec_a, codec_b, validator];
-        let plan = compile_node_plan("node", "request_chat_process", "request", 6, &authoring, &allowed_reads(), &allowed_writes(), &registry()).unwrap();
+        let plan = compile_node_plan("node", "request_chat_process", "request", 6, &authoring, &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap();
         assert_eq!(plan.selection_groups.len(), 1);
         assert_eq!(plan.selection_groups[0].active_plugin, "v4.codec.a");
         assert_eq!(plan.selection_groups[0].variants, vec!["v4.codec.a", "v4.codec.b"]);
@@ -756,7 +762,7 @@ mod tests {
     fn selection_group_zero_active_rejected() {
         let mut codec_a = authoring_plugin("v4.codec.a", PluginPhase::Semantic, 200, false);
         codec_a.descriptor.selection_group = Some("provider_wire_codec".to_string());
-        let error = compile_node_plan("node", "request_chat_process", "request", 6, &[codec_a], &allowed_reads(), &allowed_writes(), &registry()).unwrap_err();
+        let error = compile_node_plan("node", "request_chat_process", "request", 6, &[codec_a], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
         assert!(matches!(error, PlanError::ZeroSelection(_)));
     }
 
@@ -766,7 +772,7 @@ mod tests {
         codec_a.descriptor.selection_group = Some("provider_wire_codec".to_string());
         let mut codec_b = authoring_plugin("v4.codec.b", PluginPhase::Semantic, 200, true);
         codec_b.descriptor.selection_group = Some("provider_wire_codec".to_string());
-        let error = compile_node_plan("node", "request_chat_process", "request", 6, &[codec_a, codec_b], &allowed_reads(), &allowed_writes(), &registry()).unwrap_err();
+        let error = compile_node_plan("node", "request_chat_process", "request", 6, &[codec_a, codec_b], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
         assert!(matches!(error, PlanError::MultiSelection { .. }));
     }
 
@@ -776,7 +782,7 @@ mod tests {
         a.descriptor.before = vec!["v4.request.b".to_string()];
         let mut b = authoring_plugin("v4.request.b", PluginPhase::Semantic, 300, true);
         b.descriptor.before = vec!["v4.request.a".to_string()];
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a, b], &allowed_reads(), &allowed_writes(), &registry()).unwrap_err();
+        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a, b], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
         assert!(matches!(error, PlanError::OrderingCycle));
     }
 
@@ -784,7 +790,7 @@ mod tests {
     fn same_phase_same_order_tie_rejected() {
         let a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
         let b = authoring_plugin("v4.request.b", PluginPhase::Semantic, 300, true);
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a, b], &allowed_reads(), &allowed_writes(), &registry()).unwrap_err();
+        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a, b], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
         assert!(matches!(error, PlanError::Tie { .. }));
     }
 
@@ -792,7 +798,7 @@ mod tests {
     fn missing_before_dependency_rejected() {
         let mut a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
         a.descriptor.before = vec!["v4.request.ghost".to_string()];
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a], &allowed_reads(), &allowed_writes(), &registry()).unwrap_err();
+        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
         assert!(matches!(error, PlanError::MissingDependency { .. }));
     }
 
@@ -806,7 +812,7 @@ mod tests {
             },
         ];
         let provider = authoring_plugin("v4.request.provider", PluginPhase::Semantic, 200, true);
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[consumer, provider], &allowed_reads(), &allowed_writes(), &registry()).unwrap_err();
+        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[consumer, provider], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
         assert!(matches!(error, PlanError::VersionConflict { .. }));
     }
 
@@ -814,7 +820,7 @@ mod tests {
     fn unauthorized_write_rejected() {
         let mut a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
         a.descriptor.writes = vec!["v4.response.normal_payload".to_string()];
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a], &allowed_reads(), &allowed_writes(), &registry()).unwrap_err();
+        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
         assert!(matches!(error, PlanError::UnauthorizedWrite { .. }));
     }
 
@@ -822,8 +828,45 @@ mod tests {
     fn cross_node_service_inject_rejected() {
         let mut a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
         a.descriptor.inject = vec!["nodeBPrivate".to_string()];
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a], &allowed_reads(), &allowed_writes(), &registry()).unwrap_err();
+        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
         assert!(matches!(error, PlanError::CrossNodeService { .. }));
+    }
+
+    #[test]
+    fn container_service_inject_allowed() {
+        // NodeContainer host services (nodeControl, nodeInformation, ...) are
+        // provided by the container itself, not by a plugin. A plugin may
+        // inject them without a plugin-side provider.
+        let mut a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
+        a.descriptor.inject = vec![
+            "nodeControl".to_string(),
+            "nodeInformation".to_string(),
+            "nodeDiagnostics".to_string(),
+        ];
+        let container_services = vec![
+            "nodeControl".to_string(),
+            "nodeInformation".to_string(),
+            "nodeDiagnostics".to_string(),
+            "nodeErrors".to_string(),
+            "nodeExecution".to_string(),
+            "nodeLifecycle".to_string(),
+            "nodeDescriptor".to_string(),
+            "nodePlugins".to_string(),
+        ];
+        let plan = compile_node_plan(
+            "node",
+            "request_chat_process",
+            "request",
+            4,
+            &[a],
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &container_services,
+        )
+        .unwrap();
+        assert_eq!(plan.entries.len(), 1);
+        assert!(plan.verify());
     }
 
     #[test]
@@ -833,7 +876,7 @@ mod tests {
         observer.descriptor.effect = PluginEffect::DiagnosticOnly;
         observer.descriptor.reads = vec!["v4.debug.event_ledger".to_string()];
         observer.descriptor.writes = vec![];
-        let plan = compile_node_plan("node", "request_chat_process", "request", 4, &[observer], &allowed_reads(), &allowed_writes(), &registry()).unwrap();
+        let plan = compile_node_plan("node", "request_chat_process", "request", 4, &[observer], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap();
         assert_eq!(plan.entries.len(), 1);
         assert!(plan.verify());
     }
@@ -843,7 +886,7 @@ mod tests {
         let mut a = authoring_plugin("v4.request.a", PluginPhase::Projection, 300, true);
         a.descriptor.before = vec!["v4.request.b".to_string()];
         let b = authoring_plugin("v4.request.b", PluginPhase::Semantic, 300, true);
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a, b], &allowed_reads(), &allowed_writes(), &registry()).unwrap_err();
+        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a, b], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
         assert!(matches!(error, PlanError::PhaseOrderConflict { .. }));
     }
 }

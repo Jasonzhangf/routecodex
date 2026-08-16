@@ -35669,3 +35669,27 @@ Verification (all green):
 - `cargo test -p routecodex-v4-skeleton` 7/7
 
 Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
+
+# 2026-08-16 V4 M3 前置：真实 Cordis NodeContainer 垂直切片实验
+- 实验目录 `v4/playground/experiments/cordis-node-container-001/`（git 排除，
+  不提交）：cordis@4.0.0-rc.8 精确锁定 + rust-executor 独立 workspace
+  （path 依赖真实 plugin-plan/plugin-contract）。
+- 21/21 检查全绿（evidence/evidence.json）：A/B 节点不同插件集与顺序的 plan
+  编译、Cordis 按 plan 顺序挂载全部 ACTIVE、每节点一次 typed bridge
+  dispatch、effect 写权限运行时 fail-fast、diagnostic-only 并发只读、逆序
+  幂等 dispose、篡改 plan hash 拒绝、跨节点 inject 计划层拒绝。
+- 关键发现 1：Cordis v4 RC8 提供真实 Context/plugin/Fiber/provide/inject/
+  isolate/effect/dispose；provider 未先 ACTIVE 时 consumer 静默 PENDING，
+  `await()` 对 PENDING 也 resolve，host 必须断言 state===ACTIVE。
+- 关键发现 2（P0 设计输入）：Cordis 服务隔离必须逐名 `isolate()`；不阴影时
+  跨节点插件可解析首个 provider 的 root symbol 并激活（实验复现
+  cordis-unshadowed-service-leak）。NodeContext 必须阴影标准 node 服务 +
+  声明 services_provided 名。
+- 关键发现 3：plan compiler 需 `container_services` 参数（host 提供的
+  nodeControl/nodeInformation 等不是插件提供）；已实现于
+  routecodex-v4-plugin-plan（测试 14→15）。
+- 延迟：每节点 typed dispatch 中位 0.179ms（子进程 JSON 桥）；正式 M3 用
+  NAPI/长驻 native worker。
+- 治理：`playground/**` 归 routecodex-v4-governance 所有（module-registry +
+  project.json），否则 isolation gate 对未注册文件 fail。
+- verify:ci 全绿：gates=13 consumers=9 red=6。
