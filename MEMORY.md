@@ -5562,3 +5562,4 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 - Req03 只有 scope、缺精确 provider pin 时，仅允许唯一候选恢复；存在多个 provider binding 必须 fail-fast `AmbiguousProviderBinding`，禁止猜测、payload 重建或 fallback。
 - SSE 在首个业务帧前失败可进入同请求 retry/reselect；首个业务帧后失败不可换流，必须经统一 typed Error01-06 投影成入口协议的标准 error event 并 clean EOF。禁止把 Rust/Hyper body `Err` 直接暴露成客户端 transport decode failure；禁止伪造成功终态。
 - 实现提交 `a4e29c97571df089ab784a4eec3c30fa6f583234`，全局版本 0.90.4576；定向、红测、architecture 36/36、workspace、isolated build/install、四端口 health 与 5555 两个 typed session 连续 HTTP 200 已验证。
+- continuation architecture gate 与 red fixtures 必须进入 `verify:v3-architecture-ci` 唯一 CI umbrella；commit `2a2582c5b` 接线后 umbrella 38/38，`test.yml`/`release.yml` 均实际消费。并发运行实例一度回到 0.90.4575 后，已重新安装/聚合 restart 并再次确认四端口 0.90.4576、5555 两个 typed session HTTP 200。
