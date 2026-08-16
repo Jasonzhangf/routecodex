@@ -1,24 +1,24 @@
 {
-  "evidence_id": "evidence-edge-v2",
-  "issue_id": "routecodex-v4-foundation",
-  "experiment_id": "experiment-edge-active-link-v2",
+  "evidence_id": "evidence-edge-v3",
+  "issue_id": "v4-edge-control-lifecycle-20260816",
+  "experiment_id": "experiment-edge-control-lifecycle-v3",
   "kind": "gate",
-  "source_commit": "d6239b197",
-  "artifact_hash": "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593",
+  "source_commit": "8bef032e6",
+  "artifact_hash": "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0",
   "scope": {
     "module_id": "routecodex-v4-edge"
   },
   "producer": {
     "adapter": "appsdk",
-    "identity": "appsdk::compiler+routecodex-v4-build-link"
+    "identity": "appsdk::compiler+routecodex-v4-build-link+edge-control-lifecycle"
   },
   "result": "pass",
-  "created_at": "2026-08-15T02:40:00Z",
+  "created_at": "2026-08-16T03:15:00Z",
   "expires_at": "2099-01-01T00:00:00Z",
   "input_hashes": [
-    "sha256:944d045b1a1744c2878fa49920a8fae551da912df597979229ee26783bc10279",
-    "sha256:8f126cdb7f261e3cc2642d56900b8074b65e106ceb332ae406a030790a5b9454",
-    "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593"
+    "sha256:fb0002a89089b892f7c8323cb555a8d50d261bc125c4116b76578bc79c4520ad",
+    "sha256:e97ff7522d76b5567db2bf6ba9745479ea6f14b12ccfcb54b876fbf73325dd76",
+    "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0"
   ],
-  "scope_hash": "sha256:944d045b1a1744c2878fa49920a8fae551da912df597979229ee26783bc10279"
+  "scope_hash": "sha256:fb0002a89089b892f7c8323cb555a8d50d261bc125c4116b76578bc79c4520ad"
 }

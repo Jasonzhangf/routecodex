@@ -1,0 +1,8 @@
+{
+  "cleanup_id": "cleanup-edge-v3",
+  "disposition": "archive_then_remove",
+  "removed_paths": [
+    "playground/experiments/v4-edge-control-lifecycle-v3"
+  ],
+  "created_at": "2026-08-16T03:15:00Z"
+}

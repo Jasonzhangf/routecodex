@@ -1,16 +1,16 @@
 {
   "ai_confidence": 0.99,
-  "confidence_rationale": "resolver hermetic record graph, edge test-consumer regression through the Active surface, workspace tests, release build and admission all pass for active-v2",
-  "created_at": "2026-08-15T02:40:00Z",
+  "confidence_rationale": "approved design V4-EDGE-CONTROL-LIFECYCLE-20260816 has baseline, positive and reverse intervention evidence; the unique Edge owner now rejects duplicate register, invalid release, missing key and non-control resource axes with exact typed errors",
+  "created_at": "2026-08-16T03:15:00Z",
   "evidence_ids": [
-    "evidence-edge-v2"
+    "evidence-edge-v3"
   ],
-  "issue_id": "routecodex-v4-foundation",
-  "promotion_id": "promotion-edge-v2",
-  "review_id": "review-edge-v2",
-  "reviewed_artifact_hash": "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593",
-  "reviewed_commit": "d6239b197",
-  "reviewed_scope_hash": "sha256:944d045b1a1744c2878fa49920a8fae551da912df597979229ee26783bc10279",
+  "issue_id": "v4-edge-control-lifecycle-20260816",
+  "promotion_id": "promotion-edge-v3",
+  "review_id": "review-edge-v3",
+  "reviewed_artifact_hash": "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0",
+  "reviewed_commit": "8bef032e6",
+  "reviewed_scope_hash": "sha256:fb0002a89089b892f7c8323cb555a8d50d261bc125c4116b76578bc79c4520ad",
   "reviewer": {
     "adapter": "codex",
     "identity": "codex::architecture-review"

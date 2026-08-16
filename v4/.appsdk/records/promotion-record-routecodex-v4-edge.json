@@ -1,23 +1,23 @@
 {
-  "artifact_hash": "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593",
-  "base_artifact_hash": "sha256:1f800dc90551ae1e3ca11b34560f9c967ef68b65eba0956f5f624bfff93cf3af",
-  "base_commit": "8eac65195",
-  "change_reason_comment": "Edge re-freeze active-v2: frozen Edge build/regression migrated from Cargo path dependency to the routecodex-v4-build-link resolver commands; Edge links the frozen base-node Active surface and the config regression consumes it through the resolver",
-  "change_set_id": "change-edge-active-link-v2",
+  "artifact_hash": "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0",
+  "base_artifact_hash": "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593",
+  "base_commit": "d6239b197",
+  "change_reason_comment": "Edge active-v3 makes ControlFlow lifecycle validation exact: duplicate register, missing or foreign-scope release, missing control key, and non-Control resource targets fail at the owning boundary",
+  "change_set_id": "change-edge-control-lifecycle-v3",
   "compatibility_level": "breaking",
-  "created_at": "2026-08-15T02:40:00Z",
-  "design_id": "v4-active-artifact-linking-design",
+  "created_at": "2026-08-16T03:15:00Z",
+  "design_id": "V4-EDGE-CONTROL-LIFECYCLE-20260816",
   "evidence_ids": [
-    "evidence-edge-v2"
+    "evidence-edge-v3"
   ],
-  "experiment_id": "experiment-edge-active-link-v2",
-  "issue_id": "routecodex-v4-foundation",
+  "experiment_id": "experiment-edge-control-lifecycle-v3",
+  "issue_id": "v4-edge-control-lifecycle-20260816",
   "module_id": "routecodex-v4-edge",
-  "new_active_version": "active-v2",
-  "playground_cleanup_record_id": "cleanup-edge-v2",
-  "previous_active_version": "active-v1",
-  "promotion_id": "promotion-edge-v2",
-  "public_api_hash": "sha256:08718796c61aac004f5b95ca3046d7123be2791fe0ad3c7d8d5c8dfa59deb7c6",
+  "new_active_version": "active-v3",
+  "playground_cleanup_record_id": "cleanup-edge-v3",
+  "previous_active_version": "active-v2",
+  "promotion_id": "promotion-edge-v3",
+  "public_api_hash": "sha256:e97ff7522d76b5567db2bf6ba9745479ea6f14b12ccfcb54b876fbf73325dd76",
   "required_gate_results": [
     {
       "gate_id": "v4_edge_l1_regression",
@@ -35,8 +35,8 @@
       "result": "pass"
     }
   ],
-  "review_id": "review-edge-v2",
-  "root_cause": "frozen Edge still consumed base-node through a Cargo path dependency; re-freeze binds Edge via the resolver Active surface so lifecycle records and compiled artifacts agree",
-  "scope_hash": "sha256:944d045b1a1744c2878fa49920a8fae551da912df597979229ee26783bc10279",
-  "source_commit": "d6239b197"
+  "review_id": "review-edge-v3",
+  "root_cause": "validate_edge treated ControlFlow as existence-only validation: missing keys were defaulted, register overwrote state, release removed without identity checks, and resource axis was not enforced",
+  "scope_hash": "sha256:fb0002a89089b892f7c8323cb555a8d50d261bc125c4116b76578bc79c4520ad",
+  "source_commit": "8bef032e6"
 }

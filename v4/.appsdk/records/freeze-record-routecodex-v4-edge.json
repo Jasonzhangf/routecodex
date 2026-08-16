@@ -1,17 +1,17 @@
 {
-  "active_version": "active-v2",
-  "artifact_record_id": "evidence-edge-v2",
+  "active_version": "active-v3",
+  "artifact_record_id": "evidence-edge-v3",
   "clean_scope": {
-    "base_commit": "d6239b197",
+    "base_commit": "8bef032e6",
     "changed_paths": [],
     "generated_policy": "tracked_hash",
     "ignored_paths": []
   },
-  "created_at": "2026-08-15T02:40:00Z",
-  "freeze_id": "freeze-edge-v2",
+  "created_at": "2026-08-16T03:15:00Z",
+  "freeze_id": "freeze-edge-v3",
   "git_clean": true,
-  "issue_id": "routecodex-v4-foundation",
-  "library_hash": "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593",
+  "issue_id": "v4-edge-control-lifecycle-20260816",
+  "library_hash": "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0",
   "module_id": "routecodex-v4-edge",
   "owners": {
     "api_extractor": "appsdk",
@@ -21,12 +21,12 @@
     "vcs": "git"
   },
   "previous_active_immutable": true,
-  "previous_active_version": "active-v1",
-  "promotion_id": "promotion-edge-v2",
-  "promotion_record_hash": "sha256:ea7e806a85e6ff4bcb3aecfb69a6c2b23a8a7129408c446e701c480b08188ab4",
-  "public_api_hash": "sha256:08718796c61aac004f5b95ca3046d7123be2791fe0ad3c7d8d5c8dfa59deb7c6",
-  "regression_report_hash": "sha256:95d507ed0e990c92f021adda6ced23581ad8d27034404263532bb12aa5341407",
-  "regression_report_id": "regression-edge-v2",
-  "review_id": "review-edge-v2",
-  "source_commit_or_tag": "d6239b197"
+  "previous_active_version": "active-v2",
+  "promotion_id": "promotion-edge-v3",
+  "promotion_record_hash": "sha256:ad21809ab7f0934a51f4ab3eb20bfcceb6494dbcbafca9ba8a7b3111a887a74e",
+  "public_api_hash": "sha256:e97ff7522d76b5567db2bf6ba9745479ea6f14b12ccfcb54b876fbf73325dd76",
+  "regression_report_hash": "sha256:6bf80e37a8804028a8522484aff5afca0e1bbf3b169da531a6fc1e33cb23dda6",
+  "regression_report_id": "regression-edge-v3",
+  "review_id": "review-edge-v3",
+  "source_commit_or_tag": "8bef032e6"
 }
