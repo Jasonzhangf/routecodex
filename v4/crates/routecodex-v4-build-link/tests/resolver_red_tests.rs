@@ -97,12 +97,12 @@ fn positive_frozen_base_node_active_identity_resolves() {
 #[test]
 fn positive_edge_active_identity_resolves_with_dependency_closure() {
     let host = host_triple().expect("rustc host");
-    let resolution = resolve(&fixture_root(), "routecodex-v4-edge", "active-v2", &host)
+    let resolution = resolve(&fixture_root(), "routecodex-v4-edge", "active-v3", &host)
         .expect("frozen edge Active artifact must resolve");
     assert_eq!(resolution.identity.module_id, "routecodex-v4-edge");
     assert_eq!(
         resolution.identity.artifact_hash,
-        "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593"
+        "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0"
     );
     assert_eq!(resolution.identity.dependencies.len(), 1);
     assert_eq!(
@@ -255,7 +255,7 @@ fn negative_dependency_closure_mismatch_fails_fast() {
     let broken_root = temp_fixture("dep-missing");
     fs::remove_dir_all(broken_root.join("active/lib/routecodex-v4-base-node"))
         .expect("remove base-node fixture copy");
-    let error = resolve(&broken_root, "routecodex-v4-edge", "active-v2", &host)
+    let error = resolve(&broken_root, "routecodex-v4-edge", "active-v3", &host)
         .expect_err("dependency hash swap must fail");
     assert!(matches!(
         error,
