@@ -35648,3 +35648,10 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 全项目重放仍在 `routecodex-v4-config` 构建时 fail closed：`ActiveLinkErr10StaleOrMissingRecord`。当前 base-node `active-v2` 单独 resolve 成功，edge `active-v4` 的 dependency hash 也明确为 base-node `active-v2` 的 `16b93c...`，但递归解析先进入 `active-v1` 并用当前 freeze record 校验，得到旧 artifact `036daf...` 与当前 record `16b93c...` 不一致。
 - 唯一首次偏离：`v4/crates/routecodex-v4-build-link/src/resolver.rs::find_dependency_version` 先对所有历史版本执行 `resolve_inner`，之后才比较 `artifact_hash`；排序从 `active-v1` 开始，因此一个不匹配且历史 record 已归档的版本会阻断目标版本选择。
 - 候选设计 `V4-ACTIVE-RESOLVE-PREFILTER-001`：版本选择先只读 candidate `artifact.json` 的 recorded artifact hash，跳过不匹配版本；只对 hash 匹配的唯一候选执行完整 `resolve_inner` 和 record/dependency/rustc 校验。正测锁 current dependency 能越过历史版本；反测锁匹配版本 record stale、hash 无匹配、重复 hash/歧义仍 fail closed。未获 Jason 明确批准前不改 runtime 源码。
+
+# 2026-08-16 V4-ACTIVE-RESOLVE-PREFILTER-001 approved fix evidence
+- Jason 已明确批准 design。clean-fix worktree 基于 migration commit `1494fdcac`；唯一代码 owner 为 `routecodex-v4-build-link::find_dependency_version`，无 Active/Protected/V3 修改。
+- 红测先证实旧实现失败：current edge active-v4 递归解析被 nonmatching base-node active-v1 的旧 record 挡住；duplicate hash 也未返回 ambiguity。
+- 实现：先读取所有 Active candidate 的 recorded artifact hash；零匹配报 dependency closure mismatch，多匹配报 ambiguous；只对唯一匹配版本运行完整 `resolve_inner`。选中版本 artifact 重算、record graph、target、dependency closure、rustc gate 全部保留。
+- 正反测试 21/21：历史版本跳过、duplicate hash、无匹配 hash、选中版本 stale record；原有 artifact/public API/rustc/path/symlink/source-dep 红测全部通过。workspace 12+21+7 通过，fmt/release build/active-link gate/index gen+verify 通过。
+- 真实 migration Active 图恢复：显式 hydration frozen module generated manifests 后，AppSDK 0.1.3 全项目 compile 成功，config artifact `1e7e3d...`、runtime artifact `ebfe6568...`；verify 与 admission 均通过。resolver consumer：edge 15、control 15、error 23、config 24、runtime 20 全绿。

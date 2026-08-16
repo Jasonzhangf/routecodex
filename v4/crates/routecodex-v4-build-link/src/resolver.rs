@@ -364,11 +364,44 @@ fn find_dependency_version(
         }
     }
     versions.sort();
+    let mut matching_versions = Vec::new();
     for version in versions {
-        let candidate = resolve_inner(root, dependency_module, &version, target, visiting)?;
-        if candidate.identity.artifact_hash == dependency_hash {
-            return Ok(candidate);
+        validate_identity_component(dependency_module, &version).map_err(|_| {
+            ActiveLinkError::DependencyClosureMismatch(format!(
+                "invalid dependency version {dependency_module} {version}"
+            ))
+        })?;
+        let version_dir = module_dir.join(&version);
+        assert_no_symlink_components(root, &version_dir)?;
+        let artifact_file = version_dir.join("artifact.json");
+        if !artifact_file.is_file() {
+            return Err(ActiveLinkError::ArtifactMissing(format!(
+                "{} missing",
+                artifact_file.display()
+            )));
         }
+        assert_no_symlink_components(root, &artifact_file)?;
+        let artifact = read_json(
+            &artifact_file,
+            ActiveLinkError::ArtifactMissing(format!("{} missing", artifact_file.display())),
+        )?;
+        let recorded_hash = record_str(&artifact, "artifact_hash").ok_or_else(|| {
+            ActiveLinkError::ManifestInvalid(format!(
+                "{dependency_module} {version} artifact missing artifact_hash"
+            ))
+        })?;
+        if recorded_hash == dependency_hash {
+            matching_versions.push(version);
+        }
+    }
+    if matching_versions.len() > 1 {
+        return Err(ActiveLinkError::DependencyClosureMismatch(format!(
+            "dependency {dependency_module} artifact hash {dependency_hash} is ambiguous across Active versions {}",
+            matching_versions.join(",")
+        )));
+    }
+    if let Some(version) = matching_versions.pop() {
+        return resolve_inner(root, dependency_module, &version, target, visiting);
     }
     Err(ActiveLinkError::DependencyClosureMismatch(format!(
         "dependency {dependency_module} has no Active version matching artifact hash {dependency_hash}"
