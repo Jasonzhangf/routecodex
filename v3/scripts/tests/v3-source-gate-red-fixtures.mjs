@@ -24,6 +24,15 @@ const fixtures = [
     diagnostic: /source must have exactly one module owner: v3\/crates\/routecodex-v3-target.*v3\.target,v3\.target_duplicate/,
   },
   {
+    name: 'module owner feature is undeclared',
+    file: 'docs/architecture/v3-runtime-module-registry.yml',
+    transform: (source) => source.replace(
+      '    owner_feature_id: v3.hub_pipeline_static_skeleton\n',
+      '    owner_feature_id: v3.undeclared_feature\n',
+    ),
+    diagnostic: /owner_feature_id does not resolve to a declared feature: v3\.undeclared_feature/,
+  },
+  {
     name: 'provider transport outside provider owner',
     file: 'v3/crates/routecodex-v3-server/src/lib.rs',
     mutation: '\nfn forbidden_transport_owner() { let _ = reqwest::Client::new(); }\n',
