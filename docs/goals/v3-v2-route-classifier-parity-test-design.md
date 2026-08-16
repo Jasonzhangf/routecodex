@@ -108,7 +108,9 @@ context rejection, and request-local failure exclusion remain Target/Error conce
 
 ## Known boundary
 
-Target context-priority remains a separate owner from route classification. The completed
-`bug_id:v3_target_priority_context_heuristic` change removed the V3-only 90% candidate veto; this
-classifier contract supplies only route order, active-turn facts, and the configured longcontext
-threshold. Real upstream context rejection remains in the provider error/switch chain.
+Target context admission remains a separate owner from route classification. The classifier
+supplies route order, RCC-owned active-turn input tokens, and the configured longcontext threshold;
+Target10 compares those tokens with each candidate context window. Below 90% keeps configured
+priority, 90% through 100% is demoted but retained, and above 100% is filtered before transport.
+Provider tokenizer disagreement can still produce a health-neutral context error in the provider
+error/switch chain, but that error cannot rewrite Target token truth.

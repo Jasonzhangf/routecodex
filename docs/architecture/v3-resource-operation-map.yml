@@ -238,6 +238,7 @@ resources:
     semantic_contract:
       availability_scope: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
       tier_progression: a higher numeric priority tier is selectable only when every lower-priority candidate is unavailable in the current session
+      context_admission: Target10 compares route request_input_tokens with candidate max_context_tokens; below 90 percent keeps configured order, 90 through 100 percent is eligible after normal candidates, and above 100 percent is filtered before transport
       protocol_decision_inputs: providerType and provider.responses.process from the selected Target10 truth; process=chat is a Relay execution requirement, not a provider id special case.
     allowed_writers: [V3Target10ConcreteProviderSelected]
     allowed_readers: [V3Execution11ProtocolDecision, V3ResponsesDirect11Policy, V3Provider12ResponsesWirePayload]
