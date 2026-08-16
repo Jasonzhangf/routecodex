@@ -1,1 +1,39 @@
-{"active_version":"active-v4","artifact_record_id":"error-sdk013-candidate","clean_scope":{"base_commit":"5e1d7e9151b1c10dd8af0fd37f82fa0d88fb3c23","changed_paths":["v4/.appsdk/**","v4/Protected/**"],"generated_policy":"excluded_from_source_clean","ignored_paths":["v4/Active/lib/**","v4/generated/**","v4/target/**"]},"created_at":"2026-08-16T04:29:30Z","freeze_id":"error-sdk013-freeze","git_clean":true,"issue_id":"appsdk-013-migration","library_hash":"sha256:pending","module_id":"routecodex-v4-error","owners":{"api_extractor":"appsdk-0.1.3","artifact_registry":"appsdk-active","compiler":"appsdk-0.1.3","review":"routecodex-codex-adapter","vcs":"git"},"previous_active_immutable":true,"previous_active_version":"active-v3","promotion_id":"error-sdk013-promotion","promotion_record_hash":"sha256:pending","public_api_hash":"sha256:37520a2290b4ab4b6cfc615f8e4a8f16a09b209d445d73f7e421175afd60733a","regression_report_hash":"sha256:pending","regression_report_id":"error-sdk013-regression","review_id":"error-sdk013-architecture-review","source_commit_or_tag":"73a427ee5e4a529cc16890cdb8b4a1b5940704c9"}
+{
+  "active_version": "active-v4",
+  "artifact_record_id": "error-sdk013-candidate",
+  "clean_scope": {
+    "base_commit": "5e1d7e9151b1c10dd8af0fd37f82fa0d88fb3c23",
+    "changed_paths": [
+      "v4/.appsdk/**",
+      "v4/Protected/**"
+    ],
+    "generated_policy": "excluded_from_source_clean",
+    "ignored_paths": [
+      "v4/Active/lib/**",
+      "v4/generated/**",
+      "v4/target/**"
+    ]
+  },
+  "created_at": "2026-08-16T04:29:30Z",
+  "freeze_id": "error-sdk013-freeze",
+  "git_clean": true,
+  "issue_id": "appsdk-013-migration",
+  "library_hash": "sha256:e172b55e1d30076d9adba3d6b9f12dc7ce6f7adc73bbe2fbf8b5abe8fd61ca74",
+  "module_id": "routecodex-v4-error",
+  "owners": {
+    "api_extractor": "appsdk-0.1.3",
+    "artifact_registry": "appsdk-active",
+    "compiler": "appsdk-0.1.3",
+    "review": "routecodex-codex-adapter",
+    "vcs": "git"
+  },
+  "previous_active_immutable": true,
+  "previous_active_version": "active-v3",
+  "promotion_id": "error-sdk013-promotion",
+  "promotion_record_hash": "sha256:ec29cd1bd534a11db5f8d359f11c429336eec7d5c0b209cc9b904c3f5525dfa4",
+  "public_api_hash": "sha256:37520a2290b4ab4b6cfc615f8e4a8f16a09b209d445d73f7e421175afd60733a",
+  "regression_report_hash": "sha256:1c4f09b917f7a12ad2bc430f735f5d258452a374a52304c9efd9e934d1295dac",
+  "regression_report_id": "error-sdk013-regression",
+  "review_id": "error-sdk013-architecture-review",
+  "source_commit_or_tag": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9"
+}

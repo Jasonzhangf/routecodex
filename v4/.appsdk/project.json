@@ -460,13 +460,7 @@
         "suite_id": "v4-error-l2-regression"
       },
       "source_owner": "routecodex-v4-error",
-      "stage": "architecture_stable",
-      "version_base": {
-        "base_artifact_hash": "sha256:c26ccfc3ee6c847b1b4b2f812b72071a20df81f98fe40e60d457c41b3aed5d3f",
-        "base_source_commit": "389bd3cf0",
-        "new_active_version": "active-v4",
-        "previous_active_version": "active-v3"
-      }
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-config/**",
