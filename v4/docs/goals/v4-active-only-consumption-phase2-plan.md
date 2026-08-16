@@ -35,7 +35,7 @@ Design ID: `V4-ACTIVE-LINK-002`（本计划）；上游设计：`v4/docs/design/
   （evidence/review/promotion/regression/freeze/publish）。
 - config：Cargo.toml 移除 base-node、edge path dep → build/regression 改 resolver（不 freeze）。
 - workspace/CI：`v4/Cargo.toml` members 收口；`verify:v4-active-link`、`v4_cargo_workspace_build`、
-  module regression gate、CI `v4-active-link` job 命令改 resolver entrypoint。
+  module regression gate、CI `test` job（V4 canonical `verify:ci`）命令改 resolver entrypoint。
 - registry/maps/docs：frozen-consumer-registry、resource/function/mainline/verification map、
   design/test-design 文档状态同步。
 - hermetic fixture：control active-v2 / error active-v3 与 config 编译产物进入 fixture，CI 恢复后跑 index gate。
@@ -69,7 +69,7 @@ Design ID: `V4-ACTIVE-LINK-002`（本计划）；上游设计：`v4/docs/design/
 5. `v4/contracts/active-link/frozen-consumer-registry.json`：control/error/config 四条边 → `active_artifact`/`migrated`。
 6. resolver `v4/crates/routecodex-v4-build-link/`：验证/补 multi-dep 与 transitive closure（
    config→edge→base-node）、registry coverage 红测（ActiveLinkErr 族沿用）。
-7. `scripts/architecture/verify-v4-active-link.mjs`：删除 transitional 分支，全量扫描保持。
+7. `v4/scripts/architecture/verify-v4-active-link.mjs`：删除 transitional 分支，全量扫描保持。
 8. CI（`.github/workflows/test.yml`）+ `v4/contracts/` gate 命令：workspace build/regression 走 resolver。
 9. fixture：control active-v2 / error active-v3 rlib/artifact/records、config compiled artifact 固化到
    `v4/contracts/active-link/fixture`（沿用 Phase 1 模式，CI restore + index gate）。

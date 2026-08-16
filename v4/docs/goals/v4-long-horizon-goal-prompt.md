@@ -42,7 +42,7 @@ Phase 0 —— 收口当前资源锚定 slice（已基本完成，剩生命周�
 目标：49/49 anchored 双源一致已绿；修复 appsdk verify/admission
 （ARTIFACT_MODULE_SET_MISMATCH），注册 v4_debug/router/provider/server_l2_regression
 四个 gate，verify:v4-foundation 10 -> 14 gates、verify:v4-foundation-red、
-CI v4-active-link job 追加 test-consumer 步骤，active-link frozen-consumer
+CI `test` job 经 V4 canonical `verify:ci` 覆盖 test-consumer 步骤，active-link frozen-consumer
 registry 登记新 crate，全量验证矩阵绿后提交并 DSH PASS。
 验证：resource gate 12/12 红自测 -> 各 crate L2 -> cargo workspace ->
 test-consumer（全部模块）-> verify:v4-foundation -> verify:v4-foundation-red ->

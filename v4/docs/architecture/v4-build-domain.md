@@ -12,9 +12,9 @@ unrelated cwd through the absolute V4 package path):
 |---|---|---|
 | `npm run build` | `v4/scripts/build.mjs` | Cargo workspace release build with tracked lock (`--locked`) |
 | `npm run test` | `v4/scripts/test.mjs` | Cargo workspace tests (incl. resolver/compile-fail red tests) with tracked lock |
-| `npm run verify` | `v4/scripts/verify.mjs` | workspace build, hermetic Active restore, 11 architecture gates, 9 consumer regressions, Active index gen/verify |
-| `npm run verify:red` | `v4/scripts/verify-red.mjs` | verifier red self-test suites + isolation negative matrix |
-| `npm run verify:ci` | `v4/scripts/verify-ci.mjs` | complete admission matrix (build + test + verify + red + isolation) |
+| `npm run verify` | `v4/scripts/verify.mjs` | workspace build, hermetic Active restore, 11 architecture gates, 9 consumer regressions, Active index gen/verify, isolation positive/red matrix |
+| `npm run verify:red` | `v4/scripts/verify-red.mjs` | verifier red self-test suites (isolation matrix is owned by the `verify` positive surface) |
+| `npm run verify:ci` | `v4/scripts/verify-ci.mjs` | complete admission matrix (workspace tests + `verify` + `verify:red`; build and isolation run inside `verify`) |
 | `node scripts/verify-isolation.mjs` | `v4/scripts/verify-isolation.mjs` | isolation positive + red gates (workspace/target ownership, path deps, forbidden refs, Node resolution, module ownership, root dispatchers, output targets) |
 
 Root `package.json` and `.github/workflows/test.yml` only dispatch to

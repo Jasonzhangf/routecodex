@@ -101,7 +101,7 @@ error chain / MetadataCenter / Config v2 / Responses Direct compat 已闭环）�
 - 新增 `v4/docs/architecture/v4-relay-continuation-compatibility-slice.yml`：
   六面条目，每面 v3_stage -> v4_container -> v4_checkpoint -> v4_resource ->
   验证 gate -> evidence -> diff_status；unexplained_diff=0。
-- 新增 `scripts/architecture/verify-v4-relay-continuation.mjs`：
+- 新增 `v4/scripts/architecture/verify-v4-relay-continuation.mjs`：
   1) 六面 compat 机器锁（missing/extra/duplicate/unexplained）；
   2) continuation 不可变区红测（save 后 restore 前语义转换必红）；
   3) Direct/Relay 隔离红测（协议/owner/session 三键）；
@@ -151,7 +151,7 @@ error chain / MetadataCenter / Config v2 / Responses Direct compat 已闭环）�
 ## 7. 实施步骤（顺序）
 
 1. 落 compat slice 六面条目（基于 V3 mainline/function map，只读 V3）。
-2. 写 `verify-v4-relay-continuation.mjs` 与红测（先红后绿）；接入
+2. 写 `v4/scripts/architecture/verify-v4-relay-continuation.mjs` 与红测（先红后绿）；接入
    verification-map / package.json / CI。
 3. 实现 Rust：scope.session 三键恢复 + payload_cycle + relay operator +
    continuation save/restore（逐红测转绿）。

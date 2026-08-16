@@ -129,15 +129,16 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
     supersession/reconciliation（属 V3 侧文档，动前须确认 supersession 计划）。
 - 已记录 known gaps：target_triple、public_api_hash（派生非真 API 提取）、edge 再冻结、
   workspace gate 修正：runtime/config/control/error 四个 anchored crate 依赖
-  `--extern` 注入，只经 build-link test-consumer 编译（CI `v4-active-link`
-  job），未纳入 `cargo test --workspace`（见 `v4-active-artifact-linking-test-design.md` §5）。
+  `--extern` 注入，只经 build-link test-consumer 编译（CI `test` job 经 V4
+  canonical `verify:ci` 覆盖），未纳入 `cargo test --workspace`
+  （见 `v4-active-artifact-linking-test-design.md` §5）。
 
 ## 实施步骤
 
 1. 逐资源审计 49 条：有实现证据的标记 anchored（request/response/error/config/control
    已实现切片内资源），未实现的保留 design 并给 gate 豁免/阶段标注。
 2. 同步 `.appsdk/maps/resource-map.json` status。
-3. 新增 `scripts/architecture/verify-v4-resource-binding.mjs`，锁 anchored 准入 + 双源一致。
+3. 新增 `v4/scripts/architecture/verify-v4-resource-binding.mjs`，锁 anchored 准入 + 双源一致。
 4. 接入 package.json `verify:v4-foundation` 与 CI。
 5. 全量验证（cargo workspace + test-consumer + verify:v4-foundation + appsdk admission）。
 6. DSH review，修复 findings 后重验重审（上限 5 轮）。
@@ -145,7 +146,7 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
 
 ## 验证矩阵
 
-- `cargo test --workspace --manifest-path v4/Cargo.toml`
+- `cargo test --workspace --manifest-path Cargo.toml`（V4 根执行）
 - `cargo run ... test-consumer --consumer routecodex-v4-runtime ...`（各模块）
 - `npm run verify:v4-foundation`（含新 resource-binding gate）
 - `appsdk verify --admission v4`
