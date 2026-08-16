@@ -11,7 +11,6 @@
 //!   provider/client wire effect.
 
 use std::collections::BTreeMap;
-use std::slice::Iter;
 
 /// Stopless current-turn control state (registered Req04 injection /
 /// Resp03 provenance stripping exception only).

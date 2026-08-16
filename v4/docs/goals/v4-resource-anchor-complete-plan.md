@@ -212,3 +212,55 @@ validator：
   debug 5、router 1、provider 1、server 3 全绿；
 - `cargo test --workspace --manifest-path v4/Cargo.toml`、release build、
   `cargo fmt --check`、gen/verify-index 全绿。
+
+### 9.4 DSH review 两轮 FAIL 修复与干净 checkout 证据（2026-08-16）
+
+第一轮 DSH review（commit `3ce6f36a0`）FAIL findings 与修复：
+
+1. **P0 control_resources.rs 未入 VCS**：runtime `lib.rs` 声明
+   `mod control_resources` 但文件被本地 `.git/info/exclude` 排除、从未提交，
+   干净 checkout 编译失败。修复：`git add -f` 纳入版本控制（366 行），
+   并从本地 exclude 移除 runtime 目录条目；resource-map 6 个 runtime
+   owner_symbols 因此全部可解析。
+2. **P1 function-map 伪造 symbol**：`v4.debug.observer` /
+   `v4.router.live_policy` / `v4.provider.availability` /
+   `v4.server.console_identity_evidence` 的 entry_symbols 与实际源码不符。
+   修复：逐符号核对 `DebugRuntime` / `V4Router08LivePolicyOverride` /
+   `V4Availability01SessionScoped` / server 四类型真实方法后重写；同时修正
+   resource-operation-map 中 4 处 `V4DebugRuntime::*` 伪符号
+   （`enabled_for_module`、`register_dry_run_chain`、
+   `execute_dry_run_no_network_effect` x2）与 debug-subscription.contract.json
+   对应 writer/reader。
+3. **P2 codex-sample 授权真源漂移**：debug 的
+   `should_capture_snapshot_stage` 读 module_switch 而非 config manifest 授权。
+   修复：物理删除该伪读取点；授权发布/消费全部收口到 config crate
+   （`CodexSampleAuthorization` 查询 + `ConfigManifestV2` 新增
+   `should_capture_codex_sample_stage` 决策入口），resource map 与
+   debug-subscription contract 的 allowed_readers 同步为 config 符号；
+   `l2_config_v2.rs` 增补 disabled 反向断言。
+
+第二轮 DSH review（commit `39a610fe8`）FAIL findings 与修复：
+
+1. **P1 tracked contract JSON 残留旧符号**：`debug-subscription.contract.json`
+   第 17/18 行仍写已删除的 `V4DebugRuntime::execute_dry_run_no_network_effect`
+   与 `V4DebugRuntime::should_capture_snapshot_stage`。修复：更新为
+   `V4Debug09DryRunNoNetworkTerminalEffect::execute` /
+   `CodexSampleAuthorization::should_capture_snapshot_stage`。
+2. **P2 授权无消费点**：将 manifest 决策入口
+   `ConfigManifestV2::should_capture_codex_sample_stage` 接入正反测试，
+   授权 truth 的"发布 -> manifest 查询"链路成为真实代码路径。
+3. **P2 死 import**：删除 `control_resources.rs` 未使用的
+   `use std::slice::Iter;`。
+4. **P2 缺 runtime 编译/测试证据**：在 `39a610fe8` 干净 worktree
+   （临时 git worktree，fixture 恢复 active artifact 后）重放
+   `test-consumer --consumer routecodex-v4-runtime`（21/21 绿）、
+   `routecodex-v4-debug`（5/5 绿）、`routecodex-v4-config`（26/26 绿），
+   证明无本地未提交文件即可编译运行。
+
+第三轮验证证据（两轮修复合入前全量重跑）：
+- `verify:v4-foundation` 14 gates 绿、`verify:v4-foundation-red` 54 绿；
+- config 26 / runtime 21 / debug 5 / router 1 / provider 1 / server 3
+  test-consumer 绿；workspace cargo test/build/fmt 绿；
+- appsdk 0.1.2（digest 锁定 `sha256:3685149e…`，临时 PATH 隔离运行，
+  不覆盖并行 worker 的 0.1.3 全局二进制）compile/verify/admission 绿；
+- gen-index/verify-index/active-link 绿。
