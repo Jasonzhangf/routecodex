@@ -42,6 +42,8 @@ const STEPS = [
   ['test:v3-stage-protocol-shapes-red-fixtures', 'Stage-shape contract mutations are rejected'],
   ['verify:responses-continuation-immutable-boundary', 'Responses continuation save-to-restore interval remains semantically immutable'],
   ['test:responses-continuation-immutable-boundary-red-fixtures', 'Continuation immutable-boundary mutations are rejected'],
+  ['verify:v3-responses-direct-remote-continuation', 'Responses remote continuation identity and provider-bound lifecycle remain locked'],
+  ['test:v3-responses-direct-remote-continuation-red-fixtures', 'Remote continuation identity and SSE closeout mutations are rejected'],
   ['verify:v3-relay-tool-servertool-multiturn-parity-closeout', 'Req04/Resp03 tool governance preserves restored history and current-turn ownership'],
   ['test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures', 'Historical payload rewrite and wrong-owner tool mutations are rejected'],
   ['verify:v3-selected-provider-model-binding', 'V3 selected provider/model binding'],
