@@ -99,6 +99,15 @@ pub struct PublishOutcome {
     pub next: ActiveChain,
 }
 
+#[derive(Debug, Clone)]
+pub struct ManagerView {
+    pub active: Option<ActiveChain>,
+    pub candidates: Vec<PluginCandidate>,
+    pub audit: Vec<AuditRecord>,
+    pub mounted_node_ids: Vec<String>,
+    pub rejected_node_ids: Vec<String>,
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ManagerError {
     #[error("candidate already exists")]
@@ -188,6 +197,19 @@ impl<L: LifecyclePort> PluginManager<L> {
 
     pub fn rejected_node_ids(&self) -> Vec<String> {
         self.lock().port.rejected_node_ids()
+    }
+
+    /// Single-lock read of every management fact the inspector projects, so a
+    /// snapshot cannot observe torn state across concurrent transitions.
+    pub fn view(&self) -> ManagerView {
+        let inner = self.lock();
+        ManagerView {
+            active: inner.active.clone(),
+            candidates: inner.candidates.values().cloned().collect(),
+            audit: inner.audit.records().to_vec(),
+            mounted_node_ids: inner.port.mounted_node_ids(),
+            rejected_node_ids: inner.port.rejected_node_ids(),
+        }
     }
 
     pub fn create_candidate(
@@ -356,10 +378,17 @@ impl<L: LifecyclePort> PluginManager<L> {
         id: &str,
         expected_base_hash: Option<&str>,
     ) -> Result<PublishOutcome, ManagerError> {
-        let _gate = self
-            .publish_gate
-            .try_lock()
-            .map_err(|_| ManagerError::ConcurrentPublish)?;
+        // Only a genuinely held gate is a concurrent publish. A poisoned gate
+        // (a prior publisher panicked while holding it) must not be mislabeled
+        // as a transient race and must not permanently block publishing; the
+        // recovered guard is safe because the interior lock also recovers.
+        let _gate = match self.publish_gate.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(ManagerError::ConcurrentPublish);
+            }
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        };
         let mut inner = self.lock();
         Self::publish_locked(&mut inner, id, expected_base_hash)
     }

@@ -161,7 +161,7 @@ pub fn current_release_rlibs(
             String::from_utf8_lossy(&output.stderr)
         )));
     }
-    let mut found: HashMap<String, Vec<(String, PathBuf)>> = HashMap::new();
+    let mut found: HashMap<String, Vec<PathBuf>> = HashMap::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let value: serde_json::Value = match serde_json::from_str(line) {
             Ok(value) => value,
@@ -202,16 +202,10 @@ pub fn current_release_rlibs(
                 None
             };
             if let Some(rlib_path) = rlib_path {
-                let stem = rlib_path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .and_then(|name| name.strip_suffix(".rlib"))
-                    .unwrap_or_default()
-                    .to_string();
                 found
                     .entry(target_name.to_string())
                     .or_default()
-                    .push((stem, rlib_path));
+                    .push(rlib_path);
             }
         }
     }
@@ -219,22 +213,16 @@ pub fn current_release_rlibs(
     for (name, candidates) in found {
         let rlib = candidates
             .iter()
-            .find(|(stem, path)| {
-                path.is_file()
-                    && path
-                        .parent()
-                        .map(|p| p.ends_with("deps"))
-                        .unwrap_or(false)
-                    && select_rlib_by_stem(std::slice::from_ref(path), stem).is_some()
+            .find(|path| {
+                path.is_file() && path.parent().map(|p| p.ends_with("deps")).unwrap_or(false)
             })
-            .or_else(|| candidates.iter().find(|(_, path)| path.is_file()))
-            .map(|(_, path)| path.clone())
+            .or_else(|| candidates.iter().find(|path| path.is_file()))
             .ok_or_else(|| {
                 ActiveLinkError::LinkFailed(format!(
                     "cargo reported no existing release rlib for {name}; run `cargo build --release --locked` first"
                 ))
             })?;
-        selected.insert(name, rlib);
+        selected.insert(name, rlib.clone());
     }
     Ok(selected)
 }
@@ -242,7 +230,11 @@ pub fn current_release_rlibs(
 /// Select the rlib whose file stem matches the cargo-reported artifact stem.
 /// `target/release/deps` accumulates stale rlibs from older unit graphs; their
 /// names are unrelated to the current cargo graph, so lexicographic ordering
-/// must never be used as a selection rule.
+/// must never be used as a selection rule. Production source-deps resolution
+/// never scans `target/release/deps` directly — it consumes only the current
+/// cargo build graph — so stale rlibs are structurally unreachable there;
+/// this helper and its hermetic red fixture lock the rule against any
+/// regression that reintroduces directory-scan selection.
 pub fn select_rlib_by_stem<'a>(
     candidates: &'a [PathBuf],
     expected_stem: &str,

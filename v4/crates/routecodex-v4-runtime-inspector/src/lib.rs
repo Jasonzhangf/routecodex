@@ -63,36 +63,39 @@ pub struct RuntimeSnapshot {
 }
 
 pub fn snapshot<L: LifecyclePort>(manager: &PluginManager<L>) -> RuntimeSnapshot {
-    let active = manager.active().map(|chain| ActiveSummary {
+    // Single-lock read: the manager exposes one consistent view so the
+    // projection cannot observe torn state across concurrent transitions.
+    let view = manager.view();
+    let active = view.active.map(|chain| ActiveSummary {
         candidate_id: chain.candidate_id.as_str().to_string(),
         hash: chain.hash.clone(),
         node_ids: chain.node_ids.clone(),
     });
-    let mut candidates: Vec<CandidateSummary> = manager
-        .candidates()
+    let mut candidates: Vec<CandidateSummary> = view
+        .candidates
         .iter()
         .filter(|c| !matches!(c.state, CandidateState::Failed | CandidateState::Discarded))
         .map(candidate_summary)
         .collect();
     candidates.sort_by(|a, b| a.id.cmp(&b.id));
 
-    let failed: Vec<FailedSummary> = manager
-        .candidates()
+    let failed: Vec<FailedSummary> = view
+        .candidates
         .iter()
         .filter(|c| matches!(c.state, CandidateState::Failed))
         .map(|c| FailedSummary {
             id: c.id.as_str().to_string(),
             hash: c.hash(),
-            reason: audit_failure_reason(&manager.audit(), c.id.as_str()),
+            reason: audit_failure_reason(&view.audit, c.id.as_str()),
         })
         .collect();
 
     let container_lifecycle = ContainerLifecycle {
-        mounted_node_ids: manager.mounted_node_ids(),
-        rejected_node_ids: manager.rejected_node_ids(),
+        mounted_node_ids: view.mounted_node_ids.clone(),
+        rejected_node_ids: view.rejected_node_ids.clone(),
     };
 
-    let audit: Vec<AuditSummary> = manager.audit().iter().map(audit_summary).collect();
+    let audit: Vec<AuditSummary> = view.audit.iter().map(audit_summary).collect();
 
     RuntimeSnapshot {
         active,
