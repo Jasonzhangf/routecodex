@@ -320,13 +320,7 @@
         "suite_id": "v4-edge-l1-regression"
       },
       "source_owner": "routecodex-v4-edge",
-      "stage": "source_implemented",
-      "version_base": {
-        "base_artifact_hash": "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0",
-        "base_source_commit": "8bef032e6",
-        "new_active_version": "active-v4",
-        "previous_active_version": "active-v3"
-      }
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-control/**",
@@ -401,13 +395,7 @@
         "suite_id": "v4-control-l2-regression"
       },
       "source_owner": "routecodex-v4-control",
-      "stage": "source_implemented",
-      "version_base": {
-        "base_artifact_hash": "sha256:bf6b8e426f5bda1962b5c0c4b82bde1be090294eed5e44bbfdc49d7cdc0e0103",
-        "base_source_commit": "389bd3cf0",
-        "new_active_version": "active-v3",
-        "previous_active_version": "active-v2"
-      }
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-error/**",
@@ -478,13 +466,7 @@
         "suite_id": "v4-error-l2-regression"
       },
       "source_owner": "routecodex-v4-error",
-      "stage": "source_implemented",
-      "version_base": {
-        "base_artifact_hash": "sha256:c26ccfc3ee6c847b1b4b2f812b72071a20df81f98fe40e60d457c41b3aed5d3f",
-        "base_source_commit": "389bd3cf0",
-        "new_active_version": "active-v4",
-        "previous_active_version": "active-v3"
-      }
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-config/**",
