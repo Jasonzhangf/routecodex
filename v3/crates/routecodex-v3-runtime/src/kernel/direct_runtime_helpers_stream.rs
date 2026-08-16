@@ -72,6 +72,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
         strip_client_response_id,
         retain_response_cipher,
         false,
+        false,
     )
 }
 
@@ -82,6 +83,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     strip_client_response_id: bool,
     retain_response_cipher: bool,
     deepseek_console_go: bool,
+    thinking_tags: bool,
 ) -> V3ClientSseStream {
     struct StreamState {
         source: V3ClientSseStream,
@@ -94,6 +96,11 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
         done: bool,
     }
 
+    let source = if thinking_tags {
+        wrap_v3_direct_sse_thinking_tag_compat_stream(source)
+    } else {
+        source
+    };
     Box::pin(stream::unfold(
         StreamState {
             source,

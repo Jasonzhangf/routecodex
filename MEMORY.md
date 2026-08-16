@@ -5574,3 +5574,10 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
   参数：`inject` 对 host 容器服务 + 节点内插件 `services_provided` 联合校验
   （15 tests）；`playground/**` 归 routecodex-v4-governance 模块。
 Tags: #v4 #cordis #node-container #plugin #isolation #experiment
+
+## 2026-08-16 cc-sol Direct thinking-tag compatibility verified
+- 唯一 owner：Direct 相邻响应投影 `V3ProviderResp14Raw -> V3DirectResp14ProviderProjectionPrepared`，由显式 profile `responses:thinking-tags` 开启；禁止按 provider id 分支，禁止进入请求/历史、Relay、continuation、handler 或 SSE transport。
+- 当前轮输出规则：成对 `<thinking>...</thinking>` 映射为 Responses reasoning summary；孤立 opening/closing tag 只剥离 tag，正文保持 visible。SSE delta lifecycle 与 terminal response aggregate 必须一致；无 tag 响应 byte-exact。
+- 在线断言只检查 `response.output`。provider 可在 response envelope 的 `instructions` 回显原始请求 tag；它仍是请求数据面，不能为“全包无 tag”而清洗。
+- 已安装并在线验证 0.90.4575（SHA256 `4de2b1a5fa57a04771dc60585b68a82de75da32587c31d6368bc497683fac2aa`）：paired 请求 `...T080440619-825048-7844` 和 unpaired 请求 `...T080639178-825049-7845` 均 Direct cc-sol key1、HTTP 200，输出分别命中映射与仅剥 tag 规则。
+Tags: #v3 #direct #cc-sol #responses #reasoning #sse

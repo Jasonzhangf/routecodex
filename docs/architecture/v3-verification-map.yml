@@ -1051,6 +1051,7 @@ features:
   - docs/goals/v3-vr-target-protocol-execution-decision-sop.md
   test_design:
   - docs/goals/v3-responses-direct-mvp-test-design.md
+  - docs/goals/v3-direct-thinking-tag-response-compat-test-design.md
   required_contract:
   - P6 owns only adjacent transitions V3Target10ConcreteProviderSelected through V3Server16HttpFrame,
     with V3Execution11ProtocolDecision between Target10 and Direct policy
@@ -1076,6 +1077,10 @@ features:
     the client stream intent
   - Direct provider raw response decode/projection errors enter the same Error01-06
     provider failure policy and reselect before Error06 while alternatives remain
+  - Direct current-response provider compatibility is activated only by the selected
+    target compatibility profile; paired thinking tags map to Responses reasoning
+    output while unmatched tags are stripped without changing the surrounding text,
+    and Relay/history/continuation payloads remain outside this owner
   - Direct target-local reselection uses the full captured Target09 candidate set;
     if the newly selected Target10 requires Hub Relay and no Direct-owned previous_response_id
     is active, Direct returns a typed relay handoff side-channel carrying the complete

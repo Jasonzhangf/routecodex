@@ -420,6 +420,11 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/shared.rs
+  - v3/crates/routecodex-v3-runtime/src/shared_direct_thinking_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_response_thinking_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_response_thinking_compat_tests.rs
   - v3/crates/routecodex-v3-provider-responses/src
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
@@ -452,6 +457,8 @@ features:
   - V3ResponsesDirectRuntimeSharedState
   - responses_direct_route_hook
   - responses_direct_response_projection_hook
+  - apply_v3_direct_thinking_tag_json_compat
+  - wrap_v3_direct_sse_thinking_tag_compat_stream
   - kernel::tests::direct_protocol_plan_uses_session_bound_cooldown_before_initial_target
   - kernel::tests::provider_response_decode_failure_reselects_without_router_reentry
   - kernel::tests::direct_reselect_can_handoff_to_relay_target_after_provider_failure
@@ -474,6 +481,7 @@ features:
   - docs/goals/v3-responses-direct-mvp-implementation-plan.md
   - docs/goals/v3-responses-direct-mvp-test-design.md
   - docs/goals/v3-vr-target-protocol-execution-decision-sop.md
+  - docs/goals/v3-direct-thinking-tag-response-compat-test-design.md
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml

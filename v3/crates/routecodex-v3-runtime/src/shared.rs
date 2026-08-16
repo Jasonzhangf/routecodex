@@ -263,6 +263,9 @@ pub(crate) async fn project_provider_raw_to_client_payload(
         if compatibility_profile.as_deref() == Some("responses:deepseek-console-go") {
             parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
         }
+        if compatibility_profile.as_deref() == Some("responses:thinking-tags") {
+            apply_v3_direct_thinking_tag_json_compat(&mut parsed);
+        }
         let observation = observe_json_remote_continuation(&provider_id, status, &parsed)?;
         (V3ClientBody::Json(parsed), observation, None)
     } else {
@@ -293,6 +296,8 @@ pub(crate) async fn project_provider_raw_to_client_payload(
         stream_observation,
     })
 }
+
+include!("shared_direct_thinking_compat.rs");
 
 async fn project_sse_stream(
     provider_id: &str,
@@ -1340,5 +1345,98 @@ mod tests {
         );
         assert_eq!(body["output"][0]["input"], "ls -la");
         assert!(body["output"][0].get("arguments").is_none());
+    }
+
+    #[tokio::test]
+    async fn direct_json_thinking_tags_profile_maps_paired_block_to_reasoning() {
+        let raw = V3ProviderResp14Raw::from_json(
+            "req",
+            "profile-driven-provider",
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_1","output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"<thinking>inspect the owner</thinking>visible result"}]}]}"#.to_vec(),
+        )
+        .with_compatibility_profile(Some("responses:thinking-tags".to_string()));
+
+        let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
+        let V3ClientBody::Json(body) = &projection.client_payload.body else {
+            panic!("expected JSON client body");
+        };
+        assert_eq!(body["output"][0]["content"][0]["text"], "visible result");
+        assert_eq!(body["output"][1]["type"], "reasoning");
+        assert_eq!(
+            body["output"][1]["summary"][0],
+            serde_json::json!({"type":"summary_text","text":"inspect the owner"})
+        );
+        assert!(!body.to_string().contains("<thinking>"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn direct_json_thinking_tags_profile_strips_unpaired_tag_only() {
+        let raw = V3ProviderResp14Raw::from_json(
+            "req",
+            "profile-driven-provider",
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_1","output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"<thinking>keep this visible"}]}]}"#.to_vec(),
+        )
+        .with_compatibility_profile(Some("responses:thinking-tags".to_string()));
+
+        let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
+        let V3ClientBody::Json(body) = &projection.client_payload.body else {
+            panic!("expected JSON client body");
+        };
+        assert_eq!(body["output"][0]["content"][0]["text"], "keep this visible");
+        assert_eq!(body["output"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn direct_json_thinking_tags_profile_strips_stray_closing_tag_only() {
+        let raw = V3ProviderResp14Raw::from_json(
+            "req",
+            "profile-driven-provider",
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_1","output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"keep this visible</thinking>"}]}]}"#.to_vec(),
+        )
+        .with_compatibility_profile(Some("responses:thinking-tags".to_string()));
+
+        let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
+        let V3ClientBody::Json(body) = &projection.client_payload.body else {
+            panic!("expected JSON client body");
+        };
+        assert_eq!(body["output"][0]["content"][0]["text"], "keep this visible");
+        assert_eq!(body["output"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn direct_json_thinking_tags_without_profile_remains_unchanged() {
+        let raw = V3ProviderResp14Raw::from_json(
+            "req",
+            "cc-sol",
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_1","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"<thinking>unchanged</thinking>"}]}]}"#.to_vec(),
+        );
+        let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
+        let V3ClientBody::Json(body) = &projection.client_payload.body else {
+            panic!("expected JSON client body");
+        };
+        assert_eq!(
+            body["output"][0]["content"][0]["text"],
+            "<thinking>unchanged</thinking>"
+        );
     }
 }

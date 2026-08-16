@@ -35643,6 +35643,15 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - DSH review r2（commit=8a76cbc83 base=486d68f68，opencode-go/deepseek-v4-flash）`VERDICT: PASS`，recommendation=deliver；3 条非阻塞 P2：① `_sse.rs` 未列 v3-function-map allowed_paths（doc-lockstep 漂移）；② incomplete reason allowlist 窄（goal-locked fail-fast 取舍）；③ health.rs 测试改写与 SSE 设计 forbidden_paths 范围（对齐 486d68f68 provider-key 跨 session 语义）。
 - 注：HEAD 之上 v4 worker 已提交 `044767d2d`（relay/continuation slice，纯 v4，不影响 V3 SSE 交付）；交付 commit 只含版本 bump + note/MEMORY。
 
+# 2026-08-16 cc-sol Direct thinking-tag response compat（进行中）
+- 真实旧样本 `.../openai-responses-router-gpt-5.5-20260816T003729093-818150-946/response.json` 证明上游把 `<thinking>` 拆进多个 `response.output_text.delta`，并在 `output_text.done`、`output_item.done`、`response.completed.response.output` 重复保留 literal tag；因此只改单帧或 UI 不能闭环。
+- 唯一 owner 是现有 Direct 相邻响应投影 `V3ProviderResp14Raw -> V3DirectResp14ProviderProjectionPrepared -> V3Resp15ClientPayload`。配置 profile `responses:thinking-tags` 门控；不按 provider id 分支，不进入 Relay/历史/continuation/server handler。
+- 规则：成对 tag 内容从 message `output_text` 移入 Responses `reasoning.summary[].summary_text`；不成对 tag 仅剥离 tag、正文保持 visible。SSE profile 当前轮缓冲到 terminal，保证跨 delta/chunk 的配对判定与 terminal aggregate 一致；普通无 tag 响应 byte-exact。
+- 红绿证据：JSON paired/unpaired/no-profile + SSE split-pair/unpaired/ordinary 共 6 个定向测试绿；V3 workspace 全绿；架构 docs/module/resource gates 绿。build/install 尚待并发 V3 builder 结束后重跑，随后全局 restart + cc-sol 在线样本。
+- 闭环证据：补齐 stray closing-tag 反测后定向 7/7；`build:v3-cli`、architecture CI 36/36、workspace 全绿。全局安装 0.90.4575，repo/global SHA256 均为 `4de2b1a5fa57a04771dc60585b68a82de75da32587c31d6368bc497683fac2aa`；一次聚合 restart 后 4444/5520/5555/10000 全绿。
+- 在线 paired 请求 `...T080440619-825048-7844`：Direct cc-sol key1，output message=`PAIR_VISIBLE_OK`，reasoning summary=`PAIR_REASONING_OK`，reasoning lifecycle 与 terminal aggregate 一致。在线 unpaired 请求 `...T080639178-825049-7845`：Direct cc-sol key1，output message=`UNPAIRED_VISIBLE_OK`，无 reasoning item；两者均 200 且 output 无 literal tag。上游 response envelope 回显 request `instructions` 中的 tag 属请求数据面，按边界不改；断言只检查当前 response output。
+- DSH Review `ccsol-direct-thinking-compat-r1`（opencode-go/deepseek-v4-flash）`VERDICT: PASS`，无 P0/P1。四条 P2 均不阻塞：缺 terminal 的 profiled SSE 继续 fail-fast（不采纳 passthrough fallback）；全路径 sequence_number 保证重写事件的单调序列；整轮缓冲是跨 chunk 配对与 terminal aggregate 一致性的已知当前轮内存/首帧延迟取舍；mainline/resource map 精化留后续架构图谱维护。
+
 # 2026-08-16 AppSDK 0.1.3 dependent migration：Active 历史版本选择阻塞
 - 隔离分支 `codex/v4-appsdk-0.1.3-migration` 已完成 base-node `active-v2`，以及 edge `active-v4`、control `active-v3`、error `active-v4` 的 0.1.3 review/effectiveness/freeze/publish；模块回归分别 12/12、15/15、15/15、23/23。
 - 全项目重放仍在 `routecodex-v4-config` 构建时 fail closed：`ActiveLinkErr10StaleOrMissingRecord`。当前 base-node `active-v2` 单独 resolve 成功，edge `active-v4` 的 dependency hash 也明确为 base-node `active-v2` 的 `16b93c...`，但递归解析先进入 `active-v1` 并用当前 freeze record 校验，得到旧 artifact `036daf...` 与当前 record `16b93c...` 不一致。
