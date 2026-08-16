@@ -23,9 +23,9 @@
   "previous_active_immutable": true,
   "previous_active_version": "active-v2",
   "promotion_id": "promotion-edge-v3",
-  "promotion_record_hash": "sha256:ad21809ab7f0934a51f4ab3eb20bfcceb6494dbcbafca9ba8a7b3111a887a74e",
+  "promotion_record_hash": "sha256:4f430468476632e8718e21d85b34f5b157cb3a1a0e3c2dc027d640ba20b0f5eb",
   "public_api_hash": "sha256:e97ff7522d76b5567db2bf6ba9745479ea6f14b12ccfcb54b876fbf73325dd76",
-  "regression_report_hash": "sha256:6bf80e37a8804028a8522484aff5afca0e1bbf3b169da531a6fc1e33cb23dda6",
+  "regression_report_hash": "sha256:c472e276976daf722409cd699c0d3ad226a971c0c5637d6a2853c31af7cc4316",
   "regression_report_id": "regression-edge-v3",
   "review_id": "review-edge-v3",
   "source_commit_or_tag": "8bef032e6"
