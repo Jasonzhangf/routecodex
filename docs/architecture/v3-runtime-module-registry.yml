@@ -1,0 +1,64 @@
+version: 1
+status: active
+source_root: v3/crates
+modules:
+  - module_id: v3.provider_compat_core
+    owner_feature_id: v3.provider_compat_profile_loading
+    owned_paths:
+      - v3/crates/provider-compat-core/**
+  - module_id: v3.cli
+    owner_feature_id: v3.managed_server_lifecycle
+    owned_paths:
+      - v3/crates/routecodex-v3-cli/**
+  - module_id: v3.config
+    owner_feature_id: v3.config_manifest_compile
+    owned_paths:
+      - v3/crates/routecodex-v3-config/**
+  - module_id: v3.debug
+    owner_feature_id: v3.debug_pipeline
+    owned_paths:
+      - v3/crates/routecodex-v3-debug/**
+  - module_id: v3.error
+    owner_feature_id: v3.error_pipeline
+    owned_paths:
+      - v3/crates/routecodex-v3-error/**
+  - module_id: v3.lifecycle
+    owner_feature_id: v3.managed_server_lifecycle
+    owned_paths:
+      - v3/crates/routecodex-v3-lifecycle/**
+  - module_id: v3.provider_responses
+    owner_feature_id: v3.responses_direct_passthrough
+    owned_paths:
+      - v3/crates/routecodex-v3-provider-responses/**
+  - module_id: v3.route_classifier
+    owner_feature_id: vr.route_classifier
+    owned_paths:
+      - v3/crates/routecodex-v3-route-classifier/**
+  - module_id: v3.runtime
+    owner_feature_id: v3.hub_pipeline_v1
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/**
+  - module_id: v3.server
+    owner_feature_id: v3.server_runtime
+    owned_paths:
+      - v3/crates/routecodex-v3-server/**
+  - module_id: v3.sse
+    owner_feature_id: v3.sse_transport_core
+    owned_paths:
+      - v3/crates/routecodex-v3-sse/**
+  - module_id: v3.target
+    owner_feature_id: v3.virtual_router_target_interpreter
+    owned_paths:
+      - v3/crates/routecodex-v3-target/**
+  - module_id: v3.virtual_router
+    owner_feature_id: v3.virtual_router_target_interpreter
+    owned_paths:
+      - v3/crates/routecodex-v3-virtual-router/**
+  - module_id: v3.servertool_core
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    owned_paths:
+      - v3/crates/servertool-core/**
+  - module_id: v3.stop_message_core
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    owned_paths:
+      - v3/crates/stop-message-core/**

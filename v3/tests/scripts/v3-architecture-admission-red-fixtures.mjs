@@ -76,5 +76,12 @@ rewriteManifest(invalidCommit, (manifest) => {
 });
 assert(collectAdmissionFailures({ root: invalidCommit }).some((failure) => failure.includes('source commit invalid')));
 
+const duplicateMap = copyAdmission('duplicate-map');
+fs.copyFileSync(
+  path.join(duplicateMap, 'repo', 'docs', 'architecture', 'v3-function-map.yml'),
+  path.join(duplicateMap, 'v3-function-map.yml'),
+);
+assert(collectAdmissionFailures({ root: duplicateMap }).some((failure) => failure.includes('duplicate architecture admission truth')));
+
 fs.rmSync(scratchRoot, { recursive: true, force: true });
 process.stdout.write('[test:v3-architecture-admission-red-fixtures] PASS\n');

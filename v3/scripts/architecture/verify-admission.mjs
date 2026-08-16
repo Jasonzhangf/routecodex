@@ -8,12 +8,22 @@ import YAML from 'yaml';
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const admissionRoot = resolve(v3Root, 'build-contracts', 'architecture-admission');
 const requiredSources = new Map([
+  ['repo/.github/workflows/release.yml', '.github/workflows/release.yml'],
+  ['repo/.github/workflows/test.yml', '.github/workflows/test.yml'],
   ['repo/docs/architecture/v3-build-tool-module-registry.yml', 'docs/architecture/v3-build-tool-module-registry.yml'],
   ['repo/docs/architecture/v3-function-map.yml', 'docs/architecture/v3-function-map.yml'],
   ['repo/docs/architecture/v3-mainline-call-map.yml', 'docs/architecture/v3-mainline-call-map.yml'],
   ['repo/docs/architecture/v3-resource-operation-map.yml', 'docs/architecture/v3-resource-operation-map.yml'],
+  ['repo/docs/architecture/v3-runtime-module-registry.yml', 'docs/architecture/v3-runtime-module-registry.yml'],
   ['repo/docs/architecture/v3-verification-map.yml', 'docs/architecture/v3-verification-map.yml'],
 ]);
+const forbiddenDuplicateMaps = [
+  'v3-build-tool-module-registry.yml',
+  'v3-function-map.yml',
+  'v3-mainline-call-map.yml',
+  'v3-resource-operation-map.yml',
+  'v3-verification-map.yml',
+];
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -25,6 +35,11 @@ function canonicalJson(value) {
 
 export function collectAdmissionFailures({ root = admissionRoot } = {}) {
   const failures = [];
+  for (const duplicate of forbiddenDuplicateMaps) {
+    if (existsSync(resolve(root, duplicate))) {
+      failures.push(`duplicate architecture admission truth is forbidden: ${duplicate}`);
+    }
+  }
   const manifestPath = resolve(root, 'manifest.json');
   if (!existsSync(manifestPath)) {
     return [`missing V3 architecture admission manifest: ${manifestPath}`];

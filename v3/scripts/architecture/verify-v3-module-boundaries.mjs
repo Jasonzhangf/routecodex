@@ -1,14 +1,20 @@
 #!/usr/bin/env node
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import YAML from 'yaml';
 
 const installedV3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const explicitSourceRoot = String(process.env.ROUTECODEX_V3_SOURCE_ROOT ?? '').trim();
+const sourceRoot = explicitSourceRoot
+  ? resolve(explicitSourceRoot)
+  : resolve(installedV3Root, '..');
 const v3Root = explicitSourceRoot
-  ? resolve(explicitSourceRoot, 'v3')
+  ? resolve(sourceRoot, 'v3')
   : installedV3Root;
-const resolveV3Path = (path) => path.startsWith('v3/') ? resolve(v3Root, path.slice(3)) : resolve(path);
+const resolveV3Path = (path) => path.startsWith('v3/')
+  ? resolve(v3Root, path.slice(3))
+  : resolve(sourceRoot, path);
 
 const failures = [];
 
@@ -21,8 +27,7 @@ function files(dir, out = []) {
     try {
       stat = statSync(path);
     } catch (error) {
-      if (error && error.code === 'ENOENT') continue;
-      throw error;
+      throw new Error(`V3 module-boundary source disappeared during scan: ${path}`, { cause: error });
     }
     if (stat.isDirectory()) files(path, out);
     else if (path.endsWith('.rs') || path.endsWith('Cargo.toml')) out.push(path);
@@ -34,8 +39,35 @@ function fail(message) {
   failures.push(message);
 }
 
-const all = files(v3Root);
+const all = files('v3/crates');
 const read = (path) => readFileSync(resolveV3Path(path), 'utf8');
+const moduleRegistryPath = 'docs/architecture/v3-runtime-module-registry.yml';
+const moduleRegistry = YAML.parse(read(moduleRegistryPath));
+if (moduleRegistry?.status !== 'active' || !Array.isArray(moduleRegistry.modules)) {
+  fail(`${moduleRegistryPath} must contain an active modules array`);
+} else {
+  const modules = moduleRegistry.modules;
+  for (const path of all) {
+    const repoPath = `v3/${relative(v3Root, path).split('\\').join('/')}`;
+    const owners = modules.filter((module) => Array.isArray(module.owned_paths)
+      && module.owned_paths.some((ownedPath) => {
+        if (typeof ownedPath !== 'string') return false;
+        if (ownedPath.endsWith('/**')) return repoPath.startsWith(ownedPath.slice(0, -3));
+        return repoPath === ownedPath;
+      }));
+    if (owners.length !== 1) {
+      fail(`V3 source must have exactly one module owner: ${repoPath} owners=${owners.map((owner) => owner.module_id).join(',') || 'none'}`);
+    }
+  }
+  for (const module of modules) {
+    if (typeof module.module_id !== 'string' || typeof module.owner_feature_id !== 'string') {
+      fail(`${moduleRegistryPath} module entries require module_id and owner_feature_id`);
+    }
+    if (!Array.isArray(module.owned_paths) || module.owned_paths.length === 0) {
+      fail(`${moduleRegistryPath} module ${module.module_id ?? '<unknown>'} requires owned_paths`);
+    }
+  }
+}
 const isRustTestSource = (path) =>
   path.includes('/tests/')
   || path.endsWith('/tests.rs')
@@ -204,7 +236,10 @@ if (/V3ProviderHealthStore|apply_error_action|update_quota_state|update_concurre
 for (const crateName of ['routecodex-v3-virtual-router', 'routecodex-v3-target']) {
   const crateRoot = `v3/crates/${crateName}`;
   const resolvedCrateRoot = resolveV3Path(crateRoot);
-  if (!all.some((path) => path.startsWith(resolvedCrateRoot + '/'))) continue;
+  if (!all.some((path) => path.startsWith(resolvedCrateRoot + '/'))) {
+    fail(`required V3 crate source missing: ${crateRoot}`);
+    continue;
+  }
   const source = files(crateRoot).map(read).join('\n');
   if (/V3ProviderHealthStore|apply_error_action|update_quota_state|update_concurrency_state/.test(source)) {
     fail(`${crateName} cannot import Provider health mutation APIs`);

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -8,6 +8,21 @@ import { fileURLToPath } from 'node:url';
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const verifier = resolve(v3Root, 'scripts/architecture/verify-v3-module-boundaries.mjs');
 const fixtures = [
+  {
+    name: 'runtime source loses its module owner',
+    file: 'docs/architecture/v3-runtime-module-registry.yml',
+    transform: (source) => source.replace(
+      '      - v3/crates/routecodex-v3-runtime/**\n',
+      '',
+    ),
+    diagnostic: /source must have exactly one module owner: v3\/crates\/routecodex-v3-runtime/,
+  },
+  {
+    name: 'target source gains a duplicate module owner',
+    file: 'docs/architecture/v3-runtime-module-registry.yml',
+    mutation: '\n  - module_id: v3.target_duplicate\n    owner_feature_id: v3.virtual_router_target_interpreter\n    owned_paths:\n      - v3/crates/routecodex-v3-target/**\n',
+    diagnostic: /source must have exactly one module owner: v3\/crates\/routecodex-v3-target.*v3\.target,v3\.target_duplicate/,
+  },
   {
     name: 'provider transport outside provider owner',
     file: 'v3/crates/routecodex-v3-server/src/lib.rs',
@@ -192,8 +207,17 @@ for (const fixture of fixtures) {
   try {
     cpSync(v3Root, join(root, 'v3'), {
       recursive: true,
-      filter: (source) => !source.includes('/target/'),
+      filter: (source) => {
+        const relativeSource = source.slice(v3Root.length).replaceAll('\\', '/');
+        return !relativeSource.startsWith('/target/')
+          && !relativeSource.startsWith('/build-control/');
+      },
     });
+    mkdirSync(join(root, 'docs/architecture'), { recursive: true });
+    copyFileSync(
+      resolve(v3Root, '../docs/architecture/v3-runtime-module-registry.yml'),
+      join(root, 'docs/architecture/v3-runtime-module-registry.yml'),
+    );
     const target = join(root, fixture.file);
     const source = readFileSync(target, 'utf8');
     const testModule = source.indexOf('#[cfg(test)]');

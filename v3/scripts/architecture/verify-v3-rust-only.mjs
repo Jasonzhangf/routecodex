@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = 'v3/crates';
+const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const root = resolve(v3Root, 'crates');
 const ignoredDirs = new Set(['target']);
 const offenders = [];
 
@@ -24,7 +26,7 @@ function walk(dir) {
 try {
   walk(root);
 } catch {
-  console.error('[verify:v3-rust-only] missing v3/');
+  console.error('[verify:v3-rust-only] missing V3 crates/');
   process.exit(1);
 }
 

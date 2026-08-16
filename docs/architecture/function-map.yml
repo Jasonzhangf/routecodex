@@ -323,7 +323,7 @@ owners:
     only load/apply provider-family compatibility profiles at the provider-runtime
     boundary; they must not own routing, tool governance, protocol conversion, fallback,
     or request/response lifecycle state
-  owner_module: sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core
+  owner_module: v3/crates/provider-compat-core
   canonical_types:
   - AdapterContext
   - ReqOutboundCompatInput
@@ -338,7 +338,7 @@ owners:
   - v3-model-bind-04
   - v3-provider-compat-minimax-anthropic-01
   allowed_paths:
-  - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core
+  - v3/crates/provider-compat-core
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
@@ -356,8 +356,8 @@ owners:
   - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks
   - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks
   required_tests:
-  - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
-  - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/minimax_anthropic.rs
+  - v3/crates/provider-compat-core/src/lib.rs
+  - v3/crates/provider-compat-core/src/minimax_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs

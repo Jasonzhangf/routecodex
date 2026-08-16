@@ -3701,6 +3701,7 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-build-tool-module-registry.yml
+  - docs/architecture/v3-runtime-module-registry.yml
   - docs/architecture/wiki/v3-independent-build-isolation.md
   required_positive:
   - V3-local Node, Cargo, toolchain, version, and architecture-admission contracts

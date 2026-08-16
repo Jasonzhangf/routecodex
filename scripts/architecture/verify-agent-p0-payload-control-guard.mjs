@@ -95,13 +95,14 @@ for (const file of files) {
 }
 
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
-const umbrella = readFileSync('scripts/architecture/verify-v3-architecture-ci.mjs', 'utf8');
 for (const script of [
   'verify:agent-p0-payload-control-guard',
   'test:agent-p0-payload-control-guard-red-fixtures',
 ]) {
   if (!packageJson.scripts?.[script]) failures.push(`package.json: missing ${script}`);
-  if (!umbrella.includes(`'${script}'`)) failures.push(`verify:v3-architecture-ci: missing ${script}`);
+}
+if (packageJson.scripts?.['verify:v3-architecture-ci'] !== 'npm --prefix v3 run verify:v3-architecture-ci') {
+  failures.push('package.json: verify:v3-architecture-ci must be a thin V3 dispatcher');
 }
 
 if (includeGlobal) {

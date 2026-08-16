@@ -24,6 +24,7 @@ const outputRoot = resolve(
 const sourceRoots = [
   '.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md',
   '.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md',
+  '.github/workflows/release.yml',
   '.github/workflows/test.yml',
   'v3/config/v3-file-size-policy.json',
   'docs/architecture',
