@@ -46,6 +46,8 @@ published manifest, Debug, Error, provider payload, or client payload.
 
 - Empty provider id, empty file, malformed line, empty key, empty value, duplicate key,
   or duplicate derived alias fails at config compile time.
+- A file containing only keys scoped to another provider fails instead of adopting those
+  keys as unscoped aliases for the requested provider.
 - Top-level `secretFile` mixed with explicit `entries`, `apiKey`, `env`, or `tokenFile`
   fails instead of choosing one source.
 - Unreadable `secretFile` fails with a config validation error.
@@ -60,4 +62,3 @@ published manifest, Debug, Error, provider payload, or client payload.
    run global `routecodex config check`, then aggregate `routecodex restart`.
 5. Verify every configured listener health and use provider-request dry-run / live route
    evidence to prove multiple aliases were expanded without exposing secret values.
-

@@ -35678,3 +35678,30 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
   expected standard Responses `medium`. Green implementation now maps standard Responses
   unknown -> medium, DeepSeek unknown -> high, and MiniMax Anthropic active effort ->
   thinking.type=adaptive without output_config.effort; malformed type/empty remains fail-fast.
+
+# 2026-08-16 DSH target-effort review follow-up
+- DSH review `dsh-1786869980273-b4417804` returned `VERDICT: PASS` with no P0/P1,
+  but identified a second, divergent DeepSeek effort mapping in shared provider compat.
+- Red tests proved shared compat still injected/defaulted DeepSeek effort and secret-file
+  discovery could adopt another provider's scoped keys. The shared effort mapper was
+  physically removed so `ProviderReqCompat06` remains the unique target projection owner;
+  foreign-only scoped secret files now fail instead of being misattributed.
+- The prior DSH PASS is invalid after this code change. Rebuild, matching global install,
+  aggregate restart, exact HTTP 200 replay, and a new DSH review are required.
+- Final follow-up verification: shared compat 37/37, config 81/81, runtime lib 466/466,
+  full build with architecture CI 36/36, and servertool Rust-only all pass. Global
+  0.90.4573 matches repo dist SHA-256
+  `6a283e388adff1acbba53e35f2eb1e773d040a7a1bd95973be42f4dfd3418563`.
+- A concurrent workflow had overwritten the global binary back to 0.90.4565; Jason's
+  `start --snap` then reproduced the old secretFile config failure and the prior process
+  had aborted with stack overflow. Reinstalling 0.90.4573 restored config check
+  (`servers=4`); one aggregate `restart` recovered managed instance
+  `v3-f89ec693b55096920c06`; ports 10000/5520/5555/4444 are HTTP 200.
+- Exact live request `openai-responses-router-deepseek-v4-flash-20260816T020756905-820139-2935`
+  preserved client `definitely_invalid`, projected target effort to `high`, returned HTTP
+  200/completed with the exact marker; medium and absent-effort controls also returned 200.
+- DSH `dsh-1786871352650-a2c82944` returned FAIL because `mode=base` judged only committed
+  `HEAD` and explicitly excluded the eight verified uncommitted follow-up files. Its two P1
+  findings exactly describe the pre-follow-up state already fixed in those files. A scoped
+  checkpoint commit is required so DSH can review the actual fix; Codex Review is not an
+  authorized substitute for a valid DSH FAIL.

@@ -869,7 +869,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_max_profile_uses_max_when_only_summary_projects_an_effort() {
+    fn deepseek_profile_maps_summary_derived_medium_to_official_high_domain() {
         let mut req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Responses,
             json!({
@@ -883,11 +883,11 @@ mod tests {
             Some("chat:deepseek-max".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect("summary-derived effort must preserve the DeepSeek default max");
+            .expect("summary-derived medium must use the DeepSeek high projection");
 
         assert_eq!(
             req_compat.provider_semantic_payload()["reasoning_effort"],
-            "max"
+            "high"
         );
     }
 
