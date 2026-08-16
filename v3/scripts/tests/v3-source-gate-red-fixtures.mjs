@@ -214,10 +214,16 @@ for (const fixture of fixtures) {
       },
     });
     mkdirSync(join(root, 'docs/architecture'), { recursive: true });
-    copyFileSync(
-      resolve(v3Root, '../docs/architecture/v3-runtime-module-registry.yml'),
-      join(root, 'docs/architecture/v3-runtime-module-registry.yml'),
-    );
+    for (const name of [
+      'v3-runtime-module-registry.yml',
+      'v3-function-map.yml',
+      'function-map.yml',
+    ]) {
+      copyFileSync(
+        resolve(v3Root, `../docs/architecture/${name}`),
+        join(root, `docs/architecture/${name}`),
+      );
+    }
     const target = join(root, fixture.file);
     const source = readFileSync(target, 'utf8');
     const testModule = source.indexOf('#[cfg(test)]');

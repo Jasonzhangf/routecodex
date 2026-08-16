@@ -42,6 +42,27 @@ function fail(message) {
 const all = files('v3/crates');
 const read = (path) => readFileSync(resolveV3Path(path), 'utf8');
 const moduleRegistryPath = 'docs/architecture/v3-runtime-module-registry.yml';
+const functionMapPaths = ['docs/architecture/v3-function-map.yml', 'docs/architecture/function-map.yml'];
+const declaredFeatureIds = new Set();
+for (const functionMapPath of functionMapPaths) {
+  const functionMap = YAML.parse(read(functionMapPath));
+  const features = Array.isArray(functionMap)
+    ? functionMap
+    : Array.isArray(functionMap?.features)
+      ? functionMap.features
+      : Array.isArray(functionMap?.owners)
+        ? functionMap.owners
+        : null;
+  if (!features) {
+    fail(`${functionMapPath} must contain a feature array`);
+    continue;
+  }
+  for (const feature of features) {
+    if (typeof feature?.feature_id === 'string' && feature.feature_id.trim()) {
+      declaredFeatureIds.add(feature.feature_id.trim());
+    }
+  }
+}
 const moduleRegistry = YAML.parse(read(moduleRegistryPath));
 if (moduleRegistry?.status !== 'active' || !Array.isArray(moduleRegistry.modules)) {
   fail(`${moduleRegistryPath} must contain an active modules array`);
@@ -62,6 +83,8 @@ if (moduleRegistry?.status !== 'active' || !Array.isArray(moduleRegistry.modules
   for (const module of modules) {
     if (typeof module.module_id !== 'string' || typeof module.owner_feature_id !== 'string') {
       fail(`${moduleRegistryPath} module entries require module_id and owner_feature_id`);
+    } else if (!declaredFeatureIds.has(module.owner_feature_id)) {
+      fail(`${moduleRegistryPath} module ${module.module_id} owner_feature_id does not resolve to a declared feature: ${module.owner_feature_id}`);
     }
     if (!Array.isArray(module.owned_paths) || module.owned_paths.length === 0) {
       fail(`${moduleRegistryPath} module ${module.module_id ?? '<unknown>'} requires owned_paths`);

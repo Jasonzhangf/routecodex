@@ -19,7 +19,7 @@
       "output_path": "repo/.github/workflows/release.yml",
       "source_path": ".github/workflows/release.yml",
       "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
-      "sha256": "c2595d344cbb2cb2737ce3a7c0652bd925e321564da80a709f64ae4a666d7441"
+      "sha256": "d7e149ed19f87c1084d56e6d6adb07ce4fa578aace4188e04a87ad5d5141994c"
     },
     {
       "output_path": "repo/.github/workflows/test.yml",
@@ -769,7 +769,7 @@
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
       "source_path": "docs/architecture/v3-runtime-module-registry.yml",
       "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
-      "sha256": "d007635fa343f399baa96586ccedf338665e532f484aa028a369e2f6ea98842e"
+      "sha256": "d81f19cb814aaecaebd6b294bb9b97b3897473d2bbdab5649241e1f9cae68839"
     },
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
@@ -2626,5 +2626,5 @@
       "sha256": "2ada8d17e5cc0cb53ff0dfa9acfbeedf10eb4e35f7db239fb43ef88aa7478ea6"
     }
   ],
-  "manifest_digest": "4f885560dc1a2508ccb68d1822d33fef8c82c16ffa1b14e3f1077353987c3ef4"
+  "manifest_digest": "c79dafb2f2ee2254363508aefb47a4062469c001833ce618343b2d5afedf8140"
 }
