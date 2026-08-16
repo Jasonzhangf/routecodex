@@ -18,8 +18,8 @@ use std::fs;
 
 fn contract_json() -> String {
     let path = std::env::var("RUNTIME_CONTRACT_PATH")
-        .unwrap_or_else(|_| "v4/contracts/skeleton-plan.contract.json".to_string());
-    fs::read_to_string(&path).expect("skeleton plan contract must be readable from repo root")
+        .unwrap_or_else(|_| "contracts/skeleton-plan.contract.json".to_string());
+    fs::read_to_string(&path).expect("skeleton plan contract must be readable from v4 root")
 }
 
 fn scope(request_id: &str) -> Scope {

@@ -12,8 +12,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
+import { fileURLToPath } from 'node:url';
 
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const failures = [];
 
 const readJson = (file) => {
@@ -33,9 +34,9 @@ const readYaml = (file) => {
   }
 };
 
-const pluginContract = readJson('v4/contracts/node-plugin.contract.json');
-const containerContract = readJson('v4/contracts/node-container.contract.json');
-const resourceMap = readYaml('v4/docs/architecture/v4-resource-operation-map.yml');
+const pluginContract = readJson('contracts/node-plugin.contract.json');
+const containerContract = readJson('contracts/node-container.contract.json');
+const resourceMap = readYaml('docs/architecture/v4-resource-operation-map.yml');
 if (!pluginContract || !containerContract || !resourceMap) process.exit(1);
 
 const effects = pluginContract.effect_rule ?? {};

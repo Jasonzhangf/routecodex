@@ -67,6 +67,21 @@
     {"resource_id":"v4.plugin.node_plugin_plan","owner":"contract:v4-node-container","truth_store":"contracts/node-container.contract.json","allowed_operations":["read","validate"],"status":"contract_bound"},
     {"resource_id":"v4.build.link_surface","owner":"routecodex-v4-build-link","truth_store":"active/lib/**","allowed_operations":["read","resolve","link"],"status":"active"},
     {"resource_id":"v4.build.active_artifact_index","owner":"routecodex-v4-build-link","truth_store":"build-control/active-index.json","allowed_operations":["generate","read","validate"],"status":"active"},
-    {"resource_id":"v4.build.workspace_artifact_link","owner":"routecodex-v4-build-link","truth_store":"crates/routecodex-v4-build-link/src/resolver.rs","allowed_operations":["read","resolve","link"],"status":"active"}
+    {"resource_id":"v4.build.workspace_artifact_link","owner":"routecodex-v4-build-link","truth_store":"crates/routecodex-v4-build-link/src/resolver.rs","allowed_operations":["read","resolve","link"],"status":"active"},
+    {"resource_id":"v4.build.domain","owner":"appsdk::build_domain","truth_store":"package.json","allowed_operations":["read","validate"],"status":"active"},
+    {"resource_id":"v4.build.node_lock","owner":"appsdk::build_domain","truth_store":"package-lock.json","allowed_operations":["read","validate"],"status":"active"},
+    {"resource_id":"v4.build.rust_lock","owner":"appsdk::build_domain","truth_store":"Cargo.lock","allowed_operations":["read","validate"],"status":"active"},
+    {"resource_id":"v4.build.toolchain","owner":"appsdk::build_domain","truth_store":"rust-toolchain.toml","allowed_operations":["read","validate"],"status":"active"},
+    {"resource_id":"v4.build.verification_entrypoint","owner":"appsdk::build_domain","truth_store":"scripts/verify-ci.mjs","allowed_operations":["read","execute"],"status":"active"},
+    {"resource_id":"v4.build.architecture_gates","owner":"appsdk::build_domain","truth_store":"scripts/architecture/**","allowed_operations":["read","execute"],"status":"active"},
+    {"resource_id":"v4.build.scratch_output","owner":"appsdk::build_domain","truth_store":"build-control/**","allowed_operations":["read","write","validate"],"status":"active"},
+    {"resource_id":"v4.build.generated_output","owner":"appsdk::build_domain","truth_store":"generated/**","allowed_operations":["read","write","validate"],"status":"active"},
+    {"resource_id":"v4.build.dist_output","owner":"appsdk::build_domain","truth_store":"dist/**","allowed_operations":["read","write","validate"],"status":"active"},
+    {"resource_id":"v4.build.artifact_output","owner":"appsdk::build_domain","truth_store":"artifacts/**","allowed_operations":["read","write","validate"],"status":"active"},
+    {"resource_id":"v4.build.cargo_target","owner":"appsdk::build_domain","truth_store":"target/**","allowed_operations":["read","write"],"status":"active"},
+    {"resource_id":"v4.build.v3_baseline","owner":"appsdk::build_domain","truth_store":"contracts/v3-baseline/**","allowed_operations":["read","validate"],"status":"active"},
+    {"resource_id":"v4.build.root_dispatcher","owner":"appsdk::build_domain","truth_store":"<repo-root>/package.json + .github/workflows/test.yml","allowed_operations":["read","execute"],"status":"active","notes":"dispatch-only consumer of v4.build.verification_entrypoint; must never enumerate V4 modules/gates"},
+    {"resource_id":"v4.build.forbidden_v3_live_map","owner":"appsdk::build_domain","truth_store":"<repo-root>/docs/architecture/v3-* (forbidden read)","allowed_operations":[],"status":"active","notes":"V4 build/test/verify must never read live V3 maps; only immutable contracts/v3-baseline snapshots"},
+    {"resource_id":"v4.build.forbidden_root_dependency","owner":"appsdk::build_domain","truth_store":"<repo-root>/node_modules + src/ + sharedmodule/ (forbidden dependency)","allowed_operations":[],"status":"active","notes":"V4 Node resolution must stay in v4/node_modules; Cargo path deps must not escape v4"}
   ]
 }

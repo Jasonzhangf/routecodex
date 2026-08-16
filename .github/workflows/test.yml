@@ -14,7 +14,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,7 +23,12 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            v4/package-lock.json
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: v4
       - run: npm ci --ignore-scripts
       - name: Repo sanity (no root junk)
         run: npm run verify:repo-sanity
@@ -65,14 +70,10 @@ jobs:
         run: npm run test:v3-console-request-count-visibility-red-fixtures
       - name: V2 and V3 route-classifier semantic gate
         run: npm run test:route-classifier-semantics
-      - name: V4 frozen foundation regression
-        run: cargo test --workspace --manifest-path v4/Cargo.toml
-      - name: V4 foundation pipeline gates
-        run: npm run verify:v4-foundation
-      - name: V4 foundation red self-tests
-        run: npm run verify:v4-foundation-red
-      - name: V4 relay/continuation compat + red self-test
-        run: node scripts/architecture/verify-v4-relay-continuation.mjs && node scripts/architecture/verify-v4-relay-continuation.mjs --red-self-test
+      - name: V4 install local build dependencies
+        run: npm ci --prefix v4 --ignore-scripts
+      - name: V4 canonical verification (build/test/gates/red/isolation)
+        run: npm --prefix v4 run verify:ci
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
       - name: Fetch Rust dependencies for offline builds
@@ -113,83 +114,3 @@ jobs:
           test -x "$(command -v appsdk)"
           test "sha256:$(shasum -a 256 "$(command -v appsdk)" | cut -d ' ' -f 1)" = "$(jq -r .digest v4/.appsdk/sdk.lock)"
           appsdk verify --admission v4
-
-  v4-active-link:
-    runs-on: macos-14
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: V4 Active-link resolver regression
-        run: cargo test -p routecodex-v4-build-link --manifest-path v4/Cargo.toml
-      - name: V4 workspace release build
-        run: cargo build --release --manifest-path v4/Cargo.toml
-      - name: V4 workspace tests
-        run: cargo test --workspace --manifest-path v4/Cargo.toml
-      - name: Restore frozen Active artifacts from hermetic fixture
-        run: mkdir -p v4/active/lib && cp -R v4/tests/resources/active-link-fixture/active/lib/. v4/active/lib/
-      - name: V4 edge regression through Active surface
-        run: >-
-          cargo run --quiet --release --manifest-path v4/Cargo.toml
-          -p routecodex-v4-build-link --
-          test-consumer --root v4 --consumer routecodex-v4-edge
-          --deps routecodex-v4-base-node
-      - name: V4 config regression through resolver
-        run: >-
-          cargo run --quiet --release --manifest-path v4/Cargo.toml
-          -p routecodex-v4-build-link --
-          test-consumer --root v4 --consumer routecodex-v4-config
-          --deps routecodex-v4-base-node,routecodex-v4-edge
-      - name: V4 control regression through resolver
-        run: >-
-          cargo run --quiet --release --manifest-path v4/Cargo.toml
-          -p routecodex-v4-build-link --
-          test-consumer --root v4 --consumer routecodex-v4-control
-          --deps routecodex-v4-base-node
-      - name: V4 error regression through resolver
-        run: >-
-          cargo run --quiet --release --manifest-path v4/Cargo.toml
-          -p routecodex-v4-build-link --
-          test-consumer --root v4 --consumer routecodex-v4-error
-          --deps routecodex-v4-base-node
-      - name: V4 runtime vertical slice regression
-        run: >-
-          cargo build --release --manifest-path v4/Cargo.toml -p routecodex-v4-skeleton &&
-          cargo run --quiet --release --manifest-path v4/Cargo.toml
-          -p routecodex-v4-build-link -- test-consumer --root v4
-          --consumer routecodex-v4-runtime
-          --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control
-          --source-deps routecodex-v4-skeleton
-      - name: V4 debug regression through resolver
-        run: >-
-          cargo run --quiet --release --manifest-path v4/Cargo.toml
-          -p routecodex-v4-build-link --
-          test-consumer --root v4 --consumer routecodex-v4-debug
-          --deps routecodex-v4-base-node
-      - name: V4 router regression through resolver
-        run: >-
-          cargo run --quiet --release --manifest-path v4/Cargo.toml
-          -p routecodex-v4-build-link --
-          test-consumer --root v4 --consumer routecodex-v4-router
-          --deps routecodex-v4-base-node
-      - name: V4 provider regression through resolver
-        run: >-
-          cargo run --quiet --release --manifest-path v4/Cargo.toml
-          -p routecodex-v4-build-link --
-          test-consumer --root v4 --consumer routecodex-v4-provider
-          --deps routecodex-v4-base-node
-      - name: V4 server regression through resolver
-        run: >-
-          cargo run --quiet --release --manifest-path v4/Cargo.toml
-          -p routecodex-v4-build-link --
-          test-consumer --root v4 --consumer routecodex-v4-server
-          --deps routecodex-v4-base-node
-      - name: V4 deterministic Active index
-        run: >-
-          cargo run --quiet --release --manifest-path v4/Cargo.toml
-          -p routecodex-v4-build-link -- gen-index --root v4 &&
-          cargo run --quiet --release --manifest-path v4/Cargo.toml
-          -p routecodex-v4-build-link -- verify-index --root v4
-      - name: V4 frozen-source edge gate
-        run: node scripts/architecture/verify-v4-active-link.mjs

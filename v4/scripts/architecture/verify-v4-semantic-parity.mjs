@@ -15,8 +15,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
+import { fileURLToPath } from 'node:url';
 
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const failures = [];
 
 const readJson = (file) => {
@@ -37,9 +38,9 @@ const readYaml = (file) => {
   }
 };
 
-const parity = readYaml('v4/docs/architecture/v3-v4-semantic-parity-map.yml');
-const verification = readJson('v4/.appsdk/maps/verification-map.json');
-const resourceMap = readYaml('v4/docs/architecture/v4-resource-operation-map.yml');
+const parity = readYaml('docs/architecture/v3-v4-semantic-parity-map.yml');
+const verification = readJson('.appsdk/maps/verification-map.json');
+const resourceMap = readYaml('docs/architecture/v4-resource-operation-map.yml');
 
 if (!parity || !verification || !resourceMap) process.exit(1);
 

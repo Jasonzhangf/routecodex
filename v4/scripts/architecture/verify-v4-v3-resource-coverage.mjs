@@ -30,12 +30,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
+import { fileURLToPath } from 'node:url';
+import { loadV3Baseline } from './_v3-baseline.mjs';
 
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const readJson = (file) => {
   try {
-    return JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
+    const full = path.isAbsolute(file) ? file : path.join(root, file);
+    return JSON.parse(fs.readFileSync(full, 'utf8'));
   } catch (error) {
     console.error(`[v4_parity_gate_v3_resource_coverage] ${file}: cannot read/parse: ${error.message}`);
     return null;
@@ -44,7 +47,8 @@ const readJson = (file) => {
 
 const readYaml = (file) => {
   try {
-    return yaml.load(fs.readFileSync(path.join(root, file), 'utf8'));
+    const full = path.isAbsolute(file) ? file : path.join(root, file);
+    return yaml.load(fs.readFileSync(full, 'utf8'));
   } catch (error) {
     console.error(`[v4_parity_gate_v3_resource_coverage] ${file}: cannot read/parse: ${error.message}`);
     return null;
@@ -193,10 +197,11 @@ function validate(v3Map, coverage, parity, abstractionContract) {
 }
 
 function loadInputs() {
-  const v3Map = readYaml('docs/architecture/v3-resource-operation-map.yml');
-  const coverage = readYaml('v4/docs/architecture/v4-v3-abstraction-coverage.yml');
-  const parity = readYaml('v4/docs/architecture/v3-v4-semantic-parity-map.yml');
-  const contract = readJson('v4/contracts/pipeline-abstraction.contract.json');
+  const baselineInfo = loadV3Baseline('v3-resource-operation-map.yml');
+  const v3Map = readYaml(baselineInfo.artifactPath);
+  const coverage = readYaml('docs/architecture/v4-v3-abstraction-coverage.yml');
+  const parity = readYaml('docs/architecture/v3-v4-semantic-parity-map.yml');
+  const contract = readJson('contracts/pipeline-abstraction.contract.json');
   if (!v3Map || !coverage || !parity || !contract) {
     console.error('[v4_parity_gate_v3_resource_coverage] FAIL: input source unreadable');
     process.exit(1);

@@ -23,8 +23,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
+import { fileURLToPath } from 'node:url';
 
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const readJson = (file) => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
 const readYaml = (file) => yaml.load(fs.readFileSync(path.join(root, file), 'utf8'));
@@ -42,7 +43,7 @@ const REQUIRED_FIELDS = [
 ];
 
 const CRATE_DIRS = fs
-  .readdirSync(path.join(root, 'v4/crates'), { withFileTypes: true })
+  .readdirSync(path.join(root, 'crates'), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name);
 
@@ -54,7 +55,7 @@ const DECL_RE = /^(?:pub(?:\([^)]*\))?\s+)?(struct|enum|trait|fn|type|const|stat
 const REUSE_RE = /^pub use [^\n]*\b([A-Za-z_][A-Za-z0-9_]*)\b/gm;
 
 function collectDeclaredSymbols(crate) {
-  const crateRoot = path.join(root, 'v4/crates', crate, 'src');
+  const crateRoot = path.join(root, 'crates', crate, 'src');
   const symbols = new Set();
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -93,7 +94,7 @@ function collectDeclaredSymbols(crate) {
  */
 function collectNodeCatalog() {
   const nodeIds = new Set();
-  const nodeGraph = readJson('v4/contracts/node-graph.contract.json');
+  const nodeGraph = readJson('contracts/node-graph.contract.json');
   for (const [key, value] of Object.entries(nodeGraph)) {
     if (key === 'registered_nodes') {
       for (const node of value ?? []) {
@@ -109,7 +110,7 @@ function collectNodeCatalog() {
       }
     }
   }
-  const skeleton = readJson('v4/contracts/skeleton-plan.contract.json');
+  const skeleton = readJson('contracts/skeleton-plan.contract.json');
   for (const chain of skeleton.chains ?? []) {
     for (const checkpoint of chain.checkpoints ?? []) {
       if (checkpoint?.node_id) nodeIds.add(checkpoint.node_id);
@@ -260,9 +261,9 @@ function validate(resourceMap, appsdkMap, verificationMap, nodeIds) {
 }
 
 function runSelfTest() {
-  const baseResourceMap = readYaml('v4/docs/architecture/v4-resource-operation-map.yml');
-  const baseAppsdkMap = readJson('v4/.appsdk/maps/resource-map.json');
-  const verificationMap = readJson('v4/.appsdk/maps/verification-map.json');
+  const baseResourceMap = readYaml('docs/architecture/v4-resource-operation-map.yml');
+  const baseAppsdkMap = readJson('.appsdk/maps/resource-map.json');
+  const verificationMap = readJson('.appsdk/maps/verification-map.json');
 
   const clone = (value) => JSON.parse(JSON.stringify(value));
   const cases = [
@@ -341,9 +342,9 @@ if (process.argv.includes('--red-self-test')) {
   process.exit(0);
 }
 
-const resourceMap = readYaml('v4/docs/architecture/v4-resource-operation-map.yml');
-const appsdkMap = readJson('v4/.appsdk/maps/resource-map.json');
-const verificationMap = readJson('v4/.appsdk/maps/verification-map.json');
+const resourceMap = readYaml('docs/architecture/v4-resource-operation-map.yml');
+const appsdkMap = readJson('.appsdk/maps/resource-map.json');
+const verificationMap = readJson('.appsdk/maps/verification-map.json');
 
 const failures = validate(resourceMap, appsdkMap, verificationMap, collectNodeCatalog());
 if (failures.length > 0) {

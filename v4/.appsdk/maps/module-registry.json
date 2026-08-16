@@ -7,7 +7,16 @@
       "owner": "routecodex-v4-governance",
       "owned_paths": [
         ".appsdk/**",
-        "contracts/**"
+        "contracts/**",
+        "docs/**",
+        "tests/**",
+        "scripts/**",
+        "Cargo.toml",
+        "Cargo.lock",
+        "package.json",
+        "package-lock.json",
+        "rust-toolchain.toml",
+        ".gitignore"
       ],
       "forbidden_paths": [
         "active/lib/**",
@@ -16,7 +25,11 @@
       ],
       "verification_gates": [
         "contract_valid",
-        "record_graph"
+        "record_graph",
+        "v4_build_verify_positive",
+        "v4_build_verify_red",
+        "v4_build_verify_ci",
+        "v4_isolation_positive"
       ]
     },
     {
