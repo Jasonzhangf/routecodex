@@ -73,6 +73,7 @@ chains:
     semantic_contract:
       - Initial Direct planning selects from the captured Target09 set using session availability before global availability.
       - Request-local exclusions are empty before the first provider attempt.
+      - Target10 applies context admission from route request_input_tokens and candidate max_context_tokens before provider availability selection.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection]
       produces: [v3.target.concrete_provider]
@@ -90,6 +91,7 @@ chains:
     semantic_contract:
       - Direct kernel revalidates a preplanned target and every request-local reselection against current session availability before provider transport.
       - Global availability is selectable only when no nonfailed session alternative remains; failed candidate identities come from the request-local Error03 action state.
+      - Context admission is recomputed from the immutable Target09 route facts; provider errors cannot rewrite its token estimate.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
       produces: [v3.target.concrete_provider]
@@ -106,6 +108,7 @@ chains:
     owner_feature_id: v3.virtual_router_target_interpreter
     semantic_contract:
       - Initial Relay resolution selects from Target09 with session availability and the request-local exclusion set supplied by the owning runtime.
+      - Context-oversized candidates are filtered before Relay provider transport; near-limit candidates remain eligible after normal candidates.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
       produces: [v3.target.concrete_provider]
@@ -123,6 +126,7 @@ chains:
     semantic_contract:
       - Relay failure handling expands only the captured route plan and reselects from Target09 without Router reentry.
       - Error03 request-local exclusions prevent reuse of a failed provider candidate.
+      - Reselection preserves the same Target09 context-admission truth and does not infer tokens from the prior provider error.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
       produces: [v3.target.concrete_provider]

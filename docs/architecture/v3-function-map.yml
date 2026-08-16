@@ -627,6 +627,7 @@ features:
   - V3TargetInterpreter::classify_kind
   - V3TargetInterpreter::expand_candidates
   - V3TargetInterpreter::select_available
+  - candidate_context_admission
   - select_v3_target_with_session_then_global
   - select_v3_preplanned_direct_target
   - v3_direct_selected_available_for_send
@@ -660,7 +661,7 @@ features:
   - restart
   required_gates:
   - npm run test:v3-p5-router-target
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target configured_priority_is_not_overridden_by_context_near_limit_heuristic
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target context_admission_preserves_normal_priority_demotes_near_limit_and_filters_oversized
     -- --nocapture
   - npm run test:v3-p5-server-blackbox
   - 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests:': --
@@ -682,10 +683,13 @@ features:
     selection signals; route selection is not model capability filtering.
   - 'Target hard capability_mismatch is allowed only for capabilities the selected
     model/provider may genuinely lack: web_search/search and multimodal/vision.'
-  - After genuine web_search/search and multimodal/vision capability validation, Target10
-    preserves configured candidate order; max_context_tokens metadata cannot synthesize
-    context_near_limit unavailability or preempt priority, while Provider availability/health
-    and request-local provider-failure exclusion remain explicit switch inputs.
+  - Target10 consumes RCC-owned request_input_tokens and candidate max_context_tokens
+    as a control-side admission rule; below 90 percent preserves configured order,
+    90 through 100 percent remains eligible after normal candidates, and above 100
+    percent is filtered before provider transport.
+  - Provider availability/health and request-local provider-failure exclusion remain
+    explicit switch inputs after capability and context admission; provider errors
+    and payload metadata cannot reconstruct request token truth.
   - Tools, tool_outputs, reasoning/thinking, coding, longcontext, remote_continuation,
     and local_materialization are route/protocol/continuation ownership signals; they
     may steer pool choice but must not mark a candidate as capability_mismatch.
