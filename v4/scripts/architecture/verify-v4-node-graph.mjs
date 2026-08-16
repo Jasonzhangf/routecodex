@@ -147,7 +147,7 @@ function roleCatalog(nodeGraph) {
   return families;
 }
 
-function validate(nodeGraph, resourceMap, skeleton, mainline) {
+function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline) {
   const failures = [];
   const roleCatalogByFamily = roleCatalog(nodeGraph);
   const chainSections = {};
@@ -316,6 +316,11 @@ function validate(nodeGraph, resourceMap, skeleton, mainline) {
         failures.push(`skeleton ${chainId}: edge references unknown node ${edge.from}->${edge.to}`);
       }
     }
+    const otherChainNodes = new Set(
+      Object.entries(CHAIN_EXPECTED)
+        .filter(([otherChainId]) => otherChainId !== chainId)
+        .flatMap(([, nodeIds]) => nodeIds),
+    );
     for (const checkpoint of planChain.checkpoints ?? []) {
       if (REVIVAL_DENYLIST.has(checkpoint.node_id)) {
         failures.push(`skeleton ${chainId}: checkpoint references legacy node ${checkpoint.node_id}`);
@@ -323,7 +328,7 @@ function validate(nodeGraph, resourceMap, skeleton, mainline) {
       if (!nodeCatalog.has(checkpoint.node_id) && !registeredIds.has(checkpoint.node_id)) {
         failures.push(`skeleton ${chainId}: checkpoint references unregistered node ${checkpoint.node_id}`);
       }
-      if (expected.includes(checkpoint.node_id) && !expectedIdsForChain(chainId, expected).includes(checkpoint.node_id)) {
+      if (otherChainNodes.has(checkpoint.node_id)) {
         failures.push(`skeleton ${chainId}: checkpoint ${checkpoint.node_id} chain mismatch`);
       }
     }
@@ -380,19 +385,27 @@ function validate(nodeGraph, resourceMap, skeleton, mainline) {
         failures.push(`mainline edge ${expected[i]}->${expected[i + 1]} type ${edge.edge_type} (must be ${expectedEdgeType})`);
       }
       const resource = resById.get(edge.resource);
-      if (resource) {
+      if (!resource) {
+        failures.push(`mainline edge ${expected[i]}->${expected[i + 1]} references unknown resource ${edge.resource}`);
+      } else {
         const expectedAxis = chainId === 'config' ? 'information' : 'data';
         if (resource.axis !== expectedAxis) {
           failures.push(`mainline edge ${expected[i]}->${expected[i + 1]} resource ${edge.resource} axis ${resource.axis} (must be ${expectedAxis})`);
+        }
+        if (edge.resource === 'v4.request.provider_semantic' || edge.resource === 'v4.request.provider_wire_payload') {
+          const writers = new Set(resource.allowed_writers ?? []);
+          const readers = new Set(resource.allowed_readers ?? []);
+          if (!writers.has(expected[i])) {
+            failures.push(`mainline edge ${expected[i]}->${expected[i + 1]} resource ${edge.resource} does not allow source writer`);
+          }
+          if (!readers.has(expected[i + 1])) {
+            failures.push(`mainline edge ${expected[i]}->${expected[i + 1]} resource ${edge.resource} does not allow target reader`);
+          }
         }
       }
     }
   }
   return failures;
-}
-
-function expectedIdsForChain(chainId, expected) {
-  return expected;
 }
 
 function loadCurrent() {
@@ -546,6 +559,30 @@ function makeCleanBase() {
         forbidden_writers: ['V4ScopeRegistry'],
         verification_gate: ['v4_parity_gate_node_graph'],
       },
+      {
+        resource_id: 'v4.request.provider_semantic',
+        axis: 'data',
+        binding_status: 'anchored',
+        owner_node: 'V4HubReqOutbound05ProviderSemantic',
+        owner_crate: 'routecodex-v4-runtime',
+        owner_symbols: ['SemanticProjection'],
+        allowed_writers: ['V4HubReqOutbound05ProviderSemantic'],
+        allowed_readers: ['V4ProviderReqCompat06Compat'],
+        forbidden_writers: ['V4ScopeRegistry'],
+        verification_gate: ['v4_parity_gate_node_graph'],
+      },
+      {
+        resource_id: 'v4.request.provider_wire_payload',
+        axis: 'data',
+        binding_status: 'anchored',
+        owner_node: 'V4ProviderReqCompat06Compat',
+        owner_crate: 'routecodex-v4-runtime',
+        owner_symbols: ['WireBuild'],
+        allowed_writers: ['V4ProviderReqCompat06Compat'],
+        allowed_readers: ['V4ProviderSseOut07WireBoundary'],
+        forbidden_writers: ['V4ScopeRegistry'],
+        verification_gate: ['v4_parity_gate_node_graph'],
+      },
     ],
   };
   const mainline = {
@@ -559,7 +596,12 @@ function makeCleanBase() {
         to: expected[i + 1],
         owner: 'routecodex-v4-runtime::SkeletonRuntime',
         edge_type: 'data_flow',
-        resource: 'v4.test.data',
+        resource:
+          expected[i] === 'V4HubReqOutbound05ProviderSemantic'
+            ? 'v4.request.provider_semantic'
+            : expected[i] === 'V4ProviderReqCompat06Compat'
+              ? 'v4.request.provider_wire_payload'
+              : 'v4.test.data',
         path: 'crates/routecodex-v4-runtime/src/lib.rs',
         status: 'active',
       });
@@ -667,12 +709,25 @@ function runSelfTest() {
   add('checkpoint legacy node', (d) => {
     d.skeleton.chains[0].checkpoints.push({ node_id: 'V4ReqInbound02Normalized', semantic: 'x', owner: 'x' });
   }, 'legacy node');
+  add('checkpoint wrong chain', (d) => {
+    d.skeleton.chains[0].checkpoints.push({ node_id: 'V4HubRespInbound02Parsed', semantic: 'x', owner: 'x' });
+  }, 'chain mismatch');
   add('mainline legacy edge', (d) => {
     d.mainline.edges.push({ from: 'V4ReqInbound01Raw', to: 'V4ReqProcess02', owner: 'x', edge_type: 'data_flow', resource: 'v4.test.data', path: 'x', status: 'active' });
   }, 'revives legacy node');
   add('mainline wrong edge type', (d) => {
     d.mainline.edges[0].edge_type = 'information_flow';
   }, 'must be data_flow');
+  add('mainline resource missing source writer', (d) => {
+    const edge = d.mainline.edges.find((item) => item.resource === 'v4.request.provider_semantic');
+    const resource = d.resourceMap.resources.find((item) => item.resource_id === edge.resource);
+    resource.allowed_writers = resource.allowed_writers.filter((nodeId) => nodeId !== edge.from);
+  }, 'does not allow source writer');
+  add('mainline resource missing target reader', (d) => {
+    const edge = d.mainline.edges.find((item) => item.resource === 'v4.request.provider_wire_payload');
+    const resource = d.resourceMap.resources.find((item) => item.resource_id === edge.resource);
+    resource.allowed_readers = resource.allowed_readers.filter((nodeId) => nodeId !== edge.to);
+  }, 'does not allow target reader');
   add('config role drift', (d) => {
     const chain = d.skeleton.chains.find((c) => c.chain_id === 'config');
     chain.nodes[2].role_id = 'config_registry';
@@ -691,7 +746,7 @@ function runSelfTest() {
   for (const [name, mutate, marker] of cases) {
     const data = makeCleanBase();
     mutate(data);
-    const failures = validate(data.nodeGraph, data.resourceMap, data.skeleton, data.mainline);
+    const failures = validateNodeGraph(data.nodeGraph, data.resourceMap, data.skeleton, data.mainline);
     const hit = failures.some((failure) => failure.includes(marker));
     if (failures.length === 0 || !hit) {
       console.error(`[v4_parity_gate_node_graph] red self-test ${name}: expected FAIL, got ${failures.length} failures (marker ${marker})`);
@@ -712,7 +767,7 @@ if (process.argv.includes('--red-self-test')) {
 }
 
 const current = loadCurrent();
-const failures = validate(current.nodeGraph, current.resourceMap, current.skeleton, current.mainline);
+const failures = validateNodeGraph(current.nodeGraph, current.resourceMap, current.skeleton, current.mainline);
 if (failures.length > 0) {
   console.error('[v4_parity_gate_node_graph] FAIL');
   console.error(failures.slice(0, 200).join('\n'));

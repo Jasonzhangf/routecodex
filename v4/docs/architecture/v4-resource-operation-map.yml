@@ -44,7 +44,7 @@ resources:
     owner_symbols: [SemanticProjection]
     identity: [requestId, targetId, providerId, modelId]
     allowed_writers: [V4HubReqOutbound05ProviderSemantic]
-    allowed_readers: [V4ProviderReqCompat06Compat, V4ProviderSseOut07WireBoundary]
+    allowed_readers: [V4ProviderReqCompat06Compat]
     forbidden_writers: [V4ControlMetadataCenter, V4Router, V4DebugSnapshotLedger]
     may_enter_provider_body: true
     may_enter_client_body: false

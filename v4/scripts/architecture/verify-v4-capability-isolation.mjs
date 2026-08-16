@@ -63,8 +63,15 @@ if (routeDecision) {
 const providerSemantic = byId.get('v4.request.provider_semantic');
 if (providerSemantic) {
   const readers = new Set(providerSemantic.allowed_readers ?? []);
-  if (!readers.has('V4ProviderReqCompat06Compat') || !readers.has('V4ProviderSseOut07WireBoundary')) {
-    failures.push('resource map: provider wire builders (V4ProviderReqCompat06Compat + V4ProviderSseOut07WireBoundary) must both read provider semantic');
+  if (readers.size !== 1 || !readers.has('V4ProviderReqCompat06Compat')) {
+    failures.push('resource map: V4ProviderReqCompat06Compat must be the only reader of provider semantic');
+  }
+}
+const providerWire = byId.get('v4.request.provider_wire_payload');
+if (providerWire) {
+  const readers = new Set(providerWire.allowed_readers ?? []);
+  if (readers.size !== 1 || !readers.has('V4ProviderSseOut07WireBoundary')) {
+    failures.push('resource map: V4ProviderSseOut07WireBoundary must be the only reader of provider wire payload');
   }
 }
 
