@@ -10,6 +10,7 @@ const verifier = resolve(repo, 'scripts/architecture/verify-v3-responses-direct-
 const runtime = 'v3/crates/routecodex-v3-runtime/src/kernel.rs';
 const runtimeCommit = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_continuation_commit.rs';
 const runtimeHelpers = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs';
+const continuationOwner = 'v3/crates/routecodex-v3-runtime/src/responses_continuation_owner.rs';
 const response = 'v3/crates/routecodex-v3-runtime/src/shared.rs';
 const server = 'v3/crates/routecodex-v3-server/src/lib.rs';
 const serverScope = 'v3/crates/routecodex-v3-server/src/scope_metadata.rs';
@@ -21,6 +22,8 @@ const cases = [
   ['Req03 load removed', runtime, '.load_for_req03(response_id, &scope.key, now_epoch_ms)', '.load(response_id)', /forbidden|load_for_req03/],
   ['Default transport session state removed', runtime, 'static DEFAULT_RESPONSES_TRANSPORT', 'static REMOVED_DEFAULT_RESPONSES_TRANSPORT', /DEFAULT_RESPONSES_TRANSPORT/],
   ['second response exit', runtimeHelpers, 'fn release_terminal_failure_locator(', 'async fn execute_selected_continuation() {}\nfn release_terminal_failure_locator(', /execute_selected_continuation/],
+  ['scope-only terminal release', runtimeHelpers, 'store.release_bound(response_id, &scope.key, selected_pin)', 'store.release_for_req03(response_id, &scope.key)', /release_bound|release_for_req03/],
+  ['ambiguous provider binding becomes internal failure', continuationOwner, 'AmbiguousProviderBinding { .. } =>', 'ScopeMismatch { .. } =>', /AmbiguousProviderBinding/],
   ['Router reentry marker', runtime, 'trace.push("V3HubReqTarget06Resolved");', 'trace.push("V3HubReqTarget06Resolved");\n        let fallback_router = V3VirtualRouter::default();', /fallback/],
   ['control payload leak', runtime, 'let policy = hook_registry.run_route(selected, &standardized);', 'let mut policy = hook_registry.run_route(selected, &standardized);\n        policy.request_body["provider_id"] = serde_json::json!("leak");', /provider_id/],
   ['HTTP V2 direct capability gate reintroduced', runtimeCommit, 'let input = V3RemoteContinuationCommitInput::locator_only(locator);', 'let remote_capability_error = "provider p model m lacks required remote_continuation capability";\n                    let input = V3RemoteContinuationCommitInput::locator_only(locator);', /remote_capability_error|lacks required remote_continuation/],
@@ -39,6 +42,7 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs',
   runtimeCommit,
   runtimeHelpers,
+  continuationOwner,
   'v3/crates/routecodex-v3-runtime/src/remote_continuation.rs',
   relayTypes,
   'v3/crates/routecodex-v3-runtime/src/shared.rs',

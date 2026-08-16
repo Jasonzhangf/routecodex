@@ -5,6 +5,7 @@ const runtimePath = 'v3/crates/routecodex-v3-runtime/src/kernel.rs';
 const runtimeEntrypointsPath = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs';
 const runtimeCommitPath = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_continuation_commit.rs';
 const runtimeHelpersPath = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs';
+const continuationOwnerPath = 'v3/crates/routecodex-v3-runtime/src/responses_continuation_owner.rs';
 const storePath = 'v3/crates/routecodex-v3-runtime/src/remote_continuation.rs';
 const responsePath = 'v3/crates/routecodex-v3-runtime/src/shared.rs';
 const targetPath = 'v3/crates/routecodex-v3-target/src/lib.rs';
@@ -28,6 +29,7 @@ const runtime = [runtimePath, runtimeEntrypointsPath, runtimeCommitPath]
   .map((path) => readFileSync(path, 'utf8'))
   .join('\n');
 const runtimeHelpers = readFileSync(runtimeHelpersPath, 'utf8');
+const continuationOwner = readFileSync(continuationOwnerPath, 'utf8');
 const store = readFileSync(storePath, 'utf8');
 const response = readFileSync(responsePath, 'utf8');
 const target = readFileSync(targetPath, 'utf8');
@@ -46,6 +48,10 @@ const server = [serverPath, serverScopePath, serverOutcomePath]
 const relayTypes = readFileSync(relayTypesPath, 'utf8');
 const serverFrames = readFileSync(serverFramesPath, 'utf8');
 const serverWebsocket = readFileSync(serverWebsocketPath, 'utf8');
+const relayWebsocketFunction = serverWebsocket.slice(
+  serverWebsocket.indexOf('pub(crate) async fn send_responses_relay_websocket_sse_stream('),
+  serverWebsocket.indexOf('\nfn responses_websocket_event_text_from_sse_fields'),
+);
 const tests = readFileSync(testPath, 'utf8');
 const configTests = readFileSync(configTestPath, 'utf8');
 const websocketTests = readFileSync(websocketTestPath, 'utf8');
@@ -69,6 +75,13 @@ for (const [owner, text, phrases] of [
     'let input = V3RemoteContinuationCommitInput::locator_only(locator);',
     'store.rebind_for_resp04(previous_response_id, input)',
     'None => store.commit(input)',
+  ]],
+  [runtimeHelpersPath, runtimeHelpers, [
+    'store.release_bound(response_id, &scope.key, selected_pin)',
+  ]],
+  [continuationOwnerPath, continuationOwner, [
+    'AmbiguousProviderBinding { .. } =>',
+    'ambiguous_provider_binding_is_request_classified_not_internal_state_failure',
   ]],
   [runtimeHelpersPath, runtimeHelpers, [
     'fn release_terminal_failure_locator(',
@@ -137,7 +150,7 @@ for (const [owner, text, phrases] of [
     'Some(Err(source)) if source.code == "client_disconnect"',
     'Ok(v3_post_commit_sse_error_event_chunk(source))',
   ]],
-  [serverWebsocketPath, serverWebsocket, [
+  [`${serverWebsocketPath}#send_responses_relay_websocket_sse_stream`, relayWebsocketFunction, [
     'Err(error) if error.code == "client_disconnect" => return Err(())',
   ]],
   [testPath, tests, [
@@ -232,6 +245,9 @@ forbid(response, responsePath, [
 ]);
 forbid(relayTypes, relayTypesPath, [
   /V3ResponsesRelayClientStream\s*=\s*[\s\S]{0,160}Result<Vec<u8>, String>/,
+]);
+forbid(runtimeHelpers, runtimeHelpersPath, [
+  /release_for_req03/,
 ]);
 forbid(providerTransportControlSource, providerTransportPath, [
   /fallback/i,

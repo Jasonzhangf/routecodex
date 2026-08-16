@@ -71,9 +71,20 @@ pub fn resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
     };
     let direct_owned = match direct_scope {
         Some(scope) => direct_state.contains_for_req03(&response_id, scope, now_epoch_ms),
-        None => direct_state.contains(&response_id),
+        None => direct_state.contains(&response_id).map_err(|message| {
+            crate::remote_continuation::V3RemoteContinuationError::Codec { message }
+        }),
     }
-    .map_err(|message| V3ResponsesPreviousResponseOwnerResolutionError::DirectState { message })?;
+    .map_err(|error| match error {
+        crate::remote_continuation::V3RemoteContinuationError::AmbiguousProviderBinding { .. } => {
+            V3ResponsesPreviousResponseOwnerResolutionError::Ambiguous {
+                response_id: response_id.clone(),
+            }
+        }
+        error => V3ResponsesPreviousResponseOwnerResolutionError::DirectState {
+            message: error.to_string(),
+        },
+    })?;
     let relay_owned = match relay_scope {
         Some(scope) => relay_state.contains_for_req03(&response_id, scope),
         None => relay_state.contains(&response_id),
@@ -248,6 +259,64 @@ mod tests {
         .unwrap();
 
         assert_eq!(resolved, V3EntryProtocolExecutionMode::Direct);
+    }
+
+    #[test]
+    fn ambiguous_provider_binding_is_request_classified_not_internal_state_failure() {
+        let direct = V3ResponsesDirectContinuationState::default();
+        let relay = V3ResponsesRelayLocalContinuationState::default();
+        let direct_scope = V3ResponsesDirectContinuationScope::responses(
+            "/v1/responses",
+            "session-a",
+            "conversation-a",
+            5555,
+            "coding",
+        );
+        let relay_scope = V3ResponsesRelayLocalContinuationScope::responses(
+            "/v1/responses",
+            "session-a",
+            "conversation-a",
+            5555,
+            "coding",
+        );
+        direct
+            .commit_for_req03_test_with_pin(
+                "resp_shared",
+                &direct_scope,
+                crate::remote_continuation::V3RemoteContinuationPin::new(
+                    "provider-a",
+                    "gpt-5.5",
+                    "key-a",
+                ),
+                1_000,
+            )
+            .unwrap();
+        direct
+            .commit_for_req03_test_with_pin(
+                "resp_shared",
+                &direct_scope,
+                crate::remote_continuation::V3RemoteContinuationPin::new(
+                    "provider-b",
+                    "gpt-5.5",
+                    "key-b",
+                ),
+                1_000,
+            )
+            .unwrap();
+
+        let error = resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
+            Some("resp_shared"),
+            V3EntryProtocolExecutionMode::Direct,
+            &direct,
+            &relay,
+            Some(&direct_scope),
+            Some(&relay_scope),
+            1_001,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code(), "responses_continuation_owner_invalid");
+        assert!(!error.is_internal_state_failure());
     }
 
     #[test]

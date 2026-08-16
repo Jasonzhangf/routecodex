@@ -459,29 +459,6 @@ impl V3RemoteContinuationStore {
         self.locators.remove(&key).is_some()
     }
 
-    pub fn release_for_req03(
-        &mut self,
-        remote_response_id: &str,
-        scope_key: &V3RemoteContinuationScopeKey,
-    ) -> Result<bool, V3RemoteContinuationError> {
-        if scope_key.entry_protocol != V3RemoteContinuationEntryProtocol::Responses {
-            return Err(V3RemoteContinuationError::EntryProtocolMismatch);
-        }
-        let mut matching = self.locators.keys().filter(|key| {
-            key.remote_response_id == remote_response_id && key.scope_key == *scope_key
-        });
-        let key = match matching.next().cloned() {
-            Some(key) if matching.next().is_none() => key,
-            Some(_) => {
-                return Err(V3RemoteContinuationError::AmbiguousProviderBinding {
-                    remote_response_id: remote_response_id.to_string(),
-                })
-            }
-            None => return Ok(false),
-        };
-        Ok(self.locators.remove(&key).is_some())
-    }
-
     pub fn contains(&self, remote_response_id: &str) -> bool {
         self.locators
             .keys()

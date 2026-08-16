@@ -449,6 +449,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         if previous_response_id.is_none() {
             trace.push("V3Target10ConcreteProviderSelected");
         }
+        let selected_pin = V3RemoteContinuationPin::new(
+            selected.candidate.provider_id.clone(),
+            selected.candidate.model_id.clone(),
+            selected.candidate.auth_alias.clone(),
+        );
         if let Some(sink) = route_selection_event_sink.as_ref() {
             let transport_label = if standardized
                 .body
@@ -632,6 +637,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         continuation_state,
                         continuation_scope.as_ref(),
                         previous_response_id.as_deref(),
+                        &selected_pin,
                     ) {
                         return error_output(
                             runtime_source("V3HubRespContinuation04Committed", error),
@@ -757,11 +763,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             }
         }
 
-        let selected_pin = V3RemoteContinuationPin::new(
-            selected.candidate.provider_id.clone(),
-            selected.candidate.model_id.clone(),
-            selected.candidate.auth_alias.clone(),
-        );
         let selected_capability_revision =
             match capability_revision_for_pin(manifest, &selected_pin) {
                 Ok(revision) => revision,
@@ -783,6 +784,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     continuation_state,
                     continuation_scope.as_ref(),
                     previous_response_id.as_deref(),
+                    &selected_pin,
                 ) {
                     return error_output(
                         runtime_source("V3HubRespContinuation04Committed", error),
@@ -805,6 +807,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     continuation_state,
                     continuation_scope.as_ref(),
                     previous_response_id.as_deref(),
+                    &selected_pin,
                 ) {
                     return error_output(
                         runtime_source("V3HubRespContinuation04Committed", error),
@@ -930,6 +933,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             continuation_state,
                             continuation_scope.as_ref(),
                             previous_response_id.as_deref(),
+                            &selected_pin,
                         ) {
                             return error_output(
                                 runtime_source("V3HubRespContinuation04Committed", release_error),
@@ -1010,6 +1014,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             continuation_state,
                             continuation_scope.as_ref(),
                             previous_response_id.as_deref(),
+                            &selected_pin,
                         ) {
                             return error_output(
                                 runtime_source("V3HubRespContinuation04Committed", error),
@@ -1084,6 +1089,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                                 continuation_state,
                                 continuation_scope.as_ref(),
                                 previous_response_id.as_deref(),
+                                &selected_pin,
                             ) {
                                 return error_output(
                                     runtime_source("V3HubRespContinuation04Committed", error),
