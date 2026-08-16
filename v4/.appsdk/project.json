@@ -240,13 +240,7 @@
         "suite_id": "v4-base-node-l0-regression"
       },
       "source_owner": "routecodex-v4-base-node",
-      "stage": "architecture_stable",
-      "version_base": {
-        "base_artifact_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
-        "base_source_commit": "fac43e278",
-        "new_active_version": "active-v2",
-        "previous_active_version": "active-v1"
-      }
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-edge/**",

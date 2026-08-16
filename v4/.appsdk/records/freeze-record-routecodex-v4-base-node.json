@@ -1,1 +1,42 @@
-{"freeze_id":"base-sdk013-freeze","issue_id":"appsdk-013-migration","module_id":"routecodex-v4-base-node","promotion_id":"base-sdk013-promotion","promotion_record_hash":"sha256:pending","artifact_record_id":"base-sdk013-candidate","regression_report_id":"base-sdk013-regression","regression_report_hash":"sha256:pending","source_commit_or_tag":"6c9b181eb39b70742118006d213682efc81972d6","active_version":"active-v2","previous_active_version":"active-v1","library_hash":"sha256:16b93ccf529ec4a940c1ddeab745af7a8e70daf148396f5b8f5ba88ce1d08f70","public_api_hash":"sha256:ec272ec095451c3f66d6594660ba56b4b6b538074dc568ac31c5e4412267db71","review_id":"base-sdk013-architecture-review","previous_active_immutable":true,"git_clean":true,"clean_scope":{"base_commit":"3a845cd50ae0a7c3cf0cf29bd5d25997b7a07d59","changed_paths":["v4/.appsdk/**","v4/contracts/**","v4/docs/goals/appsdk-0.1.3-migration.md","v4/.gitignore","v4/protected/**"],"ignored_paths":["v4/active/lib/**","v4/generated/**","v4/target/**"],"generated_policy":"excluded_from_source_clean"},"owners":{"vcs":"git","compiler":"appsdk-0.1.3","api_extractor":"appsdk-0.1.3","review":"routecodex-codex-adapter","artifact_registry":"appsdk-active"},"created_at":"2026-08-16T04:07:20Z"}
+{
+  "active_version": "active-v2",
+  "artifact_record_id": "base-sdk013-candidate",
+  "clean_scope": {
+    "base_commit": "3a845cd50ae0a7c3cf0cf29bd5d25997b7a07d59",
+    "changed_paths": [
+      "v4/.appsdk/**",
+      "v4/contracts/**",
+      "v4/docs/goals/appsdk-0.1.3-migration.md",
+      "v4/.gitignore",
+      "v4/protected/**"
+    ],
+    "generated_policy": "excluded_from_source_clean",
+    "ignored_paths": [
+      "v4/active/lib/**",
+      "v4/generated/**",
+      "v4/target/**"
+    ]
+  },
+  "created_at": "2026-08-16T04:07:20Z",
+  "freeze_id": "base-sdk013-freeze",
+  "git_clean": true,
+  "issue_id": "appsdk-013-migration",
+  "library_hash": "sha256:16b93ccf529ec4a940c1ddeab745af7a8e70daf148396f5b8f5ba88ce1d08f70",
+  "module_id": "routecodex-v4-base-node",
+  "owners": {
+    "api_extractor": "appsdk-0.1.3",
+    "artifact_registry": "appsdk-active",
+    "compiler": "appsdk-0.1.3",
+    "review": "routecodex-codex-adapter",
+    "vcs": "git"
+  },
+  "previous_active_immutable": true,
+  "previous_active_version": "active-v1",
+  "promotion_id": "base-sdk013-promotion",
+  "promotion_record_hash": "sha256:1f8cffaeb49d073e75e44b75e7de50563adf8f19d640199dd95679acabd2c10b",
+  "public_api_hash": "sha256:ec272ec095451c3f66d6594660ba56b4b6b538074dc568ac31c5e4412267db71",
+  "regression_report_hash": "sha256:d545acdcf5cd7b025022eda3b5c2c6259ab9d04dc111872b36f63001c3e83f3a",
+  "regression_report_id": "base-sdk013-regression",
+  "review_id": "base-sdk013-architecture-review",
+  "source_commit_or_tag": "6c9b181eb39b70742118006d213682efc81972d6"
+}

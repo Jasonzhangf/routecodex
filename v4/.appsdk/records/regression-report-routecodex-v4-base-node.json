@@ -1,1 +1,35 @@
-{"regression_report_id":"base-sdk013-regression","module_id":"routecodex-v4-base-node","source_commit":"6c9b181eb39b70742118006d213682efc81972d6","artifact_hash":"sha256:16b93ccf529ec4a940c1ddeab745af7a8e70daf148396f5b8f5ba88ce1d08f70","public_api_hash":"sha256:ec272ec095451c3f66d6594660ba56b4b6b538074dc568ac31c5e4412267db71","scope_hash":"sha256:7d1e6dda7043dedd559eb5c13df6ae94d7c49165b54e4602ecbd29ad5c6c6de9","input_hash":"sha256:16b93ccf529ec4a940c1ddeab745af7a8e70daf148396f5b8f5ba88ce1d08f70","suite_id":"v4-base-node-l0-regression","command":{"program":"cargo","args":["test","-p","routecodex-v4-base-node","--test","l0_base_node"],"working_directory":"."},"test_count":12,"passed":12,"failed":0,"skipped":0,"result":"pass","producer":{"adapter":"cargo","identity":"routecodex-v4-base-node-regression"},"test_characteristics":{"whitebox":true,"blackbox":true},"created_at":"2026-08-16T04:07:10Z"}
+{
+  "artifact_hash": "sha256:16b93ccf529ec4a940c1ddeab745af7a8e70daf148396f5b8f5ba88ce1d08f70",
+  "command": {
+    "args": [
+      "test",
+      "-p",
+      "routecodex-v4-base-node",
+      "--test",
+      "l0_base_node"
+    ],
+    "program": "cargo",
+    "working_directory": "."
+  },
+  "created_at": "2026-08-16T04:07:10Z",
+  "failed": 0,
+  "input_hash": "sha256:16b93ccf529ec4a940c1ddeab745af7a8e70daf148396f5b8f5ba88ce1d08f70",
+  "module_id": "routecodex-v4-base-node",
+  "passed": 12,
+  "producer": {
+    "adapter": "cargo",
+    "identity": "routecodex-v4-base-node-regression"
+  },
+  "public_api_hash": "sha256:ec272ec095451c3f66d6594660ba56b4b6b538074dc568ac31c5e4412267db71",
+  "regression_report_id": "base-sdk013-regression",
+  "result": "pass",
+  "scope_hash": "sha256:7d1e6dda7043dedd559eb5c13df6ae94d7c49165b54e4602ecbd29ad5c6c6de9",
+  "skipped": 0,
+  "source_commit": "6c9b181eb39b70742118006d213682efc81972d6",
+  "suite_id": "v4-base-node-l0-regression",
+  "test_characteristics": {
+    "blackbox": true,
+    "whitebox": true
+  },
+  "test_count": 12
+}
