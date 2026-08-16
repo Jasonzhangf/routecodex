@@ -1028,6 +1028,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn direct_sse_empty_output_item_then_failed_projects_error_before_client_commit() {
+        let raw = V3ProviderResp14Raw::from_sse(
+            "req".to_string(),
+            "provider".to_string(),
+            201,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(vec![
+                Ok::<Vec<u8>, V3ProviderError>(
+                    b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
+                ),
+                Ok::<Vec<u8>, V3ProviderError>(
+                    b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"provider_failed\",\"message\":\"provider failed after empty lifecycle frame\"}}}\n\n".to_vec(),
+                ),
+            ])),
+        );
+
+        let error = project_provider_raw_to_client_payload(raw)
+            .await
+            .expect_err("empty lifecycle frames must not commit Resp15 before provider failure");
+        assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(error.code, "provider_failed");
+    }
+
+    #[tokio::test]
+    async fn direct_sse_empty_output_item_then_eof_projects_error_before_client_commit() {
+        let raw = V3ProviderResp14Raw::from_sse(
+            "req".to_string(),
+            "provider".to_string(),
+            201,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(
+                b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
+            )])),
+        );
+
+        let error = project_provider_raw_to_client_payload(raw)
+            .await
+            .expect_err("empty lifecycle frames followed by EOF must fail before Resp15 commit");
+        assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(error.code, "provider_response_sse_empty");
+    }
+
+    #[tokio::test]
     async fn direct_sse_first_non_failure_frame_replays_buffered_chunk() {
         let raw = V3ProviderResp14Raw::from_sse(
             "req".to_string(),
