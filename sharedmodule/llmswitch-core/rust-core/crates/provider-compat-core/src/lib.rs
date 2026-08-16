@@ -46,8 +46,6 @@ pub struct AdapterContext {
     #[serde(default)]
     pub anthropic_thinking: Option<String>,
     #[serde(default)]
-    pub reasoning_effort_explicit: Option<bool>,
-    #[serde(default)]
     pub estimated_input_tokens: Option<f64>,
     #[serde(default)]
     pub model_id: Option<String>,
@@ -1677,17 +1675,12 @@ fn apply_glm_response_compat(payload: Value) -> Value {
 mod tests {
     use super::*;
 
-    fn deepseek_max_input(
-        payload: Value,
-        provider_protocol: &str,
-        reasoning_effort_explicit: Option<bool>,
-    ) -> ReqOutboundCompatInput {
+    fn deepseek_max_input(payload: Value, provider_protocol: &str) -> ReqOutboundCompatInput {
         ReqOutboundCompatInput {
             payload,
             adapter_context: AdapterContext {
                 compatibility_profile: Some("chat:deepseek-max".to_string()),
                 provider_protocol: Some(provider_protocol.to_string()),
-                reasoning_effort_explicit,
                 ..Default::default()
             },
             explicit_profile: None,
@@ -1699,7 +1692,6 @@ mod tests {
         let result = run_req_outbound_stage3_compat(deepseek_max_input(
             json!({"model":"deepseek-v4-flash","messages":[]}),
             "openai-chat",
-            Some(false),
         ))
         .expect("registered DeepSeek profile must accept an already-compatible request");
 
@@ -1713,7 +1705,6 @@ mod tests {
                 "reasoning_effort":"already-projected-by-provider-req-compat"
             }),
             "openai-chat",
-            Some(true),
         ))
         .expect("shared compat must not own target effort validation or projection");
         assert_eq!(
@@ -1724,7 +1715,6 @@ mod tests {
         let untouched = run_req_outbound_stage3_compat(deepseek_max_input(
             json!({"model":"deepseek-v4-flash","messages":[]}),
             "anthropic-messages",
-            Some(false),
         ))
         .expect("profile must not mutate a different provider protocol");
         assert!(untouched.payload.get("reasoning_effort").is_none());

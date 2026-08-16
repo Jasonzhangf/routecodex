@@ -32,6 +32,10 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
@@ -55,6 +59,20 @@ const files = [
 ];
 
 const cases = [
+  {
+    name: 'Provider response projection is collapsed into the client inbound error variant',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+    from: 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(\n                                    error.to_string(),\n                                )',
+    to: 'V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())',
+    diagnostic: /no_shared_client_error_variant|InboundCanonical/u,
+  },
+  {
+    name: 'Internal web search canonicalization is collapsed into the client inbound error variant',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs',
+    from: 'V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(format!(\n                "servertool followup canonicalization failed: {error}"\n            ))',
+    to: 'V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())',
+    diagnostic: /no_shared_client_error_variant|InboundCanonical/u,
+  },
   {
     name: 'Shared provider compat reintroduces a second DeepSeek effort owner',
     file: 'sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs',

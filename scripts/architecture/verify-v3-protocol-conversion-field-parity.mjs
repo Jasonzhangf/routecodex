@@ -29,6 +29,10 @@ const paths = {
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesRuntimeInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   responsesRuntimeTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
+  responsesRuntimeTestsExtra: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs',
+  responsesRelayDryRun: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
+  responsesRelayTypes: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs',
+  webSearchHop: 'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs',
   responsesOpenaiChatConversion: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
   anthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
   anthropicProjectionContext: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
@@ -107,11 +111,19 @@ const targetReasoningEffortProjection = functionSlice(
   text.providerReqCompat,
   paths.providerReqCompat,
   'fn project_reasoning_effort_for_selected_target',
-  'pub(crate) fn provider_req_compat_reasoning_effort_explicit',
+  'fn build_v3_provider_standard_protocol_payload_from_req07',
 );
 forbid(text.providerCompatCore, `${paths.providerCompatCore}::target_effort_unique_owner`, [
   /fn apply_deepseek_max_request_compat/u,
 ]);
+requireText(text.responsesRelayTypes, `${paths.responsesRelayTypes}::client_input_error_type`, 'ClientInboundCanonical(String)');
+requireText(text.responsesRelayDryRun, `${paths.responsesRelayDryRun}::client_input_error_projection`, 'V3ResponsesRelayRuntimeError::ClientInboundCanonical(message)');
+requireText(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::provider_response_projection_error`, 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(');
+requireText(text.webSearchHop, `${paths.webSearchHop}::internal_hop_error`, 'V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(format!(');
+requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'provider_response_projection_failure_is_not_client_invalid_request');
+requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'internal_web_search_canonicalization_failure_is_not_client_invalid_request');
+forbid(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
+forbid(text.webSearchHop, `${paths.webSearchHop}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
 for (const phrase of [
   'request.reasoning_effort',
   'request.reasoning_budget_tokens',

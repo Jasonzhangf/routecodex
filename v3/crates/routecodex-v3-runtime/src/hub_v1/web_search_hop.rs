@@ -214,8 +214,12 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
         V3HubInvocationSource::ServertoolFollowup,
         V3HubTransportIntent::Json,
     );
-    let req02 = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(req01)
-        .map_err(|error| V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string()))?;
+    let req02 =
+        build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(req01).map_err(|error| {
+            V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(format!(
+                "servertool followup canonicalization failed: {error}"
+            ))
+        })?;
     let req03 = build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(
         req02,
         V3HubContinuationOwnership::New,

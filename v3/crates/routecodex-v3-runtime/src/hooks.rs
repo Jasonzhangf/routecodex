@@ -201,8 +201,6 @@ pub(crate) fn responses_direct_request_projection_hook(
                 V3InternalErrorCode::V3Provider12ResponsesWirePayload,
             )
         })?;
-    let reasoning_effort_explicit =
-        crate::hub_v1::provider_req_compat_reasoning_effort_explicit(&policy.request_body);
     let request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
         policy.request_body.clone(),
         candidate,
@@ -254,7 +252,6 @@ pub(crate) fn responses_direct_request_projection_hook(
         candidate,
         provider_protocol,
         &profile,
-        reasoning_effort_explicit,
     )
     .map_err(|error| {
         build_v3_error_01_source_raised_internal(

@@ -72,7 +72,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     );
     trace.push("V3HubReqInbound01ClientRaw");
     let req02 = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(req01)
-        .map_err(V3ResponsesRelayRuntimeError::InboundCanonical)?;
+        .map_err(V3ResponsesRelayRuntimeError::ClientInboundCanonical)?;
     trace.push("V3HubReqInbound02Normalized");
     let route_facts_body = req02.payload().clone();
     let base_hub_scope = V3HubContinuationScope::new(
@@ -673,7 +673,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 &anthropic_response_projection_context,
                             )
                             .map_err(|error| {
-                                V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())
+                                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                    error.to_string(),
+                                )
                             })
                         )
                     } else {

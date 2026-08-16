@@ -298,7 +298,7 @@ pub fn project_v3_responses_relay_runtime_failure(
             });
             error_output(source, projected.status, "none", Vec::new(), None, 0)
         }
-        V3ResponsesRelayRuntimeError::InboundCanonical(message) => {
+        V3ResponsesRelayRuntimeError::ClientInboundCanonical(message) => {
             let source = build_v3_error_01_source_raised(
                 V3ErrorSourceKind::InvalidRequest,
                 "V3HubReqInbound02Normalized",

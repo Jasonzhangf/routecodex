@@ -54,8 +54,6 @@ fn apply_v3_provider_req_compat(
     input: &V3HubReqOutbound07ProviderSemantic,
     profile: &V3ProviderCompatProfileId,
 ) -> Result<Value, V3ProviderCompatError> {
-    let reasoning_effort_explicit =
-        provider_req_compat_reasoning_effort_explicit(input.provider_semantic_payload());
     let payload =
         build_v3_provider_standard_protocol_payload_from_req07(input).map_err(|reason| {
             V3ProviderCompatError {
@@ -69,7 +67,6 @@ fn apply_v3_provider_req_compat(
         input.selected_target(),
         input.provider_protocol,
         profile,
-        reasoning_effort_explicit,
     )
 }
 
@@ -78,7 +75,6 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
     profile: &V3ProviderCompatProfileId,
-    reasoning_effort_explicit: bool,
 ) -> Result<Value, V3ProviderCompatError> {
     project_reasoning_effort_for_selected_target(&mut payload, selected, provider_protocol)?;
     let provider_key = format!(
@@ -90,7 +86,6 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
         adapter_context: AdapterContext {
             compatibility_profile: profile.as_optional_string(),
             provider_protocol: Some(provider_protocol_compat_id(provider_protocol)),
-            reasoning_effort_explicit: Some(reasoning_effort_explicit),
             model_id: Some(selected.model_id.clone()),
             original_model_id: Some(selected.wire_model.clone()),
             provider_id: Some(selected.provider_id.clone()),
@@ -228,18 +223,6 @@ fn project_reasoning_effort_for_selected_target(
         V3HubProviderWireProtocol::Gemini => unreachable!(),
     }
     Ok(())
-}
-
-pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> bool {
-    payload
-        .get("reasoning_effort")
-        .or_else(|| {
-            payload
-                .get("reasoning")
-                .and_then(Value::as_object)
-                .and_then(|reasoning| reasoning.get("effort"))
-        })
-        .is_some()
 }
 
 fn build_v3_provider_standard_protocol_payload_from_req07(
@@ -507,7 +490,6 @@ mod tests {
             &selected,
             V3HubProviderWireProtocol::Responses,
             &V3ProviderCompatProfileId::from_config(selected.compatibility_profile.as_deref()),
-            true,
         )
         .expect("DeepSeek effort must map into its official compatibility domain");
 
@@ -535,7 +517,6 @@ mod tests {
             &selected,
             V3HubProviderWireProtocol::Anthropic,
             &V3ProviderCompatProfileId::from_config(selected.compatibility_profile.as_deref()),
-            true,
         )
         .expect("MiniMax effort must map to its official adaptive thinking control");
 

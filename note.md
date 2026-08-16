@@ -35730,3 +35730,28 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
   200/completed, target projection `reasoning.effort=high`, and exact final marker
   `RCC_V3_REASONING_EFFORT_200_OK`. Negative structural sample with numeric effort returned
   HTTP 400, code `invalid_responses_request`, and no duplicated prefix.
+
+# 2026-08-16 DSH r4 P1 error-origin split + 0.90.4576 verification
+- DSH `dsh-1786873309079-08397fb8` returned a valid FAIL: the shared
+  `InboundCanonical -> 400` arm also caught Anthropic provider-response projection and an
+  internally generated web-search hop, mislabeling non-client failures as client input.
+- Error origin is now typed at the raising site: only client Req02 uses
+  `ClientInboundCanonical` and projects HTTP 400; Anthropic response projection uses
+  `ProviderResponseEventCodec` so provider-response policy can recognize it; internal
+  servertool search canonicalization uses `WebSearchDispatchFailed` and remains HTTP 500.
+  Three paired tests prove the client 400 positive and both non-client 400 negatives.
+- Physically removed dead `AdapterContext.reasoning_effort_explicit` plumbing and its V3
+  helper/arguments after the shared DeepSeek mapper was removed. The target mapper remains
+  the sole effort owner.
+- Architecture gate now locks distinct error origins and rejects two new collapse mutations;
+  parity verifier is green, 111 red mutations are rejected, combined protocol CI is green,
+  runtime focused tests are 3/3, provider-compat-core is 37/37, and full build/architecture
+  CI 36/36/servertool Rust-only all pass.
+- Installed 0.90.4576; repo/global SHA-256 match at
+  `3a1043030f0cc227ff33a06f114dbe156fd4c4a1801a5b1b2014a1ea9d74d3b6`; config check is
+  green (`servers=4`). One aggregate restart preserved managed instance
+  `v3-f89ec693b55096920c06`; all four health endpoints are HTTP 200.
+- Online 0.90.4576 exact unknown-string replay returned HTTP 200/completed, target effort
+  `high`, and exact final marker. Numeric malformed effort remains HTTP 400 with code
+  `invalid_responses_request` and a single canonical message. A fresh DSH review is required
+  because the r4 FAIL was followed by code changes.

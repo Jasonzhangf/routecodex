@@ -1060,8 +1060,8 @@ pub enum V3ResponsesRelayRuntimeError {
     Request(#[from] V3HubRelayRequestError),
     #[error(transparent)]
     Response(#[from] V3HubRelayResponseError),
-    #[error("V3 Responses Relay inbound canonicalization failed: {0}")]
-    InboundCanonical(String),
+    #[error("V3 Responses Relay client inbound canonicalization failed: {0}")]
+    ClientInboundCanonical(String),
     #[error("V3 Hub static hook registry failed: {0}")]
     StaticRegistry(String),
     #[error("V3 Responses Relay target resolution failed: {0}")]

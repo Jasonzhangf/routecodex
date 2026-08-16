@@ -60,6 +60,11 @@ Compatibility table:
   it now reaches standard Responses as `medium` and DeepSeek as `high`.
 - Reverse: null, non-string, and empty/whitespace-only effort still fail Req02 and project
   as client-invalid HTTP 400; unknown non-empty strings remain valid and must reach HTTP 200.
+- Error-origin reverse: an Anthropic provider response projection failure remains a
+  provider-response codec failure and is never labeled `invalid_responses_request`; an
+  internally generated servertool web-search request canonicalization failure remains an
+  internal dispatch failure and is never labeled as client input. Only
+  `ClientInboundCanonical` may enter the Req02 client-invalid HTTP 400 branch.
 - Cross-protocol reverse: Anthropic maps to its legal qualitative domain; MiniMax maps
   active effort to adaptive thinking without an unsupported effort field.
 - Live old sample: exact captured request must return a successful terminal response,
