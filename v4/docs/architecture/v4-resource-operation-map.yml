@@ -1677,6 +1677,7 @@ resources:
   axis: control
   verification_gate:
   - v4_parity_gate_plugin_manager
+  - v4_plugin_manager_l2_regression
   resource_kind: control
   lifecycle: v4.plugin_management
   owner_crate: routecodex-v4-plugin-manager
@@ -1702,6 +1703,7 @@ resources:
   axis: diagnostic
   verification_gate:
   - v4_parity_gate_plugin_manager
+  - v4_plugin_manager_l2_regression
   resource_kind: audit
   lifecycle: v4.plugin_management
   owner_crate: routecodex-v4-plugin-manager
@@ -1729,6 +1731,7 @@ resources:
   axis: control
   verification_gate:
   - v4_parity_gate_plugin_manager
+  - v4_plugin_manager_l2_regression
   resource_kind: control
   lifecycle: v4.plugin_management
   owner_crate: routecodex-v4-plugin-manager
@@ -1752,6 +1755,8 @@ resources:
   axis: information
   verification_gate:
   - v4_parity_gate_runtime_inspector
+  - v4_runtime_inspector_l2_regression
+  - v4_admin_l2_regression
   resource_kind: projection
   lifecycle: v4.plugin_management
   owner_crate: routecodex-v4-runtime-inspector
