@@ -12,7 +12,10 @@
  *     the module registry; build edges are declared and adjacent.
  *  6. Root package.json and CI contain only approved V4 dispatcher forms,
  *     and the CI job running V4 canonical verification is on an arm64 macOS
- *     runner matching the aarch64-apple-darwin Active artifact target.
+ *     runner matching the aarch64-apple-darwin Active artifact target
+ *     (GitHub-hosted `macos-14` is ARM64 per the 2025-09-19 hosted-runner
+ *     label change; Intel labels such as `macos-14-large`/`macos-15-intel`
+ *     are rejected).
  *  7. The architecture gate/consumer matrix executed by verify/verify:red is
  *     exactly the matrix declared in verification-map.json (no drift in
  *     either direction).
@@ -135,6 +138,15 @@ function scanForbiddenReferences(files, base = v4Root) {
   return out;
 }
 
+function escapeViolation(target) {
+  const stripped = target.replace(/^["']|["']$/g, '');
+  if (stripped.startsWith('/') && !stripped.startsWith(`${v4Root}/`)) {
+    return true;
+  }
+  const rel = stripped.replace(/^\.\//, '');
+  return rel.startsWith('../');
+}
+
 function scanOutputTargets(files, base = v4Root) {
   const out = [];
   const textSources = [
@@ -146,19 +158,23 @@ function scanOutputTargets(files, base = v4Root) {
     const full = path.join(base, file);
     if (!fs.existsSync(full)) continue;
     const text = fs.readFileSync(full, 'utf8');
-    for (const match of text.matchAll(/(?:--out|--output|-o)\s+([^\s"']+)/g)) {
-      const target = match[1];
-      if (target.startsWith('/') && !target.startsWith(`${v4Root}/`)) {
-        out.push(`${file}: output target escapes v4 -> ${target}`);
-        continue;
-      }
-      const rel = target.replace(/^\.\//, '');
-      if (rel.startsWith('../')) {
-        out.push(`${file}: output target escapes v4 -> ${target}`);
+    for (const match of text.matchAll(
+      /(?:--out|--output|-o)(?:=|\s+)(?:"([^"]*)"|'([^']*)'|([^\s"']+))/g,
+    )) {
+      const target = match[1] ?? match[2] ?? match[3];
+      if (target && escapeViolation(target)) {
+        out.push(`${file}: output target escapes v4 -> ${match[0]}`);
       }
     }
-    for (const match of text.matchAll(/(?:cp|mv|rsync)\s+[^\n]*\s(\/tmp\/|\$TMPDIR|\$HOME)/g)) {
-      out.push(`${file}: output target escapes v4 (${match[0]})`);
+    for (const line of text.split(/\r?\n/)) {
+      if (!/\b(?:cp|mv|rsync)\b/.test(line)) continue;
+      const tokens = line.trim().split(/\s+/);
+      const destination = tokens[tokens.length - 1];
+      if (destination && escapeViolation(destination)) {
+        out.push(`${file}: output target escapes v4 -> ${line.trim()}`);
+      } else if (/(\/tmp\/|\$TMPDIR|\$HOME)/.test(line)) {
+        out.push(`${file}: output target escapes v4 (${line.trim()})`);
+      }
     }
   }
   return out;
@@ -215,14 +231,26 @@ function checkMainlineEdges() {
   return out;
 }
 
-function checkRootDispatchers(rootPkgPath, workflowPath) {
+function checkRootDispatchers(rootPkgPath, workflowPath, v4PkgPath) {
   const out = [];
+  const v4Pkg = fs.existsSync(v4PkgPath)
+    ? JSON.parse(fs.readFileSync(v4PkgPath, 'utf8'))
+    : {};
   if (fs.existsSync(rootPkgPath)) {
     const pkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'));
     for (const [name, command] of Object.entries(pkg.scripts ?? {})) {
       if (!name.startsWith('verify:v4') && !name.startsWith('test:v4') && !name.startsWith('build:v4')) continue;
       if (!/^npm --prefix v4 run /.test(command)) {
         out.push(`root package.json ${name}: must be a thin npm --prefix v4 dispatcher (got: ${command})`);
+        continue;
+      }
+      if (/^(?:verify|test|build):v4-/.test(name)) {
+        if (command !== `npm --prefix v4 run ${name}`) {
+          out.push(`root package.json ${name}: dispatcher target must match its name (expected "npm --prefix v4 run ${name}", got: ${command})`);
+        }
+        if (!(v4Pkg.scripts ?? {})[name]) {
+          out.push(`root package.json ${name}: v4/package.json has no matching script "${name}"`);
+        }
       }
     }
   }
@@ -242,20 +270,34 @@ function checkRootDispatchers(rootPkgPath, workflowPath) {
   return out;
 }
 
+/**
+ * GitHub-hosted runner label semantics (verified 2026-08-16):
+ * - ARM64 (Apple silicon) labels: macos-14, macos-15, macos-latest,
+ *   macos-14-xlarge, macos-15-xlarge, macos-latest-xlarge.
+ * - x86_64 (Intel) labels: macos-14-large, macos-15-intel,
+ *   macos-latest-large, macos-15-large.
+ * Source: https://github.blog/changelog/2025-09-19-github-actions-macos-13-runner-image-is-closing-down/
+ * The V4 canonical verify:ci job must run on an arm64 macOS runner because
+ * the hermetic Active fixtures are aarch64-apple-darwin rlibs. xlarge labels
+ * are paid larger runners and are intentionally not allowed here; only the
+ * standard arm64 label is admitted so label changes require a deliberate gate
+ * update.
+ */
+const ARM64_MACOS_RUNNER_LABELS = new Set(['macos-14']);
+
 function checkCIPlatform(workflowPath) {
   const out = [];
   if (!fs.existsSync(workflowPath)) return out;
   const workflow = yaml.load(fs.readFileSync(workflowPath, 'utf8'));
-  const allowedRunners = new Set(['macos-14']);
   for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
     const steps = Array.isArray(job.steps)
       ? job.steps.map((step) => step.run ?? '').join('\n')
       : '';
     if (steps.includes('verify:ci')) {
       const runner = String(job['runs-on'] ?? '');
-      if (!allowedRunners.has(runner)) {
+      if (!ARM64_MACOS_RUNNER_LABELS.has(runner)) {
         out.push(
-          `CI job ${jobName} runs V4 verify:ci on ${runner || '(missing runs-on)'}; Active artifacts are aarch64-apple-darwin, so canonical V4 verification must run on an arm64 macOS runner (allowed: ${[...allowedRunners].join(', ')})`,
+          `CI job ${jobName} runs V4 verify:ci on ${runner || '(missing runs-on)'}; Active artifacts are aarch64-apple-darwin, so canonical V4 verification must run on the arm64 GitHub-hosted label ${[...ARM64_MACOS_RUNNER_LABELS].join(', ')} (macos-14 is ARM64 per the 2025-09-19 hosted-runner label change; Intel labels such as macos-14-large/macos-15-intel are rejected)`,
         );
       }
     }
@@ -263,10 +305,18 @@ function checkCIPlatform(workflowPath) {
   return out;
 }
 
+function checkCIRunnerArch(ci, arch) {
+  if (!ci) return [];
+  return arch === 'arm64'
+    ? []
+    : [`CI node process arch=${arch}; Active artifacts are aarch64-apple-darwin, so V4 verify:ci must run on an arm64 runner`];
+}
+
 function checkDeclaredExecutedBinding(verificationMapPath, architectureDir) {
   const out = [];
   const declaredGates = new Set();
   const declaredConsumers = new Set();
+  const declaredConsumerDetails = new Map();
   const map = JSON.parse(fs.readFileSync(verificationMapPath, 'utf8'));
   for (const gate of map.gates ?? []) {
     const command = String(gate.command ?? '');
@@ -276,10 +326,23 @@ function checkDeclaredExecutedBinding(verificationMapPath, architectureDir) {
     for (const match of command.matchAll(/test-consumer[^\n]*--consumer\s+([a-z0-9-]+)/g)) {
       declaredConsumers.add(match[1]);
     }
+    const consumer = command.match(/test-consumer[^\n]*--consumer\s+([a-z0-9-]+)/)?.[1];
+    if (!consumer) continue;
+    const deps = command.match(/--deps\s+([^\s]+)/)?.[1] ?? '';
+    const sourceDeps = command.match(/--source-deps\s+([^\s]+)/)?.[1] ?? '';
+    declaredConsumerDetails.set(consumer, { deps, sourceDeps });
   }
   const executedGates = new Set(ARCHITECTURE_GATES);
   for (const [gate] of RED_SUITES) executedGates.add(gate);
   const executedConsumers = new Set(CONSUMER_REGRESSIONS.map(([consumer]) => consumer));
+  const executedConsumerDetails = new Map();
+  for (const [consumer, deps, ...extra] of CONSUMER_REGRESSIONS) {
+    const sourceIndex = extra.indexOf('--source-deps');
+    executedConsumerDetails.set(consumer, {
+      deps,
+      sourceDeps: sourceIndex >= 0 ? (extra[sourceIndex + 1] ?? '') : '',
+    });
+  }
 
   const unregistered = [...executedGates].filter((gate) => !declaredGates.has(gate));
   if (unregistered.length > 0) {
@@ -305,6 +368,13 @@ function checkDeclaredExecutedBinding(verificationMapPath, architectureDir) {
   const executedList = [...executedConsumers].sort();
   if (JSON.stringify(declaredList) !== JSON.stringify(executedList)) {
     out.push(`declared consumers ${JSON.stringify(declaredList)} != executed consumers ${JSON.stringify(executedList)}`);
+  }
+  for (const [consumer, executed] of executedConsumerDetails) {
+    const declared = declaredConsumerDetails.get(consumer);
+    if (!declared) continue;
+    if (declared.deps !== executed.deps || declared.sourceDeps !== executed.sourceDeps) {
+      out.push(`consumer ${consumer} declared test-consumer args ${JSON.stringify(declared)} != executed ${JSON.stringify(executed)}`);
+    }
   }
   return out;
 }
@@ -348,6 +418,7 @@ if (edgeFailures.length > 0) {
 const dispatcherFailures = checkRootDispatchers(
   path.join(v4Root, '../package.json'),
   path.join(v4Root, '../.github/workflows/test.yml'),
+  path.join(v4Root, 'package.json'),
 );
 if (dispatcherFailures.length > 0) {
   failures.push(`root dispatchers:\n${dispatcherFailures.join('\n')}`);
@@ -357,6 +428,10 @@ const ciPlatformFailures = checkCIPlatform(
 );
 if (ciPlatformFailures.length > 0) {
   failures.push(`CI platform:\n${ciPlatformFailures.join('\n')}`);
+}
+const ciArchFailures = checkCIRunnerArch(process.env.CI, process.arch);
+if (ciArchFailures.length > 0) {
+  failures.push(`CI runner arch:\n${ciArchFailures.join('\n')}`);
 }
 const bindingFailures = checkDeclaredExecutedBinding(
   path.join(v4Root, '.appsdk/maps/verification-map.json'),
@@ -471,7 +546,14 @@ const outputDir = path.join(redDir, 'scripts/isolation-red/output-escape');
 fs.mkdirSync(outputDir, { recursive: true });
 fs.writeFileSync(
   path.join(outputDir, 'verify-output.mjs'),
-  "import { run } from './_common.mjs';\nrun('cargo run --release -p routecodex-v4-build-link -- build-consumer --out ../../escape.rlib');\n",
+  [
+    "import { run } from './_common.mjs';",
+    "run('cargo run --release -p routecodex-v4-build-link -- build-consumer --out ../../escape.rlib');",
+    "run('cargo run --release -p routecodex-v4-build-link -- build-consumer --out=../../escape.rlib');",
+    "run('cargo run --release -p routecodex-v4-build-link -- build-consumer --out \"../escape.rlib\"');",
+    "run('cp build-control/src.rlib ../escape.rlib');",
+    "run('cp build-control/src.rlib /tmp/escape.rlib');",
+  ].join('\n'),
 );
 const outputProblems = scanOutputTargets(
   walkFiles(outputDir, 'scripts/isolation-red/output-escape'),
@@ -507,6 +589,7 @@ fs.writeFileSync(
     gates: [
       { gate_id: 'g1', command: 'node scripts/architecture/verify-v4-declared-only.mjs' },
       { gate_id: 'g2', command: 'node scripts/architecture/verify-v4-executed.mjs' },
+      { gate_id: 'g3', command: 'cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control' },
     ],
   }),
 );
@@ -517,15 +600,39 @@ const bindingProblems = checkDeclaredExecutedBinding(
 );
 expectReject('declared vs executed gate binding drift', () => bindingProblems);
 
-// R11: V4 verify:ci must run on an arm64 macOS runner, not an x86 macOS runner.
+// R11: V4 verify:ci must run on an arm64 macOS runner, not an Intel macOS
+// runner (macos-14-large is the current GitHub-hosted x86_64 label).
 const ciPlatformX86Dir = path.join(redDir, 'ci-platform-x86');
 fs.mkdirSync(ciPlatformX86Dir, { recursive: true });
 fs.writeFileSync(
   path.join(ciPlatformX86Dir, 'test.yml'),
-  'jobs:\n  test:\n    runs-on: macos-13\n    steps:\n      - run: npm --prefix v4 run verify:ci\n',
+  'jobs:\n  test:\n    runs-on: macos-14-large\n    steps:\n      - run: npm --prefix v4 run verify:ci\n',
 );
 const ciPlatformX86Problems = checkCIPlatform(path.join(ciPlatformX86Dir, 'test.yml'));
-expectReject('V4 verify:ci on x86 macOS runner', () => ciPlatformX86Problems);
+expectReject('V4 verify:ci on Intel macOS runner (macos-14-large)', () => ciPlatformX86Problems);
+
+// R12: on CI, the actual runner process must be arm64.
+const ciArchX64Problems = checkCIRunnerArch('true', 'x64');
+expectReject('V4 verify:ci on an x64 CI process', () => ciArchX64Problems);
+
+// R13: root dispatchers named after a V4 script must bind to that exact
+// v4/package.json script (no name-semantic drift).
+const rootPkgDriftDir = path.join(redDir, 'root-dispatcher-drift');
+fs.mkdirSync(rootPkgDriftDir, { recursive: true });
+fs.writeFileSync(
+  path.join(rootPkgDriftDir, 'package.json'),
+  '{"scripts":{"verify:v4-active-link":"npm --prefix v4 run verify:v4-active-link","verify:v4-foundation":"npm --prefix v4 run verify"}}\n',
+);
+fs.writeFileSync(
+  path.join(rootPkgDriftDir, 'v4-package.json'),
+  '{"scripts":{"verify:v4-active-link":"node scripts/architecture/verify-v4-active-link.mjs"}}\n',
+);
+const rootPkgDriftProblems = checkRootDispatchers(
+  path.join(rootPkgDriftDir, 'package.json'),
+  path.join(rootPkgDriftDir, 'test.yml'),
+  path.join(rootPkgDriftDir, 'v4-package.json'),
+);
+expectReject('root dispatcher name-semantic drift', () => rootPkgDriftProblems);
 
 if (redFail > 0) {
   console.error(`[v4 isolation] red fixtures failed: ${redFail}`);

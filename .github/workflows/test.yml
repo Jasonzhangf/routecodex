@@ -85,6 +85,9 @@ jobs:
         run: npm run test:v3-workspace
 
   v4-build:
+    # GitHub-hosted macos-14 is ARM64 (2025-09-19 hosted-runner label change);
+    # matches the aarch64-apple-darwin Active fixtures. Intel labels such as
+    # macos-14-large/macos-15-intel are rejected by the isolation gate.
     runs-on: macos-14
     timeout-minutes: 45
     steps:

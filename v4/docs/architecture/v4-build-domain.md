@@ -14,11 +14,23 @@ unrelated cwd through the absolute V4 package path):
 | `npm run test` | `v4/scripts/test.mjs` | Cargo workspace tests (incl. resolver/compile-fail red tests) with tracked lock |
 | `npm run verify` | `v4/scripts/verify.mjs` | workspace build, hermetic Active restore, 11 architecture gates, 9 consumer regressions, Active index gen/verify, isolation positive/red matrix |
 | `npm run verify:red` | `v4/scripts/verify-red.mjs` | verifier red self-test suites (isolation matrix is owned by the `verify` positive surface) |
+| `npm run verify:v4-active-link` | `v4/scripts/architecture/verify-v4-active-link.mjs` | single Active-link frozen-source gate |
+| `npm run verify:v4-foundation` | `v4/scripts/verify.mjs` | foundation truth-lock surface (alias of `verify`) |
+| `npm run verify:v4-foundation-red` | `v4/scripts/verify-red.mjs` | foundation red suites (alias of `verify:red`) |
 | `npm run verify:ci` | `v4/scripts/verify-ci.mjs` | complete admission matrix (workspace tests + `verify` + `verify:red`; build and isolation run inside `verify`) |
-| `node scripts/verify-isolation.mjs` | `v4/scripts/verify-isolation.mjs` | isolation positive + red gates (workspace/target ownership, path deps, forbidden refs, Node resolution, module ownership, root dispatchers, arm64 CI runner allowlist, declared↔executed gate binding vs verification-map, output targets) |
+| `node scripts/verify-isolation.mjs` | `v4/scripts/verify-isolation.mjs` | isolation positive + red gates (workspace/target ownership, path deps, forbidden refs, Node resolution, module ownership, root dispatchers with name↔target binding, arm64 CI runner allowlist + CI process arch, declared↔executed gate/consumer binding vs verification-map, output targets incl. `--out=`/quoted/`cp|mv|rsync` escapes) |
 
 Root `package.json` and `.github/workflows/test.yml` only dispatch to
-`verify:ci`; they do not enumerate V4 modules or gates.
+`verify:ci`; they do not enumerate V4 modules or gates. Root dispatchers
+named `verify:v4-<x>` / `test:v4-<x>` / `build:v4-<x>` must bind to the
+exact same `<x>` script in `v4/package.json` (machine-checked by the
+isolation gate).
+
+GitHub-hosted `macos-14` is an ARM64 runner (2025-09-19 hosted-runner label
+change; Intel labels are `macos-14-large`/`macos-15-intel` and are rejected).
+The CI `v4-build`/`v4-appsdk-admission` jobs run on `macos-14` because the
+hermetic Active fixtures and the pinned AppSDK release artifact are
+`aarch64-apple-darwin`.
 
 `v4/.appsdk/maps/verification-map.json` command entries execute with
 `cwd = v4` (declared in `command_context`); they are not runnable from the
