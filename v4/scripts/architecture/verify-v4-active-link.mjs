@@ -14,10 +14,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const failures = [];
-const v4 = path.join(root, 'v4');
+const v4 = root;
 
 const readJson = (file) => {
   try {
@@ -28,12 +29,12 @@ const readJson = (file) => {
   }
 };
 
-const registry = readJson('v4/contracts/active-link/frozen-consumer-registry.json');
-const project = readJson('v4/.appsdk/project.json');
-const resourceMap = readJson('v4/.appsdk/maps/resource-map.json');
-const functionMap = readJson('v4/.appsdk/maps/function-map.json');
-const mainline = readJson('v4/.appsdk/maps/mainline-call-map.json');
-const verification = readJson('v4/.appsdk/maps/verification-map.json');
+const registry = readJson('contracts/active-link/frozen-consumer-registry.json');
+const project = readJson('.appsdk/project.json');
+const resourceMap = readJson('.appsdk/maps/resource-map.json');
+const functionMap = readJson('.appsdk/maps/function-map.json');
+const mainline = readJson('.appsdk/maps/mainline-call-map.json');
+const verification = readJson('.appsdk/maps/verification-map.json');
 
 if (!registry || !project || !resourceMap || !functionMap || !mainline || !verification) {
   console.log(failures.join('\n'));

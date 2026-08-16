@@ -1,0 +1,26 @@
+{
+  "name": "routecodex-v4",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RouteCodex V4 self-contained build domain: local Node/Rust locks, canonical build/test/verify entrypoints, and V4-owned architecture gates.",
+  "type": "module",
+  "engines": {
+    "node": ">=20 <26"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/test.mjs",
+    "verify": "node scripts/verify.mjs",
+    "verify:red": "node scripts/verify-red.mjs",
+    "verify:ci": "node scripts/verify-ci.mjs",
+    "verify:isolation": "node scripts/verify-isolation.mjs",
+    "verify:v4-active-link": "node scripts/architecture/verify-v4-active-link.mjs",
+    "verify:v4-node-graph": "node scripts/architecture/verify-v4-node-graph.mjs",
+    "verify:v4-node-graph-red": "node scripts/architecture/verify-v4-node-graph.mjs --red-self-test",
+    "verify:v4-foundation": "node scripts/verify.mjs",
+    "verify:v4-foundation-red": "node scripts/verify-red.mjs"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}

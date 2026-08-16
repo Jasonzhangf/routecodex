@@ -321,6 +321,16 @@ impl ConfigManifestV2 {
         self.codex_sample.as_ref()
     }
 
+    /// Decision entrypoint: snapshot capture for a stage is authorized only
+    /// when the published manifest authorizes it. This is the single consumer
+    /// of `v4.debug.codex_sample_authorization`; no other code may re-derive
+    /// capture authorization from module switches or debug state.
+    pub fn should_capture_codex_sample_stage(&self, stage: &str) -> bool {
+        self.codex_sample()
+            .map(|auth| auth.should_capture_snapshot_stage(stage))
+            .unwrap_or(false)
+    }
+
     pub fn plan_hash(&self) -> &str {
         &self.plan_hash
     }

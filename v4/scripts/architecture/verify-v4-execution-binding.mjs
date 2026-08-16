@@ -9,8 +9,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const failures = [];
 
 const readJson = (file) => {
@@ -22,8 +23,8 @@ const readJson = (file) => {
   }
 };
 
-const plan = readJson('v4/contracts/skeleton-plan.contract.json');
-const nodeContainer = readJson('v4/contracts/node-container.contract.json');
+const plan = readJson('contracts/skeleton-plan.contract.json');
+const nodeContainer = readJson('contracts/node-container.contract.json');
 if (!plan || !nodeContainer) {
   console.error('[v4_parity_gate_execution_binding] FAIL');
   console.error(failures.join('\n'));

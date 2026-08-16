@@ -25,12 +25,12 @@ resources:
     resource_kind: normal_payload
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
-    owner_node: V4ReqInbound02Normalized
+    owner_node: V4HubReqInbound03Normalized
     owner_symbols: [ProtocolParse, Normalize, InputValidate, Governance]
     identity: [requestId, endpoint]
-    allowed_writers: [V4ReqInbound02Normalized, V4ReqChatProcess03Governed]
-    allowed_readers: [V4ReqChatProcess03Governed, V4ReqOutbound05ProviderSemantic]
-    forbidden_writers: [V4ControlMetadataCenter, V4DebugSnapshotLedger, V4RespOutbound04ClientSemantic, V4ServerFrame]
+    allowed_writers: [V4HubReqInbound03Normalized, V4HubReqChatProcess04Governed]
+    allowed_readers: [V4HubReqChatProcess04Governed, V4HubReqOutbound05ProviderSemantic]
+    forbidden_writers: [V4ControlMetadataCenter, V4DebugSnapshotLedger, V4HubRespOutbound04ClientSemantic, V4ServerFrame]
     may_enter_provider_body: true
     may_enter_client_body: false
     binding_status: anchored
@@ -40,11 +40,11 @@ resources:
     resource_kind: provider_semantic
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
-    owner_node: V4ReqOutbound05ProviderSemantic
+    owner_node: V4HubReqOutbound05ProviderSemantic
     owner_symbols: [SemanticProjection]
     identity: [requestId, targetId, providerId, modelId]
-    allowed_writers: [V4ReqOutbound05ProviderSemantic]
-    allowed_readers: [V4ProviderReqOutbound06WirePayload]
+    allowed_writers: [V4HubReqOutbound05ProviderSemantic]
+    allowed_readers: [V4ProviderReqCompat06Compat]
     forbidden_writers: [V4ControlMetadataCenter, V4Router, V4DebugSnapshotLedger]
     may_enter_provider_body: true
     may_enter_client_body: false
@@ -55,16 +55,16 @@ resources:
     resource_kind: provider_wire
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
-    owner_node: V4ProviderReqOutbound06WirePayload
+    owner_node: V4ProviderReqCompat06Compat
     owner_symbols: [WireBuild]
     identity: [requestId, providerId, providerType, modelId]
     semantic_contract:
       control_fields_forbidden: true
       protocol_metadata_forbidden: true
       secret_handle_only: true
-    allowed_writers: [V4ProviderReqOutbound06WirePayload]
-    allowed_readers: [V4ProviderTransport07Request]
-    forbidden_writers: [V4ControlMetadataCenter, V4ReqChatProcess03Governed, V4Router, V4DebugSnapshotLedger, V4ScopeRegistry]
+    allowed_writers: [V4ProviderReqCompat06Compat]
+    allowed_readers: [V4ProviderSseOut07WireBoundary]
+    forbidden_writers: [V4ControlMetadataCenter, V4HubReqChatProcess04Governed, V4Router, V4DebugSnapshotLedger, V4ScopeRegistry]
     may_enter_provider_body: true
     may_enter_client_body: false
     binding_status: anchored
@@ -74,12 +74,12 @@ resources:
     resource_kind: provider_response
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
-    owner_node: V4ProviderRespInbound01Raw
+    owner_node: V4ProviderSseIn01FrameBoundary
     owner_symbols: [RawParse]
     identity: [requestId, providerId, statusCode]
-    allowed_writers: [V4ProviderRespInbound01Raw]
-    allowed_readers: [V4RespInbound02Parsed, V4Error01SourceRaised]
-    forbidden_writers: [V4ControlMetadataCenter, V4RespOutbound04ClientSemantic, V4DebugSnapshotLedger]
+    allowed_writers: [V4ProviderSseIn01FrameBoundary]
+    allowed_readers: [V4HubRespInbound02Parsed, V4Error01SourceRaised]
+    forbidden_writers: [V4ControlMetadataCenter, V4HubRespOutbound04ClientSemantic, V4DebugSnapshotLedger]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -89,12 +89,12 @@ resources:
     resource_kind: normal_payload
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
-    owner_node: V4RespInbound02Parsed
+    owner_node: V4HubRespInbound02Parsed
     owner_symbols: [ProtocolDecode]
     identity: [requestId, endpoint]
-    allowed_writers: [V4RespInbound02Parsed, V4RespChatProcess03Governed]
-    allowed_readers: [V4RespChatProcess03Governed, V4RespOutbound04ClientSemantic]
-    forbidden_writers: [V4ControlMetadataCenter, V4DebugSnapshotLedger, V4ProviderReqOutbound06WirePayload]
+    allowed_writers: [V4HubRespInbound02Parsed, V4HubRespChatProcess03Governed]
+    allowed_readers: [V4HubRespChatProcess03Governed, V4HubRespOutbound04ClientSemantic]
+    forbidden_writers: [V4ControlMetadataCenter, V4DebugSnapshotLedger, V4ProviderReqCompat06Compat]
     may_enter_provider_body: false
     may_enter_client_body: true
     binding_status: anchored
@@ -104,15 +104,15 @@ resources:
     resource_kind: client_wire
     lifecycle: v4.pipeline.mainline
     owner_crate: routecodex-v4-runtime
-    owner_node: V4RespOutbound04ClientSemantic
+    owner_node: V4HubRespOutbound04ClientSemantic
     owner_symbols: [FrameBuild]
     identity: [requestId, endpoint, streamIntent]
     semantic_contract:
       control_fields_forbidden: true
       error_projection_only: V4Error06ClientProjected
-    allowed_writers: [V4RespOutbound04ClientSemantic, V4ServerRespOutbound05ClientFrame]
+    allowed_writers: [V4HubRespOutbound04ClientSemantic, V4ServerRespOutbound06ClientFrame]
     allowed_readers: [V4ServerFrame]
-    forbidden_writers: [V4ControlMetadataCenter, V4DebugSnapshotLedger, V4ProviderReqOutbound06WirePayload]
+    forbidden_writers: [V4ControlMetadataCenter, V4DebugSnapshotLedger, V4ProviderReqCompat06Compat]
     may_enter_provider_body: false
     may_enter_client_body: true
     binding_status: anchored
@@ -132,8 +132,8 @@ resources:
       never_provider_wire: true
       never_client_wire: true
     allowed_writers: [V4Control01ScopeBoundCarrier, V4ControlMetadataCenter, V4Router, V4ErrorChain]
-    allowed_readers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ScopeRegistry]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame, V4DebugSnapshotLedger]
+    allowed_readers: [V4HubReqChatProcess04Governed, V4Router, V4ErrorChain, V4ScopeRegistry]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4ServerFrame, V4DebugSnapshotLedger]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -154,9 +154,9 @@ resources:
       client_protocol_metadata_passthrough: true
       cross_closed_loop_reuse: forbidden
     allowed_writers: ["V4MetadataCenter01ScopeRegistry::register", "V4MetadataCenter01ScopeRegistry::consume", "V4MetadataCenter01ScopeRegistry::release"]
-    allowed_readers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4StoplessControlState, V4ScopeRegistry]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame, V4DebugSnapshotLedger]
-    forbidden_readers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4DebugSnapshotRestore]
+    allowed_readers: [V4HubReqChatProcess04Governed, V4Router, V4ErrorChain, V4StoplessControlState, V4ScopeRegistry]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4ServerFrame, V4DebugSnapshotLedger]
+    forbidden_readers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4DebugSnapshotRestore]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -175,7 +175,7 @@ resources:
       capability_mismatch_projection: forbidden
     allowed_writers: [V4Router05RequestClassified]
     allowed_readers: [V4Router06SelectionPlan]
-    forbidden_writers: [V4ReqChatProcess03Governed, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4DebugSnapshotLedger]
+    forbidden_writers: [V4HubReqChatProcess04Governed, V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4DebugSnapshotLedger]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -193,8 +193,8 @@ resources:
       health_mutation: forbidden
       provider_specific_branch: forbidden
     allowed_writers: [V4Router06SelectionPlan, V4Target07OpaqueTarget]
-    allowed_readers: [V4ReqOutbound05ProviderSemantic, V4Error04RouterPolicyApplied]
-    forbidden_writers: [V4ReqChatProcess03Governed, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    allowed_readers: [V4HubReqOutbound05ProviderSemantic, V4Error04RouterPolicyApplied]
+    forbidden_writers: [V4HubReqChatProcess04Governed, V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -214,8 +214,8 @@ resources:
       original_payload_immutable: true
       switch_cooldown_reroute_same_cycle: true
     allowed_writers: [V4Router07RouteDecisionExit]
-    allowed_readers: [V4ReqOutbound05ProviderSemantic, V4Error04RouterPolicyApplied]
-    forbidden_writers: [V4ReqChatProcess03Governed, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    allowed_readers: [V4HubReqOutbound05ProviderSemantic, V4Error04RouterPolicyApplied]
+    forbidden_writers: [V4HubReqChatProcess04Governed, V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -236,7 +236,7 @@ resources:
       immutable_history: true
     allowed_writers: [V4Router08LivePolicyOverride]
     allowed_readers: [V4Router06SelectionPlan]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4HubReqChatProcess04Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -255,7 +255,7 @@ resources:
       router_health_write: forbidden
     allowed_writers: ["V4Availability01SessionScoped::record"]
     allowed_readers: [V4Target07OpaqueTarget, V4Error04RouterPolicyApplied]
-    forbidden_writers: [V4Router, V4ReqChatProcess03Governed, V4ServerFrame]
+    forbidden_writers: [V4Router, V4HubReqChatProcess04Governed, V4ServerFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -276,7 +276,7 @@ resources:
       fallback: forbidden
     allowed_writers: [V4Error01SourceRaised, V4Error02HostCaptured, V4Error03RuntimeClassified, V4Error04RouterPolicyApplied, V4Error05ExecutionDecision, V4Error06ClientProjected]
     allowed_readers: [V4Target07OpaqueTarget, V4ServerFrame, V4Error06ClientProjected]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4HubReqChatProcess04Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -302,7 +302,7 @@ resources:
       classification_witness: opaque_fact_lineage_bound_single_use
     allowed_writers: [V4Error01SourceRaised, V4ErrorCenter02ClassifyAudit]
     allowed_readers: [V4Router07RouteDecisionExit, V4Error04RouterPolicyApplied]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4ServerFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -324,7 +324,7 @@ resources:
       original_payload_mutation: forbidden
     allowed_writers: ["V4PayloadCycleRegistry::open", "V4PayloadCycleRegistry::merge_retry", "V4PayloadCycleRegistry::close_success", "V4PayloadCycleRegistry::close_error"]
     allowed_readers: [V4Router07RouteDecisionExit, V4ErrorCenter02ClassifyAudit]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -362,7 +362,7 @@ resources:
       internal_control_fields: forbidden
     allowed_writers: [V4Error06ClientProjected]
     allowed_readers: [V4ServerFrame]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: true
     binding_status: anchored
@@ -381,7 +381,7 @@ resources:
       cooldown_persistence: forbidden
     allowed_writers: [V4Error04RouterPolicyApplied]
     allowed_readers: [V4Error05ExecutionDecision]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4HubReqChatProcess04Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -401,7 +401,7 @@ resources:
       continuation_owner_locked: true
     allowed_writers: ["V4ScopeRegistry::bind", "V4ScopeRegistry::release"]
     allowed_readers: [V4Control01ScopeBoundCarrier, V4ControlMetadataCenter, V4StoplessControlState]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame, V4DebugSnapshotLedger]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4ServerFrame, V4DebugSnapshotLedger]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -420,9 +420,9 @@ resources:
       history_mutation: forbidden
       continuation_immutable_interval_semantics: forbidden
     allowed_writers: ["V4StoplessControlState::store_for_scope", "V4StoplessControlState::clear_for_scope"]
-    allowed_readers: [V4ReqChatProcess03Governed, V4RespChatProcess03Governed]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame, V4DebugSnapshotLedger]
-    forbidden_readers: [V4RespOutbound04ClientSemantic, V4ServerFrame, V4DebugSnapshotRestore]
+    allowed_readers: [V4HubReqChatProcess04Governed, V4HubRespChatProcess03Governed]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4ServerFrame, V4DebugSnapshotLedger]
+    forbidden_readers: [V4HubRespOutbound04ClientSemantic, V4ServerFrame, V4DebugSnapshotRestore]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -536,8 +536,8 @@ resources:
     owner_symbols: [AuthHandle]
     identity: [providerId, authAlias, envOrTokenFileHandle]
     allowed_writers: [V4Config05ManifestPublished]
-    allowed_readers: [V4ProviderTransport07Request]
-    forbidden_writers: [V4DebugSnapshotLedger, V4Error06ClientProjected, V4RespOutbound04ClientSemantic]
+    allowed_readers: [V4ProviderSseOut07WireBoundary]
+    forbidden_writers: [V4DebugSnapshotLedger, V4Error06ClientProjected, V4HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -557,7 +557,7 @@ resources:
       may_enter_metadata_center: false
     allowed_writers: [V4Debug01SnapshotLedger]
     allowed_readers: [developer_diagnostics]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame, V4ReqChatProcess03Governed]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4ServerFrame, V4HubReqChatProcess04Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -580,7 +580,7 @@ resources:
       may_enter_metadata_center: false
     allowed_writers: ["V4Debug12ModuleSwitch::set", "V4Config05ManifestPublished"]
     allowed_readers: ["V4Debug12ModuleSwitch::enabled_for_module"]
-    forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    forbidden_writers: [V4HubReqChatProcess04Governed, V4Router, V4ErrorChain, V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -602,7 +602,7 @@ resources:
       may_enter_metadata_center: false
     allowed_writers: ["V4Debug13DryRunChain::register_dry_run_chain", "V4Debug12ModuleSwitch"]
     allowed_readers: ["V4Debug09DryRunNoNetworkTerminalEffect::execute", developer_diagnostics]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -622,7 +622,7 @@ resources:
       payload_hash_only: true
     allowed_writers: ["V4Control02RecordLedger::append"]
     allowed_readers: [developer_diagnostics, V4ControlCenterAudit]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4HubReqChatProcess04Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -642,7 +642,7 @@ resources:
       may_enter_metadata_center: false
     allowed_writers: ["V4Debug02BusSubscription::subscribe"]
     allowed_readers: ["V4Debug02BusSubscription::observe"]
-    forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    forbidden_writers: [V4HubReqChatProcess04Governed, V4Router, V4ErrorChain, V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -662,7 +662,7 @@ resources:
       may_enter_metadata_center: false
     allowed_writers: ["V4Debug03SnapshotSubscription::subscribe"]
     allowed_readers: ["V4Debug03SnapshotSubscription::observe", developer_diagnostics]
-    forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    forbidden_writers: [V4HubReqChatProcess04Governed, V4Router, V4ErrorChain, V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -683,7 +683,7 @@ resources:
       may_enter_metadata_center: false
     allowed_writers: ["V4Control03NodeStatistics::record"]
     allowed_readers: [developer_diagnostics, "V4Debug02BusSubscription"]
-    forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    forbidden_writers: [V4HubReqChatProcess04Governed, V4Router, V4ErrorChain, V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -813,7 +813,7 @@ resources:
     semantic_contract:
       may_enter_metadata_center: false
     allowed_writers: [V4Config05ManifestPublished]
-    allowed_readers: ["CodexSampleAuthorization::should_capture_snapshot_stage", "V4Config05ManifestPublished"]
+    allowed_readers: ["CodexSampleAuthorization::should_capture_snapshot_stage", "V4Config05ManifestPublished", "V4DebugRuntime::record_snapshot", "V4DebugRuntime::persist"]
     forbidden_writers: [routecodex-v4-runtime, routecodex-v4-provider, V4ControlMetadataCenter]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -871,7 +871,7 @@ resources:
       may_enter_metadata_center: false
     allowed_writers: [V4RuntimeObservabilityAccumulator]
     allowed_readers: [v4.console.terminal_output]
-    forbidden_writers: [routecodex-v4-provider, routecodex-v4-server, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    forbidden_writers: [routecodex-v4-provider, routecodex-v4-server, V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -889,7 +889,7 @@ resources:
       may_enter_metadata_center: false
     allowed_writers: [V4RuntimeTimingState]
     allowed_readers: [v4.debug.observability, v4.console.terminal_output]
-    forbidden_writers: [routecodex-v4-server, routecodex-v4-provider, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
+    forbidden_writers: [routecodex-v4-server, routecodex-v4-provider, V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -907,7 +907,7 @@ resources:
       may_enter_metadata_center: false
     allowed_writers: [V4ConsoleProjection]
     allowed_readers: [developer_terminal]
-    forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
+    forbidden_writers: [V4ProviderReqCompat06Compat, V4HubRespOutbound04ClientSemantic, V4HubReqChatProcess04Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -925,7 +925,7 @@ resources:
       may_enter_metadata_center: false
     allowed_writers: ["V4RequestIdCounter::next_request_identity"]
     allowed_readers: [v4.console.terminal_output]
-    forbidden_writers: [routecodex-v4-runtime, routecodex-v4-provider, V4ReqChatProcess03Governed]
+    forbidden_writers: [routecodex-v4-runtime, routecodex-v4-provider, V4HubReqChatProcess04Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored

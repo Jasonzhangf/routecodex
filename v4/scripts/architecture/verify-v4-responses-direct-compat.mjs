@@ -14,8 +14,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
+import { fileURLToPath } from 'node:url';
 
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const failures = [];
 
 const readJson = (file) => {
@@ -36,9 +37,9 @@ const readYaml = (file) => {
   }
 };
 
-const slice = readYaml('v4/docs/architecture/v4-responses-direct-compatibility-slice.yml');
-const verification = readJson('v4/.appsdk/maps/verification-map.json');
-const resourceMap = readYaml('v4/docs/architecture/v4-resource-operation-map.yml');
+const slice = readYaml('docs/architecture/v4-responses-direct-compatibility-slice.yml');
+const verification = readJson('.appsdk/maps/verification-map.json');
+const resourceMap = readYaml('docs/architecture/v4-resource-operation-map.yml');
 
 if (!slice || !verification || !resourceMap) process.exit(1);
 

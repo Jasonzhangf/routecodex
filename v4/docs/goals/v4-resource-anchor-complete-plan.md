@@ -19,9 +19,9 @@
 3. 冻结基线不失效：base-node / edge / control / error 的 active artifact 未被修改；
    若新增资源确需由已冻结 crate 拥有（如 control 的 stopless/record_ledger），走完整
    begin-version -> re-freeze 生命周期，或按实现证据迁移 owner 到未冻结模块并记录偏差。
-4. 构建门禁统一：`cargo test --workspace --manifest-path v4/Cargo.toml` 覆盖全部
+4. 构建门禁统一：`cargo test --workspace --manifest-path Cargo.toml` 覆盖全部
    workspace 成员；workspace 外 crate 全部经 build-link test-consumer 跑 L2 回归，
-   verification-map 的 `v4_cargo_workspace_build` 与 CI v4-active-link job 不遗漏任何模块。
+   verification-map 的 `v4_cargo_workspace_build` 与 CI `v4-build` job（macos-14，V4 canonical `verify:ci`）不遗漏任何模块。
 5. 所有新 gate 先红后绿：红自测覆盖"资源缺 owner/缺 symbol/owner crate 不存在/
    node 未注册/双源漂移/控制资源进 payload"等负类。
 6. DSH review（opencode-go/deepseek-v4-flash）语义 PASS，无 P0/P1、无"修复后再审"。
@@ -90,7 +90,8 @@
 - verification-map：新 crate 各注册 `v4_*_l2_regression`（test-consumer）与
   `v4_*_resource_binding`；`v4_cargo_workspace_build.required_for` 扩展覆盖全部模块。
 - package.json：`verify:v4-foundation` 与 `verify:v4-foundation-red` 追加对应 gate。
-- CI：v4-active-link job 追加新 crate test-consumer 步骤与资源全锚定 gate 步骤。
+- CI：`v4-build` job（macos-14）安装 v4 依赖并调用 V4 canonical `verify:ci`，覆盖新 crate
+  test-consumer 与资源全锚定 gate（root CI 不枚举 V4 内部矩阵）。
 
 ## 5. 风险与规避
 
@@ -109,7 +110,7 @@
    payload 泄漏 / 双源漂移 / 未注册 node），确认当前红。
 2. L2 白盒/黑盒：每 crate 至少覆盖生命周期正向 + 反向（重复 register / 未注册
    consume / 已释放复用 / 越权写入 / 跨 session 复用），正反成对。
-3. 构建/门禁矩阵：`cargo test --workspace --manifest-path v4/Cargo.toml`、
+3. 构建/门禁矩阵：`cargo test --workspace --manifest-path Cargo.toml`、
    build-link test-consumer（全部模块）、`npm run verify:v4-foundation`、
    `npm run verify:v4-foundation-red`、`appsdk verify --admission v4`、
    gen/verify-index、fmt/release build。
@@ -125,7 +126,8 @@
    `contract_bound`（project.json + maps + L2 红测 + test-consumer 绿）。
 4. 扩展 runtime/config 资源面（dry-run/observability/timing、codex_sample_authorization）。
 5. 全量 49 anchored 双源同步；处理 control 决策点（owner 迁移或批准 re-freeze）。
-6. 构建门禁统一：`v4_cargo_workspace_build` 覆盖全部模块，CI v4-active-link 完整执行。
+6. 构建门禁统一：`v4_cargo_workspace_build` 覆盖全部模块，CI `v4-build` job（macos-14）经
+   V4 canonical `verify:ci` 完整执行。
 7. 全量验证矩阵绿；提交（显式路径，不裹 V3 dirty）。
 8. DSH review PASS；更新 plan ledger / note / MEMORY。
 
@@ -198,7 +200,8 @@ validator：
    `v4_router_l2_regression` / `v4_provider_l2_regression` /
    `v4_server_l2_regression`（module-registry 已引用，此前缺失）；package.json
    `verify:v4-foundation` 10 -> 14 gates、`verify:v4-foundation-red` 追加
-   resource-binding 红自测；CI `v4-active-link` job 追加 4 个 test-consumer
+   resource-binding 红自测；CI `v4-build` job（macos-14）经 V4 canonical `verify:ci` 覆盖
+   4 个 test-consumer
    步骤；active-link frozen-consumer-registry 登记 debug/router/provider/server
    -> base-node（active_artifact），mainline-call-map 补 4 条
    active_artifact_link 边；function-map 补 4 个新 crate function 条目。
@@ -210,5 +213,78 @@ validator：
 - `verify:v4-foundation-red` 绿（resource-binding 12/12）；
 - test-consumer：edge 15、config 11、control 15、error 23、runtime 21、
   debug 5、router 1、provider 1、server 3 全绿；
-- `cargo test --workspace --manifest-path v4/Cargo.toml`、release build、
+- `cargo test --workspace --manifest-path Cargo.toml`、release build、
   `cargo fmt --check`、gen/verify-index 全绿。
+
+### 9.4 DSH review 两轮 FAIL 修复与干净 checkout 证据（2026-08-16）
+
+第一轮 DSH review（commit `3ce6f36a0`）FAIL findings 与修复：
+
+1. **P0 control_resources.rs 未入 VCS**：runtime `lib.rs` 声明
+   `mod control_resources` 但文件被本地 `.git/info/exclude` 排除、从未提交，
+   干净 checkout 编译失败。修复：`git add -f` 纳入版本控制（366 行），
+   并从本地 exclude 移除 runtime 目录条目；resource-map 6 个 runtime
+   owner_symbols 因此全部可解析。
+2. **P1 function-map 伪造 symbol**：`v4.debug.observer` /
+   `v4.router.live_policy` / `v4.provider.availability` /
+   `v4.server.console_identity_evidence` 的 entry_symbols 与实际源码不符。
+   修复：逐符号核对 `DebugRuntime` / `V4Router08LivePolicyOverride` /
+   `V4Availability01SessionScoped` / server 四类型真实方法后重写；同时修正
+   resource-operation-map 中 4 处 `V4DebugRuntime::*` 伪符号
+   （`enabled_for_module`、`register_dry_run_chain`、
+   `execute_dry_run_no_network_effect` x2）与 debug-subscription.contract.json
+   对应 writer/reader。
+3. **P2 codex-sample 授权真源漂移**：debug 的
+   `should_capture_snapshot_stage` 读 module_switch 而非 config manifest 授权。
+   修复：物理删除该伪读取点；授权发布/消费全部收口到 config crate
+   （`CodexSampleAuthorization` 查询 + `ConfigManifestV2` 新增
+   `should_capture_codex_sample_stage` 决策入口），resource map 与
+   debug-subscription contract 的 allowed_readers 同步为 config 符号；
+   `l2_config_v2.rs` 增补 disabled 反向断言。
+
+第二轮 DSH review（commit `39a610fe8`）FAIL findings 与修复：
+
+1. **P1 tracked contract JSON 残留旧符号**：`debug-subscription.contract.json`
+   第 17/18 行仍写已删除的 `V4DebugRuntime::execute_dry_run_no_network_effect`
+   与 `V4DebugRuntime::should_capture_snapshot_stage`。修复：更新为
+   `V4Debug09DryRunNoNetworkTerminalEffect::execute` /
+   `CodexSampleAuthorization::should_capture_snapshot_stage`。
+2. **P2 授权无消费点**：将 manifest 决策入口
+   `ConfigManifestV2::should_capture_codex_sample_stage` 接入正反测试，
+   授权 truth 的"发布 -> manifest 查询"链路成为真实代码路径。
+3. **P2 死 import**：删除 `control_resources.rs` 未使用的
+   `use std::slice::Iter;`。
+4. **P2 缺 runtime 编译/测试证据**：在 `39a610fe8` 干净 worktree
+   （临时 git worktree，fixture 恢复 active artifact 后）重放
+   `test-consumer --consumer routecodex-v4-runtime`（21/21 绿）、
+   `routecodex-v4-debug`（5/5 绿）、`routecodex-v4-config`（26/26 绿），
+   证明无本地未提交文件即可编译运行。
+
+第三轮验证证据（两轮修复合入前全量重跑）：
+- `verify:v4-foundation` 14 gates 绿、`verify:v4-foundation-red` 54 绿；
+- config 26 / runtime 21 / debug 5 / router 1 / provider 1 / server 3
+  test-consumer 绿；workspace cargo test/build/fmt 绿；
+- appsdk 0.1.2（digest 锁定 `sha256:3685149e…`，临时 PATH 隔离运行，
+  不覆盖并行 worker 的 0.1.3 全局二进制）compile/verify/admission 绿；
+- gen-index/verify-index/active-link 绿。
+
+### 9.5 第三轮 DSH review 与骨架消费链闭环（2026-08-16）
+
+第三轮 DSH review（commit `356a25727`）FAIL 剩余 findings：
+
+1. **P2 contract reader 漂移（已修复）**：`debug-subscription.contract.json`
+   `v4.debug.codex_sample_authorization` readers 缺 `V4Config05ManifestPublished`
+   （resource map allowed_readers 已含）。已补上，两源一致。
+2. **P1（blocking）修复——骨架捕获门消费链闭环**：
+   - `DebugRuntime` 增加 `codex_sample_authorizer`（`Option<Arc<dyn Fn(&str)
+     -> bool>>`）与 `bind_codex_sample_authorizer` 注入点；
+   - `record_snapshot` / `persist` 生产代码强制咨询授权（fail-closed：
+     未绑定 authorizer 或 stage 未授权 -> 显式
+     `DebugError::SnapshotStageNotAuthorized`，无 silent strip）；
+   - 授权决策由 config manifest API `should_capture_codex_sample_stage`
+     提供（调用方以闭包注入），资源 map / debug-subscription contract /
+     function-map 的 readers/entry_symbols 同步登记消费点；
+   - `l2_debug.rs` 新增正反测试：未绑定 fail-closed、已授权 stage 成功、
+     未授权 stage 拒绝、persist 同一门控。
+   - 保持 49/49 anchored；真实 HTTP capture 调用方仍属长线 Phase 5，
+     但骨架捕获门（生产代码）已真实消费授权决策。

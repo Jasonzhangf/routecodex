@@ -6,6 +6,7 @@ use routecodex_v4_debug::{
     DryRunFixture, RawCaptureRecord, SnapshotSubscription, SubscriptionTopic, SwitchKind,
     TraceContext,
 };
+use std::sync::Arc;
 
 fn runtime() -> DebugRuntime {
     DebugRuntime::new()
@@ -111,11 +112,12 @@ fn subscriptions_positive_and_red() {
 #[test]
 fn snapshot_session_and_dry_run_fixture_positive_and_red() {
     let mut debug_runtime = runtime();
+    debug_runtime.bind_codex_sample_authorizer(Arc::new(|_stage| true));
     debug_runtime
         .start_snapshot_session("session-1", "srv", "req-1", "exec-1")
         .expect("start must succeed");
     debug_runtime
-        .record_snapshot("session-1", "V4ScopeRegistry", "sha256:abc")
+        .record_snapshot("session-1", "V4ScopeRegistry", "sha256:abc", "req_chatprocess")
         .expect("record must succeed");
     let session = debug_runtime
         .release_snapshot_session("session-1")
@@ -126,7 +128,7 @@ fn snapshot_session_and_dry_run_fixture_positive_and_red() {
         Err(DebugError::SnapshotSessionNotActive)
     ));
     assert!(matches!(
-        debug_runtime.record_snapshot("session-1", "V4ScopeRegistry", "sha256:abc"),
+        debug_runtime.record_snapshot("session-1", "V4ScopeRegistry", "sha256:abc", "req_chatprocess"),
         Err(DebugError::SnapshotSessionNotActive)
     ));
 
@@ -166,6 +168,7 @@ fn snapshot_session_and_dry_run_fixture_positive_and_red() {
 #[test]
 fn module_switch_and_payload_budget_and_sample_store() {
     let mut debug_runtime = runtime();
+    debug_runtime.bind_codex_sample_authorizer(Arc::new(|_stage| true));
     debug_runtime
         .module_switch
         .set(
@@ -188,7 +191,7 @@ fn module_switch_and_payload_budget_and_sample_store() {
         .expect("bounded text must succeed");
     assert_eq!(debug_runtime.payload_budget.entries().count(), 2);
     assert!(matches!(
-        debug_runtime.persist("responses", "localhost", 5555, "req-1", "req.json", 42),
+        debug_runtime.persist("responses", "localhost", 5555, "req-1", "req.json", 42, "req_chatprocess"),
         Ok(_)
     ));
     assert_eq!(debug_runtime.codex_sample_store.samples().count(), 1);
@@ -202,4 +205,39 @@ fn module_switch_and_payload_budget_and_sample_store() {
         Err(DebugError::RetentionCapExceeded)
     ));
     assert!(assert_diagnostic_only(&debug_runtime));
+}
+
+#[test]
+fn codex_sample_authorization_consumed_by_capture_gate_positive_and_red() {
+    let mut debug_runtime = runtime();
+    debug_runtime
+        .start_snapshot_session("session-1", "srv", "req-1", "exec-1")
+        .expect("start must succeed");
+
+    // Fail-closed before any manifest authorizer is bound.
+    assert!(matches!(
+        debug_runtime.record_snapshot("session-1", "V4ScopeRegistry", "sha256:abc", "req_chatprocess"),
+        Err(DebugError::SnapshotStageNotAuthorized)
+    ));
+    assert!(matches!(
+        debug_runtime.persist("responses", "localhost", 5555, "req-1", "req.json", 42, "req_chatprocess"),
+        Err(DebugError::SnapshotStageNotAuthorized)
+    ));
+
+    // Authorized stage passes, unauthorized stage is rejected by the same gate.
+    debug_runtime.bind_codex_sample_authorizer(Arc::new(|stage| stage == "req_chatprocess"));
+    debug_runtime
+        .record_snapshot("session-1", "V4ScopeRegistry", "sha256:abc", "req_chatprocess")
+        .expect("authorized stage must record");
+    assert!(matches!(
+        debug_runtime.record_snapshot("session-1", "V4ScopeRegistry", "sha256:def", "resp_outbound"),
+        Err(DebugError::SnapshotStageNotAuthorized)
+    ));
+    assert!(matches!(
+        debug_runtime.persist("responses", "localhost", 5555, "req-1", "req.json", 42, "resp_outbound"),
+        Err(DebugError::SnapshotStageNotAuthorized)
+    ));
+    debug_runtime
+        .persist("responses", "localhost", 5555, "req-1", "req.json", 42, "req_chatprocess")
+        .expect("authorized persist must succeed");
 }

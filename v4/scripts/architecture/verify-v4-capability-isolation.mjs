@@ -12,8 +12,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
+import { fileURLToPath } from 'node:url';
 
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const failures = [];
 
 const readJson = (file) => {
@@ -33,9 +34,9 @@ const readYaml = (file) => {
   }
 };
 
-const pluginContract = readJson('v4/contracts/node-plugin.contract.json');
-const containerContract = readJson('v4/contracts/node-container.contract.json');
-const resourceMap = readYaml('v4/docs/architecture/v4-resource-operation-map.yml');
+const pluginContract = readJson('contracts/node-plugin.contract.json');
+const containerContract = readJson('contracts/node-container.contract.json');
+const resourceMap = readYaml('docs/architecture/v4-resource-operation-map.yml');
 if (!pluginContract || !containerContract || !resourceMap) process.exit(1);
 
 const effects = pluginContract.effect_rule ?? {};
@@ -55,15 +56,22 @@ const byId = new Map((resourceMap.resources ?? []).map((resource) => [resource.r
 const routeDecision = byId.get('v4.control.route_exit');
 if (routeDecision) {
   const readers = new Set(routeDecision.allowed_readers ?? []);
-  if (readers.has('V4ProviderReqOutbound06WirePayload')) {
+  if (readers.has('V4ProviderReqCompat06Compat')) {
     failures.push('resource map: provider wire builder may not read route decision');
   }
 }
 const providerSemantic = byId.get('v4.request.provider_semantic');
 if (providerSemantic) {
   const readers = new Set(providerSemantic.allowed_readers ?? []);
-  if (!readers.has('V4ProviderReqOutbound06WirePayload')) {
-    failures.push('resource map: provider wire builder must be the only reader of provider semantic');
+  if (readers.size !== 1 || !readers.has('V4ProviderReqCompat06Compat')) {
+    failures.push('resource map: V4ProviderReqCompat06Compat must be the only reader of provider semantic');
+  }
+}
+const providerWire = byId.get('v4.request.provider_wire_payload');
+if (providerWire) {
+  const readers = new Set(providerWire.allowed_readers ?? []);
+  if (readers.size !== 1 || !readers.has('V4ProviderSseOut07WireBoundary')) {
+    failures.push('resource map: V4ProviderSseOut07WireBoundary must be the only reader of provider wire payload');
   }
 }
 

@@ -90,11 +90,12 @@
       "generated_outputs": [
         "generated/governance/**"
       ],
-      "module_id": "routecodex-v4-governance",
-      "owned_paths": [
-        ".appsdk/**",
-        "contracts/**"
-      ],
+  "module_id": "routecodex-v4-governance",
+  "owned_paths": [
+    ".appsdk/**",
+    "contracts/**",
+    "playground/**"
+  ],
       "regression": {
         "allow_skipped": false,
         "command": {
@@ -598,6 +599,236 @@
       "stage": "source_implemented"
     },
     {
+      "active_artifact": "active/lib/routecodex-v4-plugin-contract/**",
+      "artifact_paths": [
+        "libroutecodex_v4_plugin_contract.rlib"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo build --release -p routecodex-v4-plugin-contract && mkdir -p generated/modules/routecodex-v4-plugin-contract/lib && cp target/release/libroutecodex_v4_plugin_contract.rlib generated/modules/routecodex-v4-plugin-contract/lib/libroutecodex_v4_plugin_contract.rlib"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        "contracts/node-plugin.contract.json"
+      ],
+      "dependency_modules": [],
+      "generated_outputs": [
+        "generated/plugin-contract/**"
+      ],
+      "module_id": "routecodex-v4-plugin-contract",
+      "owned_paths": [
+        "crates/routecodex-v4-plugin-contract/**"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "-p",
+            "routecodex-v4-plugin-contract"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "crates/routecodex-v4-plugin-contract/src/lib.rs",
+          "contracts/node-plugin.contract.json"
+        ],
+        "minimum_test_count": 10,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-plugin-contract-l2-regression"
+      },
+      "source_owner": "routecodex-v4-plugin-contract",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/routecodex-v4-plugin-plan/**",
+      "artifact_paths": [
+        "libroutecodex_v4_plugin_plan.rlib"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo build --release -p routecodex-v4-plugin-plan && mkdir -p generated/modules/routecodex-v4-plugin-plan/lib && cp target/release/libroutecodex_v4_plugin_plan.rlib generated/modules/routecodex-v4-plugin-plan/lib/libroutecodex_v4_plugin_plan.rlib"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        "contracts/node-container.contract.json",
+        "contracts/node-plugin.contract.json"
+      ],
+      "dependency_modules": [
+        "routecodex-v4-plugin-contract"
+      ],
+      "generated_outputs": [
+        "generated/plugin-plan/**"
+      ],
+      "module_id": "routecodex-v4-plugin-plan",
+      "owned_paths": [
+        "crates/routecodex-v4-plugin-plan/**"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "-p",
+            "routecodex-v4-plugin-plan"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "crates/routecodex-v4-plugin-plan/src/lib.rs",
+          "contracts/node-container.contract.json",
+          "contracts/node-plugin.contract.json"
+        ],
+        "minimum_test_count": 14,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-plugin-plan-l2-regression"
+      },
+      "source_owner": "routecodex-v4-plugin-plan",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/routecodex-v4-plugin-catalog/**",
+      "artifact_paths": [
+        "libroutecodex_v4_plugin_catalog.rlib"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo build --release -p routecodex-v4-plugin-catalog && mkdir -p generated/modules/routecodex-v4-plugin-catalog/lib && cp target/release/libroutecodex_v4_plugin_catalog.rlib generated/modules/routecodex-v4-plugin-catalog/lib/libroutecodex_v4_plugin_catalog.rlib"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        "contracts/plugin-catalog.contract.json",
+        "contracts/node-plugin.contract.json"
+      ],
+      "dependency_modules": [
+        "routecodex-v4-plugin-contract"
+      ],
+      "generated_outputs": [
+        "generated/plugin-catalog/**"
+      ],
+      "module_id": "routecodex-v4-plugin-catalog",
+      "owned_paths": [
+        "crates/routecodex-v4-plugin-catalog/**"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "-p",
+            "routecodex-v4-plugin-catalog"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "crates/routecodex-v4-plugin-catalog/src/lib.rs",
+          "contracts/plugin-catalog.contract.json",
+          "contracts/node-plugin.contract.json"
+        ],
+        "minimum_test_count": 14,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-plugin-catalog-l2-regression"
+      },
+      "source_owner": "routecodex-v4-plugin-catalog",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/routecodex-v4-cordis-bridge/**",
+      "artifact_paths": [
+        "libroutecodex_v4_cordis_bridge.rlib"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo build --release -p routecodex-v4-cordis-bridge && mkdir -p generated/modules/routecodex-v4-cordis-bridge/lib && cp target/release/libroutecodex_v4_cordis_bridge.rlib generated/modules/routecodex-v4-cordis-bridge/lib/libroutecodex_v4_cordis_bridge.rlib"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        "contracts/node-container.contract.json",
+        "contracts/node-plugin.contract.json"
+      ],
+      "dependency_modules": [
+        "routecodex-v4-plugin-contract",
+        "routecodex-v4-plugin-plan"
+      ],
+      "generated_outputs": [
+        "generated/cordis-bridge/**"
+      ],
+      "module_id": "routecodex-v4-cordis-bridge",
+      "owned_paths": [
+        "crates/routecodex-v4-cordis-bridge/**"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "-p",
+            "routecodex-v4-cordis-bridge"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "crates/routecodex-v4-cordis-bridge/src/lib.rs",
+          "crates/routecodex-v4-cordis-bridge/tests/l2_bridge.rs",
+          "contracts/node-container.contract.json",
+          "contracts/node-plugin.contract.json"
+        ],
+        "minimum_test_count": 5,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-plugin-bridge-l2-regression"
+      },
+      "source_owner": "routecodex-v4-cordis-bridge",
+      "stage": "source_implemented"
+    },
+    {
       "active_artifact": "active/lib/routecodex-v4-runtime/**",
       "artifact_paths": [
         "libroutecodex_v4_runtime.rlib"
@@ -706,13 +937,13 @@
             "--quiet",
             "--release",
             "--manifest-path",
-            "v4/Cargo.toml",
+            "Cargo.toml",
             "-p",
             "routecodex-v4-build-link",
             "--",
             "test-consumer",
             "--root",
-            "v4",
+            ".",
             "--consumer",
             "routecodex-v4-debug",
             "--deps",
@@ -776,13 +1007,13 @@
             "--quiet",
             "--release",
             "--manifest-path",
-            "v4/Cargo.toml",
+            "Cargo.toml",
             "-p",
             "routecodex-v4-build-link",
             "--",
             "test-consumer",
             "--root",
-            "v4",
+            ".",
             "--consumer",
             "routecodex-v4-router",
             "--deps",
@@ -845,13 +1076,13 @@
             "--quiet",
             "--release",
             "--manifest-path",
-            "v4/Cargo.toml",
+            "Cargo.toml",
             "-p",
             "routecodex-v4-build-link",
             "--",
             "test-consumer",
             "--root",
-            "v4",
+            ".",
             "--consumer",
             "routecodex-v4-provider",
             "--deps",
@@ -914,13 +1145,13 @@
             "--quiet",
             "--release",
             "--manifest-path",
-            "v4/Cargo.toml",
+            "Cargo.toml",
             "-p",
             "routecodex-v4-build-link",
             "--",
             "test-consumer",
             "--root",
-            "v4",
+            ".",
             "--consumer",
             "routecodex-v4-server",
             "--deps",

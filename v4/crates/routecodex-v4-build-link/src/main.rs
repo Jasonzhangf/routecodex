@@ -470,6 +470,11 @@ fn test_consumer(
         rustc_args.push(test_bin.to_str().unwrap_or("").to_string());
         run_rustc(&rustc_args)?;
         let run = Command::new(&test_bin)
+            // L2 consumer tests may read cwd-relative contracts (for example
+            // routecodex-v4-runtime's skeleton-plan contract default path).
+            // Pin the V4 root so the regression is independent of the caller's
+            // working directory.
+            .current_dir(root)
             .output()
             .map_err(|e| ActiveLinkError::LinkFailed(format!("run {}: {e}", test_bin.display())))?;
         if !run.status.success() {

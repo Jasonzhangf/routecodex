@@ -35,7 +35,7 @@ Design ID: `V4-ACTIVE-LINK-002`（本计划）；上游设计：`v4/docs/design/
   （evidence/review/promotion/regression/freeze/publish）。
 - config：Cargo.toml 移除 base-node、edge path dep → build/regression 改 resolver（不 freeze）。
 - workspace/CI：`v4/Cargo.toml` members 收口；`verify:v4-active-link`、`v4_cargo_workspace_build`、
-  module regression gate、CI `v4-active-link` job 命令改 resolver entrypoint。
+  module regression gate、CI `v4-build` job（macos-14，V4 canonical `verify:ci`）命令改 resolver entrypoint。
 - registry/maps/docs：frozen-consumer-registry、resource/function/mainline/verification map、
   design/test-design 文档状态同步。
 - hermetic fixture：control active-v2 / error active-v3 与 config 编译产物进入 fixture，CI 恢复后跑 index gate。
@@ -69,7 +69,7 @@ Design ID: `V4-ACTIVE-LINK-002`（本计划）；上游设计：`v4/docs/design/
 5. `v4/contracts/active-link/frozen-consumer-registry.json`：control/error/config 四条边 → `active_artifact`/`migrated`。
 6. resolver `v4/crates/routecodex-v4-build-link/`：验证/补 multi-dep 与 transitive closure（
    config→edge→base-node）、registry coverage 红测（ActiveLinkErr 族沿用）。
-7. `scripts/architecture/verify-v4-active-link.mjs`：删除 transitional 分支，全量扫描保持。
+7. `v4/scripts/architecture/verify-v4-active-link.mjs`：删除 transitional 分支，全量扫描保持。
 8. CI（`.github/workflows/test.yml`）+ `v4/contracts/` gate 命令：workspace build/regression 走 resolver。
 9. fixture：control active-v2 / error active-v3 rlib/artifact/records、config compiled artifact 固化到
    `v4/contracts/active-link/fixture`（沿用 Phase 1 模式，CI restore + index gate）。
@@ -127,7 +127,7 @@ Design ID: `V4-ACTIVE-LINK-002`（本计划）；上游设计：`v4/docs/design/
    无 witness 调 `chain.classify()` 必须编译失败，带 witness 的正向片段必须编译成功。
    `v4_error_compile_fail_regression` 已恢复至 `v4/.appsdk/maps/verification-map.json`，
    命令改为 `cargo test -p routecodex-v4-build-link --test resolver_red_tests
-   negative_error_classify_without_witness_compile_fails --manifest-path v4/Cargo.toml`；
+   negative_error_classify_without_witness_compile_fails --manifest-path Cargo.toml`；
    function-map `v4.error.mainline` 对该 gate 的引用随之恢复有效，不删除。
    `src/lib.rs` 的 `compile_fail` 文档保留为 API 契约说明，不再作为可执行 cargo doc gate。
 2. **fixture 路径**：hermetic fixture 实际位于 `v4/tests/resources/active-link-fixture/`

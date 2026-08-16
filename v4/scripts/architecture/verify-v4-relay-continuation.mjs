@@ -29,11 +29,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
+import { fileURLToPath } from 'node:url';
+import { loadV3Baseline } from './_v3-baseline.mjs';
 
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-const readJson = (file) => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
-const readYaml = (file) => yaml.load(fs.readFileSync(path.join(root, file), 'utf8'));
+const readJson = (file) => {
+  const full = path.isAbsolute(file) ? file : path.join(root, file);
+  return JSON.parse(fs.readFileSync(full, 'utf8'));
+};
+const readYaml = (file) => {
+  const full = path.isAbsolute(file) ? file : path.join(root, file);
+  return yaml.load(fs.readFileSync(full, 'utf8'));
+};
 const readText = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 const REQUIRED_SURFACES = ['request_path', 'response_path', 'error_path', 'streaming', 'lifecycle', 'audit'];
@@ -171,8 +179,8 @@ function validate(slice, verification, resourceMap, v3ResourceMap, nodeGraph, sk
         .filter((pluginId) => CONTINUATION_PLUGINS.has(pluginId));
       if (continuationPlugins.length === 0) continue;
       const nodeId = node.node_id ?? '?';
-      const isRequestChatProcess = chain.chain_id === 'request' && node.position === 2;
-      const isResponseChatProcess = chain.chain_id === 'response' && node.position === 2;
+      const isRequestChatProcess = chain.chain_id === "request" && node.node_id === "V4HubReqChatProcess04Governed";
+      const isResponseChatProcess = chain.chain_id === "response" && node.node_id === "V4HubRespChatProcess03Governed";
       if (!isRequestChatProcess && !isResponseChatProcess) {
         failures.push(`skeleton: continuation plugins (${continuationPlugins.join(',')}) bound outside chat process at ${chain.chain_id}:${nodeId}`);
       }
@@ -215,14 +223,15 @@ function validate(slice, verification, resourceMap, v3ResourceMap, nodeGraph, sk
 }
 
 function loadInputs() {
+  const baselineInfo = loadV3Baseline('v3-resource-operation-map.yml');
   return {
-    slice: readYaml('v4/docs/architecture/v4-relay-continuation-compatibility-slice.yml'),
-    verification: readJson('v4/.appsdk/maps/verification-map.json'),
-    resourceMap: readYaml('v4/docs/architecture/v4-resource-operation-map.yml'),
-    v3ResourceMap: readYaml('docs/architecture/v3-resource-operation-map.yml'),
-    nodeGraph: readJson('v4/contracts/node-graph.contract.json'),
-    skeletonPlan: readJson('v4/contracts/skeleton-plan.contract.json'),
-    runtimeSource: readText('v4/crates/routecodex-v4-runtime/src/lib.rs'),
+    slice: readYaml('docs/architecture/v4-relay-continuation-compatibility-slice.yml'),
+    verification: readJson('.appsdk/maps/verification-map.json'),
+    resourceMap: readYaml('docs/architecture/v4-resource-operation-map.yml'),
+    v3ResourceMap: readYaml(baselineInfo.artifactPath),
+    nodeGraph: readJson('contracts/node-graph.contract.json'),
+    skeletonPlan: readJson('contracts/skeleton-plan.contract.json'),
+    runtimeSource: readText('crates/routecodex-v4-runtime/src/lib.rs'),
   };
 }
 
@@ -274,11 +283,11 @@ function runSelfTest() {
     }],
     ['skeleton restore bound to request outbound', ({ skeletonPlan: p }) => {
       const requestChain = p.chains.find((chain) => chain.chain_id === 'request');
-      requestChain.nodes[2].plugins.push({ plugin_id: 'continuation_restore', effects: ['control'] });
+      requestChain.nodes[4].plugins.push({ plugin_id: 'continuation_restore', effects: ['control'] });
     }],
     ['skeleton commit bound to response outbound', ({ skeletonPlan: p }) => {
       const responseChain = p.chains.find((chain) => chain.chain_id === 'response');
-      responseChain.nodes[2].plugins.push({ plugin_id: 'continuation_commit', effects: ['control'] });
+      responseChain.nodes[3].plugins.push({ plugin_id: 'continuation_commit', effects: ['control'] });
     }],
     ['control-leak guard removed from wire builder', ({ runtimeSource }) => ({
       runtimeSource: runtimeSource.replace(

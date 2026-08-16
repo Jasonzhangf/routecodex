@@ -32,7 +32,7 @@ surfaces:
       - v3_stage: request.normalize
         v3_resource: v3.request.normal_payload
         v4_container: {family: RequestChainNode, role: request_inbound}
-        v4_checkpoint: {node_id: V4ReqInbound02Normalized, semantic: normalized_request_identity_locked}
+        v4_checkpoint: {node_id: V4HubReqInbound03Normalized, semantic: normalized_request_identity_locked}
         v4_resource: v4.request.normal_payload
         verification_gates: [v4_parity_gate_semantic_parity, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime ProtocolParse/Normalize/InputValidate (runtime test-consumer 12)"
@@ -80,7 +80,7 @@ surfaces:
       - v3_stage: request.provider_semantic
         v3_resource: v3.request.provider_semantic
         v4_container: {family: RequestChainNode, role: request_outbound}
-        v4_checkpoint: {node_id: V4ReqOutbound05ProviderSemantic, semantic: provider_semantic}
+        v4_checkpoint: {node_id: V4HubReqOutbound05ProviderSemantic, semantic: provider_semantic}
         v4_resource: v4.request.provider_semantic
         verification_gates: [v4_parity_gate_semantic_parity, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime SemanticProjection (runtime test-consumer 12)"
@@ -88,7 +88,7 @@ surfaces:
       - v3_stage: request.wire_build
         v3_resource: v3.provider.responses_wire_payload
         v4_container: {family: RequestChainNode, role: request_outbound}
-        v4_checkpoint: {node_id: V4ProviderReqOutbound06WirePayload, semantic: provider_wire}
+        v4_checkpoint: {node_id: V4ProviderReqCompat06Compat, semantic: provider_wire}
         v4_resource: v4.request.provider_wire_payload
         verification_gates: [v4_parity_gate_plane_isolation, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime WireBuild + control-leak red test (runtime test-consumer 12)"
@@ -107,7 +107,7 @@ surfaces:
       - v3_stage: response.provider_inbound
         v3_resource: v3.response.provider_raw
         v4_container: {family: ResponseChainNode, role: response_inbound}
-        v4_checkpoint: {node_id: V4ProviderRespInbound01Raw, semantic: provider_raw}
+        v4_checkpoint: {node_id: V4ProviderSseIn01FrameBoundary, semantic: provider_raw}
         v4_resource: v4.response.provider_raw
         verification_gates: [v4_parity_gate_semantic_parity, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime RawParse (response chain, runtime test-consumer 12)"
@@ -115,7 +115,7 @@ surfaces:
       - v3_stage: response.normalize
         v3_resource: v3.hub.response_semantic
         v4_container: {family: ResponseChainNode, role: response_inbound}
-        v4_checkpoint: {node_id: V4RespInbound02Parsed, semantic: parsed_response}
+        v4_checkpoint: {node_id: V4HubRespInbound02Parsed, semantic: parsed_response}
         v4_resource: v4.response.normal_payload
         verification_gates: [v4_parity_gate_semantic_parity, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime ProtocolDecode (response chain, runtime test-consumer 12)"
@@ -139,7 +139,7 @@ surfaces:
       - v3_stage: response.client_projection
         v3_resource: v3.response.client_payload
         v4_container: {family: ResponseChainNode, role: response_outbound}
-        v4_checkpoint: {node_id: V4RespOutbound04ClientSemantic, semantic: client_semantic}
+        v4_checkpoint: {node_id: V4HubRespOutbound04ClientSemantic, semantic: client_semantic}
         v4_resource: v4.response.normal_payload
         verification_gates: [v4_parity_gate_semantic_parity, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime ClientSemanticProjection (response chain, runtime test-consumer 12)"
