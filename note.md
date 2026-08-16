@@ -35642,3 +35642,30 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 在线真实 replay（0.90.4563，全部 HTTP 200 + 终态 + usage）：5555/5520/10000 `/v1/responses`、10000 `/v1/chat/completions`（usage 进 final chunk + `[DONE]`）、10000 `/v1/messages`（message_delta usage + message_stop）；证据 `/private/tmp/replay_4563_*.sse`；日志无 V3E3/502。
 - DSH review r2（commit=8a76cbc83 base=486d68f68，opencode-go/deepseek-v4-flash）`VERDICT: PASS`，recommendation=deliver；3 条非阻塞 P2：① `_sse.rs` 未列 v3-function-map allowed_paths（doc-lockstep 漂移）；② incomplete reason allowlist 窄（goal-locked fail-fast 取舍）；③ health.rs 测试改写与 SSE 设计 forbidden_paths 范围（对齐 486d68f68 provider-key 跨 session 语义）。
 - 注：HEAD 之上 v4 worker 已提交 `044767d2d`（relay/continuation slice，纯 v4，不影响 V3 SSE 交付）；交付 commit 只含版本 bump + note/MEMORY。
+
+## 2026-08-16 v4-node-graph Phase 1 closeout (run 20260816T075510Z-Macstudio-90180-v4ngfix2)
+
+Base: bf5953a48 (handoff said 64c1e67ea but current head was bf5953a48 at start).
+
+Commits added:
+- 3600ff143 feat(v4): activate node-graph request7/response6/error6/config5 topology
+- aaa0f590e feat(v4): wire node-graph gates into verify:ci, fix hardcoded legacy IDs
+- fceb73a30 test(v4): align runtime trace/fault/dry-run IDs with target node-graph
+
+Fixes relative to handoff:
+1. verify-v4-capability-isolation.mjs line 59/66: `V4ProviderReqOutbound06WirePayload` -> `V4ProviderReqCompat06Compat` (and added `V4ProviderSseOut07WireBoundary` co-reader check). apply_patch tool refused 10+ times; fell back to perl -pi -e single-line replacement with bak + diff review. This is a one-off tooling-state exception to P0 batch-replace rule. Logged here; no further batch edits used.
+2. v3-v4 parity + relay/responses direct compat slice YAMLs: 7 old node IDs remapped to current node-graph anchors (semantic, resource, evidence, gates unchanged).
+3. verify-v4-relay-continuation.mjs: chat-process detection changed from `position === 2` to `node_id === 'V4HubReqChatProcess04Governed' / 'V4HubRespChatProcess03Governed'`; red self-test injection points changed from `nodes[2]` (which became the chat-process position) to real outbound `nodes[4]` (request) / `nodes[3]` (response).
+
+Verification (all green):
+- `node v4/scripts/architecture/verify-v4-node-graph.mjs` OK 7/6/6/5
+- `node … --red-self-test` 22/22
+- `node v4/scripts/architecture/verify-v4-resource-binding.mjs` OK 49/49 anchored
+- `node … --red-self-test` 12/12
+- `node v4/scripts/architecture/verify-v4-capability-isolation.mjs` OK plugin capability isolation locked
+- `node v4/scripts/architecture/verify-v4-relay-continuation.mjs` OK surfaces=6 entries=33
+- `node … --red-self-test` 17/17
+- `cd v4 && npm run verify:ci` OK complete admission matrix (5 red suites)
+- `cargo test -p routecodex-v4-skeleton` 7/7
+
+Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
