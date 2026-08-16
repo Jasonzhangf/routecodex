@@ -249,6 +249,22 @@ snapshot_stages = ["resp_chatprocess", "req_chatprocess"]
     assert_eq!(authorization.snapshot_stages.len(), 2);
     assert!(authorization.should_capture_snapshot_stage("req_chatprocess"));
     assert!(!authorization.should_capture_snapshot_stage("resp_outbound"));
+
+    let disabled_raw = r#"
+version = 2
+
+[codex_sample]
+managed_instance_id = "v3-main"
+codex_samples_enabled = false
+direct_snapshots_enabled = true
+snapshot_stages = ["req_chatprocess"]
+"#;
+    let disabled = compile_v2(disabled_raw).expect("compile disabled codex_sample must succeed");
+    let disabled_authorization = disabled
+        .codex_sample()
+        .expect("manifest must publish disabled codex sample authorization");
+    assert!(!disabled_authorization.should_capture_snapshot_stage("req_chatprocess"));
+
     assert_eq!(first.plan_hash(), second.plan_hash());
     assert_eq!(first.artifact_hash(), second.artifact_hash());
     first.verify().expect("stored hashes verify with codex_sample");

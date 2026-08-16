@@ -832,12 +832,6 @@ impl DebugRuntime {
         self.codex_sample_store.enforce_listener_retention()
     }
 
-    pub fn should_capture_snapshot_stage(&self, _stage: &str) -> bool {
-        // Capture authorization is published by the config manifest
-        // (v4.debug.codex_sample_authorization); the debug runtime only
-        // consumes that truth, it never writes it.
-        self.module_switch.enabled_for_module("codex_samples")
-    }
 }
 
 /// Guard used by the resource gate to prove the debug crate never exposes a
