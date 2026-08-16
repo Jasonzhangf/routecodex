@@ -637,7 +637,7 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3HubRespContinuation04Committed
     identity: [remoteResponseId, continuationOwner, entryProtocol, entryEndpoint, port, routingGroup, sessionId, conversationId, providerId, modelId, authHandleId, capabilityRevision, expiresAtEpochMs]
-    allowed_writers: [execute_v3_responses_direct_runtime_kernel_core, V3HubRespContinuation04Committed, V3RemoteContinuationStore::commit, V3RemoteContinuationStore::release, decode_v3_remote_continuation_locator]
+    allowed_writers: [execute_v3_responses_direct_runtime_kernel_core, V3HubRespContinuation04Committed, V3RemoteContinuationStore::commit, V3RemoteContinuationStore::release_bound, decode_v3_remote_continuation_locator]
     allowed_readers: [V3RemoteContinuationStore::load, V3RemoteContinuationStore::load_for_req03, V3ResponsesDirectContinuationState::contains_for_req03, resolve_v3_responses_previous_response_owner_execution_mode_at_req03, V3RemoteContinuationLocator::validate_capability_revision, encode_v3_remote_continuation_locator, V3HubReqContinuation03Classified, V3HubReqTarget06Resolved]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3HubReqChatProcess04Governed, continuation_store_transport_local_context]
     may_enter_provider_body: false

@@ -19,7 +19,7 @@ V3RemoteContinuationCommitInput
   -> immutable V3RemoteContinuationLocator
   -> encode/decode without semantic mutation
   -> V3RemoteContinuationStore::load with exact scope and pin
-  -> V3RemoteContinuationStore::release
+  -> V3RemoteContinuationStore::release_bound with exact scope and pin
 ~~~
 
 The eventual Hub lifecycle remains pending:

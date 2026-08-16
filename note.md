@@ -35658,3 +35658,9 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 在线：5555 两个不同 typed session 连续返回 HTTP 200、标准 `response.completed` 和精确文本；新进程日志无新的 `remote continuation is already committed` 或客户端 `error decoding response body`。精确“两个 provider/session 同返 resp_0”由 controlled integration 红绿样本锁定。
 - 非本变更阻塞：全仓 clippy/fmt gate 仍有改动前已存在的无关告警/格式漂移；主树存在大量其他 worker 未提交和分叉改动，本 issue 尚未合并主树，避免覆盖并发工作。
 - DSH r1 `VERDICT: FAIL` 的另一项 P1 是 feature gate 未进入 CI umbrella；已由 commit `2a2582c5b` 将 architecture gate 与 14 个 red fixtures 接入 `verify:v3-architecture-ci`，`test.yml` 与 `release.yml` 均消费该唯一入口，实跑 38/38 通过。r1 的 relay client_disconnect P2 经 owner 复核：relay stream 的 `String` Err 只承载 provider codec failure，真实 client disconnect 由 response body drop/closeout 产生 `Dropped`，不进入 provider error 投影分支，禁止用字符串特判伪造 typed source。
+
+# 2026-08-16 V3 remote continuation / SSE 最终闭环（r6）
+- 最终代码范围 `fe6b7e518..7ccfb206e`：remote response ID 以 typed scope + provider/model/auth pin 复合绑定；exact-pin release；歧义 fail-fast；pre-commit SSE retry/reselect 且 health-neutral；post-commit 只投影协议 error event + clean EOF；HTTP/WebSocket client disconnect 走 typed transport-local 判定。
+- r5 review 发现 post-commit HTTP 已提交 200，但 error event 内仍嵌 `status:502`。新增正反测试先红，唯一 frame owner 删除该冲突字段，Error01-06 console/observability 分类仍保留；red mutation 增至 19。
+- 验证：architecture CI 38/38；完整 V3 workspace 全绿（一次 managed-lifecycle 并发端口冲突后原测试单跑与 workspace 重跑均绿）；全局 install 0.90.4576，sha256 `360aee6f63ef273c35dc3a2d07df3d9f7e15f5f10918151ca97e90b98cc8329f`；一次聚合 restart 后 4444/5520/5555/10000 health 全 ok；5555 `LIVE4576R6A` 为 HTTP 200、精确文本、`response.completed`、clean EOF。
+- DSH r6 `v3-remote-continuation-provider-sse-r6-20260816`：state=completed、verdict=pass、字面 `VERDICT: PASS`、无 P0/P1。两处 docs/map 旧 `release` 已对齐为 exact-pin `release_bound`。
