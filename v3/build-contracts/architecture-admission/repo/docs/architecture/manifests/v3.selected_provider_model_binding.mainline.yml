@@ -1,0 +1,43 @@
+lifecycle_id: v3.selected_provider_model_binding
+status: active
+owner_feature_id: v3.route_selected_provider_model_binding
+canonical_docs:
+  - docs/design/v3-selected-provider-model-binding.md
+  - docs/goals/v3-selected-provider-model-binding-test-design.md
+  - docs/architecture/wiki/v3-selected-provider-model-binding.md
+entrypoint: V3Target10ConcreteProviderSelected
+return_paths:
+  direct: V3Provider12ResponsesWirePayload
+  relay: ProviderReqCompat06ProviderCompat
+nodes:
+  - node_id: V3Target10ConcreteProviderSelected
+    owner: routecodex-v3-target
+    semantic: immutable selected provider canonical model and wire model truth
+  - node_id: V3HubReqOutbound07ProviderSemantic
+    owner: routecodex-v3-runtime
+    semantic: relay provider semantic payload before selected model binding
+  - node_id: V3SelectedProviderModelBindingBlock
+    owner: v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
+    semantic: sole request model replacement from client route input to selected wire model
+  - node_id: ProviderReqCompat06ProviderCompat
+    owner: provider-compat-core
+    semantic: consumes already-bound provider model and performs declared provider compatibility only
+  - node_id: V3Provider12ResponsesWirePayload
+    owner: routecodex-v3-provider-responses
+    semantic: validates body.model equals selected wire model and rejects mismatch
+edges:
+  - { step_id: v3-model-bind-01, from_node: V3Target10ConcreteProviderSelected, to_node: V3SelectedProviderModelBindingBlock, mode: direct }
+  - { step_id: v3-model-bind-02, from_node: V3SelectedProviderModelBindingBlock, to_node: V3Provider12ResponsesWirePayload, mode: direct }
+  - { step_id: v3-model-bind-03, from_node: V3HubReqOutbound07ProviderSemantic, to_node: V3SelectedProviderModelBindingBlock, mode: relay }
+  - { step_id: v3-model-bind-04, from_node: V3SelectedProviderModelBindingBlock, to_node: ProviderReqCompat06ProviderCompat, mode: relay }
+invariants:
+  - Virtual Router remains payload-pure and only selects an opaque target.
+  - The selected target wire_model is the sole upstream model truth.
+  - Direct and Relay call the same binding owner.
+  - Provider compatibility sees the selected provider model, never the client route alias.
+  - Provider wire validates equality and never repairs a stale model.
+  - Reselection repeats the binding from the newly selected target for every attempt.
+verification_gates:
+  - npm run verify:v3-selected-provider-model-binding
+  - npm run test:v3-selected-provider-model-binding-red-fixtures
+  - npm run build:v3-cli

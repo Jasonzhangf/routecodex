@@ -1,0 +1,36 @@
+{
+  "feature_id": "error.provider_action_gate",
+  "status": "active_test_design",
+  "bug_id": "v2_provider_action_gate_attempt_routing_group_truth",
+  "lifecycle": "error.provider_action_gate.mainline",
+  "first_divergence": "ErrorErr05ExecutionDecision -> ProviderActionGateFailureRecorded",
+  "unique_consumer_fix": "HubRequestExecutor must pass routingPolicyGroupForAttempt to every provider runtime observation, resolve failure, send failure, and success action belonging to that attempt; after a provider Error05 action, terminal VR exhaustion must preserve lastError regardless of whether the Rust decision mutated the request-local exclusion set",
+  "source_truth": {
+    "raw_entry_variable": "routecodexRoutingPolicyGroup",
+    "attempt_variable": "routingPolicyGroupForAttempt",
+    "attempt_variable_precedence": [
+      "initialized metadataForAttempt routecodexRoutingPolicyGroup",
+      "raw entry routecodexRoutingPolicyGroup"
+    ],
+    "fallback_forbidden": true
+  },
+  "positive_tests": [
+    "onRequestStart initializes the routing group after raw entry capture; a runtime-resolve provider failure waits and reselects instead of failing before the action gate",
+    "a provider-send 429 with initialized attempt routing truth waits and reselects to an eligible provider without projecting 429"
+  ],
+  "negative_tests": [
+    "missing raw and initialized attempt routing-group truth remains an explicit fail-fast contract error",
+    "provider success can release only an admission owned by the same logicalRequestChainKey",
+    "an initial route-selection PROVIDER_NOT_AVAILABLE without a prior provider failure is projected without entering the provider-action gate",
+    "the original provider 429 or SSE error is projected only after explicit route and default candidate exhaustion truth"
+  ],
+  "required_regressions": [
+    "tests/server/runtime/http-server/request-executor.spec.ts",
+    "tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts",
+    "tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts",
+    "tests/server/runtime/http-server/executor/request-executor-error-action-queue.native.spec.ts",
+    "npm run verify:v3-provider-action-gate",
+    "npm run test:v3-provider-action-gate-red-fixtures",
+    "npx tsc --noEmit --project tsconfig.json"
+  ]
+}

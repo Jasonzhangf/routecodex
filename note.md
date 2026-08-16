@@ -35642,3 +35642,16 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 在线真实 replay（0.90.4563，全部 HTTP 200 + 终态 + usage）：5555/5520/10000 `/v1/responses`、10000 `/v1/chat/completions`（usage 进 final chunk + `[DONE]`）、10000 `/v1/messages`（message_delta usage + message_stop）；证据 `/private/tmp/replay_4563_*.sse`；日志无 V3E3/502。
 - DSH review r2（commit=8a76cbc83 base=486d68f68，opencode-go/deepseek-v4-flash）`VERDICT: PASS`，recommendation=deliver；3 条非阻塞 P2：① `_sse.rs` 未列 v3-function-map allowed_paths（doc-lockstep 漂移）；② incomplete reason allowlist 窄（goal-locked fail-fast 取舍）；③ health.rs 测试改写与 SSE 设计 forbidden_paths 范围（对齐 486d68f68 provider-key 跨 session 语义）。
 - 注：HEAD 之上 v4 worker 已提交 `044767d2d`（relay/continuation slice，纯 v4，不影响 V3 SSE 交付）；交付 commit 只含版本 bump + note/MEMORY。
+
+# 2026-08-16 V3 independent build isolation（进行中）
+- worktree `playground/worktrees/v3-build-isolation`，base `ca668dd68`；build-domain contracts 已以 `design_pending` 准入。
+- V3-local package/lock/toolchain/config、Cargo test wrapper、artifact budget、install cleanup、deterministic architecture admission 已落；isolation/admission/artifact-budget 正反 gate 绿。
+- `provider-compat-core`、`servertool-core`、`stop-message-core` 已字节保持式 `git mv` 到 `v3/crates/`，V3 workspace/consumer 改为 local workspace dependency，Cargo metadata 与 isolation gate 证明零逃逸；旧 shared workspace member 已退役。
+- focused baseline：provider-compat 40/40 绿；servertool 374/377，3 个断言在 approved base 源码已与生产实现漂移（两处 `hook run` vs `servertool run`，一处 budget-boundary expected action），迁移未改 Rust source/test bytes。不得为 build migration 改 runtime 语义；后续以 pre/post 同失败集合和全量 gate 判定迁移等价，并单独记录基线缺口。
+## 2026-08-16 V3 independent build isolation DSH r1 remediation
+
+- DSH review `v3-independent-build-isolation-review-r1` returned FAIL with two P1 operational regressions and five P2 architecture/gate findings. Root install/build/verify references now dispatch through V3-owned npm commands; release checkout is full-history and release workflow is admission-snapshotted.
+- Migrated provider-compat/servertool owner paths in active maps/manifests, removed five untracked-by-manifest duplicate admission maps, made the Rust-only gate cwd-independent, and added a V3 runtime module registry with exact one-owner source coverage plus red tests.
+- `verify-v3-resource-map` now parses the machine resource registry and binds every resource owner to a live V3 crate or an explicit non-crate build/docs owner. Admission rejects duplicate map truths.
+- Live evidence before review: installed/dist SHA256 `4f8720b1d96e056425c6d31596487e5ed4c60e734259e7df8e26f3a501430dfa`, version `0.90.4574`, one aggregate restart, health OK on 4444/5520/5555/10000, and 5555 same-entry old sample completed with exact `CC_SOL_OK`.
+- Jason added a separate runtime policy requirement while the build-isolation review was running: three consecutive 401/403-class account failures must enter hourly probe cadence, while SSE decoding errors must not increment the health failure counter. This is a distinct semantic claim/worktree after the build-isolation change is integrated; it must not be mixed into this build-domain claim.

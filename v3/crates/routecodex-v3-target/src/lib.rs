@@ -28,6 +28,7 @@ pub struct V3TargetCandidate {
     pub model_capabilities: Vec<String>,
     pub web_search_execution_mode: V3WebSearchExecutionMode,
     pub max_context_tokens: Option<u64>,
+    pub context_token_estimate_scale_bps: u64,
     pub base_url: String,
     pub responses_process: Option<String>,
     pub responses_transport: V3ResponsesTransportKind,
@@ -112,6 +113,16 @@ struct V3TargetExpansionScope {
     required_capabilities: Vec<String>,
     requested_model_filter: Option<String>,
     visible_model_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V3TargetContextAdmission {
+    Normal,
+    NearLimit,
+    Exceeded {
+        input_tokens: u64,
+        max_context_tokens: u64,
+    },
 }
 
 impl V3TargetInterpreter {
@@ -268,42 +279,71 @@ impl V3TargetInterpreter {
         // Explicit exclusions still block via the exhaustion path below.
         let direct_route = expanded.route.pool_id == "direct";
         let mut direct_fallback: Option<(usize, V3TargetCandidate)> = None;
-        for (index, candidate) in expanded.candidates.iter().enumerate() {
-            if !candidate_satisfies_required_capabilities(candidate) {
-                unavailable.push(format!(
-                    "{}:{}:{}:capability_mismatch",
-                    candidate.provider_id, candidate.auth_alias, candidate.model_id
+        for admission_class in [
+            V3TargetContextAdmission::Normal,
+            V3TargetContextAdmission::NearLimit,
+        ] {
+            for (index, candidate) in expanded.candidates.iter().enumerate() {
+                if !candidate_satisfies_required_capabilities(candidate) {
+                    if admission_class == V3TargetContextAdmission::Normal {
+                        unavailable.push(format!(
+                            "{}:{}:{}:capability_mismatch",
+                            candidate.provider_id, candidate.auth_alias, candidate.model_id
+                        ));
+                    }
+                    continue;
+                }
+                let context_admission =
+                    candidate_context_admission(candidate, expanded.route.request_input_tokens);
+                if let V3TargetContextAdmission::Exceeded {
+                    input_tokens,
+                    max_context_tokens,
+                } = context_admission
+                {
+                    if admission_class == V3TargetContextAdmission::Normal {
+                        unavailable.push(format!(
+                            "{}:{}:{}:context_window_exceeded(input_tokens={},max_context_tokens={})",
+                            candidate.provider_id,
+                            candidate.auth_alias,
+                            candidate.model_id,
+                            input_tokens,
+                            max_context_tokens
+                        ));
+                    }
+                    continue;
+                }
+                if context_admission != admission_class {
+                    continue;
+                }
+                let projection = availability.availability(
+                    &candidate.provider_id,
+                    Some(&candidate.auth_alias),
+                    Some(&candidate.model_id),
+                    now_ms,
+                );
+                if projection.available {
+                    return Ok(V3Target10ConcreteProviderSelected {
+                        route: expanded.route,
+                        candidate: candidate.clone(),
+                        unavailable_candidates: unavailable,
+                        attempts: index + 1,
+                        default_floor_protected: false,
+                    });
+                }
+                if direct_route
+                    && direct_fallback.is_none()
+                    && !projection
+                        .blocked_scopes
+                        .iter()
+                        .any(|scope| scope == "request_local_provider_failure")
+                {
+                    direct_fallback = Some((index, candidate.clone()));
+                }
+                unavailable.push(format_candidate_availability_unavailable(
+                    candidate,
+                    &projection,
                 ));
-                continue;
             }
-            let projection = availability.availability(
-                &candidate.provider_id,
-                Some(&candidate.auth_alias),
-                Some(&candidate.model_id),
-                now_ms,
-            );
-            if projection.available {
-                return Ok(V3Target10ConcreteProviderSelected {
-                    route: expanded.route,
-                    candidate: candidate.clone(),
-                    unavailable_candidates: unavailable,
-                    attempts: index + 1,
-                    default_floor_protected: false,
-                });
-            }
-            if direct_route
-                && direct_fallback.is_none()
-                && !projection
-                    .blocked_scopes
-                    .iter()
-                    .any(|scope| scope == "request_local_provider_failure")
-            {
-                direct_fallback = Some((index, candidate.clone()));
-            }
-            unavailable.push(format_candidate_availability_unavailable(
-                candidate,
-                &projection,
-            ));
         }
         if let Some((index, candidate)) = direct_fallback {
             return Ok(V3Target10ConcreteProviderSelected {
@@ -494,6 +534,7 @@ impl V3TargetInterpreter {
                 model_capabilities: model.capabilities.clone(),
                 web_search_execution_mode: model.web_search_execution_mode,
                 max_context_tokens: model.max_context_tokens,
+                context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                 base_url: provider.base_url.clone(),
                 responses_process: provider
                     .responses
@@ -574,6 +615,30 @@ impl V3TargetInterpreter {
         }
         order
     }
+}
+
+fn candidate_context_admission(
+    candidate: &V3TargetCandidate,
+    request_input_tokens: u64,
+) -> V3TargetContextAdmission {
+    let Some(max_context_tokens) = candidate.max_context_tokens else {
+        return V3TargetContextAdmission::Normal;
+    };
+    let scaled_input_tokens = ((u128::from(request_input_tokens)
+        * u128::from(candidate.context_token_estimate_scale_bps)
+        + 9_999)
+        / 10_000)
+        .min(u128::from(u64::MAX)) as u64;
+    if scaled_input_tokens > max_context_tokens {
+        return V3TargetContextAdmission::Exceeded {
+            input_tokens: scaled_input_tokens,
+            max_context_tokens,
+        };
+    }
+    if u128::from(scaled_input_tokens) * 100 >= u128::from(max_context_tokens) * 90 {
+        return V3TargetContextAdmission::NearLimit;
+    }
+    V3TargetContextAdmission::Normal
 }
 
 fn selected_route_required_capabilities(

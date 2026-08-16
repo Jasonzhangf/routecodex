@@ -1,0 +1,30 @@
+lifecycle_id: v3.build_test_artifact_budget
+status: active
+owner_feature_id: v3.build_test_artifact_budget
+canonical_docs:
+  - docs/goals/v3-build-test-artifact-budget-test-design.md
+  - docs/architecture/wiki/v3-build-test-artifact-budget.md
+entrypoint: V3BuildTest01CommandAccepted
+return_path: V3BuildTest04BudgetVerified
+nodes:
+  - node_id: V3BuildTest01CommandAccepted
+    owner: scripts/cargo-test-artifact-runner.mjs
+  - node_id: V3BuildTest02ArtifactsProduced
+    owner: cargo test
+  - node_id: V3BuildTest03OwnedArtifactsReleased
+    owner: scripts/run-v3-cargo-test.mjs
+  - node_id: V3BuildTest04BudgetVerified
+    owner: scripts/run-v3-cargo-test.mjs
+edges:
+  - edge_id: v3-build-test-budget-01
+    from: V3BuildTest01CommandAccepted
+    to: V3BuildTest02ArtifactsProduced
+  - edge_id: v3-build-test-budget-02
+    from: V3BuildTest02ArtifactsProduced
+    to: V3BuildTest03OwnedArtifactsReleased
+  - edge_id: v3-build-test-budget-03
+    from: V3BuildTest03OwnedArtifactsReleased
+    to: V3BuildTest04BudgetVerified
+verification_gates:
+  - npm run verify:v3-build-test-artifact-budget
+  - npm run test:v3-build-test-artifact-budget-red-fixtures

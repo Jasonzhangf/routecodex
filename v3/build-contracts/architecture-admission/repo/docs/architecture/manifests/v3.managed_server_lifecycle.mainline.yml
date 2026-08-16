@@ -1,0 +1,35 @@
+schema_version: 1
+lifecycle_id: v3.server.managed_lifecycle
+owner_feature: v3.managed_server_lifecycle
+entrypoint: V3Lifecycle01ValidatedConfig
+return_path: V3Lifecycle07GracefullyStopped
+canonical_docs:
+  - docs/goals/v3-managed-live-server-lifecycle-plan.md
+  - docs/goals/v3-managed-server-lifecycle-test-design.md
+  - docs/architecture/wiki/v3-managed-server-lifecycle.md
+nodes:
+  - V3Lifecycle01ValidatedConfig
+  - V3Lifecycle02InstanceDeclared
+  - V3Lifecycle03OperationLocked
+  - V3Lifecycle04ChildSpawned
+  - V3Lifecycle05IdentityPublished
+  - V3Lifecycle06LiveControlled
+  - V3Lifecycle07GracefullyStopped
+edges:
+  - [V3Lifecycle01ValidatedConfig, V3Lifecycle02InstanceDeclared]
+  - [V3Lifecycle02InstanceDeclared, V3Lifecycle03OperationLocked]
+  - [V3Lifecycle03OperationLocked, V3Lifecycle04ChildSpawned]
+  - [V3Lifecycle04ChildSpawned, V3Lifecycle05IdentityPublished]
+  - [V3Lifecycle05IdentityPublished, V3Lifecycle06LiveControlled]
+  - [V3Lifecycle06LiveControlled, V3Lifecycle07GracefullyStopped]
+verification_gates:
+  - verify:v3-managed-server-lifecycle
+  - test:v3-managed-server-lifecycle-red-fixtures
+  - test:v3-managed-server-lifecycle
+  - verify:v3-architecture-docs
+  - verify:v3-resource-map
+  - verify:v3-module-boundaries
+  - verify:v3-rust-only
+  - verify:v3-cargo-fmt
+  - verify:v3-clippy
+  - test:v3-workspace

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>V3 Provider Failure Session Isolation</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; background: #0b1020; color: #e8eefc; }
+    main { max-width: 1100px; margin: 0 auto; padding: 40px 24px 64px; }
+    h1 { margin: 0 0 8px; font-size: 2rem; }
+    .status { color: #fbbf24; margin-bottom: 28px; }
+    .flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .node { border: 1px solid #33456d; border-radius: 12px; padding: 14px; background: #111a31; }
+    .owner { color: #8bb8ff; font-size: .8rem; margin-top: 6px; }
+    .arrow { color: #8da0c8; text-align: center; padding: 8px; }
+    section { margin-top: 34px; }
+    li { margin: 9px 0; line-height: 1.45; }
+    code { color: #9ee7c0; }
+    @media (max-width: 760px) { .flow { grid-template-columns: 1fr; } .arrow { transform: rotate(90deg); } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>V3 Provider Failure Session Isolation</h1>
+  <div class="status">Pending implementation and live verification</div>
+  <div class="flow">
+    <div class="node">Validated request <code>session_id</code><div class="owner">Server / ReqInbound</div></div>
+    <div class="node">Typed failure session scope<div class="owner">Error contract</div></div>
+    <div class="node">Session availability + strikes<div class="owner">Provider Health</div></div>
+    <div class="node">Captured plan selection<div class="owner">Target, read-only</div></div>
+    <div class="node">Provider attempt<div class="owner">Direct / Relay Runtime</div></div>
+    <div class="node">Session ActionGate + Error05<div class="owner">Runtime / Error</div></div>
+    <div class="node">Atomic same-plan revive<div class="owner">Health admission, Runtime execution</div></div>
+    <div class="node">Original deadline or Error06<div class="owner">Health expiry / terminal projection</div></div>
+  </div>
+  <section>
+    <h2>Hard locks</h2>
+    <ul>
+      <li>Key: <code>server + group + session + provider + auth + model</code>.</li>
+      <li>No routing-group, request, conversation, continuation or MetadataCenter session fallback.</li>
+      <li>A cooldown, waiter, permit, success or terminal transition never affects B.</li>
+      <li>Virtual Router is hit once; recovery stays inside <code>selected.route.target_plan</code>.</li>
+      <li>One atomic revive requires explicit sibling health evidence.</li>
+      <li>Failed revive preserves the original deadline and cannot send again before expiry.</li>
+      <li>Configured disable, health disable, quota and concurrency remain global facts.</li>
+    </ul>
+  </section>
+  <section>
+    <h2>Completion evidence</h2>
+    <ul>
+      <li>Paired Health, ActionGate, Error05, Direct/Relay JSON/SSE and post-commit tests.</li>
+      <li>Machine verifier plus mutation fixtures wired into build and CI.</li>
+      <li>Installed-source hash match, one aggregate restart, all member health checks.</li>
+      <li>Real A/B isolation and failed-revive deadline replay.</li>
+      <li>Final Codex review semantic PASS after live verification.</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

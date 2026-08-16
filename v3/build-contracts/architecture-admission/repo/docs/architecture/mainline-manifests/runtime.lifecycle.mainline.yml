@@ -1,0 +1,53 @@
+lifecycle_id: runtime.lifecycle.mainline
+summary: "Managed server lifecycle: restart identity is one aggregate listener PID set across configured member ports; `ROUTECODEX_SESSION_DIR` is only the runtime workdir root, and tmux/request/conversation identities remain separate namespaces."
+owner_feature_id: runtime.lifecycle.pid_cache
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
+entrypoint:
+  node_id: ServerPidCacheRecord
+  wiki_page: docs/design/server-runtime-lifecycle-ssot.md
+  call_map_chain_id: runtime.lifecycle.mainline
+node_ids:
+  - DaemonRestartLoop
+  - DaemonSupervisorLoop
+  - PortRegistry
+  - PortScopedListenerRelease
+  - RestartProcessHttpRequest
+  - RestartProcessSignal
+  - RuntimeInstanceRecord
+  - ServerPidCacheRecord
+  - ServerRestartCommand
+  - ServerStartCommand
+  - ServerStopCommand
+  - StartRestartTakeoverGuard
+  - StartShutdownHandler
+  - StopIntentRecord
+step_ids:
+  - rtl-01
+  - rtl-03
+  - rtl-04
+  - rtl-05
+  - rtl-06
+  - rtl-07
+  - rtl-08
+  - rtl-09
+  - rtl-10
+  - rtl-11
+  - rtl-12
+  - rtl-13
+  - rtl-14
+  - rtl-15
+  - rtl-16
+edge_status_counts:
+  anchored: 15
+  partial: 0
+  binding_pending: 0
+  total: 15
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: runtime.lifecycle.mainline
+  min_function_feature: runtime.lifecycle.pid_cache
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

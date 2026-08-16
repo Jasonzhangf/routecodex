@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>V3 Anthropic Relay Local Continuation</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#151c31; --line:#44506f; --ok:#71e1b3; --text:#edf2ff; --muted:#a9b3cc; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:15px/1.5 ui-sans-serif,system-ui,sans-serif; background:radial-gradient(circle at top,#182445,var(--bg) 42%); color:var(--text); }
+    main { max-width:1120px; margin:auto; padding:42px 24px 64px; }
+    h1 { margin:0 0 8px; font-size:clamp(28px,4vw,46px); }
+    h2 { margin-top:34px; }
+    .status { color:var(--ok); font-weight:700; letter-spacing:.04em; }
+    .muted { color:var(--muted); }
+    .flow { display:grid; grid-template-columns:repeat(4,minmax(170px,1fr)); gap:12px; overflow:auto; padding-bottom:8px; }
+    .node,.card { border:1px solid var(--line); border-radius:12px; background:color-mix(in srgb,var(--panel) 92%,transparent); padding:14px; }
+    .node { min-height:88px; position:relative; }
+    .node:not(:last-child)::after { content:"→"; position:absolute; right:-15px; top:30px; color:var(--ok); z-index:2; }
+    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; }
+    .card strong { display:block; color:var(--ok); margin-bottom:5px; }
+    code { color:#c6d5ff; }
+    ul { padding-left:20px; }
+    @media (max-width:820px) { .flow { grid-template-columns:repeat(2,minmax(170px,1fr)); } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="status">CONTROLLED JSON/SSE VERIFIED</div>
+  <h1>V3 Anthropic Relay Local Continuation</h1>
+  <p class="muted">Rust Runtime Chat Process owner only. Resp04 save, immutable interval, next Req04 restore, terminal release. Live provider and production cutover not claimed.</p>
+
+  <h2>Lifecycle</h2>
+  <div class="flow">
+    <div class="node"><code>V3LocalContResp01ChatProcessGoverned</code><br>Resp03 determines pending or terminal.</div>
+    <div class="node"><code>V3LocalContResp02ImmutableSaved</code><br>Resp04 stores canonical provider response or releases restored truth.</div>
+    <div class="node"><code>V3LocalContReq03ExactScopeLoaded</code><br>Anthropic Relay endpoint, session, conversation, port, group, owner, expiry.</div>
+    <div class="node"><code>V3LocalContReq04RestoredGoverned</code><br>Saved reasoning/function_call precedes current function_call_output.</div>
+  </div>
+
+  <h2>Locks</h2>
+  <div class="cards">
+    <div class="card"><strong>Save</strong>Only pending Anthropic Relay tool calls save at Resp04; every pending call ID aliases the same immutable context.</div>
+    <div class="card"><strong>Restore</strong>Only Anthropic <code>tool_result.tool_use_id</code> restores at next Req04 under exact full scope.</div>
+    <div class="card"><strong>Error</strong>Scope mismatch fails before provider send. Provider error after restore follows Error01–06 and retains saved truth.</div>
+    <div class="card"><strong>Isolation</strong>No owner, scope, store key, debug, metadata, auth, or route-control field enters provider/client payload.</div>
+  </div>
+
+  <h2>Canonical docs</h2>
+  <ul>
+    <li><a href="../../goals/v3-anthropic-relay-local-continuation-integration-plan.md">implementation plan</a></li>
+    <li><a href="../../goals/v3-anthropic-relay-local-continuation-test-design.md">test design</a></li>
+    <li><a href="../manifests/v3.anthropic_relay.local_continuation.mainline.yml">machine manifest</a></li>
+  </ul>
+</main>
+</body>
+</html>

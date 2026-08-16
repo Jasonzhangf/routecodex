@@ -141,9 +141,9 @@ run_default_v3_install() {
     check_node
     cleanup_retired_v2_install
     node scripts/cleanup-stale-server-pids.mjs --quiet
-    npm run test:install-v3-target-cleanup
-    echo "🔁 install:global 默认入口走 V3-only: node scripts/install-v3-cli.mjs"
-    node scripts/install-v3-cli.mjs
+    npm --prefix v3 run test:install-cleanup
+    echo "🔁 install:global 默认入口走 V3-only: npm --prefix v3 run install"
+    npm --prefix v3 run install
     node scripts/ensure-cli-command-shim.mjs
     node scripts/ensure-cli-executable.mjs
     verify_direct_v3_install
@@ -170,6 +170,4 @@ main() {
 }
 
 main "$@"
-
-
 

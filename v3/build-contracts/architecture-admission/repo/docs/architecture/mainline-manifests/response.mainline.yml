@@ -1,0 +1,33 @@
+lifecycle_id: response.mainline
+summary: Provider response enters Hub, gets governed, then projects to client protocol and server frame.
+owner_feature_id: hub.response_provider_sse_materialization
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
+entrypoint:
+  node_id: ProviderRespInbound01Raw
+  wiki_page: docs/design/pipeline-type-topology-and-module-boundaries.md
+  call_map_chain_id: response.mainline
+node_ids:
+  - HubRespChatProcess03Governed
+  - HubRespInbound02Parsed
+  - HubRespOutbound04ClientSemantic
+  - ProviderRespInbound01Raw
+  - ServerRespOutbound05ClientFrame
+step_ids:
+  - resp-01
+  - resp-02
+  - resp-03
+  - resp-04
+edge_status_counts:
+  anchored: 4
+  partial: 0
+  binding_pending: 0
+  total: 4
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: response.mainline
+  min_function_feature: hub.response_provider_sse_materialization
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

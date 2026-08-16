@@ -392,7 +392,9 @@ targets = [
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
         .expect_err("metadata_center_local_search without backend binding must fail");
     assert!(
-        error.to_string().contains("requires exactly one web_search_backend binding"),
+        error
+            .to_string()
+            .contains("requires exactly one web_search_backend binding"),
         "unexpected error: {error}"
     );
 
@@ -400,10 +402,9 @@ targets = [
         "web_search_execution_mode = \"metadata_center_local_search\"",
         "web_search_execution_mode = \"metadata_center_local_search\"\nweb_search_backend = \"local.search\"",
     );
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&source_with_backend).unwrap(),
-    )
-    .expect("metadata_center_local_search with backend binding must compile");
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source_with_backend).unwrap())
+            .expect("metadata_center_local_search with backend binding must compile");
     assert_eq!(
         manifest.providers["local"].models["local-model"]
             .web_search_backend_binding
@@ -455,7 +456,9 @@ targets = [
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
         .expect_err("same model name with conflicting web_search_execution_mode must fail");
     assert!(
-        error.to_string().contains("conflicting web_search_execution_mode"),
+        error
+            .to_string()
+            .contains("conflicting web_search_execution_mode"),
         "unexpected error: {error}"
     );
 }
@@ -736,10 +739,8 @@ reason_code = "subscription_invalid_without_token"
 message_mode = "code_only"
 "#
     );
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&path_config).unwrap(),
-    )
-    .unwrap();
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&path_config).unwrap()).unwrap();
     let policy = manifest
         .error
         .provider_error_action_policy
@@ -756,15 +757,21 @@ message_mode = "code_only"
     );
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&ambiguous).unwrap())
         .unwrap_err();
-    assert!(error.to_string().contains("both action and path"), "{error}");
+    assert!(
+        error.to_string().contains("both action and path"),
+        "{error}"
+    );
 
     let invalid = path_config.replace(
         "step = \"cooldown\"\nscope = \"provider_instance\"\nduration_ms = 3600000\nprovider_global_failure = true",
         "step = \"project\"\nstatus = 502\nreason_code = \"early_project\"\nmessage_mode = \"code_only\"",
     );
-    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap())
-        .unwrap_err();
-    assert!(error.to_string().contains("project must be the final step"), "{error}");
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(
+        error.to_string().contains("project must be the final step"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -1656,6 +1663,52 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
             "fwd.paid.gpt-5.4",
         ],
     );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v2_compat_provider_auth_secret_file_expands_key_names_without_values() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-v2-auth-key-file-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+    );
+    let secret_file = root.join("opencode-go.conf");
+    fs::write(
+        &secret_file,
+        "cc-sol.key1 = first-secret\ncc-sol.key2 = second-secret\n",
+    )
+    .unwrap();
+    let provider_path = root.join("provider/cc-sol/config.v2.toml");
+    let provider_raw = fs::read_to_string(&provider_path).unwrap().replace(
+        "apiKey = \"secret-cc-sol-key1\"",
+        &format!("secretFile = \"{}\"", secret_file.display()),
+    );
+    fs::write(&provider_path, provider_raw).unwrap();
+    let config_path = root.join("config.toml");
+    fs::write(&config_path, V2_SINGLE_RESPONSES_CONFIG).unwrap();
+
+    let manifest = V3ConfigStore::new(&config_path).load_snapshot().unwrap();
+    let auth = &manifest.providers["cc-sol"].auth.entries;
+    assert_eq!(auth.len(), 2);
+    assert_eq!(auth[0].alias, "key1");
+    assert_eq!(auth[0].secret_file.as_deref(), secret_file.to_str());
+    assert_eq!(auth[0].secret_key.as_deref(), Some("cc-sol.key1"));
+    assert_eq!(auth[1].alias, "key2");
+    assert_eq!(auth[1].secret_key.as_deref(), Some("cc-sol.key2"));
+    assert!(auth.iter().all(|entry| entry.api_key.is_none()));
+    let debug = format!("{manifest:?}");
+    assert!(!debug.contains("first-secret"));
+    assert!(!debug.contains("second-secret"));
 
     fs::remove_dir_all(root).unwrap();
 }

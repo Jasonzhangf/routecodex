@@ -1,0 +1,145 @@
+lifecycle_id: metadata.center.mainline
+summary: "single request-scoped metadata center mainline: one bound center flows
+  across server -> Hub Pipeline -> provider/runtime -> response closeout;
+  request truth is materialized once, continuation/runtime/provider observation
+  attach as separate families, and later stages consume read-only projections
+  before closeout release."
+owner_feature_id: hub.metadata_center_mainline
+entrypoint:
+  node_id: MetaReq01InboundSeeded
+  wiki_page: docs/architecture/wiki/metadata-center-mainline-source.md
+  call_map_chain_id: metadata.center.mainline
+node_ids:
+  - MetaReq01InboundSeeded
+  - MetaReq02TruthMaterialized
+  - MetaReq03ContinuationAttached
+  - MetaReq04RuntimeControlBound
+  - MetaReq05ProviderObservationProjected
+  - MetaResp06ResponseObserved
+  - MetaResp07BridgeMetadataBound
+  - MetaResp08CloseoutReleased
+edges:
+  - step_id: mtc-01
+    from_node: MetaReq01InboundSeeded
+    to_node: MetaReq02TruthMaterialized
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.protocol_context
+      produces:
+        - metadata.request_truth
+      side_channel_reads: []
+      side_channel_writes:
+        - metadata.request_truth
+  - step_id: mtc-02
+    from_node: MetaReq02TruthMaterialized
+    to_node: MetaReq03ContinuationAttached
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - metadata.request_truth
+        - continuation.scope_state
+      produces:
+        - continuation.scope_state
+      side_channel_reads:
+        - metadata.request_truth
+        - continuation.scope_state
+      side_channel_writes:
+        - continuation.scope_state
+  - step_id: mtc-03
+    from_node: MetaReq03ContinuationAttached
+    to_node: MetaReq04RuntimeControlBound
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - metadata.request_truth
+      produces:
+        - metadata.runtime_control
+      side_channel_reads:
+        - metadata.request_truth
+      side_channel_writes:
+        - metadata.runtime_control
+  - step_id: mtc-04
+    from_node: MetaReq04RuntimeControlBound
+    to_node: MetaReq05ProviderObservationProjected
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - metadata.runtime_control
+        - route.selection
+      produces:
+        - provider_runtime.observation
+      side_channel_reads:
+        - metadata.runtime_control
+        - route.selection
+      side_channel_writes:
+        - provider_runtime.observation
+  - step_id: mtc-05
+    from_node: MetaReq05ProviderObservationProjected
+    to_node: MetaResp06ResponseObserved
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.provider_raw
+        - provider_runtime.observation
+        - metadata.request_truth
+      produces:
+        - metadata.response_observation
+      side_channel_reads:
+        - provider_runtime.observation
+        - metadata.request_truth
+      side_channel_writes:
+        - metadata.response_observation
+  - step_id: mtc-06
+    from_node: MetaResp06ResponseObserved
+    to_node: MetaResp07BridgeMetadataBound
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - metadata.response_observation
+        - metadata.runtime_control
+      produces:
+        - metadata.response_observation
+      side_channel_reads:
+        - metadata.response_observation
+        - metadata.runtime_control
+      side_channel_writes:
+        - metadata.response_observation
+  - step_id: mtc-07
+    from_node: MetaResp07BridgeMetadataBound
+    to_node: MetaResp08CloseoutReleased
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - metadata.request_truth
+        - metadata.response_observation
+      produces: []
+      side_channel_reads:
+        - metadata.request_truth
+        - metadata.response_observation
+      side_channel_writes: []
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

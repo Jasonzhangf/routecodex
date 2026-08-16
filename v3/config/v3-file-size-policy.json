@@ -1,0 +1,17 @@
+{
+  "feature_id": "v3.module_decomposition",
+  "limit": 1500,
+  "scope": "crates",
+  "exclude_path_segments": [
+    "/target/",
+    "/tests/"
+  ],
+  "ratchet_whitelist": {
+    "crates/provider-compat-core/src/lib.rs": 2210,
+    "crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs": 1698,
+    "crates/servertool-core/src/cli_contract.rs": 2913,
+    "crates/servertool-core/src/persisted_lookup.rs": 2299,
+    "crates/servertool-core/src/stop_message_auto_handler.rs": 1641,
+    "crates/stop-message-core/src/lib.rs": 2875
+  }
+}

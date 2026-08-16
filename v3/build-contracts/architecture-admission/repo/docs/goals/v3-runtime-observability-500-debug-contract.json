@@ -1,0 +1,33 @@
+{
+  "symptom": {
+    "observed": "5555 logs show post-commit status=500 runtime_observability_contract: successful V3 Runtime observability is missing timing after Direct SSE status=201/completed.",
+    "expected": "Direct SSE client drop after observed response.completed must not emit failed/500; success console line may require Runtime timing only after clean EOF.",
+    "entry": "/v1/responses SSE Direct on 5555",
+    "raw_evidence": ["~/.rcc/logs/server-5555.log", "v3/crates/routecodex-v3-server/src/lib.rs:V3DirectSseConsoleFinalizer::client_disconnected"]
+  },
+  "sop_model_flow": {
+    "status": "known",
+    "flow_id": "v3.runtime_timing_observability + v3.console_human_readable_layering",
+    "source_docs": ["docs/architecture/v3-function-map.yml", "docs/architecture/v3-verification-map.yml", "docs/architecture/v3-mainline-call-map.yml"],
+    "lifecycle_nodes": ["V3ProviderResp14Raw", "V3DirectResp15ClientPayloadReady", "V3Server16HttpFrame", "V3ServerRespOutbound06ClientFrame"],
+    "resource_edges": ["V3RuntimeStreamObservation -> Server console projection"],
+    "forbidden_edges": ["Server elapsed -> Runtime timing fabrication", "post-commit observability gap -> client-visible/business 500"]
+  },
+  "hypotheses": [
+    {
+      "id": "H1",
+      "cause": "Direct SSE Drop after response.completed merges terminal status without timing, then success console formatter treats missing timing as runtime contract failure and emits post-commit 500.",
+      "modules": ["v3/crates/routecodex-v3-server/src/lib.rs"],
+      "supporting_evidence": "format_v3_console_runtime_timing errors on None; client_disconnected emits success on terminal status; direct runtime timing records only at clean EOF.",
+      "verification_action": "make direct_sse_console_closeout_does_not_fabricate_success_or_error_before_runtime_eof set observability.timing=None and expect no runtime_observability_contract/500",
+      "confidence": 95
+    }
+  ],
+  "active_hypothesis": "H1",
+  "first_divergence_node": "V3ServerRespOutbound06ClientFrame console closeout after client Drop",
+  "root_cause_module": "v3 routecodex-v3-server console finalizer",
+  "unique_owner": "V3DirectSseConsoleFinalizer::client_disconnected / emit_direct_sse_complete_console_lines",
+  "allowed_paths": ["v3/crates/routecodex-v3-server/src/lib.rs", "docs/goals/v3-runtime-observability-500-debug-contract.json", "note.md", "MEMORY.md", ".agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md"],
+  "forbidden_paths": ["v3/crates/routecodex-v3-runtime/src/runtime_timing.rs", "v3/crates/routecodex-v3-provider-responses", "src", "sharedmodule", "provider config"],
+  "required_verification": ["cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server direct_sse_console_closeout_does_not_fabricate_success_or_error_before_runtime_eof --lib -- --nocapture", "npm run verify:v3-runtime-timing-observability", "npm run test:v3-runtime-timing-observability-red-fixtures", "npm run build:v3-cli", "npm run install:v3", "routecodex restart --port 5555", "live 5555 log window no new runtime_observability_contract"]
+}

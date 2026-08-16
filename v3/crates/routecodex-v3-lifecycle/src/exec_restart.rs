@@ -6,7 +6,9 @@ pub(crate) fn instance_has_control_truth(instance_dir: &Path) -> bool {
         && instance_dir.join("control.json").exists()
 }
 
-pub(crate) fn read_pid_cache_start_nonce(instance_dir: &Path) -> Result<Option<String>, V3LifecycleError> {
+pub(crate) fn read_pid_cache_start_nonce(
+    instance_dir: &Path,
+) -> Result<Option<String>, V3LifecycleError> {
     let pid_path = instance_dir.join("pid.cache");
     if !pid_path.exists() {
         return Ok(None);
@@ -272,4 +274,3 @@ pub(crate) fn cleanup_previous_exec_restart_owner(
     )?;
     Ok(())
 }
-

@@ -1,0 +1,101 @@
+lifecycle_id: vr.route_classifier.mainline
+summary: V2 Virtual Router consumes the shared Rust current-turn/tool classifier
+  before producing the single selected-route truth.
+owner_feature_id: vr.route_classifier
+entrypoint:
+  node_id: HubReqChatProcess03Governed
+  wiki_page: null
+  call_map_chain_id: vr.route_classifier.mainline
+node_ids:
+  - HubReqChatProcess03Governed
+  - VrRoute04SelectedTarget
+  - VrRouteClassifier03ActiveTurnSignals
+  - VrRouteClassifier03Classified
+  - VrRouteClassifier03ShellClassification
+  - VrRouteClassifier03ToolClassification
+edges:
+  - step_id: vrc-01
+    from_node: HubReqChatProcess03Governed
+    to_node: VrRouteClassifier03ActiveTurnSignals
+    status: anchored
+    owner_feature_id: vr.route_classifier
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+      produces:
+        - vr.route_classification_decision
+      side_channel_reads: []
+      side_channel_writes:
+        - vr.route_classification_decision
+  - step_id: vrc-02
+    from_node: VrRouteClassifier03ActiveTurnSignals
+    to_node: VrRouteClassifier03ToolClassification
+    status: anchored
+    owner_feature_id: vr.route_classifier
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+      produces:
+        - vr.route_classification_decision
+      side_channel_reads: []
+      side_channel_writes:
+        - vr.route_classification_decision
+  - step_id: vrc-03
+    from_node: VrRouteClassifier03ToolClassification
+    to_node: VrRouteClassifier03ShellClassification
+    status: anchored
+    owner_feature_id: vr.route_classifier
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+      produces:
+        - vr.route_classification_decision
+      side_channel_reads: []
+      side_channel_writes:
+        - vr.route_classification_decision
+  - step_id: vrc-04
+    from_node: VrRouteClassifier03ActiveTurnSignals
+    to_node: VrRouteClassifier03Classified
+    status: anchored
+    owner_feature_id: vr.route_classifier
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - metadata.runtime_control
+        - vr.route_token_estimate
+      produces:
+        - vr.route_classification_decision
+      side_channel_reads:
+        - metadata.runtime_control
+        - vr.route_token_estimate
+      side_channel_writes:
+        - vr.route_classification_decision
+  - step_id: vrc-05
+    from_node: VrRouteClassifier03Classified
+    to_node: VrRoute04SelectedTarget
+    status: anchored
+    owner_feature_id: vr.route_selection
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - vr.route_classification_decision
+      produces:
+        - vr.route_selection_decision
+      side_channel_reads:
+        - vr.route_classification_decision
+        - metadata.runtime_control
+      side_channel_writes:
+        - vr.route_selection_decision
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

@@ -504,10 +504,8 @@ pub(crate) fn resolve_v2_provider_default_compatibility_profile(
     provider_id: &str,
 ) -> Option<String> {
     static PROVIDER_RESOLUTION_CONFIG: LazyLock<V2ProviderResolutionConfig> = LazyLock::new(|| {
-        serde_json::from_str(include_str!(
-            "../../../../sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json"
-        ))
-        .expect("V2 provider resolution compatibility profile config must parse")
+        serde_json::from_str(include_str!("v2_provider_compatibility_defaults.json"))
+            .expect("V3-local V2 provider compatibility defaults must parse")
     });
 
     PROVIDER_RESOLUTION_CONFIG
@@ -524,17 +522,72 @@ fn compile_v2_auth(
     _source_hash: String,
     auth: V2ProviderAuthConfig,
 ) -> Result<V3ProviderAuthAuthoringConfig, V3ConfigError> {
-    let entries = if let Some(entries) = auth.entries {
-        entries
-    } else {
-        vec![V2ProviderAuthEntry {
+    let V2ProviderAuthConfig {
+        api_key,
+        env,
+        token_file,
+        secret_file,
+        entries,
+    } = auth;
+    let inline_handle_count = usize::from(api_key.is_some())
+        + usize::from(env.is_some())
+        + usize::from(token_file.is_some());
+    let entries = match (entries, secret_file) {
+        (Some(_), Some(_)) => {
+            return Err(validation(format!(
+                "v2 provider {provider_id} auth cannot combine entries with secretFile auto discovery"
+            )));
+        }
+        (Some(entries), None) => {
+            if inline_handle_count != 0 {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth cannot combine entries with apiKey, env, or tokenFile"
+                )));
+            }
+            entries
+        }
+        (None, Some(secret_file)) => {
+            if inline_handle_count != 0 {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth secretFile cannot combine with apiKey, env, or tokenFile"
+                )));
+            }
+            let secret_file = secret_file.trim();
+            if secret_file.is_empty() {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth secretFile is empty"
+                )));
+            }
+            let content = fs::read_to_string(secret_file).map_err(|error| {
+                validation(format!(
+                    "v2 provider {provider_id} auth secretFile {secret_file} is unreadable: {error}"
+                ))
+            })?;
+            crate::discover_v3_secret_file_auth_handles(&content, provider_id)
+                .map_err(|error| {
+                    validation(format!(
+                        "v2 provider {provider_id} auth secretFile discovery failed: {error}"
+                    ))
+                })?
+                .into_iter()
+                .map(|(alias, secret_key)| V2ProviderAuthEntry {
+                    alias: Some(alias),
+                    api_key: None,
+                    env: None,
+                    token_file: None,
+                    secret_file: Some(secret_file.to_string()),
+                    secret_key: Some(secret_key),
+                })
+                .collect()
+        }
+        (None, None) => vec![V2ProviderAuthEntry {
             alias: Some("key1".to_string()),
-            api_key: auth.api_key,
-            env: auth.env,
-            token_file: auth.token_file,
+            api_key,
+            env,
+            token_file,
             secret_file: None,
             secret_key: None,
-        }]
+        }],
     };
     let mut v3_entries = Vec::new();
     for entry in entries {
@@ -648,7 +701,7 @@ fn compile_v2_provider_models(
             (
                 id.clone(),
                 V3ProviderModelAuthoringConfig {
-                    wire_name: model.wire_name.or_else(|| Some(id)),
+                    wire_name: model.wire_name.or(Some(id)),
                     aliases: model.aliases,
                     capabilities: normalize_v2_capabilities(model.capabilities),
                     web_search_execution_mode,
@@ -661,6 +714,7 @@ fn compile_v2_provider_models(
                         .max_context_tokens
                         .or(model.context_window)
                         .or(model.max_context),
+                    context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                     features: model.features,
                 },
             )
@@ -831,6 +885,7 @@ struct V2ProviderAuthConfig {
     api_key: Option<String>,
     env: Option<String>,
     token_file: Option<String>,
+    secret_file: Option<String>,
     entries: Option<Vec<V2ProviderAuthEntry>>,
 }
 
@@ -880,6 +935,8 @@ struct V2ProviderModelConfig {
     max_context: Option<u64>,
     max_context_tokens: Option<u64>,
     context_window: Option<u64>,
+    #[serde(default = "default_context_token_estimate_scale_bps")]
+    context_token_estimate_scale_bps: u64,
     /// Mode B 显式声明（v2 配置可选；缺省时按 `web_search_direct`
     /// capability 兼容推断 Mode A）。生产 v2 配置通过此字段启用
     /// `metadata_center_local_search` 与编译期 backend binding。
@@ -892,6 +949,10 @@ struct V2ProviderModelConfig {
     web_search_backend: Option<String>,
     #[serde(default)]
     features: BTreeMap<String, bool>,
+}
+
+fn default_context_token_estimate_scale_bps() -> u64 {
+    10_000
 }
 
 impl V2ProviderModelConfig {
@@ -931,10 +992,7 @@ web_search_backend = "MiniMax-M3"
             "snake_case web_search_execution_mode must parse (found {:?})",
             parsed.web_search_execution_mode()
         );
-        assert_eq!(
-            parsed.web_search_backend.as_deref(),
-            Some("MiniMax-M3")
-        );
+        assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
     }
 
     #[test]
@@ -947,7 +1005,10 @@ webSearchBackend = "MiniMax-M3"
 "#,
         )
         .expect("parse");
-        assert_eq!(parsed.web_search_execution_mode().as_str(), "metadata_center_local_search");
+        assert_eq!(
+            parsed.web_search_execution_mode().as_str(),
+            "metadata_center_local_search"
+        );
         assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
     }
 
@@ -979,7 +1040,11 @@ apiKey = "test-key"
 "#,
         )
         .expect("parse");
-        assert_eq!(parsed.provider.timeout, Some(900_000), "snake_case timeout must parse");
+        assert_eq!(
+            parsed.provider.timeout,
+            Some(900_000),
+            "snake_case timeout must parse"
+        );
 
         // (2) 端到点：临时 provider 目录 → compile_v2_provider_directory →
         //      manifest request_timeout_ms == 900_000
@@ -1015,11 +1080,9 @@ apiKey = "test-key"
 
         let mut referenced_models: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         referenced_models.insert("test-provider".to_string(), BTreeSet::new());
-        let (providers, _sources) =
-            compile_v2_provider_directory(&tmp, &referenced_models).expect("compile v2 provider dir");
-        let authoring = providers
-            .get("test-provider")
-            .expect("provider compiled");
+        let (providers, _sources) = compile_v2_provider_directory(&tmp, &referenced_models)
+            .expect("compile v2 provider dir");
+        let authoring = providers.get("test-provider").expect("provider compiled");
         assert_eq!(
             authoring.request_timeout_ms, 900_000,
             "V2→V3 end-to-end: timeout=900_000 must land in request_timeout_ms (was silently dropped)"
@@ -1059,17 +1122,14 @@ apiKey = "test-key"
 "#,
             )
             .expect("write");
-        let (providers_default, _sources_default) = compile_v2_provider_directory(
-            &tmp_default,
-            &referenced_models,
-        )
-        .expect("compile v2 provider dir (absent timeout)");
+        let (providers_default, _sources_default) =
+            compile_v2_provider_directory(&tmp_default, &referenced_models)
+                .expect("compile v2 provider dir (absent timeout)");
         let authoring_default = providers_default
             .get("test-provider")
             .expect("provider compiled");
         assert_eq!(
-            authoring_default.request_timeout_ms,
-            DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+            authoring_default.request_timeout_ms, DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
             "absent timeout must fall back to DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS (300_000)"
         );
         std::fs::remove_dir_all(&tmp_default).ok();
@@ -1093,7 +1153,11 @@ apiKey = "test-key"
 "#,
         )
         .expect("parse");
-        assert_eq!(parsed.provider.timeout, Some(900_000), "snake_case timeout must parse");
+        assert_eq!(
+            parsed.provider.timeout,
+            Some(900_000),
+            "snake_case timeout must parse"
+        );
 
         let absent: V2ProviderConfigFile = toml::from_str(
             r#"
@@ -1112,6 +1176,97 @@ apiKey = "test-key"
 "#,
         )
         .expect("parse");
-        assert_eq!(absent.provider.timeout, None, "absent timeout must be None (default applies later)");
+        assert_eq!(
+            absent.provider.timeout, None,
+            "absent timeout must be None (default applies later)"
+        );
+    }
+
+    #[test]
+    fn provider_auth_secret_file_auto_discovers_single_or_multiple_handles() {
+        let tmp = std::env::temp_dir().join(format!(
+            "rccv3-auth-key-file-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let key_file = tmp.join("opencode-go.conf");
+        std::fs::write(
+            &key_file,
+            "opencode-go.key1 = first-secret\nopencode-go.key2 = second-secret\n",
+        )
+        .expect("write key file");
+        let key_file = key_file.to_string_lossy().into_owned();
+        let compiled = compile_v2_auth(
+            &tmp,
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some(key_file.clone()),
+                entries: None,
+            },
+        )
+        .expect("auto discover key file");
+        assert_eq!(compiled.entries.len(), 2);
+        assert_eq!(compiled.entries[0].alias, "key1");
+        assert_eq!(
+            compiled.entries[0].secret_file.as_deref(),
+            Some(key_file.as_str())
+        );
+        assert_eq!(
+            compiled.entries[0].secret_key.as_deref(),
+            Some("opencode-go.key1")
+        );
+        assert_eq!(compiled.entries[1].alias, "key2");
+        assert_eq!(
+            compiled.entries[1].secret_key.as_deref(),
+            Some("opencode-go.key2")
+        );
+        assert!(compiled.entries.iter().all(|entry| entry.api_key.is_none()));
+
+        std::fs::write(&key_file, "opencode-go = single-secret\n").expect("write single key");
+        let single = compile_v2_auth(
+            &tmp,
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some(key_file.clone()),
+                entries: None,
+            },
+        )
+        .expect("auto discover single key");
+        assert_eq!(single.entries.len(), 1);
+        assert_eq!(single.entries[0].alias, "key1");
+        assert_eq!(single.entries[0].secret_key.as_deref(), Some("opencode-go"));
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn provider_auth_secret_file_auto_discovery_rejects_mixed_authoring() {
+        let error = compile_v2_auth(
+            Path::new("."),
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some("keys.conf".to_string()),
+                entries: Some(Vec::new()),
+            },
+        )
+        .expect_err("entries plus secretFile must fail");
+        assert!(error
+            .to_string()
+            .contains("cannot combine entries with secretFile"));
     }
 }

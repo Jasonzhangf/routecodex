@@ -495,6 +495,7 @@ pub struct V3Error05ExecutionDecision {
 }
 
 impl V3Error05ExecutionDecision {
+    #[allow(clippy::result_large_err)]
     pub fn try_into_terminal(self) -> Result<V3Error05TerminalDecision, Self> {
         let source_kind = &self.exhaustion.local_action.classified.source.source_kind;
         let valid_terminal = match source_kind {
@@ -672,7 +673,7 @@ pub fn is_v3_retryable_transient_source(source: &V3Error01SourceRaised) -> bool 
     if source.source_kind != V3ErrorSourceKind::ProviderFailure {
         return false;
     }
-    is_v3_retryable_transient_stage_code(&source.source_stage, &source.code)
+    is_v3_retryable_transient_stage_code(source.source_stage, &source.code)
 }
 
 /// Returns whether a provider failure is health-neutral and eligible for the
@@ -684,9 +685,7 @@ pub fn is_v3_retryable_transient_stage_code(source_stage: &str, code: &str) -> b
         // - 2xx 响应内容/流内失败（裸 error 事件、response.failed/incomplete、
         //   空包、首事件超时、malformed SSE、body/JSON 解码失败、SSE 事件内
         //   动态错误码等）：provider 内部瞬态问题，health-neutral 重试。
-        "V3ProviderResp14Raw" | "V3ProviderRespInbound01Raw" => {
-            !code.starts_with("provider_http_")
-        }
+        "V3ProviderResp14Raw" | "V3ProviderRespInbound01Raw" => !code.starts_with("provider_http_"),
         // transport 阶段仅挂起（响应头等待超时，专属 code）为瞬态。
         "V3Transport13ResponsesHttpRequest" | "V3ProviderReqOutbound09TransportRequest" => {
             code == V3_TRANSIENT_TRANSPORT_HANG_CODE
@@ -844,12 +843,12 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         .action
         .health_affecting
         .then(|| execution.exhaustion.local_action.action.clone());
-    let mut error = serde_json::json!({
+    let error = serde_json::json!({
         "code": source.code,
         "message": source.message,
     });
     let body = routecodex_v3_debug::project_debug_value_verbatim(
-        &routecodex_v3_debug::V3RedactionPolicy::default(),
+        &routecodex_v3_debug::V3RedactionPolicy,
         serde_json::json!({ "error": error }),
     );
     V3Error06ClientProjected {

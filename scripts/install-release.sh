@@ -357,9 +357,9 @@ run_default_v3_release_install() {
   check_tmux
   check_rust
   check_curl
-  echo "📦 当前源码版本: routecodex@$(node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0")"
-  echo "🔁 install:release 默认入口走 V3-only: node scripts/install-v3-cli.mjs"
-  node scripts/install-v3-cli.mjs
+  echo "📦 当前源码版本: routecodex-v3@$(node -p "require('./v3/package.json').version" 2>/dev/null || echo "0.0.0")"
+  echo "🔁 install:release 默认入口走 V3-only: npm --prefix v3 run install"
+  npm --prefix v3 run install
   ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 node "$SOURCE_ROOT/scripts/ensure-cli-command-shim.mjs"
   node scripts/ensure-cli-executable.mjs
   verify_cli_commands
@@ -374,4 +374,3 @@ main() {
 }
 
 main "$@"
-

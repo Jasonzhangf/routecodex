@@ -1,5 +1,8 @@
 [workspace]
 members = [
+  "crates/provider-compat-core",
+  "crates/servertool-core",
+  "crates/stop-message-core",
   "crates/routecodex-v3-config",
   "crates/routecodex-v3-debug",
   "crates/routecodex-v3-error",
@@ -28,15 +31,20 @@ bytes = "1"
 clap = { version = "4.5", features = ["derive"] }
 futures-util = { version = "0.3", features = ["sink"] }
 libc = "0.2"
+provider-compat-core = { path = "crates/provider-compat-core" }
+regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+servertool-core = { path = "crates/servertool-core" }
+stop-message-core = { path = "crates/stop-message-core" }
 thiserror = "1"
 tiktoken-rs = "0.12"
 tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 toml = "0.8"
+uuid = { version = "1", features = ["v4"] }
 
 [profile.test]
 debug = 0

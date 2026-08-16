@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Topology Residual Node Review</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: #fffdfa;
+      --ink: #1f241f;
+      --muted: #5f665f;
+      --line: #d9cfbf;
+      --accent: #0f766e;
+      --accent-soft: #dff4ef;
+      --code: #f3efe6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+    .frame {
+      background: color-mix(in srgb, var(--panel) 94%, white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
+      overflow: hidden;
+    }
+    header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    article {
+      padding: 28px;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
+    h3 { font-size: 1.25rem; color: var(--accent); }
+    p, ul, table, pre { margin: 0 0 1rem; }
+    ul { padding-left: 1.35rem; }
+    li + li { margin-top: 0.35rem; }
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+    }
+    pre {
+      background: #f8f4ec;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .mermaid {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
+      padding: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px 12px 40px; }
+      article, header { padding-left: 16px; padding-right: 16px; }
+      article { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="frame">
+      <header>
+        <h1>Topology Residual Node Review</h1>
+        <p>Canonical Markdown source: <code>docs/architecture/wiki/topology-residual-node-review.md</code></p>
+      </header>
+      <article>
+        <h1>Topology Residual Node Review</h1>
+        <h2>Purpose</h2>
+        <p>This page closes the topology review debt that was previously budgeted in <code>docs/architecture/topology-sync-manifest.yml</code>. These nodes are declared in <code>docs/design/pipeline-type-topology-and-module-boundaries.md</code> as stable topology contracts but are not first-class mainline call-map edges yet.</p>
+        <h2>Main Rule</h2>
+        <p>Residual topology nodes are review-surface contracts, not permission to add runtime shortcuts. They may describe transport detail, server dispatch detail, Virtual Router internal phases, or metadata carriers, but they must not become a second request/response pipeline.</p>
+        <h2>Residual Topology Surface</h2>
+        <pre class="mermaid">flowchart LR
+          ServerReqInbound02PipelineInput --&gt; HubReqInbound02Standardized
+          HubRespOutbound04ClientSemantic --&gt; ServerRespOutbound04DispatchPlan
+          ServerRespOutbound04DispatchPlan --&gt; ServerRespOutbound05ClientFrame
+
+          HubReqChatProcess03Governed --&gt; VrRoute01Features
+          VrRoute01Features --&gt; VrRoute02ClassifiedIntent
+          VrRoute02ClassifiedIntent --&gt; VrRoute03CandidatePool
+          VrRoute03CandidatePool --&gt; VrRoute04SelectedTarget
+          VrRoute04SelectedTarget --&gt; VrRoute05DecisionRecord
+
+          ProviderReqOutbound06WirePayload --&gt; ProviderReqOutbound07AuthApplied
+          ProviderReqOutbound07AuthApplied --&gt; ProviderReqOutbound08TransportRequest
+          ProviderReqOutbound08TransportRequest --&gt; ProviderReqOutbound08TransportSigned
+          ProviderRespInbound01RawTransport --&gt; ProviderRespInbound02DecodedProtocol
+          ProviderRespInbound02DecodedProtocol --&gt; ProviderRespInbound01Raw
+
+          MetaReq01EntryCaptured --&gt; MetaReq02RuntimeCarrier
+          MetaReq02RuntimeCarrier --&gt; MetaRoute03RouteCarrier
+          MetaRoute03RouteCarrier --&gt; MetaResp04SameRequestCarrier
+          MetaResp04SameRequestCarrier --&gt; MetaDone05Released</pre>
+        <h2>Node Matrix</h2>
+        <table>
+        <thead><tr><th>Node</th><th>Contract Role</th><th>Current Review Surface</th><th>Must Not Do</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>ServerReqInbound02PipelineInput</code></td><td>server entry input after raw HTTP capture</td><td>topology-only server handoff contract</td><td>build provider wire body</td></tr>
+        <tr><td><code>ServerRespOutbound04DispatchPlan</code></td><td>server response dispatch plan before client frame write</td><td>topology-only server dispatch contract</td><td>repair Hub history or provider semantics</td></tr>
+        <tr><td><code>VrRoute01Features</code></td><td>route feature extraction phase</td><td>Virtual Router internal phase contract</td><td>mutate request payload</td></tr>
+        <tr><td><code>VrRoute02ClassifiedIntent</code></td><td>route intent classification phase</td><td>Virtual Router internal phase contract</td><td>choose provider by provider-specific payload patch</td></tr>
+        <tr><td><code>VrRoute03CandidatePool</code></td><td>route candidate pool phase</td><td>Virtual Router internal phase contract</td><td>execute retry/reroute policy locally in caller</td></tr>
+        <tr><td><code>VrRoute05DecisionRecord</code></td><td>route decision record after selected target</td><td>Virtual Router internal phase contract</td><td>become client-visible response truth</td></tr>
+        <tr><td><code>ProviderReqOutbound07AuthApplied</code></td><td>provider auth/header application phase</td><td>provider runtime transport detail</td><td>perform Hub tool governance</td></tr>
+        <tr><td><code>ProviderReqOutbound08TransportRequest</code></td><td>provider HTTP/SDK transport request phase</td><td>provider runtime transport detail</td><td>reselect route or inject metadata into body</td></tr>
+        <tr><td><code>ProviderReqOutbound08TransportSigned</code></td><td>optional signed transport tail phase</td><td>topology tail-extension example</td><td>insert a mid-chain shortcut</td></tr>
+        <tr><td><code>ProviderRespInbound01RawTransport</code></td><td>provider raw transport response phase</td><td>provider runtime transport detail</td><td>parse into client response directly</td></tr>
+        <tr><td><code>ProviderRespInbound02DecodedProtocol</code></td><td>provider decoded protocol phase</td><td>provider runtime decode detail</td><td>swallow parse errors as success</td></tr>
+        <tr><td><code>MetaReq01EntryCaptured</code></td><td>metadata captured at request entry</td><td>Rust contract help carrier</td><td>enter provider/client normal payload</td></tr>
+        <tr><td><code>MetaReq02RuntimeCarrier</code></td><td>request-scoped runtime metadata carrier</td><td>Rust contract help plus <code>meta_error_carriers.rs</code></td><td>persist as live metadata object</td></tr>
+        <tr><td><code>MetaResp04SameRequestCarrier</code></td><td>same-request response metadata carrier</td><td>Rust contract help carrier</td><td>restore another request/session state</td></tr>
+        </tbody>
+        </table>
+        <h2>Owner Matrix</h2>
+        <table>
+        <thead><tr><th>Family</th><th>Nodes</th><th>Owner Surface</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>Server runtime</td><td><code>ServerReqInbound02PipelineInput</code>, <code>ServerRespOutbound04DispatchPlan</code></td><td><code>src/server/handlers/*</code>, <code>src/server/runtime/http-server/*</code> shell surfaces; function-map owners remain server-specific</td></tr>
+        <tr><td>Virtual Router</td><td><code>VrRoute01Features</code>, <code>VrRoute02ClassifiedIntent</code>, <code>VrRoute03CandidatePool</code>, <code>VrRoute05DecisionRecord</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/</code></td></tr>
+        <tr><td>Provider runtime</td><td><code>ProviderReqOutbound07AuthApplied</code>, <code>ProviderReqOutbound08TransportRequest</code>, <code>ProviderReqOutbound08TransportSigned</code>, <code>ProviderRespInbound01RawTransport</code>, <code>ProviderRespInbound02DecodedProtocol</code></td><td>provider runtime transport/codec owner surfaces</td></tr>
+        <tr><td>Metadata carrier</td><td><code>MetaReq01EntryCaptured</code>, <code>MetaReq02RuntimeCarrier</code>, <code>MetaResp04SameRequestCarrier</code></td><td>Rust contract help: <code>hub_pipeline_contracts</code>; runtime carrier type: <code>meta_error_carriers.rs</code></td></tr>
+        </tbody>
+        </table>
+        <h2>Review Findings</h2>
+        <p>topology-residual-gap-01: These nodes are now reviewable through this wiki page instead of being hidden in the debt manifest.</p>
+        <p>topology-residual-gap-02: Nodes listed here remain topology contracts unless a future slice binds them to concrete adjacent <code>mainline-call-map.yml</code> edges.</p>
+        <p>topology-residual-gap-03: Adding a new residual node must update this page, the topology manifest counts, and the relevant owner map before implementation.</p>
+        <h2>Verification</h2>
+        <ul>
+          <li><code>npm run verify:architecture-topology-doc-sync</code></li>
+          <li><code>npm run verify:architecture-topology-type-consistency</code></li>
+          <li><code>npm run verify:architecture-wiki-sync</code></li>
+          <li><code>npm run verify:architecture-wiki-html-sync</code></li>
+        </ul>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

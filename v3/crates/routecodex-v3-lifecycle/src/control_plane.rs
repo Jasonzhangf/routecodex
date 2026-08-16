@@ -201,4 +201,3 @@ pub(crate) async fn send_control_without_timeout(
     BufReader::new(stream).read_line(&mut line).await?;
     Ok(serde_json::from_str(&line)?)
 }
-

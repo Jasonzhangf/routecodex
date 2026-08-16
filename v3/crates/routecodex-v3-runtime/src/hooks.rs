@@ -298,7 +298,9 @@ pub(crate) fn responses_direct_request_projection_hook(
         &candidate.secret_key,
         &candidate.api_key,
     ) {
-        (Some(name), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(name.clone()),
+        (Some(name), None, None, None, None) => {
+            V3ProviderAuthSecretHandle::Environment(name.clone())
+        }
         (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
         (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
             path: path.clone(),
@@ -416,7 +418,9 @@ pub(crate) fn chat_direct_request_projection_hook(
         &candidate.secret_key,
         &candidate.api_key,
     ) {
-        (Some(name), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(name.clone()),
+        (Some(name), None, None, None, None) => {
+            V3ProviderAuthSecretHandle::Environment(name.clone())
+        }
         (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
         (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
             path: path.clone(),
@@ -776,6 +780,7 @@ mod tests {
                     model_capabilities: vec!["text".to_string()],
                     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
                     max_context_tokens: None,
+                    context_token_estimate_scale_bps: 10_000,
                     base_url: "https://provider.invalid/v1".to_string(),
                     responses_process: None,
                     responses_transport: V3ResponsesTransportKind::Http,

@@ -1,0 +1,61 @@
+lifecycle_id: v3.resp03_tool_governance_gap_closeout.mainline
+owner_feature_id: v3.resp03_tool_governance_gap_closeout
+entrypoint:
+  node_id: V3HubRespInbound02Normalized
+  call_map_chain_id: v3.resp03_tool_governance_gap_closeout
+nodes:
+  - V3HubRespInbound02Normalized
+  - V3HubRespChatProcess03Governed
+  - V3Resp03FinishReasonBranch
+  - V3Resp03ToolCallServertoolHook
+  - V3Resp03OrdinaryToolGovernance
+  - V3Resp03StopServertoolHook
+  - V3HubRespContinuation04Committed
+edges:
+  - step_id: v3-resp03-tool-governance-01
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3HubRespChatProcess03Governed
+    owner_feature_id: v3.resp03_tool_governance_gap_closeout
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    owner_symbol: govern_v3_hub_relay_response
+    status: anchored
+  - step_id: v3-resp03-tool-governance-02
+    from_node: V3HubRespChatProcess03Governed
+    to_node: V3Resp03FinishReasonBranch
+    owner_feature_id: v3.resp03_tool_governance_gap_closeout
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    owner_symbol: inspect_v3_resp03_finish_reason
+    status: anchored
+  - step_id: v3-resp03-tool-governance-03
+    from_node: V3Resp03FinishReasonBranch
+    to_node: V3Resp03ToolCallServertoolHook
+    owner_feature_id: v3.resp03_tool_governance_gap_closeout
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_symbol: apply_v3_tool_call_servertool_hook_at_resp03
+    status: anchored
+  - step_id: v3-resp03-tool-governance-04
+    from_node: V3Resp03ToolCallServertoolHook
+    to_node: V3Resp03OrdinaryToolGovernance
+    owner_feature_id: v3.resp03_tool_governance_gap_closeout
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    owner_symbol: project_v3_apply_patch_freeform_calls_at_resp03
+    status: anchored
+  - step_id: v3-resp03-tool-governance-05
+    from_node: V3Resp03FinishReasonBranch
+    to_node: V3Resp03StopServertoolHook
+    owner_feature_id: v3.resp03_tool_governance_gap_closeout
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_symbol: apply_v3_stop_servertool_hook_at_resp03
+    status: anchored
+  - step_id: v3-resp03-tool-governance-06
+    from_node: V3HubRespChatProcess03Governed
+    to_node: V3HubRespContinuation04Committed
+    owner_feature_id: v3.resp03_tool_governance_gap_closeout
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
+    owner_symbol: commit_v3_hub_relay_response
+    status: anchored
+verification_gates:
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check

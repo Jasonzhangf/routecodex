@@ -230,10 +230,10 @@ verification:
 - feature_id: v3.provider_compat_profile_loading
   change_risk: high
   unit:
-  - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
+  - v3/crates/provider-compat-core/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   contract:
-  - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
+  - v3/crates/provider-compat-core/src/lib.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
   - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
   - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
@@ -277,6 +277,9 @@ verification:
     V1 endpoint bindings and server execution declarations, Jason-defined 5555 route
     ordering, provider type mapping, local token_file handle materialization, and
     secret-free manifest debug output.
+  - Provider auth key-file coverage locks single-key and list expansion into ordered
+    secret_file + secret_key handles, rejects malformed/duplicate/empty keys and mixed
+    explicit authoring, and proves no secret value is materialized in manifest entries.
   - Transport-bound V2 provider responses contract locks WebSocket v2 projection plus
     negative HTTP-only remote_continuation and missing websocket_v2_url cases.
   - Live closure still requires global install, V3 managed restart on 5555, health,

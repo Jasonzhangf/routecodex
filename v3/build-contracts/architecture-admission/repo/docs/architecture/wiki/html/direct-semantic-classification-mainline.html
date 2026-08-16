@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Direct Semantic Classification Mainline</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: #fffdfa;
+      --ink: #1f241f;
+      --muted: #5f665f;
+      --line: #d9cfbf;
+      --accent: #0f766e;
+      --accent-soft: #dff4ef;
+      --code: #f3efe6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+    .frame {
+      background: color-mix(in srgb, var(--panel) 94%, white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
+      overflow: hidden;
+    }
+    header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    article {
+      padding: 28px;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
+    h3 { font-size: 1.25rem; color: var(--accent); }
+    p, ul, table, pre { margin: 0 0 1rem; }
+    ul { padding-left: 1.35rem; }
+    li + li { margin-top: 0.35rem; }
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+    }
+    pre {
+      background: #f8f4ec;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .mermaid {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
+      padding: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px 12px 40px; }
+      article, header { padding-left: 16px; padding-right: 16px; }
+      article { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="frame">
+      <header>
+        <h1>Direct Semantic Classification Mainline</h1>
+        <p>Canonical Markdown source: <code>docs/architecture/wiki/direct-semantic-classification-mainline.md</code></p>
+      </header>
+      <article>
+        <h1>Direct Semantic Classification Mainline</h1>
+        <h2>Purpose</h2>
+        <p>Review same-protocol direct 如何从显式 provider/model 配置得到通用语义分类，并由同一分类驱动 request/response projector。</p>
+        <p>Canonical sources:</p>
+        <ul>
+          <li><code>docs/design/direct-semantic-classification.md</code></li>
+          <li><code>docs/architecture/resource-operation-map.yml</code></li>
+          <li><code>docs/architecture/function-map.yml</code></li>
+          <li><code>docs/architecture/mainline-call-map.yml</code></li>
+          <li><code>docs/goals/direct-semantic-classification-test-design.md</code></li>
+        </ul>
+        <h2>Flow</h2>
+        <pre class="mermaid">flowchart TD
+          A[&quot;ConfigDirect01AuthoringPolicy&lt;br/&gt;direct.semantics&quot;] --&gt; B[&quot;ConfigDirect02ValidatedPolicy&lt;br/&gt;routing | passthrough&quot;]
+          B --&gt; C[&quot;provider/model runtime manifest&quot;]
+          C --&gt; D[&quot;VR/forwarder selects real target&quot;]
+          D --&gt; T[&quot;RoutePoolTier.thinking&lt;br/&gt;SelectionResult.route_thinking&lt;br/&gt;target.routeThinking&quot;]
+          T --&gt; E[&quot;VrDirect03ResolvedSemantics&quot;]
+          E --&gt; F[&quot;DirectReq04ProjectionPlan&quot;]
+          F --&gt; G[&quot;ProviderReqOutbound06WirePayload&quot;]
+          G --&gt; H[&quot;ProviderRespInbound01Raw&quot;]
+          E --&gt; I[&quot;DirectResp05ProjectionPlan&quot;]
+          H --&gt; I
+          I --&gt; J[&quot;ServerRespOutbound05ClientFrame&quot;]
+
+          K[&quot;MetadataCenter&quot;] -. observation only .-&gt; E
+          K -. forbidden policy truth .-&gt; F
+          K -. forbidden policy truth .-&gt; I</pre>
+        <h2>Classification Matrix</h2>
+        <table>
+        <thead><tr><th>Class</th><th>Request model</th><th>Request thinking</th><th>Response model/thinking</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>routing</code></td><td>set canonical provider model</td><td>set route thinking</td><td>restore client-visible model; preserve protocol response thinking</td></tr>
+        <tr><td><code>passthrough</code></td><td>preserve client field</td><td>preserve client field</td><td>preserve provider response</td></tr>
+        </tbody>
+        </table>
+        <p>Missing config means <code>routing</code>. <code>passthrough</code> requires explicit provider/model declaration.</p>
+        <h2>Layer Matrix</h2>
+        <table>
+        <thead><tr><th>Layer</th><th>Owns</th><th>Must not own</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>Config compiler</td><td>enum validation, default materialization, deterministic provider profile manifest</td><td>request-scoped policy creation, runtime payload decisions</td></tr>
+        <tr><td>Forwarder</td><td>logical target to real provider selection</td><td>direct policy</td></tr>
+        <tr><td>Virtual Router</td><td>uniquely creates request-scoped resolved class/provenance after real target selection; carries top-level route tier <code>thinking</code> as <code>target.routeThinking</code></td><td>request/response mutation; route thinking hidden in <code>routeParams</code></td></tr>
+        <tr><td>HTTP server router-direct input</td><td>carry VR target <code>routeThinking</code> and <code>directSemantic</code> into native direct resolver</td><td>interpret routing/passthrough, synthesize policy, or derive thinking from <code>routeParams</code></td></tr>
+        <tr><td>Request projector</td><td>closed request field plan</td><td>config lookup, provider-specific branching</td></tr>
+        <tr><td>Response projector</td><td>closed response field plan from same resolved contract</td><td>depend on request projector output; infer mode from <code>originalClientModel</code> or <code>payloadChanged</code></td></tr>
+        <tr><td>Host</td><td>native call, stream IO, observation IO</td><td>semantic branching</td></tr>
+        </tbody>
+        </table>
+        <h2>Forbidden Shortcuts</h2>
+        <ul>
+          <li><code>routeParams.directPassthrough</code></li>
+          <li>provider-name prefix checks</li>
+          <li>forwarder-level policy override</li>
+          <li><code>routeParams.thinking</code> as route thinking truth</li>
+          <li>MetadataCenter policy recovery</li>
+          <li>request and response independently resolving mode</li>
+          <li>independent model/thinking/restore booleans</li>
+          <li>unknown config silently treated as routing</li>
+        </ul>
+        <h2>Current State</h2>
+        <ul>
+          <li>Rust owner and <code>direct.semantic_policy</code> resource are locked.</li>
+          <li>Mainline edges <code>dsc-01</code> through <code>dsc-04</code> are anchored to real Rust caller/callee symbols.</li>
+          <li>Config validation, real-target classification, and paired request/response projection plans are implemented in Rust.</li>
+          <li>Host only invokes native plans and performs payload/stream IO.</li>
+          <li>Runtime completion still requires source builds, global install, managed restart, and same-entry live replay.</li>
+          <li>Runtime residue gate locks <code>RoutePoolTier.thinking -&gt; SelectionResult.route_thinking -&gt; target.routeThinking -&gt; VrDirect03ResolvedSemantics.route_thinking</code> and the HTTP server real-target projection (<code>target.routeThinking</code> and <code>target.directSemantic</code>) because missing this bridge makes module tests pass while live router-direct silently keeps client thinking.</li>
+        </ul>
+        <h2>Review Checklist</h2>
+        <ul>
+          <li>Config surface is one closed enum.</li>
+          <li>Default remains routing.</li>
+          <li>Passthrough is explicit.</li>
+          <li>Forwarder resolves first.</li>
+          <li>HTTP server forwards real-target route params, route thinking, and direct semantic without interpreting them.</li>
+          <li>VR classifies without payload mutation.</li>
+          <li>VR is the only writer of request-scoped <code>direct.semantic_policy</code>.</li>
+          <li>Request and response consume same resolved contract.</li>
+          <li>Response does not depend on request projector output.</li>
+          <li>MetadataCenter remains observation-only.</li>
+          <li>JSON/SSE plans are paired.</li>
+          <li>Unknown config fails.</li>
+          <li>Relay/non-direct path remains isolated.</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

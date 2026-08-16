@@ -63,8 +63,7 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
     let web_search_tool_intent = continuation && last_tool_category == "websearch";
     let other_tool_continuation = continuation && last_tool_category == "other";
     let unknown_tool_continuation = continuation && last_tool_category.is_empty();
-    let web_search = web_search_tool_intent
-        || input.has_current_turn_web_search;
+    let web_search = web_search_tool_intent || input.has_current_turn_web_search;
 
     let evaluation = vec![
         (

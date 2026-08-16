@@ -224,7 +224,9 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     assert!(exhausted_body["error"].get("internal_code").is_none());
     assert!(
         exhausted_body["error"].get("target_exhausted").is_none()
-            && exhausted_body["error"].get("candidates_remaining").is_none()
+            && exhausted_body["error"]
+                .get("candidates_remaining")
+                .is_none()
             && exhausted_body["error"].get("decision").is_none()
             && exhausted_body["error"].get("external_error").is_none(),
         "Error06 body must not carry control-plane fields: {}",
