@@ -5580,3 +5580,26 @@ Tags: #v3 #responses #reasoning-effort #forward-compatibility #no-cleanup
 - The prior forward-compatible passthrough conclusion is superseded: local 200 dry-run
   plus upstream 400 is not completion. Completion requires installed live old-sample 200.
 Tags: #v3 #responses #reasoning-effort #protocol-compatibility #provider12 #http-200
+
+# 2026-08-16 V3 reasoning effort target mapping closed on 0.90.4576 (DSH PASS)
+- Final implementation commits on `codex/v3-invalid-reasoning-effort-400` end at
+  `217e67be2` (base `ca668dd68`). `ProviderReqCompat06` is the unique post-selection
+  target-effort owner; the duplicate shared DeepSeek mapper and dead
+  `AdapterContext.reasoning_effort_explicit` plumbing are physically removed.
+- Error origin is part of the contract: only client Req02 structural validation raises
+  `ClientInboundCanonical` and projects `invalid_responses_request` HTTP 400. Anthropic
+  provider-response projection raises `ProviderResponseEventCodec`; internal servertool
+  web-search request canonicalization raises `WebSearchDispatchFailed`. They must never
+  share the client-invalid 400 variant. Architecture parity gate locks this with 111 red
+  mutations and paired positive/negative tests.
+- Verified build/install truth: 0.90.4576, repo/global binary SHA-256
+  `3a1043030f0cc227ff33a06f114dbe156fd4c4a1801a5b1b2014a1ea9d74d3b6`, config
+  servers=4, one aggregate restart of instance `v3-f89ec693b55096920c06`, all four health
+  endpoints HTTP 200. Exact live `definitely_invalid` request returned HTTP 200/completed,
+  DeepSeek target effort `high`, exact final marker; numeric effort returned canonical
+  HTTP 400.
+- DSH `dsh-1786874375767-d5086c3d` completed with `VERDICT: PASS`, no P0/P1. Non-blocking
+  P2 follow-ups: direct-kernel malformed-effort status parity; duplicate Anthropic
+  pre-projection mapping; unreachable MiniMax OpenAI-Chat strip edge; mixed scoped/unscoped
+  secret-file strictness documentation/behavior.
+Tags: #v3 #responses #reasoning-effort #error-origin #dsh-pass #0.90.4576

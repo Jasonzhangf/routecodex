@@ -35755,3 +35755,7 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
   `high`, and exact final marker. Numeric malformed effort remains HTTP 400 with code
   `invalid_responses_request` and a single canonical message. A fresh DSH review is required
   because the r4 FAIL was followed by code changes.
+- DSH r5 `dsh-1786874375767-d5086c3d` completed with `VERDICT: PASS`, recommendation
+  `deliver`, and no P0/P1. Four P2 follow-ups are non-blocking: direct-kernel malformed
+  effort status parity, duplicate Anthropic pre-projection mapping, unreachable MiniMax
+  OpenAI-Chat strip edge, and strict mixed scoped/unscoped secret-file behavior.
