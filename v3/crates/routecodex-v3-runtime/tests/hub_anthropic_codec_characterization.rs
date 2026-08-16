@@ -218,7 +218,9 @@ fn multi_turn_tool_history_with_current_image_projects_full_anthropic_wire_shape
     }))
     .expect("multi-turn tool history with image must project to Anthropic wire");
 
-    let messages = provider_request["messages"].as_array().expect("messages array");
+    let messages = provider_request["messages"]
+        .as_array()
+        .expect("messages array");
     assert_eq!(messages.len(), 6, "6 条输入 → 6 条 anthropic 消息（1:1）");
 
     // assistant 带 tool_use
@@ -230,7 +232,10 @@ fn multi_turn_tool_history_with_current_image_projects_full_anthropic_wire_shape
     );
     // reasoning_content 不得泄漏
     assert!(
-        serde_json::to_string(assistant).unwrap().contains("reasoning_content") == false,
+        serde_json::to_string(assistant)
+            .unwrap()
+            .contains("reasoning_content")
+            == false,
         "reasoning_content must not leak into Anthropic wire"
     );
 
@@ -2281,6 +2286,28 @@ fn anthropic_reasoning_effort_preserves_high_effort_intersection_values() {
         .expect("Anthropic effort projection must preserve declared intersection values");
 
         assert_eq!(provider_request["output_config"]["effort"], effort);
+    }
+}
+
+#[test]
+fn anthropic_reasoning_effort_maps_non_intersection_values_to_closest_legal_level() {
+    for (source, expected) in [
+        ("none", "low"),
+        ("minimal", "low"),
+        ("definitely_invalid", "medium"),
+    ] {
+        let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+            "model":"claude-fable-5",
+            "stream": false,
+            "reasoning_effort": source,
+            "messages":[{"role":"user","content":"map effort"}]
+        }))
+        .expect("Anthropic effort must map into its official qualitative domain");
+
+        assert_eq!(
+            provider_request["output_config"]["effort"], expected,
+            "{source}"
+        );
     }
 }
 

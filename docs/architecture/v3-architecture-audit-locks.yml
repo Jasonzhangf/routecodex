@@ -323,8 +323,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:4b11a30250c6d8db95ff839c0f06225cf2a30d9420c6d20d10e4847b56ceea9e
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:3ee32151963e1fbe2a739497e40165231ab83d5099db4f4dff7c8fbed4892061
+    last_manual_authorization_id: auth-20260816-v3-reasoning-effort-target-compat
   - item_id: chain:v3.responses_relay.source_server_entry
     chain_id: v3.responses_relay.source_server_entry
     status: audited_locked
@@ -494,6 +494,13 @@ locked_items:
     fingerprint: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
     last_manual_authorization_id: auth-20260813-v3-provider-global-subscription-probe-fingerprint-refresh
 manual_authorizations:
+  - authorization_id: auth-20260816-v3-reasoning-effort-target-compat
+    item_id: chain:v3.protocol_conversion_field_parity
+    approved_by: Jason
+    approved_at: '2026-08-16T08:26:56Z'
+    reason: "Jason explicitly fixed the supported target set to OpenAI Responses, standard Anthropic, official DeepSeek, and official MiniMax APIs, and required the most compatible protocol mapping with HTTP 200 instead of 1:1 effort forwarding. This refresh locks ProviderReqCompat06 as the unique post-target-selection qualitative effort projection owner and renames the MiniMax relay characterization edge to its official adaptive-thinking behavior; no node, payload/control resource boundary, or numeric budget semantic changed."
+    fingerprint_before: sha256:4b11a30250c6d8db95ff839c0f06225cf2a30d9420c6d20d10e4847b56ceea9e
+    fingerprint_after: sha256:3ee32151963e1fbe2a739497e40165231ab83d5099db4f4dff7c8fbed4892061
   - authorization_id: auth-20260815-v3-sse-codec-file-decomposition-lock-refresh
     item_id: chain:v3.sse.protocol_codec_projection_boundary
     approved_by: Jason

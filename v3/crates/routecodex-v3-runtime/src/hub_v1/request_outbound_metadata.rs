@@ -100,12 +100,11 @@ pub(super) fn project_openai_chat_reasoning_summary_policy(
         None => summary_effort,
         Some(Value::String(value)) => {
             let explicit = value.trim().to_ascii_lowercase();
-            if reasoning_effort_rank(explicit.as_str()).is_none() {
-                return Err(
-                    "MalformedOutboundField target_protocol=openai_chat path=$.request.reasoning_effort"
-                        .to_string(),
-                );
-            }
+            let explicit = if reasoning_effort_rank(explicit.as_str()).is_some() {
+                explicit
+            } else {
+                "medium".to_string()
+            };
             if reasoning_effort_rank(explicit.as_str()) >= reasoning_effort_rank(summary_effort) {
                 row.insert("reasoning_effort".to_string(), Value::String(explicit));
                 return Ok(());

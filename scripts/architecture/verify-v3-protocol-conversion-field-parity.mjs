@@ -102,6 +102,12 @@ const verificationMap = YAML.parse(text.verificationMap);
 const requestFieldProjectionManifest = YAML.parse(text.requestFieldProjectionManifest);
 const requestFieldProjectionModules = YAML.parse(text.requestFieldProjectionModules);
 
+const targetReasoningEffortProjection = functionSlice(
+  text.providerReqCompat,
+  paths.providerReqCompat,
+  'fn project_reasoning_effort_for_selected_target',
+  'pub(crate) fn provider_req_compat_reasoning_effort_explicit',
+);
 for (const phrase of [
   'request.reasoning_effort',
   'request.reasoning_budget_tokens',
@@ -141,7 +147,7 @@ for (const [semanticId, chatStorage, projections] of [
   ['request.client_metadata', 'routecodex_chat_extension.responses_request.client_metadata', { responses: 'client_metadata', openai_chat: 'user_id_projection_other_fields_unmapped', anthropic: 'user_id_projection_other_fields_unmapped', gemini: 'unmapped' }],
   ['request.prompt_cache_key', 'routecodex_chat_extension.responses_request.prompt_cache_key', { responses: 'prompt_cache_key', openai_chat: 'prompt_cache_key', anthropic: 'unmapped', gemini: 'unmapped' }],
   ['request.store', 'routecodex_chat_extension.responses_request.store', { responses: 'store', openai_chat: 'store', anthropic: 'false_consumed_true_unsupported', gemini: 'unmapped' }],
-  ['request.reasoning_effort', 'reasoning_effort', { responses: 'reasoning.effort', openai_chat: 'reasoning_effort', anthropic: 'output_config.effort_shared_domain_only', gemini: 'generationConfig.thinkingConfig.thinkingLevel_shared_domain_only' }],
+  ['request.reasoning_effort', 'reasoning_effort', { responses: 'reasoning.effort_known_domain_unknown_to_medium', openai_chat: 'reasoning_effort_provider_compatible_domain', anthropic: 'output_config.effort_or_minimax_adaptive_thinking', gemini: 'generationConfig.thinkingConfig.thinkingLevel_shared_domain_only' }],
   ['request.reasoning_budget_tokens', 'reasoning_budget_tokens', { responses: 'unmapped', openai_chat: 'unmapped', anthropic: 'thinking.budget_tokens_with_thinking_constraints', gemini: 'generationConfig.thinkingConfig.thinkingBudget_with_model_constraints' }],
   ['request.reasoning_summary_policy', 'reasoning_summary_policy', { responses: 'reasoning.summary', openai_chat: 'compatible_reasoning_effort_auto_medium_concise_low_detailed_high_merge_higher', anthropic: 'static_compatible_full_native_thinking_summary', gemini: 'unmapped' }],
   ['request.reasoning_context_policy', 'reasoning_context_policy', { responses: 'reasoning.context', openai_chat: 'unmapped', anthropic: 'unmapped', gemini: 'unmapped' }],
@@ -452,6 +458,15 @@ for (const phrase of [
   '"metadata" | "client_metadata" | "prompt_cache_key" | "store" | "text"',
 ]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
 forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /responses_reasoning_effort_as_anthropic_budget/, /responses_reasoning_policy_as_anthropic_system_marker/, /<routecodex_reasoning_request/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s]);
+for (const phrase of [
+  'project_reasoning_effort_for_selected_target',
+  '"responses:deepseek-console-go"',
+  'serde_json::json!({"type":"adaptive"})',
+  '"xhigh" | "max" => "max"',
+  '"none" | "minimal" => "low"',
+  '_ => "medium"',
+]) requireText(targetReasoningEffortProjection, `${paths.providerReqCompat}::target_protocol_reasoning_effort_projection`, phrase);
+forbid(targetReasoningEffortProjection, `${paths.providerReqCompat}::target_protocol_reasoning_effort_projection`, [/thinking_budget|budget_tokens|MetadataCenter|metadata_center/i]);
 forbid(text.anthropicCodec, `${paths.anthropicCodec}::registered_anthropic_system_extension`, [/anthropic_entry_system/]);
 for (const phrase of ['responses_metadata_as_anthropic_metadata', 'pub(super) fn validate_responses_cache_and_store_for_anthropic(', 'pub(super) fn reject_responses_reasoning_summary_for_anthropic(', 'pub(super) fn project_responses_text_as_anthropic_output_config(', 'extension.get("prompt_cache_key")', 'extension.get("store")', 'Some(false) => {}', 'Some(true) => {', 'matches!(value, "auto" | "concise" | "detailed")']) requireText(text.anthropicRequestFieldProjection, paths.anthropicRequestFieldProjection, phrase);
 for (const phrase of [
@@ -642,7 +657,7 @@ for (const [owner, body, phrases] of [
     'http://chatwire.invalid/v1/chat/completions',
   ]],
   [paths.responsesAnthropicProviderTests, text.responsesAnthropicProviderTests, [
-    'responses_relay_reasoning_effort_projects_anthropic_output_config_effort',
+    'responses_relay_reasoning_effort_projects_minimax_adaptive_thinking',
     'responses_relay_reasoning_summary_policy_is_consumed_before_anthropic_wire',
     'responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning',
     'responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak',
@@ -784,7 +799,10 @@ for (const [owner, body, phrases] of [
     'Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire',
     'Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect',
     'Anthropic request thinking.type, thinking.budget_tokens, and thinking.display decode into separate registered Chat fields',
-    'Responses reasoning.effort reaches Anthropic `output_config.effort` only for the exact shared value domain',
+    'Responses reasoning.effort is preserved until concrete target selection',
+    'DeepSeek active lower/unknown -> high and xhigh/max -> max',
+    'MiniMax active effort',
+    'thinking.type=adaptive without output_config.effort',
     'Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions',
     'responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect',
     'responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect',

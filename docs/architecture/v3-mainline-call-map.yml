@@ -834,6 +834,9 @@ chains:
       - v3.responses_direct.policy
       - v3.target.concrete_provider
       side_channel_writes: []
+    semantic_contract:
+      - preserves source reasoning effort until Target10 is concrete, then maps it at the Provider compatibility boundary to the registered official target-protocol domain before Provider12 wire construction
+      - never writes source effort or projection decisions to MetadataCenter, error metadata, or client payload
   - step_id: v3-rd-11
     from_node: V3Provider12ResponsesWirePayload
     to_node: V3Transport13ResponsesHttpRequest
@@ -4093,7 +4096,7 @@ chains:
   - step_id: v3-protocol-field-parity-responses-anthropic-req-01
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: ProviderReqCompat06ProviderCompat
-    caller_symbol: responses_relay_reasoning_effort_projects_anthropic_output_config_effort
+    caller_symbol: responses_relay_reasoning_effort_projects_minimax_adaptive_thinking
     caller_file: v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs
     callee_symbol: build_provider_req_compat_06_from_v3_hub_req_outbound_07
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs

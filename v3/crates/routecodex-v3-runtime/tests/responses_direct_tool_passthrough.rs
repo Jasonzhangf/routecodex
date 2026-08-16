@@ -484,6 +484,37 @@ async fn direct_kernel_preserves_service_tier_reasoning_effort_and_prompt_cache_
 }
 
 #[tokio::test]
+async fn direct_kernel_maps_unknown_responses_reasoning_effort_to_protocol_neutral_medium() {
+    let manifest = manifest();
+    let transport = PassthroughTransport::default();
+    let body = json!({
+        "model": "gpt-5.5",
+        "input": "reason about compatibility",
+        "reasoning": {"effort": "definitely_invalid"}
+    });
+
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &V3ResponsesDirectContinuationState::default(),
+        &manifest,
+        request(body),
+        scope(),
+        register_responses_direct_hooks(),
+        &transport,
+        1_000,
+    )
+    .await;
+    assert_eq!(output.client_payload.status, 200, "{:#?}", output);
+
+    let wire = transport
+        .request
+        .lock()
+        .unwrap()
+        .take()
+        .expect("direct provider wire payload captured");
+    assert_eq!(wire["reasoning"]["effort"], "medium", "{wire}");
+}
+
+#[tokio::test]
 async fn direct_kernel_response_propagates_provider_output_text_to_client_unchanged() {
     let manifest = manifest();
     let transport = PassthroughTransport::default();

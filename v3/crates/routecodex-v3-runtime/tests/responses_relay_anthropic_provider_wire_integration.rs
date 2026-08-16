@@ -59,8 +59,7 @@ impl ResponsesTransport for AnthropicProviderProjectionTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        *self.captured_projection.lock().unwrap() =
-            Some(request.provider_request_projection());
+        *self.captured_projection.lock().unwrap() = Some(request.provider_request_projection());
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
             request.provider_id(),
@@ -543,7 +542,7 @@ async fn responses_tool_search_call_and_output_project_through_chat_to_anthropic
 }
 
 #[tokio::test]
-async fn responses_relay_reasoning_effort_projects_anthropic_output_config_effort() {
+async fn responses_relay_reasoning_effort_projects_minimax_adaptive_thinking() {
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
@@ -573,15 +572,19 @@ async fn responses_relay_reasoning_effort_projects_anthropic_output_config_effor
 
     assert_eq!(output.status, 200);
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    assert_eq!(captured["thinking"]["type"], json!("adaptive"));
     assert!(
-        captured.get("thinking").is_none(),
-        "Anthropic provider request must not synthesize thinking budget from Responses effort: {captured}"
+        captured["thinking"].get("budget_tokens").is_none(),
+        "MiniMax Anthropic request must not synthesize thinking budget from Responses effort: {captured}"
     );
     assert!(
         captured.get("reasoning").is_none(),
         "Anthropic provider request must not leak Responses reasoning object: {captured}"
     );
-    assert_eq!(captured["output_config"]["effort"], json!("medium"));
+    assert!(
+        captured.get("output_config").is_none(),
+        "MiniMax Anthropic wire must omit unsupported output_config.effort: {captured}"
+    );
     assert!(!captured
         .to_string()
         .contains("routecodex_reasoning_request"));
@@ -861,6 +864,7 @@ continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"
 type = "anthropic"
 base_url = "http://controlled.invalid/anthropic"
 default_model = "MiniMax-M3"
+compatibility_profile = "chat:minimax"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "MINIMAX_TEST_KEY" }] }
 
 [providers.minimax.models.MiniMax-M3]

@@ -179,7 +179,7 @@ does not authorize reuse of the source object or of another target's mapping.
 | `prompt` | Responses reusable-prompt extension | validate object/variables; never inline into instructions silently | exact Responses only | unmapped | unmapped |
 | `prompt_cache_key` | client cache-key payload extension | preserve exact string; not routing/control state | exact | exact | valid local cache hint is consumed before wire; malformed fails; never rebuild `cache_control` |
 | `prompt_cache_options.*` / `prompt_cache_retention` | cache-options extension | preserve independently from `prompt_cache_key`; no provider-health/cache mutation | exact Responses only | target-specific exact field or unmapped | unmapped |
-| `reasoning.effort` | `request.reasoning_effort` | validate enum; keep separate from budget/summary/mode | exact | exact `reasoning_effort` | conditional exact `output_config.effort` intersection only |
+| `reasoning.effort` | `request.reasoning_effort` | validate non-empty string; preserve until concrete target selection; keep separate from budget/summary/mode | registered OpenAI-domain compatibility (`max -> xhigh`, unknown -> `medium`) | registered provider-domain compatibility; DeepSeek lower/unknown -> `high`, `xhigh/max -> max` | registered Anthropic-domain compatibility (`none/minimal -> low`, unknown -> `medium`); MiniMax Anthropic uses `thinking.type=adaptive` and no `output_config.effort` |
 | `reasoning.summary` / `generate_summary` | `request.reasoning_summary_policy` | aliases must agree; policy is not response reasoning text | exact Responses | registered static compatibility: `auto/concise/detailed -> medium/low/high`, merged with explicit effort by the higher level | registered many-to-one static compatibility preserves complete Anthropic native thinking as Responses reasoning summary for all valid policy values |
 | `reasoning.context` | `request.reasoning_context_policy` | validate scope/value; no history reconstruction outside Chat Process | exact Responses | unmapped | unmapped |
 | `reasoning.mode` | `request.reasoning_mode` | preserve mode independently from effort/context | exact Responses | unmapped | unmapped |
@@ -242,15 +242,20 @@ reused to reconstruct a request `reasoning.summary` policy.
 
 OpenAI effort values are forward-compatible protocol data. Req02 validates that
 `reasoning.effort` is a non-empty string but does not close the domain to the values
-known on the verification date. An unknown value remains unchanged through Chat
-canonical storage and same-protocol Responses wire projection. Cross-protocol target
-codecs still require their explicitly registered value-domain intersection and must
-fail or reselect through the normal provider policy when no exact projection exists;
-they must not delete, approximate, or replace the client value.
+known on the verification date. The source value remains unchanged through Chat
+canonical storage until concrete target selection. ProviderReqCompat06 is the unique
+owner of the registered target-domain compatibility projection: standard OpenAI maps
+`max -> xhigh` and unknown values to `medium`; DeepSeek maps active lower/unknown
+values to `high` and `xhigh/max` to `max`; standard Anthropic maps `none/minimal` to
+`low` and unknown values to `medium`; MiniMax Anthropic removes unsupported
+`output_config.effort` and requests `thinking.type=adaptive`. This projection never
+creates a numeric thinking budget and never writes a projection decision to control
+metadata or client payload.
 
-Projection is exact only for the concrete intersection:
+Exact intersections remain unchanged:
 
-- OpenAI to Anthropic: `low`, `medium`, `high`, `xhigh`, `max`.
+- OpenAI to Anthropic: `low`, `medium`, `high`, `xhigh`, `max`; other non-empty
+  values use the registered nearest qualitative projection above.
 - OpenAI to Gemini: `minimal`, `low`, `medium`, `high`, after model-level
   capability validation.
 - Anthropic to OpenAI: all declared Anthropic effort values, after target-model

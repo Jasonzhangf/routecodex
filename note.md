@@ -35666,3 +35666,15 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
   opencode-go returned terminal 401/403 while registered `medium` and no-effort controls
   both returned HTTP 200. Thus the V3 canonicalization defect is closed; current upstream
   rejection of the deliberately unknown value is external and remains visible.
+
+# 2026-08-16 correction: exact HTTP 200 and official target-protocol effort mapping
+- Jason rejected the 1:1 passthrough outcome and locked the supported target families:
+  OpenAI Responses, Anthropic Messages, DeepSeek official API, and MiniMax official API.
+- Official docs establish OpenAI's qualitative domain, DeepSeek's high/max domain with
+  low/medium -> high and xhigh -> max compatibility, and MiniMax's Anthropic-compatible
+  adaptive thinking surface. Therefore the unique correction point is provider projection
+  after target selection, not Req02 cleanup or Error06 compensation.
+- Red proof: Direct Provider12 test captured `definitely_invalid` unchanged instead of
+  expected standard Responses `medium`. Green implementation now maps standard Responses
+  unknown -> medium, DeepSeek unknown -> high, and MiniMax Anthropic active effort ->
+  thinking.type=adaptive without output_config.effort; malformed type/empty remains fail-fast.

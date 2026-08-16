@@ -552,10 +552,17 @@ const cases = [
   {
     name: 'Responses to Anthropic provider-wire reasoning runtime test removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs',
-    from: 'responses_relay_reasoning_effort_projects_anthropic_output_config_effort',
+    from: 'responses_relay_reasoning_effort_projects_minimax_adaptive_thinking',
     to: 'responses_relay_reasoning_request_config_removed',
     all: true,
-    diagnostic: /responses_relay_reasoning_effort_projects_anthropic_output_config_effort/u,
+    diagnostic: /responses_relay_reasoning_effort_projects_minimax_adaptive_thinking/u,
+  },
+  {
+    name: 'DeepSeek max effort compatibility projection regresses to high',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+    from: '"xhigh" | "max" => "max",',
+    to: '"xhigh" | "max" => "high",',
+    diagnostic: /"xhigh" \| "max" => "max"/u,
   },
   {
     name: 'Anthropic request projection drops registered cache and store validation',

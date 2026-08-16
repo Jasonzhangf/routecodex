@@ -792,12 +792,11 @@ fn project_chat_reasoning_effort_as_anthropic_output_config(
             field: "reasoning_effort",
         })?
         .to_ascii_lowercase();
-    let value = value.as_str();
-    if !matches!(value, "low" | "medium" | "high" | "xhigh" | "max") {
-        return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-            paths: "$.request.reasoning_effort".to_string(),
-        });
-    }
+    let value = match value.as_str() {
+        "none" | "minimal" => "low",
+        "low" | "medium" | "high" | "xhigh" | "max" => value.as_str(),
+        _ => "medium",
+    };
     let output_config = output
         .entry("output_config".to_string())
         .or_insert_with(|| Value::Object(Map::new()))

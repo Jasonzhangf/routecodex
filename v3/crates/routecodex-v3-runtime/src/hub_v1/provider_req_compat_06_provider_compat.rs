@@ -74,12 +74,13 @@ fn apply_v3_provider_req_compat(
 }
 
 pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
-    payload: Value,
+    mut payload: Value,
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
     profile: &V3ProviderCompatProfileId,
     reasoning_effort_explicit: bool,
 ) -> Result<Value, V3ProviderCompatError> {
+    project_reasoning_effort_for_selected_target(&mut payload, selected, provider_protocol)?;
     let provider_key = format!(
         "{}:{}:{}",
         selected.provider_id, selected.auth_alias, selected.model_id
@@ -109,8 +110,124 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
         reason,
     })?;
     let mut result = result;
+    project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
     normalize_deepseek_thinking_stopless_tool_choice(&mut result, selected, provider_protocol);
     Ok(result)
+}
+
+fn project_reasoning_effort_for_selected_target(
+    payload: &mut Value,
+    selected: &routecodex_v3_target::V3TargetCandidate,
+    provider_protocol: V3HubProviderWireProtocol,
+) -> Result<(), V3ProviderCompatError> {
+    let is_deepseek = matches!(
+        selected.compatibility_profile.as_deref(),
+        Some("chat:deepseek-max" | "responses:deepseek-console-go")
+    );
+    let is_minimax = selected.compatibility_profile.as_deref() == Some("chat:minimax");
+
+    let effort_path = match provider_protocol {
+        V3HubProviderWireProtocol::Responses => "/reasoning/effort",
+        V3HubProviderWireProtocol::OpenAiChat => "/reasoning_effort",
+        V3HubProviderWireProtocol::Anthropic => "/output_config/effort",
+        V3HubProviderWireProtocol::Gemini => return Ok(()),
+    };
+    let Some(raw_effort) = payload.pointer(effort_path).cloned() else {
+        return Ok(());
+    };
+    let effort = raw_effort
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| V3ProviderCompatError {
+            stage: "request_reasoning_effort_projection",
+            profile: selected
+                .compatibility_profile
+                .clone()
+                .unwrap_or_else(|| "protocol-default".to_string()),
+            reason: format!("non_empty_string_required path={effort_path}"),
+        })?
+        .to_ascii_lowercase();
+
+    if is_minimax {
+        match provider_protocol {
+            V3HubProviderWireProtocol::Anthropic => {
+                if let Some(root) = payload.as_object_mut() {
+                    if let Some(output_config) =
+                        root.get_mut("output_config").and_then(Value::as_object_mut)
+                    {
+                        output_config.remove("effort");
+                        if output_config.is_empty() {
+                            root.remove("output_config");
+                        }
+                    }
+                    if effort != "none" {
+                        root.insert(
+                            "thinking".to_string(),
+                            serde_json::json!({"type":"adaptive"}),
+                        );
+                    }
+                }
+            }
+            V3HubProviderWireProtocol::OpenAiChat => {
+                if let Some(root) = payload.as_object_mut() {
+                    root.remove("reasoning_effort");
+                }
+            }
+            _ => {}
+        }
+        return Ok(());
+    }
+
+    let projected = if is_deepseek {
+        match effort.as_str() {
+            "none" => "none",
+            "xhigh" | "max" => "max",
+            _ => "high",
+        }
+    } else {
+        match provider_protocol {
+            V3HubProviderWireProtocol::Responses | V3HubProviderWireProtocol::OpenAiChat => {
+                match effort.as_str() {
+                    "none" | "minimal" | "low" | "medium" | "high" | "xhigh" => effort.as_str(),
+                    "max" => "xhigh",
+                    _ => "medium",
+                }
+            }
+            V3HubProviderWireProtocol::Anthropic => match effort.as_str() {
+                "none" | "minimal" => "low",
+                "low" | "medium" | "high" | "xhigh" | "max" => effort.as_str(),
+                _ => "medium",
+            },
+            V3HubProviderWireProtocol::Gemini => unreachable!(),
+        }
+    };
+
+    match provider_protocol {
+        V3HubProviderWireProtocol::Responses => {
+            if let Some(reasoning) = payload.get_mut("reasoning").and_then(Value::as_object_mut) {
+                reasoning.insert("effort".to_string(), Value::String(projected.to_string()));
+            }
+        }
+        V3HubProviderWireProtocol::OpenAiChat => {
+            if let Some(root) = payload.as_object_mut() {
+                root.insert(
+                    "reasoning_effort".to_string(),
+                    Value::String(projected.to_string()),
+                );
+            }
+        }
+        V3HubProviderWireProtocol::Anthropic => {
+            if let Some(output_config) = payload
+                .get_mut("output_config")
+                .and_then(Value::as_object_mut)
+            {
+                output_config.insert("effort".to_string(), Value::String(projected.to_string()));
+            }
+        }
+        V3HubProviderWireProtocol::Gemini => unreachable!(),
+    }
+    Ok(())
 }
 
 pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> bool {
@@ -367,6 +484,66 @@ mod tests {
             .provider_semantic_payload()
             .get("tool_choice")
             .is_none());
+    }
+
+    #[test]
+    fn deepseek_responses_maps_unknown_effort_to_official_high_domain() {
+        let selected = V3TargetCandidate {
+            provider_id: "opencode-go".to_string(),
+            provider_type: "responses".to_string(),
+            model_id: "deepseek-v4-flash".to_string(),
+            wire_model: "deepseek-v4-flash".to_string(),
+            compatibility_profile: Some("responses:deepseek-console-go".to_string()),
+            ..selected_candidate(V3HubProviderWireProtocol::Responses)
+        };
+        let payload = json!({
+            "model": "deepseek-v4-flash",
+            "input": "hello",
+            "reasoning": {"effort": "definitely_invalid"}
+        });
+
+        let projected = apply_v3_provider_req_compat_to_provider_payload(
+            payload,
+            &selected,
+            V3HubProviderWireProtocol::Responses,
+            &V3ProviderCompatProfileId::from_config(selected.compatibility_profile.as_deref()),
+            true,
+        )
+        .expect("DeepSeek effort must map into its official compatibility domain");
+
+        assert_eq!(projected["reasoning"]["effort"], "high", "{projected}");
+    }
+
+    #[test]
+    fn minimax_anthropic_maps_effort_to_adaptive_thinking_without_unsupported_output_effort() {
+        let selected = V3TargetCandidate {
+            provider_id: "minimax".to_string(),
+            provider_type: "anthropic".to_string(),
+            model_id: "MiniMax-M3".to_string(),
+            wire_model: "MiniMax-M3".to_string(),
+            compatibility_profile: Some("chat:minimax".to_string()),
+            ..selected_candidate(V3HubProviderWireProtocol::Anthropic)
+        };
+        let payload = json!({
+            "model": "MiniMax-M3",
+            "messages": [{"role": "user", "content": "hello"}],
+            "output_config": {"effort": "definitely_invalid"}
+        });
+
+        let projected = apply_v3_provider_req_compat_to_provider_payload(
+            payload,
+            &selected,
+            V3HubProviderWireProtocol::Anthropic,
+            &V3ProviderCompatProfileId::from_config(selected.compatibility_profile.as_deref()),
+            true,
+        )
+        .expect("MiniMax effort must map to its official adaptive thinking control");
+
+        assert_eq!(projected["thinking"]["type"], "adaptive", "{projected}");
+        assert!(
+            projected.pointer("/output_config/effort").is_none(),
+            "{projected}"
+        );
     }
 
     #[test]

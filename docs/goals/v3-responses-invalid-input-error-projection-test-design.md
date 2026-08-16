@@ -1,13 +1,13 @@
-# V3 Responses Reasoning Effort Forward-Compatibility Test Design
+# V3 Reasoning Effort Target-Protocol Compatibility Test Design
 
-Design ID: `V3-RESPONSES-REASONING-EFFORT-FORWARD-COMPAT-20260816`
+Design ID: `V3-REASONING-EFFORT-TARGET-PROTOCOL-COMPAT-20260816`
 
 ## Goal
 
 `/v1/responses` must not fail merely because `reasoning.effort` is a non-empty
 string newer than the values known to RouteCodex. Preserve the client value through
-Req02 Chat canonical storage and same-protocol Responses provider wire. Do not delete,
-replace, approximate, or move the payload field into MetadataCenter.
+Req02 Chat canonical storage, then map it at ProviderReqCompat/Provider12 to the closest
+legal target-protocol control. The exact old sample must return HTTP 200.
 
 ## Baseline and first divergence
 
@@ -22,12 +22,15 @@ replace, approximate, or move the payload field into MetadataCenter.
 
 - Feature owner: `v3.protocol_conversion_field_parity`.
 - Inbound owner: `responses_openai_codec.rs` at `V3HubReqInbound02Normalized`.
-- Same-protocol outbound owner: `request_outbound_format.rs` at
-  `V3ProviderReqOutbound08WirePayload`.
-- Allowed: validate type/non-empty shape; preserve the normalized string in the payload
-  data plane; enforce explicit target-domain intersections in Anthropic/Gemini codecs.
-- Forbidden: request cleanup, silent strip, invented replacement effort, handler/SSE
-  compensation, MetadataCenter mirroring, or provider-specific logic in Hub/VR.
+- Target-protocol compatibility owner: `provider_req_compat_06_provider_compat.rs`,
+  shared by Relay ProviderReqCompat06 and Direct `responses_direct_request_projection_hook`
+  before `V3Provider12ResponsesWirePayload`.
+- DeepSeek Chat profile owner: `provider-compat-core::apply_deepseek_max_request_compat`.
+- Allowed: validate type/non-empty shape; preserve the source value until the concrete
+  target is selected; perform an explicit lossy target-protocol projection at the registered
+  Provider compatibility owner.
+- Forbidden: inbound cleanup, handler/SSE compensation, MetadataCenter mirroring,
+  provider policy in Hub/VR, or sending a value outside the target's official domain.
 
 ## Lifecycle
 
@@ -35,21 +38,28 @@ replace, approximate, or move the payload field into MetadataCenter.
 Responses reasoning.effort(non-empty string)
   -> Req02 reasoning_effort payload semantic
   -> Req03..Req07 unchanged governance
-  -> Responses target: reasoning.effort exact projection
+  -> ProviderReqCompat06 / Direct Provider12 target compatibility projection
   -> provider transport
 ```
 
-For a cross-protocol target lacking an exact effort-domain mapping, its owning outbound
-codec remains fail-fast and the existing typed provider policy decides reselection.
+Compatibility table:
+
+- OpenAI Responses/Chat: known `none|minimal|low|medium|high|xhigh`; `max -> xhigh`;
+  unknown non-empty -> `medium`.
+- Anthropic Messages: `none|minimal -> low`; shared values remain; unknown -> `medium`.
+- DeepSeek official API: `xhigh|max -> max`; active lower/unknown values -> `high`;
+  explicit `none` remains non-thinking.
+- MiniMax Anthropic API: active effort -> `thinking.type=adaptive`; MiniMax does not
+  receive unsupported `output_config.effort`.
 
 ## Tests
 
 - Red/green inbound: unknown non-empty effort previously fails, then survives Req02.
-- Red/green outbound: unknown canonical effort previously fails, then reaches
-  same-protocol Responses `reasoning.effort` exactly.
+- Red/green Provider12: unknown canonical effort previously reached upstream unchanged;
+  it now reaches standard Responses as `medium` and DeepSeek as `high`.
 - Reverse: null, non-string, and empty/whitespace-only effort still fail Req02.
-- Cross-protocol reverse: Anthropic/Gemini retain their explicit intersection checks;
-  no value is approximated or dropped.
+- Cross-protocol reverse: Anthropic maps to its legal qualitative domain; MiniMax maps
+  active effort to adaptive thinking without an unsupported effort field.
 - Live old sample: exact captured request must return a successful terminal response,
   not HTTP 500 or 400.
 - Live positive control: registered `medium` effort remains HTTP 200 terminal.

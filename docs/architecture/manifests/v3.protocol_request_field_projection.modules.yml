@@ -95,9 +95,10 @@ modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
     allowed_operations:
       - dispatch Req07 Chat/provider semantic to the selected adjacent target codec
+      - project qualitative reasoning effort into the registered concrete target protocol domain after target selection
     forbidden_operations:
       - reconstruct source protocol payload
-      - implement field-specific approximation
+      - approximate numeric reasoning budget from qualitative effort
       - read MetadataCenter payload copies
 allowed_edges:
   - from: v3.protocol_codec.openai_outbound

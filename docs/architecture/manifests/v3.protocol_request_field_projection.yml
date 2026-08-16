@@ -107,11 +107,11 @@ semantic_registry:
       gemini: unmapped
   - semantic_id: request.reasoning_effort
     chat_storage: reasoning_effort
-    type: non_empty_qualitative_string_forward_compatible
+    type: non_empty_qualitative_string_target_protocol_compatible
     projections:
-      responses: reasoning.effort
-      openai_chat: reasoning_effort
-      anthropic: output_config.effort_shared_domain_only
+      responses: reasoning.effort_known_domain_unknown_to_medium
+      openai_chat: reasoning_effort_provider_compatible_domain
+      anthropic: output_config.effort_or_minimax_adaptive_thinking
       gemini: generationConfig.thinkingConfig.thinkingLevel_shared_domain_only
   - semantic_id: request.reasoning_budget_tokens
     chat_storage: reasoning_budget_tokens

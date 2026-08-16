@@ -5567,3 +5567,16 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 - Acceptance for this class is successful exact-sample replay. Merely changing an internal
   500 to a client 400 does not solve the request failure.
 Tags: #v3 #responses #reasoning-effort #forward-compatibility #no-cleanup
+
+# 2026-08-16 correction: reasoning effort is target-protocol compatible, not 1:1
+- Jason clarified the final contract: the exact invalid-effort sample must return HTTP
+  200, and effort mapping is intentionally lossy according to the concrete official
+  target protocol rather than 1:1 passthrough.
+- Preserve the source non-empty string through Req02, then project only at the registered
+  Provider compatibility/Provider12 owner after target selection. OpenAI unknown maps
+  to medium; Anthropic unknown maps to medium and none/minimal to low; DeepSeek active
+  lower/unknown maps to high and xhigh/max to max; MiniMax active effort maps to adaptive
+  thinking without unsupported output_config.effort.
+- The prior forward-compatible passthrough conclusion is superseded: local 200 dry-run
+  plus upstream 400 is not completion. Completion requires installed live old-sample 200.
+Tags: #v3 #responses #reasoning-effort #protocol-compatibility #provider12 #http-200

@@ -1960,11 +1960,17 @@ features:
     token, stop, stream, and thinking fields.
   - Anthropic request thinking.type, thinking.budget_tokens, and thinking.display decode into separate registered Chat fields; no raw thinking object crosses Chat
     Process and none is compressed to effort.
-  - Responses reasoning.effort reaches Anthropic `output_config.effort` only for the exact shared value domain; none/minimal fail explicitly and no effort value invents
-    `thinking.budget_tokens`.
+  - >-
+    Responses reasoning.effort is preserved until concrete target selection, then the
+    Provider compatibility owner maps it to the closest legal target-protocol control:
+    OpenAI unknown -> medium, Anthropic none/minimal -> low and unknown -> medium,
+    DeepSeek active lower/unknown -> high and xhigh/max -> max, MiniMax active effort
+    -> thinking.type=adaptive without output_config.effort. No effort value invents
+    thinking.budget_tokens.
   - Responses reasoning.effort accepts every non-empty string at Req02 and preserves
-    unknown values through same-protocol Responses projection; target-specific codecs
-    continue to enforce only exact registered cross-protocol intersections.
+    the source value until target selection; ProviderReqCompat06/Direct Provider12 owns
+    the registered lossy compatibility projection and provider wire never receives an
+    unsupported effort value.
   - Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions and round-trip to Responses; OpenAI Chat and Gemini reject
     them when the target has no equivalent request policy, while Anthropic consumes
     a valid summary policy only as a registered local response-shaping hint with no
@@ -2042,6 +2048,10 @@ features:
   - openai_chat_wire_rejects_invalid_reasoning_summary_policy
   - responses_reasoning_effort_preserves_unknown_non_empty_value_for_forward_compatibility
   - openai_responses_wire_preserves_unknown_non_empty_reasoning_effort
+  - direct_kernel_maps_unknown_responses_reasoning_effort_to_protocol_neutral_medium
+  - deepseek_responses_maps_unknown_effort_to_official_high_domain
+  - minimax_anthropic_maps_effort_to_adaptive_thinking_without_unsupported_output_effort
+  - anthropic_reasoning_effort_maps_non_intersection_values_to_closest_legal_level
   - Live V3 0.90.4017 request `openai-responses-router-gpt-5.5-20260801T215453223-700406-1956`
     entered on 5520, targeted `modrouter_anthropic[key2].claude-fable-5`, and returned
     HTTP 200 `requires_action` after the complete typed node chain.
@@ -2054,6 +2064,10 @@ features:
   - npm run test:v3-protocol-conversion-field-parity-red-fixtures
   - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime responses_reasoning_effort_preserves_unknown_non_empty_value_for_forward_compatibility --lib
   - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime openai_responses_wire_preserves_unknown_non_empty_reasoning_effort --lib
+  - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough direct_kernel_maps_unknown_responses_reasoning_effort_to_protocol_neutral_medium
+  - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime deepseek_responses_maps_unknown_effort_to_official_high_domain
+  - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime minimax_anthropic_maps_effort_to_adaptive_thinking_without_unsupported_output_effort
+  - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_anthropic_codec_characterization anthropic_reasoning_effort_maps_non_intersection_values_to_closest_legal_level
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-rust-only
   - npm run verify:v3-architecture-docs
