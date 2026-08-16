@@ -27,6 +27,14 @@ function edge(document, stepId) {
   return document.chains.flatMap((chain) => chain.edges ?? []).find((item) => item.step_id === stepId);
 }
 
+function feature(document, featureId) {
+  return document.features.find((item) => item.feature_id === featureId);
+}
+
+function removeFeature(document, featureId) {
+  document.features = document.features.filter((item) => item.feature_id !== featureId);
+}
+
 const cases = [
   {
     name: 'resource map encodes edge field',
@@ -107,7 +115,9 @@ const cases = [
     name: 'chain owner missing from function map',
     path: 'docs/architecture/v3-function-map.yml',
     mutate: function(source) {
-      return source.replace(/\n- feature_id: v3\.config_interpreter_contract[\s\S]*?(?=\n- feature_id: |\n?$)/u, '\n');
+      return mutateYaml(source, (document) => {
+        removeFeature(document, 'v3.config_interpreter_contract');
+      });
     },
     diagnostic: /v3\.config\.compile(?: edge\[\d+\] v3-cfg-\d+)?: owner_feature_id v3\.config_interpreter_contract is not declared in docs\/architecture\/v3-function-map\.yml/u,
   },
@@ -125,7 +135,9 @@ const cases = [
     name: 'mainline owner missing from verification map',
     path: 'docs/architecture/v3-verification-map.yml',
     mutate: function(source) {
-      return source.replace(/\n- feature_id: v3\.config_interpreter_contract[\s\S]*?(?=\n- feature_id: |\n?$)/u, '\n');
+      return mutateYaml(source, (document) => {
+        removeFeature(document, 'v3.config_interpreter_contract');
+      });
     },
     diagnostic: /v3\.config\.compile(?: edge\[\d+\] v3-cfg-\d+)?: owner_feature_id v3\.config_interpreter_contract is not declared in docs\/architecture\/v3-verification-map\.yml/u,
   },
@@ -161,7 +173,11 @@ const cases = [
     name: 'function resource binding undeclared',
     path: 'docs/architecture/v3-function-map.yml',
     mutate: function(source) {
-      return source.replace('  - v3.config.resource_registry\n  - v3.config.published_manifest', '  - v3.resource.registry_edge\n  - v3.config.published_manifest');
+      return mutateYaml(source, (document) => {
+        const bindings = feature(document, 'v3.config_interpreter_contract').resource_bindings;
+        const index = bindings.indexOf('v3.config.resource_registry');
+        bindings[index] = 'v3.resource.registry_edge';
+      });
     },
     diagnostic: /resource binding v3\.resource\.registry_edge is not declared in resource map/u,
   },
@@ -169,7 +185,9 @@ const cases = [
     name: 'remove resource relation gate feature',
     path: 'docs/architecture/v3-function-map.yml',
     mutate: function(source) {
-      return source.replace(/\n- feature_id: v3\.resource_relation_edge_lock[\s\S]*?(?=\n- feature_id: |\n?$)/u, '\n');
+      return mutateYaml(source, (document) => {
+        removeFeature(document, 'v3.resource_relation_edge_lock');
+      });
     },
     diagnostic: /missing feature v3\.resource_relation_edge_lock/u,
   },
@@ -177,10 +195,12 @@ const cases = [
     name: 'remove gate from verification map',
     path: 'docs/architecture/v3-verification-map.yml',
     mutate: function(source) {
-      return source.replace(
-        /(\n- feature_id: v3\.resource_relation_edge_lock[\s\S]*?)  - npm run test:v3-resource-relation-edge-lock-red-fixtures\n/u,
-        '$1',
-      );
+      return mutateYaml(source, (document) => {
+        const gates = feature(document, 'v3.resource_relation_edge_lock').required_gates;
+        feature(document, 'v3.resource_relation_edge_lock').required_gates = gates.filter(
+          (gate) => gate !== 'npm run test:v3-resource-relation-edge-lock-red-fixtures',
+        );
+      });
     },
     diagnostic: /missing required gate npm run test:v3-resource-relation-edge-lock-red-fixtures/u,
   },

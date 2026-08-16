@@ -1668,6 +1668,52 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
 }
 
 #[test]
+fn v2_compat_provider_auth_secret_file_expands_key_names_without_values() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-v2-auth-key-file-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+    );
+    let secret_file = root.join("opencode-go.conf");
+    fs::write(
+        &secret_file,
+        "cc-sol.key1 = first-secret\ncc-sol.key2 = second-secret\n",
+    )
+    .unwrap();
+    let provider_path = root.join("provider/cc-sol/config.v2.toml");
+    let provider_raw = fs::read_to_string(&provider_path).unwrap().replace(
+        "apiKey = \"secret-cc-sol-key1\"",
+        &format!("secretFile = \"{}\"", secret_file.display()),
+    );
+    fs::write(&provider_path, provider_raw).unwrap();
+    let config_path = root.join("config.toml");
+    fs::write(&config_path, V2_SINGLE_RESPONSES_CONFIG).unwrap();
+
+    let manifest = V3ConfigStore::new(&config_path).load_snapshot().unwrap();
+    let auth = &manifest.providers["cc-sol"].auth.entries;
+    assert_eq!(auth.len(), 2);
+    assert_eq!(auth[0].alias, "key1");
+    assert_eq!(auth[0].secret_file.as_deref(), secret_file.to_str());
+    assert_eq!(auth[0].secret_key.as_deref(), Some("cc-sol.key1"));
+    assert_eq!(auth[1].alias, "key2");
+    assert_eq!(auth[1].secret_key.as_deref(), Some("cc-sol.key2"));
+    assert!(auth.iter().all(|entry| entry.api_key.is_none()));
+    let debug = format!("{manifest:?}");
+    assert!(!debug.contains("first-secret"));
+    assert!(!debug.contains("second-secret"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn v2_compat_keeps_responses_endpoint_for_minimax_only_5555() {
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-v2-minimax-only-{}",

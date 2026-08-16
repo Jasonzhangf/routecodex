@@ -780,6 +780,7 @@ mod tests {
                     model_capabilities: vec!["text".to_string()],
                     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
                     max_context_tokens: None,
+                    context_token_estimate_scale_bps: 10_000,
                     base_url: "https://provider.invalid/v1".to_string(),
                     responses_process: None,
                     responses_transport: V3ResponsesTransportKind::Http,

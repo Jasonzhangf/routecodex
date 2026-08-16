@@ -934,6 +934,10 @@ features:
     direct/relay/json/sse/continuation policy
   - publish_v3_config_05_manifest_from_v3_config_04 emits the deterministic published
     manifest and auth handles
+  - provider auth secretFile supports single-key and list authoring by expanding key
+    names into ordered secret_file + secret_key handles without materializing values
+  - provider auth secretFile rejects malformed, duplicate, empty, unreadable, or mixed
+    explicit authoring at config compile time
   - provider_error_action_policy and client_error_projection_policy compile into V3ErrorManifest
     without secrets, provider runtime hardcoding, or payload leakage
   required_contract:
@@ -1322,10 +1326,12 @@ features:
   - Target candidate capability checks keep route separate from capability: only web_search/search
       and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding/longcontext/remote_continuation/local_materialization
       never hard-reject a candidate
-  - After genuine web_search/search and multimodal/vision capability validation, Target10
-    preserves configured candidate order; model context metadata cannot synthesize
-    `context_near_limit` unavailability or preempt priority, while provider health
-    and request-local provider-failure exclusion remain explicit switch inputs
+  - Target10 consumes RCC-owned request_input_tokens, validated candidate context_token_estimate_scale_bps, and candidate max_context_tokens;
+    below 90 percent preserves configured order, 90 through 100 percent remains eligible
+    after normal candidates, and above 100 percent is filtered before provider transport
+  - Provider health and request-local provider-failure exclusion remain explicit switch
+    inputs after capability and context admission; provider errors and payload metadata
+    cannot reconstruct request token truth
   - Responses continuation is owner-routed by previous_response_id at V3HubReqContinuation03Classified: remote/direct
       records exact-pin to the same GPT-family provider/model/auth; local/relay records
       restore from the local continuation store; neither path is a Target model capability
@@ -1335,7 +1341,7 @@ features:
     final compatible provider
   required_gates:
   - npm run test:v3-p5-router-target
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target configured_priority_is_not_overridden_by_context_near_limit_heuristic
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target context_admission_preserves_normal_priority_demotes_near_limit_and_filters_oversized
     -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target -- --nocapture
   - 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests:': --

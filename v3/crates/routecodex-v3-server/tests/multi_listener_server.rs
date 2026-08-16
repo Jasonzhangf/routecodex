@@ -1668,6 +1668,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                         thinking: None,
                         max_tokens: Some(8192),
                         max_context_tokens: Some(262144),
+                        context_token_estimate_scale_bps: 10_000,
                         web_search_execution_mode: manifest.providers["test"].models["test"]
                             .web_search_execution_mode
                             .clone(),
@@ -1694,6 +1695,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                         thinking: None,
                         max_tokens: Some(8192),
                         max_context_tokens: Some(262144),
+                        context_token_estimate_scale_bps: 10_000,
                         web_search_execution_mode: manifest.providers["test"].models["test"]
                             .web_search_execution_mode
                             .clone(),

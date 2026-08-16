@@ -44,3 +44,36 @@ modules:
       - provider.wire_payload
       - response.client_payload
       - metadata.runtime_control
+  - module_id: v3.target_interpreter
+    owner_feature_id: v3.virtual_router_target_interpreter
+    status: implementation_active
+    owned_paths:
+      - v3/crates/routecodex-v3-target/**
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+      - docs/goals/v3-virtual-router-target-interpreter-plan.md
+      - docs/goals/v3-target-priority-context-heuristic-test-design.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+    forbidden_paths:
+      - src
+      - sharedmodule/llmswitch-core/rust-core
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+      - v3/crates/routecodex-v3-provider-responses/src/wire.rs
+      - v3/crates/routecodex-v3-server
+    allowed_edges:
+      - from: V3Router07OpaqueTargetHitOnce
+        to: V3Target08KindClassified
+      - from: V3Target08KindClassified
+        to: V3Target09CandidateSetExpanded
+      - from: V3Target09CandidateSetExpanded
+        to: V3Target10ConcreteProviderSelected
+    forbidden_resources:
+      - v3.request.normal_payload
+      - v3.provider.wire_payload
+      - v3.response.client_payload
+      - v3.metadata.runtime_control

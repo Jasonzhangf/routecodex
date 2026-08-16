@@ -259,8 +259,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:80d855f496970333ab1628b009685523bb9d15bb9143e86b5f806df0423dab92
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:ab4f1ac4877642539f2d68dbafea87e276fee712cb76107514398687760a337a
+    last_manual_authorization_id: auth-20260816-v3-websocket-owner-path-isolation
   - item_id: chain:v3.anthropic_relay.local_continuation
     chain_id: v3.anthropic_relay.local_continuation
     status: audited_locked
@@ -711,3 +711,10 @@ manual_authorizations:
     reason: "Jason asked to inspect production/current/existing V3 config after locking the unified provider error contract and fill missing config support; adding provider error policy manifest resource changes the locked config.compile resource flow only."
     fingerprint_before: sha256:7a2f68829c5b4f2a6eb33ac605f1f27b79cdf0e1c0e54ea27f26662fa859a193
     fingerprint_after: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d
+  - authorization_id: auth-20260816-v3-websocket-owner-path-isolation
+    item_id: chain:v3.responses.websocket_v2.transport_hardening
+    approved_by: Jason
+    approved_at: '2026-08-16T05:46:58-07:00'
+    reason: "Jason approved continuing the phased V3 independent-domain migration. This refresh records the already verified WebSocket response stream owner moving from the former transport.rs monolith to transport/websocket.rs; the two adjacent chain nodes, resources, runtime behavior, and owning feature remain unchanged."
+    fingerprint_before: sha256:80d855f496970333ab1628b009685523bb9d15bb9143e86b5f806df0423dab92
+    fingerprint_after: sha256:ab4f1ac4877642539f2d68dbafea87e276fee712cb76107514398687760a337a

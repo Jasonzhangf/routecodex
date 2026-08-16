@@ -522,17 +522,72 @@ fn compile_v2_auth(
     _source_hash: String,
     auth: V2ProviderAuthConfig,
 ) -> Result<V3ProviderAuthAuthoringConfig, V3ConfigError> {
-    let entries = if let Some(entries) = auth.entries {
-        entries
-    } else {
-        vec![V2ProviderAuthEntry {
+    let V2ProviderAuthConfig {
+        api_key,
+        env,
+        token_file,
+        secret_file,
+        entries,
+    } = auth;
+    let inline_handle_count = usize::from(api_key.is_some())
+        + usize::from(env.is_some())
+        + usize::from(token_file.is_some());
+    let entries = match (entries, secret_file) {
+        (Some(_), Some(_)) => {
+            return Err(validation(format!(
+                "v2 provider {provider_id} auth cannot combine entries with secretFile auto discovery"
+            )));
+        }
+        (Some(entries), None) => {
+            if inline_handle_count != 0 {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth cannot combine entries with apiKey, env, or tokenFile"
+                )));
+            }
+            entries
+        }
+        (None, Some(secret_file)) => {
+            if inline_handle_count != 0 {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth secretFile cannot combine with apiKey, env, or tokenFile"
+                )));
+            }
+            let secret_file = secret_file.trim();
+            if secret_file.is_empty() {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth secretFile is empty"
+                )));
+            }
+            let content = fs::read_to_string(secret_file).map_err(|error| {
+                validation(format!(
+                    "v2 provider {provider_id} auth secretFile {secret_file} is unreadable: {error}"
+                ))
+            })?;
+            crate::discover_v3_secret_file_auth_handles(&content, provider_id)
+                .map_err(|error| {
+                    validation(format!(
+                        "v2 provider {provider_id} auth secretFile discovery failed: {error}"
+                    ))
+                })?
+                .into_iter()
+                .map(|(alias, secret_key)| V2ProviderAuthEntry {
+                    alias: Some(alias),
+                    api_key: None,
+                    env: None,
+                    token_file: None,
+                    secret_file: Some(secret_file.to_string()),
+                    secret_key: Some(secret_key),
+                })
+                .collect()
+        }
+        (None, None) => vec![V2ProviderAuthEntry {
             alias: Some("key1".to_string()),
-            api_key: auth.api_key,
-            env: auth.env,
-            token_file: auth.token_file,
+            api_key,
+            env,
+            token_file,
             secret_file: None,
             secret_key: None,
-        }]
+        }],
     };
     let mut v3_entries = Vec::new();
     for entry in entries {
@@ -659,6 +714,7 @@ fn compile_v2_provider_models(
                         .max_context_tokens
                         .or(model.context_window)
                         .or(model.max_context),
+                    context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                     features: model.features,
                 },
             )
@@ -829,6 +885,7 @@ struct V2ProviderAuthConfig {
     api_key: Option<String>,
     env: Option<String>,
     token_file: Option<String>,
+    secret_file: Option<String>,
     entries: Option<Vec<V2ProviderAuthEntry>>,
 }
 
@@ -878,6 +935,8 @@ struct V2ProviderModelConfig {
     max_context: Option<u64>,
     max_context_tokens: Option<u64>,
     context_window: Option<u64>,
+    #[serde(default = "default_context_token_estimate_scale_bps")]
+    context_token_estimate_scale_bps: u64,
     /// Mode B 显式声明（v2 配置可选；缺省时按 `web_search_direct`
     /// capability 兼容推断 Mode A）。生产 v2 配置通过此字段启用
     /// `metadata_center_local_search` 与编译期 backend binding。
@@ -890,6 +949,10 @@ struct V2ProviderModelConfig {
     web_search_backend: Option<String>,
     #[serde(default)]
     features: BTreeMap<String, bool>,
+}
+
+fn default_context_token_estimate_scale_bps() -> u64 {
+    10_000
 }
 
 impl V2ProviderModelConfig {
@@ -1117,5 +1180,93 @@ apiKey = "test-key"
             absent.provider.timeout, None,
             "absent timeout must be None (default applies later)"
         );
+    }
+
+    #[test]
+    fn provider_auth_secret_file_auto_discovers_single_or_multiple_handles() {
+        let tmp = std::env::temp_dir().join(format!(
+            "rccv3-auth-key-file-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let key_file = tmp.join("opencode-go.conf");
+        std::fs::write(
+            &key_file,
+            "opencode-go.key1 = first-secret\nopencode-go.key2 = second-secret\n",
+        )
+        .expect("write key file");
+        let key_file = key_file.to_string_lossy().into_owned();
+        let compiled = compile_v2_auth(
+            &tmp,
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some(key_file.clone()),
+                entries: None,
+            },
+        )
+        .expect("auto discover key file");
+        assert_eq!(compiled.entries.len(), 2);
+        assert_eq!(compiled.entries[0].alias, "key1");
+        assert_eq!(
+            compiled.entries[0].secret_file.as_deref(),
+            Some(key_file.as_str())
+        );
+        assert_eq!(
+            compiled.entries[0].secret_key.as_deref(),
+            Some("opencode-go.key1")
+        );
+        assert_eq!(compiled.entries[1].alias, "key2");
+        assert_eq!(
+            compiled.entries[1].secret_key.as_deref(),
+            Some("opencode-go.key2")
+        );
+        assert!(compiled.entries.iter().all(|entry| entry.api_key.is_none()));
+
+        std::fs::write(&key_file, "opencode-go = single-secret\n").expect("write single key");
+        let single = compile_v2_auth(
+            &tmp,
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some(key_file.clone()),
+                entries: None,
+            },
+        )
+        .expect("auto discover single key");
+        assert_eq!(single.entries.len(), 1);
+        assert_eq!(single.entries[0].alias, "key1");
+        assert_eq!(single.entries[0].secret_key.as_deref(), Some("opencode-go"));
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn provider_auth_secret_file_auto_discovery_rejects_mixed_authoring() {
+        let error = compile_v2_auth(
+            Path::new("."),
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some("keys.conf".to_string()),
+                entries: Some(Vec::new()),
+            },
+        )
+        .expect_err("entries plus secretFile must fail");
+        assert!(error
+            .to_string()
+            .contains("cannot combine entries with secretFile"));
     }
 }
