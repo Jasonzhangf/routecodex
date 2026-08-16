@@ -1,32 +1,39 @@
 {
-  "active_version": "active-v2",
-  "artifact_record_id": "evidence-control-v2",
+  "active_version": "active-v3",
+  "artifact_record_id": "control-sdk013-candidate",
   "clean_scope": {
-    "base_commit": "389bd3cf0",
-    "changed_paths": [],
-    "generated_policy": "tracked_hash",
-    "ignored_paths": []
+    "base_commit": "5e1d7e9151b1c10dd8af0fd37f82fa0d88fb3c23",
+    "changed_paths": [
+      "v4/.appsdk/**",
+      "v4/Protected/**"
+    ],
+    "generated_policy": "excluded_from_source_clean",
+    "ignored_paths": [
+      "v4/Active/lib/**",
+      "v4/generated/**",
+      "v4/target/**"
+    ]
   },
-  "created_at": "2026-08-15T13:27:00Z",
-  "freeze_id": "freeze-control-v2",
+  "created_at": "2026-08-16T04:27:30Z",
+  "freeze_id": "control-sdk013-freeze",
   "git_clean": true,
-  "issue_id": "routecodex-v4-foundation",
-  "library_hash": "sha256:bf6b8e426f5bda1962b5c0c4b82bde1be090294eed5e44bbfdc49d7cdc0e0103",
+  "issue_id": "appsdk-013-migration",
+  "library_hash": "sha256:b53e2c19765fe1a0555c982c793d899089fc29a36d30b484fb7182512c97d902",
   "module_id": "routecodex-v4-control",
   "owners": {
-    "api_extractor": "appsdk",
-    "artifact_registry": "appsdk",
-    "compiler": "cargo",
-    "review": "codex",
+    "api_extractor": "appsdk-0.1.3",
+    "artifact_registry": "appsdk-active",
+    "compiler": "appsdk-0.1.3",
+    "review": "routecodex-codex-adapter",
     "vcs": "git"
   },
   "previous_active_immutable": true,
-  "previous_active_version": "active-v1",
-  "promotion_id": "promotion-control-v2",
-  "promotion_record_hash": "sha256:b32966f59df4d18696f88cce079506fc8b119881edc697efc98637a1cb27945c",
-  "public_api_hash": "sha256:7c626cc1a63c57fdc97414aed1f8b06c64b4cea9ef4daff8700eb393487770ed",
-  "regression_report_hash": "sha256:de44ca58f666615de28529fc6a00ba6114984f3363ab8c8b2fc4559c7d2c7faf",
-  "regression_report_id": "regression-control-v2",
-  "review_id": "review-control-v2",
-  "source_commit_or_tag": "389bd3cf0"
+  "previous_active_version": "active-v2",
+  "promotion_id": "control-sdk013-promotion",
+  "promotion_record_hash": "sha256:38a7d09b72fc3508851cef7f50b595075a7c38d4792f35a67ff694625c4a70be",
+  "public_api_hash": "sha256:5a48c0374c5a293060a2f38eb935b4eb68dbcde2726e06d018657103bd0d0054",
+  "regression_report_hash": "sha256:e95cd924442fc16f41892db23fae8de10ca17466fc1b8b83c49f2f658860ac92",
+  "regression_report_id": "control-sdk013-regression",
+  "review_id": "control-sdk013-architecture-review",
+  "source_commit_or_tag": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9"
 }

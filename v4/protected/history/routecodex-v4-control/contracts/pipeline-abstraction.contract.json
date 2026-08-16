@@ -1,0 +1,427 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-pipeline-abstraction",
+  "status": "design",
+  "owner_feature_id": "v4.pipeline_abstraction",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-pipeline-abstraction-model.md",
+    "v4/docs/architecture/v3-v4-semantic-parity-map.yml",
+    "v4/docs/architecture/v4-resource-operation-map.yml",
+    "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
+    "v4/contracts/node-graph.contract.json",
+    "v4/contracts/debug-subscription.contract.json"
+  ],
+  "evaluation": {
+    "skeleton_vs_v3": "pass",
+    "coverage_v3_resources": {"total": 103, "information": 23, "data": 22, "control": 44, "diagnostic_sub_axis": 14, "unclassified": 0},
+    "coverage_v3_features": {"total": 64, "gaps": 0},
+    "adopted": true
+  },
+  "axes": [
+    {"axis_id": "request", "label": "request chain behavior", "direction": "client-to-provider"},
+    {"axis_id": "response", "label": "response chain behavior", "direction": "provider-to-client"},
+    {"axis_id": "operation", "label": "registered behavior operators", "direction": "node-bound"},
+    {"axis_id": "information", "label": "compiled immutable knowledge", "direction": "read-only"},
+    {"axis_id": "control", "label": "typed side-channel control state", "direction": "never-in-payload"},
+    {"axis_id": "data", "label": "business payload and wire semantics", "direction": "semantic-projection-only"}
+  ],
+  "operator_schema": {
+    "required": [
+      "operator_id",
+      "operator_kind",
+      "chain",
+      "node_id",
+      "version",
+      "consumes",
+      "produces",
+      "compat"
+    ],
+    "compat_required": [
+      "baseline",
+      "target",
+      "status",
+      "evidence"
+    ],
+    "compat_status": ["baseline", "replacing", "active", "retired"],
+    "chains": ["request", "response", "error", "config", "lifecycle", "diagnostic"]
+  },
+  "node_schema": {
+    "required": [
+      "node_id",
+      "chain",
+      "chain_version",
+      "position",
+      "owner",
+      "role_id",
+      "input_node",
+      "output_node",
+      "control_in",
+      "control_out",
+      "data_in",
+      "data_out",
+      "resources_read",
+      "resources_written",
+      "allowed_operator_kinds",
+      "control_record_required",
+      "debug_subscriptions",
+      "snapshot_subscriptions"
+    ],
+    "optional": ["statistics_optional"],
+    "node_extension_rule": "published chain nodes are immutable; new semantics use a new chain_version or a new operator on an existing node slot",
+    "role_subclass_rule": "node instances bind exactly one role subclass; allowed operator kinds and config schema come from that role subclass"
+  },
+  "base_node_schema": {
+    "identity_required": ["node_id", "chain", "chain_version", "position", "owner"],
+    "control_in_required": true,
+    "control_out_required": true,
+    "control_record_required": true,
+    "control_record_fields": [
+      "record_id",
+      "node_id",
+      "direction",
+      "control_key",
+      "scope",
+      "payload_hash",
+      "sequence",
+      "timestamp"
+    ],
+    "debug_subscription_rule": "read-only observation; must not alter business result or control decision",
+    "snapshot_subscription_rule": "diagnostic only; snapshot must never become live runtime input",
+    "statistics_rule": "optional observability; must not enter decisions or payload",
+    "debug_switch_rule": "per-module/per-node debug/snapshot/dry_run/route_probe switch is dynamically live-updatable, audited, diagnostic-only, and must not affect business result, control decision, or payload",
+    "dry_run_rule": "every module supports dry-run with declared chain entry/exit or defaults to the full request/response chain; input is the correct payload fixture; no network, no live input, no fallback to live",
+    "error_intake_rule": "node errors enter through a typed BaseNode error intake (stage + code + payload_hash + typed_context + scope); intake records are immutable, fail-fast, and never participate in routing decisions",
+    "hook_queue_rule": "node entry/exit hook queues are machine declared with kind/position/owner/effect, ordered by position, no duplicate positions; hooks never alter the business result",
+    "business_logic_rule": "BaseNode carries no business logic; behavior comes from registered operators"
+  },
+  "plugin_schema": {
+    "required": [
+      "operator_id",
+      "operator_kind",
+      "node_id",
+      "version",
+      "control_info",
+      "state_machine",
+      "flow",
+      "config",
+      "compat"
+    ],
+    "control_info_required": ["reads", "writes", "carrier_fields"],
+    "state_machine_required": ["in_events", "out_events", "transitions"],
+    "flow_required": ["data_in", "data_out", "information_read", "control_write"],
+    "closure_rule": "plugin owns node-local typed closure only; runtime kernel remains the only orchestrator",
+    "config_validation_rule": "operator config must validate against the node role subclass config_schema"
+  },
+  "wiring_schema": {
+    "required": ["chain_version", "nodes", "edges"],
+    "node_selection_rule": "exactly one active_operator per node slot per compiled manifest",
+    "edge_rule": "edges are adjacent and fixed by chain_version"
+  },
+  "group_schema": {
+    "required": [
+      "group_id",
+      "chain",
+      "chain_version",
+      "node_id",
+      "position",
+      "external_interface",
+      "entry_node",
+      "exit_node",
+      "nodes",
+      "edges"
+    ],
+    "rules": [
+      "group external interface equals NodeInstance interface",
+      "single entry and single exit",
+      "external data_in = entry data_in, external data_out = exit data_out",
+      "parent connects only through entry/exit",
+      "no second lifecycle inside group",
+      "internal implementation replaceable when external interface unchanged",
+      "expansion is semantically equivalent"
+    ],
+    "test_semantics": [
+      "group_external_contract",
+      "group_internal_wiring",
+      "group_no_shortcut",
+      "group_no_second_lifecycle",
+      "group_encapsulation",
+      "group_expansion_equivalence"
+    ]
+  },
+  "hook_queue_schema": {
+    "required": [
+      "hook_id",
+      "node_id",
+      "kind",
+      "position",
+      "owner",
+      "effect",
+      "resources_read",
+      "resources_written",
+      "control_record_required"
+    ],
+    "kinds": ["entry", "exit"],
+    "effects": ["read_only", "control_only", "semantic"],
+    "rules": [
+      "entry hooks run before operator in position order",
+      "exit hooks run after operator in position order",
+      "hooks cannot create a second lifecycle or shortcut nodes",
+      "hooks must be machine declared",
+      "control in/out requires ControlRecord",
+      "debug/snapshot subscriptions are read-only",
+      "hook failure enters the error chain explicitly; no fallback"
+    ]
+  },
+  "v4_hub_chain": {
+    "request_chain": "server -> sse_in -> inbound -> chat_process(group) -> outbound -> compat -> provider_sse_out",
+    "response_chain": "provider_sse_in -> inbound -> chat_process(group) -> outbound -> client_sse_out -> server",
+    "response_chain_mirror_of": "request_chain",
+    "internal_data_plane": "json_semantic",
+    "sse_boundary_only": true,
+    "direct_flow": "sse_in -> json_semantic -> sse_out",
+    "sse_coupling": "forbidden",
+    "chat_process": "supernode group with entry/exit hook queues",
+    "continuation_save_only_at": "V4HubRespChatProcess03Governed",
+    "immutable_interval": "resp_chatprocess save -> next req_chatprocess restore; no semantic transformation in between",
+    "response_terminal": "V4ServerRespOutbound06ClientFrame"
+  },
+  "v4_config_chain": {
+    "chain_version": "v4-config-1",
+    "flow": "authoring_file -> parsed -> schema_validated -> resource_registry -> compiled_manifest",
+    "data_plane": false,
+    "edge_kind": "information_flow",
+    "runtime_writable": "forbidden",
+    "authoring_directory_scan": "forbidden",
+    "secret_in_manifest": "forbidden",
+    "deterministic_output": true,
+    "terminal": "V4Config05ManifestPublished"
+  },
+  "module_mock_contract": {
+    "contract_id": "v4-module-mock",
+    "purpose": "每个模块先出 contract-complete mock（节点/边/资源/控制/错误/debug/dry-run 全声明），mock 验证通过后才允许实现",
+    "mock_required_fields": [
+      "mock_id",
+      "module_id",
+      "owner_crate",
+      "chain",
+      "chain_version",
+      "baseline_feature_ids",
+      "baseline_resources",
+      "nodes",
+      "edges",
+      "resources_read",
+      "resources_written",
+      "error_intake",
+      "debug_switch",
+      "dry_run_chain",
+      "test_semantics",
+      "test_layers",
+      "status"
+    ],
+    "status_values": ["draft", "contract_complete", "mock_verified", "implemented", "active"],
+    "rules": [
+      "mock 先于实现",
+      "mock 是合同骨架与测试 harness，不是 runtime 路径，不是 fallback",
+      "mock 合同完整 = 完整性 gate 全部通过",
+      "模块 promotion 前必须有 mock_verified 证据（红测 + 正例）",
+      "资源文件按模块重建，逐模块 anchored",
+      "冻结顺序固定：L0 BaseNode 测试通过 -> 冻结；L1 Edge 测试通过 -> 冻结；L2 模块测试通过 -> 模块冻结",
+      "冻结只锁合同与实现基线，不锁业务算子"
+    ]
+  },
+  "pipeline_test_semantics": {
+    "layers": {
+      "L0_base_node": [
+        "base_node_control_in_out_record",
+        "base_node_debug_subscription_read_only",
+        "base_node_snapshot_subscription_diagnostic",
+        "base_node_statistics_observability_only",
+        "base_node_debug_switch_diagnostic_only",
+        "base_node_dry_run_support",
+        "base_node_error_intake_typed",
+        "base_node_hook_queue_contract",
+        "base_node_no_business_logic"
+      ],
+      "L1_edge": [
+        "edge_data_flow_adjacent_only",
+        "edge_data_flow_resource_axis",
+        "edge_information_flow_adjacent_only",
+        "edge_information_flow_resource_axis",
+        "edge_control_flow_record_required",
+        "edge_control_flow_scope_isolation",
+        "edge_debug_subscription_read_only",
+        "edge_error_intake_typed",
+        "edge_forbidden_edges"
+      ],
+      "L2_module": [
+        "node_entry_contract",
+        "node_exit_contract",
+        "node_success_projection",
+        "node_error_projection",
+        "node_control_record",
+        "node_debug_switch_diagnostic_only",
+        "node_error_intake_typed",
+        "chain_entry_contract",
+        "chain_terminal_contract",
+        "chain_edge_complete",
+        "chain_error_path",
+        "group_external_contract",
+        "group_internal_wiring",
+        "group_no_shortcut",
+        "group_expansion_equivalence"
+      ]
+    },
+    "freeze": {
+      "order": ["L0_base_node -> freeze BaseNode", "L1_edge -> freeze edge contracts", "L2_module -> freeze module"],
+      "layer_dependency": "upper layers depend on frozen lower layers; lower layers never depend on derived implementations",
+      "freeze_scope": "freeze locks contract and implementation baseline; operators remain extensible on frozen node slots"
+    },
+    "chain": [
+      "chain_entry_contract",
+      "chain_terminal_contract",
+      "chain_edge_complete",
+      "chain_error_path",
+      "chain_group_equivalence"
+    ],
+    "node": [
+      "node_entry_contract",
+      "node_exit_contract",
+      "node_success_projection",
+      "node_error_projection",
+      "node_control_record",
+      "node_debug_subscription_read_only",
+      "node_statistics_optional",
+      "node_debug_switch_diagnostic_only",
+      "node_error_intake_typed",
+      "node_route_exit_consumer",
+      "node_payload_cycle_boundary"
+    ]
+  },
+  "control_center": {
+    "operations": ["register", "consume", "release"],
+    "scope_isolation": ["requestId", "pipelineId", "port", "sessionScope", "conversationScope"],
+    "never_in_payload": true,
+    "payload_reconstruction": "forbidden",
+    "protocol_metadata_as_control": "forbidden"
+  },
+  "error_center": {
+    "role": "classify_and_audit_only",
+    "intake": {
+      "from": "any node/operator/hook error",
+      "carrier": "typed error facts + payload_hash + typed_context",
+      "payload_reread": "forbidden; center never re-reads business payload to make decisions"
+    },
+    "output": "classified error facts to v4.control.route_exit",
+    "route_operation": "forbidden",
+    "retry_cooldown_reroute_execution": "forbidden",
+    "provider_local_retry_policy": "forbidden",
+    "fallback": "forbidden",
+    "original_payload_mutation": "forbidden",
+    "v3_boundary": "ErrorHandlingCenter remains ErrorErr06 client projection; V4 error center is intake/classify/audit only and never participates in provider policy or routing"
+  },
+  "route_exit": {
+    "role": "typed route control decision output boundary",
+    "owner": "routecodex-v4-router",
+    "decision_owner": "VR (virtual router) only",
+    "inputs": ["route_facts", "classified error facts", "payload_cycle"],
+    "consumers": ["req_outbound", "error policy"],
+    "payload_patch": "forbidden",
+    "provider_wire": "forbidden",
+    "client_wire": "forbidden",
+    "error_center_route_operation": "forbidden",
+    "same_cycle_semantics": "switch/cooldown/reroute are merged into the same payload cycle"
+  },
+  "payload_cycle": {
+    "role": "original request/response payload lifecycle",
+    "cycle_start": "request_sent",
+    "success_terminal": "response entered client; next request starts a new cycle",
+    "error_terminal": "error terminal only",
+    "same_cycle_merged": ["switch", "cooldown", "reroute"],
+    "original_payload_immutable": true,
+    "cross_cycle_reuse": "forbidden",
+    "payload_reconstruction_from_control": "forbidden"
+  },
+  "module_debug_switch": {
+    "scope": ["module_id", "node_id", "chain_version", "scope"],
+    "kinds": ["debug", "snapshot", "dry_run", "route_probe"],
+    "levels": ["off", "error", "warn", "info", "debug", "trace"],
+    "dynamic_live_update": true,
+    "default_from_manifest": true,
+    "audit_required": true,
+    "diagnostic_only": true,
+    "decision_plane": "forbidden",
+    "payload_carrier": "forbidden"
+  },
+  "dry_run": {
+    "per_module": true,
+    "entry_exit": "optional per chain; when undefined, run the full request or response chain",
+    "input": "correct payload fixture matching declared data_in kind",
+    "no_network": true,
+    "live_input": "forbidden",
+    "provider_wire": "forbidden",
+    "client_wire": "forbidden",
+    "fallback_to_live": "forbidden"
+  },
+  "message_bus": {
+    "purpose": ["notification", "observability", "diagnostics", "records"],
+    "topics": ["node_event", "state_transition", "diagnostic", "observability", "record"],
+    "decision_plane": "forbidden",
+    "payload_carrier": "forbidden",
+    "failure_behavior": "diagnostic error recorded; business path unchanged"
+  },
+  "invariants": [
+    "control-resources-never-enter-payload",
+    "data-resources-carry-no-control-fields",
+    "diagnostic-resources-never-live-input",
+    "operator-consumes-produces-must-be-registered-resources",
+    "one-active-operator-per-node-slot-per-compiled-manifest",
+    "skeleton-nodes-are-immutable-contract",
+    "plugin-closure-not-independent-lifecycle",
+    "message-bus-is-not-a-decision-plane",
+    "control-center-is-not-data-plane-truth",
+    "control-record-every-in-out",
+    "debug-subscription-read-only",
+    "snapshot-subscription-diagnostic-only",
+    "statistics-never-decision-or-payload",
+    "error-center-classify-audit-only",
+    "route-exit-vr-owned",
+    "payload-cycle-same-cycle",
+    "module-debug-switch-diagnostic-only",
+    "dry-run-per-module"
+  ],
+  "completeness_gates": [
+    {"gate_id":"ABS-GATE-01","name":"v3_resource_coverage","rule":"all 103 v3 resources classified with axis and operator_kind"},
+    {"gate_id":"ABS-GATE-02","name":"feature_operator_mapping","rule":"every v3 feature maps to >=1 operator; zero GAP"},
+    {"gate_id":"ABS-GATE-03","name":"reference_integrity","rule":"operator consumes/produces reference registered resources"},
+    {"gate_id":"ABS-GATE-04","name":"axis_boundary_machine_checkable","rule":"control/data/diagnostic invariants enforced by red tests"},
+    {"gate_id":"ABS-GATE-05","name":"manifest_selects_active_operator","rule":"compiled operator manifest selects exactly one active operator per node+scope"},
+    {"gate_id":"ABS-GATE-06","name":"node_immutability","rule":"published chain nodes cannot be inserted/reordered/renumbered"},
+    {"gate_id":"ABS-GATE-07","name":"plugin_closure","rule":"plugins own node-local closure only; no second lifecycle"},
+    {"gate_id":"ABS-GATE-08","name":"bus_not_decision_plane","rule":"subscribers cannot mutate control decisions or business outcome"},
+    {"gate_id":"ABS-GATE-09","name":"control_center_scope","rule":"register/consume/release isolated per scope; payload reconstruction forbidden"},
+    {"gate_id":"ABS-GATE-10","name":"control_record_required","rule":"every control_in/control_out writes an immutable ControlRecord; missing record fails"},
+    {"gate_id":"ABS-GATE-11","name":"debug_subscription_read_only","rule":"debug subscribers cannot mutate execution or decisions"},
+    {"gate_id":"ABS-GATE-12","name":"snapshot_subscription_diagnostic","rule":"node snapshots never enter live runtime input"},
+    {"gate_id":"ABS-GATE-13","name":"statistics_observability_only","rule":"statistics cannot affect decisions, payload, or business truth"},
+    {"gate_id":"ABS-GATE-14","name":"node_graph_machine_controlled","rule":"node graph edges are machine contracts; code-level conversions/subscriptions must resolve to declared edges"},
+    {"gate_id":"ABS-GATE-15","name":"data_control_flow_separated","rule":"data flow edges and control flow edges are separate edge kinds; control never enters data axis"},
+    {"gate_id":"ABS-GATE-16","name":"debug_relations_v3_locked","rule":"v4 debug subscription relations must not relax v3 anchored debug resource relations"},
+    {"gate_id":"ABS-GATE-17","name":"node_numbering_contract","rule":"node_id encodes order+function and is immutable after publication"},
+    {"gate_id":"ABS-GATE-18","name":"group_node_interface_equivalence","rule":"group external interface equals NodeInstance interface; parent pipeline treats group as one node"},
+    {"gate_id":"ABS-GATE-19","name":"pipeline_explicit_lifecycle","rule":"every chain has explicit single-entry single-terminal nodes+edges and explicit error path"},
+    {"gate_id":"ABS-GATE-20","name":"standard_test_semantics","rule":"every published node/group/chain has its standard test surface before anchored"},
+    {"gate_id":"ABS-GATE-21","name":"hub_chain_fixed","rule":"v4 hub request chain fixed: server -> sse_in -> inbound -> chat_process(group) -> outbound -> compat -> provider_sse_out"},
+    {"gate_id":"ABS-GATE-22","name":"sse_boundary_only","rule":"SSE is transport boundary only; internal data plane is JSON semantic; SSE in/out coupling forbidden"},
+    {"gate_id":"ABS-GATE-23","name":"hook_queue_contract","rule":"node entry/exit hook queues are machine declared, ordered, effect-classified, no second lifecycle"},
+    {"gate_id":"ABS-GATE-24","name":"module_debug_switch_contract","rule":"per-module/per-node debug/snapshot/dry-run/route_probe switches are dynamically live-updatable, audited, diagnostic-only, and never affect business path, payload, MetadataCenter, or error chain"},
+    {"gate_id":"ABS-GATE-25","name":"error_center_classify_audit_only","rule":"error center receives typed error facts + payload hash + typed context from any node/operator/hook; it classifies and audits only; route operation, retry/cooldown/reroute execution, provider local policy, and payload rewrite are forbidden"},
+    {"gate_id":"ABS-GATE-26","name":"route_exit_vr_owned","rule":"route control exit is VR-owned typed decision output; switch/cooldown/reroute exit here; error center cannot route; route exit never patches payload or writes provider/client wire"},
+    {"gate_id":"ABS-GATE-27","name":"payload_cycle_contract","rule":"payload cycle starts at request send, ends at response-into-client (next request = new cycle) or error terminal; switch/cooldown/reroute merge into the same cycle; original request payload immutable"},
+    {"gate_id":"ABS-GATE-28","name":"dry_run_chain_contract","rule":"every module supports dry-run with declared chain entry/exit or defaults to the full request/response chain; input is the correct payload fixture; no network, no live input, no provider/client wire, no fallback to live"},
+    {"gate_id":"ABS-GATE-29","name":"hub_response_chain_mirror","rule":"v4 hub response chain is fixed as the request chain mirror: provider_sse_in -> inbound -> chat_process(group) -> outbound -> client_sse_out -> server; SSE is transport-only; continuation save only at V4HubRespChatProcess03Governed; single success terminal V4ServerRespOutbound06ClientFrame"},
+    {"gate_id":"ABS-GATE-30","name":"module_mock_first","rule":"every V4 module must ship a contract-complete mock (nodes/edges/resources/control/error intake/debug switch/dry-run chain/test semantics) before implementation; mock gates must pass before the module leaves playground"},
+    {"gate_id":"ABS-GATE-31","name":"information_flow_edge","rule":"data_plane=false chains (config/lifecycle/diagnostic) use information_flow edges carrying information-axis resources only; control/data never travel information edges"},
+    {"gate_id":"ABS-GATE-32","name":"layered_test_and_freeze","rule":"tests are layered: L0 BaseNode tests pass -> BaseNode freezes; L1 edge tests pass -> edge contracts freeze; L2 module tests pass -> module freezes; upper layers depend only on frozen lower layers"},
+    {"gate_id":"ABS-GATE-33","name":"layered_debug","rule":"debug is layered exactly like tests: base_node debug / edge debug / module debug; upper debug layers may subscribe to lower layers read-only; all layers stay diagnostic-only and never enter live path, payload, MetadataCenter, or error decision plane"}
+  ]
+}

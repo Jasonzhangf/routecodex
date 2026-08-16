@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-test-layers",
+  "status": "design",
+  "owner_feature_id": "v4.layered_test_contract",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
+    "v4/contracts/module-mock.contract.json",
+    "v4/contracts/node-graph.contract.json"
+  ],
+  "purpose": "测试按派生层次分层：BaseNode 基础层 -> Edge 边层 -> 模块派生层。每一层有自己的测试链与 debug 面；基础层测试通过后冻结，派生层测试通过后冻结，冻结语义复用 Playground -> review -> promotion。",
+  "layers": [
+    {
+      "layer": "base_node",
+      "layer_id": "L0",
+      "subject": "BaseNode 横切能力（不绑定任何业务节点）",
+      "tests": [
+        {"test_id": "base_node_control_in_out_record", "semantic": "control_in/control_out 每次写入不可变 ControlRecord；缺记录即红"},
+        {"test_id": "base_node_debug_subscription_read_only", "semantic": "debug 订阅只读；订阅事件不改变业务结果或控制决策"},
+        {"test_id": "base_node_snapshot_subscription_diagnostic", "semantic": "snapshot 订阅只读诊断；快照不进 live path"},
+        {"test_id": "base_node_statistics_observability_only", "semantic": "统计只供观测；不进决策、不进 payload"},
+        {"test_id": "base_node_debug_switch_diagnostic_only", "semantic": "BaseNode 级 debug 开关只影响诊断；live 修改必须落审计"},
+        {"test_id": "base_node_dry_run_support", "semantic": "BaseNode 声明 dry-run 能力；节点主体可被正确 fixture 驱动，no-network"},
+        {"test_id": "base_node_error_intake_typed", "semantic": "节点错误以 typed error facts + payload hash + typed context 进入 BaseNode 错误入口，记录不可变、fail-fast、不进决策"},
+        {"test_id": "base_node_hook_queue_contract", "semantic": "节点 entry/exit hook 队列机器声明、position 排序、effect 分类、禁止重复位置；hook 不改变业务结果"},
+        {"test_id": "base_node_no_business_logic", "semantic": "BaseNode 本身无业务逻辑；业务行为只来自注册算子"}
+      ],
+      "freeze": "L0 全部测试通过后 BaseNode 冻结；冻结后不得在业务节点派生之外修改横切能力"
+    },
+    {
+      "layer": "edge",
+      "layer_id": "L1",
+      "subject": "节点图边合同（data_flow / information_flow / control_flow / debug_subscription / error_intake）",
+      "tests": [
+        {"test_id": "edge_data_flow_adjacent_only", "semantic": "data_flow 只允许相邻节点；非相邻转换无声明边即红"},
+        {"test_id": "edge_data_flow_resource_axis", "semantic": "data_flow 只承载 data 轴资源；控制/信息资源不得出现在 data 边"},
+        {"test_id": "edge_information_flow_adjacent_only", "semantic": "information_flow 只允许 data_plane=false 链相邻节点"},
+        {"test_id": "edge_information_flow_resource_axis", "semantic": "information_flow 只承载 information 轴资源；control/data 不得出现在 information 边"},
+        {"test_id": "edge_control_flow_record_required", "semantic": "control_flow 必须 record_required=true；无记录接入/输出即红"},
+        {"test_id": "edge_control_flow_scope_isolation", "semantic": "control_flow 按 scope 隔离；跨闭环复用即红"},
+        {"test_id": "edge_debug_subscription_read_only", "semantic": "debug_subscription 边 read_only=true；订阅不得反向影响执行"},
+        {"test_id": "edge_error_intake_typed", "semantic": "error_intake 必须携带 error_stage + payload_hash + typed_context 并指向错误中心"},
+        {"test_id": "edge_forbidden_edges", "semantic": "禁止边全量声明且不可被任何记录覆盖；新增未登记边即红"}
+      ],
+      "freeze": "L1 全部测试通过后边合同冻结；冻结后新增边只能走新 chain_version 或已声明边"
+    },
+    {
+      "layer": "module",
+      "layer_id": "L2",
+      "subject": "模块派生层（NodeInstance / group / 模块链，绑定 BaseNode + Edge 合同）",
+      "tests": [
+        {"test_id": "node_entry_contract", "semantic": "节点输入必须是声明前置节点输出"},
+        {"test_id": "node_exit_contract", "semantic": "节点输出必须被声明后继节点消费"},
+        {"test_id": "node_success_projection", "semantic": "成功路径产生声明 data/info_out + control_out + ControlRecord"},
+        {"test_id": "node_error_projection", "semantic": "错误路径显式进入错误中心；无 fallback"},
+        {"test_id": "node_control_record", "semantic": "模块节点每次 control in/out 写 ControlRecord"},
+        {"test_id": "node_debug_switch_diagnostic_only", "semantic": "模块级 debug/snapshot/dry_run/route_probe 开关只影响诊断"},
+        {"test_id": "node_error_intake_typed", "semantic": "模块节点错误以 typed facts + hash 进入错误中心"},
+        {"test_id": "chain_entry_contract", "semantic": "模块链只有一个显式入口"},
+        {"test_id": "chain_terminal_contract", "semantic": "模块链只有一个成功终止点"},
+        {"test_id": "chain_edge_complete", "semantic": "模块链 entry 到 terminal 全部相邻边已声明"},
+        {"test_id": "chain_error_path", "semantic": "模块链错误显式进入错误链"},
+        {"test_id": "group_external_contract", "semantic": "group 外部接口与 NodeInstance 一致（如有 group）"},
+        {"test_id": "group_internal_wiring", "semantic": "group 内部子节点全部相邻无孤立（如有 group）"},
+        {"test_id": "group_no_shortcut", "semantic": "外部不能连内部，内部不能连外部（如有 group）"},
+        {"test_id": "group_expansion_equivalence", "semantic": "group 展开前后外部语义等价（如有 group）"}
+      ],
+      "freeze": "L2 模块测试通过后模块冻结；冻结后模块实现修改必须 Playground -> review -> promotion"
+    }
+  ],
+  "freeze_rules": [
+    "L0 未冻结，禁止派生模块宣称基础横切能力可靠",
+    "L1 未冻结，禁止模块宣称接线合同可靠",
+    "L2 未冻结，禁止模块 promoted / anchored",
+    "每层测试先红后绿：先固化失败样本并确认红，再修改唯一真源转绿",
+    "层冻结只冻结合同与实现基线，不冻结业务算子；新算子仍可注册到已冻结节点 slot",
+    "冻结后的修改必须走 Playground -> review PASS -> promotion -> 新 lib version",
+    "层间只允许上层依赖下层已冻结合同；禁止下层反向依赖上层派生实现"
+  ],
+  "debug_layers": [
+    {"layer": "base_node_debug", "subject": "BaseNode 横切 debug：control record 流、订阅事件、开关状态、dry-run 能力", "switch": "v4.debug.module_switch scope=base_node", "read_only": true, "decision_plane": "forbidden"},
+    {"layer": "edge_debug", "subject": "边级 debug：接线命中、相邻性、资源轴校验、错误 intake 完整性", "switch": "v4.debug.module_switch scope=edge", "read_only": true, "decision_plane": "forbidden"},
+    {"layer": "module_debug", "subject": "模块级 debug：模块内节点/算子执行、快照、dry-run、route probe", "switch": "v4.debug.module_switch scope=module_id", "read_only": true, "decision_plane": "forbidden"}
+  ],
+  "debug_rules": [
+    "debug 分层与测试分层一致：每层有自己的开关面与观测面",
+    "上层 debug 可以订阅下层 debug 事件（只读），下层不得依赖上层观测",
+    "所有 debug 层都禁止进入 live path、payload、MetadataCenter、错误链决策面",
+    "每层 debug 开关 live 修改必须落不可变审计记录"
+  ],
+  "freeze_regression": {
+    "module_id": "routecodex-v4-base-node",
+    "foundation_scope": "BaseNode",
+    "suite_id": "v4-base-node-l0-regression",
+    "command": "cargo test -p routecodex-v4-base-node --test l0_base_node",
+    "whitebox_required": true,
+    "blackbox_required": true,
+    "blackbox_test": "base_node_public_api_blackbox_regression",
+    "report_required": true,
+    "ordinary_mode_after_freeze": "disabled",
+    "reenable_on": ["source_change", "contract_change", "public_api_change", "artifact_change", "dependency_change"]
+  }
+}

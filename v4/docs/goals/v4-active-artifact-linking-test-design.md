@@ -69,7 +69,8 @@ Negative:
 - `appsdk verify v4` and `appsdk verify --admission v4`
 - module regressions: base-node l0 (12), edge l1 (11), control l2 (15), error l2 (23), config l2 (15), error doc compile-fail
 - Active/Protected/record graph hash audit; architecture gate for unregistered/duplicate resolver edges
-- CI job `v4-appsdk-admission` plus a new `v4-active-link` job running the resolver gate and forbidden-edge scan
+- CI job `v4-appsdk-admission` (macOS admission) plus the `v4-build` job (macos-14) running
+  V4 canonical `verify:ci` (resolver gate + forbidden-edge scan integrated)
 
 ## 5. Known gaps recorded
 
@@ -77,3 +78,23 @@ Negative:
 - `public_api_hash` is artifact-entry derived (reproducible today: recompute matches `95f9248e…` for base-node); true API-surface extraction is a future-freeze item.
 - Edge is frozen; if rebuilding through the resolver changes edge artifact bytes, a deliberate re-freeze (evidence -> review -> promotion -> freeze) is required with Jason-approved reason.
 - Workspace gate amendment (resolver entrypoint) is part of the same change set.
+
+## 6. Historical-version identity selection amendment
+
+Design ID: `V4-ACTIVE-RESOLVE-PREFILTER-001`
+
+When more than one immutable Active version exists, dependency selection is by
+the exact `dependency_hashes[].artifact_hash`, not by directory order. The
+resolver first reads each candidate's recorded artifact hash, rejects duplicate
+matches as ambiguous, and only then runs the complete resolver validation for
+the unique matching version. A matching candidate still must pass artifact
+recomputation, record graph, target, dependency closure, and rustc validation.
+
+Paired gates:
+
+- positive: a current dependency resolves even when an older nonmatching
+  version has archived records;
+- negative: duplicate matching hashes are rejected as ambiguous;
+- negative: no matching version remains `ActiveLinkErr07`;
+- negative: stale records on the selected version remain
+  `ActiveLinkErr10`—prefiltering never bypasses selected-version validation.

@@ -1,10 +1,10 @@
 {
-  "bundle_digest": "sha256:1fecd4fc44263ea270d47f096cf40ed1706b659880f808e2d2dcf24b87001b86",
-  "manifest_digest": "sha256:3786ee502e23be59e4583249b80950d422f0c0212feef70554bb84fb62465301",
+  "bundle_digest": "sha256:dfccab3ac7078eb107587d52139497b94168444c8ed76ec60fdc8f6692c4c228",
+  "manifest_digest": "sha256:4d1455016a79a71b8c074ae55a8fcbfc636c2dfc8ab4f8f4df9a8174078f68ca",
   "resources": [
     {
       "class": "contracts",
-      "digest": "sha256:3786ee502e23be59e4583249b80950d422f0c0212feef70554bb84fb62465301",
+      "digest": "sha256:4d1455016a79a71b8c074ae55a8fcbfc636c2dfc8ab4f8f4df9a8174078f68ca",
       "path": ".appsdk/contracts/sdk-bundle.manifest.json",
       "source": "contracts/sdk-bundle.manifest.json"
     },
@@ -16,37 +16,67 @@
     },
     {
       "class": "contracts",
-      "digest": "sha256:d163bf34fcf7c8f62a4cd61c62495f898c282fe0921d6d53972358259401f833",
+      "digest": "sha256:a6468f12b64d3e0125ddd77828a4eeeee48cf3a38a0ee6d5bfe56935cd8a1957",
       "path": ".appsdk/contracts/transitions/zone-transition.manifest.json",
       "source": "contracts/transitions/zone-transition.manifest.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:b2728e03a0c29803714c0f8f3d7f73feb3f15d8b0ca303c22c6b5667bd3c2b28",
+      "digest": "sha256:a14512d93e87d206f89ef8f5c6382e47732b80936a071de83245db980088b3e5",
       "path": ".appsdk/contracts/lifecycle-state-machines.manifest.json",
       "source": "contracts/lifecycle-state-machines.manifest.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:075b13bef1f46598d14b38c241879d2ba9a44dd1738691f27459550bee365614",
+      "digest": "sha256:288bdd25b33a9c86f82be9afd11a049d79940650683d72f4ca337e0da9924de8",
       "path": ".appsdk/contracts/records/record-graph.contract.json",
       "source": "contracts/records/record-graph.contract.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:b64eddac9b99dfc2ae77b52e559af209e4ad19198e649bbf907788d860f0009e",
+      "digest": "sha256:156373924d6ccb823940a52e2b7c12722f7d15696a26b3f6b009cf80ba6f2250",
+      "path": ".appsdk/contracts/records/worktree-record.schema.json",
+      "source": "contracts/records/worktree-record.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:8edbaa2f3b744a806b331e0fb293ce8e18f9c38b1e267dbc66a2a203b9042a78",
+      "path": ".appsdk/contracts/records/reproduction-record.schema.json",
+      "source": "contracts/records/reproduction-record.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:33a5f5dc79491efabc368107663b602062bddc192790d8c238f8a5716384d342",
       "path": ".appsdk/contracts/records/evidence-record.schema.json",
       "source": "contracts/records/evidence-record.schema.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:c54e8e6e1dc106d219432bf9fd39fe31fb30ae2542965c3dd2e6828a186ddae3",
+      "digest": "sha256:b458de669dbe2dd45b54522862f0f984c86e4676d5ca1b6336a8030d12d91657",
+      "path": ".appsdk/contracts/records/fix-candidate-record.schema.json",
+      "source": "contracts/records/fix-candidate-record.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:78ab80a3400029923839eb4a28a4089dc0b20dd0571504f9053746771de8d842",
       "path": ".appsdk/contracts/records/review-record.schema.json",
       "source": "contracts/records/review-record.schema.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:0114274ddc4771ff34fe98cb3b22af2fb376f48cb17c14fe7a83a5bbb98ad6b2",
+      "digest": "sha256:86b214d40be346ed76d3046585373afaf0e1a6c6ebdbf58f1724dbace0b02bd6",
+      "path": ".appsdk/contracts/records/effectiveness-record.schema.json",
+      "source": "contracts/records/effectiveness-record.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:e1483c140febbeca24eba4236d94b6955a4ff0a196f8b417d76efa40578f96b1",
+      "path": ".appsdk/contracts/records/merge-record.schema.json",
+      "source": "contracts/records/merge-record.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:94bba673d2f682524b1769a9d8906521f758f72490bf84a4d5a91c278b6beae3",
       "path": ".appsdk/contracts/records/promotion-record.schema.json",
       "source": "contracts/records/promotion-record.schema.json"
     },
@@ -64,9 +94,15 @@
     },
     {
       "class": "docs",
-      "digest": "sha256:7f57e92a48321eace456b7c326aa4b2c676cde2c7a2efc4a8815157d2581ca3f",
+      "digest": "sha256:eec65e1149a5ef34d1d4f5558f3c0afdd0f05c4d58b0e767d197f92392eace16",
       "path": ".appsdk/docs/design/appsdk-project-integration.md",
       "source": "docs/design/appsdk-project-integration.md"
+    },
+    {
+      "class": "docs",
+      "digest": "sha256:5b50dfe97d92b65a1472e8de6013b5bfe365e1fed964a1eca77f8fdd61ed8248",
+      "path": ".appsdk/docs/design/fix-lifecycle-v2.md",
+      "source": "docs/design/fix-lifecycle-v2.md"
     },
     {
       "class": "docs",
@@ -76,18 +112,18 @@
     },
     {
       "class": "rules",
-      "digest": "sha256:feac7e9982ec075ae4c3a286b56d858b040ae93e40be22bee962b8b80cebe60f",
+      "digest": "sha256:2f2829b4e378d15a9addc9ce75b80f24c2cd1ee06f7a8c82a2747eb8dd93da81",
       "path": ".appsdk/rules/appsdk-project-governance.md",
       "source": "skills/appsdk-project-governance/SKILL.md"
     },
     {
       "class": "skills",
-      "digest": "sha256:feac7e9982ec075ae4c3a286b56d858b040ae93e40be22bee962b8b80cebe60f",
+      "digest": "sha256:2f2829b4e378d15a9addc9ce75b80f24c2cd1ee06f7a8c82a2747eb8dd93da81",
       "path": ".appsdk/skills/appsdk-project-governance/SKILL.md",
       "source": "skills/appsdk-project-governance/SKILL.md"
     }
   ],
   "schema_version": 1,
   "sdk": "appsdk",
-  "version": "0.1.2"
+  "version": "0.1.3"
 }

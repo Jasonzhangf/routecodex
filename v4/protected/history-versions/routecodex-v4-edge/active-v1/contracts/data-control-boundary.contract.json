@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-data-control-plane-boundary",
+  "status": "design",
+  "owner_feature_id": "v4.resource_registry",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-data-control-plane-boundary.md",
+    "v4/docs/architecture/v4-resource-operation-map.yml"
+  ],
+  "invariants": [
+    "INV-01",
+    "INV-02",
+    "INV-03",
+    "INV-04",
+    "INV-05",
+    "INV-06",
+    "INV-07",
+    "INV-08",
+    "INV-09"
+  ],
+  "forbidden_direct_edges": [
+    "v4.config.manifest->v4.request.normal_payload",
+    "v4.config.manifest->v4.request.provider_wire_payload",
+    "v4.control.metadata_center->v4.request.provider_wire_payload",
+    "v4.control.metadata_center->v4.response.client_wire_payload",
+    "v4.control.side_channel->v4.request.provider_wire_payload",
+    "v4.control.side_channel->v4.response.client_wire_payload",
+    "v4.control.stopless_state->v4.response.client_wire_payload",
+    "v4.control.stopless_state->v4.request.provider_wire_payload",
+    "v4.scope.session->v4.request.provider_wire_payload",
+    "v4.scope.session->v4.response.client_wire_payload",
+    "v4.control.route_facts->v4.request.normal_payload",
+    "v4.control.target_selection->v4.request.normal_payload",
+    "v4.request.normal_payload->v4.control.metadata_center",
+    "v4.response.normal_payload->v4.control.metadata_center",
+    "v4.debug.snapshot_ledger->v4.pipeline.mainline",
+    "v4.control.error_chain->v4.request.provider_wire_payload",
+    "v4.control.error_chain->v4.response.client_wire_payload"
+  ],
+  "red_test_gates": [
+    {"gate_id":"RED-01","name":"non_adjacent_conversion","required_for":["compile","architecture_gate"]},
+    {"gate_id":"RED-02","name":"control_in_provider_body","required_for":["architecture_gate","promotion"]},
+    {"gate_id":"RED-03","name":"control_in_client_body","required_for":["architecture_gate","promotion"]},
+    {"gate_id":"RED-04","name":"payload_reconstructs_control","required_for":["architecture_gate","promotion"]},
+    {"gate_id":"RED-05","name":"leak_compensation_forbidden","required_for":["architecture_gate"]},
+    {"gate_id":"RED-06","name":"scope_cross_session_reuse","required_for":["architecture_gate","promotion"]},
+    {"gate_id":"RED-07","name":"continuation_immutable_interval","required_for":["architecture_gate"]},
+    {"gate_id":"RED-08","name":"debug_snapshot_live_path","required_for":["architecture_gate"]},
+    {"gate_id":"RED-09","name":"protocol_metadata_as_control","required_for":["architecture_gate","promotion"]},
+    {"gate_id":"RED-10","name":"runtime_authoring_scan","required_for":["architecture_gate","promotion"]},
+    {"gate_id":"RED-11","name":"shared_control_payload_dto","required_for":["compile","architecture_gate"]}
+  ],
+  "activation_conditions": [
+    "v4 control/runtime/error/config crate skeleton exists",
+    "all RED gates wired into v4 build or CI with proven red state",
+    "resource binding_status flipped to anchored"
+  ]
+}

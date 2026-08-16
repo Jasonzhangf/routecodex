@@ -1,19 +1,29 @@
 {
-  "ai_confidence": 0.99,
-  "confidence_rationale": "resolver hermetic record graph, control test-consumer regression through the Active surface, workspace tests, release build and admission all pass for active-v2",
-  "created_at": "2026-08-15T13:27:00Z",
+  "ai_confidence": 0.94,
+  "confidence_rationale": "Post-merge architecture re-audit confirms the migration candidate remains governance-only and the latest runtime control resources are owned by routecodex-v4-runtime, keyed by scope, explicit on error, and represented only as typed side-channel state. Current resource, function, call, and verification maps bind the real symbols without payload reconstruction or duplicate owners.",
+  "created_at": "2026-08-16T04:22:10Z",
   "evidence_ids": [
-    "evidence-control-v2"
+    "control-sdk013-candidate",
+    "control-sdk013-positive",
+    "control-sdk013-negative"
   ],
-  "issue_id": "routecodex-v4-foundation",
-  "promotion_id": "promotion-control-v2",
-  "review_id": "review-control-v2",
-  "reviewed_artifact_hash": "sha256:bf6b8e426f5bda1962b5c0c4b82bde1be090294eed5e44bbfdc49d7cdc0e0103",
-  "reviewed_commit": "389bd3cf0",
+  "fix_candidate_id": "control-sdk013-candidate",
+  "function_map_hash": "sha256:cf80ecfb2c2dd64b5fa3b32987a504ec0de5708364c675898cf756bf31c94bd4",
+  "issue_id": "appsdk-013-migration",
+  "mainline_call_map_hash": "sha256:9fbbde4c43db6ebc4a3c86909a8589e7c7309e847493b3e00042625ce0e30280",
+  "promotion_id": "control-sdk013-promotion",
+  "resource_map_hash": "sha256:19c93149cd6f02edfe688b454273d1a703e67b4ef40c458860b50015c1470768",
+  "review_id": "control-sdk013-architecture-review",
+  "review_kind": "architecture",
+  "reviewed_artifact_hash": "sha256:b53e2c19765fe1a0555c982c793d899089fc29a36d30b484fb7182512c97d902",
+  "reviewed_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
+  "reviewed_diff_hash": "sha256:b37ac3d9e153ea32ed4af9c5429b8198bd0dcb7b1c4f9ae96918b5c6e2123b81",
   "reviewed_scope_hash": "sha256:b0e43a8443ea5ccdc5965bddd42853b26d884128f16cd04976453d75305a1559",
+  "reviewed_tree_hash": "144f4e0d8c2cdbbaface771797ccb9170e05e9ec",
   "reviewer": {
-    "adapter": "codex",
-    "identity": "codex::architecture-review"
+    "adapter": "routecodex-codex-adapter",
+    "identity": "codex-gpt-5"
   },
-  "verdict": "pass"
+  "verdict": "pass",
+  "verification_map_hash": "sha256:56344905a4a24e6c9d57b4a2d0c2d0ae2e92aa20c56bfcb035f5837f4e20dd99"
 }

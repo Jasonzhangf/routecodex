@@ -7,7 +7,17 @@
       "owner": "routecodex-v4-governance",
       "owned_paths": [
         ".appsdk/**",
-        "contracts/**"
+        "contracts/**",
+        "docs/**",
+        "playground/**",
+        "tests/**",
+        "scripts/**",
+        "Cargo.toml",
+        "Cargo.lock",
+        "package.json",
+        "package-lock.json",
+        "rust-toolchain.toml",
+        ".gitignore"
       ],
       "forbidden_paths": [
         "active/lib/**",
@@ -16,7 +26,14 @@
       ],
       "verification_gates": [
         "contract_valid",
-        "record_graph"
+        "sdk_pinned",
+        "record_graph",
+        "fix_lifecycle_graph",
+        "mainline_merge_identity",
+        "v4_build_verify_positive",
+        "v4_build_verify_red",
+        "v4_build_verify_ci",
+        "v4_isolation_positive"
       ]
     },
     {
@@ -32,6 +49,8 @@
         "generated/**"
       ],
       "verification_gates": [
+        "contract_valid",
+        "record_graph",
         "v4_active_link_resolver",
         "v4_active_index_verify",
         "v4_cargo_workspace_build"
@@ -51,7 +70,10 @@
       ],
       "verification_gates": [
         "v4_base_node_l0_regression",
-        "v4_cargo_workspace_build"
+        "v4_cargo_workspace_build",
+        "fix_lifecycle_graph",
+        "mainline_merge_identity",
+        "regression_report"
       ]
     },
     {
@@ -70,7 +92,10 @@
         "v4_edge_l1_regression",
         "v4_active_link_resolver",
         "v4_active_index_verify",
-        "v4_frozen_source_edge_forbidden"
+        "v4_frozen_source_edge_forbidden",
+        "fix_lifecycle_graph",
+        "mainline_merge_identity",
+        "regression_report"
       ]
     },
     {
@@ -87,7 +112,10 @@
       ],
       "verification_gates": [
         "v4_control_l2_regression",
-        "v4_parity_gate_resource_binding"
+        "v4_parity_gate_resource_binding",
+        "fix_lifecycle_graph",
+        "mainline_merge_identity",
+        "regression_report"
       ]
     },
     {
@@ -104,7 +132,10 @@
       ],
       "verification_gates": [
         "v4_error_l2_regression",
-        "v4_error_compile_fail_regression"
+        "v4_error_compile_fail_regression",
+        "fix_lifecycle_graph",
+        "mainline_merge_identity",
+        "regression_report"
       ]
     },
     {
@@ -120,6 +151,8 @@
         "generated/**"
       ],
       "verification_gates": [
+        "contract_valid",
+        "record_graph",
         "v4_config_l2_regression",
         "v4_parity_gate_resource_binding"
       ]
@@ -137,9 +170,81 @@
         "generated/**"
       ],
       "verification_gates": [
+        "contract_valid",
+        "record_graph",
         "v4_skeleton_l0_regression",
         "v4_parity_gate_skeleton_topology",
         "v4_parity_gate_resource_binding"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-plugin-contract",
+      "status": "active",
+      "owner": "routecodex-v4-plugin-contract",
+      "owned_paths": [
+        "crates/routecodex-v4-plugin-contract/**"
+      ],
+      "forbidden_paths": [
+        "active/lib/**",
+        "protected/**",
+        "generated/**"
+      ],
+      "verification_gates": [
+        "v4_plugin_contract_l2_regression",
+        "v4_parity_gate_plugin_plan"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-plugin-plan",
+      "status": "active",
+      "owner": "routecodex-v4-plugin-plan",
+      "owned_paths": [
+        "crates/routecodex-v4-plugin-plan/**"
+      ],
+      "forbidden_paths": [
+        "active/lib/**",
+        "protected/**",
+        "generated/**"
+      ],
+      "verification_gates": [
+        "v4_plugin_plan_l2_regression",
+        "v4_parity_gate_plugin_plan",
+        "v4_parity_gate_plugin_plan_red"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-plugin-catalog",
+      "status": "active",
+      "owner": "routecodex-v4-plugin-catalog",
+      "owned_paths": [
+        "crates/routecodex-v4-plugin-catalog/**"
+      ],
+      "forbidden_paths": [
+        "active/lib/**",
+        "protected/**",
+        "generated/**"
+      ],
+      "verification_gates": [
+        "v4_plugin_catalog_l2_regression",
+        "v4_parity_gate_plugin_plan"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-cordis-bridge",
+      "status": "active",
+      "owner": "routecodex-v4-cordis-bridge",
+      "owned_paths": [
+        "crates/routecodex-v4-cordis-bridge/**"
+      ],
+      "forbidden_paths": [
+        "active/lib/**",
+        "protected/**",
+        "generated/**"
+      ],
+      "verification_gates": [
+        "v4_plugin_bridge_l2_regression",
+        "v4_parity_gate_cordis_bridge",
+        "v4_parity_gate_cordis_bridge_red"
       ]
     },
     {
@@ -155,8 +260,11 @@
         "generated/**"
       ],
       "verification_gates": [
+        "contract_valid",
+        "record_graph",
         "v4_runtime_l2_regression",
         "v4_parity_gate_execution_binding",
+        "v4_parity_gate_execution_binding_red",
         "v4_parity_gate_resource_binding",
         "v4_compat_gate_responses_direct",
         "v4_compat_gate_relay_continuation"
@@ -175,6 +283,8 @@
         "generated/**"
       ],
       "verification_gates": [
+        "contract_valid",
+        "record_graph",
         "v4_debug_l2_regression",
         "v4_parity_gate_resource_binding",
         "v4_parity_gate_plane_isolation",
@@ -194,6 +304,8 @@
         "generated/**"
       ],
       "verification_gates": [
+        "contract_valid",
+        "record_graph",
         "v4_router_l2_regression",
         "v4_parity_gate_resource_binding",
         "v4_parity_gate_plane_isolation"
@@ -212,6 +324,8 @@
         "generated/**"
       ],
       "verification_gates": [
+        "contract_valid",
+        "record_graph",
         "v4_provider_l2_regression",
         "v4_parity_gate_resource_binding",
         "v4_parity_gate_plane_isolation"
@@ -230,6 +344,8 @@
         "generated/**"
       ],
       "verification_gates": [
+        "contract_valid",
+        "record_graph",
         "v4_server_l2_regression",
         "v4_parity_gate_resource_binding",
         "v4_parity_gate_execution_binding",

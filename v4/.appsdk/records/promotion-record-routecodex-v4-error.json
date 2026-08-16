@@ -1,42 +1,67 @@
 {
-  "artifact_hash": "sha256:c26ccfc3ee6c847b1b4b2f812b72071a20df81f98fe40e60d457c41b3aed5d3f",
-  "base_artifact_hash": "sha256:23e7b9950ef2f0c2c6767c573371a1d29c82050f11ddbe6593932822fce45bb1",
-  "base_commit": "dc52f4772",
-  "change_reason_comment": "Error re-freeze active-v3: frozen Error build/regression migrated from Cargo path dependency to the routecodex-v4-build-link resolver commands; Error links the frozen base-node Active surface",
-  "change_set_id": "change-error-active-link-v3",
-  "compatibility_level": "breaking",
-  "created_at": "2026-08-15T13:27:00Z",
-  "design_id": "v4-active-artifact-linking-design",
+  "architecture_review_id": "error-sdk013-architecture-review",
+  "artifact_hash": "sha256:e172b55e1d30076d9adba3d6b9f12dc7ce6f7adc73bbe2fbf8b5abe8fd61ca74",
+  "base_artifact_hash": "sha256:c26ccfc3ee6c847b1b4b2f812b72071a20df81f98fe40e60d457c41b3aed5d3f",
+  "base_commit": "389bd3cf0",
+  "candidate_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
+  "change_reason_comment": "Rebind the immutable error library to base-node active-v2 under AppSDK 0.1.3 without rewriting active-v3.",
+  "change_set_id": "error-sdk013-change-set",
+  "compatibility_level": "migration_required",
+  "created_at": "2026-08-16T04:29:00Z",
+  "design_id": "v4-appsdk-0.1.3-migration-v1",
+  "effectiveness_record_id": "error-sdk013-effectiveness",
   "evidence_ids": [
-    "evidence-error-v3"
+    "error-sdk013-candidate",
+    "error-sdk013-positive",
+    "error-sdk013-negative",
+    "error-sdk013-fixed-replay",
+    "error-sdk013-post-positive",
+    "error-sdk013-post-negative",
+    "error-sdk013-blackbox"
   ],
-  "experiment_id": "experiment-error-active-link-v3",
-  "issue_id": "routecodex-v4-foundation",
+  "experiment_id": "error-sdk013-experiment",
+  "fix_candidate_id": "error-sdk013-candidate",
+  "issue_id": "appsdk-013-migration",
+  "merge_record_id": "error-sdk013-merge",
+  "merged_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
+  "migration_id": "sdk-0.1.2-to-0.1.3",
   "module_id": "routecodex-v4-error",
-  "new_active_version": "active-v3",
-  "playground_cleanup_record_id": "cleanup-error-v3",
-  "previous_active_version": "active-v2",
-  "promotion_id": "promotion-error-v3",
-  "public_api_hash": "sha256:78b8bce67fedbb5c438c7eff1d405f7c8e0267d9ac7fd6186f9e37576898b4a4",
+  "new_active_version": "active-v4",
+  "playground_cleanup_record_id": "cleanup-error-sdk013",
+  "previous_active_version": "active-v3",
+  "promotion_id": "error-sdk013-promotion",
+  "public_api_hash": "sha256:37520a2290b4ab4b6cfc615f8e4a8f16a09b209d445d73f7e421175afd60733a",
+  "reproduction_record_id": "error-sdk013-reproduction",
   "required_gate_results": [
     {
-      "gate_id": "v4_error_l2_regression",
-      "producer": "cargo",
+      "gate_id": "worktree-clean",
+      "producer": "git",
       "result": "pass"
     },
     {
-      "gate_id": "v4_active_link_resolver",
-      "producer": "cargo",
+      "gate_id": "baseline-reproduced",
+      "producer": "appsdk-0.1.3",
       "result": "pass"
     },
     {
-      "gate_id": "v4_cargo_workspace_build",
-      "producer": "cargo",
+      "gate_id": "architecture-review-pass",
+      "producer": "routecodex-codex-adapter",
+      "result": "pass"
+    },
+    {
+      "gate_id": "post-architecture-effectiveness",
+      "producer": "appsdk-0.1.3",
+      "result": "pass"
+    },
+    {
+      "gate_id": "mainline-merge-identity",
+      "producer": "git",
       "result": "pass"
     }
   ],
-  "review_id": "review-error-v3",
-  "root_cause": "frozen Error still consumed base-node through a Cargo path dependency; re-freeze binds Error via the resolver Active surface so lifecycle records and compiled artifacts agree",
+  "review_id": "error-sdk013-architecture-review",
+  "root_cause": "The previous frozen consumer artifact binds base-node active-v1 and cannot coexist as the current graph after base-node is promoted to active-v2.",
   "scope_hash": "sha256:4693a7972e4743e7e0be3f2e6ab48c86039a26e51eb8f590abc40ca70ec42d27",
-  "source_commit": "389bd3cf0"
+  "source_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
+  "worktree_record_id": "error-sdk013-worktree"
 }

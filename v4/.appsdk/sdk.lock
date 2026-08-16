@@ -1,7 +1,7 @@
 {
   "binary_ref": "project-sdk",
-  "bundle_digest": "sha256:1fecd4fc44263ea270d47f096cf40ed1706b659880f808e2d2dcf24b87001b86",
-  "bundle_manifest_digest": "sha256:3786ee502e23be59e4583249b80950d422f0c0212feef70554bb84fb62465301",
+  "bundle_digest": "sha256:dfccab3ac7078eb107587d52139497b94168444c8ed76ec60fdc8f6692c4c228",
+  "bundle_manifest_digest": "sha256:4d1455016a79a71b8c074ae55a8fcbfc636c2dfc8ab4f8f4df9a8174078f68ca",
   "bundle_resources": {
     "contracts": [
       "contracts/sdk-bundle.manifest.json",
@@ -9,14 +9,20 @@
       "contracts/transitions/zone-transition.manifest.json",
       "contracts/lifecycle-state-machines.manifest.json",
       "contracts/records/record-graph.contract.json",
+      "contracts/records/worktree-record.schema.json",
+      "contracts/records/reproduction-record.schema.json",
       "contracts/records/evidence-record.schema.json",
+      "contracts/records/fix-candidate-record.schema.json",
       "contracts/records/review-record.schema.json",
+      "contracts/records/effectiveness-record.schema.json",
+      "contracts/records/merge-record.schema.json",
       "contracts/records/promotion-record.schema.json",
       "contracts/records/freeze-record.schema.json",
       "contracts/records/regression-report.schema.json"
     ],
     "docs": [
       "docs/design/appsdk-project-integration.md",
+      "docs/design/fix-lifecycle-v2.md",
       "docs/architecture/appsdk-governance-architecture.md"
     ],
     "rules": [
@@ -26,9 +32,9 @@
       "skills/appsdk-project-governance/SKILL.md"
     ]
   },
-  "compiler_digest": "sha256:3685149eab60ed887737e1ff0c9a6ddbbd0add32424d40595e27296ebf7b8686",
+  "compiler_digest": "sha256:e3c36ae25c94d0c01c81cfe084fac7de8dc577f5ba3b8f91ae18b9d0587631a5",
   "contract_schema": 1,
-  "digest": "sha256:3685149eab60ed887737e1ff0c9a6ddbbd0add32424d40595e27296ebf7b8686",
+  "digest": "sha256:e3c36ae25c94d0c01c81cfe084fac7de8dc577f5ba3b8f91ae18b9d0587631a5",
   "sdk": "appsdk",
-  "version": "0.1.2"
+  "version": "0.1.3"
 }
