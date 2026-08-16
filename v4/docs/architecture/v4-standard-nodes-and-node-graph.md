@@ -793,3 +793,158 @@ group 作为超级节点，除继承节点测试外还必须通过：
 6. 每个节点/group/chain 生成标准测试面；
 7. 每个 edge 接一个红测（未声明边、非相邻 data edge、control 入 payload、debug 入 live path、error intake 不带 typed facts、group 短路必须红）；
 8. `v4-resource-operation-map.yml` 的 debug 资源从 `design` 提升为 `anchored` 后再允许实现。
+
+---
+
+## Phase 1 现状审计（2026-08-16，目标 V4-INDEPENDENT NODE GRAPH 激活）
+
+设计 ID：`V4-NODE-GRAPH-ACTIVE-20260816`；owner feature：`v4.node_graph`。
+本审计只读现状、不改合同；审计数据来自以下真源（全部在 `v4/` 内）：
+`contracts/node-graph.contract.json`（design）、`contracts/skeleton-plan.contract.json`
+（active）、`docs/architecture/v4-resource-operation-map.yml`（active，49/49 anchored）、
+`.appsdk/maps/{resource,function,mainline-call,module-registry,verification}-map.json`、
+`.appsdk/project.json`、`crates/routecodex-v4-{skeleton,runtime,config,error}/src` 与
+`scripts/architecture/verify-v4-*.mjs` 现有门禁。
+
+### 1. 现状快照（每源 node ID 集合与 status）
+
+| 源 | status | 节点来源 | 节点数 | 代表性 ID |
+|---|---|---|---|---|
+| node-graph.contract.json `v4_hub_request_chain` | design | chain nodes | 7 | V4ServerReqInbound01ClientRaw … V4ProviderSseOut07WireBoundary |
+| node-graph.contract.json `v4_hub_response_chain` | design | chain nodes | 6 | V4ProviderSseIn01FrameBoundary … V4ServerRespOutbound06ClientFrame |
+| node-graph.contract.json `v4_config_chain` | design | chain nodes | 5 | V4Config01AuthoringFileSource … V4Config05ManifestPublished |
+| node-graph.contract.json `registered_nodes` | design | side/control/diagnostic 目录 | 41 | V4ScopeRegistry、V4PayloadCycleRegistry、V4Debug01..13、V4ErrorCenter02ClassifyAudit 等 |
+| skeleton-plan.contract.json `request` | active | plan nodes | 3（旧压缩） | V4ReqInbound01Raw、V4ReqProcess02、V4ReqOutbound03 |
+| skeleton-plan.contract.json `response` | active | plan nodes | 3（旧压缩） | V4RespInbound01Raw、V4RespProcess02、V4ClientProjection03 |
+| skeleton-plan.contract.json `error` | active | plan nodes | 6 | V4Error01SourceRaised … V4Error06ClientProjected |
+| skeleton-plan.contract.json `config` | active | plan nodes | 5 | V4Config01AuthoringFileSource … V4Config05ManifestPublished |
+| skeleton-plan.contract.json 全部链 | active | checkpoints | 23 | 混合旧/目标风格（见 §3） |
+| v4-resource-operation-map.yml | active | owner_node / allowed_* / forbidden_* | 49 资源、46 个不同 owner_node | 旧风格链 ID + side/control/debug/config/error |
+| .appsdk/maps/resource-map.json | active | owner（crate::symbol） | 82 资源，39 个携带 `V4*` 节点符号 | `routecodex-v4-runtime::V4ReqInbound02Normalized` 等 |
+| .appsdk/maps/mainline-call-map.json | active | node-level edges | 48 边（8 条节点边） | config 4 条正确；runtime 4 条旧三节点边 |
+| .appsdk/maps/function-map.json | active | functions | 25 | **无 `v4.node_graph` 条目** |
+| .appsdk/maps/verification-map.json | active | gates | 46 | 仅 `v4_parity_gate_skeleton_topology` 涉及节点图，且只查通用拓扑 |
+| crates/routecodex-v4-runtime | source_implemented | PLUGIN_REGISTRY + 链执行 | 16 个本地插件 + 9 个外部链插件 | 3 节点链执行、测试断言 trace.len()==3 |
+| crates/routecodex-v4-config | source_implemented | 链节点常量 | 5 | V4Config01..05（与目标一致） |
+| crates/routecodex-v4-error | frozen | ErrorStage | 6 | V4Error01..06（与目标一致，冻结不可改） |
+
+### 2. 目标拓扑（本 Phase 必须激活的固定四链）
+
+以下 24 个外部节点全部必须进入机器目录（node-graph chain sections +
+registered_nodes），编号、position、相邻边由红测锁定；`prev/next` 即相邻边。
+
+**Request（7，data plane；chain_version v4-hub-1）**
+
+| pos | node_id | role_id | axis | prev | next | 现状 owner（候选） |
+|---|---|---|---|---|---|---|
+| 1 | V4ServerReqInbound01ClientRaw | request_inbound | data | — | 2 | routecodex-v4-server（待锁定） |
+| 2 | V4ServerSseIn02FrameBoundary | request_inbound | data | 1 | 3 | routecodex-v4-server（待锁定） |
+| 3 | V4HubReqInbound03Normalized | request_inbound | data | 2 | 4 | routecodex-v4-runtime（自 V4ReqInbound02Normalized 迁移） |
+| 4 | V4HubReqChatProcess04Governed（group） | request_chat_process | data | 3 | 5 | routecodex-v4-runtime |
+| 5 | V4HubReqOutbound05ProviderSemantic | request_outbound | data | 4 | 6 | routecodex-v4-runtime（自 V4ReqOutbound05ProviderSemantic 迁移） |
+| 6 | V4ProviderReqCompat06Compat | request_outbound | data | 5 | 7 | routecodex-v4-provider（自 V4ProviderReqOutbound06WirePayload 迁移） |
+| 7 | V4ProviderSseOut07WireBoundary | request_outbound | data | 6 | — | routecodex-v4-provider（自 V4ProviderTransport07Request 迁移） |
+
+**Response（6，data plane；v4-hub-1 镜像）**
+
+| pos | node_id | role_id | axis | prev | next | 现状 owner（候选） |
+|---|---|---|---|---|---|---|
+| 1 | V4ProviderSseIn01FrameBoundary | response_inbound | data | — | 2 | routecodex-v4-provider（自 V4ProviderRespInbound01Raw 迁移） |
+| 2 | V4HubRespInbound02Parsed | response_inbound | data | 1 | 3 | routecodex-v4-runtime（自 V4RespInbound02Parsed 迁移） |
+| 3 | V4HubRespChatProcess03Governed（group） | response_chat_process | data | 2 | 4 | routecodex-v4-runtime |
+| 4 | V4HubRespOutbound04ClientSemantic | response_outbound | data | 3 | 5 | routecodex-v4-runtime（自 V4RespOutbound04ClientSemantic 迁移） |
+| 5 | V4ServerSseOut05FrameBoundary | response_outbound | data | 4 | 6 | routecodex-v4-server（待锁定） |
+| 6 | V4ServerRespOutbound06ClientFrame | response_outbound | data | 5 | — | routecodex-v4-server（待锁定，唯一 success terminal） |
+
+**Error（6，control plane；冻结语义，chain 不改）**
+
+V4Error01SourceRaised → V4Error02HostCaptured → V4Error03RuntimeClassified →
+V4Error04RouterPolicyApplied → V4Error05ExecutionDecision → V4Error06ClientProjected。
+owner=routecodex-v4-error；`ErrorStage` 01..06 已冻结；01 唯一 kernel、06 唯一 terminal。
+node-graph.contract.json 当前**缺少 error chain 机器 section**（只有 registered_nodes 里
+的 V4ErrorChain/V4ErrorCenter02ClassifyAudit 引用），必须补上并与 skeleton error 链一致。
+
+**Config（5，information plane；固定）**
+
+V4Config01AuthoringFileSource → V4Config02AuthoringParsed → V4Config03SchemaValidated →
+V4Config04ResourceRegistryBuilt → V4Config05ManifestPublished；owner=routecodex-v4-config。
+skeleton/config 代码 ID 已一致；**skeleton-plan 中 pos3/pos4 的 role_id 与 node-graph
+contract 漂移**（skeleton: pos3=config_registry、pos4=config_manifest；contract:
+pos3=config_authoring、pos4=config_registry、pos5=config_manifest），收口时以 contract 为准。
+
+**Group 私有节点与 side-chain（非父链节点）**
+
+- `V4HubReqChatProcess04Governed` 内部私有节点：continuation_classify / continuation_restore /
+  governance / execution_plan 子节点（现有 checkpoint 候选：V4ReqContinuationClassified、
+  V4ChatProcess04ContinuationRestore、V4ReqExecutionPlan04、V4Router05RequestClassified、
+  V4Router06SelectionPlan）。父链只能连 04 的 entry/exit；04.1/04.2/04.3 形式 ID 不得作为父链节点。
+- `V4HubRespChatProcess03Governed` 内部私有节点：response_governance / tool_harvest /
+  continuation_commit 子节点（现有 checkpoint 候选：V4ChatProcess03ContinuationCommit、
+  V4RespContinuationCommitted）。
+- registered_nodes 必须覆盖：四条固定链全部节点、全部 group 私有节点、
+  control/diagnostic/lifecycle side-chain 节点、以及 49/49 anchored resource 引用的
+  全部 owner_node；每个 entry 需 family/role/scope/owner 唯一，未知或重复 fail-fast。
+
+### 3. 核心差异（现状 vs 目标态）
+
+1. **三套命名并存**：design node-graph 用 `V4Server*/V4Hub*/V4Provider*` 目标 ID；
+   active resource map（49/49）与 skeleton checkpoints 用旧风格 `V4ReqInbound02Normalized`、
+   `V4ReqChatProcess03Governed`、`V4ReqOutbound05ProviderSemantic`、
+   `V4ProviderReqOutbound06WirePayload`、`V4ProviderTransport07Request`、
+   `V4ProviderRespInbound01Raw`、`V4RespInbound02Parsed`、`V4RespOutbound04ClientSemantic`；
+   active skeleton plan nodes 用更旧的 3 节点压缩 ID（V4ReqInbound01Raw/V4ReqProcess02/
+   V4ReqOutbound03、V4RespInbound01Raw/V4RespProcess02/V4ClientProjection03）。
+2. **resource owner_node 依赖 checkpoint 循环自证**：46 个 owner_node 中 11 个
+   （V4Error01/04/06、V4ProviderReqOutbound06WirePayload、V4ProviderRespInbound01Raw、
+   V4ReqInbound02Normalized、V4ReqOutbound05ProviderSemantic、V4RespInbound02Parsed、
+   V4RespOutbound04ClientSemantic、V4Router05RequestClassified、V4Router06SelectionPlan）
+   只存在于 skeleton checkpoints，不在 design chain/registered 目录；`verify-v4-resource-binding`
+   的 `collectNodeCatalog()` 把 skeleton checkpoints 当目录真源，构成 owner_node ↔ checkpoint
+   循环自证，必须打破（目录真源 = node-graph chains + registered_nodes；checkpoint 只能引用
+   目录内节点）。
+3. **active skeleton 仍是旧三节点拓扑**：request 3 / response 3；13 个目标链节点
+   （request 7 + response 6）全部不在 active plan；旧 12 个 plan node ID 不在 design 目录。
+4. **node-graph.contract.json 缺错误链与生命周期链机器 section**：error 6 节点只在
+   skeleton active 侧；lifecycle family 只有 role subclass 定义，无节点 section。
+5. **mainline-call-map 双拓扑**：config 4 条 node 边正确；runtime 4 条 node 边
+   （V4ReqInbound01Raw→V4ReqProcess02→V4ReqOutbound03、V4RespInbound01Raw→
+   V4RespProcess02→V4ClientProjection03）仍是旧三节点；收口后必须只登记目标链相邻边。
+6. **function-map 无 v4.node_graph**：25 个 function 条目中没有 node-graph 机器 owner，
+   收口时新增唯一 active function（真实 entry symbols = 新 graph gate/validator 路径）。
+7. **verification-map 无 node-graph 门禁**：仅 `v4_parity_gate_skeleton_topology`
+   （通用拓扑）；目标红测清单（编号缺/重/倒序、跨链边、group 私有直连、checkpoint 目录
+   引用、graph↔skeleton 漂移、hash 漂移、旧三节点复活、payload/control 轴违规等）全部未接。
+8. **config role 漂移**：skeleton pos3/pos4 role 与 node-graph contract 不一致（见 §2）。
+
+### 4. 收口顺序（沿用本文“落地顺序”，不新建总计划）
+
+1. 新增/强化红测并确认当前必红（先红）：resource-binding 目录真源改为
+   chains+registered_nodes（现 11 个 owner_node 必红）；node-graph 编号/重复/未知
+   family-role/缺 owner-scope；skeleton↔graph 节点/边/checkpoint 漂移；group 私有直连；
+   checkpoint 未注册引用；旧三节点 ID 复活；hash 绑定（graph/plan/manifest/runtime）；
+   mainline 旧边；payload/control 轴违规。
+2. node-graph.contract.json 补 error/lifecycle 链 section、registered_nodes 覆盖
+   24 个链节点 + group 私有节点 + 全部 46 个 owner_node，status design→active。
+3. skeleton-plan.contract.json 迁移到同一 ID/position/edge/checkpoint，物理删除旧
+   三节点 active NodeSlot/edge；config role 对齐。
+4. v4-resource-operation-map.yml 与 .appsdk resource-map.json 双源迁移到目标 ID，
+   allowed/forbidden/owner_node 全部命中新目录。
+5. mainline-call-map 只留目标链相邻边；function-map 新增 v4.node_graph；
+   module registry owned_paths 覆盖 graph validator/gate 文件；verification-map +
+   v4/package.json + CI 接入新 gate。
+6. routecodex-v4-skeleton/runtime consumer 迁移到完整拓扑并物理删除旧 NodeSlot/edge
+   （禁止兼容 fallback、双 plan、旧 ID alias）；runtime L2 测试改为 7/6 节点 trace。
+7. 全量验证栈（见 long-horizon Phase 1）+ active index gen/verify + DSH PASS。
+
+### 5. 待 Jason/实现锁定的决策点（不阻塞审计，但收口前需定）
+
+- server/provider 边界节点（01/02/07、response 01/05/06）的 owner 分配：候选
+  routecodex-v4-server / routecodex-v4-provider；Phase 1 只迁移 skeleton/runtime
+  consumer，边界节点算子可为注册的 pass-through/transport-boundary 投影，实际网络
+  transport 属 Phase 2+，禁止越界实现。
+- group 私有节点最终 ID 命名（04.1/04.2/04.3 只作私有占位，必须显式登记为
+  group-internal，父链不得引用）。
+- V4Router05RequestClassified / V4Router06SelectionPlan / V4Router07RouteDecisionExit
+  的注册归属：05/06 建议登记为 request chat-process group 私有节点（route_facts /
+  target_selection），07 维持 registered_nodes 的 request_execution side node；
+  红测锁住“父链不得直连 05/06”。
