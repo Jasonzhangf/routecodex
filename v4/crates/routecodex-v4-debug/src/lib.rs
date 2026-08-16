@@ -15,6 +15,7 @@
 //!   silent strip, no downstream compensation.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DebugError {
@@ -28,6 +29,7 @@ pub enum DebugError {
     ModuleSwitchConflict,
     NetworkEffectForbidden,
     RetentionCapExceeded,
+    SnapshotStageNotAuthorized,
 }
 
 impl std::fmt::Display for DebugError {
@@ -687,7 +689,7 @@ impl V4Debug11CodexSampleStore {
 
 /// Typed diagnostic facade: owns the resource node state machines above and
 /// exposes the debug-subscription contract writer surface (V4DebugRuntime::*).
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct DebugRuntime {
     pub snapshot_ledger: V4Debug01SnapshotLedger,
     pub bus_subscription: V4Debug02BusSubscription,
@@ -701,6 +703,7 @@ pub struct DebugRuntime {
     pub module_switch: V4Debug12ModuleSwitch,
     pub payload_budget: V4Debug10PayloadBudget,
     pub codex_sample_store: V4Debug11CodexSampleStore,
+    codex_sample_authorizer: Option<Arc<dyn Fn(&str) -> bool>>,
 }
 
 impl DebugRuntime {
@@ -718,7 +721,21 @@ impl DebugRuntime {
             module_switch: V4Debug12ModuleSwitch::new(),
             payload_budget: V4Debug10PayloadBudget::new(200),
             codex_sample_store: V4Debug11CodexSampleStore::new(200),
+            codex_sample_authorizer: None,
         }
+    }
+
+    /// Bind the manifest-published codex-sample authorization decision
+    /// (v4.debug.codex_sample_authorization). Capture gates below consult this
+    /// authorizer and fail closed when no authorizer is bound.
+    pub fn bind_codex_sample_authorizer(&mut self, authorizer: Arc<dyn Fn(&str) -> bool>) {
+        self.codex_sample_authorizer = Some(authorizer);
+    }
+
+    fn codex_sample_stage_authorized(&self, stage: &str) -> bool {
+        self.codex_sample_authorizer
+            .as_ref()
+            .map_or(false, |authorizer| authorizer(stage))
     }
 
     pub fn start_trace(&mut self, context: TraceContext) -> Result<(), DebugError> {
@@ -772,7 +789,11 @@ impl DebugRuntime {
         session_id: &str,
         node_id: &str,
         payload_hash: &str,
+        stage: &str,
     ) -> Result<(), DebugError> {
+        if !self.codex_sample_stage_authorized(stage) {
+            return Err(DebugError::SnapshotStageNotAuthorized);
+        }
         self.snapshot_session.record_snapshot(session_id, node_id, payload_hash)
     }
 
@@ -823,7 +844,11 @@ impl DebugRuntime {
         request_id: &str,
         artifact_name: &str,
         bytes: usize,
+        stage: &str,
     ) -> Result<StoredSample, DebugError> {
+        if !self.codex_sample_stage_authorized(stage) {
+            return Err(DebugError::SnapshotStageNotAuthorized);
+        }
         self.codex_sample_store
             .persist(entry_protocol, endpoint, port, request_id, artifact_name, bytes)
     }

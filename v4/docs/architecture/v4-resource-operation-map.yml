@@ -813,7 +813,7 @@ resources:
     semantic_contract:
       may_enter_metadata_center: false
     allowed_writers: [V4Config05ManifestPublished]
-    allowed_readers: ["CodexSampleAuthorization::should_capture_snapshot_stage", "V4Config05ManifestPublished"]
+    allowed_readers: ["CodexSampleAuthorization::should_capture_snapshot_stage", "V4Config05ManifestPublished", "V4DebugRuntime::record_snapshot", "V4DebugRuntime::persist"]
     forbidden_writers: [routecodex-v4-runtime, routecodex-v4-provider, V4ControlMetadataCenter]
     may_enter_provider_body: false
     may_enter_client_body: false

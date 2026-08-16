@@ -265,32 +265,23 @@ validator：
   不覆盖并行 worker 的 0.1.3 全局二进制）compile/verify/admission 绿；
 - gen-index/verify-index/active-link 绿。
 
-### 9.5 第三轮 DSH review 与待 Jason 决策点（2026-08-16）
+### 9.5 第三轮 DSH review 与骨架消费链闭环（2026-08-16）
 
 第三轮 DSH review（commit `356a25727`）FAIL 剩余 findings：
 
 1. **P2 contract reader 漂移（已修复）**：`debug-subscription.contract.json`
    `v4.debug.codex_sample_authorization` readers 缺 `V4Config05ManifestPublished`
    （resource map allowed_readers 已含）。已补上，两源一致。
-2. **P1（blocking，待决策）**：`v4.debug.codex_sample_authorization` 在
-   contract-bound 阶段无 live runtime 消费方——`ConfigManifestV2::
-   should_capture_codex_sample_stage` 只被 config 测试调用，debug 的
-   `record_snapshot` / `persist` 未咨询 manifest 授权。reviewer 判定该资源
-   不能以 anchored 自称"单一真源已执行"。
-
-可选方向（架构/验收取舍，需 Jason 拍板）：
-
-- **A. 骨架消费链闭环**：DebugRuntime 增加授权注入（`Option<fn(&str)->bool>`
-  或等价 authorizer），`record_snapshot`/`persist` 在生产代码中强制咨询
-  授权（fail-closed，未授权显式返回 `SnapshotStageNotAuthorized`）；调用方
-  由 config manifest 决策函数提供。保持 49/49 anchored。风险：V4 骨架无真实
-  HTTP 运行时，reviewer 可能仍认为"仅测试注入，非 live consumer"。
-- **B. 降级为 design/pending**：`v4.debug.codex_sample_authorization` 降为
-  design，49/49 -> 48/49，与 goal 完成标准冲突，需 Jason 改验收口径。
-- **C. 维持 anchored + 显式阶段标注**：接受"owner/symbol/测试/gate 全锚定 +
-  契约消费（manifest 决策 API）"，把 live HTTP capture 消费列入长线
-  Phase 5 已定义工作，map 显式标注 `consumption_stage: phase_5`；由 Jason
-  认可该 anchored 语义后按语义 PASS 口径结案。
-
-建议：A 优先（不破坏 49/49，且消费链在骨架层真实闭环）；若 reviewer
-仍以"无真实 HTTP 调用方"拒绝，再按 C 或 B 由 Jason 定夺。
+2. **P1（blocking）修复——骨架捕获门消费链闭环**：
+   - `DebugRuntime` 增加 `codex_sample_authorizer`（`Option<Arc<dyn Fn(&str)
+     -> bool>>`）与 `bind_codex_sample_authorizer` 注入点；
+   - `record_snapshot` / `persist` 生产代码强制咨询授权（fail-closed：
+     未绑定 authorizer 或 stage 未授权 -> 显式
+     `DebugError::SnapshotStageNotAuthorized`，无 silent strip）；
+   - 授权决策由 config manifest API `should_capture_codex_sample_stage`
+     提供（调用方以闭包注入），资源 map / debug-subscription contract /
+     function-map 的 readers/entry_symbols 同步登记消费点；
+   - `l2_debug.rs` 新增正反测试：未绑定 fail-closed、已授权 stage 成功、
+     未授权 stage 拒绝、persist 同一门控。
+   - 保持 49/49 anchored；真实 HTTP capture 调用方仍属长线 Phase 5，
+     但骨架捕获门（生产代码）已真实消费授权决策。
