@@ -1050,6 +1050,30 @@ fn console_human_prefix_uses_fixed_terminal_columns() {
 }
 
 #[test]
+fn observability_prefix_keeps_full_provider_and_key_without_truncation() {
+    let observability = V3RuntimeObservability {
+        provider_id: Some("opencode-go".to_string()),
+        provider_key: Some("opencode-go:key2:deepseek-v4-flash".to_string()),
+        wire_model: Some("deepseek-v4-flash".to_string()),
+        ..Default::default()
+    };
+
+    let prefix = format_v3_console_human_prefix_for_observability(
+        "10000",
+        "responses",
+        Some("/tmp/routecodex"),
+        &observability,
+        "default",
+    );
+
+    assert!(
+        prefix.contains("default:opencode-go[key2].deepseek-v4-flash"),
+        "provider and key must remain fully visible in the response prefix: {prefix}"
+    );
+    assert!(!prefix.contains("..."), "provider/key must not truncate: {prefix}");
+}
+
+#[test]
 #[should_panic(expected = "v3 console route projection requires pool_id or routing_group_id")]
 fn console_route_projection_rejects_missing_route_truth() {
     let _ = resolve_v3_console_route_projection(&V3RuntimeObservability::default());
@@ -1621,7 +1645,7 @@ fn direct_frame_console_emits_provider_switch_complete_and_usage() {
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
     assert!(
         log.contains("[virtual-router-hit]")
-            && log.contains("[direct:second.gpt-5.5")
+            && log.contains("[direct:second[key].gpt-5.5]")
             && !log.contains("[gpt-5.5")
             && !log.contains("[pending")
             && log.contains("❌ [provider-error]")
@@ -1630,7 +1654,7 @@ fn direct_frame_console_emits_provider_switch_complete_and_usage() {
             && log.contains("event=completed")
             && log.contains("[usage]")
             && log.contains("req=req-direct-console-json"),
-        "direct JSON console must emit route/terminal lines from pipeline observability provider.model, not request model or pre-route pending scope: {log}"
+        "direct JSON console must emit full provider/key/model route and terminal lines from pipeline observability, not request model or pre-route pending scope: {log}"
     );
     let _ = std::fs::remove_file(&log_file);
 }
@@ -1671,11 +1695,11 @@ fn realtime_provider_failure_sink_prints_before_final_and_final_dedupes() {
             panic!("missing provider-error line for failed provider: {after_realtime}")
         });
     assert!(
-        provider_error_line.contains("[direct:first.gpt-5.5"),
-        "provider failure prefix must name the failed provider, not the selected next provider: {provider_error_line}"
+        provider_error_line.contains("[direct:first[key].gpt-5.5]"),
+        "provider failure prefix must name the full failed provider/key/model, not the selected next provider: {provider_error_line}"
     );
     assert!(
-        !provider_error_line.contains("[direct:second.gpt-5.5"),
+        !provider_error_line.contains("[direct:second[key].gpt-5.5]"),
         "provider failure line must not be displayed under the next provider target: {provider_error_line}"
     );
     assert!(

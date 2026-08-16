@@ -11,7 +11,6 @@ pub const V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS: u64 = 15 * 60_000;
 pub struct V3ProviderCooldownProbeKey {
     pub provider_id: String,
     pub auth_alias: Option<String>,
-    pub model_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -19,16 +18,16 @@ pub struct V3ProviderCooldownProbeState {
     pub blocked_until_ms: Option<u64>,
     pub next_probe_at_ms: Option<u64>,
     pub probe_in_flight: bool,
+    pub probe_model_id: Option<String>,
 }
 
 pub fn provider_cooldown_probe_key(
     provider_id: &str,
     auth_alias: Option<&str>,
-    model_id: Option<&str>,
+    _model_id: Option<&str>,
 ) -> V3ProviderCooldownProbeKey {
     V3ProviderCooldownProbeKey {
         provider_id: provider_id.to_string(),
         auth_alias: auth_alias.map(str::to_string),
-        model_id: model_id.map(str::to_string),
     }
 }

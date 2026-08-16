@@ -35584,3 +35584,9 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
   P2-1 闭环。
 - P2-2（count-only 非语义绑定）文档口径已记录；P2-3（function-map.yml 旧表
   真源歧义）属 V3 侧 supersession，未动 V3。
+
+# 2026-08-15 provider key cooldown / console（进行中）
+- Jason 锁定：同一 provider 的不同 key 独立冷却/恢复；reason 不参与计数；同一 key 任意连续三次 provider error 冷却 15 分钟；到期后仅 probe HTTP 2xx 才可恢复路由。
+- 根因：`V3ProviderHealthStore` 原以 provider、key、model、session 作为失败计数和 probe identity；同一 key 跨 model / request 的失败被分散，达不到阈值。
+- 唯一 owner：`v3/crates/routecodex-v3-provider-responses/src/health.rs` 与 `provider_cooldown_probe.rs`；计数/probe identity 改为 `providerId + authAlias`，probe 保留触发时的 model 仅作真实最小请求的协议目标。reason 只记录诊断。
+- Console owner：`v3/crates/routecodex-v3-server/src/console/impl_bulk.rs`；成功和带 observability 的失败响应前缀改为完整 `route:provider[key].model`，不截断 provider/key。红测旧输出为 `default:opencode-...eepseek-v4-flash`；定向绿测已通过，待全局安装/聚合重启和线上样本验证。

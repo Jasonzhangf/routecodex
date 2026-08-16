@@ -1244,12 +1244,25 @@ pub(crate) fn format_v3_console_human_prefix_for_observability(
     observability: &V3RuntimeObservability,
     route_label: &str,
 ) -> String {
-    format_v3_console_human_prefix(
-        port_label,
-        entry_protocol,
-        project_path,
-        &format_v3_console_provider_target_compact(observability),
-        route_label,
+    let route = format_v3_console_safe_label(route_label);
+    let target = format_v3_console_provider_target(observability);
+    let port_protocol = format!(
+        "{}:{}",
+        format_v3_console_safe_label(port_label),
+        format_v3_console_entry_protocol_label(entry_protocol)
+    );
+    let project = format_v3_console_project_name(project_path);
+    let route_target = match (route.as_str(), target.as_str()) {
+        ("-", "-") => "-".to_string(),
+        ("-", target) => target.to_string(),
+        (route, "-") => route.to_string(),
+        (route, target) => format!("{route}:{target}"),
+    };
+    format!(
+        "[{}][{}][{}]",
+        fit_v3_console_display_width(&port_protocol, V3_CONSOLE_PREFIX_PORT_PROTOCOL_COLUMN_WIDTH),
+        fit_v3_console_display_width(&project, V3_CONSOLE_PREFIX_PROJECT_COLUMN_WIDTH),
+        route_target,
     )
 }
 
@@ -1367,29 +1380,6 @@ pub(crate) fn resolve_v3_console_route_projection(
         };
     }
     panic!("v3 console route projection requires pool_id or routing_group_id");
-}
-
-pub(crate) fn format_v3_console_provider_target_compact(observability: &V3RuntimeObservability) -> String {
-    let (provider_from_key, _, model_from_key) =
-        parse_v3_console_provider_key(observability.provider_key.as_deref());
-    let provider = observability
-        .provider_id
-        .as_deref()
-        .or(provider_from_key.as_deref())
-        .unwrap_or("-");
-    let model = observability
-        .wire_model
-        .as_deref()
-        .or(model_from_key.as_deref())
-        .or(observability.model_id.as_deref())
-        .unwrap_or("-");
-    if provider == "-" && model == "-" {
-        "-".to_string()
-    } else if model == "-" || model.trim().is_empty() {
-        provider.to_string()
-    } else {
-        format!("{provider}.{model}")
-    }
 }
 
 pub(crate) fn format_v3_console_provider_target(observability: &V3RuntimeObservability) -> String {

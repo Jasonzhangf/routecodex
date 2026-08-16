@@ -2350,7 +2350,7 @@ async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse
 }
 
 #[test]
-fn provider_key_consecutive_failures_cool_for_fifteen_minutes_without_cross_model_pollution() {
+fn provider_key_three_failures_cool_for_fifteen_minutes_and_probe_recovers() {
     let store = V3ProviderHealthStore::from_manifest(&responses_single_limited_manifest());
     let failure_session_scope = routecodex_v3_error::V3ProviderFailureSessionScope::new(
         "test-server",

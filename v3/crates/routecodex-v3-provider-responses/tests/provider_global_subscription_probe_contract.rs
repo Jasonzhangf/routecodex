@@ -123,6 +123,54 @@ fn success_does_not_revive_provider_cooldown_until_probe_passes() {
 }
 
 #[test]
+fn same_key_three_failures_across_sessions_and_models_cool_regardless_of_reason() {
+    let store = V3ProviderHealthStore::default();
+    let session_a = scope("session-a");
+    let session_b = scope("session-b");
+    let session_c = scope("session-c");
+
+    for (index, (failure_scope, model_id, reason, now_ms)) in [
+        (&session_a, "model-a", "upstream_429", 10),
+        (&session_b, "model-b", "provider_response_sse_stream", 11),
+        (&session_c, "model-a", "provider_transport_error", 12),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let record = store
+            .record_provider_failure_in_session(
+                failure_scope,
+                "provider-a",
+                Some("key-a"),
+                Some(model_id),
+                Some(reason),
+                now_ms,
+            )
+            .unwrap();
+        if index < 2 {
+            assert_eq!(record.state, "healthy");
+        } else {
+            assert_eq!(record.state, "cooldown");
+            assert_eq!(record.failure_count, 3);
+            assert_eq!(record.cooldown_until_ms, Some(900_012));
+        }
+    }
+
+    assert!(
+        !store
+            .availability_for_session(&session_a, "provider-a", Some("key-a"), Some("model-b"), 13)
+            .available,
+        "the same provider key must remain unavailable across models until probe success"
+    );
+    assert!(
+        store
+            .availability_for_session(&session_a, "provider-a", Some("key-b"), Some("model-b"), 13)
+            .available,
+        "a different key must remain routable"
+    );
+}
+
+#[test]
 fn same_fingerprint_three_times_blocks_provider_globally() {
     let store = V3ProviderGlobalSubscriptionHealthStore::default();
     let policy = V3ProviderGlobalSubscriptionPolicy::default();
