@@ -279,7 +279,7 @@ pub(crate) fn v3_relay_client_sse_body(
         }
         match stream.next().await {
             Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-            Some(Err(source)) if source.code == "client_disconnect" => Some((
+            Some(Err(source)) if is_v3_client_disconnect_source(&source) => Some((
                 Err(io::Error::other(format!(
                     "{}: {}",
                     source.code, source.message
@@ -306,7 +306,7 @@ pub(crate) fn v3_client_sse_body(
         }
         match stream.next().await {
             Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-            Some(Err(source)) if source.code == "client_disconnect" => Some((
+            Some(Err(source)) if is_v3_client_disconnect_source(&source) => Some((
                 Err(io::Error::other(format!(
                     "{}: {}",
                     source.code, source.message

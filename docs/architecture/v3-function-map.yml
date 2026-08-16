@@ -1739,7 +1739,6 @@ features:
   - V3RemoteContinuationStore::commit
   - V3RemoteContinuationStore::load
   - V3RemoteContinuationStore::release_bound
-  - V3RemoteContinuationStore::release_for_req03
   - encode_v3_remote_continuation_locator
   - decode_v3_remote_continuation_locator
   allowed_paths:

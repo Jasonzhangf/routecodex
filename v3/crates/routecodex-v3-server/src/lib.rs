@@ -57,7 +57,8 @@ use routecodex_v3_debug::{
     V3DebugTraceScope, V3DryRunFixture, V3RedactionPolicy,
 };
 use routecodex_v3_error::{
-    project_v3_http_boundary_error, project_v3_post_commit_sse_source,
+    is_v3_client_disconnect_source, project_v3_http_boundary_error,
+    project_v3_post_commit_sse_source,
     project_v3_server_invalid_request, project_v3_server_runtime_failure,
     project_v3_server_websocket_error, raise_v3_debug_artifact_failure,
     raise_v3_runtime_observability_contract_failure, raise_v3_sse_client_disconnect,

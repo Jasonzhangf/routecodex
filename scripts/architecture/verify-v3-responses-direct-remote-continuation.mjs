@@ -147,11 +147,11 @@ for (const [owner, text, phrases] of [
     'Stream<Item = Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>>',
   ]],
   [serverFramesPath, serverFrames, [
-    'Some(Err(source)) if source.code == "client_disconnect"',
+    'Some(Err(source)) if is_v3_client_disconnect_source(&source)',
     'Ok(v3_post_commit_sse_error_event_chunk(source))',
   ]],
   [`${serverWebsocketPath}#send_responses_relay_websocket_sse_stream`, relayWebsocketFunction, [
-    'Err(error) if error.code == "client_disconnect" => return Err(())',
+    'Err(error) if is_v3_client_disconnect_source(&error) => return Err(())',
   ]],
   [testPath, tests, [
     'json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry',
@@ -248,6 +248,12 @@ forbid(relayTypes, relayTypesPath, [
 ]);
 forbid(runtimeHelpers, runtimeHelpersPath, [
   /release_for_req03/,
+]);
+forbid(serverFrames, serverFramesPath, [
+  /\.code\s*==\s*"client_disconnect"/,
+]);
+forbid(relayWebsocketFunction, `${serverWebsocketPath}#send_responses_relay_websocket_sse_stream`, [
+  /\.code\s*==\s*"client_disconnect"/,
 ]);
 forbid(providerTransportControlSource, providerTransportPath, [
   /fallback/i,

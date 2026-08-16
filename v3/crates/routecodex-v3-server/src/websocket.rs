@@ -485,7 +485,7 @@ pub(crate) async fn send_responses_websocket_sse_stream(
         };
         let chunk = match chunk {
             Ok(chunk) => chunk,
-            Err(error) if error.code == "client_disconnect" => return Err(()),
+            Err(error) if is_v3_client_disconnect_source(&error) => return Err(()),
             Err(error) => {
                 return send_responses_websocket_error(
                     socket,
@@ -596,7 +596,7 @@ pub(crate) async fn send_responses_relay_websocket_sse_stream(
         };
         let chunk = match chunk {
             Ok(chunk) => chunk,
-            Err(error) if error.code == "client_disconnect" => return Err(()),
+            Err(error) if is_v3_client_disconnect_source(&error) => return Err(()),
             Err(error) => {
                 return send_responses_websocket_error(
                     socket,
