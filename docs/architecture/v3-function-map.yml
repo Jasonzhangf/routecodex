@@ -2633,6 +2633,7 @@ features:
   - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
   - docs/goals/v3-openai-chat-sse-reused-tool-index-test-design.md
   - docs/goals/v3-5520-duplicate-response-tool-identity-not-rerouted-test-design.md
+  - docs/goals/v3-responses-invalid-input-error-projection-test-design.md
   - v3/crates/routecodex-v3-config/src/v2_compat.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
@@ -2697,6 +2698,8 @@ features:
   - provider_response_hook_failure
   - build_v3_relay_provider_error_05_decision
   - build_v3_error_01_source_raised_external
+  - project_v3_responses_relay_runtime_failure
+  - responses_relay_runtime::responses_relay_runtime_tests_extra::inbound_canonical_validation_failure_projects_client_invalid_request
   - responses_relay_runtime::provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate
   - build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events
   - collect_openai_chat_stream_event
@@ -2730,6 +2733,9 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
@@ -2747,6 +2753,7 @@ features:
   - docs/goals/v3-hub-relay-runtime-closeout-plan.md
   - docs/goals/v3-openai-chat-sse-reused-tool-index-test-design.md
   - docs/goals/v3-5520-duplicate-response-tool-identity-not-rerouted-test-design.md
+  - docs/goals/v3-responses-invalid-input-error-projection-test-design.md
   - docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
   - docs/architecture/manifests/v3.responses_provider_event_terminal_merge.mainline.yml
   - docs/architecture/v3-function-map.yml

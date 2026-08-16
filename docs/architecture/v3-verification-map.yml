@@ -2190,6 +2190,7 @@ features:
   - docs/design/v3-hub-relay-fixed-pipeline-contract.md
   - docs/goals/v3-openai-chat-sse-reused-tool-index-test-design.md
   - docs/goals/v3-5520-duplicate-response-tool-identity-not-rerouted-test-design.md
+  - docs/goals/v3-responses-invalid-input-error-projection-test-design.md
   contract:
   - docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
   - docs/architecture/manifests/v3.responses_provider_event_terminal_merge.mainline.yml
@@ -2221,6 +2222,7 @@ features:
     SSE even if provider raw body is JSON, and client `stream=false` remains JSON
     even if a controlled provider raw body is SSE
   - provider error enters Error01-06 without Resp01 success projection
+  - Req02 malformed Responses client fields enter Error01-06 as InvalidRequest with HTTP 400 while unrelated Relay runtime failures remain HTTP 500
   - provider raw response decode/protocol errors enter the same provider failure policy
     and reselect before Error06 while alternatives remain
   - Anthropic provider SSE terminal `message_stop` closes open text/thinking/reasoning
@@ -2251,6 +2253,7 @@ features:
   required_gates:
   - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime
     terminal_merge --lib -- --nocapture
+  - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime inbound_canonical_validation_failure_projects_client_invalid_request --lib -- --nocapture
   - npm run test:v3-5520-duplicate-tool-identity
   - npm run test:v3-hub-relay-runtime-closeout
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime

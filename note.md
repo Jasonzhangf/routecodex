@@ -35642,3 +35642,16 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 在线真实 replay（0.90.4563，全部 HTTP 200 + 终态 + usage）：5555/5520/10000 `/v1/responses`、10000 `/v1/chat/completions`（usage 进 final chunk + `[DONE]`）、10000 `/v1/messages`（message_delta usage + message_stop）；证据 `/private/tmp/replay_4563_*.sse`；日志无 V3E3/502。
 - DSH review r2（commit=8a76cbc83 base=486d68f68，opencode-go/deepseek-v4-flash）`VERDICT: PASS`，recommendation=deliver；3 条非阻塞 P2：① `_sse.rs` 未列 v3-function-map allowed_paths（doc-lockstep 漂移）；② incomplete reason allowlist 窄（goal-locked fail-fast 取舍）；③ health.rs 测试改写与 SSE 设计 forbidden_paths 范围（对齐 486d68f68 provider-key 跨 session 语义）。
 - 注：HEAD 之上 v4 worker 已提交 `044767d2d`（relay/continuation slice，纯 v4，不影响 V3 SSE 交付）；交付 commit 只含版本 bump + note/MEMORY。
+# 2026-08-16 V3 invalid Responses input projected as HTTP 500
+- Exact sample `openai-responses-router-deepseek-v4-flash-20260816T000815469-817406-202`
+  sent `reasoning.effort=definitely_invalid`. Req02 correctly rejected it, but
+  `project_v3_responses_relay_runtime_failure` collapsed `InboundCanonical` into generic
+  RuntimeFailure, producing HTTP 500 `responses_relay_runtime_error`.
+- Unique fix point: the Responses Relay runtime-to-Error01 adapter now maps only the typed
+  `InboundCanonical` variant to `InvalidRequest` at `V3HubReqInbound02Normalized`, code
+  `invalid_responses_request`; validation remains fail-fast and payload stays unchanged.
+- Red/green: focused test reproduced 500 vs expected 400, then passed. Negative control keeps
+  `StaticRegistry` at HTTP 500. Runtime lib 461/461 and Relay closeout 26/26 pass.
+- Architecture/maps updated for Req02 -> Error01 failure edge and generated caller-flow sync.
+- Independent baseline gaps: Hub Relay red-fixture harness references removed
+  `responses_relay_json_hooks.rs`; repository-wide cargo fmt has unrelated pre-existing drift.

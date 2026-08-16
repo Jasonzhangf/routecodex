@@ -44,3 +44,32 @@ modules:
       - provider.wire_payload
       - response.client_payload
       - metadata.runtime_control
+  - module_id: v3.hub_relay_runtime_closeout
+    owner_feature_id: v3.hub_relay_runtime_closeout
+    status: implementation_active
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
+    allowed_paths:
+      - docs/goals/v3-responses-invalid-input-error-projection-test-design.md
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - note.md
+      - MEMORY.md
+    forbidden_paths:
+      - src
+      - sharedmodule/llmswitch-core
+      - v3/crates/routecodex-v3-server
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+    allowed_edges:
+      - from: V3HubReqInbound02Normalized
+        to: V3Error01SourceRaised
+      - from: V3Error06ClientProjected
+        to: V3ServerRespOutbound06ClientFrame
+    forbidden_resources:
+      - v3.hub.provider_wire_payload
+      - v3.metadata.runtime_control
+      - v3.provider.health_state
