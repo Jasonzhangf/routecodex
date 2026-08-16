@@ -2,6 +2,8 @@
 import { readFileSync } from 'node:fs';
 
 const runtimePath = 'v3/crates/routecodex-v3-runtime/src/kernel.rs';
+const runtimeEntrypointsPath = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs';
+const runtimeCommitPath = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_continuation_commit.rs';
 const runtimeHelpersPath = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs';
 const storePath = 'v3/crates/routecodex-v3-runtime/src/remote_continuation.rs';
 const responsePath = 'v3/crates/routecodex-v3-runtime/src/shared.rs';
@@ -9,26 +11,35 @@ const targetPath = 'v3/crates/routecodex-v3-target/src/lib.rs';
 const configTypesPath = 'v3/crates/routecodex-v3-config/src/types.rs';
 const configValidatePath = 'v3/crates/routecodex-v3-config/src/validate.rs';
 const providerTransportPath = 'v3/crates/routecodex-v3-provider-responses/src/transport.rs';
+const providerWebsocketPath = 'v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs';
 const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
+const serverScopePath = 'v3/crates/routecodex-v3-server/src/scope_metadata.rs';
+const serverOutcomePath = 'v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs';
 const testPath = 'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs';
 const configTestPath = 'v3/crates/routecodex-v3-config/tests/config_v3_contract.rs';
 const websocketTestPath = 'v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs';
 const serverTestPath = 'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs';
 const designPath = 'docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md';
 const planPath = 'docs/goals/v3-responses-direct-remote-continuation-integration-plan.md';
-const runtime = readFileSync(runtimePath, 'utf8');
+const runtime = [runtimePath, runtimeEntrypointsPath, runtimeCommitPath]
+  .map((path) => readFileSync(path, 'utf8'))
+  .join('\n');
 const runtimeHelpers = readFileSync(runtimeHelpersPath, 'utf8');
 const store = readFileSync(storePath, 'utf8');
 const response = readFileSync(responsePath, 'utf8');
 const target = readFileSync(targetPath, 'utf8');
 const configTypes = readFileSync(configTypesPath, 'utf8');
 const configValidate = readFileSync(configValidatePath, 'utf8');
-const providerTransport = readFileSync(providerTransportPath, 'utf8');
+const providerTransport = [providerTransportPath, providerWebsocketPath]
+  .map((path) => readFileSync(path, 'utf8'))
+  .join('\n');
 const providerTransportControlSource = providerTransport.replaceAll(
   'fallback-credit-2026-06-01',
   'anthropic-credit-beta',
 );
-const server = readFileSync(serverPath, 'utf8');
+const server = [serverPath, serverScopePath, serverOutcomePath]
+  .map((path) => readFileSync(path, 'utf8'))
+  .join('\n');
 const tests = readFileSync(testPath, 'utf8');
 const configTests = readFileSync(configTestPath, 'utf8');
 const websocketTests = readFileSync(websocketTestPath, 'utf8');
@@ -39,7 +50,7 @@ const failures = [];
 
 for (const [owner, text, phrases] of [
   [runtimePath, runtime, [
-    'execute_v3_responses_direct_runtime_kernel_core(',
+    'execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(',
     'static DEFAULT_RESPONSES_TRANSPORT',
     'fn default_responses_transport()',
     'execute_v3_responses_direct_runtime_kernel_with_continuation<T: ResponsesTransport>(',
@@ -159,7 +170,8 @@ if (projectSseStreamStart < 0 || projectSseStreamEnd < 0 || projectSseStreamEnd 
 } else {
   const projectSseStream = response.slice(projectSseStreamStart, projectSseStreamEnd);
   for (const phrase of [
-    'observed_sse_client_stream(provider_id.to_string(), stream, observation_state.clone())',
+    'observed_sse_client_stream(',
+    'usage_observation.clone()',
     'V3ClientBody::Sse(client_stream)',
     'V3RemoteContinuationObservation::Streaming',
   ]) {

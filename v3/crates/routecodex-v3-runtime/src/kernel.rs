@@ -250,6 +250,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     &provider_health,
                     &direct_failure_session_scope,
                     locator.pin(),
+                    continuation_scope.as_ref(),
                     previous_response_id.as_deref(),
                     continuation_state,
                     error.to_string(),
@@ -629,6 +630,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 V3Error05ExecutionAction::ProjectTerminal => {
                     if let Err(error) = release_terminal_failure_locator(
                         continuation_state,
+                        continuation_scope.as_ref(),
                         previous_response_id.as_deref(),
                     ) {
                         return error_output(
@@ -779,6 +781,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             Err(source) => {
                 if let Err(error) = release_terminal_failure_locator(
                     continuation_state,
+                    continuation_scope.as_ref(),
                     previous_response_id.as_deref(),
                 ) {
                     return error_output(
@@ -800,6 +803,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             Err(source) => {
                 if let Err(error) = release_terminal_failure_locator(
                     continuation_state,
+                    continuation_scope.as_ref(),
                     previous_response_id.as_deref(),
                 ) {
                     return error_output(
@@ -924,6 +928,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     V3Error05ExecutionAction::ProjectTerminal => {
                         if let Err(release_error) = release_terminal_failure_locator(
                             continuation_state,
+                            continuation_scope.as_ref(),
                             previous_response_id.as_deref(),
                         ) {
                             return error_output(
@@ -1003,6 +1008,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     if !matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
                         if let Err(error) = release_terminal_failure_locator(
                             continuation_state,
+                            continuation_scope.as_ref(),
                             previous_response_id.as_deref(),
                         ) {
                             return error_output(
@@ -1076,6 +1082,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         V3Error05ExecutionAction::ProjectTerminal => {
                             if let Err(error) = release_terminal_failure_locator(
                                 continuation_state,
+                                continuation_scope.as_ref(),
                                 previous_response_id.as_deref(),
                             ) {
                                 return error_output(

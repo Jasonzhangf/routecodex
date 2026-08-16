@@ -70,7 +70,7 @@ fn commit_or_release_v3_direct_continuation(
                 ))
             }
         };
-        if !store.release(previous_response_id) {
+        if !store.release_bound(previous_response_id, &scope.key, selected_pin) {
             return Err(error_output(
                 runtime_source(
                     "V3HubRespContinuation04Committed",

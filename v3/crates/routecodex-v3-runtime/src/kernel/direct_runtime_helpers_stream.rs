@@ -402,7 +402,7 @@ impl V3DirectSseRemoteContinuationPolicy {
             .store
             .lock()
             .map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))?;
-        if !store.release(&previous_response_id) {
+        if !store.release_bound(&previous_response_id, &self.scope_key, &self.selected_pin) {
             return Err(runtime_source(
                 "V3HubRespContinuation04Committed",
                 format!(
@@ -503,6 +503,7 @@ async fn exact_pin_unavailable_output(
     provider_health: &V3ProviderFailureRuntimeHealth,
     failure_session_scope: &V3ProviderFailureSessionScope,
     pin: &V3RemoteContinuationPin,
+    continuation_scope: Option<&V3ResponsesDirectContinuationScope>,
     previous_response_id: Option<&str>,
     continuation_state: Option<&V3ResponsesDirectContinuationState>,
     reason: String,
@@ -546,12 +547,14 @@ async fn exact_pin_unavailable_output(
             )
         }
     }
-    if let (Some(state), Some(response_id)) = (continuation_state, previous_response_id) {
+    if let (Some(state), Some(scope), Some(response_id)) =
+        (continuation_state, continuation_scope, previous_response_id)
+    {
         let release = state
             .store
             .lock()
             .map_err(|error| error.to_string())
-            .map(|mut store| store.release(response_id));
+            .map(|mut store| store.release_bound(response_id, &scope.key, pin));
         match release {
             Ok(true) => {}
             Ok(false) => {

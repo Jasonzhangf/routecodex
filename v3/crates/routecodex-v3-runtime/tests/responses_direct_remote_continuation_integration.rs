@@ -659,6 +659,9 @@ struct TwoTurnSseTransport {
 }
 
 #[derive(Default)]
+struct ReusedOpaqueResponseIdSseTransport;
+
+#[derive(Default)]
 struct TerminalSseWithoutRemoteContinuationTransport {
     requests: Mutex<Vec<Value>>,
 }
@@ -1213,6 +1216,42 @@ impl ResponsesTransport for TwoTurnSseTransport {
 }
 
 #[async_trait]
+impl ResponsesTransport for ReusedOpaqueResponseIdSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let chunks = vec![
+            concat!(
+                "event: response.created\n",
+                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_0\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+            )
+            .as_bytes()
+            .to_vec(),
+            concat!(
+                "event: response.output_item.done\n",
+                "data: {\"type\":\"response.output_item.done\",\"response_id\":\"resp_0\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_0\",\"name\":\"lookup\",\"arguments\":\"{}\"}}\n\n",
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_0\",\"status\":\"requires_action\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_0\",\"name\":\"lookup\",\"arguments\":\"{}\"}]}}\n\n",
+                "data: [DONE]\n\n",
+            )
+            .as_bytes()
+            .to_vec(),
+        ];
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(chunks.into_iter().map(Ok))),
+        ))
+    }
+}
+
+#[async_trait]
 impl ResponsesTransport for TerminalSseWithoutRemoteContinuationTransport {
     async fn send(
         &self,
@@ -1569,6 +1608,56 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
     assert_eq!(requests[1]["previous_response_id"], "resp_sse_1");
     assert_eq!(requests[1]["input"][0]["type"], "function_call_output");
     assert_control_truth_isolated(&requests[1]);
+}
+
+#[tokio::test]
+async fn repeated_provider_resp_0_across_sessions_never_breaks_the_second_client_stream() {
+    let manifest = manifest();
+    let state = V3ResponsesDirectContinuationState::default();
+    let transport = ReusedOpaqueResponseIdSseTransport;
+    let scopes = [
+        V3ResponsesDirectContinuationScope::responses(
+            "/v1/responses",
+            "session-resp-0-a",
+            "conversation-resp-0-a",
+            5555,
+            "g",
+        ),
+        V3ResponsesDirectContinuationScope::responses(
+            "/v1/responses",
+            "session-resp-0-b",
+            "conversation-resp-0-b",
+            5555,
+            "g",
+        ),
+    ];
+
+    for (index, scope) in scopes.into_iter().enumerate() {
+        let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
+            &state,
+            &manifest,
+            request(
+                &format!("req-reused-resp-0-{index}"),
+                json!({"model":"gpt-5.5","stream":true,"input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
+            ),
+            scope,
+            register_responses_direct_hooks(),
+            &transport,
+            1_000 + index as u64,
+        )
+        .await;
+        assert_eq!(output.client_payload.status, 200, "{output:#?}");
+        let body = collect_sse_body_text(output.client_payload.body).await;
+        assert!(body.contains("resp_0"), "{body}");
+        assert!(body.contains("call_0"), "{body}");
+        assert!(body.contains("[DONE]"), "{body}");
+    }
+
+    assert_eq!(
+        state.len().unwrap(),
+        2,
+        "the same opaque provider ID must bind independently to both typed session scopes"
+    );
 }
 
 #[tokio::test]

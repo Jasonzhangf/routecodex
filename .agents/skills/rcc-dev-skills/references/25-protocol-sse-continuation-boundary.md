@@ -17,6 +17,16 @@ continuation save/restore, finish reason, stopless/servertool projection,
 response cleanup, retry/reroute policy, or any provider/client payload semantic
 repair.
 
+After the client HTTP 200/SSE headers are committed, a provider/runtime stream
+failure must still traverse the typed Error01-06 chain. The final client-frame
+owner projects exactly one standard entry-protocol `event: error` and then a
+clean EOF. Never surface an internal Rust/Hyper body `Err` to the client: that
+turns a classified runtime failure into an undecodable transport disconnect.
+Do not synthesize `response.completed`, `[DONE]`, or successful terminal truth.
+`client_disconnect` is the only transport-local exception because the client is
+already gone; it remains health-neutral and is not projected back onto the dead
+connection.
+
 ## Malformed SSE Triage
 
 Do not treat the words `malformed SSE` in a log as owner proof. Split the failure before editing:
@@ -180,7 +190,9 @@ Forbidden in MetadataCenter:
 
 - An isolated remote-continuation contract/store codec may land before live Hub wiring, but it remains a source-only pre-module.
 - The locator must bind the exact entry protocol and endpoint, `continuationOwner=direct`, session, conversation, port, routing group, provider, model, auth handle, capability revision, commit time, and expiry.
-- Locator fields become immutable after construction. Commit must reject invalid expiry and duplicate remote response IDs; load must reject every owner/scope/pin mismatch, expiry, and provider unavailability without cross-provider reselection or local-owner fallback.
+- Provider response IDs are opaque only within their provider binding; they are not globally unique storage keys. A remote locator identity must be the composite of raw response ID + typed entry/session/conversation/port/group scope + exact provider/model/auth pin. The same raw ID may coexist across different scopes or provider pins; only an exact duplicate composite binding is already committed.
+- Req03 lookup without an exact provider pin may resolve only when the typed scope contains one matching provider binding. Multiple provider bindings for the same raw ID and scope are ambiguous and must fail fast; never choose the first match or infer a pin from payload/client metadata.
+- Locator fields become immutable after construction. Commit must reject invalid expiry and an exact duplicate composite binding; load and release must reject every owner/scope/pin mismatch or ambiguity, expiry, and provider unavailability without cross-provider reselection or local-owner fallback.
 - The locator codec must deny unknown fields so `local_context`, `history`, `tool_state`, or equivalent local Chat Process truth cannot be silently persisted or restored.
 - Keep the remote-binding resource `binding_pending` until Resp04 commit, Req03 load/classification, and pinned Target execution edges are actually wired and verified. Passing isolated store/codec tests does not prove usable continuation runtime.
 

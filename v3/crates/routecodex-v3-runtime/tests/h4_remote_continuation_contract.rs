@@ -340,7 +340,7 @@ fn release_removes_only_the_remote_locator() {
         .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
         .unwrap();
     assert_eq!(store.len(), 1);
-    assert!(store.release("resp_remote"));
+    assert!(store.release_bound("resp_remote", &scope(), &pin()));
     assert!(store.is_empty());
     assert!(matches!(
         store.load(&load_request()),
@@ -360,6 +360,86 @@ fn duplicate_remote_response_id_cannot_overwrite_immutable_binding() {
     ));
     assert_eq!(store.len(), 1);
     assert_eq!(store.load(&load_request()).unwrap().pin(), &pin());
+}
+
+#[test]
+fn same_opaque_response_id_is_isolated_by_session_scope() {
+    let mut store = V3RemoteContinuationStore::default();
+    let scope_b = V3RemoteContinuationScopeKey::responses(
+        "/v1/responses",
+        "session-b",
+        "conversation-b",
+        5555,
+        "gateway-priority",
+    );
+    let locator_b = V3RemoteContinuationLocator::new_direct(
+        "resp_remote",
+        scope_b.clone(),
+        pin(),
+        "cap-rev-1",
+        1_000,
+        9_000,
+    );
+
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator_b))
+        .expect("provider response IDs are opaque and may repeat across sessions");
+
+    assert_eq!(store.len(), 2);
+    assert_eq!(
+        store
+            .load_for_req03("resp_remote", &scope(), 2_000)
+            .unwrap()
+            .scope_key(),
+        &scope()
+    );
+    assert_eq!(
+        store
+            .load_for_req03("resp_remote", &scope_b, 2_000)
+            .unwrap()
+            .scope_key(),
+        &scope_b
+    );
+}
+
+#[test]
+fn same_opaque_response_id_is_isolated_by_provider_binding() {
+    let mut store = V3RemoteContinuationStore::default();
+    let pin_b = V3RemoteContinuationPin::new("provider-b", "model-b", "auth-b");
+    let locator_b = V3RemoteContinuationLocator::new_direct(
+        "resp_remote",
+        scope(),
+        pin_b.clone(),
+        "cap-rev-b",
+        1_000,
+        9_000,
+    );
+
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator_b))
+        .expect("provider response IDs are opaque and may repeat across provider bindings");
+
+    let request_a = load_request();
+    let request_b = V3RemoteContinuationLoadRequest::direct(
+        "resp_remote",
+        scope(),
+        pin_b.clone(),
+        V3RemoteProviderAvailability::Available,
+        2_000,
+    );
+    assert_eq!(store.load(&request_a).unwrap().pin(), &pin());
+    assert_eq!(store.load(&request_b).unwrap().pin(), &pin_b);
+    assert!(matches!(
+        store.load_for_req03("resp_remote", &scope(), 2_000),
+        Err(V3RemoteContinuationError::AmbiguousProviderBinding { .. })
+    ));
+    assert_eq!(store.len(), 2);
 }
 
 #[test]

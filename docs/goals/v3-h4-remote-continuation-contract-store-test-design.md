@@ -40,7 +40,8 @@ H4 does not insert a Hub node or perform those pending calls.
 
 - Input: direct-owner locator with Responses entry, endpoint, session, conversation, port, routing
   group, provider/model/auth pin, capability revision, commit time, and expiry.
-- Output: one immutable locator keyed by remote response ID.
+- Output: one immutable locator keyed by remote response ID + entry/session/port/group scope +
+  provider/model/auth pin. The provider response ID is opaque and is not globally unique.
 - Error: non-direct owner, non-Responses entry, or invalid expiry fails explicitly.
 - Forbidden: local Chat Process context, history, tool state, provider payload, client payload.
 
@@ -62,7 +63,8 @@ H4 does not insert a Hub node or perform those pending calls.
 
 ### Release
 
-- Input: exact remote response ID.
+- Input: exact remote response ID plus the bound scope and provider pin when the caller owns the
+  provider binding.
 - Output: whether that locator existed and was removed.
 - Forbidden: broad store clearing or local continuation mutation.
 
@@ -74,6 +76,8 @@ Positive:
 - direct owner;
 - same session/conversation and port/group;
 - same provider/model/auth pin;
+- the same opaque provider response ID can coexist across different session scopes;
+- the same opaque provider response ID can coexist across different provider/model/auth pins;
 - available provider before expiry;
 - codec round trip preserves exact locator.
 
@@ -86,7 +90,7 @@ Negative:
 - provider, model, or auth pin mismatch;
 - expired locator;
 - provider unavailable;
-- duplicate remote response ID overwrite attempt;
+- duplicate response ID + scope + provider pin overwrite attempt;
 - invalid expiry at commit;
 - unknown local_context, history, or tool_state codec field;
 - released or missing locator.

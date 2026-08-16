@@ -630,7 +630,7 @@ requireText(
 );
 for (const token of [
   'direct_sse_console_closeout_abruptly_closes_without_fabricating_error06',
-  'relay_sse_body_abruptly_closes_without_fabricating_error_event',
+  'relay_sse_body_abrupt_failure_projects_standard_error_event',
 ]) {
   requireText(text.serverTests, files.serverTests, token);
 }

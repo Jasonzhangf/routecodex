@@ -226,6 +226,11 @@ features:
   - register_v3_debug_01_pending_endpoint_event
   - project_v3_pending_endpoint_error
   - build_v3_server_16_http_frame_from_v3_error_06
+  - project_v3_post_commit_sse_source
+  - v3_post_commit_sse_error_event_chunk
+  - v3_sse_error_event_chunk
+  - v3_client_sse_body
+  - v3_relay_client_sse_body
   allowed_paths:
   - v3/crates/routecodex-v3-config
   - v3/crates/routecodex-v3-debug
@@ -1733,7 +1738,8 @@ features:
   - V3RemoteContinuationPin
   - V3RemoteContinuationStore::commit
   - V3RemoteContinuationStore::load
-  - V3RemoteContinuationStore::release
+  - V3RemoteContinuationStore::release_bound
+  - V3RemoteContinuationStore::release_for_req03
   - encode_v3_remote_continuation_locator
   - decode_v3_remote_continuation_locator
   allowed_paths:
@@ -1786,6 +1792,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/responses_continuation_owner.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/frame_builders.rs
+  - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-target/src/lib.rs
   resource_bindings:
   - v3.continuation.remote_binding
@@ -1835,6 +1843,8 @@ features:
   - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
   - v3/crates/routecodex-v3-target/src/lib.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/frame_builders.rs
+  - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - docs/goals/v3-responses-direct-remote-continuation-integration-plan.md
   - docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md

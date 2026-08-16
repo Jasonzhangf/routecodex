@@ -63,7 +63,7 @@ impl V3RemoteContinuationScopeKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct V3RemoteContinuationPin {
     pub provider_id: String,
@@ -214,6 +214,8 @@ pub enum V3RemoteContinuationError {
     ScopeMismatch { remote_response_id: String },
     #[error("remote continuation provider/model/auth pin mismatch: {remote_response_id}")]
     PinMismatch { remote_response_id: String },
+    #[error("remote continuation provider binding is ambiguous: {remote_response_id}")]
+    AmbiguousProviderBinding { remote_response_id: String },
     #[error("remote continuation capability revision mismatch: {remote_response_id}")]
     CapabilityRevisionMismatch { remote_response_id: String },
     #[error("remote continuation expired: {remote_response_id}")]
@@ -231,9 +233,38 @@ pub enum V3RemoteContinuationError {
     Codec { message: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct V3RemoteContinuationBindingKey {
+    remote_response_id: String,
+    scope_key: V3RemoteContinuationScopeKey,
+    pin: V3RemoteContinuationPin,
+}
+
+impl V3RemoteContinuationBindingKey {
+    fn from_locator(locator: &V3RemoteContinuationLocator) -> Self {
+        Self {
+            remote_response_id: locator.remote_response_id.clone(),
+            scope_key: locator.scope_key.clone(),
+            pin: locator.pin.clone(),
+        }
+    }
+
+    fn from_parts(
+        remote_response_id: impl Into<String>,
+        scope_key: V3RemoteContinuationScopeKey,
+        pin: V3RemoteContinuationPin,
+    ) -> Self {
+        Self {
+            remote_response_id: remote_response_id.into(),
+            scope_key,
+            pin,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct V3RemoteContinuationStore {
-    locators: BTreeMap<String, V3RemoteContinuationLocator>,
+    locators: BTreeMap<V3RemoteContinuationBindingKey, V3RemoteContinuationLocator>,
 }
 
 impl V3RemoteContinuationStore {
@@ -242,8 +273,8 @@ impl V3RemoteContinuationStore {
         input: V3RemoteContinuationCommitInput,
     ) -> Result<(), V3RemoteContinuationError> {
         self.validate_commit(&input.locator)?;
-        self.locators
-            .insert(input.locator.remote_response_id.clone(), input.locator);
+        let key = V3RemoteContinuationBindingKey::from_locator(&input.locator);
+        self.locators.insert(key, input.locator);
         Ok(())
     }
 
@@ -252,15 +283,20 @@ impl V3RemoteContinuationStore {
         previous_remote_response_id: &str,
         input: V3RemoteContinuationCommitInput,
     ) -> Result<(), V3RemoteContinuationError> {
-        if !self.locators.contains_key(previous_remote_response_id) {
+        let previous_key = V3RemoteContinuationBindingKey::from_parts(
+            previous_remote_response_id,
+            input.locator.scope_key.clone(),
+            input.locator.pin.clone(),
+        );
+        if !self.locators.contains_key(&previous_key) {
             return Err(V3RemoteContinuationError::NotFound {
                 remote_response_id: previous_remote_response_id.to_string(),
             });
         }
         self.validate_commit(&input.locator)?;
-        self.locators.remove(previous_remote_response_id);
-        self.locators
-            .insert(input.locator.remote_response_id.clone(), input.locator);
+        let next_key = V3RemoteContinuationBindingKey::from_locator(&input.locator);
+        self.locators.remove(&previous_key);
+        self.locators.insert(next_key, input.locator);
         Ok(())
     }
 
@@ -279,7 +315,8 @@ impl V3RemoteContinuationStore {
                 remote_response_id: locator.remote_response_id.clone(),
             });
         }
-        if self.locators.contains_key(&locator.remote_response_id) {
+        let key = V3RemoteContinuationBindingKey::from_locator(locator);
+        if self.locators.contains_key(&key) {
             return Err(V3RemoteContinuationError::AlreadyCommitted {
                 remote_response_id: locator.remote_response_id.clone(),
             });
@@ -297,12 +334,37 @@ impl V3RemoteContinuationStore {
         if request.scope_key.entry_protocol != V3RemoteContinuationEntryProtocol::Responses {
             return Err(V3RemoteContinuationError::EntryProtocolMismatch);
         }
-        let locator = self
-            .locators
-            .get(&request.remote_response_id)
-            .ok_or_else(|| V3RemoteContinuationError::NotFound {
-                remote_response_id: request.remote_response_id.clone(),
-            })?;
+        let key = V3RemoteContinuationBindingKey::from_parts(
+            request.remote_response_id.clone(),
+            request.scope_key.clone(),
+            request.pin.clone(),
+        );
+        let locator = match self.locators.get(&key) {
+            Some(locator) => locator,
+            None if self.locators.keys().any(|candidate| {
+                candidate.remote_response_id == request.remote_response_id
+                    && candidate.scope_key == request.scope_key
+            }) =>
+            {
+                return Err(V3RemoteContinuationError::PinMismatch {
+                    remote_response_id: request.remote_response_id.clone(),
+                })
+            }
+            None if self
+                .locators
+                .keys()
+                .any(|candidate| candidate.remote_response_id == request.remote_response_id) =>
+            {
+                return Err(V3RemoteContinuationError::ScopeMismatch {
+                    remote_response_id: request.remote_response_id.clone(),
+                })
+            }
+            None => {
+                return Err(V3RemoteContinuationError::NotFound {
+                    remote_response_id: request.remote_response_id.clone(),
+                })
+            }
+        };
         if locator.owner != V3RemoteContinuationOwner::Direct {
             return Err(V3RemoteContinuationError::OwnerMismatch);
         }
@@ -342,11 +404,31 @@ impl V3RemoteContinuationStore {
         if scope_key.entry_protocol != V3RemoteContinuationEntryProtocol::Responses {
             return Err(V3RemoteContinuationError::EntryProtocolMismatch);
         }
-        let locator = self.locators.get(remote_response_id).ok_or_else(|| {
-            V3RemoteContinuationError::NotFound {
-                remote_response_id: remote_response_id.to_string(),
+        let mut matching = self.locators.values().filter(|locator| {
+            locator.remote_response_id == remote_response_id && locator.scope_key == *scope_key
+        });
+        let locator = match matching.next() {
+            Some(locator) if matching.next().is_none() => locator,
+            Some(_) => {
+                return Err(V3RemoteContinuationError::AmbiguousProviderBinding {
+                    remote_response_id: remote_response_id.to_string(),
+                })
             }
-        })?;
+            None if self
+                .locators
+                .values()
+                .any(|locator| locator.remote_response_id == remote_response_id) =>
+            {
+                return Err(V3RemoteContinuationError::ScopeMismatch {
+                    remote_response_id: remote_response_id.to_string(),
+                })
+            }
+            None => {
+                return Err(V3RemoteContinuationError::NotFound {
+                    remote_response_id: remote_response_id.to_string(),
+                })
+            }
+        };
         if locator.owner != V3RemoteContinuationOwner::Direct {
             return Err(V3RemoteContinuationError::OwnerMismatch);
         }
@@ -363,12 +445,47 @@ impl V3RemoteContinuationStore {
         Ok(locator)
     }
 
-    pub fn release(&mut self, remote_response_id: &str) -> bool {
-        self.locators.remove(remote_response_id).is_some()
+    pub fn release_bound(
+        &mut self,
+        remote_response_id: &str,
+        scope_key: &V3RemoteContinuationScopeKey,
+        pin: &V3RemoteContinuationPin,
+    ) -> bool {
+        let key = V3RemoteContinuationBindingKey::from_parts(
+            remote_response_id,
+            scope_key.clone(),
+            pin.clone(),
+        );
+        self.locators.remove(&key).is_some()
+    }
+
+    pub fn release_for_req03(
+        &mut self,
+        remote_response_id: &str,
+        scope_key: &V3RemoteContinuationScopeKey,
+    ) -> Result<bool, V3RemoteContinuationError> {
+        if scope_key.entry_protocol != V3RemoteContinuationEntryProtocol::Responses {
+            return Err(V3RemoteContinuationError::EntryProtocolMismatch);
+        }
+        let mut matching = self.locators.keys().filter(|key| {
+            key.remote_response_id == remote_response_id && key.scope_key == *scope_key
+        });
+        let key = match matching.next().cloned() {
+            Some(key) if matching.next().is_none() => key,
+            Some(_) => {
+                return Err(V3RemoteContinuationError::AmbiguousProviderBinding {
+                    remote_response_id: remote_response_id.to_string(),
+                })
+            }
+            None => return Ok(false),
+        };
+        Ok(self.locators.remove(&key).is_some())
     }
 
     pub fn contains(&self, remote_response_id: &str) -> bool {
-        self.locators.contains_key(remote_response_id)
+        self.locators
+            .keys()
+            .any(|key| key.remote_response_id == remote_response_id)
     }
 
     pub fn len(&self) -> usize {

@@ -698,13 +698,19 @@ fn v3_direct_client_transport_label(payload: &V3Resp15ClientPayload) -> &str {
 
 fn release_terminal_failure_locator(
     continuation_state: Option<&V3ResponsesDirectContinuationState>,
+    continuation_scope: Option<&V3ResponsesDirectContinuationScope>,
     previous_response_id: Option<&str>,
 ) -> Result<(), String> {
-    let (Some(state), Some(response_id)) = (continuation_state, previous_response_id) else {
+    let (Some(state), Some(scope), Some(response_id)) =
+        (continuation_state, continuation_scope, previous_response_id)
+    else {
         return Ok(());
     };
     let mut store = state.store.lock().map_err(|error| error.to_string())?;
-    if !store.release(response_id) {
+    if !store
+        .release_for_req03(response_id, &scope.key)
+        .map_err(|error| error.to_string())?
+    {
         return Err(format!(
             "terminal failure locator {response_id} was not present at Resp04 release"
         ));
