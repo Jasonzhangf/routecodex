@@ -129,7 +129,7 @@ binding 有机器 gate、DSH review PASS。之后再进入 Relay/Continuation sl
     supersession/reconciliation（属 V3 侧文档，动前须确认 supersession 计划）。
 - 已记录 known gaps：target_triple、public_api_hash（派生非真 API 提取）、edge 再冻结、
   workspace gate 修正：runtime/config/control/error 四个 anchored crate 依赖
-  `--extern` 注入，只经 build-link test-consumer 编译（CI `test` job 经 V4
+  `--extern` 注入，只经 build-link test-consumer 编译（CI `v4-build` job（macos-14）经 V4
   canonical `verify:ci` 覆盖），未纳入 `cargo test --workspace`
   （见 `v4-active-artifact-linking-test-design.md` §5）。
 

@@ -10,7 +10,9 @@
  *  4. Node packages resolve from v4/node_modules (never root fallback).
  *  5. Every tracked V4 source/build file belongs to exactly one module in
  *     the module registry; build edges are declared and adjacent.
- *  6. Root package.json and CI contain only approved V4 dispatcher forms.
+ *  6. Root package.json and CI contain only approved V4 dispatcher forms,
+ *     and the CI job running V4 canonical verification is on a macOS runner
+ *     matching the aarch64-apple-darwin Active artifact target.
  *  7. No V4 build command writes outside V4-owned output roots.
  *
  * Red fixtures prove each negative class fails through the same code paths.
@@ -18,6 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import yaml from 'js-yaml';
 import { v4Root, runCapture } from './_common.mjs';
 import { loadV3Baseline } from './architecture/_v3-baseline.mjs';
 
@@ -235,6 +238,26 @@ function checkRootDispatchers(rootPkgPath, workflowPath) {
   return out;
 }
 
+function checkCIPlatform(workflowPath) {
+  const out = [];
+  if (!fs.existsSync(workflowPath)) return out;
+  const workflow = yaml.load(fs.readFileSync(workflowPath, 'utf8'));
+  for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
+    const steps = Array.isArray(job.steps)
+      ? job.steps.map((step) => step.run ?? '').join('\n')
+      : '';
+    if (steps.includes('verify:ci')) {
+      const runner = String(job['runs-on'] ?? '');
+      if (!/^macos-/.test(runner)) {
+        out.push(
+          `CI job ${jobName} runs V4 verify:ci on ${runner || '(missing runs-on)'}; Active artifacts are aarch64-apple-darwin, so canonical V4 verification must run on a macOS runner`,
+        );
+      }
+    }
+  }
+  return out;
+}
+
 function reportAndExit(label) {
   if (failures.length > 0) {
     console.error(`[v4 isolation] ${label} FAIL`);
@@ -277,6 +300,12 @@ const dispatcherFailures = checkRootDispatchers(
 );
 if (dispatcherFailures.length > 0) {
   failures.push(`root dispatchers:\n${dispatcherFailures.join('\n')}`);
+}
+const ciPlatformFailures = checkCIPlatform(
+  path.join(v4Root, '../.github/workflows/test.yml'),
+);
+if (ciPlatformFailures.length > 0) {
+  failures.push(`CI platform:\n${ciPlatformFailures.join('\n')}`);
 }
 reportAndExit('positive');
 
@@ -400,6 +429,16 @@ fs.writeFileSync(
 );
 const rootPkgProblems = checkRootDispatchers(rootPkgFixture, path.join(redDir, 'test.yml'));
 expectReject('root npm dispatcher not thin', () => rootPkgProblems);
+
+// R9: V4 verify:ci must run on a macOS runner (Active artifacts are darwin).
+const ciPlatformDir = path.join(redDir, 'ci-platform');
+fs.mkdirSync(ciPlatformDir, { recursive: true });
+fs.writeFileSync(
+  path.join(ciPlatformDir, 'test.yml'),
+  'jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm --prefix v4 run verify:ci\n',
+);
+const ciPlatformProblems = checkCIPlatform(path.join(ciPlatformDir, 'test.yml'));
+expectReject('V4 verify:ci on non-macOS runner', () => ciPlatformProblems);
 
 if (redFail > 0) {
   console.error(`[v4 isolation] red fixtures failed: ${redFail}`);

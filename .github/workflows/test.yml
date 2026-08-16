@@ -23,12 +23,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            v4/package-lock.json
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: v4
+          cache-dependency-path: package-lock.json
       - run: npm ci --ignore-scripts
       - name: Repo sanity (no root junk)
         run: npm run verify:repo-sanity
@@ -70,10 +65,6 @@ jobs:
         run: npm run test:v3-console-request-count-visibility-red-fixtures
       - name: V2 and V3 route-classifier semantic gate
         run: npm run test:route-classifier-semantics
-      - name: V4 install local build dependencies
-        run: npm ci --prefix v4 --ignore-scripts
-      - name: V4 canonical verification (build/test/gates/red/isolation)
-        run: npm --prefix v4 run verify:ci
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
       - name: Fetch Rust dependencies for offline builds
@@ -92,6 +83,26 @@ jobs:
         env:
           ROUTECODEX_SKIP_AUTO_BUMP: "1"
         run: npm run test:v3-workspace
+
+  v4-build:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: v4/package-lock.json
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: v4
+      - name: V4 install local build dependencies
+        run: npm ci --prefix v4 --ignore-scripts
+      - name: V4 canonical verification (build/test/gates/red/isolation)
+        run: npm --prefix v4 run verify:ci
 
   v4-appsdk-admission:
     runs-on: macos-14

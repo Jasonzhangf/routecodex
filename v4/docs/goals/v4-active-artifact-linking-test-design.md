@@ -69,7 +69,7 @@ Negative:
 - `appsdk verify v4` and `appsdk verify --admission v4`
 - module regressions: base-node l0 (12), edge l1 (11), control l2 (15), error l2 (23), config l2 (15), error doc compile-fail
 - Active/Protected/record graph hash audit; architecture gate for unregistered/duplicate resolver edges
-- CI job `v4-appsdk-admission` (macOS admission) plus the `test` job running
+- CI job `v4-appsdk-admission` (macOS admission) plus the `v4-build` job (macos-14) running
   V4 canonical `verify:ci` (resolver gate + forbidden-edge scan integrated)
 
 ## 5. Known gaps recorded

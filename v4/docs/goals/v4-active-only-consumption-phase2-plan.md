@@ -35,7 +35,7 @@ Design ID: `V4-ACTIVE-LINK-002`（本计划）；上游设计：`v4/docs/design/
   （evidence/review/promotion/regression/freeze/publish）。
 - config：Cargo.toml 移除 base-node、edge path dep → build/regression 改 resolver（不 freeze）。
 - workspace/CI：`v4/Cargo.toml` members 收口；`verify:v4-active-link`、`v4_cargo_workspace_build`、
-  module regression gate、CI `test` job（V4 canonical `verify:ci`）命令改 resolver entrypoint。
+  module regression gate、CI `v4-build` job（macos-14，V4 canonical `verify:ci`）命令改 resolver entrypoint。
 - registry/maps/docs：frozen-consumer-registry、resource/function/mainline/verification map、
   design/test-design 文档状态同步。
 - hermetic fixture：control active-v2 / error active-v3 与 config 编译产物进入 fixture，CI 恢复后跑 index gate。

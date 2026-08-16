@@ -21,7 +21,7 @@
    begin-version -> re-freeze 生命周期，或按实现证据迁移 owner 到未冻结模块并记录偏差。
 4. 构建门禁统一：`cargo test --workspace --manifest-path v4/Cargo.toml` 覆盖全部
    workspace 成员；workspace 外 crate 全部经 build-link test-consumer 跑 L2 回归，
-   verification-map 的 `v4_cargo_workspace_build` 与 CI `test` job（V4 canonical `verify:ci`）不遗漏任何模块。
+   verification-map 的 `v4_cargo_workspace_build` 与 CI `v4-build` job（macos-14，V4 canonical `verify:ci`）不遗漏任何模块。
 5. 所有新 gate 先红后绿：红自测覆盖"资源缺 owner/缺 symbol/owner crate 不存在/
    node 未注册/双源漂移/控制资源进 payload"等负类。
 6. DSH review（opencode-go/deepseek-v4-flash）语义 PASS，无 P0/P1、无"修复后再审"。
@@ -90,7 +90,7 @@
 - verification-map：新 crate 各注册 `v4_*_l2_regression`（test-consumer）与
   `v4_*_resource_binding`；`v4_cargo_workspace_build.required_for` 扩展覆盖全部模块。
 - package.json：`verify:v4-foundation` 与 `verify:v4-foundation-red` 追加对应 gate。
-- CI：`test` job 安装 v4 依赖并调用 V4 canonical `verify:ci`，覆盖新 crate
+- CI：`v4-build` job（macos-14）安装 v4 依赖并调用 V4 canonical `verify:ci`，覆盖新 crate
   test-consumer 与资源全锚定 gate（root CI 不枚举 V4 内部矩阵）。
 
 ## 5. 风险与规避
@@ -126,7 +126,7 @@
    `contract_bound`（project.json + maps + L2 红测 + test-consumer 绿）。
 4. 扩展 runtime/config 资源面（dry-run/observability/timing、codex_sample_authorization）。
 5. 全量 49 anchored 双源同步；处理 control 决策点（owner 迁移或批准 re-freeze）。
-6. 构建门禁统一：`v4_cargo_workspace_build` 覆盖全部模块，CI `test` job 经
+6. 构建门禁统一：`v4_cargo_workspace_build` 覆盖全部模块，CI `v4-build` job（macos-14）经
    V4 canonical `verify:ci` 完整执行。
 7. 全量验证矩阵绿；提交（显式路径，不裹 V3 dirty）。
 8. DSH review PASS；更新 plan ledger / note / MEMORY。
@@ -200,7 +200,7 @@ validator：
    `v4_router_l2_regression` / `v4_provider_l2_regression` /
    `v4_server_l2_regression`（module-registry 已引用，此前缺失）；package.json
    `verify:v4-foundation` 10 -> 14 gates、`verify:v4-foundation-red` 追加
-   resource-binding 红自测；CI `test` job 经 V4 canonical `verify:ci` 覆盖
+   resource-binding 红自测；CI `v4-build` job（macos-14）经 V4 canonical `verify:ci` 覆盖
    4 个 test-consumer
    步骤；active-link frozen-consumer-registry 登记 debug/router/provider/server
    -> base-node（active_artifact），mainline-call-map 补 4 条
