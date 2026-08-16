@@ -326,9 +326,14 @@ function checkDeclaredExecutedBinding(verificationMapPath, architectureDir) {
   const declaredConsumers = new Set();
   const declaredConsumerDetails = new Map();
   const map = JSON.parse(fs.readFileSync(verificationMapPath, 'utf8'));
+  const seenGateIds = new Set();
   for (const gate of map.gates ?? []) {
+    if (seenGateIds.has(gate.gate_id)) {
+      out.push(`duplicate gate_id in verification-map.json: ${gate.gate_id}`);
+    }
+    seenGateIds.add(gate.gate_id);
     const command = String(gate.command ?? '');
-    for (const match of command.matchAll(/node scripts\/architecture\/(verify-v4-[a-z0-9-]+\.mjs)/g)) {
+    for (const match of command.matchAll(/node scripts\/architecture\/(verify-v4-[a-z0-9_-]+\.mjs)/g)) {
       declaredGates.add(match[1]);
     }
     for (const match of command.matchAll(/test-consumer[^\n]*--consumer\s+([a-z0-9-]+)/g)) {
@@ -367,7 +372,7 @@ function checkDeclaredExecutedBinding(verificationMapPath, architectureDir) {
   }
   if (fs.existsSync(architectureDir)) {
     for (const file of fs.readdirSync(architectureDir)) {
-      if (/^verify-v4-[a-z0-9-]+\.mjs$/.test(file) && !executedGates.has(file)) {
+      if (/^verify-v4-[a-z0-9_-]+\.mjs$/.test(file) && !executedGates.has(file)) {
         out.push(`architecture gate file never executed: ${file}`);
       }
     }
@@ -607,6 +612,35 @@ const bindingProblems = checkDeclaredExecutedBinding(
   path.join(bindingDir, 'architecture'),
 );
 expectReject('declared vs executed gate binding drift', () => bindingProblems);
+
+// R10b: duplicate gate_id and underscore gate commands are registry drift the
+// binding gate must reject (dangling commands must not be regex-invisible).
+const duplicateBindingDir = path.join(redDir, 'binding-duplicate');
+fs.mkdirSync(path.join(duplicateBindingDir, 'architecture'), { recursive: true });
+fs.writeFileSync(
+  path.join(duplicateBindingDir, 'verification-map.json'),
+  JSON.stringify({
+    gates: [
+      {
+        gate_id: 'v4_parity_gate_plugin_manager',
+        command: 'node scripts/architecture/verify-v4-plugin_manager.mjs',
+      },
+      {
+        gate_id: 'v4_parity_gate_plugin_manager',
+        command: 'node scripts/architecture/verify-v4-plugin-manager.mjs',
+      },
+    ],
+  }),
+);
+fs.writeFileSync(
+  path.join(duplicateBindingDir, 'architecture/verify-v4-plugin-manager.mjs'),
+  '',
+);
+const duplicateBindingProblems = checkDeclaredExecutedBinding(
+  path.join(duplicateBindingDir, 'verification-map.json'),
+  path.join(duplicateBindingDir, 'architecture'),
+);
+expectReject('duplicate gate_id / dangling underscore gate script', () => duplicateBindingProblems);
 
 // R11: V4 verify:ci must run on an arm64 macOS runner, not an Intel macOS
 // runner (macos-14-large is the current GitHub-hosted x86_64 label).

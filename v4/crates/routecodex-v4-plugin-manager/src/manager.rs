@@ -14,6 +14,7 @@
 //! `ExecutionFailure` audit entry — the active pointer is never auto-rolled.
 
 use std::collections::BTreeMap;
+use std::sync::{Mutex, MutexGuard};
 
 use routecodex_v4_plugin_plan::NodePluginPlan;
 use sha2::{Digest, Sha256};
@@ -129,63 +130,76 @@ pub enum ManagerError {
 }
 
 pub struct PluginManager<L: LifecyclePort> {
+    inner: Mutex<ManagerInner<L>>,
+    publish_gate: Mutex<()>,
+}
+
+struct ManagerInner<L: LifecyclePort> {
     candidates: BTreeMap<String, PluginCandidate>,
     active: Option<ActiveChain>,
     audit: AuditSink,
     actor: String,
-    publish_lock: bool,
     port: L,
 }
 
 impl<L: LifecyclePort> PluginManager<L> {
     pub fn new(actor: impl Into<String>, port: L) -> Self {
         Self {
-            candidates: BTreeMap::new(),
-            active: None,
-            audit: AuditSink::default(),
-            actor: actor.into(),
-            publish_lock: false,
-            port,
+            inner: Mutex::new(ManagerInner {
+                candidates: BTreeMap::new(),
+                active: None,
+                audit: AuditSink::default(),
+                actor: actor.into(),
+                port,
+            }),
+            publish_gate: Mutex::new(()),
         }
     }
 
-    pub fn actor(&self) -> &str {
-        &self.actor
+    fn lock(&self) -> MutexGuard<'_, ManagerInner<L>> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    pub fn active(&self) -> Option<&ActiveChain> {
-        self.active.as_ref()
+    pub fn actor(&self) -> String {
+        self.lock().actor.clone()
     }
 
-    pub fn candidates(&self) -> impl Iterator<Item = &PluginCandidate> {
-        self.candidates.values()
+    pub fn active(&self) -> Option<ActiveChain> {
+        self.lock().active.clone()
     }
 
-    pub fn candidate(&self, id: &str) -> Option<&PluginCandidate> {
-        self.candidates.get(id)
+    pub fn candidates(&self) -> Vec<PluginCandidate> {
+        self.lock().candidates.values().cloned().collect()
     }
 
-    pub fn audit(&self) -> &AuditSink {
-        &self.audit
+    pub fn candidate(&self, id: &str) -> Option<PluginCandidate> {
+        self.lock().candidates.get(id).cloned()
     }
 
-    pub fn port(&self) -> &L {
-        &self.port
+    pub fn audit(&self) -> Vec<AuditRecord> {
+        self.lock().audit.records().to_vec()
     }
 
-    pub fn port_mut(&mut self) -> &mut L {
-        &mut self.port
+    pub fn mounted_node_ids(&self) -> Vec<String> {
+        self.lock().port.mounted_node_ids()
+    }
+
+    pub fn rejected_node_ids(&self) -> Vec<String> {
+        self.lock().port.rejected_node_ids()
     }
 
     pub fn create_candidate(
-        &mut self,
+        &self,
         id: CandidateId,
         plan: NodePluginPlan,
         graph_hash: String,
         manifest_hash: String,
         node_ids: Vec<String>,
-    ) -> Result<&PluginCandidate, ManagerError> {
-        if self.candidates.contains_key(id.as_str()) {
+    ) -> Result<(), ManagerError> {
+        let mut inner = self.lock();
+        if inner.candidates.contains_key(id.as_str()) {
             return Err(ManagerError::DuplicateCandidate);
         }
         if graph_hash.is_empty() || manifest_hash.is_empty() {
@@ -216,23 +230,26 @@ impl<L: LifecyclePort> PluginManager<L> {
             node_ids,
             state: CandidateState::Draft,
         };
-        self.audit
+        let actor = inner.actor.clone();
+        let base_hash = inner.active.as_ref().map(|a| a.hash.clone());
+        inner
+            .audit
             .append(AuditRecord {
                 sequence: 0,
-                actor: self.actor.clone(),
+                actor,
                 action: AuditAction::CandidateCreated,
                 candidate_id: Some(id.0.clone()),
-                base_hash: self.active.as_ref().map(|a| a.hash.clone()),
+                base_hash,
                 candidate_hash: Some(candidate.hash()),
                 result: AuditResult::Ok,
                 message: None,
             })
             .expect("actor is set");
-        self.candidates.insert(id.0.clone(), candidate);
-        Ok(self.candidates.get(id.as_str()).expect("just inserted"))
+        inner.candidates.insert(id.0.clone(), candidate);
+        Ok(())
     }
 
-    pub fn compile(&mut self, id: &str) -> Result<(), ManagerError> {
+    pub fn compile(&self, id: &str) -> Result<(), ManagerError> {
         self.transition(
             id,
             CandidateState::Draft,
@@ -241,7 +258,7 @@ impl<L: LifecyclePort> PluginManager<L> {
         )
     }
 
-    pub fn validate(&mut self, id: &str) -> Result<(), ManagerError> {
+    pub fn validate(&self, id: &str) -> Result<(), ManagerError> {
         self.transition(
             id,
             CandidateState::Compiled,
@@ -250,7 +267,7 @@ impl<L: LifecyclePort> PluginManager<L> {
         )
     }
 
-    pub fn mark_smoke_passed(&mut self, id: &str) -> Result<(), ManagerError> {
+    pub fn mark_smoke_passed(&self, id: &str) -> Result<(), ManagerError> {
         self.transition(
             id,
             CandidateState::Validated,
@@ -259,72 +276,100 @@ impl<L: LifecyclePort> PluginManager<L> {
         )
     }
 
-    pub fn mark_failed(&mut self, id: &str, reason: &str) -> Result<(), ManagerError> {
-        let candidate = self
+    pub fn mark_failed(&self, id: &str, reason: &str) -> Result<(), ManagerError> {
+        let mut inner = self.lock();
+        let candidate = inner
             .candidates
             .get(id)
             .ok_or(ManagerError::UnknownCandidate)?
             .clone();
-        self.audit
+        if !matches!(
+            candidate.state,
+            CandidateState::Draft
+                | CandidateState::Compiled
+                | CandidateState::Validated
+                | CandidateState::SmokePassed
+        ) {
+            return Err(ManagerError::InvalidTransition {
+                from: candidate.state,
+                action: "mark_failed",
+            });
+        }
+        let actor = inner.actor.clone();
+        let base_hash = inner.active.as_ref().map(|a| a.hash.clone());
+        inner
+            .audit
             .append(AuditRecord {
                 sequence: 0,
-                actor: self.actor.clone(),
+                actor,
                 action: AuditAction::PublishRejected,
                 candidate_id: Some(candidate.id.0.clone()),
-                base_hash: self.active.as_ref().map(|a| a.hash.clone()),
+                base_hash,
                 candidate_hash: Some(candidate.hash()),
                 result: AuditResult::Failure,
                 message: Some(reason.to_string()),
             })
             .expect("actor is set");
-        let entry = self.candidates.get_mut(id).expect("present");
+        let entry = inner.candidates.get_mut(id).expect("present");
         entry.state = CandidateState::Failed;
         Ok(())
     }
 
-    pub fn discard(&mut self, id: &str) -> Result<(), ManagerError> {
-        let candidate = self
+    pub fn discard(&self, id: &str) -> Result<(), ManagerError> {
+        let mut inner = self.lock();
+        let candidate = inner
             .candidates
             .get(id)
             .ok_or(ManagerError::UnknownCandidate)?
             .clone();
-        self.audit
+        if matches!(
+            candidate.state,
+            CandidateState::Published | CandidateState::Discarded
+        ) {
+            return Err(ManagerError::InvalidTransition {
+                from: candidate.state,
+                action: "discard",
+            });
+        }
+        let actor = inner.actor.clone();
+        let base_hash = inner.active.as_ref().map(|a| a.hash.clone());
+        inner
+            .audit
             .append(AuditRecord {
                 sequence: 0,
-                actor: self.actor.clone(),
+                actor,
                 action: AuditAction::CandidateDiscarded,
                 candidate_id: Some(candidate.id.0.clone()),
-                base_hash: self.active.as_ref().map(|a| a.hash.clone()),
+                base_hash,
                 candidate_hash: Some(candidate.hash()),
                 result: AuditResult::Ok,
                 message: None,
             })
             .expect("actor is set");
-        let entry = self.candidates.get_mut(id).expect("present");
+        let entry = inner.candidates.get_mut(id).expect("present");
         entry.state = CandidateState::Discarded;
         Ok(())
     }
 
     pub fn publish(
-        &mut self,
+        &self,
         id: &str,
         expected_base_hash: Option<&str>,
     ) -> Result<PublishOutcome, ManagerError> {
-        if self.publish_lock {
-            return Err(ManagerError::ConcurrentPublish);
-        }
-        self.publish_lock = true;
-        let result = self.publish_locked(id, expected_base_hash);
-        self.publish_lock = false;
-        result
+        let _gate = self
+            .publish_gate
+            .try_lock()
+            .map_err(|_| ManagerError::ConcurrentPublish)?;
+        let mut inner = self.lock();
+        Self::publish_locked(&mut inner, id, expected_base_hash)
     }
 
     fn publish_locked(
-        &mut self,
+        inner: &mut ManagerInner<L>,
         id: &str,
         expected_base_hash: Option<&str>,
     ) -> Result<PublishOutcome, ManagerError> {
-        let candidate = self
+        let candidate = inner
             .candidates
             .get(id)
             .ok_or(ManagerError::UnknownCandidate)?
@@ -332,12 +377,14 @@ impl<L: LifecyclePort> PluginManager<L> {
         if candidate.state != CandidateState::SmokePassed {
             return Err(ManagerError::NotSmokePassed);
         }
-        let actual_base = self.active.as_ref().map(|a| a.hash.clone());
+        let actual_base = inner.active.as_ref().map(|a| a.hash.clone());
         if actual_base.as_deref() != expected_base_hash {
-            self.audit
+            let actor = inner.actor.clone();
+            inner
+                .audit
                 .append(AuditRecord {
                     sequence: 0,
-                    actor: self.actor.clone(),
+                    actor,
                     action: AuditAction::PublishRejected,
                     candidate_id: Some(candidate.id.0.clone()),
                     base_hash: actual_base.clone(),
@@ -353,16 +400,18 @@ impl<L: LifecyclePort> PluginManager<L> {
         }
         let mut mounted_node_ids = Vec::with_capacity(candidate.node_ids.len());
         for node_id in &candidate.node_ids {
-            match self
+            match inner
                 .port
                 .mount_candidate(node_id, &candidate.hash(), &candidate.graph_hash)
             {
                 Ok(()) => mounted_node_ids.push(node_id.clone()),
                 Err(message) => {
-                    self.audit
+                    let actor = inner.actor.clone();
+                    inner
+                        .audit
                         .append(AuditRecord {
                             sequence: 0,
-                            actor: self.actor.clone(),
+                            actor,
                             action: AuditAction::PublishRejected,
                             candidate_id: Some(candidate.id.0.clone()),
                             base_hash: actual_base.clone(),
@@ -372,7 +421,7 @@ impl<L: LifecyclePort> PluginManager<L> {
                         })
                         .ok();
                     for mounted in mounted_node_ids.iter().rev() {
-                        let _ = self.port.dispose(mounted);
+                        let _ = inner.port.dispose(mounted);
                     }
                     return Err(ManagerError::Lifecycle(message));
                 }
@@ -383,13 +432,15 @@ impl<L: LifecyclePort> PluginManager<L> {
             hash: candidate.hash(),
             node_ids: mounted_node_ids,
         };
-        let previous = self.active.replace(next.clone());
-        let entry = self.candidates.get_mut(id).expect("present");
+        let previous = inner.active.replace(next.clone());
+        let entry = inner.candidates.get_mut(id).expect("present");
         entry.state = CandidateState::Published;
-        self.audit
+        let actor = inner.actor.clone();
+        inner
+            .audit
             .append(AuditRecord {
                 sequence: 0,
-                actor: self.actor.clone(),
+                actor,
                 action: AuditAction::Published,
                 candidate_id: Some(candidate.id.0.clone()),
                 base_hash: previous.as_ref().map(|p| p.hash.clone()),
@@ -402,41 +453,46 @@ impl<L: LifecyclePort> PluginManager<L> {
     }
 
     pub fn record_execution_failure(
-        &mut self,
+        &self,
         candidate_id: &str,
         reason: &str,
     ) -> Result<(), ManagerError> {
-        if !self.candidates.contains_key(candidate_id) {
+        let mut inner = self.lock();
+        if !inner.candidates.contains_key(candidate_id) {
             return Err(ManagerError::UnknownCandidate);
         }
-        let active_before = self.active.clone();
-        self.audit
+        let active_before = inner.active.clone();
+        let actor = inner.actor.clone();
+        let candidate_hash = inner.candidates.get(candidate_id).map(|c| c.hash());
+        inner
+            .audit
             .append(AuditRecord {
                 sequence: 0,
-                actor: self.actor.clone(),
+                actor,
                 action: AuditAction::ExecutionFailure,
                 candidate_id: Some(candidate_id.to_string()),
                 base_hash: active_before.as_ref().map(|a| a.hash.clone()),
-                candidate_hash: self.candidates.get(candidate_id).map(|c| c.hash()),
+                candidate_hash,
                 result: AuditResult::Failure,
                 message: Some(reason.to_string()),
             })
             .expect("actor is set");
         debug_assert_eq!(
-            self.active, active_before,
+            inner.active, active_before,
             "execution failure must not mutate active pointer"
         );
         Ok(())
     }
 
     fn transition(
-        &mut self,
+        &self,
         id: &str,
         from: CandidateState,
         to: CandidateState,
         action: AuditAction,
     ) -> Result<(), ManagerError> {
-        let candidate = self
+        let mut inner = self.lock();
+        let candidate = inner
             .candidates
             .get(id)
             .ok_or(ManagerError::UnknownCandidate)?
@@ -447,19 +503,22 @@ impl<L: LifecyclePort> PluginManager<L> {
                 action: action_name(action),
             });
         }
-        self.audit
+        let actor = inner.actor.clone();
+        let base_hash = inner.active.as_ref().map(|a| a.hash.clone());
+        inner
+            .audit
             .append(AuditRecord {
                 sequence: 0,
-                actor: self.actor.clone(),
+                actor,
                 action,
                 candidate_id: Some(candidate.id.0.clone()),
-                base_hash: self.active.as_ref().map(|a| a.hash.clone()),
+                base_hash,
                 candidate_hash: Some(candidate.hash()),
                 result: AuditResult::Ok,
                 message: None,
             })
             .expect("actor is set");
-        let entry = self.candidates.get_mut(id).expect("present");
+        let entry = inner.candidates.get_mut(id).expect("present");
         entry.state = to;
         Ok(())
     }

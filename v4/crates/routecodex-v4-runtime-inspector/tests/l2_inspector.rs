@@ -75,7 +75,7 @@ fn compile_plan(plugin_id: &str) -> Result<NodePluginPlan, PlanError> {
 fn snapshot_projects_management_state_only() {
     let plan = compile_plan("inspector-plugin").expect("compile");
     let hash = plan.hash.clone();
-    let mut manager = PluginManager::new("inspector-actor", NullLifecyclePort::default());
+    let manager = PluginManager::new("inspector-actor", NullLifecyclePort::default());
     manager
         .create_candidate(
             CandidateId("cand-i".to_string()),
@@ -115,7 +115,7 @@ fn snapshot_projects_management_state_only() {
 fn failed_candidate_never_appears_as_active() {
     let plan = compile_plan("inspector-plugin-2").expect("compile");
     let hash = plan.hash.clone();
-    let mut manager = PluginManager::new("inspector-actor", NullLifecyclePort::default());
+    let manager = PluginManager::new("inspector-actor", NullLifecyclePort::default());
     manager
         .create_candidate(
             CandidateId("cand-f".to_string()),

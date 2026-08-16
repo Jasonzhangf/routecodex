@@ -2,7 +2,7 @@ use routecodex_v4_build_link::error::ActiveLinkError;
 use routecodex_v4_build_link::identity::{canonical, recompute_artifact_hash, sha256_hex};
 use routecodex_v4_build_link::resolver::{
     assert_outside_active, emit_link_flags, frozen_module_ids, host_triple, resolve,
-    source_dep_link_args,
+    select_rlib_by_stem, source_dep_link_args,
 };
 use routecodex_v4_build_link::IndexBuilder;
 use std::collections::HashSet;
@@ -557,37 +557,34 @@ fn red_source_deps_rejects_invalid_name() {
 
 #[test]
 fn red_source_deps_must_use_current_cargo_artifact_not_lexicographic_max() {
-    let root = v4_root();
-    let frozen = HashSet::new();
-    let args = source_dep_link_args(&root, "routecodex-v4-plugin-contract", &frozen)
-        .expect("workspace source dep must resolve against the current cargo graph");
-    let extern_index = args
-        .iter()
-        .position(|arg| arg == "--extern")
-        .expect("resolver must emit an --extern pair");
-    let selected = PathBuf::from(&args[extern_index + 1]);
-    let file = selected
-        .file_name()
-        .expect("resolved rlib file name")
-        .to_string_lossy()
-        .into_owned();
-    let deps_dir = root.join("target/release/deps");
-    let mut candidates: Vec<String> = fs::read_dir(&deps_dir)
-        .expect("deps dir must exist after the workspace build")
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            (name.starts_with("libroutecodex_v4_plugin_contract-") && name.ends_with(".rlib"))
-                .then_some(name)
-        })
-        .collect();
+    // Hermetic fixture: fabricate a stale rlib whose file name sorts above
+    // the cargo-current artifact. Selection must match the reported stem,
+    // never the lexicographic maximum; no live deps dir is read.
+    let dir = std::env::temp_dir().join(format!(
+        "v4-link-red-stem-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).expect("create hermetic deps dir");
+    let stale = dir.join("libroutecodex_v4_plugin_contract-7c1036b0aabbccdd.rlib");
+    let current = dir.join("libroutecodex_v4_plugin_contract-3c45736e00112233.rlib");
+    fs::write(&stale, b"stale rlib").expect("write stale rlib");
+    fs::write(&current, b"current rlib").expect("write current rlib");
+    let mut candidates = vec![stale.clone(), current.clone()];
     candidates.sort();
-    if let Some(max) = candidates.last() {
-        // With one candidate both rules agree; with stale artifacts the
-        // lexicographic maximum is exactly the buggy pick and must not win.
-        assert!(
-            candidates.len() == 1 || max != &file,
-            "resolver selected stale lexicographic max {max} instead of the cargo-current artifact {file}"
-        );
-    }
+    assert_eq!(
+        candidates.last().expect("two candidates"),
+        &stale,
+        "fixture must place the stale rlib at the lexicographic maximum"
+    );
+    let picked = select_rlib_by_stem(
+        &candidates,
+        "libroutecodex_v4_plugin_contract-3c45736e00112233",
+    )
+    .expect("current stem must select");
+    assert_eq!(picked, &current, "cargo-current stem wins over stale max");
+    let _ = fs::remove_dir_all(&dir);
 }

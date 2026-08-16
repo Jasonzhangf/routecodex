@@ -78,11 +78,15 @@ pub enum AdminError {
 }
 
 pub fn execute<L: LifecyclePort>(
-    manager: &mut PluginManager<L>,
+    manager: &PluginManager<L>,
     command: AdminCommand,
 ) -> Result<AdminResponse, AdminError> {
     let actor = command_actor(&command).to_string();
     if actor.is_empty() {
+        // ponytail: identity/authz binding point is the future admin
+        // HTTP/auth layer (contract: Admin 不拥有权限判定). This crate only
+        // fail-fasts missing actors; real authorization must be enforced
+        // before commands reach this typed surface.
         return Err(AdminError::UnauthorizedActor);
     }
     match command {

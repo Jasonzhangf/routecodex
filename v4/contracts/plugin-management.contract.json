@@ -27,7 +27,14 @@
       ["compiled", "validated"],
       ["validated", "smoke_passed"],
       ["smoke_passed", "published"],
-      ["*", "failed"],
+      ["draft", "failed"],
+      ["compiled", "failed"],
+      ["validated", "failed"],
+      ["smoke_passed", "failed"],
+      ["draft", "discarded"],
+      ["compiled", "discarded"],
+      ["validated", "discarded"],
+      ["smoke_passed", "discarded"],
       ["failed", "discarded"]
     ],
     "publish_guards": [
@@ -36,7 +43,9 @@
       "candidate_hash_required",
       "sequential_mount",
       "mount_failure_inverse_drain",
-      "active_pointer_single_owner"
+      "active_pointer_single_owner",
+      "concurrent_publish_rejected",
+      "published_terminal"
     ],
     "audit_fields": [
       "actor",

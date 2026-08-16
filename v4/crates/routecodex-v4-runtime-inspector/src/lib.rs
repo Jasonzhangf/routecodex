@@ -7,8 +7,8 @@
 //! material, or native handles.
 
 use routecodex_v4_plugin_manager::{
-    AuditAction, AuditRecord, AuditResult, AuditSink, CandidateState, LifecyclePort,
-    PluginCandidate, PluginManager,
+    AuditAction, AuditRecord, AuditResult, CandidateState, LifecyclePort, PluginCandidate,
+    PluginManager,
 };
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +70,7 @@ pub fn snapshot<L: LifecyclePort>(manager: &PluginManager<L>) -> RuntimeSnapshot
     });
     let mut candidates: Vec<CandidateSummary> = manager
         .candidates()
+        .iter()
         .filter(|c| !matches!(c.state, CandidateState::Failed | CandidateState::Discarded))
         .map(candidate_summary)
         .collect();
@@ -77,6 +78,7 @@ pub fn snapshot<L: LifecyclePort>(manager: &PluginManager<L>) -> RuntimeSnapshot
 
     let failed: Vec<FailedSummary> = manager
         .candidates()
+        .iter()
         .filter(|c| matches!(c.state, CandidateState::Failed))
         .map(|c| FailedSummary {
             id: c.id.as_str().to_string(),
@@ -86,16 +88,11 @@ pub fn snapshot<L: LifecyclePort>(manager: &PluginManager<L>) -> RuntimeSnapshot
         .collect();
 
     let container_lifecycle = ContainerLifecycle {
-        mounted_node_ids: manager.port().mounted_node_ids(),
-        rejected_node_ids: manager.port().rejected_node_ids(),
+        mounted_node_ids: manager.mounted_node_ids(),
+        rejected_node_ids: manager.rejected_node_ids(),
     };
 
-    let audit: Vec<AuditSummary> = manager
-        .audit()
-        .records()
-        .iter()
-        .map(audit_summary)
-        .collect();
+    let audit: Vec<AuditSummary> = manager.audit().iter().map(audit_summary).collect();
 
     RuntimeSnapshot {
         active,
@@ -162,8 +159,8 @@ fn result_name(result: AuditResult) -> &'static str {
     }
 }
 
-fn audit_failure_reason(sink: &AuditSink, candidate_id: &str) -> String {
-    sink.records()
+fn audit_failure_reason(records: &[AuditRecord], candidate_id: &str) -> String {
+    records
         .iter()
         .rev()
         .find(|r| {

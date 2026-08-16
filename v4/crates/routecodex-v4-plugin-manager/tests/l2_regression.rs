@@ -23,6 +23,9 @@ use routecodex_v4_plugin_manager::{
     NullLifecyclePort, PluginCandidate, PluginManager,
 };
 use routecodex_v4_plugin_plan::{compile_node_plan, AuthoringPlugin, NodePluginPlan, PlanError};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 fn resource_registry() -> ResourceRegistry {
     ResourceRegistry {
@@ -96,7 +99,7 @@ fn candidate_publish_updates_active_pointer_once() {
         node_ids: node_ids.clone(),
         state: CandidateState::Draft,
     });
-    let mut manager = PluginManager::new("actor-a", NullLifecyclePort::default());
+    let manager = PluginManager::new("actor-a", NullLifecyclePort::default());
     manager
         .create_candidate(
             CandidateId("cand-a".to_string()),
@@ -116,7 +119,7 @@ fn candidate_publish_updates_active_pointer_once() {
     let active = manager.active().expect("active present");
     assert_eq!(active.candidate_id.as_str(), "cand-a");
     assert_eq!(active.hash, candidate_hash);
-    let records = manager.audit().records();
+    let records = manager.audit();
     let publish_records: Vec<_> = records
         .iter()
         .filter(|r| matches!(r.action, AuditAction::Published))
@@ -132,7 +135,7 @@ fn candidate_publish_updates_active_pointer_once() {
 fn stale_base_hash_is_rejected_without_active_mutation() {
     let plan = compile_plan("plugin-b").expect("compile plan");
     let hash = plan.hash.clone();
-    let mut manager = PluginManager::new("actor-b", NullLifecyclePort::default());
+    let manager = PluginManager::new("actor-b", NullLifecyclePort::default());
     let first_candidate_hash = PluginCandidate::hash(&PluginCandidate {
         id: CandidateId("cand-1".to_string()),
         plan: plan.clone(),
@@ -184,7 +187,7 @@ fn stale_base_hash_is_rejected_without_active_mutation() {
 fn candidate_failure_keeps_active_pointer() {
     let plan = compile_plan("plugin-d").expect("compile plan");
     let hash = plan.hash.clone();
-    let mut manager = PluginManager::new("actor-d", NullLifecyclePort::default());
+    let manager = PluginManager::new("actor-d", NullLifecyclePort::default());
     manager
         .create_candidate(
             CandidateId("cand-d".to_string()),
@@ -211,7 +214,7 @@ fn candidate_failure_keeps_active_pointer() {
 fn execution_failure_does_not_rollback_active_pointer() {
     let plan = compile_plan("plugin-e").expect("compile plan");
     let hash = plan.hash.clone();
-    let mut manager = PluginManager::new("actor-e", NullLifecyclePort::default());
+    let manager = PluginManager::new("actor-e", NullLifecyclePort::default());
     manager
         .create_candidate(
             CandidateId("cand-e".to_string()),
@@ -230,7 +233,7 @@ fn execution_failure_does_not_rollback_active_pointer() {
         .expect("record failure");
     let active = manager.active().expect("active still present");
     assert_eq!(active.candidate_id.as_str(), "cand-e");
-    let records = manager.audit().records();
+    let records = manager.audit();
     assert!(records
         .iter()
         .any(|r| matches!(r.action, AuditAction::ExecutionFailure)));
@@ -240,7 +243,7 @@ fn execution_failure_does_not_rollback_active_pointer() {
 fn duplicate_candidate_id_rejected() {
     let plan = compile_plan("plugin-f").expect("compile plan");
     let hash = plan.hash.clone();
-    let mut manager = PluginManager::new("actor-f", NullLifecyclePort::default());
+    let manager = PluginManager::new("actor-f", NullLifecyclePort::default());
     manager
         .create_candidate(
             CandidateId("dup".to_string()),
@@ -266,7 +269,7 @@ fn duplicate_candidate_id_rejected() {
 fn publish_requires_smoke_passed_state() {
     let plan = compile_plan("plugin-g").expect("compile plan");
     let hash = plan.hash.clone();
-    let mut manager = PluginManager::new("actor-g", NullLifecyclePort::default());
+    let manager = PluginManager::new("actor-g", NullLifecyclePort::default());
     manager
         .create_candidate(
             CandidateId("cand-g".to_string()),
@@ -311,7 +314,7 @@ fn mount_failure_rolls_back_partial_mounts() {
     }
     let plan = compile_plan("plugin-h").expect("compile plan");
     let hash = plan.hash.clone();
-    let mut manager = PluginManager::new("actor-h", PartialLifecycle);
+    let manager = PluginManager::new("actor-h", PartialLifecycle);
     manager
         .create_candidate(
             CandidateId("cand-h".to_string()),
@@ -333,10 +336,190 @@ fn mount_failure_rolls_back_partial_mounts() {
         manager.active().is_none(),
         "active must not flip on mount failure"
     );
-    let records = manager.audit().records();
+    let records = manager.audit();
     assert!(records.iter().any(|r| {
         matches!(r.action, AuditAction::PublishRejected)
             && matches!(r.result, AuditResult::Failure)
             && r.message.as_deref() == Some("mount_failed:v4.request.inbound.typed")
     }));
+}
+
+#[test]
+fn published_candidate_cannot_be_failed_or_discarded() {
+    let plan = compile_plan("plugin-published").expect("compile plan");
+    let hash = plan.hash.clone();
+    let manager = PluginManager::new("actor-published", NullLifecyclePort::default());
+    manager
+        .create_candidate(
+            CandidateId("cand-published".to_string()),
+            plan,
+            hash.clone(),
+            hash,
+            vec!["v4.request.inbound.normalized".to_string()],
+        )
+        .expect("create");
+    manager.compile("cand-published").expect("compile");
+    manager.validate("cand-published").expect("validate");
+    manager.mark_smoke_passed("cand-published").expect("smoke");
+    manager.publish("cand-published", None).expect("publish");
+
+    let fail_err = manager
+        .mark_failed("cand-published", "late failure")
+        .expect_err("published candidate must not be marked failed");
+    assert!(matches!(
+        fail_err,
+        ManagerError::InvalidTransition {
+            from: CandidateState::Published,
+            action: "mark_failed"
+        }
+    ));
+    let discard_err = manager
+        .discard("cand-published")
+        .expect_err("published candidate must not be discarded");
+    assert!(matches!(
+        discard_err,
+        ManagerError::InvalidTransition {
+            from: CandidateState::Published,
+            action: "discard"
+        }
+    ));
+    assert!(matches!(
+        manager
+            .candidate("cand-published")
+            .expect("candidate present")
+            .state,
+        CandidateState::Published
+    ));
+    assert_eq!(
+        manager.active().expect("active").candidate_id.as_str(),
+        "cand-published",
+        "active pointer must keep referencing the published candidate"
+    );
+}
+
+#[test]
+fn failed_candidate_can_be_discarded() {
+    let plan = compile_plan("plugin-discard").expect("compile plan");
+    let hash = plan.hash.clone();
+    let manager = PluginManager::new("actor-discard", NullLifecyclePort::default());
+    manager
+        .create_candidate(
+            CandidateId("cand-discard".to_string()),
+            plan,
+            hash.clone(),
+            hash,
+            vec!["v4.request.inbound.normalized".to_string()],
+        )
+        .expect("create");
+    manager
+        .mark_failed("cand-discard", "typed_error")
+        .expect("mark failed");
+    manager.discard("cand-discard").expect("discard failed");
+    assert!(matches!(
+        manager
+            .candidate("cand-discard")
+            .expect("candidate present")
+            .state,
+        CandidateState::Discarded
+    ));
+}
+
+/// Lifecycle port that blocks the first mount until the test releases it, so
+/// a second publisher provably hits the live publish gate.
+#[derive(Clone)]
+struct BlockingPort {
+    mounted: Arc<Mutex<Vec<String>>>,
+    release: Arc<Mutex<Option<mpsc::Receiver<()>>>>,
+}
+
+impl LifecyclePort for BlockingPort {
+    fn mount_candidate(
+        &mut self,
+        node_id: &str,
+        _plan_hash: &str,
+        _graph_hash: &str,
+    ) -> Result<(), String> {
+        self.mounted
+            .lock()
+            .expect("mounted lock")
+            .push(node_id.to_string());
+        let guard = self.release.lock().expect("release lock");
+        if let Some(rx) = guard.as_ref() {
+            let _ = rx.recv();
+        }
+        Ok(())
+    }
+
+    fn drain(&mut self, _node_id: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn dispose(&mut self, _node_id: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn mounted_node_ids(&self) -> Vec<String> {
+        self.mounted.lock().expect("mounted lock").clone()
+    }
+
+    fn rejected_node_ids(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+#[test]
+fn concurrent_publish_rejects_second_caller() {
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let port = BlockingPort {
+        mounted: Arc::new(Mutex::new(Vec::new())),
+        release: Arc::new(Mutex::new(Some(release_rx))),
+    };
+    let watch = port.clone();
+    let plan = compile_plan("plugin-concurrent").expect("compile plan");
+    let hash = plan.hash.clone();
+    let manager = Arc::new(PluginManager::new("actor-concurrent", port));
+    manager
+        .create_candidate(
+            CandidateId("cand-concurrent".to_string()),
+            plan,
+            hash.clone(),
+            hash,
+            vec!["v4.request.inbound.normalized".to_string()],
+        )
+        .expect("create");
+    manager.compile("cand-concurrent").expect("compile");
+    manager.validate("cand-concurrent").expect("validate");
+    manager.mark_smoke_passed("cand-concurrent").expect("smoke");
+
+    let first = manager.clone();
+    let first_thread = thread::spawn(move || first.publish("cand-concurrent", None));
+
+    let mut mounted = false;
+    for _ in 0..200 {
+        if !watch.mounted.lock().expect("mounted lock").is_empty() {
+            mounted = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(mounted, "first publish must hold the gate inside mount");
+
+    let second_result = manager.publish("cand-concurrent", None);
+    assert!(
+        matches!(second_result, Err(ManagerError::ConcurrentPublish)),
+        "second concurrent publish must be rejected, got {second_result:?}"
+    );
+
+    let _ = release_tx.send(());
+    let first_result = first_thread.join().expect("first publish thread");
+    assert!(matches!(first_result, Ok(_)));
+    let records = manager.audit();
+    assert_eq!(
+        records
+            .iter()
+            .filter(|r| matches!(r.action, AuditAction::Published))
+            .count(),
+        1,
+        "active pointer updated exactly once"
+    );
 }

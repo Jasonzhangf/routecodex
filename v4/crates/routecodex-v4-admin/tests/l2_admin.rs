@@ -78,10 +78,10 @@ fn compile_plan(plugin_id: &str) -> Result<NodePluginPlan, PlanError> {
 fn admin_full_lifecycle_and_readonly_query() {
     let plan = compile_plan("admin-plugin").expect("compile");
     let hash = plan.hash.clone();
-    let mut manager = PluginManager::new("admin-actor", NullLifecyclePort::default());
+    let manager = PluginManager::new("admin-actor", NullLifecyclePort::default());
 
     let created = execute(
-        &mut manager,
+        &manager,
         AdminCommand::CreateCandidate(CreateCandidateCommand {
             actor: "admin-actor".to_string(),
             candidate_id: "cand-admin".to_string(),
@@ -109,13 +109,13 @@ fn admin_full_lifecycle_and_readonly_query() {
         }),
     ] {
         assert!(matches!(
-            execute(&mut manager, command).expect("transition"),
+            execute(&manager, command).expect("transition"),
             AdminResponse::Ok { .. }
         ));
     }
 
     let published = execute(
-        &mut manager,
+        &manager,
         AdminCommand::Publish(PublishCommand {
             actor: "admin-actor".to_string(),
             candidate_id: "cand-admin".to_string(),
@@ -125,7 +125,7 @@ fn admin_full_lifecycle_and_readonly_query() {
     .expect("publish");
     assert!(matches!(published, AdminResponse::Published { .. }));
 
-    let response = query(&mut manager, AdminQuery::InspectRuntime);
+    let response = query(&manager, AdminQuery::InspectRuntime);
     let AdminResponse::Runtime(snapshot) = response else {
         panic!("expected runtime snapshot");
     };
@@ -142,9 +142,9 @@ fn admin_full_lifecycle_and_readonly_query() {
 fn empty_actor_is_rejected() {
     let plan = compile_plan("admin-plugin-2").expect("compile");
     let hash = plan.hash.clone();
-    let mut manager = PluginManager::new("admin-actor", NullLifecyclePort::default());
+    let manager = PluginManager::new("admin-actor", NullLifecyclePort::default());
     let err = execute(
-        &mut manager,
+        &manager,
         AdminCommand::CreateCandidate(CreateCandidateCommand {
             actor: String::new(),
             candidate_id: "cand-nobody".to_string(),

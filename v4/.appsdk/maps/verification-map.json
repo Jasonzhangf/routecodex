@@ -515,34 +515,6 @@
       ]
     },
     {
-      "gate_id": "v4_parity_gate_plugin_manager",
-      "command": "node scripts/architecture/verify-v4-plugin_manager.mjs",
-      "required_for": [
-        "routecodex-v4-governance:architecture_stable"
-      ]
-    },
-    {
-      "gate_id": "v4_parity_gate_plugin_manager_red",
-      "command": "node scripts/architecture/verify-v4-plugin_manager.mjs --red-self-test",
-      "required_for": [
-        "routecodex-v4-governance:architecture_stable"
-      ]
-    },
-    {
-      "gate_id": "v4_parity_gate_runtime_inspector",
-      "command": "node scripts/architecture/verify-v4-runtime_inspector.mjs",
-      "required_for": [
-        "routecodex-v4-governance:architecture_stable"
-      ]
-    },
-    {
-      "gate_id": "v4_parity_gate_runtime_inspector_red",
-      "command": "node scripts/architecture/verify-v4-runtime_inspector.mjs --red-self-test",
-      "required_for": [
-        "routecodex-v4-governance:architecture_stable"
-      ]
-    },
-    {
       "gate_id": "v4_parity_gate_admin",
       "command": "node scripts/architecture/verify-v4-admin.mjs",
       "required_for": [
