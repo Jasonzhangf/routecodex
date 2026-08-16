@@ -912,7 +912,14 @@ impl NodePlugin for ExecutionPlan {
         // mutated here.
         ctx.control.route_facts = Some(format!("facts:{}:classified", ctx.binding().plan_hash));
         ctx.control.target_selection = Some(format!("opaque:{}:selected", ctx.binding().plan_hash));
-        ctx.control.route_exit = Some("direct_policy_bound".to_string());
+        // Route exit is bound to the typed-facts operator decision (relay or
+        // direct); it is never a hardcoded value and never derived from
+        // provider id / model / payload shape.
+        ctx.control.route_exit = Some(if ctx.control.relay_operator_selected {
+            "relay_policy_bound".to_string()
+        } else {
+            "direct_policy_bound".to_string()
+        });
         Ok(())
     }
 }
@@ -1342,6 +1349,7 @@ pub struct ExecutionReport {
     pub continuation_owner: Option<String>,
     pub execution_mode: Option<String>,
     pub relay_operator_selected: bool,
+    pub route_exit: Option<String>,
     pub continuation_committed: bool,
     pub continuation_restored: bool,
     pub trace: Vec<String>,
@@ -1570,6 +1578,7 @@ impl SkeletonRuntime {
             continuation_owner: ctx.control.continuation_owner.clone(),
             execution_mode: ctx.control.execution_mode.clone(),
             relay_operator_selected: ctx.control.relay_operator_selected,
+            route_exit: ctx.control.route_exit.clone(),
             continuation_committed: ctx.control.continuation_committed,
             continuation_restored: ctx.control.continuation_restored,
             trace: ctx.diagnostic.trace.clone(),

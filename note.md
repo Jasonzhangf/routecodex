@@ -35599,6 +35599,21 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 验证证据：cargo test --workspace 绿（build-link 17 + base-node 12 + skeleton 7）；test-consumer runtime 20/20（含 direct/relay 串续红、仅 session 续接红、不可变区 double-restore 红、payload cycle 双 close 红）、edge 11、config 9、control 15、error 23；verify:v4-foundation 10/10（anchored=25）；verify:v4-foundation-red 3/3（relay-continuation 16/16）；gen-index/verify-index + active-link gate OK；appsdk verify --admission v4 contract_bound。
 - 下一步：DSH review（opencode-go/deepseek-v4-flash）→ PASS 后 commit（显式路径，不裹 V3 dirty）+ MEMORY 沉淀。
 
+# 2026-08-16 V4 relay/continuation DSH r1 FAIL → 修复（P1-3 / P1-4）
+- r1（commit 044767d2d）VERDICT: FAIL，两个 P1：
+  - P1-3：route_exit 硬编码值 + `equivalent` overclaim。修复：route_exit 由
+    typed-facts operator 选择派生（relay_policy_bound / direct_policy_bound），
+    ExecutionReport 暴露并在 l2 正测断言；compat evidence 改为实现描述。
+  - P1-4：gate 的 checkpoint 存在性校验把 resource.owner_node 并入 nodeIds，
+    构成资源自证循环。修复：nodeIds 只来自 node-graph 三链 + skeleton
+    checkpoints + 新增 machine 目录 `registered_nodes`
+    （V4Router07RouteDecisionExit / V4ScopeRegistry / V4PayloadCycleRegistry /
+    V4Debug05EventLedgerRecorded / V4RuntimeObservability，含 family/role）；
+    新增红测“checkpoint 仅存在于 resource owner_node 必红”，现 17/17。
+- 验证：runtime test-consumer 20/20；verify:v4-foundation 10/10；
+  verify:v4-foundation-red 3/3；cargo workspace；appsdk admission contract_bound。
+- 待 DSH r2（base 8a76cbc83 → fix commit，覆盖 044767d2d + 修复）。
+
 # 2026-08-16 V3 SSE 交付闭环：8a76cbc83 + 0.90.4563 全局验证 + DSH r2 PASS
 - SSE terminal 修复提交 `8a76cbc83`（base 486d68f68，19 文件 +630/-364）：Responses→Chat SSE `incomplete` 补 `[DONE]`+finish_reason=length；ClientDisconnect 不再写 provider 冷却（chat+anthropic relay）；Responses outbound 只对 `status=failed` 投影 `response.failed`，`incomplete` 独立投影保留部分输出；codec 对缺 reason/未知 reason fail-fast；删 `record_response_status`/`global_subscription_store()` 死代码；`openai_chat_relay_runtime.rs` 拆 `openai_chat_relay_runtime_sse.rs`（include!，父文件 <1500 行）；mainline map/audit-lock/parity gate/红测同步。
 - build：`RUSTUP_TOOLCHAIN=stable CARGO_NET_OFFLINE=true npm run build` 绿（36/36 arch gates，health 8/8，cargo tests 绿）；install:v3 自增版本 0.90.4563（gen-build-info 机械 bump）。

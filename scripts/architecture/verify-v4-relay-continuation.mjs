@@ -59,8 +59,11 @@ function validate(slice, verification, resourceMap, v3ResourceMap, nodeGraph, sk
       if (checkpoint.node_id) nodeIds.add(checkpoint.node_id);
     }
   }
-  for (const resource of resourceMap.resources ?? []) {
-    if (resource.owner_node) nodeIds.add(resource.owner_node);
+  // Registered side-chain/control-center nodes are the only additional node
+  // catalog. Resource-map owner_node strings are never node evidence (a
+  // resource cannot declare its own owning node, that would be circular).
+  for (const node of nodeGraph.registered_nodes ?? []) {
+    if (node.node_id) nodeIds.add(node.node_id);
   }
 
   const surfaces = slice.surfaces ?? [];
@@ -101,7 +104,7 @@ function validate(slice, verification, resourceMap, v3ResourceMap, nodeGraph, sk
       if (!entry.v4_checkpoint?.node_id || !entry.v4_checkpoint?.semantic) {
         failures.push(`${id}: v4 checkpoint must have node_id + semantic`);
       } else if (!nodeIds.has(entry.v4_checkpoint.node_id)) {
-        failures.push(`${id}: v4 checkpoint node ${entry.v4_checkpoint.node_id} not in node-graph/skeleton/resource map`);
+        failures.push(`${id}: v4 checkpoint node ${entry.v4_checkpoint.node_id} not in node-graph/skeleton/registered nodes`);
       }
       if (!entry.v4_resource) {
         failures.push(`${id}: missing v4_resource`);
@@ -250,6 +253,9 @@ function runSelfTest() {
     }],
     ['unknown checkpoint node', ({ slice: s }) => {
       s.surfaces[0].entries[0].v4_checkpoint.node_id = 'V4GhostNode99';
+    }],
+    ['checkpoint node only in resource owner_node is circular', ({ nodeGraph: g }) => {
+      g.registered_nodes = (g.registered_nodes ?? []).filter((node) => node.node_id !== 'V4ScopeRegistry');
     }],
     ['unknown v3 resource', ({ slice: s }) => {
       s.surfaces[0].entries[0].v3_resource = 'v3.ghost.resource';

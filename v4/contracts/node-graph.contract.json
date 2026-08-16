@@ -363,6 +363,14 @@
     "selection_facts": ["entry_protocol", "provider_wire_protocol", "continuation_owner", "execution_mode"],
     "forbidden_selection_facts": ["provider_id", "model_prefix", "payload_shape_guess"]
   },
+  "registered_nodes": [
+    {"node_id": "V4Router07RouteDecisionExit", "family": "RequestChainNode", "role_id": "request_execution", "scope": "route decision exit produced at request execution stage"},
+    {"node_id": "V4ScopeRegistry", "family": "ControlCenterNode", "role_id": "control_center", "scope": "continuation scope bind/restore/release control center"},
+    {"node_id": "V4PayloadCycleRegistry", "family": "ControlCenterNode", "role_id": "control_center", "scope": "original payload cycle lifecycle control center"},
+    {"node_id": "V4Debug05EventLedgerRecorded", "family": "DiagnosticChainNode", "role_id": "diagnostic_ledger", "scope": "immutable event ledger record"},
+    {"node_id": "V4RuntimeObservability", "family": "DiagnosticChainNode", "role_id": "diagnostic_observability", "scope": "runtime observability projection"}
+  ],
+  "registered_nodes_rule": "registered_nodes is the machine node catalog for side-chain/control-center/diagnostic node references; these nodes are not hub request/response/config chain positions and do not carry payload semantics",
   "verification_rules": [
     "all edge from/to must exist in declared nodes",
     "data edges must be adjacent in chain_version",

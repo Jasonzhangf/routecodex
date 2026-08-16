@@ -79,10 +79,10 @@ surfaces:
       - v3_stage: request.relay_route_exit
         v3_resource: v3.responses_direct.policy
         v4_container: {family: RequestChainNode, role: request_execution}
-        v4_checkpoint: {node_id: V4Router07RouteDecisionExit, semantic: direct_policy_bound}
+        v4_checkpoint: {node_id: V4Router07RouteDecisionExit, semantic: route_exit_bound}
         v4_resource: v4.control.route_exit
         verification_gates: [v4_parity_gate_plane_isolation]
-        evidence: "v4-resource-operation-map.yml v4.control.route_exit + node-graph.contract.json relay_and_direct_share_chain"
+        evidence: "implemented: routecodex-v4-runtime ExecutionPlan route_exit bound from typed-facts operator selection (relay/direct), runtime test-consumer"
         diff_status: equivalent
       - v3_stage: request.provider_semantic
         v3_resource: v3.request.provider_semantic

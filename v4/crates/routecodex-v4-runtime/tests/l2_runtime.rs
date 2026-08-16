@@ -106,6 +106,7 @@ fn positive_request_chain_produces_wire_and_stable_binding() {
     assert_eq!(report.continuation_owner.as_deref(), Some("relay"));
     assert_eq!(report.execution_mode.as_deref(), Some("relay"));
     assert!(report.relay_operator_selected);
+    assert_eq!(report.route_exit.as_deref(), Some("relay_policy_bound"));
 }
 
 #[test]
@@ -117,6 +118,7 @@ fn responses_entry_classifies_direct_owner() {
     assert_eq!(report.continuation_owner.as_deref(), Some("direct"));
     assert_eq!(report.execution_mode.as_deref(), Some("direct"));
     assert!(!report.relay_operator_selected);
+    assert_eq!(report.route_exit.as_deref(), Some("direct_policy_bound"));
     let scope_value = report.continuation_scope.as_deref().unwrap();
     assert!(scope_value.starts_with("scope:responses:direct:port-0:session-:conversation-"));
 }
