@@ -13,6 +13,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     stopless_control: Option<V3ResponsesRelayStoplessControlExecution<'_>>,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3ResponsesRelayRetryPolicy,
+    allow_exhaustion_rescue_probe: bool,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
@@ -203,7 +204,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         } else if let Some(selected) = initial_selected_target.take() {
             selected
         } else {
-            match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
+            let target_resolution_input = V3RelayProviderTargetResolutionInput {
                 manifest,
                 server_id: &input.server_id,
                 failure_session_scope: &input.failure_session_scope,
@@ -215,7 +216,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 now_ms: v3_relay_provider_policy_now_epoch_ms()
                     .map_err(V3ResponsesRelayRuntimeError::Target)?,
                 deterministic_sample,
-            }) {
+            };
+            let target_resolution = if allow_exhaustion_rescue_probe {
+                resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await
+            } else {
+                resolve_v3_relay_target_outcome(target_resolution_input)
+            };
+            match target_resolution {
                 V3RelayProviderTargetResolution::Selected(selected) => selected,
                 V3RelayProviderTargetResolution::Failed(source)
                     if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
@@ -854,6 +861,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             &web_search_state,
                             transport,
                             &input.request_id,
+                            allow_exhaustion_rescue_probe,
                         )
                         .await?
                     };
@@ -1183,6 +1191,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             &web_search_state,
                             transport,
                             &input.request_id,
+                            allow_exhaustion_rescue_probe,
                         )
                         .await?
                     };

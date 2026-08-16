@@ -13,8 +13,9 @@
 use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    resolve_v3_relay_target_outcome, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
+    resolve_v3_relay_target_outcome, resolve_v3_relay_target_outcome_with_rescue,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    V3ProviderFailureRuntimeHealth,
     V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
     V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolution,
     V3RelayProviderTargetResolutionInput,
@@ -313,6 +314,7 @@ pub async fn execute_v3_relay_runtime_core<'store, C, T>(
     retry_policy: V3RelayProviderFailureRetryPolicy,
     continuation_lookup: V3HubContinuationLookup<'store>,
     provider_header_overrides: Vec<V3ProviderRequestHeader>,
+    allow_exhaustion_rescue_probe: bool,
 ) -> Result<C::Output, V3RelayCoreError>
 where
     C: V3RelayProtocolCodec,
@@ -379,19 +381,25 @@ where
         let selected = if let Some(selected) = retry_selected.take() {
             selected
         } else {
-            match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
-                manifest,
-                server_id,
-                failure_session_scope: &failure_session_scope,
-                entry_kind: C::ENTRY_KIND,
-                endpoint_path,
-                body: routing_payload_ref,
-                request_local_excluded_candidates: &failed_candidates,
-                provider_health: &provider_health,
-                now_ms: v3_relay_provider_policy_now_epoch_ms()
-                    .map_err(V3RelayCoreError::Target)?,
-                deterministic_sample,
-            }) {
+            let target_resolution_input = V3RelayProviderTargetResolutionInput {
+                    manifest,
+                    server_id,
+                    failure_session_scope: &failure_session_scope,
+                    entry_kind: C::ENTRY_KIND,
+                    endpoint_path,
+                    body: routing_payload_ref,
+                    request_local_excluded_candidates: &failed_candidates,
+                    provider_health: &provider_health,
+                    now_ms: v3_relay_provider_policy_now_epoch_ms()
+                        .map_err(V3RelayCoreError::Target)?,
+                    deterministic_sample,
+                };
+            let target_resolution = if allow_exhaustion_rescue_probe {
+                resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await
+            } else {
+                resolve_v3_relay_target_outcome(target_resolution_input)
+            };
+            match target_resolution {
                 V3RelayProviderTargetResolution::Selected(selected) => selected,
                 V3RelayProviderTargetResolution::Failed(source)
                     if source.source_kind == V3ErrorSourceKind::ModelNotFound =>

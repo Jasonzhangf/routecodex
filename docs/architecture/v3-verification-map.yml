@@ -3675,3 +3675,35 @@ features:
     live_cutover: required
     global_install_restart: required
     forbidden_claim: Do not claim hourly probe or provider-global recovery from state-only tests; live runtime evidence is required.
+- feature_id: v3.provider_cooldown_rescue_probe
+  status: source_active_live_verification_required
+  change_risk: critical
+  owner_kind: rust_v3_provider_health_lifecycle
+  owner_modules:
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_failure_runtime_policy::tests:: --lib -- --nocapture
+  - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-runtime
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-architecture-docs
+  - git diff --check
+  positive_contracts:
+  - three ordinary consecutive failures enter cooldown; one or two do not
+  - editable HTTP 401 and 403 policies enter auth-key cooldown on the second consecutive failure
+  - complete candidate exhaustion probes every cooldown provider once and reruns selection after any successful probe
+  - configured default priority remains OpenCode Go keys, cc-sol, MiniMax-M3, Fable, then GLM
+  negative_contracts:
+  - provider success without a successful probe cannot revive a cooldown provider
+  - concurrent exhaustion cannot emit more than one rescue probe per provider cooldown generation
+  - Responses Relay, Anthropic Relay, generic Relay, web-search hop, and Direct dry-run cannot send a provider rescue probe
+  - a failed or missing probe target cannot clear cooldown state
+  completion_boundary:
+    source_controlled: true
+    live_cutover: required
+    global_install_restart: required
+    forbidden_claim: Do not claim the cooldown incident closed until the installed aggregate has been restarted once and port 10000 has passed live routing and recovery evidence.

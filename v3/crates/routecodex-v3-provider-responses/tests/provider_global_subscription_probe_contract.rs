@@ -8,9 +8,7 @@ fn scope(session_id: &str) -> V3ProviderFailureSessionScope {
     V3ProviderFailureSessionScope::new("server-a", "group-a", session_id).unwrap()
 }
 
-fn invalid_subscription_fingerprint(
-    provider_code: &str,
-) -> V3ProviderErrorFingerprint {
+fn invalid_subscription_fingerprint(provider_code: &str) -> V3ProviderErrorFingerprint {
     V3ProviderErrorFingerprint::new(
         "subscription_invalid_without_token",
         provider_code,
@@ -51,13 +49,7 @@ fn success_does_not_revive_provider_cooldown_until_probe_passes() {
 
     assert!(
         !store
-            .availability_for_session(
-                &session_a,
-                "provider-a",
-                Some("key-a"),
-                Some("model-a"),
-                13,
-            )
+            .availability_for_session(&session_a, "provider-a", Some("key-a"), Some("model-a"), 13,)
             .available,
         "session A is cooled after three failures"
     );
@@ -73,53 +65,43 @@ fn success_does_not_revive_provider_cooldown_until_probe_passes() {
             14,
         )
         .unwrap();
-    assert!(!store
-        .availability_for_session(
-            &session_a,
-            "provider-a",
-            Some("key-a"),
-            Some("model-a"),
-            15,
-        )
-        .available,
-        "provider-level cooldown must not be cleared by a sibling session success");
-    assert!(!store
-        .availability_for_session(
-            &session_b,
-            "provider-a",
-            Some("key-a"),
-            Some("model-a"),
-            15,
-        )
-        .available,
-        "provider-level cooldown suppresses every session including the succeeding one");
+    assert!(
+        !store
+            .availability_for_session(&session_a, "provider-a", Some("key-a"), Some("model-a"), 15,)
+            .available,
+        "provider-level cooldown must not be cleared by a sibling session success"
+    );
+    assert!(
+        !store
+            .availability_for_session(&session_b, "provider-a", Some("key-a"), Some("model-a"), 15,)
+            .available,
+        "provider-level cooldown suppresses every session including the succeeding one"
+    );
 
     // 首次 probe 在冷却到期立即执行；失败后才按 probe interval 推迟下一次。
     assert!(
         store
             .provider_cooldown_probe_keys_due(13 + 15 * 60_000 + 1)
             .unwrap()
-            .contains(&("provider-a".to_string(), Some("key-a".to_string()), Some("model-a".to_string()))),
+            .contains(&(
+                "provider-a".to_string(),
+                Some("key-a".to_string()),
+                Some("model-a".to_string())
+            )),
         "cooled provider must appear in probe-due keys after cooldown expiry"
     );
-    assert!(
-        store
-            .try_acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
-            .unwrap()
-    );
+    assert!(store
+        .try_acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+        .unwrap());
     store
         .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("model-a"))
         .unwrap();
-    assert!(store
-        .availability_for_session(
-            &session_a,
-            "provider-a",
-            Some("key-a"),
-            Some("model-a"),
-            20,
-        )
-        .available,
-        "probe success must revive provider for all sessions");
+    assert!(
+        store
+            .availability_for_session(&session_a, "provider-a", Some("key-a"), Some("model-a"), 20,)
+            .available,
+        "probe success must revive provider for all sessions"
+    );
 }
 
 #[test]
@@ -248,7 +230,12 @@ fn successful_probe_clears_provider_failures_before_next_session_window() {
             .unwrap();
     }
     let permit = store
-        .try_acquire_probe("provider-a", Some("key-a"), Some("model-a"), 3 + policy.cooldown_ms)
+        .try_acquire_probe(
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            3 + policy.cooldown_ms,
+        )
         .unwrap()
         .unwrap();
     store.complete_probe_success(permit).unwrap();
@@ -381,7 +368,10 @@ fn different_fingerprints_do_not_combine_and_probe_failure_reschedules_after_int
                 &policy,
             )
             .unwrap();
-        assert_eq!(decision, V3ProviderGlobalSubscriptionDecision::SessionFailure { count: 1 });
+        assert_eq!(
+            decision,
+            V3ProviderGlobalSubscriptionDecision::SessionFailure { count: 1 }
+        );
     }
 
     let blocked = store
@@ -395,7 +385,10 @@ fn different_fingerprints_do_not_combine_and_probe_failure_reschedules_after_int
             &policy,
         )
         .unwrap();
-    assert_eq!(blocked, V3ProviderGlobalSubscriptionDecision::SessionFailure { count: 2 });
+    assert_eq!(
+        blocked,
+        V3ProviderGlobalSubscriptionDecision::SessionFailure { count: 2 }
+    );
 
     let blocked = store
         .record_invalid_subscription_response(
@@ -414,7 +407,12 @@ fn different_fingerprints_do_not_combine_and_probe_failure_reschedules_after_int
     ));
 
     let permit = store
-        .try_acquire_probe("provider-a", Some("key-a"), Some("model-a"), 5 + policy.cooldown_ms)
+        .try_acquire_probe(
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            5 + policy.cooldown_ms,
+        )
         .unwrap()
         .unwrap();
     store.complete_probe_failure(permit).unwrap();
@@ -442,32 +440,32 @@ fn different_fingerprints_do_not_combine_and_probe_failure_reschedules_after_int
         "failed probe must become due again after the probe interval"
     );
     store.reset_after_restart().unwrap();
-    assert!(
-        store
-            .availability("provider-a", Some("key-a"), Some("model-a"), u64::MAX)
-            .unwrap()
-            .blocked_until_ms
-            .is_none()
-    );
+    assert!(store
+        .availability("provider-a", Some("key-a"), Some("model-a"), u64::MAX)
+        .unwrap()
+        .blocked_until_ms
+        .is_none());
 }
 
 #[test]
-fn stream_failure_cools_provider_immediately_and_probe_failure_keeps_excluded() {
+fn stream_failures_follow_three_error_threshold_and_probe_failure_keeps_excluded() {
     let store = V3ProviderHealthStore::default();
     let session_a = scope("session-a");
 
-    // post-commit SSE 流失败直接写 provider 级冷却（不等 session 计数）。
-    store
-        .record_provider_stream_failure_in_provider_scope(
+    // post-commit SSE 流失败只算一次普通 provider error，不能绕过三错阈值。
+    let first = store
+        .record_provider_failure_in_session(
+            &session_a,
             "provider-a",
             Some("key-a"),
             Some("model-a"),
-            "provider_response_sse_event_invalid",
+            Some("provider_response_sse_event_invalid"),
             100,
         )
         .unwrap();
+    assert_eq!(first.failure_count, 1);
     assert!(
-        !store
+        store
             .availability_for_session(
                 &session_a,
                 "provider-a",
@@ -476,8 +474,43 @@ fn stream_failure_cools_provider_immediately_and_probe_failure_keeps_excluded() 
                 101,
             )
             .available,
-        "single post-commit stream failure must cool provider immediately"
+        "single post-commit stream failure must not cool provider"
     );
+    let second = store
+        .record_provider_failure_in_session(
+            &session_a,
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            Some("provider_response_sse_event_invalid"),
+            101,
+        )
+        .unwrap();
+    assert_eq!(second.failure_count, 2);
+    assert!(
+        store
+            .availability_for_session(
+                &session_a,
+                "provider-a",
+                Some("key-a"),
+                Some("model-a"),
+                102,
+            )
+            .available,
+        "two ordinary stream failures must not cool provider"
+    );
+    let third = store
+        .record_provider_failure_in_session(
+            &session_a,
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            Some("provider_response_sse_event_invalid"),
+            102,
+        )
+        .unwrap();
+    assert_eq!(third.failure_count, 3);
+    assert_eq!(third.state, "cooldown");
 
     // 冷却到期后仍不可用，恢复唯一路径是 probe 通过。
     assert!(
@@ -487,14 +520,14 @@ fn stream_failure_cools_provider_immediately_and_probe_failure_keeps_excluded() 
                 "provider-a",
                 Some("key-a"),
                 Some("model-a"),
-                100 + 900_000 + 1,
+                102 + 900_000 + 1,
             )
             .available,
         "expired cooldown must stay excluded until probe passes"
     );
     assert_eq!(
         store
-            .provider_cooldown_probe_keys_due(100 + 900_000 + 1)
+            .provider_cooldown_probe_keys_due(102 + 900_000 + 1)
             .unwrap()
             .len(),
         1,
@@ -503,25 +536,27 @@ fn stream_failure_cools_provider_immediately_and_probe_failure_keeps_excluded() 
 
     // 首次 probe → 失败 → 保持冷却并推后下一次探针。
     let due = store
-        .provider_cooldown_probe_keys_due(100 + 900_000 + 1)
+        .provider_cooldown_probe_keys_due(102 + 900_000 + 1)
         .unwrap();
-    assert_eq!(due.len(), 1, "cooled provider must be probe-due after interval");
-    assert!(
-        store
-            .try_acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
-            .unwrap()
+    assert_eq!(
+        due.len(),
+        1,
+        "cooled provider must be probe-due after interval"
     );
+    assert!(store
+        .try_acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+        .unwrap());
     store
         .complete_provider_cooldown_probe_failure(
             "provider-a",
             Some("key-a"),
             Some("model-a"),
-            100 + 900_000 + 1,
+            102 + 900_000 + 1,
         )
         .unwrap();
     assert!(
         store
-            .provider_cooldown_probe_keys_due(100 + 900_000 + 1)
+            .provider_cooldown_probe_keys_due(102 + 900_000 + 1)
             .unwrap()
             .is_empty(),
         "failed probe must push next probe forward"
@@ -533,34 +568,81 @@ fn stream_failure_cools_provider_immediately_and_probe_failure_keeps_excluded() 
                 "provider-a",
                 Some("key-a"),
                 Some("model-a"),
-                100 + 900_000 + 15 * 60_000 + 2,
+                102 + 900_000 + 15 * 60_000 + 2,
             )
             .available,
         "provider must stay excluded after failed probe"
     );
 
     // 下一次 probe 通过 → 恢复。
-    assert!(
-        store
-            .provider_cooldown_probe_keys_due(100 + 900_000 + 15 * 60_000 + 1)
-            .unwrap()
-            .contains(&("provider-a".to_string(), Some("key-a".to_string()), Some("model-a".to_string())))
-    );
-    assert!(
-        store
-            .try_acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
-            .unwrap()
-    );
+    assert!(store
+        .provider_cooldown_probe_keys_due(102 + 900_000 + 15 * 60_000 + 1)
+        .unwrap()
+        .contains(&(
+            "provider-a".to_string(),
+            Some("key-a".to_string()),
+            Some("model-a".to_string())
+        )));
+    assert!(store
+        .try_acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+        .unwrap());
     store
         .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("model-a"))
         .unwrap();
+    assert!(
+        store
+            .availability_for_session(
+                &session_a,
+                "provider-a",
+                Some("key-a"),
+                Some("model-a"),
+                102 + 900_000 + 15 * 60_000 + 2,
+            )
+            .available
+    );
+}
+
+#[tokio::test]
+async fn exhaustion_rescue_probe_is_single_flight_once_per_cooldown_generation() {
+    let store = V3ProviderHealthStore::default();
+    let session_a = scope("rescue-session-a");
+    for now_ms in 100..103 {
+        store
+            .record_provider_failure_in_session(
+                &session_a,
+                "provider-a",
+                Some("key-a"),
+                Some("model-a"),
+                Some("controlled failure"),
+                now_ms,
+            )
+            .unwrap();
+    }
     assert!(store
-        .availability_for_session(
-            &session_a,
-            "provider-a",
-            Some("key-a"),
-            Some("model-a"),
-            100 + 900_000 + 15 * 60_000 + 2,
-        )
-        .available);
+        .try_acquire_provider_cooldown_rescue_probe("provider-a", Some("key-a"), Some("model-a"),)
+        .unwrap());
+    assert!(!store
+        .try_acquire_provider_cooldown_rescue_probe("provider-a", Some("key-a"), Some("model-a"),)
+        .unwrap());
+
+    let waiter = {
+        let store = store.clone();
+        tokio::spawn(async move {
+            store
+                .wait_for_provider_cooldown_probe_completion(
+                    "provider-a",
+                    Some("key-a"),
+                    Some("model-a"),
+                )
+                .await
+                .unwrap();
+        })
+    };
+    store
+        .complete_provider_cooldown_probe_failure("provider-a", Some("key-a"), Some("model-a"), 103)
+        .unwrap();
+    waiter.await.unwrap();
+    assert!(!store
+        .try_acquire_provider_cooldown_rescue_probe("provider-a", Some("key-a"), Some("model-a"),)
+        .unwrap());
 }

@@ -38,6 +38,13 @@ const copied = [
   "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
   "package.json",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs",
+  "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
+  "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs",
+  "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs",
+  "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
+  "v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs",
+  "v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs",
+  "v3/crates/routecodex-v3-server/src/executors.rs",
 ];
 
 const cases = [
@@ -108,7 +115,7 @@ const cases = [
     path: "docs/architecture/v3-resource-operation-map.yml",
     mutate: (source) =>
       source.replace(
-        "allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_cross_session_revive]",
+        "allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_provider_cooldown_probe, V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success, V3ProviderHealthStore::complete_provider_cooldown_probe_failure]",
         "allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record, V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session]",
       ),
     diagnostic: /Resource map provider health writers must name only session-scoped|Resource map must not register Runtime wrappers/u,
@@ -164,11 +171,14 @@ const cases = [
     diagnostic: /Provider Health must key failure-derived state/u,
   },
   {
-    name: "Health drops atomic revive owner",
+    name: "Health drops single-flight rescue owner",
     path: copied[1],
     mutate: (source) =>
-      source.replaceAll("try_acquire_cross_session_revive", "revive_without_atomic_owner"),
-    diagnostic: /Provider Health must own atomic cross-session revive admission/u,
+      source.replaceAll(
+        "try_acquire_provider_cooldown_rescue_probe",
+        "rescue_without_atomic_owner",
+      ),
+    diagnostic: /Provider Health must own single-flight cooldown rescue admission/u,
   },
   {
     name: "ActionGate key drops session",
@@ -285,14 +295,54 @@ const cases = [
     diagnostic: /Direct SSE post-commit outcome must retain/u,
   },
   {
-    name: "Direct failure policy drops atomic revive owner",
-    path: copied[6],
+    name: "Cooldown rescue drops successful provider probe requirement",
+    path: "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
     mutate: (source) =>
       source.replace(
-        "try_acquire_cross_session_revive",
-        "revive_without_atomic_health_owner",
+        "probe_v3_provider_global_target(target).await",
+        "Ok(())",
       ),
-    diagnostic: /Direct provider failure policy must consume/u,
+    diagnostic: /Runtime rescue owner must require a successful provider probe/u,
+  },
+  {
+    name: "Web-search dry-run enables provider rescue probe",
+    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs",
+    mutate: (source) =>
+      source.replace(
+        "if allow_exhaustion_rescue_probe {",
+        "if true {",
+      ),
+    diagnostic: /Web-search hop must preserve the dry-run prohibition/u,
+  },
+  {
+    name: "Shared rescue owner ignores dry-run gate",
+    path: "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
+    mutate: (source) =>
+      source.replace(
+        "if !allow_exhaustion_rescue_probe {",
+        "if false {",
+      ),
+    diagnostic: /Shared rescue owner must terminate dry-run exhaustion/u,
+  },
+  {
+    name: "Direct dry-run enables provider rescue probe",
+    path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs",
+    mutate: (source) =>
+      source.replace(
+        ".with_exhaustion_rescue_probe_disabled();",
+        ";",
+      ),
+    diagnostic: /Direct provider-request dry-run must disable rescue probes/u,
+  },
+  {
+    name: "Live Chat Direct disables provider rescue probe",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source.replace(
+        "            now_epoch_ms,\n            true,\n            Some(&provider_failure_event_sink),",
+        "            now_epoch_ms,\n            false,\n            Some(&provider_failure_event_sink),",
+      ),
+    diagnostic: /Live Chat Direct must explicitly enable exhaustion rescue probes/u,
   },
 ];
 

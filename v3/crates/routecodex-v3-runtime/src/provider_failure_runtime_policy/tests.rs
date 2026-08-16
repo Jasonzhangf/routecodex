@@ -92,6 +92,133 @@ targets = [
     .expect("global-pool-alive manifest")
 }
 
+fn account_threshold_manifest() -> V3Config05ManifestPublished {
+    let source = r#"
+version = 3
+
+[[error.provider_error_action_policy]]
+policy_id = "account_http_401_two_errors"
+[error.provider_error_action_policy.match]
+http_status = 401
+[[error.provider_error_action_policy.path]]
+step = "wait_retry"
+retry_mode = "reselect_before_client_projection"
+max_attempts = 2
+backoff_ms = 1000
+[[error.provider_error_action_policy.path]]
+step = "cooldown"
+scope = "auth_key"
+duration_ms = 900000
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 502
+reason_code = "provider_account_http_401"
+message_mode = "code_only"
+
+[[error.provider_error_action_policy]]
+policy_id = "account_http_403_two_errors"
+[error.provider_error_action_policy.match]
+http_status = 403
+[[error.provider_error_action_policy.path]]
+step = "wait_retry"
+retry_mode = "reselect_before_client_projection"
+max_attempts = 2
+backoff_ms = 1000
+[[error.provider_error_action_policy.path]]
+step = "cooldown"
+scope = "auth_key"
+duration_ms = 900000
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 502
+reason_code = "provider_account_http_403"
+message_mode = "code_only"
+
+[servers.account_threshold]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "account_threshold"
+endpoints = ["responses"]
+[providers.primary]
+type = "responses"
+base_url = "http://primary.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "PRIMARY_KEY" }] }
+[providers.primary.models.gpt-test]
+wire_name = "gpt-test"
+capabilities = ["text"]
+[route_groups.account_threshold.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", key = "key1", priority = 1 }]
+"#;
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(source).expect("account threshold authoring"),
+    )
+    .expect("account threshold manifest")
+}
+
+#[test]
+fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
+    let manifest = account_threshold_manifest();
+    for status in [401, 403] {
+        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+        let session = test_provider_failure_scope(
+            "account_threshold",
+            "account_threshold",
+            &format!("account-threshold-{status}"),
+        )
+        .unwrap();
+        for index in 0..2 {
+            let record = health
+                .record_provider_failure_record_with_policy(
+                    &manifest,
+                    &session,
+                    "primary",
+                    Some("responses"),
+                    Some("key1"),
+                    Some("gpt-test"),
+                    Some("account failure"),
+                    status,
+                    Some("provider_http_error"),
+                    "account failure",
+                    100 + index,
+                )
+                .unwrap();
+            assert_eq!(record.failure_count, (index + 1) as u32);
+            assert_eq!(
+                record.state,
+                if index == 0 { "healthy" } else { "cooldown" }
+            );
+        }
+    }
+
+    let other_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let session = test_provider_failure_scope(
+        "account_threshold",
+        "account_threshold",
+        "ordinary-threshold-session",
+    )
+    .unwrap();
+    for index in 0..3 {
+        let record = other_health
+            .record_provider_failure_record_with_policy(
+                &manifest,
+                &session,
+                "primary",
+                Some("responses"),
+                Some("key1"),
+                Some("gpt-test"),
+                Some("ordinary failure"),
+                500,
+                Some("provider_http_error"),
+                "ordinary failure",
+                200 + index,
+            )
+            .unwrap();
+        assert_eq!(record.state, if index < 2 { "healthy" } else { "cooldown" });
+    }
+}
+
 fn resolve_target(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
@@ -134,7 +261,7 @@ fn resolve_target_for_scope(
 }
 
 #[test]
-fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_alive() {
+fn global_default_floor_cannot_bypass_provider_cooldown_probe_pending() {
     let scope = "global_pool_alive";
     let manifest = global_pool_alive_manifest(scope);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -164,11 +291,16 @@ fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_al
         &session,
         now + 10,
     );
-    let V3RelayProviderTargetResolution::Selected(selected) = resolution else {
-        panic!("globally alive route pool must remain selectable");
+    let V3RelayProviderTargetResolution::Exhausted {
+        attempted_candidates,
+    } = resolution
+    else {
+        panic!("provider cooldown probe state must block every availability projection");
     };
-    assert_eq!(selected.candidate.provider_id, "first");
-    assert!(!selected.default_floor_protected);
+    assert_eq!(attempted_candidates.len(), 2);
+    assert!(attempted_candidates
+        .iter()
+        .all(|candidate| candidate.contains("provider_cooldown_probe_pending")));
 }
 
 fn assert_resolution_failure(

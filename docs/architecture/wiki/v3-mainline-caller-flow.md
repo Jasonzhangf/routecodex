@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 58 functional paths, 376 caller edges.
+Generated view: 59 functional paths, 385 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -49,13 +49,13 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_llmswitch_core
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime__hub_v1 -->|5 edges / 5 paths| module_v3_provider_responses
-  module_v3_runtime__hub_v1 -->|28 edges / 4 paths| module_v3_runtime
+  module_v3_runtime__hub_v1 -->|32 edges / 5 paths| module_v3_runtime
   module_v3_runtime__hub_v1 -->|127 edges / 20 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|2 edges / 2 paths| module_routecodex_v3_route_classifier
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|4 edges / 2 paths| module_v3_error
-  module_v3_runtime -->|9 edges / 5 paths| module_v3_provider_responses
-  module_v3_runtime -->|49 edges / 10 paths| module_v3_runtime
+  module_v3_runtime -->|10 edges / 6 paths| module_v3_provider_responses
+  module_v3_runtime -->|53 edges / 11 paths| module_v3_runtime
   module_v3_runtime -->|42 edges / 10 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|4 edges / 2 paths| module_v3_target
   module_v3_runtime -->|3 edges / 1 paths| module_v3_virtual_router
@@ -87,13 +87,13 @@ flowchart TD
 | v3-runtime::hub_v1 | llmswitch-core | 1 | `v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | routecodex-v3-sse | 1 | `v3.sse.protocol_codec_projection_boundary` |
 | v3-runtime::hub_v1 | v3-provider-responses | 5 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
-| v3-runtime::hub_v1 | v3-runtime | 28 | `v3.provider_action_gate.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
+| v3-runtime::hub_v1 | v3-runtime | 32 | `v3.provider_action_gate.mainline`<br/>`v3.provider_cooldown_rescue_probe`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | v3-runtime::hub_v1 | 127 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.anthropic_relay.local_continuation`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.servertool_hook_skeleton_lifecycle`<br/>`v3.sse.protocol_codec_projection_boundary` |
 | v3-runtime | routecodex-v3-route-classifier | 2 | `v3.route_classifier.facts_classification`<br/>`vr.current_turn_typed_route_facts` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 4 | `v3.debug_error_foundation.mainline`<br/>`v3.hub_relay.response_failure_entry` |
-| v3-runtime | v3-provider-responses | 9 | `v3.debug_error_foundation.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime | v3-runtime | 49 | `v3.console_human_readable_layering.mainline`<br/>`v3.direct_stopless_metadata_center`<br/>`v3.provider_action_gate.mainline`<br/>`v3.responses_continuation.remote_contract_store`<br/>`v3.responses_continuation.remote_locator_codec`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.target.session_global_selection` |
+| v3-runtime | v3-provider-responses | 10 | `v3.debug_error_foundation.mainline`<br/>`v3.provider_cooldown_rescue_probe`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.selected_provider_model_binding` |
+| v3-runtime | v3-runtime | 53 | `v3.console_human_readable_layering.mainline`<br/>`v3.direct_stopless_metadata_center`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_cooldown_rescue_probe`<br/>`v3.responses_continuation.remote_contract_store`<br/>`v3.responses_continuation.remote_locator_codec`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.target.session_global_selection` |
 | v3-runtime | v3-runtime::hub_v1 | 42 | `v3.direct_stopless_metadata_center`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.runtime_timing_observability.mainline` |
 | v3-runtime | v3-target | 4 | `v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 3 | `v3.responses_direct.required_mainline` |
@@ -2416,3 +2416,52 @@ flowchart TD
 | `v3-provider-global-probe-02` | `V3ServerAggregateLifecycle` → `V3ProviderGlobalProbeExecution` | anchored | spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small> | probe_v3_provider_global_target<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-03` | `V3ProviderGlobalSubscriptionFailureObservation` → `V3ProviderGlobalSubscriptionHealthStore` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-04` | `V3ProviderGlobalSubscriptionFailureObservation` → `V3ProviderGlobalSubscriptionHealthStore` | anchored | V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response<br/><small>routecodex-v3-provider-responses/src/provider_global_health.rs</small> | `v3.provider_global_subscription_probe` |
+
+## v3.provider_cooldown_rescue_probe
+
+Complete candidate exhaustion enters the typed provider-health owner, single-flight probes each cooldown identity once per generation, and reruns selection before Error06 projection.
+
+Owner feature: `v3.provider_cooldown_rescue_probe`
+
+```mermaid
+flowchart TD
+  subgraph c_58_v3_provider_cooldown_rescue_probe_m_v3_provider_responses["v3-provider-responses"]
+    c_58_v3_provider_cooldown_rescue_probe_8["v3-provider-responses<br/>V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
+  end
+  subgraph c_58_v3_provider_cooldown_rescue_probe_m_v3_runtime["v3-runtime"]
+    c_58_v3_provider_cooldown_rescue_probe_1["v3-runtime<br/>resolve_v3_relay_target_outcome_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
+    c_58_v3_provider_cooldown_rescue_probe_5["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
+    c_58_v3_provider_cooldown_rescue_probe_6["v3-runtime<br/>select_v3_expanded_target_with_exhaustion_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
+    c_58_v3_provider_cooldown_rescue_probe_7["v3-runtime<br/>execute_v3_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small>"]
+    c_58_v3_provider_cooldown_rescue_probe_9["v3-runtime<br/>V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
+    c_58_v3_provider_cooldown_rescue_probe_10["v3-runtime<br/>probe_v3_provider_global_target<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_58_v3_provider_cooldown_rescue_probe_11["v3-runtime<br/>select_v3_target_with_session_then_global<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+  end
+  subgraph c_58_v3_provider_cooldown_rescue_probe_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
+    c_58_v3_provider_cooldown_rescue_probe_0["v3-runtime::hub_v1<br/>execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small>"]
+    c_58_v3_provider_cooldown_rescue_probe_2["v3-runtime::hub_v1<br/>execute_v3_anthropic_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small>"]
+    c_58_v3_provider_cooldown_rescue_probe_3["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
+    c_58_v3_provider_cooldown_rescue_probe_4["v3-runtime::hub_v1<br/>execute_local_web_search_hop<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small>"]
+  end
+  c_58_v3_provider_cooldown_rescue_probe_0 -->|v3-provider-cooldown-rescue-entry-relay<br/>V3Target09CandidateSetExpanded → V3Target10CandidateSetExhausted| c_58_v3_provider_cooldown_rescue_probe_1
+  c_58_v3_provider_cooldown_rescue_probe_2 -->|v3-provider-cooldown-rescue-entry-anthropic<br/>V3Target09CandidateSetExpanded → V3Target10CandidateSetExhausted| c_58_v3_provider_cooldown_rescue_probe_1
+  c_58_v3_provider_cooldown_rescue_probe_3 -->|v3-provider-cooldown-rescue-entry-responses<br/>V3Target09CandidateSetExpanded → V3Target10CandidateSetExhausted| c_58_v3_provider_cooldown_rescue_probe_1
+  c_58_v3_provider_cooldown_rescue_probe_4 -->|v3-provider-cooldown-rescue-entry-web-search<br/>V3Target09CandidateSetExpanded → V3Target10CandidateSetExhausted| c_58_v3_provider_cooldown_rescue_probe_1
+  c_58_v3_provider_cooldown_rescue_probe_5 -->|v3-provider-cooldown-rescue-entry-direct<br/>V3Target09CandidateSetExpanded → V3Target10CandidateSetExhausted| c_58_v3_provider_cooldown_rescue_probe_6
+  c_58_v3_provider_cooldown_rescue_probe_7 -->|v3-provider-cooldown-rescue-entry-direct-core<br/>V3Target09CandidateSetExpanded → V3Target10CandidateSetExhausted| c_58_v3_provider_cooldown_rescue_probe_6
+  c_58_v3_provider_cooldown_rescue_probe_6 -->|v3-provider-cooldown-rescue-01<br/>V3Target10CandidateSetExhausted → V3ProviderCooldownRescueProbePermit| c_58_v3_provider_cooldown_rescue_probe_8
+  c_58_v3_provider_cooldown_rescue_probe_9 -->|v3-provider-cooldown-rescue-02<br/>V3ProviderCooldownRescueProbePermit → V3ProviderCooldownRescueProbeExecution| c_58_v3_provider_cooldown_rescue_probe_10
+  c_58_v3_provider_cooldown_rescue_probe_6 -->|v3-provider-cooldown-rescue-03<br/>V3ProviderCooldownRescueProbeExecution → V3Target10ConcreteProviderSelected| c_58_v3_provider_cooldown_rescue_probe_11
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-provider-cooldown-rescue-entry-relay` | `V3Target09CandidateSetExpanded` → `V3Target10CandidateSetExhausted` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | resolve_v3_relay_target_outcome_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_cooldown_rescue_probe` |
+| `v3-provider-cooldown-rescue-entry-anthropic` | `V3Target09CandidateSetExpanded` → `V3Target10CandidateSetExhausted` | anchored | execute_v3_anthropic_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | resolve_v3_relay_target_outcome_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_cooldown_rescue_probe` |
+| `v3-provider-cooldown-rescue-entry-responses` | `V3Target09CandidateSetExpanded` → `V3Target10CandidateSetExhausted` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | resolve_v3_relay_target_outcome_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_cooldown_rescue_probe` |
+| `v3-provider-cooldown-rescue-entry-web-search` | `V3Target09CandidateSetExpanded` → `V3Target10CandidateSetExhausted` | anchored | execute_local_web_search_hop<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | resolve_v3_relay_target_outcome_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_cooldown_rescue_probe` |
+| `v3-provider-cooldown-rescue-entry-direct` | `V3Target09CandidateSetExpanded` → `V3Target10CandidateSetExhausted` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | select_v3_expanded_target_with_exhaustion_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_cooldown_rescue_probe` |
+| `v3-provider-cooldown-rescue-entry-direct-core` | `V3Target09CandidateSetExpanded` → `V3Target10CandidateSetExhausted` | anchored | execute_v3_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small> | select_v3_expanded_target_with_exhaustion_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_cooldown_rescue_probe` |
+| `v3-provider-cooldown-rescue-01` | `V3Target10CandidateSetExhausted` → `V3ProviderCooldownRescueProbePermit` | anchored | select_v3_expanded_target_with_exhaustion_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_cooldown_rescue_probe` |
+| `v3-provider-cooldown-rescue-02` | `V3ProviderCooldownRescueProbePermit` → `V3ProviderCooldownRescueProbeExecution` | anchored | V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | probe_v3_provider_global_target<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_cooldown_rescue_probe` |
+| `v3-provider-cooldown-rescue-03` | `V3ProviderCooldownRescueProbeExecution` → `V3Target10ConcreteProviderSelected` | anchored | select_v3_expanded_target_with_exhaustion_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | select_v3_target_with_session_then_global<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_cooldown_rescue_probe` |

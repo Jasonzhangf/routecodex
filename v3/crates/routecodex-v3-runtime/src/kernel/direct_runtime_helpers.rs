@@ -143,16 +143,6 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             retryable_transient: false,
         });
     }
-    let _revive_admitted = context
-        .provider_health
-        .try_acquire_cross_session_revive(
-            context.failure_session_scope,
-            &selected.candidate.provider_id,
-            Some(&selected.candidate.auth_alias),
-            Some(&selected.candidate.model_id),
-            context.now_epoch_ms,
-        )
-        .map_err(|error| runtime_source("V3ProviderHealthState", error))?;
     if is_v3_retryable_transient_source(&source) {
         return run_v3_direct_transient_failure_policy(context, selected, source, status, state)
             .await;
@@ -408,16 +398,6 @@ async fn run_v3_direct_transient_failure_policy<R: V3ProviderAvailabilityReader>
     status: u16,
     state: &mut V3DirectProviderFailurePolicyState<'_>,
 ) -> Result<V3DirectProviderFailurePolicyResult, V3Error01SourceRaised> {
-    context
-        .provider_health
-        .try_acquire_cross_session_revive(
-            context.failure_session_scope,
-            &selected.candidate.provider_id,
-            Some(&selected.candidate.auth_alias),
-            Some(&selected.candidate.model_id),
-            context.now_epoch_ms,
-        )
-        .map_err(|error| runtime_source("V3ProviderHealthState", error))?;
     let failed_key = candidate_key(&selected.candidate);
     let retries_done = *state.same_candidate_retries.get(&failed_key).unwrap_or(&0);
     let provider_scope = V3ErrorActionScope::ProviderInstance {

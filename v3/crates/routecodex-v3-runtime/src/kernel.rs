@@ -16,8 +16,9 @@ use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     build_v3_transient_failure_record, build_v3_transient_recovery_witness,
-    select_v3_target_with_session_then_global, v3_relay_provider_policy_now_epoch_ms,
-    V3ProviderFailureRuntimeHealth, V3_TRANSIENT_RETRY_BUDGET,
+    select_v3_expanded_target_with_exhaustion_rescue, select_v3_target_with_session_then_global,
+    v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
+    V3TargetSelectionAfterRescue, V3_TRANSIENT_RETRY_BUDGET,
 };
 use crate::remote_continuation::{
     V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,
@@ -120,6 +121,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         initial_protocol_decision,
         initial_plan_trace,
         provider_health_neutral,
+        allow_exhaustion_rescue_probe,
         provider_failure_event_sink,
         route_selection_event_sink,
         observability_accumulator: _,
@@ -416,16 +418,22 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                                 )
                             }
                         };
-                        match select_v3_target_with_session_then_global(
-                            &target,
+                        match select_v3_expanded_target_with_exhaustion_rescue(
+                            manifest,
                             captured_expanded.clone(),
-                            &availability,
+                            &direct_failure_session_scope,
                             &provider_health,
                             &failed_candidates,
                             now_epoch_ms,
-                        ) {
-                            Ok(value) => value,
-                            Err(error) => {
+                            allow_exhaustion_rescue_probe,
+                        )
+                        .await
+                        {
+                            V3TargetSelectionAfterRescue::Selected(value) => value,
+                            V3TargetSelectionAfterRescue::Failed(source) => {
+                                return error_output(source, trace, &hook_registry)
+                            }
+                            V3TargetSelectionAfterRescue::Exhausted(error) => {
                                 return error_output(
                                     build_v3_error_01_source_raised(
                                         V3ErrorSourceKind::TargetPoolExhausted,
@@ -1234,6 +1242,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                                 &state,
                                 transport,
                                 &standardized.protocol_context.request_id,
+                                true,
                             )
                             .await
                             {

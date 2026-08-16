@@ -338,6 +338,7 @@ struct V3ResponsesDirectRuntimeCoreState<'a> {
     now_epoch_ms: u64,
     provider_health: Option<V3ProviderFailureRuntimeHealth>,
     provider_health_neutral: bool,
+    allow_exhaustion_rescue_probe: bool,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_protocol_decision: Option<V3Execution11ProtocolDecision>,
     // Candidate set from the Server-side protocol plan; always set together
@@ -363,6 +364,7 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
             now_epoch_ms: 0,
             provider_health: None,
             provider_health_neutral: false,
+            allow_exhaustion_rescue_probe: true,
             initial_selected_target: None,
             initial_protocol_decision: None,
             initial_expanded: None,
@@ -387,6 +389,7 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
             now_epoch_ms,
             provider_health: None,
             provider_health_neutral: false,
+            allow_exhaustion_rescue_probe: true,
             initial_selected_target: None,
             initial_protocol_decision: None,
             initial_expanded: None,
@@ -415,6 +418,11 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
 
     fn with_provider_health_neutral(mut self) -> Self {
         self.provider_health_neutral = true;
+        self
+    }
+
+    fn with_exhaustion_rescue_probe_disabled(mut self) -> Self {
+        self.allow_exhaustion_rescue_probe = false;
         self
     }
 

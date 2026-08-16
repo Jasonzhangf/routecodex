@@ -188,6 +188,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         retry_policy,
         continuation_lookup,
         Vec::new(),
+        true,
     )
     .await
     .map_err(|error| match error {

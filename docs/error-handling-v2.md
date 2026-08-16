@@ -124,6 +124,15 @@
    - 同 provider 连续第 3 次失败后，非最后 default provider 从当前可选池排除并冷却 15 分钟；成功清零连续错误
    - 若当前 route pool 或 default pool 仍有候选继续切；只有可选池耗尽且最后 default 当前请求 attempt budget 耗尽后才返客户端
 
+### 1.0.3 cooldown 计数、复活与池耗尽自救（2026-08-16）
+
+1. provider health 的默认阈值是连续 3 次错误；HTTP 401/403 等账号错误通过可编辑的 `error.provider_error_action_policy` 设置为连续 2 次，禁止在 provider runtime 写 provider-specific 分支。
+2. 任意 provider 错误（包括已开始响应后的 SSE stream 错误）只进入一次统一 failure record；禁止 stream 路径绕过计数阈值直接写 cooldown。
+3. 普通成功只清连续错误计数，不得清除已经形成的 cooldown。冷却 provider 只有真实 provider probe 返回 2xx 后才能恢复可选；health healthy、超时到期或跨 session admission 都不能代替 probe。
+4. 完整配置候选集第一次选择耗尽后，在进入 `ErrorErr06ClientProjected` 前，对所有 cooldown identity 执行一次连续 cooldown block 级单飞自救 probe；并发请求等待同一 probe，不得重复发 probe。只有 probe 成功清除 cooldown 后才开启下一 generation；probe 收口后重新读取 health projection 并只重跑一次 Target09→Target10 选择。
+5. 自救 probe 失败或 probe target 无法构造时保持 cooldown；某些 probe 失败不能阻止其他 probe 成功后的重新选择。一个 cooldown generation 已完成自救后，后续耗尽请求不得形成 probe 风暴。
+6. Responses Relay、Anthropic Relay、通用 Relay、web-search hop 与 Direct 的 dry-run 均必须在共享 rescue owner 前显式关闭自救 probe，不得发送 provider I/O；所有 probe permit、完成状态与 availability projection 都是 typed health side-channel，禁止进入 provider/client 正常 payload。
+
 ### 1.0.2a 2026-06-20 provider error reroutable-until-default-empty contract
 
 Jason 纠偏后的当前硬骨架：

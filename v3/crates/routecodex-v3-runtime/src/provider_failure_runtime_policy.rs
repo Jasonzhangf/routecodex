@@ -628,25 +628,6 @@ impl V3ProviderFailureRuntimeHealth {
             )?)
     }
 
-    pub(crate) fn try_acquire_cross_session_revive(
-        &self,
-        failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        now_ms: u64,
-    ) -> Result<bool, String> {
-        self.store
-            .try_acquire_cross_session_revive(
-                failure_session_scope,
-                provider_id,
-                auth_alias,
-                model_id,
-                now_ms,
-            )
-            .map_err(|error| error.to_string())
-    }
-
     /// 瞬态失败（SSE 流内/挂起）耗尽 3 次尝试后的 session 级短期绕行：
     /// health-neutral（不触发 15 分钟 cooldown、不累计失败数），但同 session
     /// 后续请求短时绕开该 provider，避免反复命中；超时自动恢复。
@@ -730,18 +711,7 @@ impl V3ProviderFailureRuntimeHealth {
         error_family: &str,
         reason: &str,
     ) -> Result<(), String> {
-        // post-commit SSE 流失败是强故障信号（流已开始却中断/malformed）：
-        // 直接写 provider 级冷却（不等 session 计数达阈值），冷却到期后由
-        // 后台 probe 复活，避免"每请求都试"持续命中故障 provider。
-        self.store
-            .record_provider_stream_failure_in_provider_scope(
-                provider_id,
-                auth_alias,
-                model_id,
-                error_family,
-                v3_relay_provider_policy_now_epoch_ms()?,
-            )
-            .map_err(|error| error.to_string())?;
+        // post-commit SSE 流失败只记一次普通 provider error，不绕过阈值。
         self.record_provider_failure_record(
             failure_session_scope,
             provider_id,
@@ -906,13 +876,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     state: &mut V3RelayProviderFailurePolicyState<'_>,
 ) -> Result<V3RelayProviderFailurePolicyResult, String> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
-    let revive_admitted = context.provider_health.try_acquire_cross_session_revive(
-        &context.failure_session_scope,
-        &selected.candidate.provider_id,
-        Some(&selected.candidate.auth_alias),
-        Some(&selected.candidate.model_id),
-        v3_relay_provider_policy_now_epoch_ms()?,
-    )?;
     // 瞬态失败（SSE 流内/挂起）判定由错误处理中心按「阶段 + 类别」表达：
     // relay 侧在这里按同样的 stage/code 规则消费，直接驱动 health-neutral
     // 同 provider 重试（前 2 次静默，第 3 次失败一次回报再切），与入口脱耦。
@@ -1114,46 +1077,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         }
         V3RelayProviderTargetResolution::Exhausted {
             attempted_candidates: _,
-        } => {
-            if revive_admitted {
-                let recovery = V3Error05RecoveryAdmissionWitness::new(
-                    context.failure_session_scope.clone(),
-                    candidate_key.clone(),
-                    error_type.as_deref().unwrap_or("provider_failure"),
-                    1,
-                )?;
-                let decision = build_v3_relay_provider_error_05_decision(
-                    &selected,
-                    source_stage,
-                    status,
-                    error_type.as_deref(),
-                    &message,
-                    0,
-                    false,
-                    true,
-                    Some(recovery),
-                );
-                state.trace.push("V3CrossSessionReviveRetry");
-                return Ok(V3RelayProviderFailurePolicyResult {
-                    terminal_projection: terminal_projection_for(&decision, matched_policy),
-                    decision,
-                    retry_selected: Some(Box::new(selected.clone())),
-                    event: build_v3_relay_provider_failure_policy_event(
-                        V3RelayProviderFailurePolicyEventInput {
-                            candidate: selected.candidate,
-                            status,
-                            error_type,
-                            message,
-                            health_record,
-                            action: "retry_cross_session_revived_provider",
-                            next_provider_key: Some(candidate_key),
-                            wait_ms: None,
-                        },
-                    ),
-                });
-            }
-            true
-        }
+        } => true,
         V3RelayProviderTargetResolution::Failed(source) => {
             let resolution_message = source.message.clone();
             let decision = V3ErrorHandlingCenter::decide_provider(
@@ -1529,9 +1453,9 @@ pub(crate) fn expand_v3_relay_target_plan_for_selected(
         .map_err(|error| error.to_string())
 }
 
-pub(crate) fn resolve_v3_relay_target_outcome(
-    input: V3RelayProviderTargetResolutionInput<'_>,
-) -> V3RelayProviderTargetResolution {
+fn build_v3_relay_target_candidates(
+    input: &V3RelayProviderTargetResolutionInput<'_>,
+) -> Result<V3Target09CandidateSetExpanded, V3RelayProviderTargetResolution> {
     let facts = crate::build_v3_router_request_facts_for_entry_with_manifest(
         input.body,
         input.entry_kind,
@@ -1547,32 +1471,36 @@ pub(crate) fn resolve_v3_relay_target_outcome(
     ) {
         Ok(classified) => classified,
         Err(error) => {
-            return V3RelayProviderTargetResolution::Failed(target_resolution_source(
-                "V3Router05RequestClassified",
-                "target_resolution_classification_failed",
-                error,
+            return Err(V3RelayProviderTargetResolution::Failed(
+                target_resolution_source(
+                    "V3Router05RequestClassified",
+                    "target_resolution_classification_failed",
+                    error,
+                ),
             ))
         }
     };
     let plan = match router.resolve_route_pool_plan(input.manifest, classified) {
         Ok(plan) => plan,
         Err(error) => {
-            return V3RelayProviderTargetResolution::Failed(
+            return Err(V3RelayProviderTargetResolution::Failed(
                 crate::shared::v3_route_plan_error_source(
                     "V3Router06RoutePoolResolved",
                     "target_resolution_route_plan_failed",
                     error,
                 ),
-            )
+            ))
         }
     };
     let hit = match router.hit_opaque_target_plan_once(plan, input.deterministic_sample) {
         Ok(hit) => hit,
         Err(error) => {
-            return V3RelayProviderTargetResolution::Failed(target_resolution_source(
-                "V3Router07OpaqueTargetHitOnce",
-                "target_resolution_opaque_target_failed",
-                error,
+            return Err(V3RelayProviderTargetResolution::Failed(
+                target_resolution_source(
+                    "V3Router07OpaqueTargetHitOnce",
+                    "target_resolution_opaque_target_failed",
+                    error,
+                ),
             ))
         }
     };
@@ -1582,13 +1510,26 @@ pub(crate) fn resolve_v3_relay_target_outcome(
     {
         Ok(expanded) => expanded,
         Err(error) => {
-            return V3RelayProviderTargetResolution::Failed(target_resolution_source(
-                "V3Target09CandidateSetExpanded",
-                "target_resolution_candidate_expansion_failed",
-                error,
+            return Err(V3RelayProviderTargetResolution::Failed(
+                target_resolution_source(
+                    "V3Target09CandidateSetExpanded",
+                    "target_resolution_candidate_expansion_failed",
+                    error,
+                ),
             ))
         }
     };
+    Ok(expanded)
+}
+
+pub(crate) fn resolve_v3_relay_target_outcome(
+    input: V3RelayProviderTargetResolutionInput<'_>,
+) -> V3RelayProviderTargetResolution {
+    let expanded = match build_v3_relay_target_candidates(&input) {
+        Ok(expanded) => expanded,
+        Err(resolution) => return resolution,
+    };
+    let target = V3TargetInterpreter::default();
     let session_availability = input
         .provider_health
         .session_bound_availability(input.failure_session_scope);
@@ -1606,6 +1547,8 @@ pub(crate) fn resolve_v3_relay_target_outcome(
         },
     }
 }
+
+include!("provider_cooldown_rescue.rs");
 
 fn target_resolution_source(
     stage: &'static str,

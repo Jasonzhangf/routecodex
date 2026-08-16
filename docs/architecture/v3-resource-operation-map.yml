@@ -842,9 +842,28 @@ resources:
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStateMutated
     identity: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
-    allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_cross_session_revive]
-    allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderSessionAvailabilityReader::availability, V3ProviderHealthStore::try_acquire_cross_session_revive]
+    allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_provider_cooldown_probe, V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success, V3ProviderHealthStore::complete_provider_cooldown_probe_failure]
+    allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderSessionAvailabilityReader::availability, V3ProviderHealthStore::wait_for_provider_cooldown_probe_completion]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.provider.cooldown_probe_state
+    resource_kind: side_channel
+    lifecycle: v3.provider_cooldown_rescue_probe
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3ProviderCooldownProbeState
+    identity: [providerId, authAlias]
+    semantic_contract:
+      ordinary_failure_threshold: 3 consecutive failures
+      configurable_account_failure_threshold: provider_error_action_policy max_attempts
+      revival_rule: only a successful provider transport probe may remove cooldown state
+      exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
+      generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block
+      dry_run_rule: dry-run never acquires or sends a rescue probe
+    allowed_writers: [V3ProviderHealthStore::try_acquire_provider_cooldown_probe, V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success, V3ProviderHealthStore::complete_provider_cooldown_probe_failure]
+    allowed_readers: [V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::wait_for_provider_cooldown_probe_completion, V3ProviderHealthStore::availability_for_session]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, V3ProviderReqOutbound06WirePayload, V3ServerRespOutbound05ClientFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored

@@ -1,12 +1,13 @@
 use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    project_v3_client_disconnect, provider_runtime_failure_stage, resolve_v3_relay_target_outcome,
+    project_v3_client_disconnect, provider_runtime_failure_stage,
+    resolve_v3_relay_target_outcome, resolve_v3_relay_target_outcome_with_rescue,
     run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
-    V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolution,
-    V3RelayProviderTargetResolutionInput,
+    v3_relay_provider_target_selection_sample,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
+    V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
+    V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
 };
 use crate::{
     V3LocalContinuationError, V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey,
@@ -279,6 +280,7 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
         V3HubRelayResponseHookProfile::empty(),
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        false,
     )
     .await
     {
@@ -388,6 +390,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_client_headers_provider_hea
         V3HubRelayResponseHookProfile::empty(),
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        true,
     )
     .await
 }
@@ -443,6 +446,7 @@ where
         V3HubRelayResponseHookProfile::new(servertool_names),
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        true,
     )
     .await
 }
@@ -462,6 +466,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     response_hook_profile: V3HubRelayResponseHookProfile,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
+    allow_exhaustion_rescue_probe: bool,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3AnthropicRelayRuntimeError::StaticRegistry(error.to_string()))?;
@@ -585,19 +590,25 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let selected = if let Some(selected) = retry_selected.take() {
             selected
         } else {
-            match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
-                manifest,
-                server_id: &input.server_id,
-                failure_session_scope: &input.failure_session_scope,
-                entry_kind: "anthropic",
-                endpoint_path: "/v1/messages",
-                body: &route_facts_body,
-                request_local_excluded_candidates: &failed_candidates,
-                provider_health: &provider_health,
-                now_ms: v3_relay_provider_policy_now_epoch_ms()
-                    .map_err(V3AnthropicRelayRuntimeError::Target)?,
-                deterministic_sample,
-            }) {
+            let target_resolution_input = V3RelayProviderTargetResolutionInput {
+                    manifest,
+                    server_id: &input.server_id,
+                    failure_session_scope: &input.failure_session_scope,
+                    entry_kind: "anthropic",
+                    endpoint_path: "/v1/messages",
+                    body: &route_facts_body,
+                    request_local_excluded_candidates: &failed_candidates,
+                    provider_health: &provider_health,
+                    now_ms: v3_relay_provider_policy_now_epoch_ms()
+                        .map_err(V3AnthropicRelayRuntimeError::Target)?,
+                    deterministic_sample,
+                };
+            let target_resolution = if allow_exhaustion_rescue_probe {
+                resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await
+            } else {
+                resolve_v3_relay_target_outcome(target_resolution_input)
+            };
+            match target_resolution {
                 V3RelayProviderTargetResolution::Selected(selected) => selected,
                 V3RelayProviderTargetResolution::Failed(source)
                     if source.source_kind == V3ErrorSourceKind::ModelNotFound =>

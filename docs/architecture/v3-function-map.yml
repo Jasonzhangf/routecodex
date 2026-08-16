@@ -349,7 +349,6 @@ features:
   - V3ProviderHealthStore::record_provider_success_in_session
   - V3ProviderHealthStore::availability
   - V3ProviderHealthStore::availability_for_session
-  - V3ProviderHealthStore::try_acquire_cross_session_revive
   - V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response
   - V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
   - V3ProviderGlobalSubscriptionHealthStore::complete_probe_success
@@ -4601,6 +4600,62 @@ features:
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
   - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-architecture-docs
+  runtime_status: source_controlled_live_verification_required
+
+- feature_id: v3.provider_cooldown_rescue_probe
+  status: source_active_live_verification_required
+  change_risk: critical
+  owner_kind: rust_v3_provider_health_lifecycle
+  owner_crates:
+  - routecodex-v3-provider-responses
+  - routecodex-v3-runtime
+  owner_files:
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  resource_bindings:
+  - v3.provider.health_state
+  - v3.provider.cooldown_probe_state
+  - v3.provider.availability_projection
+  - v3.config.published_manifest
+  entry_symbols:
+  - V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe
+  - V3ProviderHealthStore::wait_for_provider_cooldown_probe_completion
+  - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
+  - select_v3_expanded_target_with_exhaustion_rescue
+  - resolve_v3_relay_target_outcome_with_rescue
+  - execute_local_web_search_hop
+  - V3ResponsesDirectRuntimeCoreState::with_exhaustion_rescue_probe_disabled
+  allowed_paths:
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
+  - v3/crates/routecodex-v3-provider-responses/src/probe.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel
+  - v3/crates/routecodex-v3-config/src
+  - docs/architecture
+  forbidden_paths:
+  - src
+  - sharedmodule/llmswitch-core
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_failure_runtime_policy::tests:: --lib -- --nocapture
+  - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-runtime
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-architecture-docs

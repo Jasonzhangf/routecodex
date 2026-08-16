@@ -18,6 +18,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
     transport: &T,
     provider_health: V3ProviderFailureRuntimeHealth,
     now_epoch_ms: u64,
+    allow_exhaustion_rescue_probe: bool,
     provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
 ) -> V3ResponsesDirectRuntimeOutput {
@@ -107,16 +108,26 @@ pub async fn execute_v3_direct_runtime_kernel_core<
     loop {
         let selected = match retry_selected.take() {
             Some(selected) => selected,
-            None => match select_v3_target_with_session_then_global(
-                &target,
+            None => match select_v3_expanded_target_with_exhaustion_rescue(
+                manifest,
                 expanded.clone(),
-                &availability,
+                &direct_failure_session_scope,
                 &provider_health,
                 &failed_candidates,
                 now_epoch_ms,
-            ) {
-                Ok(value) => value,
-                Err(error) => {
+                allow_exhaustion_rescue_probe,
+            )
+            .await
+            {
+                V3TargetSelectionAfterRescue::Selected(value) => value,
+                V3TargetSelectionAfterRescue::Failed(source) => {
+                    return error_output(
+                        source,
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    );
+                }
+                V3TargetSelectionAfterRescue::Exhausted(error) => {
                     // 可观测性：exhausted 时带全部候选明细（provider:alias:model:
                     // 原因），否则 console 只有 "N candidates unavailable" 无法诊断
                     // 哪个候选因何被冷却/排除。
