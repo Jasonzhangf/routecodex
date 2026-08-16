@@ -500,6 +500,14 @@ pub fn discover_v3_secret_file_auth_handles(
     let parsed = parse_v3_secret_file_entries(content)?;
     let prefix = format!("{provider_id}.");
     let has_scoped_entries = parsed.iter().any(|(name, _)| name.starts_with(&prefix));
+    let has_other_scoped_entries = parsed
+        .iter()
+        .any(|(name, _)| name.contains('.') && !name.starts_with(&prefix));
+    if !has_scoped_entries && has_other_scoped_entries {
+        return Err(format!(
+            "secret file has no scoped auth keys for provider {provider_id}"
+        ));
+    }
     let mut handles = Vec::new();
     let mut aliases = BTreeSet::new();
     for (name, _) in parsed {
@@ -657,6 +665,7 @@ mod tests {
         assert!(discover_v3_secret_file_auth_handles("not-an-entry\n", "p").is_err());
         assert!(discover_v3_secret_file_auth_handles("p.key1 = one\np.key1 = two\n", "p").is_err());
         assert!(discover_v3_secret_file_auth_handles("p.key1 = \"\"\n", "p").is_err());
+        assert!(discover_v3_secret_file_auth_handles("other.key1 = one\n", "p").is_err());
     }
 
     fn compile_catalog_scope_manifest() -> V3Config05ManifestPublished {
