@@ -24,6 +24,8 @@ const state = {
   requests: new Map(),
   history: [],
   scroll: 0,
+  historyMode: "follow_latest",
+  newCount: 0,
   paused: false,
   speed: 1,
   filter: "all",
@@ -65,7 +67,8 @@ function createRequest() {
     elapsed: 0,
     started: Date.now(),
     attempts: 1,
-    output: 0,
+    responseStatus: "pending",
+    responseBytes: 0,
     terminalAt: Date.now() + (1_800 + (state.nextRequest % 5) * 700) / state.speed,
   };
   state.requests.set(request.id, request);
@@ -77,9 +80,14 @@ function finishRequest(request) {
   request.elapsed = (Date.now() - request.started) / 1000;
   request.statusCode = failed ? 503 : 200;
   request.finishReason = failed ? "provider_unavailable" : "stop";
-  request.output = failed ? 0 : 180 + (Number(request.id.slice(1)) % 220);
+  request.responseStatus = failed ? "error" : "completed";
+  request.responseBytes = failed ? 0 : 180 + (Number(request.id.slice(1)) % 220);
   state.history.push({ ...request, time: now() });
   if (state.history.length > HISTORY_LIMIT) state.history.shift();
+  if (state.historyMode === "history_browsing" && visible(request)) {
+    state.scroll += 1;
+    state.newCount += 1;
+  }
   state.requests.delete(request.id);
 }
 
@@ -88,10 +96,15 @@ function advanceRequests() {
   for (const request of state.requests.values()) {
     request.elapsed = (Date.now() - request.started) / 1000;
     if (request.status === "routing" && request.elapsed > 0.5) request.status = "streaming";
+    if (request.status === "streaming") {
+      request.responseStatus = "streaming";
+      request.responseBytes = Math.floor(request.elapsed * 96);
+    }
     if (request.status === "streaming" && request.elapsed > 1.4 && Number(request.id.slice(1)) % 5 === 0) {
       request.status = "switching";
       request.attempts = 2;
       request.provider = PROVIDERS[(Number(request.id.slice(1)) + 1) % PROVIDERS.length];
+      request.responseStatus = "retrying";
     }
     if (Date.now() >= request.terminalAt) finishRequest(request);
   }
@@ -119,7 +132,7 @@ function historyLines(width) {
   return items.slice(start, end).map((item) => {
     const status = `${colorForStatus(item.status)}${item.status}${RESET}`;
     const error = item.status === "failed" ? ` error=${item.finishReason}` : "";
-    return line(`${DIM}${item.time}${RESET} ${item.port} ${item.id} ${status} ${item.route} ${item.provider} ${item.statusCode} ${item.elapsed.toFixed(1)}s attempts=${item.attempts}${error}`, width);
+    return line(`${DIM}${item.time}${RESET} ${item.port} ${item.id} ${status} ${item.route} ${item.provider} ${item.statusCode} ${item.elapsed.toFixed(1)}s attempts=${item.attempts} response=${item.responseStatus} bytes=${item.responseBytes}${error}`, width);
   });
 }
 
@@ -133,13 +146,25 @@ function liveLines(width) {
   });
   const rows = [
     `${CYAN}LIVE${RESET} active=${active.length} filter=${state.filter} speed=${state.speed}x ${state.paused ? `${YELLOW}PAUSED${RESET}` : ""}`,
-    `${DIM}${"PORT".padEnd(6)}${"REQ".padEnd(8)}${"TIME".padEnd(9)}${"ROUTE".padEnd(17)}${"PROVIDER".padEnd(27)}STATE${RESET}`,
+    `${DIM}${"PORT".padEnd(6)}${"REQ".padEnd(8)}${"TIME".padEnd(9)}${"ROUTE".padEnd(17)}${"PROVIDER".padEnd(27)}${"STATE".padEnd(13)}RESPONSE${RESET}`,
   ];
   for (const item of active.slice(0, Math.max(0, LIVE_PANEL_ROWS - 3))) {
-    rows.push(line(`${item.port}`.padEnd(6) + `${item.id}`.padEnd(8) + `${item.elapsed.toFixed(1)}s`.padEnd(9) + `${item.route}`.padEnd(17) + `${item.provider}`.padEnd(27) + `${colorForStatus(item.status)}${item.status}${RESET}`, width));
+    rows.push(line(
+      `${item.port}`.padEnd(6)
+        + `${item.id}`.padEnd(8)
+        + `${item.elapsed.toFixed(1)}s`.padEnd(9)
+        + `${item.route}`.padEnd(17)
+        + `${item.provider}`.padEnd(27)
+        + `${item.status}`.padEnd(13)
+        + `${item.responseStatus} ${item.responseBytes}B`,
+      width,
+    ));
   }
   while (rows.length < LIVE_PANEL_ROWS - 1) rows.push("");
-  rows.push(`${DIM}q quit  ↑/↓ scroll history  space pause  +/- speed  f cycle filter  r reset scroll${RESET}`);
+  const historyState = state.historyMode === "history_browsing"
+    ? `history=browsing offset=${state.scroll} new=${state.newCount} Esc=latest`
+    : "history=latest follow";
+  rows.push(`${DIM}q quit  ↑/↓ scroll history  ${historyState}  space pause  +/- speed  f filter${RESET}`);
   return rows.map((item) => line(item, width));
 }
 
@@ -167,6 +192,14 @@ function cycleFilter() {
   const filters = ["all", "port=5520", "provider=minimax", "route=router-relay", "error"];
   state.filter = filters[(filters.indexOf(state.filter) + 1) % filters.length];
   state.scroll = 0;
+  state.historyMode = "follow_latest";
+  state.newCount = 0;
+}
+
+function followLatest() {
+  state.historyMode = "follow_latest";
+  state.scroll = 0;
+  state.newCount = 0;
 }
 
 function cleanup() {
@@ -188,10 +221,16 @@ process.stdin.on("keypress", (_input, key) => {
     cleanup();
     process.exit(0);
   }
-  if (key.name === "up") state.scroll += 1;
-  if (key.name === "down") state.scroll = Math.max(0, state.scroll - 1);
+  if (key.name === "up") {
+    state.historyMode = "history_browsing";
+    state.scroll += 1;
+  }
+  if (key.name === "down" && state.historyMode === "history_browsing") {
+    state.scroll = Math.max(0, state.scroll - 1);
+  }
+  if (key.name === "escape") followLatest();
   if (key.name === "space") state.paused = !state.paused;
-  if (key.name === "r") state.scroll = 0;
+  if (key.name === "r") followLatest();
   if (key.name === "f") cycleFilter();
   if (key.sequence === "+" || key.sequence === "=") state.speed = Math.min(4, state.speed + 0.5);
   if (key.sequence === "-") state.speed = Math.max(0.5, state.speed - 0.5);

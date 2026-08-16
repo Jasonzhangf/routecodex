@@ -13,6 +13,12 @@ assert.match(source, /historyLines/);
 assert.match(source, /SIGWINCH/);
 assert.match(source, /state\.scroll/);
 assert.match(source, /finishRequest/);
+assert.match(source, /history_browsing/);
+assert.match(source, /follow_latest/);
+assert.match(source, /key\.name === "escape"/);
+assert.match(source, /responseStatus/);
+assert.match(source, /responseBytes/);
+assert.match(source, /newCount/);
 
 const result = spawnSync(process.execPath, [path.join(root, "tui-simulator.mjs")], {
   encoding: "utf8",

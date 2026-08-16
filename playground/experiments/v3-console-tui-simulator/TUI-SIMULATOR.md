@@ -16,11 +16,13 @@ node smoke.mjs
 
 Controls:
 
-- `↑` / `↓`: scroll historical final transactions
+- `↑`: enter frozen history mode and scroll older final transactions
+- `↓`: scroll toward newer history without resuming follow mode
+- `Esc`: jump to latest history and resume automatic follow
 - `space`: pause/resume simulated requests
 - `+` / `-`: change simulation speed
 - `f`: cycle `all -> port=5520 -> provider=minimax -> route=router-relay -> error`
-- `r`: reset history scroll
+- `r`: jump to latest history and resume automatic follow
 - `q`: quit
 
 Layout contract:
@@ -28,4 +30,6 @@ Layout contract:
 - Historical completed transactions occupy the upper area and scroll with terminal height.
 - Live requests stay in a fixed bottom panel.
 - Resize redraws the whole frame and recalculates history rows.
-- Only terminal transactions enter history; intermediate route/provider changes update live rows.
+- Every simulated request appears in LIVE when admitted; response status/bytes update on the same row.
+- Only terminal transactions enter history; intermediate route/provider changes update that same live row.
+- New terminal history does not move a frozen history viewport; `Esc` restores latest-follow mode.
