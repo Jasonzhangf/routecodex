@@ -51,11 +51,14 @@ function verifyRepositoryFilesystemGovernance() {
     const requiredOwnedPaths = [
       '.gitignore',
       'scripts/ci/repo-sanity.mjs',
+      'scripts/ci/mempalace-scan-artifact-audit.mjs',
       'scripts/architecture/verify-repository-filesystem-governance.mjs',
       'scripts/tests/repository-filesystem-governance-red-fixtures.mjs',
       'v3/README.md',
       'v3/fixtures',
       'deprecated/v2',
+      'docs/audits/repository-root-layout-v3-v2-audit.md',
+      'docs/goals/repository-root-retirement-v4-v3-integration-plan.md',
     ];
     if (registry?.status !== 'active') failures.push('repository filesystem module registry must be active');
     if (!moduleOwner) failures.push('repository filesystem module owner is missing');

@@ -27,7 +27,7 @@ function listRootEntries({ includeIgnored = false } = {}) {
 
 function isForbiddenRootFile(p) {
   const base = path.posix.basename(p);
-  const allow = new Set(['AGENTS.md', 'README.md', 'MEMORY.md', 'HEARTBEAT.md', 'DELIVERY.md', 'task.md', 'note.md']);
+  const allow = new Set(['AGENTS.md', 'README.md', 'MEMORY.md', 'HEARTBEAT.md', 'task.md', 'note.md']);
   if (allow.has(base)) return false;
   if (/^test-.*\.(mjs|js|ts|py)$/i.test(base)) return true;
   if (/^debug-.*\.(mjs|js|ts)$/i.test(base)) return true;
@@ -75,7 +75,6 @@ function checkRootLayout() {
     '.gitattributes',
     '.gitignore',
     'AGENTS.md',
-    'DELIVERY.md',
     'HEARTBEAT.md',
     'MEMORY.md',
     'README.md',

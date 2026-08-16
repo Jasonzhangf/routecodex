@@ -1,5 +1,7 @@
 # Repository Root Layout Audit: V3/V2 and Generated State
 
+> Superseded on 2026-08-16 by the approved independent V3/V4 build-domain migration. The newer consumer audit will move the three V3-only Rust crates into `v3/`, retire the root `src/` only after V3 owns generated build information, reduce the root package to repository governance and thin version dispatch, and remove `deprecated/` only after both isolated build domains pass. Historical conclusions below remain evidence for the 2026-08-04 state only.
+
 Date: 2026-08-04
 Scope: repository root layout, V3/V2 ownership, memory documents, generated artifacts, and protocol samples.
 

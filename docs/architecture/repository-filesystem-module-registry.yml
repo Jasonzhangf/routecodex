@@ -6,6 +6,7 @@ modules:
     owned_paths:
       - .gitignore
       - scripts/ci/repo-sanity.mjs
+      - scripts/ci/mempalace-scan-artifact-audit.mjs
       - scripts/architecture/verify-repository-filesystem-governance.mjs
       - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
       - v3/README.md
@@ -15,8 +16,10 @@ modules:
       - .agents/skills/rcc-dev-skills/references
       - .agents/skills/rcc-v3-architecture/SKILL.md
       - docs/architecture/repository-filesystem-module-registry.yml
+      - docs/audits/repository-root-layout-v3-v2-audit.md
       - docs/goals/root-generated-artifacts-governance-plan.md
       - docs/goals/root-generated-artifacts-governance-execution-prompt.md
+      - docs/goals/repository-root-retirement-v4-v3-integration-plan.md
     allowed_paths:
       - docs/architecture/function-map.yml
       - docs/architecture/mainline-call-map.yml
