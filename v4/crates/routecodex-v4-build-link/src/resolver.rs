@@ -6,7 +6,7 @@ use crate::identity::{
     canonical, recompute_artifact_hash, recompute_public_api_hash, sha256_hex,
     ActiveArtifactDependency, ActiveArtifactIdentity, ActiveArtifactResolution, ArtifactEntry,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -90,14 +90,11 @@ pub fn frozen_module_ids(root: &Path) -> Result<HashSet<String>, ActiveLinkError
     Ok(ids)
 }
 
-/// Resolve a mutable workspace crate to its cargo-built release rlib and
-/// return rustc `--extern` + `-L dependency` arguments. Frozen modules are
-/// rejected: their only consumption surface is the Active artifact resolver.
-pub fn source_dep_link_args(
+fn validate_source_dep(
     root: &Path,
     name: &str,
     frozen: &HashSet<String>,
-) -> Result<Vec<String>, ActiveLinkError> {
+) -> Result<String, ActiveLinkError> {
     if frozen.contains(name) {
         return Err(ActiveLinkError::LinkFailed(format!(
             "frozen module {name} must be consumed through the Active surface, not --source-deps"
@@ -119,39 +116,141 @@ pub fn source_dep_link_args(
             source_dir.display()
         )));
     }
-    let rust_name = name.replace('-', "_");
-    let deps_dir = root.join("target/release/deps");
-    let mut candidates: Vec<PathBuf> = fs::read_dir(&deps_dir)
-        .map_err(|e| {
-            ActiveLinkError::LinkFailed(format!(
-                "read {}: {e} (build the workspace crate first with `cargo build --release --manifest-path v4/Cargo.toml -p {name}`)",
-                deps_dir.display()
-            ))
-        })?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name()
-                .map(|file| {
-                    let file = file.to_string_lossy();
-                    file.starts_with(&format!("lib{rust_name}-")) && file.ends_with(".rlib")
-                })
-                .unwrap_or(false)
-        })
-        .collect();
-    candidates.sort();
-    let rlib = candidates.pop().ok_or_else(|| {
-        ActiveLinkError::LinkFailed(format!(
-            "no release rlib for source dependency {rust_name} in {} (run `cargo build --release --manifest-path v4/Cargo.toml -p {name}` first)",
-            deps_dir.display()
-        ))
-    })?;
-    Ok(vec![
+    Ok(name.replace('-', "_"))
+}
+
+fn source_dep_link_args_for(root: &Path, rust_name: &str, rlib: &Path) -> Vec<String> {
+    vec![
         "--extern".to_string(),
         format!("{rust_name}={}", rlib.display()),
         "-L".to_string(),
-        format!("dependency={}", deps_dir.display()),
-    ])
+        format!("dependency={}", root.join("target/release/deps").display()),
+    ]
+}
+
+/// Cargo-reported release rlibs for each requested crate target name.
+///
+/// `target/release/deps` accumulates stale rlibs from earlier unit graphs, so
+/// directory scanning cannot identify the artifact the current workspace
+/// links. The cargo build graph is the only truth: `--message-format=json`
+/// reports the exact rlib/rmeta of every fresh or rebuilt unit.
+pub fn current_release_rlibs(
+    root: &Path,
+    names: &[String],
+) -> Result<HashMap<String, PathBuf>, ActiveLinkError> {
+    let manifest = root.join("Cargo.toml");
+    if !manifest.is_file() {
+        return Err(ActiveLinkError::LinkFailed(format!(
+            "workspace manifest {} missing; source/external deps must belong to a cargo project",
+            manifest.display()
+        )));
+    }
+    let mut command = Command::new("cargo");
+    command.args(["build", "--release", "--manifest-path"]);
+    command.arg(&manifest);
+    command.arg("--locked");
+    command.arg("--message-format=json");
+    let output = command.output().map_err(|e| {
+        ActiveLinkError::LinkFailed(format!("run cargo build {}: {e}", manifest.display()))
+    })?;
+    if !output.status.success() {
+        return Err(ActiveLinkError::LinkFailed(format!(
+            "cargo build {} failed:\nstdout: {}\nstderr: {}",
+            manifest.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    let mut found: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let value: serde_json::Value = match serde_json::from_str(line) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if value.get("reason").and_then(serde_json::Value::as_str) != Some("compiler-artifact") {
+            continue;
+        }
+        let Some(target_name) = value
+            .get("target")
+            .and_then(|target| target.get("name"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        if !names.iter().any(|name| name == target_name) {
+            continue;
+        }
+        let Some(filenames) = value.get("filenames").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for filename in filenames {
+            let Some(filename) = filename.as_str() else {
+                continue;
+            };
+            let path = PathBuf::from(filename);
+            let is_deps = path
+                .parent()
+                .map(|parent| parent.ends_with("deps"))
+                .unwrap_or(false);
+            if path.extension().and_then(|ext| ext.to_str()) == Some("rlib") {
+                found.entry(target_name.to_string()).or_default().push(path);
+            } else if is_deps && path.extension().and_then(|ext| ext.to_str()) == Some("rmeta") {
+                // Member lib units emit a release-root rlib plus a deps rmeta;
+                // the sibling deps rlib is the artifact consumers link.
+                found
+                    .entry(target_name.to_string())
+                    .or_default()
+                    .push(path.with_extension("rlib"));
+            }
+        }
+    }
+    let mut selected = HashMap::new();
+    for (name, candidates) in found {
+        let rlib = candidates
+            .iter()
+            .find(|path| {
+                path.is_file() && path.parent().map(|p| p.ends_with("deps")).unwrap_or(false)
+            })
+            .or_else(|| candidates.iter().find(|path| path.is_file()))
+            .ok_or_else(|| {
+                ActiveLinkError::LinkFailed(format!(
+                    "cargo reported no existing release rlib for {name}; run `cargo build --release --locked` first"
+                ))
+            })?;
+        selected.insert(name, rlib.clone());
+    }
+    Ok(selected)
+}
+
+/// Resolve a mutable workspace crate to the cargo-current release rlib and
+/// return rustc `--extern` + `-L dependency` arguments. Frozen modules are
+/// rejected: their only consumption surface is the Active artifact resolver.
+pub fn source_dep_link_args(
+    root: &Path,
+    name: &str,
+    frozen: &HashSet<String>,
+) -> Result<Vec<String>, ActiveLinkError> {
+    let rust_name = validate_source_dep(root, name, frozen)?;
+    let artifacts = current_release_rlibs(root, &[rust_name.clone()])?;
+    source_dep_link_args_using(root, name, frozen, &artifacts)
+}
+
+/// Same as [`source_dep_link_args`] but consumes an artifact map already
+/// resolved by [`current_release_rlibs`] so a consumer can resolve all of its
+/// source deps with a single cargo invocation.
+pub fn source_dep_link_args_using(
+    root: &Path,
+    name: &str,
+    frozen: &HashSet<String>,
+    artifacts: &HashMap<String, PathBuf>,
+) -> Result<Vec<String>, ActiveLinkError> {
+    let rust_name = validate_source_dep(root, name, frozen)?;
+    let rlib = artifacts.get(&rust_name).ok_or_else(|| {
+        ActiveLinkError::LinkFailed(format!(
+            "cargo build did not report a release rlib for source dependency {name} (run `cargo build --release --locked` first)"
+        ))
+    })?;
+    Ok(source_dep_link_args_for(root, &rust_name, rlib))
 }
 
 /// Fail if `path` resolves inside the Active zone (`active/**`).

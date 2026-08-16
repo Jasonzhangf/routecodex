@@ -1,67 +1,669 @@
 {
   "schema_version": 1,
-  "lifecycle_id":"appsdk-governance",
-  "nodes":["clarify","playground","review","promotion","compile","active","protected","verify"],
-  "edges":[
-    {"from":"clarify","to":"playground","owner":"appsdk::goal"},
-    {"from":"global_appsdk_binary","to":"sdk_bundle_resources","owner":"appsdk::init","edge_type":"governance_install","path":".appsdk/sdk-resources.json","status":"active"},
-    {"from":"sdk_bundle_resources","to":"project_contract","owner":"appsdk::verify","edge_type":"governance_validation","path":".appsdk/project.json","status":"active"},
-    {"from":"playground","to":"review","owner":"appsdk::lifecycle"},
-    {"from":"review","to":"promotion","owner":"appsdk::lifecycle"},
-    {"from":"promotion","to":"regression","owner":"appsdk::regression_gate"},
-    {"from":"regression","to":"compile","owner":"appsdk::compiler"},
-    {"from":"compile","to":"active","owner":"appsdk::publisher"},
-    {"from":"active","to":"protected","owner":"appsdk::freezer"},
-    {"from":"protected","to":"verify","owner":"appsdk::verifier"},
-    {"from":"verify","to":"playground","owner":"appsdk::workspace","return_path":true},
-    {"from":"routecodex-v4-edge","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link","edge_type":"active_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-control","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link","edge_type":"active_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-error","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link","edge_type":"active_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-config","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link","edge_type":"active_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-config","to":"routecodex-v4-edge","owner":"routecodex-v4-build-link","edge_type":"active_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-edge","to":"routecodex-v4-base-node","owner":"routecodex-v4-edge::validate_edge","edge_type":"symbol_dependency","symbols":["NodeIdentity","NodeRef::from_identity"],"path":"crates/routecodex-v4-edge/src/lib.rs","status":"active"},
-    {"from":"routecodex-v4-control","to":"routecodex-v4-base-node","owner":"routecodex-v4-control::metadata_center","edge_type":"symbol_dependency","symbols":["Scope"],"path":"crates/routecodex-v4-control/src/lib.rs","status":"active"},
-    {"from":"routecodex-v4-error","to":"routecodex-v4-base-node","owner":"routecodex-v4-error::error_chain","edge_type":"symbol_dependency","symbols":["Scope"],"path":"crates/routecodex-v4-error/src/lib.rs","status":"active"},
-    {"from":"routecodex-v4-base-node","to":"appsdk::record_graph","owner":"routecodex-v4-base-node::BaseNode","edge_type":"record_writer","symbols":["control_in","control_out","report_error"],"path":"crates/routecodex-v4-base-node/src/lib.rs","status":"active"},
-    {"from":"routecodex-v4-config","to":"routecodex-v4-base-node","owner":"routecodex-v4-config::config_node","edge_type":"symbol_dependency","symbols":["BaseNode","NodeIdentity"],"path":"crates/routecodex-v4-config/src/lib.rs","status":"active"},
-    {"from":"routecodex-v4-config","to":"routecodex-v4-edge","owner":"routecodex-v4-config::validate_edges","edge_type":"symbol_dependency","symbols":["EdgeSpec::information_flow","validate_edge","ScopeRegistry::new"],"path":"crates/routecodex-v4-config/src/lib.rs","status":"active"},
-    {"from":"V4Config01AuthoringFileSource","to":"V4Config02AuthoringParsed","owner":"routecodex-v4-config::parse_v4_config_02_from_v4_config_01","edge_type":"information_flow","resource":"v4.config.authoring","path":"crates/routecodex-v4-config/src/lib.rs","status":"active"},
-    {"from":"V4Config02AuthoringParsed","to":"V4Config03SchemaValidated","owner":"routecodex-v4-config::validate_v4_config_03_from_v4_config_02","edge_type":"information_flow","resource":"v4.config.schema_validated","path":"crates/routecodex-v4-config/src/lib.rs","status":"active"},
-    {"from":"V4Config03SchemaValidated","to":"V4Config04ResourceRegistryBuilt","owner":"routecodex-v4-config::build_v4_config_04_from_v4_config_03","edge_type":"information_flow","resource":"v4.config.resource_registry","path":"crates/routecodex-v4-config/src/lib.rs","status":"active"},
-    {"from":"V4Config04ResourceRegistryBuilt","to":"V4Config05ManifestPublished","owner":"routecodex-v4-config::publish_v4_config_05_from_v4_config_04","edge_type":"information_flow","resource":"v4.config.manifest","path":"crates/routecodex-v4-config/src/lib.rs","status":"active"},
-    {"from":"routecodex-v4-runtime","to":"routecodex-v4-error","owner":"routecodex-v4-build-link","edge_type":"active_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-runtime","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link","edge_type":"active_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-runtime","to":"routecodex-v4-control","owner":"routecodex-v4-build-link","edge_type":"active_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-runtime","to":"routecodex-v4-control","owner":"routecodex-v4-runtime::ExecutionContext","edge_type":"symbol_dependency","symbols":["MetadataCenter::new","MetadataCenter::register","MetadataCenter::consume","MetadataCenter::release"],"path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"routecodex-v4-runtime","to":"routecodex-v4-plugin-contract","owner":"routecodex-v4-runtime::NodePlugin","edge_type":"symbol_dependency","symbols":["PluginKind"],"path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"routecodex-v4-runtime","to":"routecodex-v4-skeleton","owner":"routecodex-v4-build-link","edge_type":"workspace_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-debug","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link","edge_type":"active_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-router","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link","edge_type":"active_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-provider","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link","edge_type":"active_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-server","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link","edge_type":"active_artifact_link","path":"crates/routecodex-v4-build-link","status":"active"},
-    {"from":"routecodex-v4-skeleton","to":"routecodex-v4-runtime","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"plan_execution","symbols":["SkeletonPlan::from_contract_json","plan_hash"],"path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"routecodex-v4-plugin-plan","to":"routecodex-v4-plugin-contract","owner":"routecodex-v4-plugin-plan::compile_node_plan","edge_type":"symbol_dependency","symbols":["validate_descriptor","NodePluginDescriptor","ResourceRegistry","PluginEffect"],"path":"crates/routecodex-v4-plugin-plan/src/lib.rs","status":"active"},
-    {"from":"routecodex-v4-plugin-catalog","to":"routecodex-v4-plugin-contract","owner":"routecodex-v4-plugin-catalog::register","edge_type":"symbol_dependency","symbols":["DependencySpec"],"path":"crates/routecodex-v4-plugin-catalog/src/lib.rs","status":"active"},
-    {"from":"routecodex-v4-cordis-bridge","to":"routecodex-v4-plugin-plan","owner":"routecodex-v4-cordis-bridge::compile_node","edge_type":"symbol_dependency","symbols":["compile_node_plan","NodePluginPlan","AuthoringPlugin","PlanError"],"path":"crates/routecodex-v4-cordis-bridge/src/lib.rs","status":"active"},
-    {"from":"routecodex-v4-cordis-bridge","to":"routecodex-v4-plugin-contract","owner":"routecodex-v4-cordis-bridge::execute_plan","edge_type":"symbol_dependency","symbols":["PluginEffect","ResourceRegistry"],"path":"crates/routecodex-v4-cordis-bridge/src/lib.rs","status":"active"},
-    {"from":"V4ServerReqInbound01ClientRaw","to":"V4ServerSseIn02FrameBoundary","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"data_flow","resource":"v4.request.normal_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"V4ServerSseIn02FrameBoundary","to":"V4HubReqInbound03Normalized","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"data_flow","resource":"v4.request.normal_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"V4HubReqInbound03Normalized","to":"V4HubReqChatProcess04Governed","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"data_flow","resource":"v4.request.normal_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"V4HubReqChatProcess04Governed","to":"V4HubReqOutbound05ProviderSemantic","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"data_flow","resource":"v4.request.normal_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"V4HubReqOutbound05ProviderSemantic","to":"V4ProviderReqCompat06Compat","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"data_flow","resource":"v4.request.provider_semantic","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"V4ProviderReqCompat06Compat","to":"V4ProviderSseOut07WireBoundary","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"data_flow","resource":"v4.request.provider_wire_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"V4ProviderSseIn01FrameBoundary","to":"V4HubRespInbound02Parsed","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"data_flow","resource":"v4.response.provider_raw","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"V4HubRespInbound02Parsed","to":"V4HubRespChatProcess03Governed","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"data_flow","resource":"v4.response.normal_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"V4HubRespChatProcess03Governed","to":"V4HubRespOutbound04ClientSemantic","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"data_flow","resource":"v4.response.normal_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"V4HubRespOutbound04ClientSemantic","to":"V4ServerSseOut05FrameBoundary","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"data_flow","resource":"v4.response.client_wire_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"V4ServerSseOut05FrameBoundary","to":"V4ServerRespOutbound06ClientFrame","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"data_flow","resource":"v4.response.client_wire_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"root_v4_dispatcher","to":"v4_build_verify_ci","owner":"appsdk::build_domain","edge_type":"dispatch","path":"../package.json,.github/workflows/test.yml","status":"active"},
-    {"from":"v4_build_verify_ci","to":"v4_build_verify_positive","owner":"appsdk::build_domain","edge_type":"verification_owner","path":"scripts/verify-ci.mjs","status":"active"},
-    {"from":"v4_build_verify_ci","to":"v4_build_verify_red","owner":"appsdk::build_domain","edge_type":"verification_owner","path":"scripts/verify-ci.mjs","status":"active"},
-    {"from":"v4_build_verify_positive","to":"v4_build_verify_isolation","owner":"appsdk::build_domain","edge_type":"verification_owner","path":"scripts/verify.mjs","status":"active"},
-    {"from":"v4_build_verify_positive","to":"routecodex-v4-governance","owner":"appsdk::build_domain","edge_type":"verification_owner","path":"scripts/verify.mjs","status":"active"},
-    {"from":"v4_build_verify_positive","to":"routecodex-v4-build-link","owner":"appsdk::build_domain","edge_type":"verification_owner","path":"scripts/verify.mjs","status":"active"},
-    {"from":"routecodex-v4-build-link","to":"v4.build.active_artifact_index","owner":"routecodex-v4-build-link","edge_type":"artifact_link","path":"build-control/active-index.json","status":"active"},
-    {"from":"routecodex-v4-build-link","to":"v4.build.architecture_gates","owner":"appsdk::build_domain","edge_type":"verification_input","path":"scripts/architecture/**","status":"active"}
+  "lifecycle_id": "appsdk-governance",
+  "nodes": [
+    "clarify",
+    "playground",
+    "review",
+    "promotion",
+    "compile",
+    "active",
+    "protected",
+    "verify"
+  ],
+  "edges": [
+    {
+      "from": "clarify",
+      "to": "playground",
+      "owner": "appsdk::goal"
+    },
+    {
+      "from": "global_appsdk_binary",
+      "to": "sdk_bundle_resources",
+      "owner": "appsdk::init",
+      "edge_type": "governance_install",
+      "path": ".appsdk/sdk-resources.json",
+      "status": "active"
+    },
+    {
+      "from": "sdk_bundle_resources",
+      "to": "project_contract",
+      "owner": "appsdk::verify",
+      "edge_type": "governance_validation",
+      "path": ".appsdk/project.json",
+      "status": "active"
+    },
+    {
+      "from": "playground",
+      "to": "review",
+      "owner": "appsdk::lifecycle"
+    },
+    {
+      "from": "review",
+      "to": "promotion",
+      "owner": "appsdk::lifecycle"
+    },
+    {
+      "from": "promotion",
+      "to": "regression",
+      "owner": "appsdk::regression_gate"
+    },
+    {
+      "from": "regression",
+      "to": "compile",
+      "owner": "appsdk::compiler"
+    },
+    {
+      "from": "compile",
+      "to": "active",
+      "owner": "appsdk::publisher"
+    },
+    {
+      "from": "active",
+      "to": "protected",
+      "owner": "appsdk::freezer"
+    },
+    {
+      "from": "protected",
+      "to": "verify",
+      "owner": "appsdk::verifier"
+    },
+    {
+      "from": "verify",
+      "to": "playground",
+      "owner": "appsdk::workspace",
+      "return_path": true
+    },
+    {
+      "from": "routecodex-v4-edge",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-control",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-error",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-config",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-config",
+      "to": "routecodex-v4-edge",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-edge",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-edge::validate_edge",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "NodeIdentity",
+        "NodeRef::from_identity"
+      ],
+      "path": "crates/routecodex-v4-edge/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-control",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-control::metadata_center",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "Scope"
+      ],
+      "path": "crates/routecodex-v4-control/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-error",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-error::error_chain",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "Scope"
+      ],
+      "path": "crates/routecodex-v4-error/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-base-node",
+      "to": "appsdk::record_graph",
+      "owner": "routecodex-v4-base-node::BaseNode",
+      "edge_type": "record_writer",
+      "symbols": [
+        "control_in",
+        "control_out",
+        "report_error"
+      ],
+      "path": "crates/routecodex-v4-base-node/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-config",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-config::config_node",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "BaseNode",
+        "NodeIdentity"
+      ],
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-config",
+      "to": "routecodex-v4-edge",
+      "owner": "routecodex-v4-config::validate_edges",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "EdgeSpec::information_flow",
+        "validate_edge",
+        "ScopeRegistry::new"
+      ],
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4Config01AuthoringFileSource",
+      "to": "V4Config02AuthoringParsed",
+      "owner": "routecodex-v4-config::parse_v4_config_02_from_v4_config_01",
+      "edge_type": "information_flow",
+      "resource": "v4.config.authoring",
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4Config02AuthoringParsed",
+      "to": "V4Config03SchemaValidated",
+      "owner": "routecodex-v4-config::validate_v4_config_03_from_v4_config_02",
+      "edge_type": "information_flow",
+      "resource": "v4.config.schema_validated",
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4Config03SchemaValidated",
+      "to": "V4Config04ResourceRegistryBuilt",
+      "owner": "routecodex-v4-config::build_v4_config_04_from_v4_config_03",
+      "edge_type": "information_flow",
+      "resource": "v4.config.resource_registry",
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4Config04ResourceRegistryBuilt",
+      "to": "V4Config05ManifestPublished",
+      "owner": "routecodex-v4-config::publish_v4_config_05_from_v4_config_04",
+      "edge_type": "information_flow",
+      "resource": "v4.config.manifest",
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-error",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-control",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-control",
+      "owner": "routecodex-v4-runtime::ExecutionContext",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "MetadataCenter::new",
+        "MetadataCenter::register",
+        "MetadataCenter::consume",
+        "MetadataCenter::release"
+      ],
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-runtime::NodePlugin",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "PluginKind"
+      ],
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-skeleton",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "workspace_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-debug",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-router",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-provider",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-server",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-skeleton",
+      "to": "routecodex-v4-runtime",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "plan_execution",
+      "symbols": [
+        "SkeletonPlan::from_contract_json",
+        "plan_hash"
+      ],
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-plugin-plan",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-plugin-plan::compile_node_plan",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "validate_descriptor",
+        "NodePluginDescriptor",
+        "ResourceRegistry",
+        "PluginEffect"
+      ],
+      "path": "crates/routecodex-v4-plugin-plan/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-plugin-catalog",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-plugin-catalog::register",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "DependencySpec"
+      ],
+      "path": "crates/routecodex-v4-plugin-catalog/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-cordis-bridge",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-cordis-bridge::compile_node",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "compile_node_plan",
+        "NodePluginPlan",
+        "AuthoringPlugin",
+        "PlanError"
+      ],
+      "path": "crates/routecodex-v4-cordis-bridge/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-cordis-bridge",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-cordis-bridge::execute_plan",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "PluginEffect",
+        "ResourceRegistry"
+      ],
+      "path": "crates/routecodex-v4-cordis-bridge/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4ServerReqInbound01ClientRaw",
+      "to": "V4ServerSseIn02FrameBoundary",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.request.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4ServerSseIn02FrameBoundary",
+      "to": "V4HubReqInbound03Normalized",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.request.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4HubReqInbound03Normalized",
+      "to": "V4HubReqChatProcess04Governed",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.request.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4HubReqChatProcess04Governed",
+      "to": "V4HubReqOutbound05ProviderSemantic",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.request.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4HubReqOutbound05ProviderSemantic",
+      "to": "V4ProviderReqCompat06Compat",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.request.provider_semantic",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4ProviderReqCompat06Compat",
+      "to": "V4ProviderSseOut07WireBoundary",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.request.provider_wire_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4ProviderSseIn01FrameBoundary",
+      "to": "V4HubRespInbound02Parsed",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.response.provider_raw",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4HubRespInbound02Parsed",
+      "to": "V4HubRespChatProcess03Governed",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.response.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4HubRespChatProcess03Governed",
+      "to": "V4HubRespOutbound04ClientSemantic",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.response.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4HubRespOutbound04ClientSemantic",
+      "to": "V4ServerSseOut05FrameBoundary",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.response.client_wire_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4ServerSseOut05FrameBoundary",
+      "to": "V4ServerRespOutbound06ClientFrame",
+      "owner": "routecodex-v4-runtime::SkeletonRuntime",
+      "edge_type": "data_flow",
+      "resource": "v4.response.client_wire_payload",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "root_v4_dispatcher",
+      "to": "v4_build_verify_ci",
+      "owner": "appsdk::build_domain",
+      "edge_type": "dispatch",
+      "path": "../package.json,.github/workflows/test.yml",
+      "status": "active"
+    },
+    {
+      "from": "v4_build_verify_ci",
+      "to": "v4_build_verify_positive",
+      "owner": "appsdk::build_domain",
+      "edge_type": "verification_owner",
+      "path": "scripts/verify-ci.mjs",
+      "status": "active"
+    },
+    {
+      "from": "v4_build_verify_ci",
+      "to": "v4_build_verify_red",
+      "owner": "appsdk::build_domain",
+      "edge_type": "verification_owner",
+      "path": "scripts/verify-ci.mjs",
+      "status": "active"
+    },
+    {
+      "from": "v4_build_verify_positive",
+      "to": "v4_build_verify_isolation",
+      "owner": "appsdk::build_domain",
+      "edge_type": "verification_owner",
+      "path": "scripts/verify.mjs",
+      "status": "active"
+    },
+    {
+      "from": "v4_build_verify_positive",
+      "to": "routecodex-v4-governance",
+      "owner": "appsdk::build_domain",
+      "edge_type": "verification_owner",
+      "path": "scripts/verify.mjs",
+      "status": "active"
+    },
+    {
+      "from": "v4_build_verify_positive",
+      "to": "routecodex-v4-build-link",
+      "owner": "appsdk::build_domain",
+      "edge_type": "verification_owner",
+      "path": "scripts/verify.mjs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-build-link",
+      "to": "v4.build.active_artifact_index",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "artifact_link",
+      "path": "build-control/active-index.json",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-build-link",
+      "to": "v4.build.architecture_gates",
+      "owner": "appsdk::build_domain",
+      "edge_type": "verification_input",
+      "path": "scripts/architecture/**",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-admin",
+      "to": "routecodex-v4-plugin-manager",
+      "owner": "routecodex-v4-admin::execute",
+      "edge_type": "command_delegation",
+      "symbols": [
+        "PluginManager",
+        "AdminCommand"
+      ],
+      "path": "crates/routecodex-v4-admin/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-admin",
+      "to": "routecodex-v4-runtime-inspector",
+      "owner": "routecodex-v4-admin::query",
+      "edge_type": "readonly_projection",
+      "symbols": [
+        "snapshot",
+        "RuntimeSnapshot"
+      ],
+      "path": "crates/routecodex-v4-admin/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-inspector",
+      "to": "routecodex-v4-plugin-manager",
+      "owner": "routecodex-v4-runtime-inspector::snapshot",
+      "edge_type": "readonly_projection",
+      "symbols": [
+        "PluginManager",
+        "PluginCandidate",
+        "AuditRecord"
+      ],
+      "path": "crates/routecodex-v4-runtime-inspector/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-plugin-manager",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-plugin-manager::create_candidate",
+      "edge_type": "plan_binding",
+      "symbols": [
+        "NodePluginPlan"
+      ],
+      "path": "crates/routecodex-v4-plugin-manager/src/manager.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-plugin-manager",
+      "to": "routecodex-v4-plugin-catalog",
+      "owner": "routecodex-v4-plugin-manager",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-plugin-manager/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-plugin-manager",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-plugin-manager",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-plugin-manager/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-plugin-manager",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-plugin-manager",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-plugin-manager/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-inspector",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-runtime-inspector",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-runtime-inspector/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-inspector",
+      "to": "routecodex-v4-plugin-manager",
+      "owner": "routecodex-v4-runtime-inspector",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-runtime-inspector/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-inspector",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-runtime-inspector",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-runtime-inspector/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-admin",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-admin",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-admin/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-admin",
+      "to": "routecodex-v4-plugin-manager",
+      "owner": "routecodex-v4-admin",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-admin/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-admin",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-admin",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-admin/Cargo.toml",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-admin",
+      "to": "routecodex-v4-runtime-inspector",
+      "owner": "routecodex-v4-admin",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-admin/Cargo.toml",
+      "status": "active"
+    }
   ]
 }

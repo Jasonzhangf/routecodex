@@ -90,12 +90,12 @@
       "generated_outputs": [
         "generated/governance/**"
       ],
-  "module_id": "routecodex-v4-governance",
-  "owned_paths": [
-    ".appsdk/**",
-    "contracts/**",
-    "playground/**"
-  ],
+      "module_id": "routecodex-v4-governance",
+      "owned_paths": [
+        ".appsdk/**",
+        "contracts/**",
+        "playground/**"
+      ],
       "regression": {
         "allow_skipped": false,
         "command": {
@@ -1180,6 +1180,230 @@
         "suite_id": "v4-server-l2-regression"
       },
       "source_owner": "routecodex-v4-server",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/routecodex-v4-plugin-manager/**",
+      "artifact_paths": [
+        "libroutecodex_v4_plugin_manager.rlib"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo build --release -p routecodex-v4-plugin-manager && mkdir -p generated/modules/routecodex-v4-plugin-manager/lib && cp target/release/libroutecodex_v4_plugin_manager.rlib generated/modules/routecodex-v4-plugin-manager/lib/libroutecodex_v4_plugin_manager.rlib"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        "contracts/node-container.contract.json",
+        "contracts/node-plugin.contract.json",
+        "contracts/plugin-management.contract.json"
+      ],
+      "dependency_modules": [
+        "routecodex-v4-plugin-contract",
+        "routecodex-v4-plugin-plan",
+        "routecodex-v4-plugin-catalog"
+      ],
+      "generated_outputs": [
+        "generated/plugin-manager/**"
+      ],
+      "module_id": "routecodex-v4-plugin-manager",
+      "owned_paths": [
+        "crates/routecodex-v4-plugin-manager/**"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "run",
+            "--quiet",
+            "--release",
+            "--manifest-path",
+            "Cargo.toml",
+            "-p",
+            "routecodex-v4-build-link",
+            "--",
+            "test-consumer",
+            "--root",
+            ".",
+            "--consumer",
+            "routecodex-v4-plugin-manager",
+            "--deps",
+            "routecodex-v4-base-node",
+            "--source-deps",
+            "routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "crates/routecodex-v4-plugin-manager/src/lib.rs",
+          "crates/routecodex-v4-plugin-manager/src/manager.rs",
+          "contracts/plugin-management.contract.json"
+        ],
+        "minimum_test_count": 2,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-plugin-manager-l2-regression"
+      },
+      "source_owner": "routecodex-v4-plugin-manager",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/routecodex-v4-runtime-inspector/**",
+      "artifact_paths": [
+        "libroutecodex_v4_runtime_inspector.rlib"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo build --release -p routecodex-v4-runtime-inspector && mkdir -p generated/modules/routecodex-v4-runtime-inspector/lib && cp target/release/libroutecodex_v4_runtime_inspector.rlib generated/modules/routecodex-v4-runtime-inspector/lib/libroutecodex_v4_runtime_inspector.rlib"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        "contracts/node-container.contract.json",
+        "contracts/node-plugin.contract.json",
+        "contracts/plugin-management.contract.json"
+      ],
+      "dependency_modules": [
+        "routecodex-v4-plugin-manager",
+        "routecodex-v4-plugin-contract",
+        "routecodex-v4-plugin-plan"
+      ],
+      "generated_outputs": [
+        "generated/runtime-inspector/**"
+      ],
+      "module_id": "routecodex-v4-runtime-inspector",
+      "owned_paths": [
+        "crates/routecodex-v4-runtime-inspector/**"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "run",
+            "--quiet",
+            "--release",
+            "--manifest-path",
+            "Cargo.toml",
+            "-p",
+            "routecodex-v4-build-link",
+            "--",
+            "test-consumer",
+            "--root",
+            ".",
+            "--consumer",
+            "routecodex-v4-runtime-inspector",
+            "--deps",
+            "routecodex-v4-base-node",
+            "--source-deps",
+            "routecodex-v4-plugin-manager,routecodex-v4-plugin-contract,routecodex-v4-plugin-plan"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "crates/routecodex-v4-runtime-inspector/src/lib.rs",
+          "contracts/plugin-management.contract.json"
+        ],
+        "minimum_test_count": 2,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-runtime-inspector-l2-regression"
+      },
+      "source_owner": "routecodex-v4-runtime-inspector",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/routecodex-v4-admin/**",
+      "artifact_paths": [
+        "libroutecodex_v4_admin.rlib"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo build --release -p routecodex-v4-admin && mkdir -p generated/modules/routecodex-v4-admin/lib && cp target/release/libroutecodex_v4_admin.rlib generated/modules/routecodex-v4-admin/lib/libroutecodex_v4_admin.rlib"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        "contracts/node-container.contract.json",
+        "contracts/node-plugin.contract.json",
+        "contracts/plugin-management.contract.json"
+      ],
+      "dependency_modules": [
+        "routecodex-v4-plugin-manager",
+        "routecodex-v4-runtime-inspector",
+        "routecodex-v4-plugin-contract",
+        "routecodex-v4-plugin-plan"
+      ],
+      "generated_outputs": [
+        "generated/admin/**"
+      ],
+      "module_id": "routecodex-v4-admin",
+      "owned_paths": [
+        "crates/routecodex-v4-admin/**"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "run",
+            "--quiet",
+            "--release",
+            "--manifest-path",
+            "Cargo.toml",
+            "-p",
+            "routecodex-v4-build-link",
+            "--",
+            "test-consumer",
+            "--root",
+            ".",
+            "--consumer",
+            "routecodex-v4-admin",
+            "--deps",
+            "routecodex-v4-base-node",
+            "--source-deps",
+            "routecodex-v4-plugin-manager,routecodex-v4-runtime-inspector,routecodex-v4-plugin-contract,routecodex-v4-plugin-plan"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "crates/routecodex-v4-admin/src/lib.rs",
+          "contracts/plugin-management.contract.json"
+        ],
+        "minimum_test_count": 2,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-admin-l2-regression"
+      },
+      "source_owner": "routecodex-v4-admin",
       "stage": "source_implemented"
     }
   ],

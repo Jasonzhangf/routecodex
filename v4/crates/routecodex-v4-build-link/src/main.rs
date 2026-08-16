@@ -9,8 +9,10 @@
 //!   test-consumer   build and run a consumer regression via rustc flags
 
 use routecodex_v4_build_link::resolver::assert_outside_active;
+use routecodex_v4_build_link::resolver::{
+    current_release_rlibs, frozen_module_ids, source_dep_link_args_using,
+};
 use routecodex_v4_build_link::resolver::{emit_link_flags, host_triple, resolve};
-use routecodex_v4_build_link::resolver::{frozen_module_ids, source_dep_link_args};
 use routecodex_v4_build_link::ActiveArtifactResolution;
 use routecodex_v4_build_link::ActiveLinkError;
 use routecodex_v4_build_link::IndexBuilder;
@@ -187,8 +189,8 @@ fn extern_args(resolutions: &[ActiveArtifactResolution]) -> Vec<String> {
 }
 
 /// Registry (non-path) dependency of a consumer manifest, e.g. serde/sha2.
-/// These are not V4 module artifacts; the resolver builds them once into
-/// `build-control/extern-deps` and links them as ordinary extern crates.
+/// These are not V4 module artifacts; the resolver links the workspace-built
+/// rlibs so the consumer and its source deps share one cargo graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ExternalCrate {
     name: String,
@@ -271,8 +273,12 @@ struct ExternalLink {
     search_args: Vec<String>,
 }
 
-/// Build registry dependencies of a consumer into a resolver-owned scratch
-/// project (`build-control/extern-deps`) and return rustc link arguments.
+/// Return rustc link arguments for a consumer's registry dependencies.
+///
+/// The rlibs come from the same cargo workspace graph that produced the
+/// consumer's source deps (`v4/target/release/deps`). A separate dependency
+/// graph would build the same registry crates with different unit metadata,
+/// so the combined rustc invocation could never link them together.
 fn build_external_deps(
     root: &Path,
     crates: &[ExternalCrate],
@@ -280,82 +286,18 @@ fn build_external_deps(
     if crates.is_empty() {
         return Ok(ExternalLink::default());
     }
-    let scratch = root.join("build-control/extern-deps");
-    fs::create_dir_all(&scratch)
-        .map_err(|e| ActiveLinkError::LinkFailed(format!("create {}: {e}", scratch.display())))?;
-    let mut manifest = String::from(
-        "[package]\nname = \"routecodex-v4-extern-deps\"\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[lib]\npath = \"src/lib.rs\"\n\n[workspace]\n\n[dependencies]\n",
-    );
-    for external in crates {
-        manifest.push_str(&format!(
-            "{} = {{ version = {:?}",
-            external.name, external.version
-        ));
-        if !external.default_features {
-            manifest.push_str(", default-features = false");
-        }
-        if !external.features.is_empty() {
-            manifest.push_str(", features = [");
-            for (index, feature) in external.features.iter().enumerate() {
-                if index > 0 {
-                    manifest.push_str(", ");
-                }
-                manifest.push_str(&format!("{:?}", feature));
-            }
-            manifest.push(']');
-        }
-        manifest.push_str(" }\n");
-    }
-    let manifest_path = scratch.join("Cargo.toml");
-    fs::write(&manifest_path, manifest).map_err(|e| {
-        ActiveLinkError::LinkFailed(format!("write {}: {e}", manifest_path.display()))
-    })?;
-    let lib_path = scratch.join("src/lib.rs");
-    fs::create_dir_all(
-        lib_path
-            .parent()
-            .ok_or_else(|| ActiveLinkError::LinkFailed("extern-deps src has no parent".into()))?,
-    )
-    .map_err(|e| ActiveLinkError::LinkFailed(format!("create {}: {e}", lib_path.display())))?;
-    if !lib_path.is_file() {
-        fs::write(&lib_path, "").map_err(|e| {
-            ActiveLinkError::LinkFailed(format!("write {}: {e}", lib_path.display()))
-        })?;
-    }
-    let output = Command::new("cargo")
-        .args(["build", "--release", "--manifest-path"])
-        .arg(&manifest_path)
-        .output()
-        .map_err(|e| ActiveLinkError::LinkFailed(format!("spawn cargo: {e}")))?;
-    if !output.status.success() {
-        return Err(ActiveLinkError::LinkFailed(format!(
-            "extern deps build failed:\nstdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        )));
-    }
-    let deps_dir = scratch.join("target/release/deps");
+    let external_names: Vec<String> = crates
+        .iter()
+        .map(|external| external.name.replace('-', "_"))
+        .collect();
+    let artifacts = current_release_rlibs(root, &external_names)?;
+    let deps_dir = root.join("target/release/deps");
     let mut extern_args = Vec::new();
     for external in crates {
         let rust_name = external.name.replace('-', "_");
-        let mut candidates: Vec<PathBuf> = fs::read_dir(&deps_dir)
-            .map_err(|e| ActiveLinkError::LinkFailed(format!("read {}: {e}", deps_dir.display())))?
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.file_name()
-                    .map(|name| {
-                        let name = name.to_string_lossy();
-                        name.starts_with(&format!("lib{rust_name}-")) && name.ends_with(".rlib")
-                    })
-                    .unwrap_or(false)
-            })
-            .collect();
-        candidates.sort();
-        let rlib = candidates.last().ok_or_else(|| {
+        let rlib = artifacts.get(&rust_name).ok_or_else(|| {
             ActiveLinkError::LinkFailed(format!(
-                "no rlib for external crate {rust_name} in {}",
-                deps_dir.display()
+                "extern deps build produced no release rlib for {rust_name}"
             ))
         })?;
         extern_args.push("--extern".to_string());
@@ -613,9 +555,11 @@ fn source_dep_link_args_all(
     names: &[String],
     frozen: &HashSet<String>,
 ) -> Result<Vec<String>, ActiveLinkError> {
+    let rust_names: Vec<String> = names.iter().map(|name| name.replace('-', "_")).collect();
+    let artifacts = current_release_rlibs(root, &rust_names)?;
     let mut args = Vec::new();
     for name in names {
-        args.extend(source_dep_link_args(root, name, frozen)?);
+        args.extend(source_dep_link_args_using(root, name, frozen, &artifacts)?);
     }
     Ok(args)
 }

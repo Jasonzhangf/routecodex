@@ -50,7 +50,7 @@ All mutable V4 build products stay under `v4/`:
 | Root | Purpose |
 |---|---|
 | `v4/target` | Cargo workspace output |
-| `v4/build-control` | test consumers, external-dep scratch workspaces, Active index, isolation audit |
+| `v4/build-control` | test consumers, Active index, isolation audit |
 | `v4/generated` | deterministic generated outputs (AppSDK lifecycle) |
 | `v4/dist`, `v4/artifacts` | assembled binaries/packages |
 | `v4/active`, `v4/protected` | AppSDK lifecycle-managed surfaces |

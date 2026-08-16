@@ -6,6 +6,9 @@ members = [
   "crates/routecodex-v4-plugin-catalog",
   "crates/routecodex-v4-plugin-contract",
   "crates/routecodex-v4-plugin-plan",
+  "crates/routecodex-v4-plugin-manager",
+  "crates/routecodex-v4-runtime-inspector",
+  "crates/routecodex-v4-admin",
   "crates/routecodex-v4-skeleton",
 ]
 resolver = "2"

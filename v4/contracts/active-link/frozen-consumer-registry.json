@@ -38,77 +38,147 @@
       "status": "migrated",
       "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
     },
-  {
-   "consumer": "routecodex-v4-config",
-   "dependency": "routecodex-v4-edge",
-   "mode": "active_artifact",
-   "status": "migrated",
-   "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
-  },
-  {
-   "consumer": "routecodex-v4-debug",
-   "dependency": "routecodex-v4-base-node",
-   "mode": "active_artifact",
-   "status": "migrated",
-   "manifest_path": "crates/routecodex-v4-debug/Cargo.toml"
-  },
-  {
-   "consumer": "routecodex-v4-router",
-   "dependency": "routecodex-v4-base-node",
-   "mode": "active_artifact",
-   "status": "migrated",
-   "manifest_path": "crates/routecodex-v4-router/Cargo.toml"
-  },
-  {
-   "consumer": "routecodex-v4-provider",
-   "dependency": "routecodex-v4-base-node",
-   "mode": "active_artifact",
-   "status": "migrated",
-   "manifest_path": "crates/routecodex-v4-provider/Cargo.toml"
-  },
-  {
-   "consumer": "routecodex-v4-server",
-   "dependency": "routecodex-v4-base-node",
-   "mode": "active_artifact",
-   "status": "migrated",
-   "manifest_path": "crates/routecodex-v4-server/Cargo.toml"
-  },
-  {
-    "consumer": "routecodex-v4-plugin-plan",
-    "dependency": "routecodex-v4-plugin-contract",
-    "mode": "source_path",
-    "status": "transitional",
-    "manifest_path": "crates/routecodex-v4-plugin-plan/Cargo.toml"
-  },
-  {
-    "consumer": "routecodex-v4-plugin-catalog",
-    "dependency": "routecodex-v4-plugin-contract",
-    "mode": "source_path",
-    "status": "transitional",
-    "manifest_path": "crates/routecodex-v4-plugin-catalog/Cargo.toml"
-  },
-  {
-    "consumer": "routecodex-v4-cordis-bridge",
-    "dependency": "routecodex-v4-plugin-plan",
-    "mode": "source_path",
-    "status": "transitional",
-    "manifest_path": "crates/routecodex-v4-cordis-bridge/Cargo.toml"
-  },
-  {
-    "consumer": "routecodex-v4-cordis-bridge",
-    "dependency": "routecodex-v4-plugin-contract",
-    "mode": "source_path",
-    "status": "transitional",
-    "manifest_path": "crates/routecodex-v4-cordis-bridge/Cargo.toml"
-  },
-  {
-    "consumer": "routecodex-v4-runtime",
-    "dependency": "routecodex-v4-plugin-contract",
-    "mode": "source_path",
-    "status": "transitional",
-    "manifest_path": "crates/routecodex-v4-runtime/Cargo.toml"
-  }
- ],
+    {
+      "consumer": "routecodex-v4-config",
+      "dependency": "routecodex-v4-edge",
+      "mode": "active_artifact",
+      "status": "migrated",
+      "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-debug",
+      "dependency": "routecodex-v4-base-node",
+      "mode": "active_artifact",
+      "status": "migrated",
+      "manifest_path": "crates/routecodex-v4-debug/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-router",
+      "dependency": "routecodex-v4-base-node",
+      "mode": "active_artifact",
+      "status": "migrated",
+      "manifest_path": "crates/routecodex-v4-router/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-provider",
+      "dependency": "routecodex-v4-base-node",
+      "mode": "active_artifact",
+      "status": "migrated",
+      "manifest_path": "crates/routecodex-v4-provider/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-server",
+      "dependency": "routecodex-v4-base-node",
+      "mode": "active_artifact",
+      "status": "migrated",
+      "manifest_path": "crates/routecodex-v4-server/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-plugin-plan",
+      "dependency": "routecodex-v4-plugin-contract",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-plugin-plan/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-plugin-catalog",
+      "dependency": "routecodex-v4-plugin-contract",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-plugin-catalog/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-cordis-bridge",
+      "dependency": "routecodex-v4-plugin-plan",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-cordis-bridge/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-cordis-bridge",
+      "dependency": "routecodex-v4-plugin-contract",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-cordis-bridge/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime",
+      "dependency": "routecodex-v4-plugin-contract",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-runtime/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-plugin-manager",
+      "dependency": "routecodex-v4-plugin-catalog",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-plugin-manager/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-plugin-manager",
+      "dependency": "routecodex-v4-plugin-contract",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-plugin-manager/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-plugin-manager",
+      "dependency": "routecodex-v4-plugin-plan",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-plugin-manager/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime-inspector",
+      "dependency": "routecodex-v4-plugin-contract",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-runtime-inspector/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime-inspector",
+      "dependency": "routecodex-v4-plugin-manager",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-runtime-inspector/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime-inspector",
+      "dependency": "routecodex-v4-plugin-plan",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-runtime-inspector/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-admin",
+      "dependency": "routecodex-v4-plugin-contract",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-admin/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-admin",
+      "dependency": "routecodex-v4-plugin-manager",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-admin/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-admin",
+      "dependency": "routecodex-v4-plugin-plan",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-admin/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-admin",
+      "dependency": "routecodex-v4-runtime-inspector",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-admin/Cargo.toml"
+    }
+  ],
   "forbidden_path_roots": [
     "playground",
     "protected",

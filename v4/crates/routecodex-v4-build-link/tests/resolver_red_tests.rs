@@ -554,3 +554,40 @@ fn red_source_deps_rejects_invalid_name() {
         .expect_err("invalid crate name must fail");
     assert!(matches!(error, ActiveLinkError::IdentityMissing(_)));
 }
+
+#[test]
+fn red_source_deps_must_use_current_cargo_artifact_not_lexicographic_max() {
+    let root = v4_root();
+    let frozen = HashSet::new();
+    let args = source_dep_link_args(&root, "routecodex-v4-plugin-contract", &frozen)
+        .expect("workspace source dep must resolve against the current cargo graph");
+    let extern_index = args
+        .iter()
+        .position(|arg| arg == "--extern")
+        .expect("resolver must emit an --extern pair");
+    let selected = PathBuf::from(&args[extern_index + 1]);
+    let file = selected
+        .file_name()
+        .expect("resolved rlib file name")
+        .to_string_lossy()
+        .into_owned();
+    let deps_dir = root.join("target/release/deps");
+    let mut candidates: Vec<String> = fs::read_dir(&deps_dir)
+        .expect("deps dir must exist after the workspace build")
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            (name.starts_with("libroutecodex_v4_plugin_contract-") && name.ends_with(".rlib"))
+                .then_some(name)
+        })
+        .collect();
+    candidates.sort();
+    if let Some(max) = candidates.last() {
+        // With one candidate both rules agree; with stale artifacts the
+        // lexicographic maximum is exactly the buggy pick and must not win.
+        assert!(
+            candidates.len() == 1 || max != &file,
+            "resolver selected stale lexicographic max {max} instead of the cargo-current artifact {file}"
+        );
+    }
+}

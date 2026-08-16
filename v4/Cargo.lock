@@ -115,6 +115,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v4-admin"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-plugin-contract",
+ "routecodex-v4-plugin-manager",
+ "routecodex-v4-plugin-plan",
+ "routecodex-v4-runtime-inspector",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "routecodex-v4-base-node"
 version = "0.1.0"
 
@@ -159,6 +171,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v4-plugin-manager"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-plugin-catalog",
+ "routecodex-v4-plugin-contract",
+ "routecodex-v4-plugin-plan",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "routecodex-v4-plugin-plan"
 version = "0.1.0"
 dependencies = [
@@ -166,6 +191,17 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "routecodex-v4-runtime-inspector"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-plugin-contract",
+ "routecodex-v4-plugin-manager",
+ "routecodex-v4-plugin-plan",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
