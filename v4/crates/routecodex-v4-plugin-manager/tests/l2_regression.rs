@@ -23,6 +23,7 @@ use routecodex_v4_plugin_manager::{
     NullLifecyclePort, PluginCandidate, PluginManager,
 };
 use routecodex_v4_plugin_plan::{compile_node_plan, AuthoringPlugin, NodePluginPlan, PlanError};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -521,5 +522,208 @@ fn concurrent_publish_rejects_second_caller() {
             .count(),
         1,
         "active pointer updated exactly once"
+    );
+}
+
+/// Lifecycle port whose first mount panics while the publish gate and the
+/// interior lock are held, so the test can prove the manager recovers from a
+/// poisoned gate instead of permanently misreporting concurrent publish.
+#[derive(Clone)]
+struct PanicOncePort {
+    armed: Arc<AtomicBool>,
+    mounted: Arc<Mutex<Vec<String>>>,
+    disposed: Arc<Mutex<Vec<String>>>,
+}
+
+impl LifecyclePort for PanicOncePort {
+    fn mount_candidate(
+        &mut self,
+        node_id: &str,
+        _plan_hash: &str,
+        _graph_hash: &str,
+    ) -> Result<(), String> {
+        if self.armed.swap(false, Ordering::SeqCst) {
+            panic!("mid-mount panic while publish gate held");
+        }
+        self.mounted
+            .lock()
+            .expect("mounted lock")
+            .push(node_id.to_string());
+        Ok(())
+    }
+
+    fn drain(&mut self, _node_id: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn dispose(&mut self, node_id: &str) -> Result<(), String> {
+        self.disposed
+            .lock()
+            .expect("disposed lock")
+            .push(node_id.to_string());
+        Ok(())
+    }
+
+    fn mounted_node_ids(&self) -> Vec<String> {
+        self.mounted.lock().expect("mounted lock").clone()
+    }
+
+    fn rejected_node_ids(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+#[test]
+fn poisoned_publish_gate_recovers_and_is_not_misclassified() {
+    let port = PanicOncePort {
+        armed: Arc::new(AtomicBool::new(true)),
+        mounted: Arc::new(Mutex::new(Vec::new())),
+        disposed: Arc::new(Mutex::new(Vec::new())),
+    };
+    let watch = port.clone();
+    let plan = compile_plan("plugin-poison").expect("compile plan");
+    let hash = plan.hash.clone();
+    let manager = PluginManager::new("actor-poison", port);
+    manager
+        .create_candidate(
+            CandidateId("cand-poison".to_string()),
+            plan,
+            hash.clone(),
+            hash,
+            vec!["v4.request.inbound.normalized".to_string()],
+        )
+        .expect("create");
+    manager.compile("cand-poison").expect("compile");
+    manager.validate("cand-poison").expect("validate");
+    manager.mark_smoke_passed("cand-poison").expect("smoke");
+
+    // Precondition: a panic while mount is running poisons both locks.
+    let panic_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        manager.publish("cand-poison", None)
+    }));
+    assert!(
+        panic_outcome.is_err(),
+        "mid-publish panic must poison the publish gate"
+    );
+
+    // Negative: the panic must not leave partial mounts or a flipped active
+    // pointer, and the next publish must not be misreported as ConcurrentPublish.
+    assert!(
+        watch.mounted.lock().expect("mounted lock").is_empty(),
+        "no mount may survive a mid-mount panic"
+    );
+    assert!(watch.disposed.lock().expect("disposed lock").is_empty());
+    assert!(
+        manager.active().is_none(),
+        "active pointer must not flip on a mid-publish panic"
+    );
+    assert!(matches!(
+        manager.candidate("cand-poison").expect("present").state,
+        CandidateState::SmokePassed
+    ));
+
+    // Positive: the poisoned gate recovers (into_inner) and publish succeeds;
+    // it is neither ConcurrentPublish nor permanently blocked.
+    match manager.publish("cand-poison", None) {
+        Ok(_) => {}
+        Err(err) => panic!("poisoned gate must recover, got {err:?}"),
+    }
+    assert_eq!(
+        manager.active().expect("active").candidate_id.as_str(),
+        "cand-poison"
+    );
+    assert!(matches!(
+        manager.candidate("cand-poison").expect("present").state,
+        CandidateState::Published
+    ));
+    assert_eq!(
+        watch.mounted.lock().expect("mounted lock").clone(),
+        vec!["v4.request.inbound.normalized".to_string()]
+    );
+    assert!(watch.disposed.lock().expect("disposed lock").is_empty());
+    assert_eq!(
+        manager
+            .audit()
+            .iter()
+            .filter(|r| matches!(r.action, AuditAction::Published))
+            .count(),
+        1,
+        "exactly one Published audit record after recovery"
+    );
+}
+
+#[test]
+fn manager_view_is_atomic_across_concurrent_publish() {
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let port = BlockingPort {
+        mounted: Arc::new(Mutex::new(Vec::new())),
+        release: Arc::new(Mutex::new(Some(release_rx))),
+    };
+    let watch = port.clone();
+    let plan = compile_plan("plugin-view").expect("compile plan");
+    let hash = plan.hash.clone();
+    let manager = Arc::new(PluginManager::new("actor-view", port));
+    manager
+        .create_candidate(
+            CandidateId("cand-view".to_string()),
+            plan,
+            hash.clone(),
+            hash,
+            vec!["v4.request.inbound.normalized".to_string()],
+        )
+        .expect("create");
+    manager.compile("cand-view").expect("compile");
+    manager.validate("cand-view").expect("validate");
+    manager.mark_smoke_passed("cand-view").expect("smoke");
+
+    let first = manager.clone();
+    let first_thread = thread::spawn(move || first.publish("cand-view", None));
+
+    let mut mounted = false;
+    for _ in 0..200 {
+        if !watch.mounted.lock().expect("mounted lock").is_empty() {
+            mounted = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        mounted,
+        "publish must hold the interior lock inside mount before view is read"
+    );
+
+    let (done_tx, done_rx) = mpsc::channel::<()>();
+    let second = manager.clone();
+    let view_thread = thread::spawn(move || {
+        let view = second.view();
+        done_tx.send(()).expect("send view");
+        view
+    });
+
+    // Negative: a view issued while publish is mid-mount must not return a
+    // torn snapshot; it waits for the single interior lock.
+    assert!(
+        done_rx.recv_timeout(Duration::from_millis(250)).is_err(),
+        "view must not observe mid-publish state"
+    );
+
+    let _ = release_tx.send(());
+    let first_result = first_thread.join().expect("first publish thread");
+    assert!(matches!(first_result, Ok(_)));
+
+    // Positive: after the transition the single-lock view is complete and
+    // internally consistent: active matches the published candidate, the
+    // candidate state and mount facts agree.
+    let view = view_thread.join().expect("view thread");
+    let active = view.active.expect("active present after publish");
+    assert_eq!(active.candidate_id.as_str(), "cand-view");
+    assert_eq!(active.hash, view.candidates[0].hash());
+    assert!(matches!(
+        view.candidates[0].state,
+        CandidateState::Published
+    ));
+    assert_eq!(
+        view.mounted_node_ids,
+        vec!["v4.request.inbound.normalized".to_string()]
     );
 }
