@@ -107,7 +107,7 @@ semantic_registry:
       gemini: unmapped
   - semantic_id: request.reasoning_effort
     chat_storage: reasoning_effort
-    type: qualitative_enum
+    type: non_empty_qualitative_string_forward_compatible
     projections:
       responses: reasoning.effort
       openai_chat: reasoning_effort

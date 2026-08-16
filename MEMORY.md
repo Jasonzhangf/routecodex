@@ -5556,3 +5556,14 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
   修复叙述 prose 先剥离），node --check + test-dsh-mcp + 4 个历史 final
   回归（r2 PASS→pass、genuine FAIL→fail、P0/P1 none→pass、r1 FAIL→fail）
   通过。该工具修复在仓库外，不入 repo commit。
+# 2026-08-16 V3 Responses reasoning.effort forward-compatibility rule
+- A non-empty `reasoning.effort` string unknown to the current RouteCodex enum is not
+  automatically malformed client input. Req02 must preserve it as payload semantics,
+  and same-protocol Responses outbound must project it exactly. Only JSON type and
+  empty-string shape are rejected at inbound.
+- Cross-protocol target codecs still own exact domain intersections and must fail/reselect
+  through typed policy when no lossless mapping exists; never strip, approximate, invent
+  a replacement effort, or move the value into MetadataCenter.
+- Acceptance for this class is successful exact-sample replay. Merely changing an internal
+  500 to a client 400 does not solve the request failure.
+Tags: #v3 #responses #reasoning-effort #forward-compatibility #no-cleanup

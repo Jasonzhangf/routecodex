@@ -2288,7 +2288,9 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
@@ -2341,6 +2343,8 @@ features:
   - project_v3_anthropic_message_as_responses_response_with_context
   - responses_openai_chat_field_parity_request_matrix
   - responses_openai_chat_field_parity_response_matrix
+  - responses_reasoning_effort_preserves_unknown_non_empty_value_for_forward_compatibility
+  - openai_responses_wire_preserves_unknown_non_empty_reasoning_effort
   - responses_relay_reasoning_effort_projects_anthropic_output_config_effort
   - responses_relay_reasoning_summary_policy_is_consumed_before_anthropic_wire
   - anthropic_wire_consumes_reasoning_summary_policy_as_local_response_hint
@@ -2358,8 +2362,10 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
@@ -2377,6 +2383,7 @@ features:
   - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
   - docs/goals/v3-protocol-conversion-field-parity-test-design.md
   - docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md
+  - docs/goals/v3-responses-invalid-input-error-projection-test-design.md
   - docs/design/v3-protocol-request-field-projection.md
   - docs/architecture/manifests/v3.protocol_request_field_projection.yml
   - docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml
@@ -2633,7 +2640,6 @@ features:
   - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
   - docs/goals/v3-openai-chat-sse-reused-tool-index-test-design.md
   - docs/goals/v3-5520-duplicate-response-tool-identity-not-rerouted-test-design.md
-  - docs/goals/v3-responses-invalid-input-error-projection-test-design.md
   - v3/crates/routecodex-v3-config/src/v2_compat.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
@@ -2698,8 +2704,6 @@ features:
   - provider_response_hook_failure
   - build_v3_relay_provider_error_05_decision
   - build_v3_error_01_source_raised_external
-  - project_v3_responses_relay_runtime_failure
-  - responses_relay_runtime::responses_relay_runtime_tests_extra::inbound_canonical_validation_failure_projects_client_invalid_request
   - responses_relay_runtime::provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate
   - build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events
   - collect_openai_chat_stream_event
@@ -2733,9 +2737,6 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
@@ -2753,7 +2754,6 @@ features:
   - docs/goals/v3-hub-relay-runtime-closeout-plan.md
   - docs/goals/v3-openai-chat-sse-reused-tool-index-test-design.md
   - docs/goals/v3-5520-duplicate-response-tool-identity-not-rerouted-test-design.md
-  - docs/goals/v3-responses-invalid-input-error-projection-test-design.md
   - docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
   - docs/architecture/manifests/v3.responses_provider_event_terminal_merge.mainline.yml
   - docs/architecture/v3-function-map.yml

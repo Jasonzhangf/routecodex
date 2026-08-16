@@ -33,9 +33,10 @@ modules:
     owned_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
     allowed_operations:
       - decode Responses wire into Chat canonical and registered payload extensions
-      - validate source protocol field types and value domains
+      - validate source protocol field types while preserving non-empty forward-compatible effort values
     forbidden_operations:
       - read or write MetadataCenter
       - encode Anthropic or Gemini wire
@@ -47,6 +48,7 @@ modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
     allowed_operations:
       - validate target field domain
       - project Chat semantics to OpenAI Chat or Responses wire

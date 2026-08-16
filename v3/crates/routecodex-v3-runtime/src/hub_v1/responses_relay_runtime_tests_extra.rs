@@ -71,41 +71,6 @@ fn non_target_runtime_failure_remains_runtime_error() {
 }
 
 #[test]
-fn inbound_canonical_validation_failure_projects_client_invalid_request() {
-    let output = project_v3_responses_relay_runtime_failure(
-        V3ResponsesRelayRuntimeError::InboundCanonical(
-            "Responses inbound canonicalization failed: Responses reasoning.effort has an invalid value"
-                .to_string(),
-        ),
-    );
-
-    assert_eq!(output.status, 400);
-    let body = match &output.client_body {
-        V3ResponsesRelayClientBody::Json(body) => body,
-        V3ResponsesRelayClientBody::Sse(_) => {
-            panic!("pre-transport invalid request must project as JSON")
-        }
-    };
-    assert_eq!(body["error"]["code"], "invalid_responses_request");
-    assert_eq!(
-        body["error"]["message"],
-        "V3 Responses Relay inbound canonicalization failed: Responses inbound canonicalization failed: Responses reasoning.effort has an invalid value"
-    );
-    assert!(
-        body["error"].get("class").is_none()
-            && body["error"].get("stage").is_none()
-            && body["error"].get("decision").is_none()
-            && body["error"].get("error_node").is_none(),
-        "Error06 client body must not expose control-plane fields: {body}"
-    );
-    assert_eq!(
-        output.error_chain.as_deref(),
-        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
-    );
-    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
-}
-
-#[test]
 fn provider_failure_output_projects_error_chain_body_without_success_wrapping() {
     let terminal_projection = V3ErrorHandlingCenter::project_terminal_decision(
         V3ErrorHandlingCenter::decide_provider(

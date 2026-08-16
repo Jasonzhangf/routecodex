@@ -251,21 +251,6 @@ pub fn project_v3_responses_relay_runtime_failure(
     error: V3ResponsesRelayRuntimeError,
 ) -> V3ResponsesRelayRuntimeOutput {
     match error {
-        V3ResponsesRelayRuntimeError::InboundCanonical(message) => {
-            let source = build_v3_error_01_source_raised(
-                V3ErrorSourceKind::InvalidRequest,
-                "V3HubReqInbound02Normalized",
-                "invalid_responses_request",
-                V3ResponsesRelayRuntimeError::InboundCanonical(message).to_string(),
-            );
-            let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-                source: source.clone(),
-                action_scope: V3ErrorActionScope::None,
-                candidates_remaining: 0,
-                source_status: None,
-            });
-            error_output(source, projected.status, "none", Vec::new(), None, 0)
-        }
         V3ResponsesRelayRuntimeError::ModelNotFound(message) => {
             let source = build_v3_error_01_source_raised(
                 V3ErrorSourceKind::ModelNotFound,

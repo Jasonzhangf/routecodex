@@ -35642,23 +35642,16 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 在线真实 replay（0.90.4563，全部 HTTP 200 + 终态 + usage）：5555/5520/10000 `/v1/responses`、10000 `/v1/chat/completions`（usage 进 final chunk + `[DONE]`）、10000 `/v1/messages`（message_delta usage + message_stop）；证据 `/private/tmp/replay_4563_*.sse`；日志无 V3E3/502。
 - DSH review r2（commit=8a76cbc83 base=486d68f68，opencode-go/deepseek-v4-flash）`VERDICT: PASS`，recommendation=deliver；3 条非阻塞 P2：① `_sse.rs` 未列 v3-function-map allowed_paths（doc-lockstep 漂移）；② incomplete reason allowlist 窄（goal-locked fail-fast 取舍）；③ health.rs 测试改写与 SSE 设计 forbidden_paths 范围（对齐 486d68f68 provider-key 跨 session 语义）。
 - 注：HEAD 之上 v4 worker 已提交 `044767d2d`（relay/continuation slice，纯 v4，不影响 V3 SSE 交付）；交付 commit 只含版本 bump + note/MEMORY。
-# 2026-08-16 V3 invalid Responses input projected as HTTP 500
+# 2026-08-16 V3 Responses reasoning effort forward compatibility
+- Jason corrected the acceptance signal: changing the exact sample from HTTP 500 to
+  HTTP 400 is not a fix; the request must continue successfully.
 - Exact sample `openai-responses-router-deepseek-v4-flash-20260816T000815469-817406-202`
-  sent `reasoning.effort=definitely_invalid`. Req02 correctly rejected it, but
-  `project_v3_responses_relay_runtime_failure` collapsed `InboundCanonical` into generic
-  RuntimeFailure, producing HTTP 500 `responses_relay_runtime_error`.
-- Unique fix point: the Responses Relay runtime-to-Error01 adapter now maps only the typed
-  `InboundCanonical` variant to `InvalidRequest` at `V3HubReqInbound02Normalized`, code
-  `invalid_responses_request`; validation remains fail-fast and payload stays unchanged.
-- Red/green: focused test reproduced 500 vs expected 400, then passed. Negative control keeps
-  `StaticRegistry` at HTTP 500. Runtime lib 461/461 and Relay closeout 26/26 pass.
-- Architecture/maps updated for Req02 -> Error01 failure edge and generated caller-flow sync.
-- Independent baseline gaps: Hub Relay red-fixture harness references removed
-  `responses_relay_json_hooks.rs`; repository-wide cargo fmt has unrelated pre-existing drift.
-## 2026-08-16 — V3 Responses invalid reasoning effort projection
-
-- Exact captured request `openai-responses-router-deepseek-v4-flash-20260816T000815469-817406-202` contains `reasoning.effort: definitely_invalid`; inbound codec correctly rejects it.
-- First incorrect divergence was Error-chain projection: `InboundCanonical` was collapsed into `RuntimeFailure`, yielding HTTP 500 `responses_relay_runtime_error`.
-- Owning fix keeps validation fail-fast and maps that typed inbound failure to `InvalidRequest` at `V3HubReqInbound02Normalized`, HTTP 400 `invalid_responses_request`; payload is neither cleaned nor rewritten.
-- Red/green test, negative control, runtime tests, relay-closeout tests, architecture gates, full build, and global install passed. Installed candidate is `rccv3 0.90.4567`, SHA-256 `2167c25e99e5cd0a94e7b6543b18cd6dc97e06a30429f5ff1ab40bcf872eda32`.
-- Known unrelated baseline gaps: the red-fixture harness references retired `responses_relay_json_hooks.rs`; repository-wide rustfmt has pre-existing drift. Focused modified-file rustfmt passed.
+  sent the non-empty string `reasoning.effort=definitely_invalid`.
+- Verified first divergence: Req02 used a closed known-value enum before routing. This
+  wrongly treated a forward-compatible payload value as malformed protocol data.
+- Correct owner is `v3.protocol_conversion_field_parity`, not Relay Error06. Req02 now
+  validates string shape and preserves unknown non-empty values; same-protocol Responses
+  outbound projects the exact canonical value. Anthropic/Gemini keep their explicit
+  target-domain intersection checks, with no cleanup, approximation, or MetadataCenter use.
+- Red tests locked inbound and same-protocol outbound rejection before the owner fix;
+  reverse tests keep non-string and empty values fail-fast.

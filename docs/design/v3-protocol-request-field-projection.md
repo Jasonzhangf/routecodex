@@ -240,6 +240,14 @@ reused to reconstruct a request `reasoning.summary` policy.
 | Anthropic Messages | `output_config.effort` | `low`, `medium`, `high`, `xhigh`, `max`; model support varies. |
 | Gemini GenerateContent | `generationConfig.thinkingConfig.thinkingLevel` | `MINIMAL`, `LOW`, `MEDIUM`, `HIGH`; supported levels vary by model. |
 
+OpenAI effort values are forward-compatible protocol data. Req02 validates that
+`reasoning.effort` is a non-empty string but does not close the domain to the values
+known on the verification date. An unknown value remains unchanged through Chat
+canonical storage and same-protocol Responses wire projection. Cross-protocol target
+codecs still require their explicitly registered value-domain intersection and must
+fail or reselect through the normal provider policy when no exact projection exists;
+they must not delete, approximate, or replace the client value.
+
 Projection is exact only for the concrete intersection:
 
 - OpenAI to Anthropic: `low`, `medium`, `high`, `xhigh`, `max`.

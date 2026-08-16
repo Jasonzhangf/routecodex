@@ -1,68 +1,63 @@
-# V3 Responses Invalid Input Error Projection Test Design
+# V3 Responses Reasoning Effort Forward-Compatibility Test Design
 
-Design ID: `V3-RESPONSES-INVALID-INPUT-ERROR-PROJECTION-20260816`
+Design ID: `V3-RESPONSES-REASONING-EFFORT-FORWARD-COMPAT-20260816`
 
 ## Goal
 
-When `/v1/responses` Relay Req02 rejects malformed client protocol data, preserve the
-fail-fast validation and project a typed client invalid-request response. Do not classify
-the client defect as an internal Relay runtime failure.
+`/v1/responses` must not fail merely because `reasoning.effort` is a non-empty
+string newer than the values known to RouteCodex. Preserve the client value through
+Req02 Chat canonical storage and same-protocol Responses provider wire. Do not delete,
+replace, approximate, or move the payload field into MetadataCenter.
 
 ## Baseline and first divergence
 
 - Exact sample: `openai-responses-router-deepseek-v4-flash-20260816T000815469-817406-202`.
-- Input fact: `reasoning.effort = "definitely_invalid"`.
-- Req02 validator correctly rejects the value.
-- First divergence: `project_v3_responses_relay_runtime_failure` maps
-  `V3ResponsesRelayRuntimeError::InboundCanonical` into generic
-  `V3ErrorSourceKind::RuntimeFailure`, HTTP 500, code `responses_relay_runtime_error`.
+- Input: `reasoning.effort = "definitely_invalid"`.
+- First divergence: `project_responses_reasoning_to_chat_fields` used a closed enum
+  allowlist at Req02 and rejected the request before target selection or transport.
+- Secondary same-protocol divergence: Responses outbound used the same closed enum and
+  would reject the preserved canonical value before provider wire construction.
 
-## Module and owner boundary
+## Owner and boundary
 
-- Feature owner: `v3.hub_relay_runtime_closeout`.
-- Request validator owner: `V3HubReqInbound02Normalized` / `responses_openai_codec.rs`.
-- Error truth owner: `routecodex-v3-error` Error01-06 chain.
-- Runtime adapter owner: `project_v3_responses_relay_runtime_failure` in
-  `responses_relay_dry_run.rs`.
-- Allowed change: classify only the existing typed `InboundCanonical` error before
-  entering Error01; keep the validator and payload unchanged.
-- Forbidden: accept/strip the invalid value, mutate request payload, add handler/SSE
-  compensation, reroute providers, or turn any unrelated Runtime error into HTTP 400.
+- Feature owner: `v3.protocol_conversion_field_parity`.
+- Inbound owner: `responses_openai_codec.rs` at `V3HubReqInbound02Normalized`.
+- Same-protocol outbound owner: `request_outbound_format.rs` at
+  `V3ProviderReqOutbound08WirePayload`.
+- Allowed: validate type/non-empty shape; preserve the normalized string in the payload
+  data plane; enforce explicit target-domain intersections in Anthropic/Gemini codecs.
+- Forbidden: request cleanup, silent strip, invented replacement effort, handler/SSE
+  compensation, MetadataCenter mirroring, or provider-specific logic in Hub/VR.
 
-## Lifecycle contract
+## Lifecycle
 
 ```text
-V3HubReqInbound01ClientRaw
-  -> V3HubReqInbound02Normalized validates Responses schema
-  -> invalid input: V3ResponsesRelayRuntimeError::InboundCanonical
-  -> V3Error01SourceRaised(kind=InvalidRequest, stage=V3HubReqInbound02Normalized)
-  -> V3Error02..06
-  -> client HTTP 400 invalid_request
+Responses reasoning.effort(non-empty string)
+  -> Req02 reasoning_effort payload semantic
+  -> Req03..Req07 unchanged governance
+  -> Responses target: reasoning.effort exact projection
+  -> provider transport
 ```
 
-Valid input continues through Req03-Req09. Non-input runtime failures remain HTTP 500.
+For a cross-protocol target lacking an exact effort-domain mapping, its owning outbound
+codec remains fail-fast and the existing typed provider policy decides reselection.
 
-## Whitebox tests
+## Tests
 
-- Negative/client-invalid: `InboundCanonical` projects HTTP 400 and a stable
-  `invalid_responses_request` code through Error01-06.
-- Positive/unrelated-runtime: `StaticRegistry` remains HTTP 500
-  `responses_relay_runtime_error`.
-- Payload/control boundary: client body contains only client error code/message; no
-  class, stage, decision, node, candidate, or error-chain control fields.
-
-## Blackbox tests
-
-- Client-facing: exact old sample returns HTTP 400, not 500.
-- Provider-facing: invalid input stops before target/provider send.
-- Positive live control: a valid `/v1/responses` request still reaches provider and
-  returns its normal terminal response.
+- Red/green inbound: unknown non-empty effort previously fails, then survives Req02.
+- Red/green outbound: unknown canonical effort previously fails, then reaches
+  same-protocol Responses `reasoning.effort` exactly.
+- Reverse: null, non-string, and empty/whitespace-only effort still fail Req02.
+- Cross-protocol reverse: Anthropic/Gemini retain their explicit intersection checks;
+  no value is approximated or dropped.
+- Live old sample: exact captured request must return a successful terminal response,
+  not HTTP 500 or 400.
+- Live positive control: registered `medium` effort remains HTTP 200 terminal.
 
 ## Required gates
 
-- Focused red/green runtime unit test.
-- V3 Hub Relay runtime closeout gate and red fixtures.
-- V3 architecture/resource/module/Rust-only/fmt gates.
-- V3 build, global install, one aggregate `routecodex restart`, all configured port
-  health checks, exact old-sample replay, and valid same-entry live replay.
-- DSH Review after unchanged-source live verification.
+- Focused red/green/reverse tests.
+- `test:v3-protocol-conversion-field-parity` plus verifier/red fixtures.
+- Module, Rust-only, architecture, resource, function-map, fmt, and diff gates.
+- Full build, global install, one aggregate `routecodex restart`, all configured health
+  endpoints, exact old-sample replay, valid same-entry replay, then DSH Review.

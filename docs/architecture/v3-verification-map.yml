@@ -1940,6 +1940,7 @@ features:
   design:
   - docs/goals/v3-protocol-conversion-field-parity-test-design.md
   - docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md
+  - docs/goals/v3-responses-invalid-input-error-projection-test-design.md
   - docs/architecture/reviews/v3-protocol-semantic-matrix-review.md
   - docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml
   - docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html
@@ -1961,6 +1962,9 @@ features:
     Process and none is compressed to effort.
   - Responses reasoning.effort reaches Anthropic `output_config.effort` only for the exact shared value domain; none/minimal fail explicitly and no effort value invents
     `thinking.budget_tokens`.
+  - Responses reasoning.effort accepts every non-empty string at Req02 and preserves
+    unknown values through same-protocol Responses projection; target-specific codecs
+    continue to enforce only exact registered cross-protocol intersections.
   - Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions and round-trip to Responses; OpenAI Chat and Gemini reject
     them when the target has no equivalent request policy, while Anthropic consumes
     a valid summary policy only as a registered local response-shaping hint with no
@@ -2036,6 +2040,8 @@ features:
   - anthropic_wire_consumes_reasoning_summary_policy_as_local_response_hint
   - anthropic_projection_context_consumes_reasoning_summary_policy_for_response_shape
   - openai_chat_wire_rejects_invalid_reasoning_summary_policy
+  - responses_reasoning_effort_preserves_unknown_non_empty_value_for_forward_compatibility
+  - openai_responses_wire_preserves_unknown_non_empty_reasoning_effort
   - Live V3 0.90.4017 request `openai-responses-router-gpt-5.5-20260801T215453223-700406-1956`
     entered on 5520, targeted `modrouter_anthropic[key2].claude-fable-5`, and returned
     HTTP 200 `requires_action` after the complete typed node chain.
@@ -2046,6 +2052,8 @@ features:
   - npm run test:v3-protocol-conversion-field-parity
   - npm run verify:v3-protocol-conversion-field-parity
   - npm run test:v3-protocol-conversion-field-parity-red-fixtures
+  - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime responses_reasoning_effort_preserves_unknown_non_empty_value_for_forward_compatibility --lib
+  - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime openai_responses_wire_preserves_unknown_non_empty_reasoning_effort --lib
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-rust-only
   - npm run verify:v3-architecture-docs
@@ -2190,7 +2198,6 @@ features:
   - docs/design/v3-hub-relay-fixed-pipeline-contract.md
   - docs/goals/v3-openai-chat-sse-reused-tool-index-test-design.md
   - docs/goals/v3-5520-duplicate-response-tool-identity-not-rerouted-test-design.md
-  - docs/goals/v3-responses-invalid-input-error-projection-test-design.md
   contract:
   - docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
   - docs/architecture/manifests/v3.responses_provider_event_terminal_merge.mainline.yml
@@ -2222,7 +2229,6 @@ features:
     SSE even if provider raw body is JSON, and client `stream=false` remains JSON
     even if a controlled provider raw body is SSE
   - provider error enters Error01-06 without Resp01 success projection
-  - Req02 malformed Responses client fields enter Error01-06 as InvalidRequest with HTTP 400 while unrelated Relay runtime failures remain HTTP 500
   - provider raw response decode/protocol errors enter the same provider failure policy
     and reselect before Error06 while alternatives remain
   - Anthropic provider SSE terminal `message_stop` closes open text/thinking/reasoning
@@ -2253,7 +2259,6 @@ features:
   required_gates:
   - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime
     terminal_merge --lib -- --nocapture
-  - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime inbound_canonical_validation_failure_projects_client_invalid_request --lib -- --nocapture
   - npm run test:v3-5520-duplicate-tool-identity
   - npm run test:v3-hub-relay-runtime-closeout
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime
