@@ -276,6 +276,9 @@ verification:
     V1 endpoint bindings and server execution declarations, Jason-defined 5555 route
     ordering, provider type mapping, local token_file handle materialization, and
     secret-free manifest debug output.
+  - Provider auth key-file coverage locks single-key and list expansion into ordered
+    secret_file + secret_key handles, rejects malformed/duplicate/empty keys and mixed
+    explicit authoring, and proves no secret value is materialized in manifest entries.
   - Transport-bound V2 provider responses contract locks WebSocket v2 projection plus
     negative HTTP-only remote_continuation and missing websocket_v2_url cases.
   - Live closure still requires global install, V3 managed restart on 5555, health,
