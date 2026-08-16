@@ -35642,3 +35642,9 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 在线真实 replay（0.90.4563，全部 HTTP 200 + 终态 + usage）：5555/5520/10000 `/v1/responses`、10000 `/v1/chat/completions`（usage 进 final chunk + `[DONE]`）、10000 `/v1/messages`（message_delta usage + message_stop）；证据 `/private/tmp/replay_4563_*.sse`；日志无 V3E3/502。
 - DSH review r2（commit=8a76cbc83 base=486d68f68，opencode-go/deepseek-v4-flash）`VERDICT: PASS`，recommendation=deliver；3 条非阻塞 P2：① `_sse.rs` 未列 v3-function-map allowed_paths（doc-lockstep 漂移）；② incomplete reason allowlist 窄（goal-locked fail-fast 取舍）；③ health.rs 测试改写与 SSE 设计 forbidden_paths 范围（对齐 486d68f68 provider-key 跨 session 语义）。
 - 注：HEAD 之上 v4 worker 已提交 `044767d2d`（relay/continuation slice，纯 v4，不影响 V3 SSE 交付）；交付 commit 只含版本 bump + note/MEMORY。
+
+# 2026-08-16 AppSDK 0.1.3 dependent migration：Active 历史版本选择阻塞
+- 隔离分支 `codex/v4-appsdk-0.1.3-migration` 已完成 base-node `active-v2`，以及 edge `active-v4`、control `active-v3`、error `active-v4` 的 0.1.3 review/effectiveness/freeze/publish；模块回归分别 12/12、15/15、15/15、23/23。
+- 全项目重放仍在 `routecodex-v4-config` 构建时 fail closed：`ActiveLinkErr10StaleOrMissingRecord`。当前 base-node `active-v2` 单独 resolve 成功，edge `active-v4` 的 dependency hash 也明确为 base-node `active-v2` 的 `16b93c...`，但递归解析先进入 `active-v1` 并用当前 freeze record 校验，得到旧 artifact `036daf...` 与当前 record `16b93c...` 不一致。
+- 唯一首次偏离：`v4/crates/routecodex-v4-build-link/src/resolver.rs::find_dependency_version` 先对所有历史版本执行 `resolve_inner`，之后才比较 `artifact_hash`；排序从 `active-v1` 开始，因此一个不匹配且历史 record 已归档的版本会阻断目标版本选择。
+- 候选设计 `V4-ACTIVE-RESOLVE-PREFILTER-001`：版本选择先只读 candidate `artifact.json` 的 recorded artifact hash，跳过不匹配版本；只对 hash 匹配的唯一候选执行完整 `resolve_inner` 和 record/dependency/rustc 校验。正测锁 current dependency 能越过历史版本；反测锁匹配版本 record stale、hash 无匹配、重复 hash/歧义仍 fail closed。未获 Jason 明确批准前不改 runtime 源码。
