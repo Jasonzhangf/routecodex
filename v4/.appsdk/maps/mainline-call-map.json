@@ -42,6 +42,14 @@
     {"from":"V4ReqInbound01Raw","to":"V4ReqProcess02","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"information_flow","resource":"v4.request.normal_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
     {"from":"V4ReqProcess02","to":"V4ReqOutbound03","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"information_flow","resource":"v4.request.provider_wire_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
     {"from":"V4RespInbound01Raw","to":"V4RespProcess02","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"information_flow","resource":"v4.response.normal_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
-    {"from":"V4RespProcess02","to":"V4ClientProjection03","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"information_flow","resource":"v4.response.client_wire_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"}
+    {"from":"V4RespProcess02","to":"V4ClientProjection03","owner":"routecodex-v4-runtime::SkeletonRuntime","edge_type":"information_flow","resource":"v4.response.client_wire_payload","path":"crates/routecodex-v4-runtime/src/lib.rs","status":"active"},
+    {"from":"root_v4_dispatcher","to":"v4_build_verify_ci","owner":"appsdk::build_domain","edge_type":"dispatch","path":"../package.json,.github/workflows/test.yml","status":"active"},
+    {"from":"v4_build_verify_ci","to":"v4_build_verify_positive","owner":"appsdk::build_domain","edge_type":"verification_owner","path":"scripts/verify-ci.mjs","status":"active"},
+    {"from":"v4_build_verify_ci","to":"v4_build_verify_red","owner":"appsdk::build_domain","edge_type":"verification_owner","path":"scripts/verify-ci.mjs","status":"active"},
+    {"from":"v4_build_verify_positive","to":"v4_build_verify_isolation","owner":"appsdk::build_domain","edge_type":"verification_owner","path":"scripts/verify.mjs","status":"active"},
+    {"from":"v4_build_verify_positive","to":"routecodex-v4-governance","owner":"appsdk::build_domain","edge_type":"verification_owner","path":"scripts/verify.mjs","status":"active"},
+    {"from":"v4_build_verify_positive","to":"routecodex-v4-build-link","owner":"appsdk::build_domain","edge_type":"verification_owner","path":"scripts/verify.mjs","status":"active"},
+    {"from":"routecodex-v4-build-link","to":"v4.build.active_artifact_index","owner":"routecodex-v4-build-link","edge_type":"artifact_link","path":"build-control/active-index.json","status":"active"},
+    {"from":"routecodex-v4-build-link","to":"v4.build.architecture_gates","owner":"appsdk::build_domain","edge_type":"verification_input","path":"scripts/architecture/**","status":"active"}
   ]
 }

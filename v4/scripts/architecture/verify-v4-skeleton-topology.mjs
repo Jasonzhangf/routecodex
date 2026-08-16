@@ -13,8 +13,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const failures = [];
 
 const readJson = (file) => {
@@ -26,7 +27,7 @@ const readJson = (file) => {
   }
 };
 
-const plan = readJson('v4/contracts/skeleton-plan.contract.json');
+const plan = readJson('contracts/skeleton-plan.contract.json');
 if (!plan) {
   console.error('[v4_parity_gate_skeleton_topology] FAIL');
   console.error(failures.join('\n'));

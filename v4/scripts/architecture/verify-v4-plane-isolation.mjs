@@ -13,8 +13,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
+import { fileURLToPath } from 'node:url';
 
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const failures = [];
 
 const readYaml = (file) => {
@@ -26,7 +27,7 @@ const readYaml = (file) => {
   }
 };
 
-const resourceMap = readYaml('v4/docs/architecture/v4-resource-operation-map.yml');
+const resourceMap = readYaml('docs/architecture/v4-resource-operation-map.yml');
 if (!resourceMap) process.exit(1);
 
 const byId = new Map((resourceMap.resources ?? []).map((resource) => [resource.resource_id, resource]));
