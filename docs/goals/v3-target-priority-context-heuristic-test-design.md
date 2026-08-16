@@ -5,7 +5,7 @@
 - Owner feature: `v3.virtual_router_target_interpreter`.
 - Owner function: `V3TargetInterpreter::select_available` in `v3/crates/routecodex-v3-target/src/lib.rs`.
 - Route order from `V3Router07OpaqueTargetHitOnce -> V3Target09CandidateSetExpanded` remains the configured priority truth among candidates in the same context-admission class.
-- Target10 compares the request's RCC-owned `request_input_tokens` with each candidate's `max_context_tokens`; it never reconstructs token counts from provider errors or payload metadata.
+- Target10 applies each model's validated `context_token_estimate_scale_bps` (default `10000`, never below `10000`) to the RCC-owned `request_input_tokens`, then compares that candidate-local estimate with `max_context_tokens`; it never reconstructs token counts from provider errors or payload metadata.
 - Context admission has exactly three classes: below 90% keeps configured priority, 90% through 100% remains eligible but is ordered after every below-90% candidate, and above 100% is filtered before provider transport.
 - A missing `max_context_tokens` remains eligible in the normal class. Genuine `web_search/search` and `multimodal/vision` capability mismatch remains an independent hard filter.
 - After context and capability admission, Provider availability/health and request-local provider-failure exclusion remain explicit switch inputs. No provider-specific branch, payload mutation, or Error/SSE compensation is allowed.
@@ -15,6 +15,7 @@
 1. Build a priority pool with `short` first and `long` second; both candidates satisfy the request capability contract.
 2. Positive normal: below 90% of `short`, Target10 selects `short` by configured priority.
 3. Positive near-limit: from 90% through 100% of `short`, Target10 keeps `short` eligible but selects normal-class `long` first.
+4. Positive tokenizer calibration: a configured `17000` basis-point scale turns `2400` RCC tokens into `4080` candidate tokens and filters a `4000`-token model before transport.
 4. Positive retained boundary: at exactly 100%, if normal-class alternatives are unavailable, Target10 may still select `short`.
 5. Negative oversized: above 100%, Target10 filters `short`; it cannot be revived by provider health or default-floor behavior.
 6. Negative all oversized: when every declared candidate is oversized, Target10 exhausts before provider transport and reports each context admission rejection.

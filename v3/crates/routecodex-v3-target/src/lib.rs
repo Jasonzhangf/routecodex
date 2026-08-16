@@ -28,6 +28,7 @@ pub struct V3TargetCandidate {
     pub model_capabilities: Vec<String>,
     pub web_search_execution_mode: V3WebSearchExecutionMode,
     pub max_context_tokens: Option<u64>,
+    pub context_token_estimate_scale_bps: u64,
     pub base_url: String,
     pub responses_process: Option<String>,
     pub responses_transport: V3ResponsesTransportKind,
@@ -118,7 +119,10 @@ struct V3TargetExpansionScope {
 enum V3TargetContextAdmission {
     Normal,
     NearLimit,
-    Exceeded { max_context_tokens: u64 },
+    Exceeded {
+        input_tokens: u64,
+        max_context_tokens: u64,
+    },
 }
 
 impl V3TargetInterpreter {
@@ -291,7 +295,10 @@ impl V3TargetInterpreter {
                 }
                 let context_admission =
                     candidate_context_admission(candidate, expanded.route.request_input_tokens);
-                if let V3TargetContextAdmission::Exceeded { max_context_tokens } = context_admission
+                if let V3TargetContextAdmission::Exceeded {
+                    input_tokens,
+                    max_context_tokens,
+                } = context_admission
                 {
                     if admission_class == V3TargetContextAdmission::Normal {
                         unavailable.push(format!(
@@ -299,7 +306,7 @@ impl V3TargetInterpreter {
                             candidate.provider_id,
                             candidate.auth_alias,
                             candidate.model_id,
-                            expanded.route.request_input_tokens,
+                            input_tokens,
                             max_context_tokens
                         ));
                     }
@@ -527,6 +534,7 @@ impl V3TargetInterpreter {
                 model_capabilities: model.capabilities.clone(),
                 web_search_execution_mode: model.web_search_execution_mode,
                 max_context_tokens: model.max_context_tokens,
+                context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                 base_url: provider.base_url.clone(),
                 responses_process: provider
                     .responses
@@ -616,10 +624,18 @@ fn candidate_context_admission(
     let Some(max_context_tokens) = candidate.max_context_tokens else {
         return V3TargetContextAdmission::Normal;
     };
-    if request_input_tokens > max_context_tokens {
-        return V3TargetContextAdmission::Exceeded { max_context_tokens };
+    let scaled_input_tokens = ((u128::from(request_input_tokens)
+        * u128::from(candidate.context_token_estimate_scale_bps)
+        + 9_999)
+        / 10_000)
+        .min(u128::from(u64::MAX)) as u64;
+    if scaled_input_tokens > max_context_tokens {
+        return V3TargetContextAdmission::Exceeded {
+            input_tokens: scaled_input_tokens,
+            max_context_tokens,
+        };
     }
-    if u128::from(request_input_tokens) * 100 >= u128::from(max_context_tokens) * 90 {
+    if u128::from(scaled_input_tokens) * 100 >= u128::from(max_context_tokens) * 90 {
         return V3TargetContextAdmission::NearLimit;
     }
     V3TargetContextAdmission::Normal

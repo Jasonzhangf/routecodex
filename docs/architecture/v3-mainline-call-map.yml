@@ -73,7 +73,7 @@ chains:
     semantic_contract:
       - Initial Direct planning selects from the captured Target09 set using session availability before global availability.
       - Request-local exclusions are empty before the first provider attempt.
-      - Target10 applies context admission from route request_input_tokens and candidate max_context_tokens before provider availability selection.
+      - Target10 applies the candidate model context_token_estimate_scale_bps to route request_input_tokens, then compares max_context_tokens before provider availability selection.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection]
       produces: [v3.target.concrete_provider]

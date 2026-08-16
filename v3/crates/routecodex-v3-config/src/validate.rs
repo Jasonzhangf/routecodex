@@ -987,6 +987,11 @@ fn compile_models(
             }
             _ => {}
         }
+        if !(10_000..=100_000).contains(&model.context_token_estimate_scale_bps) {
+            return Err(validation(format!(
+                "provider {provider_id} model {id} context_token_estimate_scale_bps must be between 10000 and 100000"
+            )));
+        }
         models.insert(
             id.clone(),
             V3ProviderModelManifest {
@@ -1001,6 +1006,7 @@ fn compile_models(
                 thinking: model.thinking,
                 max_tokens: model.max_tokens,
                 max_context_tokens: model.max_context_tokens,
+                context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                 features: model.features,
             },
         );
