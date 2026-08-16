@@ -110,7 +110,7 @@ context rejection, and request-local failure exclusion remain Target/Error conce
 
 Target context admission remains a separate owner from route classification. The classifier
 supplies route order, RCC-owned active-turn input tokens, and the configured longcontext threshold;
-Target10 compares those tokens with each candidate context window. Below 90% keeps configured
+Target10 first applies the candidate model's validated context-token estimate scale (default 1.0), then compares those tokens with each candidate context window. Below 90% keeps configured
 priority, 90% through 100% is demoted but retained, and above 100% is filtered before transport.
 Provider tokenizer disagreement can still produce a health-neutral context error in the provider
 error/switch chain, but that error cannot rewrite Target token truth.

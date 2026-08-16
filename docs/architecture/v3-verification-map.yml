@@ -1326,7 +1326,7 @@ features:
   - Target candidate capability checks keep route separate from capability: only web_search/search
       and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding/longcontext/remote_continuation/local_materialization
       never hard-reject a candidate
-  - Target10 consumes RCC-owned request_input_tokens and candidate max_context_tokens;
+  - Target10 consumes RCC-owned request_input_tokens, validated candidate context_token_estimate_scale_bps, and candidate max_context_tokens;
     below 90 percent preserves configured order, 90 through 100 percent remains eligible
     after normal candidates, and above 100 percent is filtered before provider transport
   - Provider health and request-local provider-failure exclusion remain explicit switch

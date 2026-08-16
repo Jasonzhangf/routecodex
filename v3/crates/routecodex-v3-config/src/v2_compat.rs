@@ -716,6 +716,7 @@ fn compile_v2_provider_models(
                         .max_context_tokens
                         .or(model.context_window)
                         .or(model.max_context),
+                    context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                     features: model.features,
                 },
             )
@@ -936,6 +937,8 @@ struct V2ProviderModelConfig {
     max_context: Option<u64>,
     max_context_tokens: Option<u64>,
     context_window: Option<u64>,
+    #[serde(default = "default_context_token_estimate_scale_bps")]
+    context_token_estimate_scale_bps: u64,
     /// Mode B 显式声明（v2 配置可选；缺省时按 `web_search_direct`
     /// capability 兼容推断 Mode A）。生产 v2 配置通过此字段启用
     /// `metadata_center_local_search` 与编译期 backend binding。
@@ -948,6 +951,10 @@ struct V2ProviderModelConfig {
     web_search_backend: Option<String>,
     #[serde(default)]
     features: BTreeMap<String, bool>,
+}
+
+fn default_context_token_estimate_scale_bps() -> u64 {
+    10_000
 }
 
 impl V2ProviderModelConfig {

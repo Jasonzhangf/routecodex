@@ -683,7 +683,7 @@ features:
     selection signals; route selection is not model capability filtering.
   - 'Target hard capability_mismatch is allowed only for capabilities the selected
     model/provider may genuinely lack: web_search/search and multimodal/vision.'
-  - Target10 consumes RCC-owned request_input_tokens and candidate max_context_tokens
+  - Target10 consumes RCC-owned request_input_tokens, validated candidate context_token_estimate_scale_bps, and candidate max_context_tokens
     as a control-side admission rule; below 90 percent preserves configured order,
     90 through 100 percent remains eligible after normal candidates, and above 100
     percent is filtered before provider transport.
