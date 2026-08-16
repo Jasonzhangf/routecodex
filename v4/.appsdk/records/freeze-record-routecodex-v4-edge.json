@@ -1,1 +1,39 @@
-{"active_version":"active-v4","artifact_record_id":"edge-sdk013-candidate","clean_scope":{"base_commit":"5e1d7e9151b1c10dd8af0fd37f82fa0d88fb3c23","changed_paths":["v4/.appsdk/**","v4/Protected/**"],"generated_policy":"excluded_from_source_clean","ignored_paths":["v4/Active/lib/**","v4/generated/**","v4/target/**"]},"created_at":"2026-08-16T04:25:30Z","freeze_id":"edge-sdk013-freeze","git_clean":true,"issue_id":"appsdk-013-migration","library_hash":"sha256:pending","module_id":"routecodex-v4-edge","owners":{"api_extractor":"appsdk-0.1.3","artifact_registry":"appsdk-active","compiler":"appsdk-0.1.3","review":"routecodex-codex-adapter","vcs":"git"},"previous_active_immutable":true,"previous_active_version":"active-v3","promotion_id":"edge-sdk013-promotion","promotion_record_hash":"sha256:pending","public_api_hash":"sha256:a986908c5eb56e5b39d1e941f18c6f7b4f9fd41266285ac54139d9907119da96","regression_report_hash":"sha256:pending","regression_report_id":"edge-sdk013-regression","review_id":"edge-sdk013-architecture-review","source_commit_or_tag":"73a427ee5e4a529cc16890cdb8b4a1b5940704c9"}
+{
+  "active_version": "active-v4",
+  "artifact_record_id": "edge-sdk013-candidate",
+  "clean_scope": {
+    "base_commit": "5e1d7e9151b1c10dd8af0fd37f82fa0d88fb3c23",
+    "changed_paths": [
+      "v4/.appsdk/**",
+      "v4/Protected/**"
+    ],
+    "generated_policy": "excluded_from_source_clean",
+    "ignored_paths": [
+      "v4/Active/lib/**",
+      "v4/generated/**",
+      "v4/target/**"
+    ]
+  },
+  "created_at": "2026-08-16T04:25:30Z",
+  "freeze_id": "edge-sdk013-freeze",
+  "git_clean": true,
+  "issue_id": "appsdk-013-migration",
+  "library_hash": "sha256:f44c0ae0fee3f077fe36e128406f777261947ce8f2ab9988577274232878a038",
+  "module_id": "routecodex-v4-edge",
+  "owners": {
+    "api_extractor": "appsdk-0.1.3",
+    "artifact_registry": "appsdk-active",
+    "compiler": "appsdk-0.1.3",
+    "review": "routecodex-codex-adapter",
+    "vcs": "git"
+  },
+  "previous_active_immutable": true,
+  "previous_active_version": "active-v3",
+  "promotion_id": "edge-sdk013-promotion",
+  "promotion_record_hash": "sha256:b0265b60738e2bee2cadfa1504ad2e14a7ade0add1ead8431b170dd873e00268",
+  "public_api_hash": "sha256:a986908c5eb56e5b39d1e941f18c6f7b4f9fd41266285ac54139d9907119da96",
+  "regression_report_hash": "sha256:8ece81766b652c5bb22406ecfa900edd7b7c74f5d32b59edf930778e9585079a",
+  "regression_report_id": "edge-sdk013-regression",
+  "review_id": "edge-sdk013-architecture-review",
+  "source_commit_or_tag": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9"
+}
