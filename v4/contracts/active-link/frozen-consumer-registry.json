@@ -38,14 +38,42 @@
       "status": "migrated",
       "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
     },
-    {
-      "consumer": "routecodex-v4-config",
-      "dependency": "routecodex-v4-edge",
-      "mode": "active_artifact",
-      "status": "migrated",
-      "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
-    }
-  ],
+  {
+   "consumer": "routecodex-v4-config",
+   "dependency": "routecodex-v4-edge",
+   "mode": "active_artifact",
+   "status": "migrated",
+   "manifest_path": "crates/routecodex-v4-config/Cargo.toml"
+  },
+  {
+   "consumer": "routecodex-v4-debug",
+   "dependency": "routecodex-v4-base-node",
+   "mode": "active_artifact",
+   "status": "migrated",
+   "manifest_path": "crates/routecodex-v4-debug/Cargo.toml"
+  },
+  {
+   "consumer": "routecodex-v4-router",
+   "dependency": "routecodex-v4-base-node",
+   "mode": "active_artifact",
+   "status": "migrated",
+   "manifest_path": "crates/routecodex-v4-router/Cargo.toml"
+  },
+  {
+   "consumer": "routecodex-v4-provider",
+   "dependency": "routecodex-v4-base-node",
+   "mode": "active_artifact",
+   "status": "migrated",
+   "manifest_path": "crates/routecodex-v4-provider/Cargo.toml"
+  },
+  {
+   "consumer": "routecodex-v4-server",
+   "dependency": "routecodex-v4-base-node",
+   "mode": "active_artifact",
+   "status": "migrated",
+   "manifest_path": "crates/routecodex-v4-server/Cargo.toml"
+  }
+ ],
   "forbidden_path_roots": [
     "playground",
     "protected",

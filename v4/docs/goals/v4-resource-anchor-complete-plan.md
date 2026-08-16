@@ -136,3 +136,79 @@
 - 冻结基线未被静默修改；control 决策点有批准或证据记录；
 - 先红后绿证据在案；全量验证矩阵绿；
 - DSH review 语义 PASS（无 P0/P1、无"修复后再审"）。
+
+## 9. 执行偏差记录（2026-08-16）
+
+### 9.1 Control 决策点：owner 迁移到 routecodex-v4-runtime（明确不改 frozen control）
+
+`v4.control.stopless_state` / `v4.control.record_ledger` / `v4.node.statistics`
+注册表原 owner 为已冻结的 `routecodex-v4-control`（active-v2）。按本计划 §4.1
+决策点与 goal 完成标准（"Control 决策点有批准记录或明确不改"），本 slice
+**不改 frozen control**，按实现证据将三条资源 owner 迁移到
+`routecodex-v4-runtime`：
+
+- runtime 已拥有同一 control 邻域真源：`v4.scope.session`（V4ScopeRegistry）、
+  `v4.lifecycle.payload_cycle`（V4PayloadCycleRegistry）、continuation 三键、
+  relay operator 与 route_exit 派生；stopless/record/statistics 与这些
+  control center 是同一层，不是 frozen control crate 的 MetadataCenter 面。
+- `routecodex-v4-control` 已 frozen active-v2；给它加新能力必须完整
+  re-freeze（begin-version -> evidence -> promote -> freeze -> publish），超出
+  本 slice 且需 Jason 明确批准；owner 迁移后不再触发。
+- 同步动作：`v4-resource-operation-map.yml` owner_crate/owner_node/owner_symbols、
+  `.appsdk/maps/resource-map.json` owner、node-graph `registered_nodes` 目录
+  三源一致；frozen control/error/edge/base-node Active artifact 零修改。
+
+### 9.2 关系 validator 落点
+
+`verify-v4-resource-binding.mjs` 从"owner crate/symbol 存在性"扩展为完整关系
+validator：
+
+- node catalog 真源 = node-graph 三链 nodes + skeleton-plan checkpoints +
+  node-graph `registered_nodes`（35 条 side/control/diagnostic/legacy 节点）；
+- anchored 资源 owner_node 必须命中 catalog 或 owner_symbols；
+- allowed/forbidden writer/reader 的 `V4*` 引用必须命中 catalog（方法引用
+  按基节点校验；developer_/incident_/replay_/appsdk::/crate 名称为显式非节点
+  引用白名单）；
+- allowed writer/reader 与 forbidden writer 冲突即红；
+- design 资源在 owner crate 已存在时必须有 owner_symbols 且可解析，禁止
+  用 design 状态冒充 truth；
+- .appsdk owner 符号必须声明在 YAML owner_symbols/owner_node 中；
+- 红自测 12 类负例，先红后绿。
+
+### 9.3 appsdk verify 阻塞修复与红自测适配（2026-08-16 收口）
+
+收口期实际证据与修复：
+
+1. **ARTIFACT_MODULE_SET_MISMATCH 根因**：`v4/.appsdk/project.json` 中
+   skeleton build 命令 `cp target/release/deps/libroutecodex_v4_skeleton-*.rlib`
+   在 deps 目录存在多个 hash rlib 时 cp 多源到单文件报
+   `Not a directory`，compile 中断导致 verify 的 module set 不一致。
+   修复：拷贝 `target/release/libroutecodex_v4_skeleton.rlib`（release 根目录
+   无 hash 产物）；四个新模块 build 命令从 `--manifest-path v4/Cargo.toml` /
+   `--root v4`（仓库根假设）改为与 config/runtime 一致的 `-p` / `--root .`
+   （project root 假设），compile 全量 13 模块通过。
+2. **红自测适配全 anchored 状态**：49/49 全 anchored 后，原
+   `anchored/drift` 用例（翻转 design -> anchored）与
+   `design with implemented crate lacks owner_symbols` 用例（依赖 design
+   资源存在）失去样本；改为 `anchored flipped to design drifts from .appsdk
+   active`（anchored -> design 与 .appsdk active 冲突必红）与
+   `anchored resource with empty owner_symbols`（anchored 资源空 symbols 必红），
+   红自测仍 12/12。
+3. **门禁接线**：verification-map 注册 `v4_debug_l2_regression` /
+   `v4_router_l2_regression` / `v4_provider_l2_regression` /
+   `v4_server_l2_regression`（module-registry 已引用，此前缺失）；package.json
+   `verify:v4-foundation` 10 -> 14 gates、`verify:v4-foundation-red` 追加
+   resource-binding 红自测；CI `v4-active-link` job 追加 4 个 test-consumer
+   步骤；active-link frozen-consumer-registry 登记 debug/router/provider/server
+   -> base-node（active_artifact），mainline-call-map 补 4 条
+   active_artifact_link 边；function-map 补 4 个新 crate function 条目。
+
+验证证据（收口矩阵全绿）：
+- `appsdk compile v4` / `appsdk verify v4` / `appsdk verify --admission v4`：
+  `{"ok":true,"stage":"contract_bound"}`；
+- `verify:v4-foundation` 14 gates 绿（含新 4 个 L2 test-consumer）；
+- `verify:v4-foundation-red` 绿（resource-binding 12/12）；
+- test-consumer：edge 15、config 11、control 15、error 23、runtime 21、
+  debug 5、router 1、provider 1、server 3 全绿；
+- `cargo test --workspace --manifest-path v4/Cargo.toml`、release build、
+  `cargo fmt --check`、gen/verify-index 全绿。

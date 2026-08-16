@@ -29,6 +29,10 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 
+mod control_resources;
+
+pub use control_resources::*;
+
 /// Plugin effect kinds, mirroring `node-plugin.contract.json`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginKind {

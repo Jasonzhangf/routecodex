@@ -226,3 +226,45 @@ fn v2_staged_chain_positive_regression() {
     manifest.verify().expect("published manifest must verify");
     assert_eq!(manifest.chain_version(), "v4-config-2");
 }
+
+#[test]
+fn v2_codex_sample_authorization_positive_and_deterministic() {
+    let raw = r#"
+version = 2
+
+[codex_sample]
+managed_instance_id = "v3-main"
+codex_samples_enabled = true
+direct_snapshots_enabled = true
+snapshot_stages = ["resp_chatprocess", "req_chatprocess"]
+"#;
+    let first = compile_v2(raw).expect("compile with codex_sample must succeed");
+    let second = compile_v2(raw).expect("compile is deterministic");
+    let authorization = first
+        .codex_sample()
+        .expect("manifest must publish codex sample authorization");
+    assert_eq!(authorization.managed_instance_id, "v3-main");
+    assert!(authorization.codex_samples_enabled);
+    assert!(authorization.direct_snapshots_enabled);
+    assert_eq!(authorization.snapshot_stages.len(), 2);
+    assert!(authorization.should_capture_snapshot_stage("req_chatprocess"));
+    assert!(!authorization.should_capture_snapshot_stage("resp_outbound"));
+    assert_eq!(first.plan_hash(), second.plan_hash());
+    assert_eq!(first.artifact_hash(), second.artifact_hash());
+    first.verify().expect("stored hashes verify with codex_sample");
+}
+
+#[test]
+fn v2_codex_sample_unknown_field_red() {
+    let raw = r#"
+version = 2
+
+[codex_sample]
+managed_instance_id = "v3-main"
+unknown_field = "leak"
+"#;
+    assert!(matches!(
+        compile_v2(raw),
+        Err(ConfigV2Error::Parse(_))
+    ));
+}

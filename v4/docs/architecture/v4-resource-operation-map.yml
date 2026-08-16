@@ -226,6 +226,7 @@ resources:
     lifecycle: v4.router.mainline
     owner_crate: routecodex-v4-router
     owner_node: V4Router08LivePolicyOverride
+    owner_symbols: [V4Router08LivePolicyOverride, LivePolicyOverride, PolicyVersion]
     identity: [serverId, routeGroupId, policyVersion, scope]
     semantic_contract:
       live_update_allowed: true
@@ -238,7 +239,7 @@ resources:
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.control.availability
     axis: control
     verification_gate: [v4_parity_gate_plane_isolation]
@@ -246,6 +247,7 @@ resources:
     lifecycle: v4.provider.availability
     owner_crate: routecodex-v4-provider
     owner_node: V4Availability01SessionScoped
+    owner_symbols: [V4Availability01SessionScoped, AvailabilityRecord, AvailabilityState]
     identity: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
     semantic_contract:
       session_scoped: true
@@ -256,7 +258,7 @@ resources:
     forbidden_writers: [V4Router, V4ReqChatProcess03Governed, V4ServerFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.control.error_chain
     axis: control
     verification_gate: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
@@ -408,8 +410,9 @@ resources:
     verification_gate: [v4_parity_gate_plane_isolation, v4_parity_gate_capability_isolation]
     resource_kind: metadata_center_control_signal
     lifecycle: v4.control.stopless
-    owner_crate: routecodex-v4-control
+    owner_crate: routecodex-v4-runtime
     owner_node: V4StoplessControlState
+    owner_symbols: [V4StoplessControlState, StoplessFacts, StoplessError]
     identity: [entryEndpoint, sessionId, conversationId, port, routingGroup]
     state_machine_required: true
     semantic_contract:
@@ -422,7 +425,7 @@ resources:
     forbidden_readers: [V4RespOutbound04ClientSemantic, V4ServerFrame, V4DebugSnapshotRestore]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   # ---------------- config / artifact / secret / debug ----------------
   - resource_id: v4.config.authoring
     axis: information
@@ -545,6 +548,7 @@ resources:
     lifecycle: v4.debug.side_channel
     owner_crate: routecodex-v4-debug
     owner_node: V4Debug01SnapshotLedger
+    owner_symbols: [V4Debug01SnapshotLedger, DebugSnapshotRecord, DebugRuntime]
     identity: [serverId, requestId, executionId, kind]
     semantic_contract:
       diagnostic_only: true
@@ -556,7 +560,7 @@ resources:
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame, V4ReqChatProcess03Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.module_switch
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation, v4_parity_gate_plane_isolation]
@@ -564,6 +568,7 @@ resources:
     lifecycle: v4.debug.module_switch
     owner_crate: routecodex-v4-debug
     owner_node: V4Debug12ModuleSwitch
+    owner_symbols: [V4Debug12ModuleSwitch, ModuleSwitchState, DebugRuntime]
     identity: [moduleId, nodeId, scope, switchKind]
     semantic_contract:
       dynamic_live_update: true
@@ -578,7 +583,7 @@ resources:
     forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.dry_run_chain
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation, v4_parity_gate_plane_isolation]
@@ -586,6 +591,7 @@ resources:
     lifecycle: v4.debug.dry_run
     owner_crate: routecodex-v4-debug
     owner_node: V4Debug13DryRunChain
+    owner_symbols: [V4Debug13DryRunChain, DryRunChainDefinition, DebugRuntime]
     identity: [chainId, moduleId, entryNode, exitNode, fixtureId]
     semantic_contract:
       per_module: true
@@ -599,14 +605,15 @@ resources:
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.control.record_ledger
     axis: control
     verification_gate: [v4_control_l2_regression, v4_parity_gate_plane_isolation]
     resource_kind: control_record
     lifecycle: v4.control.node_records
-    owner_crate: routecodex-v4-control
+    owner_crate: routecodex-v4-runtime
     owner_node: V4Control02RecordLedger
+    owner_symbols: [V4Control02RecordLedger, ControlLedgerRecord, ControlLedgerError]
     identity: [recordId, nodeId, direction, controlKey, scope]
     semantic_contract:
       immutable: true
@@ -618,7 +625,7 @@ resources:
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.bus_subscription
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
@@ -626,6 +633,7 @@ resources:
     lifecycle: v4.debug.bus
     owner_crate: routecodex-v4-debug
     owner_node: V4Debug02BusSubscription
+    owner_symbols: [V4Debug02BusSubscription, SubscriptionTopic, DebugRuntime]
     identity: [subscriberId, topic, scope]
     semantic_contract:
       read_only: true
@@ -637,7 +645,7 @@ resources:
     forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.snapshot_subscription
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
@@ -645,6 +653,7 @@ resources:
     lifecycle: v4.debug.snapshot_subscription
     owner_crate: routecodex-v4-debug
     owner_node: V4Debug03SnapshotSubscription
+    owner_symbols: [V4Debug03SnapshotSubscription, SnapshotSubscription, DebugRuntime]
     identity: [subscriberId, nodeId, snapshotKind, scope]
     semantic_contract:
       diagnostic_only: true
@@ -656,14 +665,15 @@ resources:
     forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.node.statistics
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
     resource_kind: diagnostic_observability
     lifecycle: v4.node.statistics
-    owner_crate: routecodex-v4-control
+    owner_crate: routecodex-v4-runtime
     owner_node: V4Control03NodeStatistics
+    owner_symbols: [V4Control03NodeStatistics, NodeStatistic, NodeStatisticsError]
     identity: [nodeId, operatorId, scope]
     semantic_contract:
       optional: true
@@ -676,7 +686,7 @@ resources:
     forbidden_writers: [V4ReqChatProcess03Governed, V4Router, V4ErrorChain, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.trace_context
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
@@ -684,6 +694,7 @@ resources:
     lifecycle: v4.debug.trace
     owner_crate: routecodex-v4-debug
     owner_node: V4Debug04TraceContextStarted
+    owner_symbols: [V4Debug04TraceContextStarted, TraceContext, DebugRuntime]
     identity: [serverId, requestId, executionId]
     v3_baseline: v3.debug.trace_context
     semantic_contract:
@@ -694,7 +705,7 @@ resources:
     forbidden_writers: [routecodex-v4-server, routecodex-v4-error, routecodex-v4-provider]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.event_ledger
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
@@ -702,6 +713,7 @@ resources:
     lifecycle: v4.debug.ledger
     owner_crate: routecodex-v4-debug
     owner_node: V4Debug05EventLedgerRecorded
+    owner_symbols: [V4Debug05EventLedgerRecorded, DebugEventRecord, DebugRuntime]
     identity: [sequence, serverId, requestId, executionId, nodeId]
     v3_baseline: v3.debug.event_ledger
     semantic_contract:
@@ -711,7 +723,7 @@ resources:
     forbidden_writers: [routecodex-v4-server, routecodex-v4-error, routecodex-v4-provider]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.raw_capture
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
@@ -719,6 +731,7 @@ resources:
     lifecycle: v4.debug.raw_capture
     owner_crate: routecodex-v4-debug
     owner_node: V4Debug06RawCaptureStored
+    owner_symbols: [V4Debug06RawCaptureStored, RawCaptureRecord, DebugRuntime]
     identity: [sequence, serverId, requestId, executionId, kind]
     v3_baseline: v3.debug.raw_capture
     semantic_contract:
@@ -730,7 +743,7 @@ resources:
     forbidden_writers: [routecodex-v4-server, routecodex-v4-error, routecodex-v4-provider]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.snapshot_session
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
@@ -738,6 +751,7 @@ resources:
     lifecycle: v4.debug.snapshot_lifecycle
     owner_crate: routecodex-v4-debug
     owner_node: V4Debug07SnapshotSessionRegistered
+    owner_symbols: [V4Debug07SnapshotSessionRegistered, SnapshotSession, DebugRuntime]
     identity: [sessionId, serverId, requestId, executionId]
     v3_baseline: v3.debug.snapshot_session
     semantic_contract:
@@ -748,7 +762,7 @@ resources:
     forbidden_writers: [routecodex-v4-server, routecodex-v4-error, routecodex-v4-provider]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.dry_run_fixture
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
@@ -756,6 +770,7 @@ resources:
     lifecycle: v4.debug.dry_run
     owner_crate: routecodex-v4-debug
     owner_node: V4Debug08DryRunFixture
+    owner_symbols: [V4Debug08DryRunFixture, DryRunFixture, DebugRuntime]
     identity: [fixtureId, serverId, endpoint]
     v3_baseline: v3.debug.dry_run_fixture
     semantic_contract:
@@ -765,7 +780,7 @@ resources:
     forbidden_writers: [routecodex-v4-server, routecodex-v4-error, routecodex-v4-provider]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.dry_run_execution
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation, v4_parity_gate_plane_isolation]
@@ -773,6 +788,7 @@ resources:
     lifecycle: v4.debug.dry_run
     owner_crate: routecodex-v4-runtime
     owner_node: V4Debug09DryRunNoNetworkTerminalEffect
+    owner_symbols: [V4Debug09DryRunNoNetworkTerminalEffect, DryRunExecution, DryRunExecutionError]
     identity: [fixtureId, serverId, requestId, executionId]
     v3_baseline: v3.debug.dry_run_execution
     semantic_contract:
@@ -783,7 +799,7 @@ resources:
     forbidden_writers: [routecodex-v4-server, routecodex-v4-provider]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.codex_sample_authorization
     axis: diagnostic
     verification_gate: [v4_config_l2_regression, v4_parity_gate_capability_isolation]
@@ -791,6 +807,7 @@ resources:
     lifecycle: v4.config.compile
     owner_crate: routecodex-v4-config
     owner_node: V4Config05ManifestPublished
+    owner_symbols: [V4Config05ManifestPublished, CodexSampleAuthorization]
     identity: [managedInstanceId, codexSamplesEnabled, directSnapshotsEnabled, snapshotStages]
     v3_baseline: v3.debug.codex_sample_authorization
     semantic_contract:
@@ -800,7 +817,7 @@ resources:
     forbidden_writers: [routecodex-v4-runtime, routecodex-v4-provider, V4ControlMetadataCenter]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.payload_budget
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
@@ -808,6 +825,7 @@ resources:
     lifecycle: v4.debug.sample_retention
     owner_crate: routecodex-v4-debug
     owner_node: V4Debug10PayloadBudget
+    owner_symbols: [V4Debug10PayloadBudget, PayloadBudgetState, DebugRuntime]
     identity: [serverId, requestId, executionId, artifactKind]
     v3_baseline: v3.debug.payload_budget
     semantic_contract:
@@ -820,7 +838,7 @@ resources:
     forbidden_writers: [routecodex-v4-server, routecodex-v4-error, routecodex-v4-provider, V4ControlMetadataCenter]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.codex_sample_filesystem
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
@@ -828,6 +846,7 @@ resources:
     lifecycle: v4.debug.sample_retention
     owner_crate: routecodex-v4-debug
     owner_node: V4Debug11CodexSampleStore
+    owner_symbols: [V4Debug11CodexSampleStore, CodexSampleStore, DebugRuntime]
     identity: [entryProtocol, endpoint, port, requestId, artifactName]
     v3_baseline: v3.debug.codex_sample_filesystem
     semantic_contract:
@@ -837,7 +856,7 @@ resources:
     forbidden_writers: [routecodex-v4-runtime, routecodex-v4-provider, V4ControlMetadataCenter]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.observability
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
@@ -845,6 +864,7 @@ resources:
     lifecycle: v4.debug.observability
     owner_crate: routecodex-v4-runtime
     owner_node: V4RuntimeObservability
+    owner_symbols: [V4RuntimeObservability, V4RuntimeObservabilityAccumulator]
     identity: [requestId, entryProtocol, executionMode, routingGroupId, providerId, modelId]
     v3_baseline: v3.runtime.responses_observability
     semantic_contract:
@@ -854,7 +874,7 @@ resources:
     forbidden_writers: [routecodex-v4-provider, routecodex-v4-server, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.debug.timing_observability
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
@@ -862,6 +882,7 @@ resources:
     lifecycle: v4.debug.timing
     owner_crate: routecodex-v4-runtime
     owner_node: V4RuntimeTimingSummary
+    owner_symbols: [V4RuntimeTimingSummary, V4RuntimeTimingState]
     identity: [requestId, attempt, timingPhase]
     v3_baseline: v3.runtime.responses_timing_observability
     semantic_contract:
@@ -871,7 +892,7 @@ resources:
     forbidden_writers: [routecodex-v4-server, routecodex-v4-provider, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.console.terminal_output
     axis: diagnostic
     verification_gate: [v4_parity_gate_capability_isolation]
@@ -879,6 +900,7 @@ resources:
     lifecycle: v4.console.projection
     owner_crate: routecodex-v4-server
     owner_node: V4ConsoleTerminalOutput
+    owner_symbols: [V4ConsoleTerminalOutput, ConsoleProjection, ConsoleLine]
     identity: [serverId, requestId, entryProtocol, severity]
     v3_baseline: v3.console.terminal_output
     semantic_contract:
@@ -888,7 +910,7 @@ resources:
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ReqChatProcess03Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.server.request_identity
     axis: diagnostic
     verification_gate: [v4_parity_gate_execution_binding]
@@ -896,6 +918,7 @@ resources:
     lifecycle: v4.server.request_identity
     owner_crate: routecodex-v4-server
     owner_node: V4RequestIdCounter
+    owner_symbols: [V4RequestIdCounter, RequestIdentity, RequestIdentityError]
     identity: [serverId, localDay, sequence, requestId]
     v3_baseline: v3.server.request_identity
     semantic_contract:
@@ -905,7 +928,7 @@ resources:
     forbidden_writers: [routecodex-v4-runtime, routecodex-v4-provider, V4ReqChatProcess03Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.error.raw_wire_evidence
     axis: diagnostic
     verification_gate: [v4_parity_gate_plane_isolation]
@@ -913,6 +936,7 @@ resources:
     lifecycle: v4.error.raw_wire_evidence
     owner_crate: routecodex-v4-server
     owner_node: V4ErrorEvidenceFlushOnTerminalFailure
+    owner_symbols: [V4ErrorEvidenceFlushOnTerminalFailure, WireEvidenceRecord, WireEvidenceError]
     identity: [entryProtocol, endpoint, port, requestId, artifactName]
     v3_baseline: v3.error.raw_wire_evidence
     semantic_contract:
@@ -924,7 +948,7 @@ resources:
     forbidden_writers: [routecodex-v4-runtime, routecodex-v4-provider, V4ControlMetadataCenter]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
 forbidden_direct_edges:
   - from: v4.config.manifest
     to: v4.request.normal_payload

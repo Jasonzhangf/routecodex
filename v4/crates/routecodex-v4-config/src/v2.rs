@@ -75,6 +75,8 @@ pub struct AuthoringV2 {
     pub selection_groups: Vec<SelectionGroupAuthoring>,
     #[serde(default)]
     pub edges: Vec<EdgeV2Authoring>,
+    #[serde(default)]
+    pub codex_sample: Option<CodexSampleAuthoring>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -153,6 +155,49 @@ pub struct EdgeV2Authoring {
     pub direction: String,
     #[serde(default)]
     pub resource_id: String,
+}
+
+/// Diagnostic codex-sample capture authorization published by the manifest.
+/// This is configuration truth, never a live runtime control input; it must
+/// not enter provider/client payload.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodexSampleAuthoring {
+    pub managed_instance_id: String,
+    #[serde(default)]
+    pub codex_samples_enabled: bool,
+    #[serde(default)]
+    pub direct_snapshots_enabled: bool,
+    #[serde(default)]
+    pub snapshot_stages: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexSampleAuthorization {
+    pub managed_instance_id: String,
+    pub codex_samples_enabled: bool,
+    pub direct_snapshots_enabled: bool,
+    pub snapshot_stages: Vec<String>,
+}
+
+impl CodexSampleAuthorization {
+    pub fn from_authoring(authoring: &Option<CodexSampleAuthoring>) -> Option<Self> {
+        authoring.as_ref().map(|sample| {
+            let mut stages = sample.snapshot_stages.clone();
+            stages.sort();
+            stages.dedup();
+            CodexSampleAuthorization {
+                managed_instance_id: sample.managed_instance_id.clone(),
+                codex_samples_enabled: sample.codex_samples_enabled,
+                direct_snapshots_enabled: sample.direct_snapshots_enabled,
+                snapshot_stages: stages,
+            }
+        })
+    }
+
+    pub fn should_capture_snapshot_stage(&self, stage: &str) -> bool {
+        self.codex_samples_enabled && self.snapshot_stages.iter().any(|s| s == stage)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -241,6 +286,7 @@ pub struct ConfigManifestV2 {
     edges: Vec<ManifestEdgeV2>,
     selection_groups: Vec<ManifestSelectionGroupV2>,
     checkpoints: Vec<ManifestCheckpointV2>,
+    codex_sample: Option<CodexSampleAuthorization>,
     plan_hash: String,
     checkpoint_hash: String,
     artifact_hash: String,
@@ -269,6 +315,10 @@ impl ConfigManifestV2 {
 
     pub fn checkpoints(&self) -> &[ManifestCheckpointV2] {
         &self.checkpoints
+    }
+
+    pub fn codex_sample(&self) -> Option<&CodexSampleAuthorization> {
+        self.codex_sample.as_ref()
     }
 
     pub fn plan_hash(&self) -> &str {
@@ -314,6 +364,15 @@ impl ConfigManifestV2 {
                 group.group_id,
                 group.variants.join(","),
                 group.active.join(",")
+            ));
+        }
+        if let Some(sample) = &self.codex_sample {
+            lines.push(format!(
+                "codex_sample|{}|{}|{}|{}",
+                sample.managed_instance_id,
+                sample.codex_samples_enabled,
+                sample.direct_snapshots_enabled,
+                sample.snapshot_stages.join(",")
             ));
         }
         lines.join("\n")
@@ -655,6 +714,7 @@ pub fn publish_v2_manifest(registry: RegistryV2) -> Result<ConfigManifestV2, Con
         edges,
         selection_groups,
         checkpoints,
+        codex_sample: CodexSampleAuthorization::from_authoring(&authoring.codex_sample),
         plan_hash: String::new(),
         checkpoint_hash: String::new(),
         artifact_hash: String::new(),

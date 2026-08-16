@@ -414,6 +414,120 @@ fn red_cross_request_reuse_fails() {
 }
 
 #[test]
+fn control_resources_lifecycle_positive_and_red() {
+    use routecodex_v4_runtime::{
+        ControlLedgerRecord, DryRunExecutionError, NodeStatistic, StoplessError, StoplessFacts,
+        V4Control02RecordLedger, V4Control03NodeStatistics, V4Debug09DryRunNoNetworkTerminalEffect,
+        V4RuntimeObservability, V4RuntimeTimingSummary, V4StoplessControlState,
+    };
+
+    // Stopless: store -> consume -> clear; double-store and empty-clear are red.
+    let mut stopless = V4StoplessControlState::new();
+    stopless
+        .store_for_scope(StoplessFacts {
+            entry_endpoint: "responses".to_string(),
+            session_id: "s-1".to_string(),
+            conversation_id: "c-1".to_string(),
+            port: 5555,
+            routing_group: "rg-1".to_string(),
+        })
+        .expect("first store must succeed");
+    assert_eq!(stopless.consume().unwrap().port, 5555);
+    stopless.clear_for_scope().expect("clear must succeed");
+    assert!(matches!(stopless.consume(), Err(StoplessError::NotStored)));
+    let mut store_twice = || -> Result<(), StoplessError> {
+        stopless.store_for_scope(StoplessFacts {
+            entry_endpoint: "chat".to_string(),
+            session_id: "s-2".to_string(),
+            conversation_id: "c-2".to_string(),
+            port: 5555,
+            routing_group: "rg-1".to_string(),
+        })?;
+        stopless.store_for_scope(StoplessFacts {
+            entry_endpoint: "chat".to_string(),
+            session_id: "s-2".to_string(),
+            conversation_id: "c-2".to_string(),
+            port: 5555,
+            routing_group: "rg-1".to_string(),
+        })
+    };
+    assert!(matches!(store_twice(), Err(StoplessError::AlreadyStored)));
+
+    // Ledger: append immutable; duplicate record id is red.
+    let mut ledger = V4Control02RecordLedger::new();
+    ledger
+        .append(ControlLedgerRecord {
+            record_id: "r-1".to_string(),
+            node_id: "V4ScopeRegistry".to_string(),
+            direction: "in".to_string(),
+            control_key: "scope.bind".to_string(),
+            scope_key: "scope-a".to_string(),
+            payload_hash: Some("sha256:abc".to_string()),
+        })
+        .expect("append must succeed");
+    assert_eq!(ledger.scope_records("scope-a").count(), 1);
+    assert!(matches!(
+        ledger.append(ControlLedgerRecord {
+            record_id: "r-1".to_string(),
+            node_id: "V4ScopeRegistry".to_string(),
+            direction: "in".to_string(),
+            control_key: "scope.bind".to_string(),
+            scope_key: "scope-a".to_string(),
+            payload_hash: Some("sha256:abc".to_string()),
+        }),
+        Err(routecodex_v4_runtime::ControlLedgerError::ImmutableRecord)
+    ));
+
+    // Statistics: diagnostic-only counters, never decision input.
+    let mut stats = V4Control03NodeStatistics::new();
+    stats
+        .record("V4ScopeRegistry", "bind", "scope-a", false)
+        .unwrap();
+    stats
+        .record("V4ScopeRegistry", "bind", "scope-a", true)
+        .unwrap();
+    let snapshot: Vec<NodeStatistic> = stats.snapshot().cloned().collect();
+    assert_eq!(snapshot.len(), 1);
+    assert_eq!(snapshot[0].invocations, 2);
+    assert_eq!(snapshot[0].errors, 1);
+
+    // Dry-run: registered fixture executes with no network effect; empty
+    // fixture id is red.
+    let mut dry_run = V4Debug09DryRunNoNetworkTerminalEffect::new();
+    let execution = dry_run
+        .execute(
+            "fixture-1",
+            "exec-1",
+            "V4ReqInbound01Raw",
+            "V4RespOutbound04ClientSemantic",
+            "sha256:input",
+        )
+        .expect("dry-run must execute");
+    assert_eq!(execution.terminal_state, "dry_run_terminal");
+    assert_eq!(dry_run.executions().count(), 1);
+    assert!(matches!(
+        dry_run.execute(
+            "",
+            "exec-2",
+            "V4ReqInbound01Raw",
+            "V4RespOutbound04ClientSemantic",
+            "sha256:input"
+        ),
+        Err(DryRunExecutionError::FixtureMissing)
+    ));
+
+    // Observability + timing: diagnostic projections only.
+    let mut observability = V4RuntimeObservability::new();
+    observability
+        .accumulator()
+        .record("req-1", "responses", "relay", "rg-1", "cc", "deepseek-v4-flash");
+    assert_eq!(observability.summaries().count(), 1);
+    let mut timing = V4RuntimeTimingSummary::new();
+    timing.state().record_phase("resp_chatprocess", 42);
+    assert_eq!(timing.total_micros("resp_chatprocess"), 42);
+}
+
+#[test]
 fn metadata_center_lifecycle_register_consume_release() {
     let binding = ExecutionBinding {
         skeleton_version: "v4-skeleton-1".to_string(),
