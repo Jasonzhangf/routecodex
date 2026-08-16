@@ -1473,3 +1473,203 @@ resources:
     may_enter_metadata_center: false
     binding_status: anchored
     required_gates: [npm run test:v3-cli-distribution, npm run test:install-v3-target-cleanup, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]
+
+  - resource_id: v3.build.node_dependency_lock
+    resource_kind: build_dependency_lock
+    lifecycle: v3.build.independent_domain
+    owner_feature_id: v3.build.independent_domain
+    owner_crate: routecodex-v3-build-tools
+    owner_module: v3-independent-build-domain
+    owner_node: V3BuildDomain01LocalContractsLoaded
+    identity: [packageManifestPath, lockfilePath, lockfileSha256]
+    allowed_writers: [v3_dependency_maintenance]
+    allowed_readers: [v3_npm_ci, v3_build_entrypoint, v3_verify_entrypoint]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    canonical_paths: [v3/package.json, v3/package-lock.json]
+    forbidden_paths: [package.json, package-lock.json, node_modules]
+    release_point: tracked_source_contract
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+    required_gates: [npm run verify:v3-resource-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: v3.build.cargo_dependency_lock
+    resource_kind: build_dependency_lock
+    lifecycle: v3.build.independent_domain
+    owner_feature_id: v3.build.independent_domain
+    owner_crate: routecodex-v3-build-tools
+    owner_module: v3-independent-build-domain
+    owner_node: V3BuildDomain01LocalContractsLoaded
+    identity: [workspaceManifestPath, cargoLockPath, cargoLockSha256]
+    allowed_writers: [v3_cargo_dependency_maintenance]
+    allowed_readers: [cargo_build_locked, cargo_test_locked, cargo_metadata_locked]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    canonical_paths: [v3/Cargo.toml, v3/Cargo.lock]
+    forbidden_paths: [sharedmodule/llmswitch-core/rust-core/Cargo.toml, v4/Cargo.toml]
+    release_point: tracked_source_contract
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+    required_gates: [npm run verify:v3-resource-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: v3.build.rust_toolchain_contract
+    resource_kind: build_toolchain_lock
+    lifecycle: v3.build.independent_domain
+    owner_feature_id: v3.build.independent_domain
+    owner_crate: routecodex-v3-build-tools
+    owner_module: v3-independent-build-domain
+    owner_node: V3BuildDomain01LocalContractsLoaded
+    identity: [toolchainFilePath, cargoConfigPath, toolchainSha256]
+    allowed_writers: [v3_toolchain_maintenance]
+    allowed_readers: [cargo, rustc, rustfmt, clippy]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    canonical_paths: [v3/rust-toolchain.toml, v3/.cargo/config.toml]
+    forbidden_paths: [.cargo/config.toml, v4/rust-toolchain.toml]
+    release_point: tracked_source_contract
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+    required_gates: [npm run verify:v3-resource-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: v3.build.architecture_admission
+    resource_kind: deterministic_build_admission_manifest
+    lifecycle: v3.build.independent_domain
+    owner_feature_id: v3.build.independent_domain
+    owner_crate: routecodex-v3-build-tools
+    owner_module: v3-independent-build-domain
+    owner_node: V3BuildDomain02AdmissionVerified
+    identity: [schemaVersion, sourceCommit, sourceDigests, manifestDigest]
+    allowed_writers: [compile_v3_architecture_admission]
+    allowed_readers: [verify_v3_architecture_admission, v3_verify_ci]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    canonical_path: v3/build-contracts/architecture-admission
+    forbidden_paths: [v4, ~/.rcc, ~/.routecodex, ~/.rcc/codex-samples]
+    release_point: explicit_authoring_sync
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+    required_gates: [npm run verify:v3-resource-map, npm run verify:v3-architecture-docs]
+
+  - resource_id: v3.build.version_truth
+    resource_kind: build_version_contract
+    lifecycle: v3.build.independent_domain
+    owner_feature_id: v3.build.independent_domain
+    owner_crate: routecodex-v3-build-tools
+    owner_module: v3-independent-build-domain
+    owner_node: V3BuildDomain01LocalContractsLoaded
+    identity: [versionSourcePath, buildVersion, sourceSha256]
+    allowed_writers: [v3_release_version_maintenance]
+    allowed_readers: [v3_build_entrypoint, v3_install_entrypoint, v3_pack_entrypoint, cargo_build]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    canonical_path: v3/package.json
+    forbidden_paths: [package.json, src/build-info.ts]
+    release_point: explicit_version_change
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+    required_gates: [npm run verify:v3-resource-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: v3.build.ordinary_cargo_target
+    resource_kind: mutable_build_output
+    lifecycle: v3.build.independent_domain
+    owner_feature_id: v3.build.independent_domain
+    owner_crate: routecodex-v3-build-tools
+    owner_module: v3-independent-build-domain
+    owner_node: V3BuildDomain03LocalArtifactsProduced
+    identity: [workspaceRoot, cargoProfile, targetPath]
+    allowed_writers: [cargo_build, cargo_test]
+    allowed_readers: [cargo_build, cargo_test, v3_artifact_budget]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    canonical_path: v3/target
+    forbidden_paths: [target, v4/target, sharedmodule/llmswitch-core/rust-core/target]
+    release_point: cargo_clean_or_owned_artifact_release
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+    required_gates: [npm run verify:v3-resource-map, npm run verify:v3-build-test-artifact-budget]
+
+  - resource_id: v3.build.install_target
+    resource_kind: mutable_build_output
+    lifecycle: v3.build.independent_domain
+    owner_feature_id: v3.build.independent_domain
+    owner_crate: routecodex-v3-build-tools
+    owner_module: v3-independent-build-domain
+    owner_node: V3BuildDomain03LocalArtifactsProduced
+    identity: [installRunId, targetPath, binarySha256]
+    allowed_writers: [v3_install_entrypoint, cargo_build_release]
+    allowed_readers: [v3_install_entrypoint]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    canonical_path: v3/build-control/install-target
+    forbidden_paths: [$TMPDIR, /tmp, ~/.rcc/install]
+    release_point: install_run_terminal_cleanup
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+    required_gates: [npm run verify:v3-resource-map, npm run test:install-v3-target-cleanup]
+
+  - resource_id: v3.build.pack_staging
+    resource_kind: mutable_package_staging
+    lifecycle: v3.build.independent_domain
+    owner_feature_id: v3.build.independent_domain
+    owner_crate: routecodex-v3-build-tools
+    owner_module: v3-independent-build-domain
+    owner_node: V3BuildDomain03LocalArtifactsProduced
+    identity: [packRunId, packageKind, stagingPath]
+    allowed_writers: [v3_pack_entrypoint]
+    allowed_readers: [v3_pack_entrypoint, v3_package_tests]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    canonical_path: v3/build-control/pack
+    forbidden_paths: [$TMPDIR, /tmp, artifacts/pack, dist]
+    release_point: pack_run_terminal_cleanup
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+    required_gates: [npm run verify:v3-resource-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: v3.build.assembled_binary
+    resource_kind: assembled_release_candidate
+    lifecycle: v3.build.independent_domain
+    owner_feature_id: v3.build.independent_domain
+    owner_crate: routecodex-v3-build-tools
+    owner_module: v3-independent-build-domain
+    owner_node: V3BuildDomain03LocalArtifactsProduced
+    identity: [buildVersion, binaryPath, binarySha256]
+    allowed_writers: [v3_install_entrypoint, v3_pack_entrypoint]
+    allowed_readers: [v3_distribution_tests, v3_global_binary_publication]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    canonical_path: v3/dist/bin/rccv3
+    forbidden_paths: [dist/bin/rccv3, ~/.rcc/install]
+    release_point: explicit_install_or_pack
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+    required_gates: [npm run verify:v3-resource-map, npm run test:v3-cli-distribution]
+
+  - resource_id: v3.build.release_artifacts
+    resource_kind: release_package_artifact
+    lifecycle: v3.build.independent_domain
+    owner_feature_id: v3.build.independent_domain
+    owner_crate: routecodex-v3-build-tools
+    owner_module: v3-independent-build-domain
+    owner_node: V3BuildDomain04ReleaseSurfaceReady
+    identity: [buildVersion, packageKind, artifactPath, artifactSha256]
+    allowed_writers: [v3_pack_entrypoint]
+    allowed_readers: [v3_release_workflow, v3_package_tests]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    canonical_path: v3/artifacts/pack
+    forbidden_paths: [artifacts/pack, v4/artifacts]
+    release_point: explicit_release_publication
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+    required_gates: [npm run verify:v3-resource-map, npm run verify:function-map-compile-gate]

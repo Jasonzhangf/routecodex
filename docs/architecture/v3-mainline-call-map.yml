@@ -6991,6 +6991,7 @@ chains:
       produces: [v3.provider.global_subscription_health]
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
+
   - step_id: v3-provider-global-probe-02
     from_node: V3ServerAggregateLifecycle
     to_node: V3ProviderGlobalProbeExecution
@@ -7005,6 +7006,7 @@ chains:
       produces: [v3.provider.global_subscription_health]
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
+
   - step_id: v3-provider-global-probe-03
     from_node: V3ProviderGlobalSubscriptionFailureObservation
     to_node: V3ProviderGlobalSubscriptionHealthStore
@@ -7033,3 +7035,107 @@ chains:
       produces: [v3.provider.global_subscription_health]
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
+
+- chain_id: v3.build.independent_domain
+  owner_feature_id: v3.build.independent_domain
+  status: design
+  summary: Root orchestration dispatches into one V3-local command surface; V3-local
+    contracts and admission manifests authorize build/test/package writes only under
+    declared V3 artifact roots before explicit global binary publication.
+  manifest: docs/architecture/manifests/v3.build.independent_domain.mainline.yml
+  entry_contract:
+    node: V3BuildDomain00RootDispatcher
+    owner_doc: docs/architecture/wiki/v3-independent-build-isolation.md
+  edges:
+  - step_id: v3-build-domain-01
+    from_node: V3BuildDomain00RootDispatcher
+    to_node: V3BuildDomain01LocalContractsLoaded
+    caller_symbol: pending_root_v3_dispatch
+    caller_file: package.json
+    callee_symbol: pending_v3_canonical_entrypoint
+    callee_file: v3/package.json
+    status: binding_pending
+    owner_feature_id: v3.build.independent_domain
+    semantic_contract:
+    - Root npm, CI, and release surfaces may dispatch through npm --prefix v3 only.
+    - Root orchestration cannot enumerate V3 crates, gates, version inputs, or artifact paths.
+    resource_flow:
+      consumes: []
+      produces:
+      - v3.build.node_dependency_lock
+      - v3.build.cargo_dependency_lock
+      - v3.build.rust_toolchain_contract
+      - v3.build.version_truth
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-build-domain-02
+    from_node: V3BuildDomain01LocalContractsLoaded
+    to_node: V3BuildDomain02AdmissionVerified
+    caller_symbol: pending_v3_verify_entrypoint
+    caller_file: v3/package.json
+    callee_symbol: pending_verify_v3_architecture_admission
+    callee_file: v3/scripts/verify-isolation.mjs
+    status: binding_pending
+    owner_feature_id: v3.build.independent_domain
+    semantic_contract:
+    - Ordinary V3 build and verify consume tracked V3-local admission contracts only.
+    - Missing, stale, tampered, or externally resolved admission input fails explicitly.
+    resource_flow:
+      consumes:
+      - v3.build.node_dependency_lock
+      - v3.build.cargo_dependency_lock
+      - v3.build.rust_toolchain_contract
+      - v3.build.architecture_admission
+      - v3.build.version_truth
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-build-domain-03
+    from_node: V3BuildDomain02AdmissionVerified
+    to_node: V3BuildDomain03LocalArtifactsProduced
+    caller_symbol: pending_v3_canonical_entrypoint
+    caller_file: v3/package.json
+    callee_symbol: pending_v3_local_build_test_pack
+    callee_file: v3/scripts/build.mjs
+    status: binding_pending
+    owner_feature_id: v3.build.independent_domain
+    semantic_contract:
+    - Compilation, tests, assembly, and package staging write only under V3-owned mutable roots.
+    - External CARGO_TARGET_DIR, temp, dist, artifact, or staging overrides fail instead of escaping V3.
+    resource_flow:
+      consumes:
+      - v3.build.node_dependency_lock
+      - v3.build.cargo_dependency_lock
+      - v3.build.rust_toolchain_contract
+      - v3.build.architecture_admission
+      - v3.build.version_truth
+      - v3.build.dependency_cache
+      produces:
+      - v3.build.ordinary_cargo_target
+      - v3.build.install_target
+      - v3.build.pack_staging
+      - v3.build.assembled_binary
+      - v3.build.test_artifact_store
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-build-domain-04
+    from_node: V3BuildDomain03LocalArtifactsProduced
+    to_node: V3BuildDomain04ReleaseSurfaceReady
+    caller_symbol: pending_v3_install_or_pack_entrypoint
+    caller_file: v3/package.json
+    callee_symbol: pending_publish_verified_v3_artifact
+    callee_file: v3/scripts/install-cli.mjs
+    status: binding_pending
+    owner_feature_id: v3.build.independent_domain
+    semantic_contract:
+    - Packaging writes final packages only under v3/artifacts/pack.
+    - Global installation is an explicit atomic publication of the already-built verified binary.
+    resource_flow:
+      consumes:
+      - v3.build.assembled_binary
+      - v3.build.pack_staging
+      produces:
+      - v3.build.release_artifacts
+      - v3.global_binary_install
+      side_channel_reads: []
+      side_channel_writes: []

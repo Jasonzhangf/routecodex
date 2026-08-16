@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>58 functional paths</span>
-        <span>376 caller edges</span>
+        <span>59 functional paths</span>
+        <span>380 caller edges</span>
       </div>
     </header>
 
@@ -471,7 +471,7 @@ flowchart TD
 <tr><td>Forbidden source registered direct response edges</td><td><strong>none</strong></td></tr>
 <tr><td>Invalid aggregate wrapper edges</td><td><strong>none</strong></td></tr>
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
-<tr><td>Binding-pending edges</td><td><strong>8</strong></td></tr>
+<tr><td>Binding-pending edges</td><td><strong>12</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>17</strong></td></tr>
 <tr><td>live-bound source edges</td><td><strong>293</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
@@ -499,6 +499,10 @@ flowchart TD
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-06</code></td><td><code>HubRespChatProcess03Governed</code></td><td><code>V3WebSearch03SearchResultCaptured</code></td></tr>
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-07</code></td><td><code>V3WebSearch03SearchResultCaptured</code></td><td><code>HubRespOutbound04ClientSemantic</code></td></tr>
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-08</code></td><td><code>HubReqChatProcess03Governed</code></td><td><code>V3WebSearch04ToolResultInjected</code></td></tr>
+<tr><td><code>v3.build.independent_domain</code></td><td><code>v3-build-domain-01</code></td><td><code>V3BuildDomain00RootDispatcher</code></td><td><code>V3BuildDomain01LocalContractsLoaded</code></td></tr>
+<tr><td><code>v3.build.independent_domain</code></td><td><code>v3-build-domain-02</code></td><td><code>V3BuildDomain01LocalContractsLoaded</code></td><td><code>V3BuildDomain02AdmissionVerified</code></td></tr>
+<tr><td><code>v3.build.independent_domain</code></td><td><code>v3-build-domain-03</code></td><td><code>V3BuildDomain02AdmissionVerified</code></td><td><code>V3BuildDomain03LocalArtifactsProduced</code></td></tr>
+<tr><td><code>v3.build.independent_domain</code></td><td><code>v3-build-domain-04</code></td><td><code>V3BuildDomain03LocalArtifactsProduced</code></td><td><code>V3BuildDomain04ReleaseSurfaceReady</code></td></tr>
 </tbody>
 </table>
 
@@ -533,6 +537,10 @@ flowchart TD
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-06</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-07</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-08</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.build.independent_domain</code></td><td><code>v3-build-domain-01</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.build.independent_domain</code></td><td><code>v3-build-domain-02</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.build.independent_domain</code></td><td><code>v3-build-domain-03</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.build.independent_domain</code></td><td><code>v3-build-domain-04</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
 </tbody>
 </table>
     </section>
@@ -603,6 +611,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_sse_protocol_codec_projection_boundary"><code>v3.sse.protocol_codec_projection_boundary</code></a><br/>v 3.sse.protocol_codec_projection_boundary</td><td><span class="status audited_locked">locked by Jason</span></td><td>3</td><td>7</td><td><code>v3.sse_protocol_codec_projection_boundary</code></td><td><code>sha256:f9cef82020d2…</code></td></tr>
 <tr><td><a href="#chain-vr_current_turn_typed_route_facts"><code>vr.current_turn_typed_route_facts</code></a><br/>vr.current_turn_typed_route_facts</td><td><span class="status audited_locked">locked by Jason</span></td><td>2</td><td>3</td><td><code>vr.current_turn_typed_route_facts</code></td><td><code>sha256:572f913b7701…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_global_subscription_probe"><code>v3.provider_global_subscription_probe</code></a><br/>v 3.provider_global_subscription_probe</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>3</td><td><code>v3.provider_global_subscription_probe</code></td><td><code>sha256:645d2d8bcceb…</code></td></tr>
+<tr><td><a href="#chain-v3_build_independent_domain"><code>v3.build.independent_domain</code></a><br/>v 3.build.independent_domain</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>13</td><td><code>v3.build.independent_domain</code></td><td><code>sha256:73f819a8b703…</code></td></tr>
 </tbody>
 </table>
     </section>
@@ -737,6 +746,13 @@ flowchart TD
             <span><code>v3.provider_global_subscription_probe</code></span>
             <span>4 edges · 3 resources · v3-provider-responses, v3-runtime, v3-runtime::hub_v1, v3-server</span>
             <span class="status audited_locked">locked by Jason</span>
+          </a>
+<a class="branch-card" href="#chain-v3_build_independent_domain">
+            <span class="chain-id">v 3.build.independent_domain</span>
+            <span>V3BuildDomain00RootDispatcher → V3BuildDomain04ReleaseSurfaceReady</span>
+            <span><code>v3.build.independent_domain</code></span>
+            <span>4 edges · 13 resources · package.json, v3/package.json, v3/scripts</span>
+            <span class="status pending_review">pending review</span>
           </a>
       </div>
     </section>
@@ -4069,6 +4085,52 @@ flowchart TD
 <tr><td><code>v3-provider-global-probe-02</code></td><td><code>V3ServerAggregateLifecycle</code><br/>→ <code>V3ProviderGlobalProbeExecution</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.provider.global_subscription_health</code> <code>v3.config.published_manifest</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.provider.global_subscription_health</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.provider.global_subscription_health</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.provider.global_subscription_health</code></div></td><td><code>spawn_v3_server_aggregate</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>probe_v3_provider_global_target</code><br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small></td></tr>
 <tr><td><code>v3-provider-global-probe-03</code></td><td><code>V3ProviderGlobalSubscriptionFailureObservation</code><br/>→ <code>V3ProviderGlobalSubscriptionHealthStore</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.provider.global_subscription_health</code> <code>v3.error.source</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.provider.global_subscription_health</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.provider.global_subscription_health</code> <code>v3.error.source</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.provider.global_subscription_health</code></div></td><td><code>execute_v3_responses_relay_runtime_inner</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small></td><td><code>V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure</code><br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small></td></tr>
 <tr><td><code>v3-provider-global-probe-04</code></td><td><code>V3ProviderGlobalSubscriptionFailureObservation</code><br/>→ <code>V3ProviderGlobalSubscriptionHealthStore</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.provider.global_subscription_health</code> <code>v3.error.source</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.provider.global_subscription_health</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.provider.global_subscription_health</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.provider.global_subscription_health</code></div></td><td><code>V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure</code><br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small></td><td><code>V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response</code><br/><small>routecodex-v3-provider-responses/src/provider_global_health.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_build_independent_domain" >
+      <summary>
+        <span class="summary-main">v 3.build.independent_domain</span>
+        <span class="summary-sub">V3BuildDomain00RootDispatcher → V3BuildDomain04ReleaseSurfaceReady</span>
+        <span class="summary-sub">4 edges · <code>v3.build.independent_domain</code> · V3BuildDomain00RootDispatcher → V3BuildDomain04ReleaseSurfaceReady</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Root orchestration dispatches into one V3-local command surface; V3-local contracts and admission manifests authorize build/test/package writes only under declared V3 artifact roots before explicit global binary publication.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.build.independent_domain</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>package.json · v3/package.json · v3/scripts</code></span>
+          <span>resources: <code>13</code></span>
+          <span>manifest: <code>docs/architecture/manifests/v3.build.independent_domain.mainline.yml</code></span>
+          <span class="pending-pill">4 binding pending</span>
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_build_independent_domain_0[&quot;&lt;b&gt;Build Domain 00 Root Dispatcher&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain00RootDispatcher&lt;/small&gt;&quot;]
+  n_v3_build_independent_domain_1[&quot;&lt;b&gt;Build Domain 01 Local Contracts Loaded&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain01LocalContractsLoaded&lt;/small&gt;&quot;]
+  n_v3_build_independent_domain_2[&quot;&lt;b&gt;Build Domain 02 Admission Verified&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain02AdmissionVerified&lt;/small&gt;&quot;]
+  n_v3_build_independent_domain_3[&quot;&lt;b&gt;Build Domain 03 Local Artifacts Produced&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain03LocalArtifactsProduced&lt;/small&gt;&quot;]
+  n_v3_build_independent_domain_4[&quot;&lt;b&gt;Build Domain 04 Release Surface Ready&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain04ReleaseSurfaceReady&lt;/small&gt;&quot;]
+  n_v3_build_independent_domain_0 --&gt;|v3-build-domain-01&lt;br/&gt;package.json → v3/package.json| n_v3_build_independent_domain_1
+  n_v3_build_independent_domain_1 --&gt;|v3-build-domain-02&lt;br/&gt;v3/package.json → v3/scripts| n_v3_build_independent_domain_2
+  n_v3_build_independent_domain_2 --&gt;|v3-build-domain-03&lt;br/&gt;v3/package.json → v3/scripts| n_v3_build_independent_domain_3
+  n_v3_build_independent_domain_3 --&gt;|v3-build-domain-04&lt;br/&gt;v3/package.json → v3/scripts| n_v3_build_independent_domain_4
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_build_independent_domain_0,n_v3_build_independent_domain_1,n_v3_build_independent_domain_2,n_v3_build_independent_domain_3,n_v3_build_independent_domain_4 node;
+  class n_v3_build_independent_domain_0,n_v3_build_independent_domain_1,n_v3_build_independent_domain_2,n_v3_build_independent_domain_3,n_v3_build_independent_domain_4 pending;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-build-domain-01</code></td><td><code>V3BuildDomain00RootDispatcher</code><br/>→ <code>V3BuildDomain01LocalContractsLoaded</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.build.node_dependency_lock</code> <code>v3.build.cargo_dependency_lock</code> <code>v3.build.rust_toolchain_contract</code> <code>v3.build.version_truth</code></div></td><td><code>pending_root_v3_dispatch</code><br/><small>package.json</small></td><td><code>pending_v3_canonical_entrypoint</code><br/><small>v3/package.json</small></td></tr>
+<tr><td><code>v3-build-domain-02</code></td><td><code>V3BuildDomain01LocalContractsLoaded</code><br/>→ <code>V3BuildDomain02AdmissionVerified</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.build.node_dependency_lock</code> <code>v3.build.cargo_dependency_lock</code> <code>v3.build.rust_toolchain_contract</code> <code>v3.build.architecture_admission</code> <code>v3.build.version_truth</code></div></td><td><code>pending_v3_verify_entrypoint</code><br/><small>v3/package.json</small></td><td><code>pending_verify_v3_architecture_admission</code><br/><small>v3/scripts/verify-isolation.mjs</small></td></tr>
+<tr><td><code>v3-build-domain-03</code></td><td><code>V3BuildDomain02AdmissionVerified</code><br/>→ <code>V3BuildDomain03LocalArtifactsProduced</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.build.node_dependency_lock</code> <code>v3.build.cargo_dependency_lock</code> <code>v3.build.rust_toolchain_contract</code> <code>v3.build.architecture_admission</code> <code>v3.build.version_truth</code> <code>v3.build.dependency_cache</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.build.ordinary_cargo_target</code> <code>v3.build.install_target</code> <code>v3.build.pack_staging</code> <code>v3.build.assembled_binary</code> <code>v3.build.test_artifact_store</code></div></td><td><code>pending_v3_canonical_entrypoint</code><br/><small>v3/package.json</small></td><td><code>pending_v3_local_build_test_pack</code><br/><small>v3/scripts/build.mjs</small></td></tr>
+<tr><td><code>v3-build-domain-04</code></td><td><code>V3BuildDomain03LocalArtifactsProduced</code><br/>→ <code>V3BuildDomain04ReleaseSurfaceReady</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.build.assembled_binary</code> <code>v3.build.pack_staging</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.build.release_artifacts</code> <code>v3.global_binary_install</code></div></td><td><code>pending_v3_install_or_pack_entrypoint</code><br/><small>v3/package.json</small></td><td><code>pending_publish_verified_v3_artifact</code><br/><small>v3/scripts/install-cli.mjs</small></td></tr>
 </tbody>
 </table>
       </div>

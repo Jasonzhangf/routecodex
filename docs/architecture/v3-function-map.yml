@@ -4605,3 +4605,73 @@ features:
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-architecture-docs
   runtime_status: source_controlled_live_verification_required
+
+- feature_id: v3.build.independent_domain
+  status: design_pending
+  change_risk: high
+  owner_kind: v3_build_domain
+  owner_scope: V3 owns its complete source, dependency-lock, toolchain, build, test,
+    architecture-admission, install-build, package-staging, and release-artifact
+    graph under v3/. Root package, CI, and release surfaces may only dispatch into
+    V3-owned canonical commands. Runtime request, response, Error, Direct, Relay,
+    continuation, provider, and SSE semantics are unchanged.
+  owner_module: v3-independent-build-domain
+  owner_files:
+  - docs/goals/v3-independent-build-isolation-plan.md
+  - docs/goals/v3-independent-build-isolation-test-design.md
+  - docs/architecture/manifests/v3.build.independent_domain.mainline.yml
+  - docs/architecture/wiki/v3-independent-build-isolation.md
+  resource_bindings:
+  - v3.build.node_dependency_lock
+  - v3.build.cargo_dependency_lock
+  - v3.build.rust_toolchain_contract
+  - v3.build.architecture_admission
+  - v3.build.version_truth
+  - v3.build.ordinary_cargo_target
+  - v3.build.install_target
+  - v3.build.pack_staging
+  - v3.build.assembled_binary
+  - v3.build.release_artifacts
+  - v3.build.test_artifact_store
+  - v3.build.dependency_cache
+  - v3.global_binary_install
+  allowed_paths:
+  - v3
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-build-tool-module-registry.yml
+  - docs/architecture/v3-verification-map.yml
+  - docs/architecture/manifests/v3.build.independent_domain.mainline.yml
+  - docs/architecture/wiki/v3-independent-build-isolation.md
+  - docs/architecture/wiki/v3-independent-build-isolation.html
+  - docs/goals/v3-independent-build-isolation-plan.md
+  - docs/goals/v3-independent-build-isolation-test-design.md
+  - package.json
+  - package-lock.json
+  - .github/workflows/test.yml
+  - .github/workflows/release.yml
+  - sharedmodule/llmswitch-core/rust-core/Cargo.toml
+  - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core
+  - sharedmodule/llmswitch-core/rust-core/crates/servertool-core
+  - sharedmodule/llmswitch-core/rust-core/crates/stop-message-core
+  forbidden_paths:
+  - v4
+  - src
+  - ~/.rcc
+  - request.normal_payload
+  - provider.wire_payload
+  - response.client_payload
+  - MetadataCenter
+  - Error
+  mainline_bindings:
+  - v3-build-domain-01
+  - v3-build-domain-02
+  - v3-build-domain-03
+  - v3-build-domain-04
+  required_gates:
+  - npm run verify:v3-resource-map
+  - npm run verify:function-map-compile-gate
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-module-boundaries
+  runtime_status: design_only_not_implemented

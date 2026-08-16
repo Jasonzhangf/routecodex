@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 58 functional paths, 376 caller edges.
+Generated view: 59 functional paths, 380 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -17,6 +17,7 @@ flowchart TD
   module_docs["docs"]
   module_docs__manifest["docs::manifest"]
   module_llmswitch_core["llmswitch-core"]
+  module_package_json["package.json"]
   module_pending["pending"]
   module_routecodex_v3_route_classifier["routecodex-v3-route-classifier"]
   module_routecodex_v3_sse["routecodex-v3-sse"]
@@ -32,6 +33,9 @@ flowchart TD
   module_v3_server["v3-server"]
   module_v3_target["v3-target"]
   module_v3_virtual_router["v3-virtual-router"]
+  module_v3_package_json["v3/package.json"]
+  module_v3_scripts["v3/scripts"]
+  module_package_json -->|1 edges / 1 paths| module_v3_package_json
   module_pending -->|8 edges / 1 paths| module_pending
   module_routecodex_v3_route_classifier -->|1 edges / 1 paths| module_routecodex_v3_route_classifier
   module_routecodex_v3_sse -->|2 edges / 1 paths| module_routecodex_v3_sse
@@ -66,10 +70,12 @@ flowchart TD
   module_v3_server -->|4 edges / 4 paths| module_v3_runtime
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
   module_v3_server -->|25 edges / 14 paths| module_v3_server
+  module_v3_package_json -->|3 edges / 1 paths| module_v3_scripts
 ```
 
 | From module | To module | Edges | Functional paths |
 | --- | --- | ---: | --- |
+| package.json | v3/package.json | 1 | `v3.build.independent_domain` |
 | pending | pending | 8 | `v3.web_search_servertool_state_machine` |
 | routecodex-v3-route-classifier | routecodex-v3-route-classifier | 1 | `vr.current_turn_typed_route_facts` |
 | routecodex-v3-sse | routecodex-v3-sse | 2 | `v3.sse.transport_boundary` |
@@ -104,6 +110,7 @@ flowchart TD
 | v3-server | v3-runtime | 4 | `v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
 | v3-server | v3-server | 25 | `v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3/package.json | v3/scripts | 3 | `v3.build.independent_domain` |
 
 ## Auto audit /补救清单
 
@@ -127,6 +134,10 @@ flowchart TD
 | v3.web_search_servertool_state_machine | v3-web-search-sm-06 | HubRespChatProcess03Governed | V3WebSearch03SearchResultCaptured |
 | v3.web_search_servertool_state_machine | v3-web-search-sm-07 | V3WebSearch03SearchResultCaptured | HubRespOutbound04ClientSemantic |
 | v3.web_search_servertool_state_machine | v3-web-search-sm-08 | HubReqChatProcess03Governed | V3WebSearch04ToolResultInjected |
+| v3.build.independent_domain | v3-build-domain-01 | V3BuildDomain00RootDispatcher | V3BuildDomain01LocalContractsLoaded |
+| v3.build.independent_domain | v3-build-domain-02 | V3BuildDomain01LocalContractsLoaded | V3BuildDomain02AdmissionVerified |
+| v3.build.independent_domain | v3-build-domain-03 | V3BuildDomain02AdmissionVerified | V3BuildDomain03LocalArtifactsProduced |
+| v3.build.independent_domain | v3-build-domain-04 | V3BuildDomain03LocalArtifactsProduced | V3BuildDomain04ReleaseSurfaceReady |
 
 ### Missing caller/callee fields
 
@@ -2416,3 +2427,38 @@ flowchart TD
 | `v3-provider-global-probe-02` | `V3ServerAggregateLifecycle` → `V3ProviderGlobalProbeExecution` | anchored | spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small> | probe_v3_provider_global_target<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-03` | `V3ProviderGlobalSubscriptionFailureObservation` → `V3ProviderGlobalSubscriptionHealthStore` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-04` | `V3ProviderGlobalSubscriptionFailureObservation` → `V3ProviderGlobalSubscriptionHealthStore` | anchored | V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response<br/><small>routecodex-v3-provider-responses/src/provider_global_health.rs</small> | `v3.provider_global_subscription_probe` |
+
+## v3.build.independent_domain
+
+Root orchestration dispatches into one V3-local command surface; V3-local contracts and admission manifests authorize build/test/package writes only under declared V3 artifact roots before explicit global binary publication.
+
+Owner feature: `v3.build.independent_domain`
+Manifest: `docs/architecture/manifests/v3.build.independent_domain.mainline.yml`
+
+```mermaid
+flowchart TD
+  subgraph c_58_v3_build_independent_domain_m_package_json["package.json"]
+    c_58_v3_build_independent_domain_0["package.json<br/>pending_root_v3_dispatch<br/><small>package.json</small>"]
+  end
+  subgraph c_58_v3_build_independent_domain_m_v3_package_json["v3/package.json"]
+    c_58_v3_build_independent_domain_1["v3/package.json<br/>pending_v3_canonical_entrypoint<br/><small>v3/package.json</small>"]
+    c_58_v3_build_independent_domain_2["v3/package.json<br/>pending_v3_verify_entrypoint<br/><small>v3/package.json</small>"]
+    c_58_v3_build_independent_domain_5["v3/package.json<br/>pending_v3_install_or_pack_entrypoint<br/><small>v3/package.json</small>"]
+  end
+  subgraph c_58_v3_build_independent_domain_m_v3_scripts["v3/scripts"]
+    c_58_v3_build_independent_domain_3["v3/scripts<br/>pending_verify_v3_architecture_admission<br/><small>v3/scripts/verify-isolation.mjs</small>"]
+    c_58_v3_build_independent_domain_4["v3/scripts<br/>pending_v3_local_build_test_pack<br/><small>v3/scripts/build.mjs</small>"]
+    c_58_v3_build_independent_domain_6["v3/scripts<br/>pending_publish_verified_v3_artifact<br/><small>v3/scripts/install-cli.mjs</small>"]
+  end
+  c_58_v3_build_independent_domain_0 -->|v3-build-domain-01<br/>V3BuildDomain00RootDispatcher → V3BuildDomain01LocalContractsLoaded| c_58_v3_build_independent_domain_1
+  c_58_v3_build_independent_domain_2 -->|v3-build-domain-02<br/>V3BuildDomain01LocalContractsLoaded → V3BuildDomain02AdmissionVerified| c_58_v3_build_independent_domain_3
+  c_58_v3_build_independent_domain_1 -->|v3-build-domain-03<br/>V3BuildDomain02AdmissionVerified → V3BuildDomain03LocalArtifactsProduced| c_58_v3_build_independent_domain_4
+  c_58_v3_build_independent_domain_5 -->|v3-build-domain-04<br/>V3BuildDomain03LocalArtifactsProduced → V3BuildDomain04ReleaseSurfaceReady| c_58_v3_build_independent_domain_6
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-build-domain-01` | `V3BuildDomain00RootDispatcher` → `V3BuildDomain01LocalContractsLoaded` | binding_pending | pending_root_v3_dispatch<br/><small>package.json</small> | pending_v3_canonical_entrypoint<br/><small>v3/package.json</small> | `v3.build.independent_domain` |
+| `v3-build-domain-02` | `V3BuildDomain01LocalContractsLoaded` → `V3BuildDomain02AdmissionVerified` | binding_pending | pending_v3_verify_entrypoint<br/><small>v3/package.json</small> | pending_verify_v3_architecture_admission<br/><small>v3/scripts/verify-isolation.mjs</small> | `v3.build.independent_domain` |
+| `v3-build-domain-03` | `V3BuildDomain02AdmissionVerified` → `V3BuildDomain03LocalArtifactsProduced` | binding_pending | pending_v3_canonical_entrypoint<br/><small>v3/package.json</small> | pending_v3_local_build_test_pack<br/><small>v3/scripts/build.mjs</small> | `v3.build.independent_domain` |
+| `v3-build-domain-04` | `V3BuildDomain03LocalArtifactsProduced` → `V3BuildDomain04ReleaseSurfaceReady` | binding_pending | pending_v3_install_or_pack_entrypoint<br/><small>v3/package.json</small> | pending_publish_verified_v3_artifact<br/><small>v3/scripts/install-cli.mjs</small> | `v3.build.independent_domain` |

@@ -3675,3 +3675,54 @@ features:
     live_cutover: required
     global_install_restart: required
     forbidden_claim: Do not claim hourly probe or provider-global recovery from state-only tests; live runtime evidence is required.
+
+- feature_id: v3.build.independent_domain
+  status: design_pending
+  change_risk: high
+  owner_kind: v3_build_domain
+  owner_scope: V3-local dependency/toolchain/version locks, architecture admission,
+    build and test targets, install target, package staging, assembled binary, release
+    artifacts, root thin dispatch, and explicit global publication.
+  owner_modules:
+  - v3-independent-build-domain
+  design:
+  - docs/goals/v3-independent-build-isolation-plan.md
+  - docs/goals/v3-independent-build-isolation-test-design.md
+  contract:
+  - docs/architecture/manifests/v3.build.independent_domain.mainline.yml
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-build-tool-module-registry.yml
+  - docs/architecture/wiki/v3-independent-build-isolation.md
+  required_positive:
+  - V3-local Node, Cargo, toolchain, version, and architecture-admission contracts
+    drive the canonical build, test, verify, install-build, and pack commands.
+  - Cargo metadata reports v3/ as workspace and target root with zero escaping path
+    dependencies and one V3-local owner for each relocated crate.
+  - Build, test, install-build, assembly, and package writes remain under declared V3 roots.
+  - Root npm, CI, and release invoke only thin V3 dispatchers.
+  - Installed binary hash/version matches v3/dist, one aggregate restart succeeds,
+    every configured listener is healthy, and Direct/Relay JSON/SSE old samples replay.
+  required_negative:
+  - Missing local contracts, stale admission manifests, external target/temp/staging
+    overrides, root module fallback, sharedmodule crate revival, duplicate owners,
+    and root CI gate enumeration fail explicitly.
+  - No V4 source, root runtime source, provider configuration, user configuration,
+    request/response payload, MetadataCenter, Error payload, or runtime semantic owner
+    is modified by build isolation.
+  - No fallback build path, duplicate crate implementation, root version/build-info
+    input, root dist/artifact output, OS-temp staging, stop/start lifecycle, broad kill,
+    or per-port restart is allowed.
+  required_gates:
+  - npm run verify:v3-resource-map
+  - npm run verify:function-map-compile-gate
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-module-boundaries
+  completion_rule:
+    source: Pending until the V3-local isolation gate, positive/red suites, full
+      architecture CI, package tests, and filesystem write-set audit are implemented
+      and pass from V3 root, root dispatcher, unrelated cwd, and standalone V3 copy.
+    runtime: Pending until global installation, exactly one aggregate restart,
+      all-listener health, Direct/Relay JSON/SSE old-sample replay, log audit, and
+      post-live DSH Review PASS.

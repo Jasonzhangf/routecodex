@@ -1,0 +1,64 @@
+lifecycle_id: v3.build.independent_domain
+status: design
+owner_feature_id: v3.build.independent_domain
+canonical_docs:
+  - docs/goals/v3-independent-build-isolation-plan.md
+  - docs/goals/v3-independent-build-isolation-test-design.md
+  - docs/architecture/wiki/v3-independent-build-isolation.md
+entrypoint: V3BuildDomain00RootDispatcher
+return_path: V3BuildDomain04ReleaseSurfaceReady
+nodes:
+  - node_id: V3BuildDomain00RootDispatcher
+    owner: root orchestration
+    binding_status: pending
+  - node_id: V3BuildDomain01LocalContractsLoaded
+    owner: v3/package.json
+    binding_status: pending
+  - node_id: V3BuildDomain02AdmissionVerified
+    owner: v3/scripts/verify-isolation.mjs
+    binding_status: pending
+  - node_id: V3BuildDomain03LocalArtifactsProduced
+    owner: v3/scripts
+    binding_status: pending
+  - node_id: V3BuildDomain04ReleaseSurfaceReady
+    owner: v3/scripts/install-cli.mjs and v3/scripts/pack-release.mjs
+    binding_status: pending
+edges:
+  - edge_id: v3-build-domain-01
+    from: V3BuildDomain00RootDispatcher
+    to: V3BuildDomain01LocalContractsLoaded
+    binding_status: pending
+  - edge_id: v3-build-domain-02
+    from: V3BuildDomain01LocalContractsLoaded
+    to: V3BuildDomain02AdmissionVerified
+    binding_status: pending
+  - edge_id: v3-build-domain-03
+    from: V3BuildDomain02AdmissionVerified
+    to: V3BuildDomain03LocalArtifactsProduced
+    binding_status: pending
+  - edge_id: v3-build-domain-04
+    from: V3BuildDomain03LocalArtifactsProduced
+    to: V3BuildDomain04ReleaseSurfaceReady
+    binding_status: pending
+resource_flow:
+  source_contracts:
+    - v3.build.node_dependency_lock
+    - v3.build.cargo_dependency_lock
+    - v3.build.rust_toolchain_contract
+    - v3.build.architecture_admission
+    - v3.build.version_truth
+  mutable_local_outputs:
+    - v3.build.ordinary_cargo_target
+    - v3.build.install_target
+    - v3.build.pack_staging
+    - v3.build.test_artifact_store
+  release_candidates:
+    - v3.build.assembled_binary
+    - v3.build.release_artifacts
+  explicit_publication:
+    - v3.global_binary_install
+verification_gates:
+  - npm run verify:v3-resource-map
+  - npm run verify:function-map-compile-gate
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-module-boundaries

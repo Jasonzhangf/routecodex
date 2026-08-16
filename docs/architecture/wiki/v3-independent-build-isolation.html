@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>V3 Independent Build Isolation Review</title>
+  <style>
+    :root { color-scheme: light; font-family: ui-sans-serif, system-ui, sans-serif; color: #18212b; background: #f5f7f9; }
+    body { margin: 0; }
+    header, main { max-width: 1120px; margin: 0 auto; padding: 24px; }
+    header { padding-top: 36px; }
+    h1 { margin: 0 0 8px; font-size: 32px; letter-spacing: 0; }
+    h2 { margin-top: 32px; font-size: 20px; letter-spacing: 0; }
+    p { line-height: 1.55; }
+    .status { color: #8a4b08; font-weight: 700; }
+    .flow { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 16px; align-items: stretch; }
+    .node { position: relative; min-height: 116px; padding: 16px; border: 1px solid #bac4cf; border-radius: 6px; background: #fff; }
+    .node:not(:last-child)::after { content: "→"; position: absolute; right: -15px; top: 44px; z-index: 2; color: #41515f; font-size: 22px; }
+    .node strong { display: block; overflow-wrap: anywhere; }
+    .node span { display: block; margin-top: 10px; color: #526271; font-size: 14px; line-height: 1.4; }
+    table { width: 100%; border-collapse: collapse; background: #fff; }
+    th, td { padding: 12px; border: 1px solid #cbd3da; text-align: left; vertical-align: top; line-height: 1.4; }
+    code { overflow-wrap: anywhere; }
+    ul { padding-left: 22px; line-height: 1.55; }
+    @media (max-width: 900px) {
+      .flow { grid-template-columns: 1fr; }
+      .node:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -20px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>V3 Independent Build Isolation</h1>
+    <p class="status">Design pending. No source binding is claimed.</p>
+    <p>Review surface for <code>v3.build.independent_domain</code>. Runtime protocol and control-plane semantics are excluded.</p>
+  </header>
+  <main>
+    <section class="flow" aria-label="Build isolation lifecycle">
+      <div class="node"><strong>V3BuildDomain00RootDispatcher</strong><span>Thin root dispatch only.</span></div>
+      <div class="node"><strong>V3BuildDomain01LocalContractsLoaded</strong><span>V3-local locks, toolchain, version, admission.</span></div>
+      <div class="node"><strong>V3BuildDomain02AdmissionVerified</strong><span>Reject stale, missing, tampered, or escaping inputs.</span></div>
+      <div class="node"><strong>V3BuildDomain03LocalArtifactsProduced</strong><span>All mutable build and staging output stays under V3.</span></div>
+      <div class="node"><strong>V3BuildDomain04ReleaseSurfaceReady</strong><span>V3 packages or explicit atomic binary publication.</span></div>
+    </section>
+
+    <h2>Resource Classes</h2>
+    <table>
+      <thead><tr><th>Class</th><th>Resources</th><th>Boundary</th></tr></thead>
+      <tbody>
+        <tr><td>Source contracts</td><td><code>node_dependency_lock</code>, <code>cargo_dependency_lock</code>, <code>rust_toolchain_contract</code>, <code>architecture_admission</code>, <code>version_truth</code></td><td>Tracked V3-local inputs only.</td></tr>
+        <tr><td>Mutable outputs</td><td><code>ordinary_cargo_target</code>, <code>install_target</code>, <code>pack_staging</code>, test artifacts and dependency cache</td><td>Declared paths under <code>v3/</code> only.</td></tr>
+        <tr><td>Release candidates</td><td><code>assembled_binary</code>, <code>release_artifacts</code></td><td><code>v3/dist</code> and <code>v3/artifacts</code>.</td></tr>
+        <tr><td>Publication</td><td><code>v3.global_binary_install</code></td><td>Explicit atomic publication to <code>~/.local/bin/rccv3</code>.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Blocking Review Checks</h2>
+    <ul>
+      <li>Every design resource must gain a real path, owner, symbol, and red/green gate before becoming active.</li>
+      <li>Cargo metadata must show zero escaping dependencies and one V3-local owner for each relocated crate.</li>
+      <li>Root package, CI, and release must remain thin dispatchers.</li>
+      <li>No build identity or artifact may enter request/response/provider wire, MetadataCenter, continuation, debug, or Error payloads.</li>
+      <li>Global install, one aggregate restart, all health endpoints, old sample replay, and post-live DSH Review are required.</li>
+    </ul>
+
+    <h2>Canonical Sources</h2>
+    <ul>
+      <li><a href="../../goals/v3-independent-build-isolation-plan.md">Implementation plan</a></li>
+      <li><a href="../../goals/v3-independent-build-isolation-test-design.md">Test design</a></li>
+      <li><a href="../manifests/v3.build.independent_domain.mainline.yml">Lifecycle manifest</a></li>
+      <li><a href="v3-independent-build-isolation.md">Markdown review surface</a></li>
+    </ul>
+  </main>
+</body>
+</html>
