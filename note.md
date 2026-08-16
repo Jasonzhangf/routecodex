@@ -35648,3 +35648,12 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 根因红证据：`record_post_commit_provider_stream_failure` 同时调用 `record_provider_stream_failure_in_provider_scope` 与 `record_provider_failure_record`，一次 post-commit SSE 失败立即生成 provider cooldown；新增反测在旧实现上失败，fresh session 被错误阻断。
 - 唯一 owner 修复：runtime post-commit helper 仅写 request-scoped action-gate failure；物理删除 provider-health 的 SSE 专用拉黑入口及其错误正测。Responses direct codec 把空 `response.output_item.added` lifecycle frame 保持为 pre-commit buffering，使随后 failed/EOF 能进入既有同请求 retry/reselect。
 - 当前证据：根因反测先红后绿；pre-commit empty-lifecycle failed/EOF、同 provider 三次 retry 后 reselect、post-commit fresh request 200、provider action/session cooldown 正反 gate、resource/module/docs/rust-only gates 均绿。待 workspace/build、全局安装、聚合 restart、线上 200 replay 和 DSH review。
+
+# 2026-08-16 V3 remote continuation provider 绑定与 SSE 客户端收口
+- 根因：remote continuation store 曾把 provider 返回的裸 `response_id` 当全局唯一键；多个 session/provider 返回同一个 `resp_0` 时，第二次 commit 被误判 `AlreadyCommitted`，并在 SSE 已开始后以 Rust body error 断开客户端。
+- 唯一 owner 修复：store identity 改为 `remote_response_id + V3RemoteContinuationScopeKey + V3RemoteContinuationPin`；同 ID 可在不同 session/provider 并存，同复合身份重复提交仍 fail-fast；scope-only lookup 多 provider 绑定时显式 `AmbiguousProviderBinding`。
+- SSE：pre-commit transport failure 留在既有 retry/reselect；post-commit failure 经 typed Error01-06 投影为标准 Responses `event: error` 后 clean EOF，不再向 Hyper body 返回 `Err`，也不伪造 `response.completed`/`[DONE]`；client disconnect 保持 health-neutral。
+- 验证：remote continuation 16/16、direct integration 28/28、server 98/98、provider action 22/22；两组 red fixtures 14/14 与 53/53；architecture CI 36/36；V3 workspace 全绿；isolated Cargo target 的 `build:v3-cli` 与 `install:v3` 通过。
+- 全局运行：commit `a4e29c97571df089ab784a4eec3c30fa6f583234`，version 0.90.4576，安装二进制 sha256 `863b5da960b5b694bf3fc6a2e89ba9fbac97ce2fbcfa1774de355c1025a9a5ad`；一次聚合 restart 后 4444/5520/5555/10000 health 均报告 0.90.4576。
+- 在线：5555 两个不同 typed session 连续返回 HTTP 200、标准 `response.completed` 和精确文本；新进程日志无新的 `remote continuation is already committed` 或客户端 `error decoding response body`。精确“两个 provider/session 同返 resp_0”由 controlled integration 红绿样本锁定。
+- 非本变更阻塞：全仓 clippy/fmt gate 仍有改动前已存在的无关告警/格式漂移；主树存在大量其他 worker 未提交和分叉改动，本 issue 尚未合并主树，避免覆盖并发工作。

@@ -5556,3 +5556,9 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
   修复叙述 prose 先剥离），node --check + test-dsh-mcp + 4 个历史 final
   回归（r2 PASS→pass、genuine FAIL→fail、P0/P1 none→pass、r1 FAIL→fail）
   通过。该工具修复在仓库外，不入 repo commit。
+
+## 2026-08-16 V3 remote continuation / SSE 身份与终止契约（追加确证）
+- provider 返回的 Responses `response_id` 不是全局唯一 ID。remote continuation 的唯一身份必须是裸 ID、typed entry/session scope 和精确 provider pin（provider/model/auth binding）的复合键；跨 scope/provider 同 ID 必须可并存，同复合身份重复 commit 才是 `AlreadyCommitted`。
+- Req03 只有 scope、缺精确 provider pin 时，仅允许唯一候选恢复；存在多个 provider binding 必须 fail-fast `AmbiguousProviderBinding`，禁止猜测、payload 重建或 fallback。
+- SSE 在首个业务帧前失败可进入同请求 retry/reselect；首个业务帧后失败不可换流，必须经统一 typed Error01-06 投影成入口协议的标准 error event 并 clean EOF。禁止把 Rust/Hyper body `Err` 直接暴露成客户端 transport decode failure；禁止伪造成功终态。
+- 实现提交 `a4e29c97571df089ab784a4eec3c30fa6f583234`，全局版本 0.90.4576；定向、红测、architecture 36/36、workspace、isolated build/install、四端口 health 与 5555 两个 typed session 连续 HTTP 200 已验证。
