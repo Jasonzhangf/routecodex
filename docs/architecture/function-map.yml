@@ -414,6 +414,7 @@ owners:
   - compile_v2_config_02_authoring_from_file
   - compile_v2_root
   - compile_v2_providers
+  - discover_v3_secret_file_auth_handles
   - compile_v2_route_groups
   allowed_paths:
   - v3/crates/routecodex-v3-config/src/lib.rs
@@ -424,6 +425,7 @@ owners:
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - docs/architecture
   - docs/design/v3-routecodex-rust-module-boundaries.md
+  - docs/goals/v3-provider-auth-key-file-expansion-test-design.md
   - package.json
   forbidden_paths:
   - v3/crates/routecodex-v3-runtime
@@ -448,6 +450,9 @@ owners:
   - V2 literal apiKey values remain apiKey/auth-handle declarations in the V3 manifest
     and are resolved only at provider transport send time; V3 must not materialize
     them into .routecodex-v3-secret-handles or a second secret truth.
+  - Provider auth may reference one top-level secretFile; routecodex-v3-config enumerates
+    its key names into existing secret_file + secret_key handles while values remain
+    transport-resolved. Mixing auto-discovery with explicit auth entries fails fast.
   - 'The 5555 route contract is locked by config_store_compiles_v2_root_and_provider_toml_for_5555_contract:
     thinking/coding/longcontext = GLM 5.2 primary, GPT free backup, GPT paid backup;
     tools/search/web_search = MiniMax M3 primary, GLM 5.2 backup; multimodal = MiniMax

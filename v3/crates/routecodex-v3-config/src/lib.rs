@@ -473,16 +473,84 @@ pub fn looks_like_secret_literal(value: &str) -> bool {
 /// 解析归 config 层：编译时校验（文件可读 + key 存在 + 值非空）与运行时
 /// 取值（transport）共用同一实现，禁止在消费方重复解析。
 pub fn resolve_v3_secret_file_key(content: &str, key: &str) -> Result<String, String> {
-    for raw_line in content.lines() {
+    for (name, value) in parse_v3_secret_file_entries(content)? {
+        if name == key {
+            return Ok(value);
+        }
+    }
+    Err(format!("secret file key {key} not found"))
+}
+
+/// Enumerates provider auth handles from a provider-owned secret file without
+/// returning secret values. A single key may be authored as `provider-id = value`
+/// (alias `key1`) or `key1 = value`; a list may use `provider-id.key1 = value`
+/// / `provider-id.key2 = value` or provider-local names such as `key1 = value`.
+///
+/// When scoped keys for the requested provider exist, keys scoped to other
+/// providers are ignored. Returned names are auth handles only and must never
+/// enter Debug, Error, provider, or client payloads.
+pub fn discover_v3_secret_file_auth_handles(
+    content: &str,
+    provider_id: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let provider_id = provider_id.trim();
+    if provider_id.is_empty() {
+        return Err("secret file provider id is empty".to_string());
+    }
+    let parsed = parse_v3_secret_file_entries(content)?;
+    let prefix = format!("{provider_id}.");
+    let has_scoped_entries = parsed.iter().any(|(name, _)| name.starts_with(&prefix));
+    let mut handles = Vec::new();
+    let mut aliases = BTreeSet::new();
+    for (name, _) in parsed {
+        let alias = if let Some(alias) = name.strip_prefix(&prefix) {
+            alias.to_string()
+        } else if has_scoped_entries {
+            continue;
+        } else if name == provider_id {
+            "key1".to_string()
+        } else {
+            name.clone()
+        };
+        if alias.trim().is_empty() {
+            return Err(format!("secret file key {name} has an empty auth alias"));
+        }
+        if !aliases.insert(alias.clone()) {
+            return Err(format!("secret file auth alias {alias} is duplicated"));
+        }
+        handles.push((alias, name));
+    }
+    if handles.is_empty() {
+        return Err(format!(
+            "secret file has no auth keys for provider {provider_id}"
+        ));
+    }
+    Ok(handles)
+}
+
+fn parse_v3_secret_file_entries(content: &str) -> Result<Vec<(String, String)>, String> {
+    let mut entries = Vec::new();
+    let mut names = BTreeSet::new();
+    for (index, raw_line) in content.lines().enumerate() {
         let line = raw_line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
         let Some((name, value)) = line.split_once('=') else {
-            continue;
+            return Err(format!(
+                "secret file line {} must use name = value",
+                index + 1
+            ));
         };
-        if name.trim() != key {
-            continue;
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(format!(
+                "secret file line {} has an empty key name",
+                index + 1
+            ));
+        }
+        if !names.insert(name.to_string()) {
+            return Err(format!("secret file key {name} is duplicated"));
         }
         let value = value.trim();
         let unquoted = match value.as_bytes().first() {
@@ -495,11 +563,14 @@ pub fn resolve_v3_secret_file_key(content: &str, key: &str) -> Result<String, St
             _ => value.to_string(),
         };
         if unquoted.is_empty() {
-            return Err(format!("secret file key {key} has an empty value"));
+            return Err(format!("secret file key {name} has an empty value"));
         }
-        return Ok(unquoted);
+        entries.push((name.to_string(), unquoted));
     }
-    Err(format!("secret file key {key} not found"))
+    if entries.is_empty() {
+        return Err("secret file has no key entries".to_string());
+    }
+    Ok(entries)
 }
 
 /// 读取集中 secret 文件并解析指定 key 的值（编译期校验辅助）。
@@ -553,6 +624,39 @@ mod tests {
     fn secret_file_key_resolution_rejects_empty_value() {
         assert!(resolve_v3_secret_file_key("a.key = \"\"\n", "a.key").is_err());
         assert!(resolve_v3_secret_file_key("a.key =\n", "a.key").is_err());
+    }
+
+    #[test]
+    fn secret_file_auth_handle_discovery_supports_single_and_list_forms() {
+        assert_eq!(
+            discover_v3_secret_file_auth_handles("opencode-go = one\n", "opencode-go").unwrap(),
+            vec![("key1".to_string(), "opencode-go".to_string())]
+        );
+        assert_eq!(
+            discover_v3_secret_file_auth_handles(
+                "opencode-go.key1 = one\nopencode-go.key2 = two\nother.key1 = ignored\n",
+                "opencode-go",
+            )
+            .unwrap(),
+            vec![
+                ("key1".to_string(), "opencode-go.key1".to_string()),
+                ("key2".to_string(), "opencode-go.key2".to_string()),
+            ]
+        );
+        assert_eq!(
+            discover_v3_secret_file_auth_handles("primary = one\nsecondary = two\n", "p").unwrap(),
+            vec![
+                ("primary".to_string(), "primary".to_string()),
+                ("secondary".to_string(), "secondary".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn secret_file_auth_handle_discovery_rejects_malformed_or_duplicate_keys() {
+        assert!(discover_v3_secret_file_auth_handles("not-an-entry\n", "p").is_err());
+        assert!(discover_v3_secret_file_auth_handles("p.key1 = one\np.key1 = two\n", "p").is_err());
+        assert!(discover_v3_secret_file_auth_handles("p.key1 = \"\"\n", "p").is_err());
     }
 
     fn compile_catalog_scope_manifest() -> V3Config05ManifestPublished {

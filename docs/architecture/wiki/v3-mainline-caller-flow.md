@@ -265,7 +265,7 @@ flowchart TD
 
 ## v3.config.compile
 
-Unique config.v3 read/parse/validate/registry/publish chain.
+Unique config.v3 read/parse/validate/registry/publish chain; provider secretFile authoring is expanded here into named auth handles without publishing secret values.
 
 Owner feature: `v3.config_interpreter_contract`
 

@@ -934,6 +934,10 @@ features:
     direct/relay/json/sse/continuation policy
   - publish_v3_config_05_manifest_from_v3_config_04 emits the deterministic published
     manifest and auth handles
+  - provider auth secretFile supports single-key and list authoring by expanding key
+    names into ordered secret_file + secret_key handles without materializing values
+  - provider auth secretFile rejects malformed, duplicate, empty, unreadable, or mixed
+    explicit authoring at config compile time
   - provider_error_action_policy and client_error_projection_policy compile into V3ErrorManifest
     without secrets, provider runtime hardcoding, or payload leakage
   required_contract:
