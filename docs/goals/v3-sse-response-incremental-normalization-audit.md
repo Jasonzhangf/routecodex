@@ -220,3 +220,40 @@ stopless/servertool action 与 terminal status 必须在 owning hook 给出稳�
 而是缺少“事件治理稳定性”和“客户端已提交后错误策略”两个合同。先锁这两个合同，
 再拆 codec/reducer，最后逐类开放安全事件；这样可以在不牺牲“不让未治理响应进入历史”
 原则的前提下恢复真实 SSE 延迟与反压。
+
+## DSH Review Round 1 FAIL 修复闭环（2026-08-15/16，commit c7192b3a9 后修复轮）
+
+DSH review（taskId=v3-sse-usage-delivery-20260815）对 commit c7192b3a9 给出
+`VERDICT: FAIL`，三条 P1 + 三条 P2。修复内容：
+
+1. P1 `response.incomplete` 在 Responses→Chat SSE relay 缺 `[DONE]` 收口：
+   `openai_chat_relay_runtime.rs::project_responses_sse_as_openai_chat_stream` 把
+   `response.incomplete` 与 `response.completed` 一并视为合法终态，补发 `[DONE]`
+   并置 done_seen；截断响应（max_output_tokens/content_filter）不再以
+   IncompleteRead/Connection reset 形式中断客户端连接。
+2. P1 Responses SSE outbound 把 `status=incomplete` 误投影为 `response.failed` 并
+   丢部分输出：`build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05`
+   只把 `status=failed` 判为失败；incomplete 按协议投影 response.created +
+   output_item.done + response.incomplete + response.done + [DONE]，保留部分输出
+   与 `incomplete_details.reason`。
+3. P1 流中段 ClientDisconnect 经 relay 流转换器误写 provider 级冷却：
+   `project_responses_sse_as_openai_chat_stream` 与
+   `project_anthropic_sse_as_openai_chat_stream` 对 `V3ProviderError::ClientDisconnect`
+   直接返回流错误且不调用 record_failure（health-neutral），与
+   project_sse_stream / gemini / direct 路径一致。
+4. P2 死代码：物理删除 `V3RuntimeStreamObservation::record_response_status`
+   （responses_relay_types.rs）与
+   `V3ProviderFailureRuntimeHealth::global_subscription_store()`
+   （provider_failure_runtime_policy.rs）。
+5. P2 reason-less `response.incomplete` 语义不一致：relay event codec 与
+   openai_chat_codec / provider_sse_json_codec 同口径 fail-fast（缺
+   incomplete_details.reason 或未知 reason 显式报错，禁止静默 200）。
+6. P2 测试缺口：新增 relay 级红/绿锁——Responses→Chat SSE incomplete 终态带
+   [DONE]、Responses SSE outbound incomplete 保留部分输出且不投影 failed、
+   流中段 ClientDisconnect 不写 provider cooldown、畸形 incomplete 终帧 fail-fast。
+
+验证：`cargo test --workspace` 全绿（含四个新测试）；`npm run build` +
+`npm run install:v3` 安装 0.90.4558+；聚合 restart 一次；4444/5555/5520/10000
+health=ok 且 build_version 与安装产物一致；真实 SSE replay（5555/5520/10000
+responses + 10000 chat + 10000 messages）全部 200 且 usage 有值；DSH round 2
+review 结论见 `~/.dsh/reviews/`。

@@ -1148,44 +1148,41 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
     }
 
     #[test]
-    fn one_failure_in_other_session_keeps_session_counter_isolated_when_provider_cooldown_active() {
+    fn one_failure_in_other_session_shares_provider_key_cooldown() {
         let store = V3ProviderHealthStore::default();
-        for now_ms in 100..103 {
-            store
+        for (index, session_id) in ["session-a", "session-a", "session-a", "session-b"]
+            .into_iter()
+            .enumerate()
+        {
+            let record = store
                 .record_provider_failure_in_session(
-                    &session("session-a"),
+                    &session(session_id),
                     "provider-a",
                     Some("key-a"),
                     Some("gpt-5.5"),
                     Some("controlled failure"),
-                    now_ms,
+                    100 + index as u64,
                 )
                 .unwrap();
+            if index == 3 {
+                assert_eq!(record.state, "cooldown");
+                assert_eq!(record.failure_count, 4);
+            }
         }
-        // session-a 的 provider 级冷却共享到 availability；session-b 的
-        // consecutive counter 仍独立，不因 sibling cooldown 被伪造为本地 cooldown。
-        let record = store
-            .record_provider_failure_in_session(
-                &session("session-b"),
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                Some("one strike"),
-                104,
-            )
-            .unwrap();
-        assert_eq!(record.state, "healthy");
-        assert!(
-            !store
-                .availability_for_session(
-                    &session("session-b"),
-                    "provider-a",
-                    Some("key-a"),
-                    Some("gpt-5.5"),
-                    105,
-                )
-                .available
-        );
+        for (key, available) in [("key-a", false), ("key-b", true)] {
+            assert_eq!(
+                store
+                    .availability_for_session(
+                        &session("session-b"),
+                        "provider-a",
+                        Some(key),
+                        Some("gpt-5.5"),
+                        105,
+                    )
+                    .available,
+                available
+            );
+        }
     }
 
     #[test]
@@ -1417,10 +1414,13 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
     }
 
     #[test]
-    fn failure_count_stays_session_isolated_without_provider_cooldown() {
+    fn failure_count_is_provider_key_shared_across_sessions() {
         let store = V3ProviderHealthStore::default();
-        for session_id in ["session-a", "session-b", "session-b"] {
-            store
+        for (index, session_id) in ["session-a", "session-b", "session-b"]
+            .into_iter()
+            .enumerate()
+        {
+            let record = store
                 .record_provider_failure_in_session(
                     &session(session_id),
                     "provider-a",
@@ -1430,20 +1430,24 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                     100,
                 )
                 .unwrap();
+            if index == 2 {
+                assert_eq!((record.state.as_str(), record.failure_count), ("cooldown", 3));
+            } else {
+                assert_eq!(record.state, "healthy");
+            }
         }
-        // 无 session 达阈值且无 provider 级冷却：计数不跨 session 组合，
-        // 各 session 均保持可用。
-        for session_id in ["session-a", "session-b"] {
-            assert!(
+        for (key, available) in [("key-a", false), ("key-b", true)] {
+            assert_eq!(
                 store
                     .availability_for_session(
-                        &session(session_id),
+                        &session("session-a"),
                         "provider-a",
-                        Some("key-a"),
+                        Some(key),
                         Some("gpt-5.5"),
                         101,
                     )
-                    .available
+                    .available,
+                available
             );
         }
     }

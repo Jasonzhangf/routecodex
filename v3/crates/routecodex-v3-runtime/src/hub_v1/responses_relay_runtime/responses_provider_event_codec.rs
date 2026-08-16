@@ -66,12 +66,7 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame(
         output_items,
         output_text,
     )?;
-    apply_v3_runtime_responses_semantic_event(
-        &event,
-        response_scaffold,
-        output_items,
-        output_text,
-    )
+    apply_v3_runtime_responses_semantic_event(&event, response_scaffold, output_items, output_text)
 }
 
 fn apply_v3_runtime_responses_semantic_event(
@@ -102,16 +97,35 @@ fn apply_v3_runtime_responses_semantic_event(
         // response.incomplete 是 Responses 协议合法终态（max_output_tokens 截断 /
         // content_filter 触发）：与 completed 一样产出 terminal response（保留
         // status=incomplete + incomplete_details），客户端按协议消费部分输出，
-        // 网关不得把它当 provider 流错误切 provider / 打 502。
+        // 网关不得把它当 provider 流错误切 provider / 打 502。畸形终帧（缺
+        // incomplete_details.reason / 未知 reason）必须与 openai_chat_codec /
+        // provider_sse_json_codec 同口径 fail-fast，不能静默当 200 终态收下。
         Some("response.incomplete") => {
+            let reason = event
+                .pointer("/response/incomplete_details/reason")
+                .or_else(|| event.pointer("/incomplete_details/reason"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            match reason {
+                Some("max_output_tokens" | "content_filter") => {}
+                Some(other) => {
+                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        format!(
+                            "Responses SSE response.incomplete carries unsupported incomplete_details.reason {other}"
+                        ),
+                    ))
+                }
+                None => {
+                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        "Responses SSE response.incomplete requires incomplete_details.reason"
+                            .to_string(),
+                    ))
+                }
+            }
             build_v3_runtime_terminal_response(event, response_scaffold, output_items, output_text)
         }
-        Some(
-            "response.failed"
-            | "response.cancelled"
-            | "response.canceled"
-            | "response.error",
-        ) => {
+        Some("response.failed" | "response.cancelled" | "response.canceled" | "response.error") => {
             let message = event
                 .pointer("/response/error/message")
                 .or_else(|| event.pointer("/error/message"))
@@ -1076,6 +1090,32 @@ mod tests {
             json!("max_output_tokens")
         );
         assert_eq!(terminal["usage"]["total_tokens"], json!(15));
+    }
+
+    #[test]
+    fn response_incomplete_without_or_unknown_reason_fails_fast() {
+        // 与 openai_chat_codec / provider_sse_json_codec 同口径：畸形
+        // response.incomplete（缺 reason / 未知 reason）必须显式报错，
+        // 禁止静默当 200 合法终态收下。
+        for payload in [
+            json!({
+                "type": "response.incomplete",
+                "response": {"id": "resp_bad_1", "status": "incomplete"}
+            }),
+            json!({
+                "type": "response.incomplete",
+                "incomplete_details": {"reason": "internal_error"},
+                "response": {"id": "resp_bad_2", "status": "incomplete"}
+            }),
+        ] {
+            let mut scaffold = None;
+            let error = apply_v3_runtime_responses_semantic_event(&payload, &mut scaffold, &[], "")
+                .expect_err("malformed/unknown incomplete terminal must fail fast");
+            assert!(
+                error.to_string().contains("response.incomplete"),
+                "unexpected error: {error}"
+            );
+        }
     }
 
     #[test]

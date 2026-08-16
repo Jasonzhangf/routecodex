@@ -114,10 +114,10 @@ const cases = [
     name: 'Responses client SSE completed terminal relabeled as requires_action',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     marker:
-      'frames.push(Ok(build_v3_runtime_sse_json_frame(\n            "response.completed",',
+      'let terminal_event = if incomplete {\n            "response.incomplete"\n        } else {\n            "response.completed"',
     mutation:
-      'frames.push(Ok(build_v3_runtime_sse_json_frame(\n            "response.requires_action",',
-    diagnostic: /response\.completed|response\.requires_action client SSE terminal projection/,
+      'let terminal_event = if incomplete {\n            "response.incomplete"\n        } else {\n            "response.requires_action"',
+    diagnostic: /response\.requires_action client SSE terminal projection/,
   },
   {
     name: 'Responses client SSE done terminal removed',
@@ -127,6 +127,13 @@ const cases = [
     mutation:
       'frames.push(Ok(build_v3_runtime_sse_json_frame(\n            "response.closed",\n            &json!({\n                "type": "response.closed",',
     diagnostic: /response\.done/,
+  },
+  {
+    name: 'Responses client SSE incomplete remerged into failed terminal',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    marker: 'let failed = status == Some("failed");',
+    mutation: 'let failed = status == Some("failed" | "incomplete");',
+    diagnostic: /missing Some\("failed"\)/,
   },
   {
     name: 'SSE transport revives tool-call semantic finish inference',

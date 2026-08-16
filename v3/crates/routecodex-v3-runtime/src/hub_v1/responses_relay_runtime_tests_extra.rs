@@ -581,6 +581,59 @@ async fn client_sse_completed_response_projects_output_text_items_to_message_sha
 }
 
 #[tokio::test]
+async fn client_sse_incomplete_terminal_streams_partial_output_not_failed() {
+    // response.incomplete 是 Responses 协议合法终态：必须保留部分输出并投影
+    // response.created + output_item.done + response.incomplete + response.done
+    // + [DONE]，禁止映射成 response.failed 丢弃部分输出。
+    let projected = collect_projected_sse(
+        build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
+            "id": "resp_incomplete_shape",
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": [{"type": "output_text", "text": "partial"}]
+        })),
+    )
+    .await;
+    let text: String = projected
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("SSE projection must not error")
+        .join("\n");
+    assert!(
+        !text.contains("response.failed"),
+        "incomplete must not project response.failed: {text}"
+    );
+    assert!(
+        text.contains("event: response.created"),
+        "response.created frame must be present: {text}"
+    );
+    assert!(
+        text.contains(r#""type":"response.output_item.done""#),
+        "partial output_item.done frames must be streamed: {text}"
+    );
+    assert!(
+        text.contains("event: response.incomplete"),
+        "response.incomplete frame must be present: {text}"
+    );
+    assert!(
+        text.contains(r#""status":"incomplete""#),
+        "incomplete frame must preserve status=incomplete: {text}"
+    );
+    assert!(
+        text.contains(r#""reason":"max_output_tokens""#),
+        "incomplete frame must preserve incomplete_details.reason: {text}"
+    );
+    assert!(
+        text.contains("partial"),
+        "partial output must not be dropped: {text}"
+    );
+    assert!(
+        text.contains("event: response.done") && text.contains("data: [DONE]"),
+        "incomplete terminal must close with response.done + [DONE]: {text}"
+    );
+}
+
+#[tokio::test]
 async fn anthropic_provider_sse_canonicalizes_responses_response_before_chatprocess() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![

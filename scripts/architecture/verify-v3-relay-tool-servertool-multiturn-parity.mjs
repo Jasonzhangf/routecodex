@@ -197,8 +197,9 @@ if (clientSseProjectionStart < 0 || clientSseProjectionEnd < 0) {
     clientSseProjectionEnd,
   );
   requireAll(clientSseProjection, files.responsesRelayRuntime, [
-    'Some("failed" | "incomplete")',
+    'Some("failed")',
     '"response.failed"',
+    '"response.incomplete"',
     '"response.completed"',
     '"response.done"',
     'b"data: [DONE]\\n\\n"',

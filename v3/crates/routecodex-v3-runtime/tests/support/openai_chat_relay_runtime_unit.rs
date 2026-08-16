@@ -111,6 +111,86 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn responses_sse_incomplete_terminates_chat_stream_with_done() {
+        use futures_util::StreamExt;
+        let manifest = test_relay_manifest();
+        let outcome = test_relay_outcome(&manifest);
+        let provider: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
+            Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_inc\",\"status\":\"in_progress\"}}\n\n".to_vec()),
+            Ok(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec()),
+            Ok(b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_inc\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n".to_vec()),
+        ]));
+        let mut stream = project_responses_sse_as_openai_chat_stream(
+            provider,
+            None,
+            V3WebSearchExecutionMode::None,
+            None,
+            false,
+            outcome,
+        );
+        let mut chunks = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(bytes) => chunks.push(bytes),
+                Err(error) => {
+                    panic!("response.incomplete must not error the chat stream: {error}")
+                }
+            }
+        }
+        let joined_bytes = chunks.concat();
+        let joined = String::from_utf8_lossy(&joined_bytes);
+        assert!(
+            joined.contains(r#""finish_reason":"length""#),
+            "incomplete must project terminal finish_reason=length: {joined}"
+        );
+        assert!(
+            joined.contains("data: [DONE]"),
+            "incomplete terminal must close the chat SSE stream with [DONE]: {joined}"
+        );
+    }
+
+    #[tokio::test]
+    async fn responses_sse_mid_stream_client_disconnect_is_health_neutral() {
+        use futures_util::StreamExt;
+        use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
+        let manifest = test_relay_manifest();
+        let outcome = test_relay_outcome(&manifest);
+        let provider_health = outcome.provider_health.clone();
+        let provider: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
+            Ok(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n".to_vec()),
+            Err(V3ProviderError::ClientDisconnect {
+                request_id: "req-1".to_string(),
+                provider_id: "test".to_string(),
+            }),
+        ]));
+        let mut stream = project_responses_sse_as_openai_chat_stream(
+            provider,
+            None,
+            V3WebSearchExecutionMode::None,
+            None,
+            false,
+            outcome,
+        );
+        let mut saw_error = false;
+        while let Some(chunk) = stream.next().await {
+            if chunk.is_err() {
+                saw_error = true;
+            }
+        }
+        assert!(
+            saw_error,
+            "client disconnect mid-stream must surface as a stream error"
+        );
+        let availability =
+            provider_health.availability("test", Some("key"), Some("model"), u64::MAX);
+        assert!(
+            availability.available && availability.blocked_scopes.is_empty(),
+            "client disconnect must not write provider cooldown/health: {:?}",
+            availability.blocked_scopes
+        );
+    }
+
     fn test_relay_outcome(
         manifest: &routecodex_v3_config::V3Config05ManifestPublished,
     ) -> V3OpenAiChatSseProviderOutcome {

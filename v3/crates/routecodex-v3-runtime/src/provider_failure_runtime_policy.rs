@@ -10,11 +10,10 @@ use routecodex_v3_error::{
     V3ExternalErrorLink, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_global_probe_request,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle,
-    V3ProviderAuthSecretHandle,
-    V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
-    V3ProviderFailurePolicy, V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
+    build_v3_provider_global_probe_request, ReqwestResponsesTransport, ResponsesTransport,
+    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderAvailabilityProjection,
+    V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailurePolicy,
+    V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
     V3ProviderGlobalSubscriptionHealthStore, V3ProviderGlobalSubscriptionPolicy,
     V3ProviderHealthStore, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
@@ -441,10 +440,6 @@ impl V3ProviderFailureRuntimeHealth {
                 now_ms,
                 &policy,
             )
-    }
-
-    pub(crate) fn global_subscription_store(&self) -> V3ProviderGlobalSubscriptionHealthStore {
-        self.global_subscription_store.clone()
     }
 
     pub async fn run_due_global_subscription_probes<F, Fut>(

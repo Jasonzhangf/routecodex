@@ -956,10 +956,13 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
     use futures_util::stream;
 
     let _owner = V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER;
-    let failed = matches!(
-        response.get("status").and_then(Value::as_str),
-        Some("failed" | "incomplete")
-    );
+    let status = response.get("status").and_then(Value::as_str);
+    // response.incomplete 是 Responses 协议合法终态（max_output_tokens 截断 /
+    // content_filter 触发）：必须按协议投影 response.created + output_item.done
+    // （部分输出）+ response.incomplete + response.done + [DONE]，禁止把它映射
+    // 成 response.failed 丢弃部分输出；只有 status=failed 才是失败终态。
+    let failed = status == Some("failed");
+    let incomplete = status == Some("incomplete");
     let mut frames = Vec::new();
     if !failed {
         if let Some(response_id) = response.get("id").and_then(Value::as_str) {
@@ -1011,19 +1014,24 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
             }),
         )));
     } else {
-        let completed_response = project_v3_responses_client_completed_response(&response);
+        let terminal_response = project_v3_responses_client_completed_response(&response);
+        let terminal_event = if incomplete {
+            "response.incomplete"
+        } else {
+            "response.completed"
+        };
         frames.push(Ok(build_v3_runtime_sse_json_frame(
-            "response.completed",
+            terminal_event,
             &json!({
-                "type": "response.completed",
-                "response": completed_response,
+                "type": terminal_event,
+                "response": terminal_response,
             }),
         )));
         frames.push(Ok(build_v3_runtime_sse_json_frame(
             "response.done",
             &json!({
                 "type": "response.done",
-                "response": completed_response,
+                "response": terminal_response,
             }),
         )));
     }

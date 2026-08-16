@@ -6913,7 +6913,7 @@ chains:
     from_node: V3SseTransportIn03ValidatedFrameStream
     to_node: V3HubRespInbound02Normalized
     caller_symbol: project_sse_event_payload
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime_sse.rs
     callee_symbol: build_v3_hub_resp_inbound_02_from_provider_resp_compat_02
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
     status: anchored

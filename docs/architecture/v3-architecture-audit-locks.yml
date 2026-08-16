@@ -475,8 +475,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:073179b302055968e07d99040d0488cbea36a548ee89cb8cf747e64c3afa1b1e
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:f9cef82020d255ad1ca85add8fe970fcacdc2624de21ca2499215285f34df710
+    last_manual_authorization_id: auth-20260815-v3-sse-codec-file-decomposition-lock-refresh
   - item_id: chain:vr.current_turn_typed_route_facts
     chain_id: vr.current_turn_typed_route_facts
     status: audited_locked
@@ -494,6 +494,13 @@ locked_items:
     fingerprint: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
     last_manual_authorization_id: auth-20260813-v3-provider-global-subscription-probe-fingerprint-refresh
 manual_authorizations:
+  - authorization_id: auth-20260815-v3-sse-codec-file-decomposition-lock-refresh
+    item_id: chain:v3.sse.protocol_codec_projection_boundary
+    approved_by: Jason
+    approved_at: '2026-08-15T18:00:00+08:00'
+    reason: "Jason approved the V3 SSE delivery fix loop (DSH round-1 FAIL remediation + file-size ratchet compliance). project_sse_event_payload and project_anthropic_sse_as_openai_chat_stream moved from openai_chat_relay_runtime.rs into the new include file openai_chat_relay_runtime_sse.rs to satisfy the <=1500-line file-size gate; the locked chain's only change is v3-sse-codec-02 caller_file path. Caller/callee symbols, node/edge semantics, owner, and resource flow are unchanged."
+    fingerprint_before: sha256:073179b302055968e07d99040d0488cbea36a548ee89cb8cf747e64c3afa1b1e
+    fingerprint_after: sha256:f9cef82020d255ad1ca85add8fe970fcacdc2624de21ca2499215285f34df710
   - authorization_id: auth-20260815-v3-provider-action-gate-51-semantic-frame
     item_id: chain:v3.provider_action_gate.mainline
     approved_by: Jason

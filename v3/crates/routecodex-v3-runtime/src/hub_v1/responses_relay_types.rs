@@ -344,22 +344,6 @@ impl V3RuntimeStreamObservation {
         Ok(())
     }
 
-    /// 只记录客户端协议终态状态（chat/gemini 等非 Responses 协议 wire 没有
-    /// `status`/`type` 字段，终态只能由语义 finish_reason 推导；该状态只写
-    /// observation 侧信道，绝不进入业务 payload）。
-    pub(crate) fn record_response_status(&self, status: &str) -> Result<(), String> {
-        let status = status.trim();
-        if status.is_empty() {
-            return Ok(());
-        }
-        let mut snapshot = self
-            .inner
-            .lock()
-            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
-        snapshot.response_status = Some(status.to_string());
-        Ok(())
-    }
-
     pub(crate) fn record_timing(&self, timing: V3RuntimeTimingSummary) -> Result<(), String> {
         let mut snapshot = self
             .inner
