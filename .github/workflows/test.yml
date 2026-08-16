@@ -71,6 +71,8 @@ jobs:
         run: npm run verify:v4-foundation
       - name: V4 foundation red self-tests
         run: npm run verify:v4-foundation-red
+      - name: V4 relay/continuation compat + red self-test
+        run: node scripts/architecture/verify-v4-relay-continuation.mjs && node scripts/architecture/verify-v4-relay-continuation.mjs --red-self-test
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
       - name: Fetch Rust dependencies for offline builds

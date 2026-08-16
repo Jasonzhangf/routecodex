@@ -54,8 +54,9 @@ resources:
     verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: provider_wire
     lifecycle: v4.pipeline.mainline
-    owner_crate: routecodex-v4-provider
+    owner_crate: routecodex-v4-runtime
     owner_node: V4ProviderReqOutbound06WirePayload
+    owner_symbols: [WireBuild]
     identity: [requestId, providerId, providerType, modelId]
     semantic_contract:
       control_fields_forbidden: true
@@ -66,21 +67,22 @@ resources:
     forbidden_writers: [V4ControlMetadataCenter, V4ReqChatProcess03Governed, V4Router, V4DebugSnapshotLedger, V4ScopeRegistry]
     may_enter_provider_body: true
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.response.provider_raw
     axis: data
     verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: provider_response
     lifecycle: v4.pipeline.mainline
-    owner_crate: routecodex-v4-provider
+    owner_crate: routecodex-v4-runtime
     owner_node: V4ProviderRespInbound01Raw
+    owner_symbols: [RawParse]
     identity: [requestId, providerId, statusCode]
     allowed_writers: [V4ProviderRespInbound01Raw]
     allowed_readers: [V4RespInbound02Parsed, V4Error01SourceRaised]
     forbidden_writers: [V4ControlMetadataCenter, V4RespOutbound04ClientSemantic, V4DebugSnapshotLedger]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.response.normal_payload
     axis: data
     verification_gate: [v4_parity_gate_plane_isolation]
@@ -101,8 +103,9 @@ resources:
     verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: client_wire
     lifecycle: v4.pipeline.mainline
-    owner_crate: routecodex-v4-server
+    owner_crate: routecodex-v4-runtime
     owner_node: V4RespOutbound04ClientSemantic
+    owner_symbols: [FrameBuild]
     identity: [requestId, endpoint, streamIntent]
     semantic_contract:
       control_fields_forbidden: true
@@ -112,7 +115,7 @@ resources:
     forbidden_writers: [V4ControlMetadataCenter, V4DebugSnapshotLedger, V4ProviderReqOutbound06WirePayload]
     may_enter_provider_body: false
     may_enter_client_body: true
-    binding_status: design
+    binding_status: anchored
   # ---------------- control plane ----------------
   - resource_id: v4.control.side_channel
     axis: control
@@ -162,8 +165,9 @@ resources:
     verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: control_contract
     lifecycle: v4.router.mainline
-    owner_crate: routecodex-v4-router
+    owner_crate: routecodex-v4-runtime
     owner_node: V4Router05RequestClassified
+    owner_symbols: [ExecutionPlan]
     identity: [serverId, entryProtocol, clientModel, capabilities, inputTokens]
     semantic_contract:
       route_signals_only: true
@@ -174,14 +178,15 @@ resources:
     forbidden_writers: [V4ReqChatProcess03Governed, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4DebugSnapshotLedger]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.control.target_selection
     axis: control
     verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: control_contract
     lifecycle: v4.router.mainline
-    owner_crate: routecodex-v4-router
+    owner_crate: routecodex-v4-runtime
     owner_node: V4Router06SelectionPlan
+    owner_symbols: [ExecutionPlan]
     identity: [requestId, serverId, routeGroupId, poolId, orderedOpaqueTargets]
     semantic_contract:
       opaque_target: true
@@ -192,14 +197,15 @@ resources:
     forbidden_writers: [V4ReqChatProcess03Governed, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.control.route_exit
     axis: control
     verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: control_contract
     lifecycle: v4.router.mainline
-    owner_crate: routecodex-v4-router
+    owner_crate: routecodex-v4-runtime
     owner_node: V4Router07RouteDecisionExit
+    owner_symbols: [ExecutionPlan]
     identity: [requestId, serverId, decision, targetId, poolId, reason]
     semantic_contract:
       vr_decision_owner_only: true
@@ -212,7 +218,7 @@ resources:
     forbidden_writers: [V4ReqChatProcess03Governed, V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.control.route_policy_live
     axis: control
     verification_gate: [v4_parity_gate_plane_isolation]
@@ -303,8 +309,9 @@ resources:
     verification_gate: [v4_parity_gate_plane_isolation]
     resource_kind: control_contract
     lifecycle: v4.pipeline.request_cycle
-    owner_crate: routecodex-v4-control
+    owner_crate: routecodex-v4-runtime
     owner_node: V4PayloadCycleRegistry
+    owner_symbols: [PayloadCycleRegistry, PayloadCycle]
     identity: [requestId, pipelineId, originalRequestHash]
     semantic_contract:
       cycle_start: request_sent
@@ -318,7 +325,7 @@ resources:
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.pipeline.mainline
     axis: control
     verification_gate: [v4_parity_gate_plane_isolation, v4_parity_gate_execution_binding]
@@ -381,8 +388,9 @@ resources:
     verification_gate: [v4_parity_gate_execution_binding, v4_parity_gate_plane_isolation]
     resource_kind: control_scope
     lifecycle: v4.control.scope
-    owner_crate: routecodex-v4-control
+    owner_crate: routecodex-v4-runtime
     owner_node: V4ScopeRegistry
+    owner_symbols: [ScopeRegistry]
     identity: [requestId, pipelineId, port, sessionScope, conversationScope]
     semantic_contract:
       bind_release_required: true
@@ -394,7 +402,7 @@ resources:
     forbidden_writers: [V4ProviderReqOutbound06WirePayload, V4RespOutbound04ClientSemantic, V4ServerFrame, V4DebugSnapshotLedger]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: anchored
   - resource_id: v4.control.stopless_state
     axis: control
     verification_gate: [v4_parity_gate_plane_isolation, v4_parity_gate_capability_isolation]

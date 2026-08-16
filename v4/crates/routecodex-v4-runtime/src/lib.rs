@@ -25,6 +25,7 @@ use routecodex_v4_error::{
 };
 use routecodex_v4_skeleton::SkeletonPlan;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -93,6 +94,400 @@ pub fn execution_binding(plan: &SkeletonPlan) -> ExecutionBinding {
     }
 }
 
+/// Typed continuation facts. Selection may only use these facts; provider id,
+/// model prefix and payload-shape guessing are forbidden by contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContinuationFacts {
+    pub entry_protocol: String,
+    pub provider_wire_protocol: String,
+    pub continuation_owner: String,
+    pub execution_mode: String,
+}
+
+impl ContinuationFacts {
+    pub fn new(
+        entry_protocol: &str,
+        provider_wire_protocol: &str,
+        continuation_owner: &str,
+        execution_mode: &str,
+    ) -> Self {
+        Self {
+            entry_protocol: entry_protocol.to_string(),
+            provider_wire_protocol: provider_wire_protocol.to_string(),
+            continuation_owner: continuation_owner.to_string(),
+            execution_mode: execution_mode.to_string(),
+        }
+    }
+}
+
+/// Relay / Direct operator decision derived only from typed facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayOperator {
+    Relay,
+    Direct,
+}
+
+/// Select the relay/direct operator from typed facts only. Same-protocol
+/// responses + direct owner selects Direct; non-responses entry + relay owner
+/// selects Relay. Any contradictory pair (responses + relay, chat + direct)
+/// fails fast: there is no fallback and no provider-specific selection.
+pub fn select_relay_operator(facts: &ContinuationFacts) -> Result<RelayOperator, RuntimeFault> {
+    if facts.entry_protocol == "responses" && facts.continuation_owner == "direct" {
+        Ok(RelayOperator::Direct)
+    } else if facts.entry_protocol != "responses" && facts.continuation_owner == "relay" {
+        Ok(RelayOperator::Relay)
+    } else {
+        Err(RuntimeFault::new(
+            "relay_operator_select",
+            format!(
+                "no typed-facts match (entry={} owner={}); provider-specific selection is forbidden",
+                facts.entry_protocol, facts.continuation_owner
+            ),
+        ))
+    }
+}
+
+/// Three-key continuation restore key: entry protocol + continuation owner +
+/// session/conversation (+ port/group). Session-only restore is impossible by
+/// construction because the key always carries all three dimensions.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ContinuationKey {
+    pub entry_protocol: String,
+    pub continuation_owner: String,
+    pub port: u16,
+    pub session_scope: String,
+    pub conversation_scope: String,
+}
+
+impl ContinuationKey {
+    pub fn new(
+        entry_protocol: &str,
+        continuation_owner: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> Self {
+        Self {
+            entry_protocol: entry_protocol.to_string(),
+            continuation_owner: continuation_owner.to_string(),
+            port,
+            session_scope: session_scope.to_string(),
+            conversation_scope: conversation_scope.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScopeError {
+    AlreadyBound,
+    NotBound,
+    OwnerMismatch,
+    EntryProtocolMismatch,
+    PortMismatch,
+    SessionMismatch,
+    ConversationMismatch,
+    CrossRequestReuse,
+    FullInputMissing,
+    ImmutableIntervalViolation,
+    RestoreAfterRelease,
+}
+
+impl fmt::Display for ScopeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::AlreadyBound => "continuation key already bound",
+            Self::NotBound => "continuation key not bound",
+            Self::OwnerMismatch => "continuation owner mismatch (direct/relay cross-continuation)",
+            Self::EntryProtocolMismatch => "entry protocol mismatch (chat/messages hit responses continuation)",
+            Self::PortMismatch => "port/group mismatch",
+            Self::SessionMismatch => "session scope mismatch",
+            Self::ConversationMismatch => "conversation scope mismatch",
+            Self::CrossRequestReuse => "cross-request reuse of continuation binding",
+            Self::FullInputMissing => "full input missing for continuation restore",
+            Self::ImmutableIntervalViolation => "continuation restored more than once (immutable interval)",
+            Self::RestoreAfterRelease => "continuation restored after release",
+        };
+        write!(formatter, "{message}")
+    }
+}
+
+/// One bound continuation scope with immutable three-key isolation. The
+/// binding is created only at response chat process commit and consumed only
+/// at the next request chat process restore.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeBinding {
+    pub key: ContinuationKey,
+    pub request_id: String,
+    pub full_input_hash: Option<String>,
+    pub restored: bool,
+    pub released: bool,
+}
+
+/// Immutable audit record for scope bind/restore/release.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeRecord {
+    pub record_id: String,
+    pub key: ContinuationKey,
+    pub operation: String,
+    pub request_id: String,
+    pub sequence: u64,
+}
+
+/// Scope session registry: bind (save at resp chat process), restore (three-key
+/// at next req chat process), release. Cross-request reuse, owner mismatch,
+/// entry-protocol mismatch and session-only restore fail fast.
+#[derive(Debug, Default)]
+pub struct ScopeRegistry {
+    bindings: HashMap<ContinuationKey, ScopeBinding>,
+    records: Vec<ScopeRecord>,
+    next_sequence: u64,
+}
+
+impl ScopeRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn bind(
+        &mut self,
+        key: ContinuationKey,
+        request_id: &str,
+        full_input_hash: Option<&str>,
+    ) -> Result<ScopeRecord, ScopeError> {
+        if self.bindings.contains_key(&key) {
+            return Err(ScopeError::AlreadyBound);
+        }
+        let full_input_hash = match full_input_hash {
+            Some(hash) => Some(hash.to_string()),
+            None => return Err(ScopeError::FullInputMissing),
+        };
+        self.bindings.insert(
+            key.clone(),
+            ScopeBinding {
+                key: key.clone(),
+                request_id: request_id.to_string(),
+                full_input_hash,
+                restored: false,
+                released: false,
+            },
+        );
+        Ok(self.append_record(key, "bind", request_id))
+    }
+
+    /// Three-key restore. The key must match entry protocol + owner + session/
+    /// conversation(+port/group) exactly; a binding found on the same
+    /// session trio with a different owner or entry protocol returns the
+    /// explicit isolation error. Full input is mandatory.
+    pub fn restore(
+        &mut self,
+        key: &ContinuationKey,
+        request_id: &str,
+        full_input_hash: Option<&str>,
+    ) -> Result<&ScopeBinding, ScopeError> {
+        if let Some(binding) = self.bindings.get(key) {
+            if binding.released {
+                return Err(ScopeError::RestoreAfterRelease);
+            }
+            if binding.restored {
+                return Err(ScopeError::ImmutableIntervalViolation);
+            }
+            if full_input_hash.is_none() {
+                return Err(ScopeError::FullInputMissing);
+            }
+            self.bindings
+                .get_mut(key)
+                .expect("binding exists")
+                .restored = true;
+            self.append_record(key.clone(), "restore", request_id);
+            return Ok(self.bindings.get(key).expect("binding exists"));
+        }
+        // Explicit isolation diagnostics: same session trio, different
+        // entry/owner dimensions.
+        for (bound_key, binding) in &self.bindings {
+            if bound_key.port == key.port
+                && bound_key.session_scope == key.session_scope
+                && bound_key.conversation_scope == key.conversation_scope
+            {
+                if bound_key.continuation_owner != key.continuation_owner {
+                    return Err(ScopeError::OwnerMismatch);
+                }
+                if bound_key.entry_protocol != key.entry_protocol {
+                    return Err(ScopeError::EntryProtocolMismatch);
+                }
+                let _ = binding;
+            }
+        }
+        Err(ScopeError::NotBound)
+    }
+
+    pub fn release(
+        &mut self,
+        key: &ContinuationKey,
+        request_id: &str,
+    ) -> Result<ScopeRecord, ScopeError> {
+        {
+            let binding = self
+                .bindings
+                .get_mut(key)
+                .ok_or(ScopeError::NotBound)?;
+            if binding.released {
+                return Err(ScopeError::RestoreAfterRelease);
+            }
+            binding.released = true;
+        }
+        Ok(self.append_record(key.clone(), "release", request_id))
+    }
+
+    pub fn is_bound(&self, key: &ContinuationKey) -> bool {
+        self.bindings.contains_key(key)
+    }
+
+    /// Whether any binding exists on the same port/session/conversation trio.
+    /// Used to distinguish a fresh turn (no binding at all) from a three-key
+    /// isolation violation (binding exists but entry/owner mismatch).
+    pub fn session_trio_bound(&self, port: u16, session_scope: &str, conversation_scope: &str) -> bool {
+        self.bindings.keys().any(|key| {
+            key.port == port
+                && key.session_scope == session_scope
+                && key.conversation_scope == conversation_scope
+        })
+    }
+
+    pub fn records(&self) -> impl Iterator<Item = &ScopeRecord> {
+        self.records.iter()
+    }
+
+    fn append_record(
+        &mut self,
+        key: ContinuationKey,
+        operation: &str,
+        request_id: &str,
+    ) -> ScopeRecord {
+        self.next_sequence += 1;
+        let record = ScopeRecord {
+            record_id: format!("scope-{}", self.next_sequence),
+            key,
+            operation: operation.to_string(),
+            request_id: request_id.to_string(),
+            sequence: self.next_sequence,
+        };
+        self.records.push(record.clone());
+        record
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PayloadCycleState {
+    Open,
+    SuccessTerminal,
+    ErrorTerminal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PayloadCycleError {
+    OpenTwice,
+    CloseWithoutOpen,
+    AlreadyTerminal,
+    MergeAfterTerminal,
+}
+
+impl fmt::Display for PayloadCycleError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::OpenTwice => "payload cycle opened twice for one request",
+            Self::CloseWithoutOpen => "payload cycle closed without open",
+            Self::AlreadyTerminal => "payload cycle already terminal",
+            Self::MergeAfterTerminal => "retry merge after terminal payload cycle",
+        };
+        write!(formatter, "{message}")
+    }
+}
+
+/// Original request payload lifecycle registry. switch/cooldown/reroute merge
+/// into the same cycle; the cycle terminates only on client-entry success or
+/// error terminal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PayloadCycle {
+    pub request_id: String,
+    pub original_request_hash: String,
+    pub state: PayloadCycleState,
+    pub attempts: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct PayloadCycleRegistry {
+    cycles: HashMap<String, PayloadCycle>,
+}
+
+impl PayloadCycleRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn open(
+        &mut self,
+        request_id: &str,
+        original_request_hash: &str,
+    ) -> Result<&PayloadCycle, PayloadCycleError> {
+        if self.cycles.contains_key(request_id) {
+            return Err(PayloadCycleError::OpenTwice);
+        }
+        self.cycles.insert(
+            request_id.to_string(),
+            PayloadCycle {
+                request_id: request_id.to_string(),
+                original_request_hash: original_request_hash.to_string(),
+                state: PayloadCycleState::Open,
+                attempts: 1,
+            },
+        );
+        Ok(self.cycles.get(request_id).expect("cycle inserted"))
+    }
+
+    pub fn merge_retry(&mut self, request_id: &str) -> Result<&PayloadCycle, PayloadCycleError> {
+        let cycle = self
+            .cycles
+            .get_mut(request_id)
+            .ok_or(PayloadCycleError::CloseWithoutOpen)?;
+        if cycle.state != PayloadCycleState::Open {
+            return Err(PayloadCycleError::MergeAfterTerminal);
+        }
+        cycle.attempts += 1;
+        Ok(cycle)
+    }
+
+    pub fn close_success(
+        &mut self,
+        request_id: &str,
+    ) -> Result<&PayloadCycle, PayloadCycleError> {
+        let cycle = self
+            .cycles
+            .get_mut(request_id)
+            .ok_or(PayloadCycleError::CloseWithoutOpen)?;
+        if cycle.state != PayloadCycleState::Open {
+            return Err(PayloadCycleError::AlreadyTerminal);
+        }
+        cycle.state = PayloadCycleState::SuccessTerminal;
+        Ok(cycle)
+    }
+
+    pub fn close_error(&mut self, request_id: &str) -> Result<&PayloadCycle, PayloadCycleError> {
+        let cycle = self
+            .cycles
+            .get_mut(request_id)
+            .ok_or(PayloadCycleError::CloseWithoutOpen)?;
+        if cycle.state != PayloadCycleState::Open {
+            return Err(PayloadCycleError::AlreadyTerminal);
+        }
+        cycle.state = PayloadCycleState::ErrorTerminal;
+        Ok(cycle)
+    }
+
+    pub fn get(&self, request_id: &str) -> Option<&PayloadCycle> {
+        self.cycles.get(request_id)
+    }
+}
+
 /// Data plane view: only business request/response semantics.
 #[derive(Debug, Clone, Default)]
 pub struct DataView {
@@ -112,11 +507,16 @@ pub struct DataView {
 #[derive(Debug, Clone)]
 pub struct ControlView {
     pub continuation_scope: Option<String>,
+    pub continuation_owner: Option<String>,
+    pub execution_mode: Option<String>,
+    pub relay_operator_selected: bool,
     pub governance_applied: bool,
     pub execution_plan: Option<String>,
     pub route_facts: Option<String>,
     pub target_selection: Option<String>,
+    pub route_exit: Option<String>,
     pub continuation_committed: bool,
+    pub continuation_restored: bool,
     pub metadata: MetadataCenter,
 }
 
@@ -141,6 +541,9 @@ pub struct ExecutionContext {
     request_id: String,
     binding: ExecutionBinding,
     scope: Scope,
+    port: u16,
+    session_scope: String,
+    conversation_scope: String,
     pub data: DataView,
     pub control: ControlView,
     pub information: InformationView,
@@ -149,22 +552,48 @@ pub struct ExecutionContext {
 
 impl ExecutionContext {
     pub fn new(request_id: &str, binding: ExecutionBinding) -> Self {
-        // Minimal slice: request_id is the isolation key; pipeline/port/session
-        // dimensions are wired by the runtime host in later phases. The scope
-        // stays request-bound so control state never crosses closed loops.
-        let scope = Scope::new(request_id, "v4-skeleton", 0, "", "");
+        // Default request-bound scope; hosts with real session/conversation
+        // dimensions use `with_scope` so continuation restore can bind the
+        // three keys (entry protocol + owner + session/conversation(+port)).
+        Self::with_scope(request_id, binding, 0, "", "")
+    }
+
+    /// Scoped constructor for real port/session/conversation dimensions. The
+    /// scope stays closed-loop bound so control state never crosses requests.
+    pub fn with_scope(
+        request_id: &str,
+        binding: ExecutionBinding,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> Self {
+        let scope = Scope::new(
+            request_id,
+            "v4-skeleton",
+            port,
+            session_scope,
+            conversation_scope,
+        );
         Self {
             request_id: request_id.to_string(),
             binding,
             scope: scope.clone(),
+            port,
+            session_scope: session_scope.to_string(),
+            conversation_scope: conversation_scope.to_string(),
             data: DataView::default(),
             control: ControlView {
                 continuation_scope: None,
+                continuation_owner: None,
+                execution_mode: None,
+                relay_operator_selected: false,
                 governance_applied: false,
                 execution_plan: None,
                 route_facts: None,
                 target_selection: None,
+                route_exit: None,
                 continuation_committed: false,
+                continuation_restored: false,
                 metadata: MetadataCenter::new(scope),
             },
             information: InformationView::default(),
@@ -184,6 +613,18 @@ impl ExecutionContext {
         &self.scope
     }
 
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub fn session_scope(&self) -> &str {
+        &self.session_scope
+    }
+
+    pub fn conversation_scope(&self) -> &str {
+        &self.conversation_scope
+    }
+
     pub fn binding_mut(&mut self) -> &mut ExecutionBinding {
         &mut self.binding
     }
@@ -196,7 +637,12 @@ impl ExecutionContext {
 /// Reserved control markers that must never appear in provider/client wire.
 const RESERVED_CONTROL_MARKERS: &[&str] = &[
     "continuation_scope",
+    "continuation_owner",
+    "execution_mode",
+    "relay_operator",
+    "continuation_restored",
     "route_facts",
+    "route_exit",
     "plan_hash",
     "governance_applied",
 ];
@@ -227,10 +673,19 @@ pub fn assert_no_control_leak(ctx: &ExecutionContext) -> Result<(), RuntimeFault
 
 /// Static plugin capability boundary. Plugins are node-local: they only touch
 /// their declared view through `ExecutionContext`; no next_node effect exists.
+pub struct RuntimeRegistries<'a> {
+    pub scope: &'a mut ScopeRegistry,
+    pub payload_cycle: &'a mut PayloadCycleRegistry,
+}
+
 pub trait NodePlugin: Send + Sync {
     fn plugin_id(&self) -> &'static str;
     fn kind(&self) -> PluginKind;
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault>;
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault>;
 }
 
 struct ProtocolParse;
@@ -241,7 +696,11 @@ impl NodePlugin for ProtocolParse {
     fn kind(&self) -> PluginKind {
         PluginKind::Semantic
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         let raw = ctx
             .data
             .raw_entry
@@ -267,7 +726,11 @@ impl NodePlugin for Normalize {
     fn kind(&self) -> PluginKind {
         PluginKind::Semantic
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         let protocol = ctx
             .information
             .protocol
@@ -286,7 +749,11 @@ impl NodePlugin for InputValidate {
     fn kind(&self) -> PluginKind {
         PluginKind::Validation
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         let raw = ctx
             .data
             .raw_entry
@@ -316,20 +783,94 @@ impl NodePlugin for ContinuationClassify {
     fn kind(&self) -> PluginKind {
         PluginKind::Control
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
-        // Classification only: lock entry protocol + continuation owner +
-        // session scope. Never restores history or rebuilds context here
-        // (immutable interval contract).
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
+        // Classification only: lock typed facts (entry protocol, provider wire
+        // protocol, continuation owner, execution mode). Never restores
+        // history or rebuilds context here (immutable interval contract).
         let protocol = ctx.information.protocol.as_deref().unwrap_or("unknown");
-        let owner = if protocol == "responses" {
-            "direct"
-        } else {
-            "none"
+        let owner = match protocol {
+            "responses" => "direct",
+            "chat" | "messages" | "anthropic" | "gemini" => "relay",
+            _ => "none",
         };
+        let execution_mode = match owner {
+            "relay" => "relay",
+            "direct" => "direct",
+            _ => "none",
+        };
+        ctx.control.continuation_owner = Some(owner.to_string());
+        ctx.control.execution_mode = Some(execution_mode.to_string());
+        let facts = ContinuationFacts::new(protocol, "hub", owner, execution_mode);
+        if select_relay_operator(&facts)? == RelayOperator::Relay {
+            ctx.control.relay_operator_selected = true;
+        }
         ctx.control.continuation_scope = Some(format!(
-            "scope:{protocol}:{owner}:session-{}",
-            ctx.request_id()
+            "scope:{protocol}:{owner}:port-{}:session-{}:conversation-{}",
+            ctx.port(),
+            ctx.session_scope(),
+            ctx.conversation_scope()
         ));
+        Ok(())
+    }
+}
+
+struct ContinuationRestore;
+impl NodePlugin for ContinuationRestore {
+    fn plugin_id(&self) -> &'static str {
+        "continuation_restore"
+    }
+    fn kind(&self) -> PluginKind {
+        PluginKind::Control
+    }
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
+        // Restore is the request-side endpoint of the immutable interval:
+        // resp_chatprocess save -> (no semantic transformation) ->
+        // req_chatprocess restore. Three keys are required and full input is
+        // mandatory; missing owner or missing binding is not a fallback.
+        let owner = ctx.control.continuation_owner.as_deref().unwrap_or("none");
+        let protocol = ctx.information.protocol.as_deref().unwrap_or("unknown");
+        if owner == "none" {
+            return Ok(());
+        }
+        let key = ContinuationKey::new(
+            protocol,
+            owner,
+            ctx.port(),
+            ctx.session_scope(),
+            ctx.conversation_scope(),
+        );
+        let full_input = ctx
+            .data
+            .normalized_request
+            .as_deref()
+            .ok_or_else(|| RuntimeFault::new("full_input_missing", "continuation restore requires full input"))?;
+        if registries.scope.is_bound(&key) {
+            registries
+                .scope
+                .restore(&key, ctx.request_id(), Some(&format!("sha256:{full_input}")))
+                .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))?;
+            ctx.control.continuation_restored = true;
+        } else if registries
+            .scope
+            .session_trio_bound(ctx.port(), ctx.session_scope(), ctx.conversation_scope())
+        {
+            // A continuation exists for this session trio but the requested
+            // three keys do not match: fail fast with the exact isolation
+            // error instead of silently starting a fresh turn.
+            registries
+                .scope
+                .restore(&key, ctx.request_id(), Some(&format!("sha256:{full_input}")))
+                .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))?;
+            ctx.control.continuation_restored = true;
+        }
         Ok(())
     }
 }
@@ -342,7 +883,11 @@ impl NodePlugin for Governance {
     fn kind(&self) -> PluginKind {
         PluginKind::Control
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         ctx.control.governance_applied = true;
         Ok(())
     }
@@ -356,12 +901,18 @@ impl NodePlugin for ExecutionPlan {
     fn kind(&self) -> PluginKind {
         PluginKind::Control
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         ctx.control.execution_plan = Some(format!("plan:{}", ctx.binding().plan_hash));
-        // Router facts and target selection are typed, opaque control facts;
-        // they are never projected into payload and never mutated here.
+        // Router facts, target selection and route exit are typed, opaque
+        // control facts; they are never projected into payload and never
+        // mutated here.
         ctx.control.route_facts = Some(format!("facts:{}:classified", ctx.binding().plan_hash));
         ctx.control.target_selection = Some(format!("opaque:{}:selected", ctx.binding().plan_hash));
+        ctx.control.route_exit = Some("direct_policy_bound".to_string());
         Ok(())
     }
 }
@@ -374,7 +925,11 @@ impl NodePlugin for SemanticProjection {
     fn kind(&self) -> PluginKind {
         PluginKind::Projection
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         let normalized = ctx.data.normalized_request.as_deref().ok_or_else(|| {
             RuntimeFault::new("semantic_projection", "normalized request missing")
         })?;
@@ -392,7 +947,11 @@ impl NodePlugin for WireBuild {
     fn kind(&self) -> PluginKind {
         PluginKind::Semantic
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         let semantic = ctx
             .data
             .provider_semantic
@@ -411,7 +970,11 @@ impl NodePlugin for OutputValidate {
     fn kind(&self) -> PluginKind {
         PluginKind::Validation
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         if ctx.data.provider_wire.is_none() {
             return Err(RuntimeFault::new(
                 "output_validate",
@@ -430,7 +993,11 @@ impl NodePlugin for RawParse {
     fn kind(&self) -> PluginKind {
         PluginKind::Semantic
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         let raw = ctx
             .data
             .provider_raw
@@ -454,7 +1021,11 @@ impl NodePlugin for ProtocolDecode {
     fn kind(&self) -> PluginKind {
         PluginKind::Semantic
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         let raw = ctx
             .data
             .provider_raw
@@ -473,7 +1044,11 @@ impl NodePlugin for ResponseGovernance {
     fn kind(&self) -> PluginKind {
         PluginKind::Control
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         ctx.control.governance_applied = true;
         Ok(())
     }
@@ -487,7 +1062,11 @@ impl NodePlugin for ToolHarvest {
     fn kind(&self) -> PluginKind {
         PluginKind::Semantic
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         // Harvest is semantic: extracted tool facts are observed and carried;
         // they are never stripped and never silently dropped.
         let parsed = ctx
@@ -513,10 +1092,40 @@ impl NodePlugin for ContinuationCommit {
     fn kind(&self) -> PluginKind {
         PluginKind::Control
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
-        // Continuation truth saved at chat process exit; the interval between
-        // this commit and the next request restore is immutable.
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
+        // Continuation truth saved at chat process exit (unique save point);
+        // the interval between this commit and the next request restore is
+        // immutable. A response without a continuation owner (e.g. a plain
+        // mock frame) commits the checkpoint with no binding: nothing to save.
         ctx.control.continuation_committed = true;
+        let Some(owner) = ctx.control.continuation_owner.as_deref() else {
+            return Ok(());
+        };
+        if owner == "none" {
+            return Ok(());
+        }
+        let protocol = ctx.information.protocol.as_deref().unwrap_or("unknown");
+        let key = ContinuationKey::new(
+            protocol,
+            owner,
+            ctx.port(),
+            ctx.session_scope(),
+            ctx.conversation_scope(),
+        );
+        let payload_hash = ctx
+            .data
+            .parsed_response
+            .as_deref()
+            .map(|payload| format!("sha256:{payload}"))
+            .ok_or_else(|| RuntimeFault::new("continuation_commit", "response payload missing"))?;
+        registries
+            .scope
+            .bind(key, ctx.request_id(), Some(&payload_hash))
+            .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))?;
         Ok(())
     }
 }
@@ -529,7 +1138,11 @@ impl NodePlugin for ClientSemanticProjection {
     fn kind(&self) -> PluginKind {
         PluginKind::Projection
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         let parsed = ctx.data.parsed_response.as_deref().ok_or_else(|| {
             RuntimeFault::new("client_semantic_projection", "parsed response missing")
         })?;
@@ -546,7 +1159,11 @@ impl NodePlugin for FrameBuild {
     fn kind(&self) -> PluginKind {
         PluginKind::Projection
     }
-    fn execute(&self, ctx: &mut ExecutionContext) -> Result<(), RuntimeFault> {
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
         let semantic = ctx
             .data
             .client_semantic
@@ -564,6 +1181,7 @@ pub static PLUGIN_REGISTRY: &[&dyn NodePlugin] = &[
     &Normalize,
     &InputValidate,
     &ContinuationClassify,
+    &ContinuationRestore,
     &Governance,
     &ExecutionPlan,
     &SemanticProjection,
@@ -721,7 +1339,11 @@ pub struct ExecutionReport {
     pub provider_wire: Option<String>,
     pub client_frame: Option<String>,
     pub continuation_scope: Option<String>,
+    pub continuation_owner: Option<String>,
+    pub execution_mode: Option<String>,
+    pub relay_operator_selected: bool,
     pub continuation_committed: bool,
+    pub continuation_restored: bool,
     pub trace: Vec<String>,
 }
 
@@ -731,6 +1353,8 @@ pub struct SkeletonRuntime {
     plan: SkeletonPlan,
     containers: NodePluginPlan,
     active_requests: RefCell<HashSet<String>>,
+    scopes: RefCell<ScopeRegistry>,
+    payload_cycles: RefCell<PayloadCycleRegistry>,
 }
 
 impl SkeletonRuntime {
@@ -742,6 +1366,8 @@ impl SkeletonRuntime {
             plan,
             containers,
             active_requests: RefCell::new(HashSet::new()),
+            scopes: RefCell::new(ScopeRegistry::new()),
+            payload_cycles: RefCell::new(PayloadCycleRegistry::new()),
         })
     }
 
@@ -772,8 +1398,21 @@ impl SkeletonRuntime {
         raw_entry: &str,
         request_id: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
+        self.execute_request_scoped(raw_entry, request_id, 0, "", "")
+    }
+
+    /// Request slice with explicit port/session/conversation dimensions so the
+    /// continuation restore key can carry the full three-key scope.
+    pub fn execute_request_scoped(
+        &self,
+        raw_entry: &str,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain("request", request_id, |ctx| {
+        let result = self.run_chain("request", request_id, port, session_scope, conversation_scope, |ctx| {
             ctx.data.raw_entry = Some(raw_entry.to_string());
             ctx.information.model = Some("mock-provider".to_string());
         });
@@ -788,12 +1427,74 @@ impl SkeletonRuntime {
         provider_raw: &str,
         request_id: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
+        self.execute_mock_response_scoped(provider_raw, request_id, 0, "", "", "chat", "none")
+    }
+
+    /// Response slice with continuation facts so commit can bind the three-key
+    /// save (entry protocol + owner + session/conversation(+port/group)).
+    pub fn execute_mock_response_scoped(
+        &self,
+        provider_raw: &str,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        entry_protocol: &str,
+        continuation_owner: &str,
+    ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain("response", request_id, |ctx| {
+        let result = self.run_chain("response", request_id, port, session_scope, conversation_scope, |ctx| {
             ctx.data.provider_raw = Some(provider_raw.to_string());
+            ctx.information.protocol = Some(entry_protocol.to_string());
+            ctx.control.continuation_owner = Some(continuation_owner.to_string());
+            ctx.control.execution_mode = Some(if continuation_owner == "relay" {
+                "relay".to_string()
+            } else {
+                "direct".to_string()
+            });
         });
         self.release(request_id);
         result
+    }
+
+    /// Open a payload cycle (request_sent) for a request id.
+    pub fn open_payload_cycle(
+        &self,
+        request_id: &str,
+        original_request_hash: &str,
+    ) -> Result<(), RuntimeFault> {
+        self.payload_cycles
+            .borrow_mut()
+            .open(request_id, original_request_hash)
+            .map(|_| ())
+            .map_err(|error| RuntimeFault::new("payload_cycle", error.to_string()))
+    }
+
+    /// Merge a retry into the same payload cycle.
+    pub fn merge_payload_cycle(&self, request_id: &str) -> Result<(), RuntimeFault> {
+        self.payload_cycles
+            .borrow_mut()
+            .merge_retry(request_id)
+            .map(|_| ())
+            .map_err(|error| RuntimeFault::new("payload_cycle", error.to_string()))
+    }
+
+    /// Close a payload cycle as success terminal.
+    pub fn close_payload_cycle_success(&self, request_id: &str) -> Result<(), RuntimeFault> {
+        self.payload_cycles
+            .borrow_mut()
+            .close_success(request_id)
+            .map(|_| ())
+            .map_err(|error| RuntimeFault::new("payload_cycle", error.to_string()))
+    }
+
+    /// Close a payload cycle as error terminal.
+    pub fn close_payload_cycle_error(&self, request_id: &str) -> Result<(), RuntimeFault> {
+        self.payload_cycles
+            .borrow_mut()
+            .close_error(request_id)
+            .map(|_| ())
+            .map_err(|error| RuntimeFault::new("payload_cycle", error.to_string()))
     }
 
     /// Generic chain execution. External-owned chains (error/config) must not
@@ -804,7 +1505,7 @@ impl SkeletonRuntime {
         request_id: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain(chain_id, request_id, |_| {});
+        let result = self.run_chain(chain_id, request_id, 0, "", "", |_| {});
         self.release(request_id);
         result
     }
@@ -813,17 +1514,32 @@ impl SkeletonRuntime {
         &self,
         chain_id: &str,
         request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
         seed: impl FnOnce(&mut ExecutionContext),
     ) -> Result<ExecutionReport, RuntimeFault> {
         let nodes = self.containers.chain(chain_id)?;
-        let mut ctx = ExecutionContext::new(request_id, execution_binding(&self.plan));
+        let mut ctx = ExecutionContext::with_scope(
+            request_id,
+            execution_binding(&self.plan),
+            port,
+            session_scope,
+            conversation_scope,
+        );
+        let mut scopes = self.scopes.borrow_mut();
+        let mut payload_cycles = self.payload_cycles.borrow_mut();
+        let mut registries = RuntimeRegistries {
+            scope: &mut scopes,
+            payload_cycle: &mut payload_cycles,
+        };
         seed(&mut ctx);
         for node in nodes {
             let binding_before = ctx.binding().clone();
             for plugin in &node.plugins {
                 match plugin {
                     PluginRef::Local(plugin) => plugin
-                        .execute(&mut ctx)
+                        .execute(&mut ctx, &mut registries)
                         .map_err(|fault| fault.with_node(&node.node_id))?,
                     PluginRef::External { plugin_id, owner } => {
                         return Err(RuntimeFault::new(
@@ -851,7 +1567,11 @@ impl SkeletonRuntime {
             provider_wire: ctx.data.provider_wire.clone(),
             client_frame: ctx.data.client_frame.clone(),
             continuation_scope: ctx.control.continuation_scope.clone(),
+            continuation_owner: ctx.control.continuation_owner.clone(),
+            execution_mode: ctx.control.execution_mode.clone(),
+            relay_operator_selected: ctx.control.relay_operator_selected,
             continuation_committed: ctx.control.continuation_committed,
+            continuation_restored: ctx.control.continuation_restored,
             trace: ctx.diagnostic.trace.clone(),
         })
     }

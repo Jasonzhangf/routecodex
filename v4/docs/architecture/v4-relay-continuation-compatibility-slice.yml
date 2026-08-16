@@ -1,0 +1,309 @@
+version: 1
+status: active
+owner_feature_id: v4.compat.relay_continuation
+compatibility_target: relay_continuation
+canonical_inputs:
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/goals/v3-responses-direct-mvp-test-design.md
+  - v4/contracts/node-graph.contract.json
+  - v4/contracts/skeleton-plan.contract.json
+  - v4/docs/architecture/v4-standard-nodes-and-node-graph.md
+  - v4/docs/architecture/v4-resource-operation-map.yml
+  - v4/docs/architecture/v4-v3-feature-mapping.yml
+notes: |
+  V4 Relay + Continuation compatibility evidence slice. Relay and Direct share
+  the same Hub chain and differ only in typed-facts operator selection
+  (entry_protocol / provider_wire_protocol / continuation_owner /
+  execution_mode; provider_id / model_prefix / payload_shape_guess forbidden).
+  Continuation save occurs only at V4HubRespChatProcess03Governed and restore
+  only at the next request ChatProcess continuation node; the interval between
+  save and restore is immutable (no semantic transformation, no history/tool
+  patch, no provider/client body rebuild). Every V3 semantic stage across the
+  six required surfaces maps to exactly one V4 container + checkpoint +
+  resource + verification gate with evidence. Any entry with
+  diff_status=unexplained is RED (unexplained_diff must be 0).
+unexplained_diff: 0
+surfaces:
+  - surface_id: request_path
+    required: true
+    entries:
+      - v3_stage: request.relay_normalize
+        v3_resource: v3.request.normal_payload
+        v4_container: {family: RequestChainNode, role: request_inbound}
+        v4_checkpoint: {node_id: V4ReqInbound02Normalized, semantic: normalized_request_identity_locked}
+        v4_resource: v4.request.normal_payload
+        verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime ProtocolParse/Normalize (request chain, runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: request.continuation_classify
+        v3_resource: v3.hub.continuation_ownership
+        v4_container: {family: RequestChainNode, role: request_continuation}
+        v4_checkpoint: {node_id: V4ReqContinuationClassified, semantic: continuation_scope_locked}
+        v4_resource: v4.scope.session
+        verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime ContinuationClassify typed facts (entry protocol + continuation owner + execution mode, runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: request.continuation_restore
+        v3_resource: v3.continuation.remote_binding
+        v4_container: {family: RequestChainNode, role: request_continuation}
+        v4_checkpoint: {node_id: V4ChatProcess04ContinuationRestore, semantic: continuation_restored}
+        v4_resource: v4.scope.session
+        verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime ContinuationRestore three-key restore (entry protocol + continuation owner + session/conversation(+port/group)), runtime test-consumer"
+        diff_status: equivalent
+      - v3_stage: request.relay_governance
+        v3_resource: v3.hub.tool_governance_truth
+        v4_container: {family: RequestChainNode, role: request_chat_process}
+        v4_checkpoint: {node_id: V4ReqChatProcess03Governed, semantic: governed_request}
+        v4_resource: v4.request.normal_payload
+        verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime Governance (request chain, runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: request.relay_operator_select
+        v3_resource: v3.route.request_facts
+        v4_container: {family: RequestChainNode, role: request_execution}
+        v4_checkpoint: {node_id: V4Router05RequestClassified, semantic: route_facts}
+        v4_resource: v4.control.route_facts
+        verification_gates: [v4_compat_gate_relay_continuation, v4_parity_gate_plane_isolation]
+        evidence: "implemented: routecodex-v4-runtime RelayOperatorSelect typed-facts selection (relay vs direct), runtime test-consumer"
+        diff_status: equivalent
+      - v3_stage: request.target_resolve
+        v3_resource: v3.target.concrete_provider
+        v4_container: {family: RequestChainNode, role: request_execution}
+        v4_checkpoint: {node_id: V4Router06SelectionPlan, semantic: opaque_target_selection}
+        v4_resource: v4.control.target_selection
+        verification_gates: [v4_parity_gate_plane_isolation, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime ExecutionPlan target_selection (runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: request.relay_route_exit
+        v3_resource: v3.responses_direct.policy
+        v4_container: {family: RequestChainNode, role: request_execution}
+        v4_checkpoint: {node_id: V4Router07RouteDecisionExit, semantic: direct_policy_bound}
+        v4_resource: v4.control.route_exit
+        verification_gates: [v4_parity_gate_plane_isolation]
+        evidence: "v4-resource-operation-map.yml v4.control.route_exit + node-graph.contract.json relay_and_direct_share_chain"
+        diff_status: equivalent
+      - v3_stage: request.provider_semantic
+        v3_resource: v3.request.provider_semantic
+        v4_container: {family: RequestChainNode, role: request_outbound}
+        v4_checkpoint: {node_id: V4ReqOutbound05ProviderSemantic, semantic: provider_semantic}
+        v4_resource: v4.request.provider_semantic
+        verification_gates: [v4_parity_gate_semantic_parity, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime SemanticProjection (runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: request.wire_build
+        v3_resource: v3.provider.responses_wire_payload
+        v4_container: {family: RequestChainNode, role: request_outbound}
+        v4_checkpoint: {node_id: V4ProviderReqOutbound06WirePayload, semantic: provider_wire}
+        v4_resource: v4.request.provider_wire_payload
+        verification_gates: [v4_parity_gate_plane_isolation, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime WireBuild + control-leak red test (runtime test-consumer)"
+        diff_status: equivalent
+  - surface_id: response_path
+    required: true
+    entries:
+      - v3_stage: response.relay_provider_inbound
+        v3_resource: v3.response.provider_raw
+        v4_container: {family: ResponseChainNode, role: response_inbound}
+        v4_checkpoint: {node_id: V4ProviderRespInbound01Raw, semantic: provider_raw}
+        v4_resource: v4.response.provider_raw
+        verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime RawParse (response chain, runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: response.relay_normalize
+        v3_resource: v3.hub.response_semantic
+        v4_container: {family: ResponseChainNode, role: response_inbound}
+        v4_checkpoint: {node_id: V4RespInbound02Parsed, semantic: parsed_response}
+        v4_resource: v4.response.normal_payload
+        verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime ProtocolDecode (response chain, runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: response.relay_response_process
+        v3_resource: v3.hub.tool_governance_truth
+        v4_container: {family: ResponseChainNode, role: response_chat_process}
+        v4_checkpoint: {node_id: V4HubRespChatProcess03Governed, semantic: governed_response}
+        v4_resource: v4.response.normal_payload
+        verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime ResponseGovernance/ToolHarvest (response chain, runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: response.continuation_commit
+        v3_resource: v3.continuation.remote_binding
+        v4_container: {family: ResponseChainNode, role: response_continuation}
+        v4_checkpoint: {node_id: V4ChatProcess03ContinuationCommit, semantic: continuation_saved}
+        v4_resource: v4.scope.session
+        verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime ContinuationCommit real save at resp_chatprocess (runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: response.client_projection
+        v3_resource: v3.response.client_payload
+        v4_container: {family: ResponseChainNode, role: response_outbound}
+        v4_checkpoint: {node_id: V4RespOutbound04ClientSemantic, semantic: client_semantic}
+        v4_resource: v4.response.normal_payload
+        verification_gates: [v4_compat_gate_relay_continuation, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime ClientSemanticProjection (response chain, runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: response.frame
+        v3_resource: v3.response.client_payload
+        v4_container: {family: ResponseChainNode, role: response_outbound}
+        v4_checkpoint: {node_id: V4ServerRespOutbound05ClientFrame, semantic: client_frame}
+        v4_resource: v4.response.client_wire_payload
+        verification_gates: [v4_parity_gate_plane_isolation, v4_runtime_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime FrameBuild + control-leak red test (response chain, runtime test-consumer)"
+        diff_status: equivalent
+  - surface_id: error_path
+    required: true
+    entries:
+      - v3_stage: error.relay_source
+        v3_resource: v3.error.source
+        v4_container: {family: ErrorChainNode, role: error_source}
+        v4_checkpoint: {node_id: V4Error01SourceRaised, semantic: source_fact}
+        v4_resource: v4.control.error_chain
+        verification_gates: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
+        evidence: "implemented: routecodex-v4-error::ErrorChain::raise (error test-consumer)"
+        diff_status: equivalent
+      - v3_stage: error.relay_capture
+        v3_resource: v3.error.source
+        v4_container: {family: ErrorChainNode, role: error_source}
+        v4_checkpoint: {node_id: V4Error02HostCaptured, semantic: host_captured}
+        v4_resource: v4.control.error_chain
+        verification_gates: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
+        evidence: "implemented: routecodex-v4-error::ErrorChain::capture (error test-consumer)"
+        diff_status: equivalent
+      - v3_stage: error.relay_classify
+        v3_resource: v3.error.classified
+        v4_container: {family: ErrorChainNode, role: error_classify}
+        v4_checkpoint: {node_id: V4Error03RuntimeClassified, semantic: classified_fact}
+        v4_resource: v4.control.error_center
+        verification_gates: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
+        evidence: "implemented: routecodex-v4-error::ErrorCenter::classify + witness (error test-consumer)"
+        diff_status: equivalent
+      - v3_stage: error.relay_policy
+        v3_resource: v3.error.action_plan
+        v4_container: {family: ErrorChainNode, role: error_policy}
+        v4_checkpoint: {node_id: V4Error04RouterPolicyApplied, semantic: policy_applied}
+        v4_resource: v4.control.retry_policy
+        verification_gates: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
+        evidence: "implemented: routecodex-v4-error::ErrorChain::apply_policy (error test-consumer)"
+        diff_status: equivalent
+      - v3_stage: error.relay_decision
+        v3_resource: v3.error.execution_decision
+        v4_container: {family: ErrorChainNode, role: error_decision}
+        v4_checkpoint: {node_id: V4Error05ExecutionDecision, semantic: execution_decision}
+        v4_resource: v4.control.error_chain
+        verification_gates: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
+        evidence: "implemented: routecodex-v4-error::ErrorChain::decide (error test-consumer)"
+        diff_status: equivalent
+      - v3_stage: error.relay_projection
+        v3_resource: v3.error.client_projection
+        v4_container: {family: ErrorChainNode, role: error_projection}
+        v4_checkpoint: {node_id: V4Error06ClientProjected, semantic: client_projection}
+        v4_resource: v4.error.client_projection
+        verification_gates: [v4_error_l2_regression, v4_parity_gate_plane_isolation]
+        evidence: "implemented: routecodex-v4-error::ErrorChain::project (error test-consumer)"
+        diff_status: equivalent
+  - surface_id: streaming
+    required: true
+    entries:
+      - v3_stage: streaming.relay_sse_in
+        v3_resource: v3.sse.transport_raw_chunk
+        v4_container: {family: ResponseChainNode, role: response_inbound}
+        v4_checkpoint: {node_id: V4ProviderSseIn01FrameBoundary, semantic: sse_frame_to_json}
+        v4_resource: v4.response.provider_raw
+        verification_gates: [v4_parity_gate_plane_isolation]
+        evidence: "node-graph.contract.json V4ProviderSseIn01FrameBoundary + ABS-GATE-29 hub_response_chain_mirror"
+        diff_status: equivalent
+      - v3_stage: streaming.relay_sse_out
+        v3_resource: v3.sse.transport_encoded_chunk
+        v4_container: {family: ResponseChainNode, role: response_outbound}
+        v4_checkpoint: {node_id: V4ServerSseOut05FrameBoundary, semantic: json_to_sse_frame}
+        v4_resource: v4.response.client_wire_payload
+        verification_gates: [v4_parity_gate_plane_isolation]
+        evidence: "node-graph.contract.json V4ServerSseOut05FrameBoundary + sse_in_sse_out_coupling forbidden"
+        diff_status: equivalent
+      - v3_stage: streaming.continuation_never_at_sse_boundary
+        v3_resource: v3.hub.continuation_ownership
+        v4_container: {family: ResponseChainNode, role: response_continuation}
+        v4_checkpoint: {node_id: V4ChatProcess03ContinuationCommit, semantic: continuation_saved}
+        v4_resource: v4.scope.session
+        verification_gates: [v4_compat_gate_relay_continuation, v4_parity_gate_plane_isolation]
+        evidence: "node-graph.contract.json continuation_save_only_at V4HubRespChatProcess03Governed + sse_boundary_only"
+        diff_status: equivalent
+  - surface_id: lifecycle
+    required: true
+    entries:
+      - v3_stage: lifecycle.payload_cycle_open
+        v3_resource: v3.hub.execution_plan
+        v4_container: {family: LifecycleChainNode, role: lifecycle_control}
+        v4_checkpoint: {node_id: V4PayloadCycleRegistry, semantic: cycle_open}
+        v4_resource: v4.lifecycle.payload_cycle
+        verification_gates: [v4_compat_gate_relay_continuation, v4_parity_gate_plane_isolation]
+        evidence: "implemented: routecodex-v4-runtime PayloadCycleRegistry::open (runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: lifecycle.scope_bind
+        v3_resource: v3.hub.continuation_ownership
+        v4_container: {family: ControlCenterNode, role: control_center}
+        v4_checkpoint: {node_id: V4ScopeRegistry, semantic: scope_bound}
+        v4_resource: v4.scope.session
+        verification_gates: [v4_compat_gate_relay_continuation, v4_parity_gate_plane_isolation]
+        evidence: "implemented: routecodex-v4-runtime ScopeRegistry::bind three-key (runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: lifecycle.payload_cycle_success
+        v3_resource: v3.hub.execution_plan
+        v4_container: {family: LifecycleChainNode, role: lifecycle_control}
+        v4_checkpoint: {node_id: V4PayloadCycleRegistry, semantic: cycle_success_terminal}
+        v4_resource: v4.lifecycle.payload_cycle
+        verification_gates: [v4_compat_gate_relay_continuation, v4_parity_gate_plane_isolation]
+        evidence: "implemented: routecodex-v4-runtime PayloadCycleRegistry::close_success (runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: lifecycle.payload_cycle_error
+        v3_resource: v3.hub.execution_plan
+        v4_container: {family: LifecycleChainNode, role: lifecycle_control}
+        v4_checkpoint: {node_id: V4PayloadCycleRegistry, semantic: cycle_error_terminal}
+        v4_resource: v4.lifecycle.payload_cycle
+        verification_gates: [v4_compat_gate_relay_continuation, v4_parity_gate_plane_isolation]
+        evidence: "implemented: routecodex-v4-runtime PayloadCycleRegistry::close_error (runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: lifecycle.scope_release
+        v3_resource: v3.hub.continuation_ownership
+        v4_container: {family: ControlCenterNode, role: control_center}
+        v4_checkpoint: {node_id: V4ScopeRegistry, semantic: scope_released}
+        v4_resource: v4.scope.session
+        verification_gates: [v4_compat_gate_relay_continuation, v4_parity_gate_plane_isolation]
+        evidence: "implemented: routecodex-v4-runtime ScopeRegistry::release (runtime test-consumer)"
+        diff_status: equivalent
+  - surface_id: audit
+    required: true
+    entries:
+      - v3_stage: audit.relay_facts_audit
+        v3_resource: v3.route.request_facts
+        v4_container: {family: ControlCenterNode, role: control_center}
+        v4_checkpoint: {node_id: V4Router05RequestClassified, semantic: route_facts}
+        v4_resource: v4.control.route_facts
+        verification_gates: [v4_parity_gate_plane_isolation]
+        evidence: "v4-resource-operation-map.yml v4.control.route_facts typed facts only + selection facts contract"
+        diff_status: equivalent
+      - v3_stage: audit.continuation_save_audit
+        v3_resource: v3.continuation.remote_binding
+        v4_container: {family: ControlCenterNode, role: control_center}
+        v4_checkpoint: {node_id: V4ChatProcess03ContinuationCommit, semantic: continuation_saved}
+        v4_resource: v4.scope.session
+        verification_gates: [v4_compat_gate_relay_continuation, v4_control_l2_regression]
+        evidence: "implemented: routecodex-v4-runtime ScopeRegistry bind/release records (runtime test-consumer)"
+        diff_status: equivalent
+      - v3_stage: audit.event_ledger
+        v3_resource: v3.debug.event_ledger
+        v4_container: {family: DiagnosticChainNode, role: diagnostic_ledger}
+        v4_checkpoint: {node_id: V4Debug05EventLedgerRecorded, semantic: node_event_recorded}
+        v4_resource: v4.debug.event_ledger
+        verification_gates: [v4_parity_gate_capability_isolation]
+        evidence: "v4-resource-operation-map.yml v4.debug.event_ledger may_enter_metadata_center=false"
+        diff_status: equivalent
+      - v3_stage: audit.observability
+        v3_resource: v3.runtime.responses_observability
+        v4_container: {family: DiagnosticChainNode, role: diagnostic_observability}
+        v4_checkpoint: {node_id: V4RuntimeObservability, semantic: observability_projected}
+        v4_resource: v4.debug.observability
+        verification_gates: [v4_parity_gate_capability_isolation]
+        evidence: "v4-resource-operation-map.yml v4.debug.observability + v3.runtime.responses_observability baseline"
+        diff_status: equivalent

@@ -167,3 +167,14 @@ error chain / MetadataCenter / Config v2 / Responses Direct compat 已闭环）�
 - verify:v4-foundation 10/10、verify:v4-foundation-red 3/3、cargo workspace、
   test-consumer、appsdk admission 全绿；
 - DSH review 语义 PASS（无 P0/P1、无“修复后再审”）。
+
+## 9. 执行偏差记录（2026-08-15）
+
+- §2 In scope 原把 ScopeRegistry / PayloadCycleRegistry 划给
+  `routecodex-v4-control`；control 已 freeze 至 active-v2，源码修改需完整
+  re-freeze 生命周期（本 slice 明确 out of scope，且 active-link 禁 frozen
+  path dep）。实现按唯一 owner 证据落在 `routecodex-v4-runtime`
+  （ScopeRegistry / PayloadCycleRegistry / ExecutionPlan / WireBuild /
+  RawParse / FrameBuild 为顶层 anchor symbol），resource map 双源同步
+  anchored（8 条本 slice 资源，含 route_exit 由 ExecutionPlan 产出控制事实）。
+  其余设计原则不变。
