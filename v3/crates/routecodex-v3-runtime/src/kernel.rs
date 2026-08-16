@@ -1324,6 +1324,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         retain_response_cipher,
                         policy.target.candidate.compatibility_profile.as_deref()
                             == Some("responses:deepseek-console-go"),
+                        policy.target.candidate.compatibility_profile.as_deref()
+                            == Some("responses:thinking-tags"),
                     );
                     V3ClientBody::Sse(stream)
                 }

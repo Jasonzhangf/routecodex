@@ -715,3 +715,4 @@ fn release_terminal_failure_locator(
 /// Exact-pin availability remains fail-fast in the adjacent stream helper:
 /// `V3ExactPinAvailabilityExhaustion` emits `continuation_exact_pin_unavailable`.
 include!("direct_runtime_helpers_stream.rs");
+include!("direct_response_thinking_compat.rs");
