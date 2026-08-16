@@ -179,8 +179,8 @@ function validate(slice, verification, resourceMap, v3ResourceMap, nodeGraph, sk
         .filter((pluginId) => CONTINUATION_PLUGINS.has(pluginId));
       if (continuationPlugins.length === 0) continue;
       const nodeId = node.node_id ?? '?';
-      const isRequestChatProcess = chain.chain_id === 'request' && node.position === 2;
-      const isResponseChatProcess = chain.chain_id === 'response' && node.position === 2;
+      const isRequestChatProcess = chain.chain_id === "request" && node.node_id === "V4HubReqChatProcess04Governed";
+      const isResponseChatProcess = chain.chain_id === "response" && node.node_id === "V4HubRespChatProcess03Governed";
       if (!isRequestChatProcess && !isResponseChatProcess) {
         failures.push(`skeleton: continuation plugins (${continuationPlugins.join(',')}) bound outside chat process at ${chain.chain_id}:${nodeId}`);
       }
@@ -283,11 +283,11 @@ function runSelfTest() {
     }],
     ['skeleton restore bound to request outbound', ({ skeletonPlan: p }) => {
       const requestChain = p.chains.find((chain) => chain.chain_id === 'request');
-      requestChain.nodes[2].plugins.push({ plugin_id: 'continuation_restore', effects: ['control'] });
+      requestChain.nodes[4].plugins.push({ plugin_id: 'continuation_restore', effects: ['control'] });
     }],
     ['skeleton commit bound to response outbound', ({ skeletonPlan: p }) => {
       const responseChain = p.chains.find((chain) => chain.chain_id === 'response');
-      responseChain.nodes[2].plugins.push({ plugin_id: 'continuation_commit', effects: ['control'] });
+      responseChain.nodes[3].plugins.push({ plugin_id: 'continuation_commit', effects: ['control'] });
     }],
     ['control-leak guard removed from wire builder', ({ runtimeSource }) => ({
       runtimeSource: runtimeSource.replace(

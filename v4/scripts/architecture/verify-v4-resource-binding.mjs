@@ -87,7 +87,8 @@ function collectDeclaredSymbols(crate) {
 
 /**
  * Machine node catalog for resource relations: node-graph chains +
- * skeleton-plan checkpoints + node-graph registered_nodes. Relation entries
+ * node-graph registered_nodes. Skeleton checkpoints are consumers of this
+ * catalog and cannot prove that their own node references exist. Relation entries
  * must resolve to this catalog or to an explicit non-node reference
  * (developer/incident/replay consumers and bare crate identities); unknown
  * node-like references are RED (no resource self-proof, no dangling nodes).
@@ -108,12 +109,6 @@ function collectNodeCatalog() {
           }
         }
       }
-    }
-  }
-  const skeleton = readJson('contracts/skeleton-plan.contract.json');
-  for (const chain of skeleton.chains ?? []) {
-    for (const checkpoint of chain.checkpoints ?? []) {
-      if (checkpoint?.node_id) nodeIds.add(checkpoint.node_id);
     }
   }
   return nodeIds;

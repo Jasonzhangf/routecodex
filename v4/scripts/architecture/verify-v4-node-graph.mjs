@@ -190,7 +190,11 @@ function validate(nodeGraph, resourceMap, skeleton, mainline) {
       if (node.node_id !== expectedId) {
         failures.push(`${chainId}: position ${position} expected ${expectedId}, got ${node.node_id}`);
       }
-      if (!node.node_id.endsWith(numberSuffix) || /[.][0-9]/.test(node.node_id)) {
+      const positionToken = new RegExp(`[A-Za-z]${numberSuffix}[A-Z]`);
+      if (
+        (!positionToken.test(node.node_id) && !node.node_id.endsWith(numberSuffix)) ||
+        /[.][0-9]/.test(node.node_id)
+      ) {
         failures.push(`${chainId}: node ${node.node_id} violates position numbering ${numberSuffix} (no temp numbering)`);
       }
       if (seen.has(node.node_id)) {

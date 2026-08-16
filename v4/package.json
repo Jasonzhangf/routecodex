@@ -15,6 +15,8 @@
     "verify:ci": "node scripts/verify-ci.mjs",
     "verify:isolation": "node scripts/verify-isolation.mjs",
     "verify:v4-active-link": "node scripts/architecture/verify-v4-active-link.mjs",
+    "verify:v4-node-graph": "node scripts/architecture/verify-v4-node-graph.mjs",
+    "verify:v4-node-graph-red": "node scripts/architecture/verify-v4-node-graph.mjs --red-self-test",
     "verify:v4-foundation": "node scripts/verify.mjs",
     "verify:v4-foundation-red": "node scripts/verify-red.mjs"
   },

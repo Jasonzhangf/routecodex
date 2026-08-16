@@ -10,6 +10,7 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-capability-isolation.mjs',
   'verify-v4-execution-binding.mjs',
   'verify-v4-feature-gap.mjs',
+  'verify-v4-node-graph.mjs',
   'verify-v4-plane-isolation.mjs',
   'verify-v4-relay-continuation.mjs',
   'verify-v4-resource-binding.mjs',
@@ -21,6 +22,7 @@ export const ARCHITECTURE_GATES = [
 
 export const RED_SUITES = [
   ['verify-v4-feature-gap.mjs', '--red-self-test'],
+  ['verify-v4-node-graph.mjs', '--red-self-test'],
   ['verify-v4-relay-continuation.mjs', '--red-self-test'],
   ['verify-v4-resource-binding.mjs', '--red-self-test'],
   ['verify-v4-v3-resource-coverage.mjs', '--red-self-test'],

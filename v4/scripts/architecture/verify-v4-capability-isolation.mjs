@@ -56,15 +56,15 @@ const byId = new Map((resourceMap.resources ?? []).map((resource) => [resource.r
 const routeDecision = byId.get('v4.control.route_exit');
 if (routeDecision) {
   const readers = new Set(routeDecision.allowed_readers ?? []);
-  if (readers.has('V4ProviderReqOutbound06WirePayload')) {
+  if (readers.has('V4ProviderReqCompat06Compat')) {
     failures.push('resource map: provider wire builder may not read route decision');
   }
 }
 const providerSemantic = byId.get('v4.request.provider_semantic');
 if (providerSemantic) {
   const readers = new Set(providerSemantic.allowed_readers ?? []);
-  if (!readers.has('V4ProviderReqOutbound06WirePayload')) {
-    failures.push('resource map: provider wire builder must be the only reader of provider semantic');
+  if (!readers.has('V4ProviderReqCompat06Compat') || !readers.has('V4ProviderSseOut07WireBoundary')) {
+    failures.push('resource map: provider wire builders (V4ProviderReqCompat06Compat + V4ProviderSseOut07WireBoundary) must both read provider semantic');
   }
 }
 
