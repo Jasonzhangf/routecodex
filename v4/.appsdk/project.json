@@ -309,7 +309,7 @@
         "suite_id": "v4-edge-l1-regression"
       },
       "source_owner": "routecodex-v4-edge",
-      "stage": "architecture_stable",
+      "stage": "frozen",
       "version_base": {
         "base_artifact_hash": "sha256:59078a62b2b1f1b94fa82d749b6812e9f1a653c39acd66d88fe5b38a9a866593",
         "base_source_commit": "d6239b197",
