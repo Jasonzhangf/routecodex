@@ -35642,3 +35642,9 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 在线真实 replay（0.90.4563，全部 HTTP 200 + 终态 + usage）：5555/5520/10000 `/v1/responses`、10000 `/v1/chat/completions`（usage 进 final chunk + `[DONE]`）、10000 `/v1/messages`（message_delta usage + message_stop）；证据 `/private/tmp/replay_4563_*.sse`；日志无 V3E3/502。
 - DSH review r2（commit=8a76cbc83 base=486d68f68，opencode-go/deepseek-v4-flash）`VERDICT: PASS`，recommendation=deliver；3 条非阻塞 P2：① `_sse.rs` 未列 v3-function-map allowed_paths（doc-lockstep 漂移）；② incomplete reason allowlist 窄（goal-locked fail-fast 取舍）；③ health.rs 测试改写与 SSE 设计 forbidden_paths 范围（对齐 486d68f68 provider-key 跨 session 语义）。
 - 注：HEAD 之上 v4 worker 已提交 `044767d2d`（relay/continuation slice，纯 v4，不影响 V3 SSE 交付）；交付 commit 只含版本 bump + note/MEMORY。
+
+# 2026-08-16 V3 independent build isolation（进行中）
+- worktree `playground/worktrees/v3-build-isolation`，base `ca668dd68`；build-domain contracts 已以 `design_pending` 准入。
+- V3-local package/lock/toolchain/config、Cargo test wrapper、artifact budget、install cleanup、deterministic architecture admission 已落；isolation/admission/artifact-budget 正反 gate 绿。
+- `provider-compat-core`、`servertool-core`、`stop-message-core` 已字节保持式 `git mv` 到 `v3/crates/`，V3 workspace/consumer 改为 local workspace dependency，Cargo metadata 与 isolation gate 证明零逃逸；旧 shared workspace member 已退役。
+- focused baseline：provider-compat 40/40 绿；servertool 374/377，3 个断言在 approved base 源码已与生产实现漂移（两处 `hook run` vs `servertool run`，一处 budget-boundary expected action），迁移未改 Rust source/test bytes。不得为 build migration 改 runtime 语义；后续以 pre/post 同失败集合和全量 gate 判定迁移等价，并单独记录基线缺口。

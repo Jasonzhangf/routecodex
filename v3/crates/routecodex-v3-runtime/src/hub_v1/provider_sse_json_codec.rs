@@ -344,10 +344,7 @@ mod provider_sse_json_codec_tests {
             );
             let generic = classify_v3_provider_generic_sse_json_data(&data)
                 .expect("generic classifier must accept response.incomplete");
-            assert_eq!(
-                generic,
-                Some(V3ProviderResponsesJsonFrameOutcome::Terminal)
-            );
+            assert_eq!(generic, Some(V3ProviderResponsesJsonFrameOutcome::Terminal));
         }
     }
 

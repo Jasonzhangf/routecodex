@@ -175,7 +175,10 @@ pub(crate) fn signal_explicit_listener_pids(
     Ok(())
 }
 
-pub(crate) fn signal_explicit_pid(pid: u32, signal: V3LifecycleSignal) -> Result<(), V3LifecycleError> {
+pub(crate) fn signal_explicit_pid(
+    pid: u32,
+    signal: V3LifecycleSignal,
+) -> Result<(), V3LifecycleError> {
     if pid == 0 || pid == std::process::id() {
         return Ok(());
     }

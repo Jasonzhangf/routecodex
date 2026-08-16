@@ -503,15 +503,10 @@ pub fn resolve_v3_secret_file_key(content: &str, key: &str) -> Result<String, St
 }
 
 /// 读取集中 secret 文件并解析指定 key 的值（编译期校验辅助）。
-pub fn read_v3_secret_file_key(
-    path: &str,
-    key: &str,
-) -> Result<String, V3ConfigError> {
-    let content = std::fs::read_to_string(path).map_err(|error| {
-        validation(format!("secret file {path} is unreadable: {error}"))
-    })?;
-    resolve_v3_secret_file_key(&content, key)
-        .map_err(validation)
+pub fn read_v3_secret_file_key(path: &str, key: &str) -> Result<String, V3ConfigError> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|error| validation(format!("secret file {path} is unreadable: {error}")))?;
+    resolve_v3_secret_file_key(&content, key).map_err(validation)
 }
 
 pub fn resolve_routecodex_package_version_from_executable(_executable: &Path) -> Option<String> {

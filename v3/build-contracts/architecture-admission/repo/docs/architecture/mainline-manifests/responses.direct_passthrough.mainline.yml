@@ -1,0 +1,29 @@
+lifecycle_id: responses.direct_passthrough.mainline
+summary: Responses same-protocol direct keeps the current request body as provider wire, uses Virtual Router only for target selection, and must not preflight, sanitize, repair, or replay historical tool shape in the server layer.
+owner_feature_id: responses.direct_tool_shape_contract
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+entrypoint:
+  node_id: ServerReqInbound01ClientRaw
+  wiki_page: docs/architecture/wiki/responses-direct-relay-map.md
+  call_map_chain_id: responses.direct_passthrough.mainline
+node_ids:
+  - ProviderReqOutbound06WirePayload
+  - ServerReqInbound01ClientRaw
+  - VrRoute04SelectedTarget
+step_ids:
+  - rdp-01
+  - rdp-02
+edge_status_counts:
+  anchored: 2
+  partial: 0
+  binding_pending: 0
+  total: 2
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: responses.direct_passthrough.mainline
+  min_function_feature: responses.direct_tool_shape_contract
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

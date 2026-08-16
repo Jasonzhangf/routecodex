@@ -1,0 +1,91 @@
+<!-- AUTO-GENERATED: do not edit by hand. Rebuild with `node scripts/architecture/render-architecture-wiki-pages.mjs`. -->
+# Runtime Lifecycle Call Graph
+
+Source of truth:
+- `docs/architecture/mainline-call-map.yml` defines adjacent edges for this chain
+- `docs/architecture/function-map.yml` enriches owner summary and owner module context
+
+Render rules:
+- This page is a filtered render artifact, not a second architecture truth source.
+- `anchored` = verified caller/callee binding
+- `partial` = edge is bound, but only part of the transition is concretely anchored
+- `binding pending` = edge intentionally left unresolved until code audit pins the real bridge
+
+## runtime.lifecycle.mainline
+
+Managed server lifecycle: restart identity is one aggregate listener PID set across configured member ports; `ROUTECODEX_SESSION_DIR` is only the runtime workdir root, and tmux/request/conversation identities remain separate namespaces.
+
+Entry contract: `ServerPidCacheRecord` via `docs/design/server-runtime-lifecycle-ssot.md`
+
+```mermaid
+flowchart LR
+  PortRegistry["PortRegistry"]
+  PortScopedListenerRelease["PortScopedListenerRelease"]
+  StartRestartTakeoverGuard["StartRestartTakeoverGuard"]
+  StartShutdownHandler["StartShutdownHandler"]
+  DaemonRestartLoop["DaemonRestartLoop"]
+  DaemonSupervisorLoop["DaemonSupervisorLoop"]
+  RuntimeInstanceRecord["RuntimeInstanceRecord"]
+  RestartProcessSignal["RestartProcessSignal"]
+  RestartProcessHttpRequest["RestartProcessHttpRequest"]
+  ServerRestartCommand["ServerRestartCommand"]
+  StopIntentRecord["StopIntentRecord"]
+  ServerStopCommand["ServerStopCommand"]
+  ServerPidCacheRecord["ServerPidCacheRecord"]
+  ServerStartCommand["ServerStartCommand"]
+  ServerStartCommand -->|rtl-01| ServerPidCacheRecord
+  ServerStopCommand -->|rtl-03| StopIntentRecord
+  ServerStartCommand -->|rtl-04| StopIntentRecord
+  ServerRestartCommand -->|rtl-05| RestartProcessHttpRequest
+  ServerRestartCommand -->|rtl-06| RestartProcessSignal
+  ServerStartCommand -->|rtl-07| RuntimeInstanceRecord
+  DaemonSupervisorLoop -->|rtl-08| RuntimeInstanceRecord
+  DaemonRestartLoop -->|rtl-09| RuntimeInstanceRecord
+  ServerStartCommand -->|rtl-10| RuntimeInstanceRecord
+  StartShutdownHandler -->|rtl-11| RuntimeInstanceRecord
+  ServerStopCommand -->|rtl-12| RuntimeInstanceRecord
+  ServerStartCommand -->|rtl-13| StartRestartTakeoverGuard
+  ServerStartCommand -->|rtl-14| PortScopedListenerRelease
+  ServerStopCommand -->|rtl-15| PortScopedListenerRelease
+  PortScopedListenerRelease -->|rtl-16| PortRegistry
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ServerStartCommand anchored;
+  class ServerPidCacheRecord anchored;
+  class ServerStopCommand anchored;
+  class StopIntentRecord anchored;
+  class ServerRestartCommand anchored;
+  class RestartProcessHttpRequest anchored;
+  class RestartProcessSignal anchored;
+  class RuntimeInstanceRecord anchored;
+  class DaemonSupervisorLoop anchored;
+  class DaemonRestartLoop anchored;
+  class StartShutdownHandler anchored;
+  class StartRestartTakeoverGuard anchored;
+  class PortScopedListenerRelease anchored;
+  class PortRegistry anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| rtl-01 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> planRuntimePidCacheWrite` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
+| rtl-03 | `ServerStopCommand -> StopIntentRecord` | anchored | `writeDaemonStopIntent -> planRuntimeStopIntentWrite` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
+| rtl-04 | `ServerStartCommand -> StopIntentRecord` | anchored | `consumeDaemonStopIntent -> planRuntimeStopIntentConsume` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
+| rtl-05 | `ServerRestartCommand -> RestartProcessHttpRequest` | anchored | `planRestartTransport -> planRuntimeRestartRequest` |  | `runtime.lifecycle.restart_command`<br/>CLI restart locates one aggregate RouteCodex process and requests one in-session restart for all member ports |
+| rtl-06 | `ServerRestartCommand -> RestartProcessSignal` | anchored | `planRestartTransport -> planRuntimeRestartRequest` |  | `runtime.lifecycle.restart_command`<br/>CLI restart locates one aggregate RouteCodex process and requests one in-session restart for all member ports |
+| rtl-07 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> planRuntimeInstanceWrite` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-08 | `DaemonSupervisorLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> planRuntimeInstanceWrite` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-09 | `DaemonRestartLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> planRuntimeInstanceWrite` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-10 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> planRuntimeInstanceStatusUpdate` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-11 | `StartShutdownHandler -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> planRuntimeInstanceStatusUpdate` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-12 | `ServerStopCommand -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> planRuntimeInstanceStatusUpdate` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-13 | `ServerStartCommand -> StartRestartTakeoverGuard` | anchored | `createStartCommand -> planRuntimeStartRestartTakeoverGuard` |  | `runtime.lifecycle.start_command`<br/>CLI start owns server process launch and port takeover intent; occupied target ports are released before bind unless --no-restart forbids takeover |
+| rtl-14 | `ServerStartCommand -> PortScopedListenerRelease` | anchored | `createStartCommand -> ensurePortAvailableImpl` |  | `runtime.lifecycle.port_scoped_start_stop`<br/>V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process |
+| rtl-15 | `ServerStopCommand -> PortScopedListenerRelease` | anchored | `createStopCommand -> registerHttpRoutes` |  | `runtime.lifecycle.port_scoped_start_stop`<br/>V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process |
+| rtl-16 | `PortScopedListenerRelease -> PortRegistry` | anchored | `registerHttpRoutes -> removePort` |  | `runtime.lifecycle.port_scoped_start_stop`<br/>V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process |
+
+
+## Other Chains
+
+[architecture.repository_filesystem.mainline](docs/architecture/wiki/architecture-repository_filesystem-mainline.md) · [config.user_config_materialization.mainline](docs/architecture/wiki/mainline-call-graph.md) · [v3.v2_config_toml_compat_5555.mainline](docs/architecture/wiki/v3-v2_config_toml_compat_5555-mainline.md) · [servertool.hook_skeleton.mainline](docs/architecture/wiki/servertool-hook_skeleton-mainline.md) · [request.mainline](docs/architecture/wiki/request-mainline-call-graph.md) · [responses.direct_passthrough.mainline](docs/architecture/wiki/responses-direct_passthrough-mainline.md) · [direct.semantic_classification.mainline](docs/architecture/wiki/direct-semantic_classification-mainline.md) · [response.mainline](docs/architecture/wiki/response-mainline-call-graph.md) · [responses.continuation.mainline](docs/architecture/wiki/responses-continuation-mainline.md) · [debug.unified_surface.mainline](docs/architecture/wiki/debug-unified_surface-mainline.md) · [debug.pipeline_dry_run_loop.mainline](docs/architecture/wiki/debug-pipeline_dry_run_loop-mainline.md) · [internal_error_numbering.mainline](docs/architecture/wiki/internal_error_numbering-mainline.md) · [error.provider_action_gate.mainline](docs/architecture/wiki/error-provider_action_gate-mainline.md) · [error.mainline](docs/architecture/wiki/error-mainline-call-graph.md) · [vr.route_classifier.mainline](docs/architecture/wiki/vr-route_classifier-mainline.md) · [vr.route_token_estimation.mainline](docs/architecture/wiki/vr-route_token_estimation-mainline.md) · [vr.route_availability.mainline](docs/architecture/wiki/vr-route_availability-mainline.md) · [vr.online_diagnostics.mainline](docs/architecture/wiki/vr-online_diagnostics-mainline.md) · [vr.hit_log_projection.mainline](docs/architecture/wiki/vr-hit_log_projection-mainline.md) · [stopless.session.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [metadata.center.mainline](docs/architecture/wiki/metadata-center-mainline-source.md) · [sse.chat_stream_projection.mainline](docs/architecture/wiki/sse-chat_stream_projection-mainline.md) · [stage_a.p0_rust_migration.mainline](docs/architecture/wiki/stage_a-p0_rust_migration-mainline.md) · [sse.transport_core_shared.mainline](docs/architecture/wiki/sse-transport_core_shared-mainline.md) · [v3.console_human_readable_layering.mainline](docs/architecture/wiki/v3-console_human_readable_layering-mainline.md) · [v3.console_request_count_visibility.mainline](docs/architecture/wiki/v3-console_request_count_visibility-mainline.md) · [v3.runtime_timing_observability.mainline](docs/architecture/wiki/v3-runtime_timing_observability-mainline.md) · [v3.codex_sample_retention_snap_scope](docs/architecture/wiki/v3-codex_sample_retention_snap_scope.md)

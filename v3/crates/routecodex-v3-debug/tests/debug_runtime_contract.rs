@@ -1,3 +1,5 @@
+#![allow(clippy::default_constructed_unit_structs)]
+
 use routecodex_v3_debug::{
     V3DebugBoundedTextCapture, V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture,
     V3RedactionPolicy,
@@ -9,7 +11,8 @@ use std::sync::Arc;
 use std::thread;
 
 #[test]
-fn records_ordered_events_preserves_verbatim_payload_and_does_not_retain_node_payloads_by_default() {
+fn records_ordered_events_preserves_verbatim_payload_and_does_not_retain_node_payloads_by_default()
+{
     let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
         log_console: false,
         log_file: None,

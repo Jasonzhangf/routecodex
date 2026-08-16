@@ -1,3 +1,5 @@
+#![allow(clippy::manual_contains)]
+
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{

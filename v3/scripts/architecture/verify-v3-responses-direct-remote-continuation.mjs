@@ -1,0 +1,252 @@
+#!/usr/bin/env node
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+
+const runtimePath = 'v3/crates/routecodex-v3-runtime/src/kernel.rs';
+const runtimeHelpersPath = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs';
+const storePath = 'v3/crates/routecodex-v3-runtime/src/remote_continuation.rs';
+const responsePath = 'v3/crates/routecodex-v3-runtime/src/shared.rs';
+const targetPath = 'v3/crates/routecodex-v3-target/src/lib.rs';
+const configTypesPath = 'v3/crates/routecodex-v3-config/src/types.rs';
+const configValidatePath = 'v3/crates/routecodex-v3-config/src/validate.rs';
+const providerTransportPath = 'v3/crates/routecodex-v3-provider-responses/src/transport.rs';
+const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
+const testPath = 'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs';
+const configTestPath = 'v3/crates/routecodex-v3-config/tests/config_v3_contract.rs';
+const websocketTestPath = 'v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs';
+const serverTestPath = 'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs';
+const designPath = 'docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md';
+const planPath = 'docs/goals/v3-responses-direct-remote-continuation-integration-plan.md';
+const runtime = readSurface(runtimePath);
+const runtimeHelpers = readFileSync(runtimeHelpersPath, 'utf8');
+const store = readFileSync(storePath, 'utf8');
+const response = readFileSync(responsePath, 'utf8');
+const target = readFileSync(targetPath, 'utf8');
+const configTypes = readFileSync(configTypesPath, 'utf8');
+const configValidate = readFileSync(configValidatePath, 'utf8');
+const providerTransport = readSurface(providerTransportPath);
+const providerTransportControlSource = providerTransport.replaceAll(
+  'fallback-credit-2026-06-01',
+  'anthropic-credit-beta',
+);
+const server = [
+  serverPath,
+  'v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs',
+  'v3/crates/routecodex-v3-server/src/scope_metadata.rs',
+  'v3/crates/routecodex-v3-server/src/websocket.rs',
+].map((path) => readFileSync(path, 'utf8')).join('\n');
+const tests = readFileSync(testPath, 'utf8');
+const configTests = readFileSync(configTestPath, 'utf8');
+const websocketTests = readFileSync(websocketTestPath, 'utf8');
+const serverTests = readFileSync(serverTestPath, 'utf8');
+const design = readFileSync(designPath, 'utf8');
+const plan = readFileSync(planPath, 'utf8');
+const failures = [];
+
+for (const [owner, text, phrases] of [
+  [runtimePath, runtime, [
+    'execute_v3_responses_direct_runtime_kernel_core(',
+    'static DEFAULT_RESPONSES_TRANSPORT',
+    'fn default_responses_transport()',
+    'execute_v3_responses_direct_runtime_kernel_with_continuation<T: ResponsesTransport>(',
+    '.load_for_req03(response_id, &scope.key, now_epoch_ms)',
+    'locator.validate_capability_revision(&current_capability_revision)',
+    'target.resolve_exact_provider_model_auth(',
+    'trace.push("V3HubReqContinuation03Classified")',
+    'trace.push("V3HubReqTarget06Resolved")',
+    'trace.push("V3HubRespContinuation04Committed")',
+    'let input = V3RemoteContinuationCommitInput::locator_only(locator);',
+    'store.rebind_for_resp04(previous_response_id, input)',
+    'None => store.commit(input)',
+  ]],
+  [runtimeHelpersPath, runtimeHelpers, [
+    'fn release_terminal_failure_locator(',
+  ]],
+  [storePath, store, [
+    'pub fn load_for_req03(',
+    'pub fn rebind_for_resp04(',
+    'pub fn validate_capability_revision(',
+    'CapabilityRevisionMismatch',
+    'V3RemoteContinuationOwner::Direct',
+  ]],
+  [responsePath, response, [
+    'V3RemoteContinuationObservation',
+    'V3ProviderResponseBody::Sse(stream) => project_sse_stream(&provider_id, stream).await?',
+    'SseIncrementalDecoder::new(SseTransportLimits::default())',
+    'build_v3_sse_transport_in_01_raw_chunk(chunk)',
+    'observe_sse_frame_remote_continuation(',
+    'frame.frame().fields()',
+    'response_id_candidate: None',
+    'observation_state.record_pending_response_id(&response_id)',
+    'observe_json_remote_continuation(&provider_id, status, &parsed)?',
+  ]],
+  [targetPath, target, ['pub fn resolve_exact_provider_model_auth(']],
+  [configTypesPath, configTypes, [
+    'pub enum V3ResponsesTransportKind',
+    'WebsocketV2',
+    'pub websocket_v2_url: Option<String>',
+  ]],
+  [configValidatePath, configValidate, [
+    'let responses = compile_provider_responses(&id, provider.responses, &models)?;',
+    'fn compile_provider_responses(',
+    'fn apply_implicit_provider_model_capabilities(',
+    'HTTP transport cannot declare websocket_v2_url',
+    'websocket_v2_url is required for websocket_v2 transport',
+  ]],
+  [providerTransportPath, providerTransport, [
+    'pub struct V3Transport13ResponsesRequest',
+    'ProviderResponsesTransport',
+    'extract_http_submit_tool_outputs_response_id',
+    'build_http_submit_tool_outputs_url',
+    '.push("submit_tool_outputs")',
+    'connect_async(handshake)',
+    'event.remove("stream")',
+    'event.remove("background")',
+    'Value::String("response.create".to_string())',
+    'event_type == "error"',
+    'event_type != "response.completed"',
+    'fn websocket_sse_stream(',
+    'OwnedMutexGuard<Option<ResponsesWebSocket>>',
+    'stream::unfold(state, |mut state| async move',
+    'impl Drop for WebSocketSseState',
+    'websocket_event_to_sse',
+  ]],
+  [serverPath, server, [
+    'responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>',
+    'build_responses_direct_continuation_scope(',
+    'request_local_continuation_scope(',
+    'request payload and client metadata cannot construct continuation control identity',
+    'entry_facts.previous_response_id.is_some() || entry_facts.has_function_call_output',
+    'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(',
+  ]],
+  [testPath, tests, [
+    'json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry',
+    'sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact_pin',
+    'http_only_sse_terminal_response_streams_without_remote_continuation_commit',
+    'http_only_json_function_call_uses_v2_direct_http_continuation_without_remote_capability',
+    'http_only_sse_function_call_uses_v2_direct_http_continuation_without_remote_capability',
+    'missing_locator_scope_mismatch_and_expiry_fail_before_router_or_provider_send',
+    'capability_auth_and_provider_availability_drift_fail_at_req06_without_router_or_send',
+    'pinned_terminal_provider_failure_uses_error01_06_without_reselection',
+    'transport = "websocket_v2"',
+  ]],
+  [configTestPath, configTests, [
+    'continuation_labels_do_not_block_http_responses_config',
+    'gpt_responses_models_do_not_publish_continuation_as_implicit_capability',
+    'v2_compat_projects_responses_websocket_v2_transport_without_implicit_continuation_capabilities',
+    'HTTP transport cannot declare websocket_v2_url',
+    'websocket_v2_url is required',
+  ]],
+  [websocketTestPath, websocketTests, [
+    'websocket_v2_reuses_one_connection_for_exact_incremental_continuation',
+    'websocket_v2_binary_events_project_as_equivalent_sse_and_errors_never_fallback',
+    'websocket_v2_sse_returns_first_frame_before_terminal_event',
+    'previous_response_id',
+    'data: [DONE]',
+  ]],
+  [serverTestPath, serverTests, [
+    'responses_relay_client_metadata_cannot_authorize_continuation_control_scope',
+    'responses_relay_missing_client_scope_for_tool_output_fails_before_provider_send',
+    'start_controlled_continuation_websocket',
+    'p6_remote_continuation_manifest',
+  ]],
+  [designPath, design, ['Resp04 commit', 'Req03 load', 'Req06 exact pin', 'V2 HTTP direct parity correction', 'Transport-bound continuation matrix']],
+  [planPath, plan, ['V2 HTTP direct parity correction', 'Provider Responses WebSocket v2 slice', 'Responses WebSocket v2 transport']],
+]) {
+  for (const phrase of phrases) requireText(text, owner, phrase);
+}
+
+const coreDefinitions = runtime.match(/async fn execute_v3_responses_direct_runtime_kernel_core</g) ?? [];
+if (coreDefinitions.length !== 1) failures.push(`${runtimePath}: expected one Runtime kernel core, got ${coreDefinitions.length}`);
+const projectSseStreamStart = response.indexOf('async fn project_sse_stream(');
+const projectSseStreamEnd = response.indexOf('fn observed_sse_client_stream(');
+if (projectSseStreamStart < 0 || projectSseStreamEnd < 0 || projectSseStreamEnd <= projectSseStreamStart) {
+  failures.push(`${responsePath}: missing project_sse_stream streaming handoff boundary`);
+} else {
+  const projectSseStream = response.slice(projectSseStreamStart, projectSseStreamEnd);
+  for (const phrase of [
+    'observed_sse_client_stream(',
+    'usage_observation.clone()',
+    'V3ClientBody::Sse(client_stream)',
+    'V3RemoteContinuationObservation::Streaming',
+  ]) {
+    requireText(projectSseStream, `${responsePath}: project_sse_stream`, phrase);
+  }
+}
+const observedStreamStart = response.indexOf('fn observed_sse_client_stream(');
+const observedStreamEnd = response.indexOf('fn observe_sse_remote_continuation_bytes(');
+if (observedStreamStart < 0 || observedStreamEnd < 0 || observedStreamEnd <= observedStreamStart) {
+  failures.push(`${responsePath}: missing observed_sse_client_stream structured observer boundary`);
+} else {
+  const observedStream = response.slice(observedStreamStart, observedStreamEnd);
+  for (const phrase of [
+    'observe_sse_remote_continuation_chunk(',
+    'build_v3_sse_transport_in_01_raw_chunk(chunk)',
+    '&state.observation_state',
+    'observation_state.record_pending_response_id(&response_id)?',
+  ]) {
+    requireText(observedStream, `${responsePath}: observed_sse_client_stream`, phrase);
+  }
+}
+forbid(`${runtime}\n${runtimeHelpers}`, `${runtimePath}+${runtimeHelpersPath}`, [
+  /execute_selected_continuation/,
+  /\.load\(response_id\)/,
+  /fallback/i,
+  /require_remote_continuation_capabilities|remote_capability_error|lacks required remote_continuation/,
+  /local_materiali[sz]ation|relay_continuation|restore_history|repair_history/i,
+  /store\.release\(previous_response_id\)[\s\S]{0,120}store\.commit\(input\)/,
+  /request_body\s*\[\s*["'](?:provider_id|auth_alias|continuation_owner|capability_revision|routing_group)["']\s*\]/,
+]);
+if (/store\.release\(previous_response_id\)[\s\S]{0,120}store\.commit\(input\)/.test(runtime)) {
+  failures.push(`${runtimePath}: non-atomic Resp04 rebind must use rebind_for_resp04`);
+}
+forbid(server, serverPath, [
+  /body\s*\[\s*["'](?:provider_id|auth_alias|continuation_owner|capability_revision|routing_group)["']\s*\]\s*=/,
+  /V3RemoteContinuationStore/,
+]);
+forbid(response, responsePath, [
+  /fallback/i,
+  /restore_history|materiali[sz]e_context/i,
+  /into_body_bytes\s*\(/,
+]);
+forbid(providerTransportControlSource, providerTransportPath, [
+  /fallback/i,
+  /local_materiali[sz]ation|relay_continuation|restore_history|repair_history/i,
+  /previous_response_id[\s\S]{0,200}null/,
+  /let\s+mut\s+sse_frames\s*=\s*Vec::new\s*\(\s*\)/,
+  /sse_frames\.push\s*\(/,
+  /stream::iter\s*\(\s*sse_frames/,
+]);
+const resp04 = runtime.indexOf('trace.push("V3HubRespContinuation04Committed")');
+const resp15 = runtime.indexOf('trace.push("V3Resp15ClientPayload")');
+if (resp04 < 0 || resp15 < 0 || resp04 > resp15) {
+  failures.push(`${runtimePath}: Resp04 must precede the single Resp15 response exit`);
+}
+
+if (failures.length) {
+  console.error('[verify:v3-responses-direct-remote-continuation] failed');
+  for (const failure of failures) console.error(`- ${failure}`);
+  process.exit(1);
+}
+console.log('[verify:v3-responses-direct-remote-continuation] ok');
+
+function requireText(text, owner, phrase) {
+  if (!text.includes(phrase)) failures.push(`${owner}: missing ${phrase}`);
+}
+function forbid(text, owner, patterns) {
+  for (const pattern of patterns) {
+    if (pattern.test(text)) failures.push(`${owner}: forbidden ${pattern}`);
+  }
+}
+
+function readSurface(path) {
+  const parts = [readFileSync(path, 'utf8')];
+  const siblingDirectory = path.replace(/\.rs$/, '');
+  if (statSync(siblingDirectory).isDirectory()) {
+    for (const entry of readdirSync(siblingDirectory).sort()) {
+      const child = join(siblingDirectory, entry);
+      if (statSync(child).isFile() && entry.endsWith('.rs')) parts.push(readFileSync(child, 'utf8'));
+    }
+  }
+  return parts.join('\n');
+}

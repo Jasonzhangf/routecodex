@@ -34,6 +34,7 @@ impl V3CodexSampleStore {
         self.retention
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn persist(
         &self,
         port: u16,
@@ -54,7 +55,8 @@ impl V3CodexSampleStore {
         // 账号/配额类错误状态不落盘（401/402/403/429/503 等）。
         if force {
             if let Some(status) = status {
-                if routecodex_v3_config::internal::v3_error_sample_skip_statuses().contains(&status) {
+                if routecodex_v3_config::internal::v3_error_sample_skip_statuses().contains(&status)
+                {
                     return Ok(());
                 }
             }
@@ -214,10 +216,8 @@ mod tests {
     fn with_test_home(f: impl FnOnce(&std::path::Path)) {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = LOCK.lock().unwrap();
-        let base = std::env::temp_dir().join(format!(
-            "v3-codex-sample-store-test-{}",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("v3-codex-sample-store-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         let home = base.join("home");
         fs::create_dir_all(&home).unwrap();
@@ -248,11 +248,18 @@ mod tests {
             let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
             let payload = json!({"model": "deepseek-v4-flash", "input": [{"role": "user", "content": "hello"}]});
             store
-                .persist(10000, "responses", "/v1/responses", "req-1", "request.json", &payload, false, None)
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    "req-1",
+                    "request.json",
+                    &payload,
+                    false,
+                    None,
+                )
                 .unwrap();
-            let path = sample_dir(home_base)
-                .join("req-1")
-                .join("request.json");
+            let path = sample_dir(home_base).join("req-1").join("request.json");
             let written = fs::read_to_string(&path).unwrap();
             assert!(written.contains("deepseek-v4-flash"));
             assert!(written.contains("hello"));
@@ -265,7 +272,16 @@ mod tests {
         with_test_home(|home_base| {
             let store = V3CodexSampleStore::new(false, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
             store
-                .persist(10000, "responses", "/v1/responses", "req-1", "request.json", &json!({"a": 1}), false, None)
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    "req-1",
+                    "request.json",
+                    &json!({"a": 1}),
+                    false,
+                    None,
+                )
                 .unwrap();
             assert!(!sample_dir(home_base).join("req-1").exists());
         });
@@ -276,7 +292,16 @@ mod tests {
         with_test_home(|home_base| {
             let store = V3CodexSampleStore::new(false, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
             store
-                .persist(10000, "responses", "/v1/responses", "req-1", "error.json", &json!({"status": 502}), true, Some(502))
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    "req-1",
+                    "error.json",
+                    &json!({"status": 502}),
+                    true,
+                    Some(502),
+                )
                 .unwrap();
             let path = sample_dir(home_base).join("req-1").join("error.json");
             let written = fs::read_to_string(&path).unwrap();
@@ -289,17 +314,38 @@ mod tests {
         with_test_home(|home_base| {
             let store = V3CodexSampleStore::new(false, V3_CODEX_SAMPLE_REQUEST_RETENTION, false);
             store
-                .persist(10000, "responses", "/v1/responses", "req-1", "error.json", &json!({"status": 503}), true, Some(503))
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    "req-1",
+                    "error.json",
+                    &json!({"status": 503}),
+                    true,
+                    Some(503),
+                )
                 .unwrap();
             assert!(
                 !sample_dir(home_base).join("req-1").exists(),
                 "skipped account/quota error status must not be persisted"
             );
             store
-                .persist(10000, "responses", "/v1/responses", "req-2", "error.json", &json!({"status": 502}), true, Some(502))
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    "req-2",
+                    "error.json",
+                    &json!({"status": 502}),
+                    true,
+                    Some(502),
+                )
                 .unwrap();
             assert!(
-                sample_dir(home_base).join("req-2").join("error.json").exists(),
+                sample_dir(home_base)
+                    .join("req-2")
+                    .join("error.json")
+                    .exists(),
                 "non-skipped error status must still be persisted"
             );
         });
@@ -310,17 +356,38 @@ mod tests {
         with_test_home(|home_base| {
             let store = V3CodexSampleStore::new(true, V3_CODEX_SAMPLE_REQUEST_RETENTION, true);
             store
-                .persist(10000, "responses", "/v1/responses", "req-1", "request.json", &json!({"a": 1}), false, None)
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    "req-1",
+                    "request.json",
+                    &json!({"a": 1}),
+                    false,
+                    None,
+                )
                 .unwrap();
             assert!(
                 !sample_dir(home_base).join("req-1").exists(),
                 "normal sample must not be persisted when error_samples_only"
             );
             store
-                .persist(10000, "responses", "/v1/responses", "req-2", "error.json", &json!({"status": 500}), true, Some(500))
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    "req-2",
+                    "error.json",
+                    &json!({"status": 500}),
+                    true,
+                    Some(500),
+                )
                 .unwrap();
             assert!(
-                sample_dir(home_base).join("req-2").join("error.json").exists(),
+                sample_dir(home_base)
+                    .join("req-2")
+                    .join("error.json")
+                    .exists(),
                 "error evidence must still be persisted when error_samples_only"
             );
         });
@@ -332,7 +399,16 @@ mod tests {
             let store = V3CodexSampleStore::new(true, 200, false);
             for index in 0..201 {
                 store
-                    .persist(10000, "responses", "/v1/responses", &format!("req-{index}"), "request.json", &json!({"n": index}), true, Some(502))
+                    .persist(
+                        10000,
+                        "responses",
+                        "/v1/responses",
+                        &format!("req-{index}"),
+                        "request.json",
+                        &json!({"n": index}),
+                        true,
+                        Some(502),
+                    )
                     .unwrap();
             }
             let dirs = fs::read_dir(sample_dir(home_base)).unwrap().count();
@@ -355,7 +431,10 @@ mod tests {
             "anthropic-messages"
         );
         assert_eq!(
-            format_v3_codex_sample_endpoint_dir("gemini", "/v1beta/models/gemini-2.0-flash:generateContent"),
+            format_v3_codex_sample_endpoint_dir(
+                "gemini",
+                "/v1beta/models/gemini-2.0-flash:generateContent"
+            ),
             "gemini-generate-content"
         );
     }
@@ -364,7 +443,9 @@ mod tests {
     fn unknown_request_id_encodes_to_unknown() {
         assert_eq!(encode_v3_codex_sample_path_segment("///"), "unknown");
         assert_eq!(
-            encode_v3_codex_sample_path_segment("router-gpt-5.6-sol-20260810T223407524-738231-8043"),
+            encode_v3_codex_sample_path_segment(
+                "router-gpt-5.6-sol-20260810T223407524-738231-8043"
+            ),
             "router-gpt-5.6-sol-20260810T223407524-738231-8043"
         );
     }

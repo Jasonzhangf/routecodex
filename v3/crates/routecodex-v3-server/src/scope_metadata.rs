@@ -34,7 +34,8 @@ pub(crate) fn responses_effective_execution_mode_for_entry_facts(
     match configured_mode {
         V3EntryProtocolExecutionMode::PendingNotImplemented => configured_mode,
         V3EntryProtocolExecutionMode::Direct | V3EntryProtocolExecutionMode::Relay
-            if responses_entry_facts_allow_fresh_protocol_plan(entry_facts) => {
+            if responses_entry_facts_allow_fresh_protocol_plan(entry_facts) =>
+        {
             V3EntryProtocolExecutionMode::Relay
         }
         V3EntryProtocolExecutionMode::Direct | V3EntryProtocolExecutionMode::Relay => {
@@ -246,7 +247,8 @@ pub(crate) fn payload_input_has_unpaired_function_call_output(input: Option<&Val
     })
 }
 
-pub(crate) const TURN_METADATA_SESSION_PATHS: &[&[&str]] = &[&["session_id"], &["sessionId"], &["session-id"]];
+pub(crate) const TURN_METADATA_SESSION_PATHS: &[&[&str]] =
+    &[&["session_id"], &["sessionId"], &["session-id"]];
 
 pub(crate) const TURN_METADATA_CONVERSATION_PATHS: &[&[&str]] = &[
     &["thread_id"],
@@ -404,7 +406,10 @@ pub(crate) fn decode_hex(value: u8) -> Option<u8> {
     }
 }
 
-pub(crate) fn first_header_text(headers: &HeaderMap, names: &[&str]) -> Result<Option<String>, String> {
+pub(crate) fn first_header_text(
+    headers: &HeaderMap,
+    names: &[&str],
+) -> Result<Option<String>, String> {
     for name in names {
         if let Some(value) = header_text(headers, name)? {
             return Ok(Some(value));

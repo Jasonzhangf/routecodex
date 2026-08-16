@@ -199,14 +199,7 @@ fn provider_directory_snake_case_web_search_mode_parses_to_manifest() {
     // → 500（真实故障 20260808）。
     let root = temp_root("snake-mode");
     let token = write_token(&root, "external");
-    let provider_path = write_provider(
-        &root,
-        "external",
-        "anthropic",
-        "MiniMax-M3",
-        &token,
-        "",
-    );
+    let provider_path = write_provider(&root, "external", "anthropic", "MiniMax-M3", &token, "");
     // 在 model 段内注入 snake_case 的 Mode B 字段（生产 provider config 写法）。
     let content = fs::read_to_string(&provider_path)
         .unwrap()
@@ -216,7 +209,11 @@ fn provider_directory_snake_case_web_search_mode_parses_to_manifest() {
         );
     fs::write(&provider_path, content).unwrap();
     let config_path = root.join("config.v3.toml");
-    fs::write(&config_path, directory_root_config("external", "MiniMax-M3")).unwrap();
+    fs::write(
+        &config_path,
+        directory_root_config("external", "MiniMax-M3"),
+    )
+    .unwrap();
 
     let snapshot = V3ConfigStore::new(&config_path)
         .load_snapshot_with_source_identity()

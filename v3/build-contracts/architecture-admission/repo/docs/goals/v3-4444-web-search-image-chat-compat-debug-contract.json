@@ -1,0 +1,34 @@
+{
+  "debug_id": "v3_4444_responses_web_search_image_chat_compat",
+  "state": "diagnosis_locked",
+  "symptom": {
+    "observed": "4444 /v1/responses relay to an OpenAI Chat provider fails with HTTP 502 UnmappedOutboundFields at $.tools[13].search_content_types",
+    "expected": "A valid Codex web_search declaration reaches the target's legal static web-search wire shape without silent field copying or provider switching",
+    "entry": "V3 port 4444 /v1/responses",
+    "ids": ["openai-responses-router-gpt-5.5-20260805T213336708-707349-940"],
+    "raw_evidence": ["~/.rcc/codex-samples/openai-responses/ports/4444/openai-responses-router-gpt-5.5-20260805T213336708-707349-940/request.json", "~/.rcc/codex-samples/openai-responses/ports/4444/openai-responses-router-gpt-5.5-20260805T213336708-707349-940/error.json", "~/.rcc/logs/server-v3-5555.log"]
+  },
+  "sop_model_flow": {
+    "status": "known",
+    "flow_id": "v3.protocol_conversion_field_parity",
+    "source_docs": ["docs/architecture/v3-resource-operation-map.yml", "docs/architecture/v3-function-map.yml", "docs/architecture/v3-mainline-call-map.yml", "docs/architecture/v3-verification-map.yml", "docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml"],
+    "lifecycle_nodes": ["V3HubReqInbound02Normalized", "V3HubReqChatProcess04Governed", "V3HubReqOutbound07ProviderSemantic", "V3ProviderReqCompat06ProviderCompat", "OpenAI Chat provider wire"],
+    "resource_edges": ["Responses wire to Chat canonical", "Chat governed to provider semantic", "provider semantic to adjacent OpenAI Chat codec"],
+    "forbidden_edges": ["raw inbound payload to outbound codec", "MetadataCenter to provider payload", "Virtual Router payload repair"],
+    "owner_graph": ["v3.protocol_codec.responses_inbound", "V3HubReqChatProcess04Governed", "v3.protocol_codec.provider_compat_dispatch", "v3.protocol_codec.openai_outbound"],
+    "gap_if_new": ""
+  },
+  "hypotheses": [
+    {"id":"H1","cause":"The registered design intentionally rejects image search content because OpenAI Chat lacks an exact selector, even though the target has compatible web_search_options semantics","modules":["v3.protocol_codec.openai_outbound"],"supporting_evidence":"Design, matrix, runtime condition, and repeated live error all name the same field and behavior","counter_evidence_or_gap":"Would be false if the target Chat schema exposed an exact image selector or no web-search capability","verification_action":"Inspect installed target schema and V2 behavior","confidence":100}
+  ],
+  "active_hypothesis": "H1",
+  "confirmed_hypothesis": "H1",
+  "first_divergence_node": "V3ProviderReqCompat06ProviderCompat adjacent OpenAI Chat codec",
+  "root_cause_module": "v3.protocol_codec.openai_outbound",
+  "unique_owner": "normalize_openai_chat_web_search_tool",
+  "allowed_paths": ["v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs", "v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs"],
+  "forbidden_paths": ["src", "sharedmodule", "provider config", "MetadataCenter", "Virtual Router", "provider compat dispatch"],
+  "required_verification": ["exact source-shape red/green unit test", "unknown content type negative test", "protocol parity gates", "V3 build and install", "aggregate restart and all-port health", "same-entry real sample replay", "Codex review"],
+  "exact_replay": "Replay the original request.json through V3 port 4444 /v1/responses after managed install/restart"
+  ,"confidence": 100
+}

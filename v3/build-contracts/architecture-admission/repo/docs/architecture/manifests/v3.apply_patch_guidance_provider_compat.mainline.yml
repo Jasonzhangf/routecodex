@@ -1,0 +1,34 @@
+lifecycle_id: v3.apply_patch_guidance_provider_compat.mainline
+summary: Responses Req04 rejects leaked internal Codex apply_patch guidance in normal payload; provider transport remains forbidden from schema compatibility or protocol reshaping.
+owner_feature_id: v3.apply_patch_guidance_provider_compat
+entrypoint:
+  node_id: V3HubReqContinuation03Classified
+  call_map_chain_id: v3.apply_patch_guidance_provider_compat.mainline
+return_path:
+  node_id: V3HubReqChatProcess04Governed
+node_ids:
+  - V3HubReqContinuation03Classified
+  - V3HubReqChatProcess04Governed
+edges:
+  - step_id: v3-apply-patch-guidance-01
+    from_node: V3HubReqContinuation03Classified
+    to_node: V3HubReqChatProcess04Governed
+    status: anchored
+    owner_feature_id: v3.apply_patch_guidance_provider_compat
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.request.normal_payload
+      produces:
+        - v3.request.normal_payload
+      side_channel_reads: []
+      side_channel_writes: []
+verification:
+  required_gates:
+    - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics apply_patch_guidance -- --test-threads=1 --nocapture
+    - npm run verify:v3-relay-request-semantics
+    - npm run verify:v3-mainline-caller-flow
+    - npm run verify:v3-module-boundaries
+    - npm run verify:v3-cargo-fmt
+    - git diff --check

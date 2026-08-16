@@ -1,8 +1,7 @@
 use crate::hub_v1::{
     classify_v3_provider_generic_sse_json_data, collect_v3_provider_sse_json_data,
     is_v3_provider_sse_keepalive_text, parse_v3_provider_sse_json_data,
-    v3_feature_enabled_for_server,
-    V3ProviderResponsesJsonFrameOutcome, V3RuntimeStreamObservation,
+    v3_feature_enabled_for_server, V3ProviderResponsesJsonFrameOutcome, V3RuntimeStreamObservation,
 };
 use crate::nodes::{V3ClientBody, V3ClientSseStream, V3Resp15ClientPayload};
 use futures_util::{stream, StreamExt};
@@ -517,7 +516,9 @@ fn observed_sse_client_stream_with_timeout(
             if state.done {
                 return None;
             }
-            let next = match tokio::time::timeout_at(state.semantic_deadline, state.stream.next()).await {
+            let next = match tokio::time::timeout_at(state.semantic_deadline, state.stream.next())
+                .await
+            {
                 Ok(next) => next,
                 Err(_) if state.terminal_observed => {
                     return None;
@@ -549,8 +550,7 @@ fn observed_sse_client_stream_with_timeout(
                     // transport 帧活跃即保活：任何 provider 字节（含 keepalive/
                     // 非语义帧）都刷新帧间隔 deadline，避免"活着但语义安静"
                     // 的流被误杀；只有完全无字节的挂起流才超时。
-                    state.semantic_deadline =
-                        tokio::time::Instant::now() + frame_interval_timeout;
+                    state.semantic_deadline = tokio::time::Instant::now() + frame_interval_timeout;
                     let result = observe_sse_remote_continuation_chunk(
                         &state.provider_id,
                         &chunk,
@@ -1088,8 +1088,7 @@ mod tests {
     #[tokio::test]
     async fn direct_sse_projection_times_out_after_provider_stalls_between_frames() {
         let first =
-            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n"
-                .to_vec();
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n".to_vec();
         let mut stream = observed_sse_client_stream_with_timeout(
             "provider".to_string(),
             Box::pin(
@@ -1100,7 +1099,11 @@ mod tests {
             V3RuntimeStreamObservation::default(),
             std::time::Duration::from_millis(20),
         );
-        let first = stream.next().await.expect("first frame").expect("valid first frame");
+        let first = stream
+            .next()
+            .await
+            .expect("first frame")
+            .expect("valid first frame");
         assert!(std::str::from_utf8(&first).unwrap().contains("early"));
         let error = stream
             .next()

@@ -298,7 +298,9 @@ pub(crate) fn responses_direct_request_projection_hook(
         &candidate.secret_key,
         &candidate.api_key,
     ) {
-        (Some(name), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(name.clone()),
+        (Some(name), None, None, None, None) => {
+            V3ProviderAuthSecretHandle::Environment(name.clone())
+        }
         (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
         (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
             path: path.clone(),
@@ -416,7 +418,9 @@ pub(crate) fn chat_direct_request_projection_hook(
         &candidate.secret_key,
         &candidate.api_key,
     ) {
-        (Some(name), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(name.clone()),
+        (Some(name), None, None, None, None) => {
+            V3ProviderAuthSecretHandle::Environment(name.clone())
+        }
         (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
         (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
             path: path.clone(),

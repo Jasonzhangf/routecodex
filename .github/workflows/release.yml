@@ -31,41 +31,38 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: v3/package-lock.json
 
-      - name: Install
-        run: npm ci --ignore-scripts
+      - name: Install V3 local build dependencies
+        run: npm ci --prefix v3 --ignore-scripts
 
       - name: Repo sanity (no root junk)
-        run: npm run verify:repo-sanity
-      - name: V3 architecture CI umbrella
-        run: npm run verify:v3-architecture-ci
+        run: node scripts/ci/repo-sanity.mjs
 
-      - name: Test (V3 workspace)
-        env:
-          ROUTECODEX_SKIP_AUTO_BUMP: "1"
-        run: npm run test:v3-workspace
+      - name: V3 admission snapshot lockstep
+        run: node scripts/architecture/compile-v3-build-admission.mjs --check
+
+      - name: Verify V3 canonical build domain
+        run: npm --prefix v3 run verify:ci
 
       - name: Pack V3 npm tarball
-        env:
-          BUILD_MODE: release
-          ROUTECODEX_SKIP_AUTO_BUMP: "1"
-        run: npm run pack:v3:npm
+        run: npm --prefix v3 run pack:npm
 
       - name: Resolve tag + asset name
         id: meta
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(node -p "require('./package.json').version")"
+          VERSION="$(node -p "require('./v3/package.json').version")"
           if [[ -n "${{ inputs.tag }}" ]]; then
             TAG="${{ inputs.tag }}"
           else
             TAG="v${VERSION}"
           fi
-          TARBALL="artifacts/pack/routecodex-v3-${VERSION}.tgz"
+          TARBALL="v3/artifacts/pack/routecodex-v3-${VERSION}.tgz"
           if [[ ! -f "${TARBALL}" ]]; then
             echo "missing tarball: ${TARBALL}" >&2
-            ls -la artifacts/pack/routecodex-v3-*.tgz || true
+            ls -la v3/artifacts/pack/routecodex-v3-*.tgz || true
             exit 2
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"

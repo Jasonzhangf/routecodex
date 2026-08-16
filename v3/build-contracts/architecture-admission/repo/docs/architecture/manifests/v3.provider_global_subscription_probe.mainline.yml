@@ -1,0 +1,30 @@
+lifecycle_id: v3.provider_global_subscription_probe
+entrypoint: spawn_v3_server_aggregate
+return_path: V3ProviderGlobalSubscriptionHealthStore
+owner_feature: v3.provider_global_subscription_probe
+canonical_docs:
+  - docs/goals/v3-provider-error-disposition-path-config-plan.md
+  - docs/architecture/v3-resource-operation-map.yml
+verification_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
+  - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features
+nodes:
+  - id: V3ProviderGlobalSubscriptionHealthStore
+    owner: routecodex-v3-provider-responses
+  - id: V3ProviderGlobalProbePermit
+    owner: routecodex-v3-provider-responses
+  - id: V3ServerAggregateLifecycle
+    owner: routecodex-v3-server
+  - id: V3ProviderGlobalProbeExecution
+    owner: routecodex-v3-runtime
+  - id: V3ProviderGlobalSubscriptionFailureObservation
+    owner: routecodex-v3-runtime
+edges:
+  - from: V3ProviderGlobalSubscriptionHealthStore
+    to: V3ProviderGlobalProbePermit
+  - from: V3ServerAggregateLifecycle
+    to: V3ProviderGlobalProbeExecution
+  - from: V3ProviderGlobalSubscriptionFailureObservation
+    to: V3ProviderGlobalSubscriptionHealthStore
+  - from: V3ProviderGlobalSubscriptionFailureObservation
+    to: V3ProviderGlobalSubscriptionHealthStore

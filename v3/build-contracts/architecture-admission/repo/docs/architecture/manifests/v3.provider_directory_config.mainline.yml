@@ -1,0 +1,48 @@
+lifecycle_id: v3.provider_directory_config.mainline
+summary: Native V3 root authoring selects directory mode when inline providers
+  are empty, resolves exact referenced Provider files, and publishes one
+  manifest before runtime starts.
+owner_feature_id: v3.provider_directory_config_compat
+entrypoint:
+  node_id: V3Config01FileSource
+  wiki_page: null
+  call_map_chain_id: v3.provider_directory_config.mainline
+node_ids:
+  - V3Config01FileSource
+  - V3Config02AuthoringParsed
+  - V3Config03SchemaValidated
+  - V3ProviderDirectory02ReferencedSource
+  - V3ProviderDirectory03ProviderCompiled
+edges:
+  - step_id: v3-provider-dir-01
+    from_node: V3Config01FileSource
+    to_node: V3Config02AuthoringParsed
+    status: anchored
+    owner_feature_id: v3.provider_directory_config_compat
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-provider-dir-02
+    from_node: V3Config02AuthoringParsed
+    to_node: V3ProviderDirectory02ReferencedSource
+    status: anchored
+    owner_feature_id: v3.provider_directory_config_compat
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-provider-dir-03
+    from_node: V3ProviderDirectory02ReferencedSource
+    to_node: V3ProviderDirectory03ProviderCompiled
+    status: anchored
+    owner_feature_id: v3.provider_directory_config_compat
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-provider-dir-04
+    from_node: V3ProviderDirectory03ProviderCompiled
+    to_node: V3Config03SchemaValidated
+    status: anchored
+    owner_feature_id: v3.provider_directory_config_compat
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

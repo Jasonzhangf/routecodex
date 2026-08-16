@@ -1,0 +1,760 @@
+version: 1
+owners:
+- feature_id: architecture.repository_filesystem_governance
+  status: active
+  summary: repository root, generated output, tracked residue, and critical source
+    ignore governance
+  owner_kind: architecture_contract
+  owner_scope: repository-only filesystem policy and build gate; no runtime request,
+    response, provider, metadata, or routing behavior
+  owner_module: scripts/architecture/verify-repository-filesystem-governance.mjs
+  canonical_types:
+  - RepositoryFilesystemContract
+  canonical_builders:
+  - verifyRepositoryFilesystemGovernance
+  allowed_paths:
+  - .gitignore
+  - scripts/ci/repo-sanity.mjs
+  - scripts/architecture/verify-repository-filesystem-governance.mjs
+  - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+  - .agents/skills/rcc-dev-skills/SKILL.md
+  - .agents/skills/rcc-dev-skills/references
+  - .agents/skills/rcc-v3-architecture/SKILL.md
+  - docs/architecture/repository-filesystem-module-registry.yml
+  - docs/architecture/function-map.yml
+  - docs/architecture/mainline-call-map.yml
+  - docs/architecture/resource-operation-map.yml
+  - docs/architecture/verification-map.yml
+  - docs/architecture/wiki/mainline-call-graph.md
+  - docs/architecture/wiki/html/mainline-call-graph.html
+  - docs/design/payload-copy-hotspot-inventory.md
+  - docs/goals/root-generated-artifacts-governance-plan.md
+  - docs/goals/root-generated-artifacts-governance-execution-prompt.md
+  - v3/fixtures
+  - scripts/architecture/verify-agent-p0-payload-control-guard.mjs
+  - scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs
+  - docs/architecture/reviews/agent-worker-p0-architecture-guard-audit.md
+  forbidden_paths:
+  - src
+  - sharedmodule/llmswitch-core/rust-core
+  - v3/crates
+  - config
+  required_tests:
+  - scripts/architecture/verify-repository-filesystem-governance.mjs
+  - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+  - scripts/ci/repo-sanity.mjs
+  required_gates:
+  - npm run verify:repo-sanity
+  - npm run verify:v3-resource-map
+  migration_target: none
+  resource_bindings:
+    writes:
+    - architecture.repository_filesystem_contract@RepoFilesystemAuthoring01Policy
+    reads:
+    - architecture.repository_filesystem_contract@RepoFilesystemVerify02Gate
+    forbidden:
+    - request.normal_payload@HubReqInbound02Standardized
+    - provider.wire_payload@ProviderReqOutbound06WirePayload
+    - response.client_payload@ServerRespOutbound05ClientFrame
+    - metadata.runtime_control@MetaReq04RuntimeControlBound
+  notes:
+  - This owner governs repository files only and cannot own or mutate runtime semantics.
+- feature_id: architecture.resource_ownership_model
+  status: active
+  summary: resource ownership taxonomy, operation map, resource-flow gate, and source-binding
+    gate for request/response/resource convergence
+  owner_kind: architecture_contract
+  owner_scope: M0 architecture resource ownership registry; runtime refactors must
+    bind to this map before changing resource writers
+  owner_module: scripts/architecture/verify-v3-resource-map.mjs
+  canonical_types:
+  - ResourceOperationMap
+  - ResourceTaxonomy
+  - ResourceFlow
+  canonical_builders:
+  - readYaml
+  - assertSameList
+  allowed_paths:
+  - docs/architecture/resource-taxonomy.md
+  - docs/architecture/resource-operation-map.yml
+  - docs/architecture/resource-global-coverage-report.json
+  - scripts/architecture/audit-resource-global-coverage.mjs
+  - scripts/tests/resource-source-bindings-red-fixtures.mjs
+  - docs/architecture/function-map.yml
+  - docs/architecture/verification-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/wiki/v3-mainline-skeleton-sop.md
+  - docs/architecture/mainline-call-map.yml
+  - docs/goals/resource-ownership-refactor-plan.md
+  forbidden_paths:
+  - src/providers/core/runtime
+  - src/server/runtime/http-server
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+  required_tests:
+  - scripts/architecture/verify-v3-resource-map.mjs
+  - scripts/tests/resource-source-bindings-red-fixtures.mjs
+  required_gates:
+  - npm run audit:resource-global-coverage
+  - npm run verify:v3-resource-map
+  - npm run test:resource-source-bindings-red-fixtures
+  migration_target: rust
+  resource_bindings:
+    writes:
+    - dryrun.provider_request_probe@DebugDryRun02InternalControlCarrier
+    reads:
+    - request.normal_payload@HubReqInbound02Standardized
+    - response.client_payload@HubRespOutbound04ClientSemantic
+    - metadata.runtime_control@MetaReq04RuntimeControlBound
+    forbidden:
+    - provider.wire_payload@ProviderReqOutbound06WirePayload
+  notes:
+  - This feature owns the map/gate shell only; it must not become a runtime global
+    manager.
+  - Resource identity is global per lifecycle, but writes stay stage-bound and feature-owned.
+- feature_id: vr.route_classifier
+  status: active
+  summary: shared V2/V3 current-turn route classification contract
+  owner_kind: rust_ssot
+  owner_scope: shared current-turn/tool classification only; target selection remains
+    owned by each Virtual Router
+  owner_module: sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core
+  resource_bindings:
+    writes:
+    - vr.route_classification_decision@VrRouteClassifier03Classified
+    reads:
+    - request.normal_payload@HubReqChatProcess03Governed
+    - metadata.runtime_control@MetaRoute03RouteCarrier
+    - vr.route_token_estimate@VrRouteClassifier03Classified
+    forbidden:
+    - vr.route_selection_decision@VrRoute04SelectedTarget
+    - provider.wire_payload@ProviderReqOutbound06WirePayload
+    - response.client_payload@HubRespOutbound04ClientSemantic
+  canonical_types:
+  - RouteActiveTurnSignals
+  - RouteClassification
+  canonical_builders:
+  - extract_active_turn_signals
+  - classify_tool_call
+  - classify_shell_command
+  - classify_route
+  allowed_paths:
+  - sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+  - v3/crates/routecodex-v3-runtime
+  - v3/crates/routecodex-v3-virtual-router
+  - docs/goals/v3-v2-route-classifier-parity-test-design.md
+  forbidden_paths:
+  - sharedmodule/llmswitch-core/src/router
+  - src/providers/core/runtime
+  - src/server/runtime/http-server/executor
+  - v3/crates/routecodex-v3-provider-responses
+  required_tests:
+  - sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/tests.rs
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  required_gates:
+  - npm run test:route-classifier-semantics
+  migration_target: rust
+  notes:
+  - Only current active-turn calls/outputs and strict fresh-user keywords produce
+    route signals; tool declarations, tool_choice, schemas, descriptions, reasoning
+    fields, and history contribute zero signal.
+  - Multimodal consumes only the typed request-scoped hasImageAttachment carrier;
+    payload image shapes are not a classifier input.
+  - The classifier outputs an ordered route contract only and cannot select providers
+    or mutate payloads.
+- feature_id: openai_chat.single_tool_call_history_compat
+  status: active
+  summary: OpenAI chat providers that reject historical parallel tool-call turns must
+    split assistant history into single-tool-call turns only in Rust req_outbound
+    compat
+  owner_kind: rust_ssot
+  owner_scope: OpenAI chat historical single-tool-call history compat must be owned
+    by Rust req_outbound stage3 compat only
+  owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
+  resource_bindings:
+    writes:
+    - protocol.openai_chat_history_compat@ProviderReqOutbound06WirePayload
+    reads:
+    - request.provider_semantic@HubReqOutbound05ProviderSemantic
+    - provider.wire_payload@ProviderReqOutbound06WirePayload
+    forbidden:
+    - response.client_payload@HubRespOutbound04ClientSemantic
+    - route.selection@VrRoute04SelectedTarget
+  canonical_types:
+  - HubReqOutbound05ProviderSemantic
+  - ProviderReqOutbound06WirePayload
+  canonical_builders:
+  - split_parallel_tool_call_assistant_history
+  allowed_paths:
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
+  forbidden_paths:
+  - src/providers/core/runtime
+  - src/server/runtime/http-server
+  - src/modules/llmswitch
+  required_tests:
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/core.rs
+  required_gates:
+  - npm run verify:v3-resource-map
+  migration_target: rust
+  notes:
+  - This compat is invoked by the shared `run_req_outbound_stage3_compat_json` stage
+    runner owned by `responses.request_compat_normalization`; only the single-tool-call
+    history helper is canonical to this feature.
+  - Historical assistant `tool_calls.len()>1` repair for OpenAI chat providers belongs
+    in Rust req_outbound compat only; TS and Hub Pipeline must not own this provider-wire
+    compatibility.
+  - The compat is profile-gated and must not become a provider-key special case in
+    Hub or HTTP server layers.
+- feature_id: conversion.glm_tool_schema_payload_copy_budget
+  status: active
+  summary: GLM tool schema sanitizer consumes owned provider-wire payload branches
+    instead of cloning full objects before small field edits
+  owner_kind: rust_ssot
+  owner_scope: file-scoped Rust owner for GLM tool schema sanitizer payload-copy budget
+  owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs
+  resource_bindings:
+    writes:
+    - protocol.glm_tool_schema_projection@ProviderReqOutbound06WirePayload
+    reads:
+    - request.normal_payload@OpenAiChatInbound
+    forbidden:
+    - route.selection@VrRoute04SelectedTarget
+    - response.client_payload@HubRespOutbound04ClientSemantic
+    - metadata.runtime_control@MetaReq04RuntimeControlBound
+  canonical_types:
+  - serde_json::Value
+  canonical_builders:
+  - sanitize_glm_tools_schema_owned
+  - sanitize_tool_schema_glm_shell_json
+  allowed_paths:
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs
+  - docs/goals/full-pipeline-glm-tool-schema-payload-copy-budget-test-design.md
+  - docs/design/payload-copy-hotspot-inventory.md
+  - docs/architecture
+  forbidden_paths:
+  - src/server/runtime/http-server
+  - src/server/handlers
+  - src/modules/llmswitch/bridge
+  - config.toml
+  - configsamples
+  required_tests:
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs
+  required_gates:
+  - npm run verify:v3-resource-map
+  migration_target: rust
+  notes:
+  - The outer JSON-string N-API boundary remains a contract limit; this feature removes
+    only internal provider-wire branch clones.
+  - Provider configuration, Virtual Router semantics, retry, continuation, MetadataCenter,
+    and response paths are forbidden owners for this copy-budget slice.
+- feature_id: v3.sse_transport_core_independent
+  status: active
+  summary: V3 owns an in-workspace protocol-neutral SSE transport module and does
+    not depend on the V2 llmswitch-core SSE crate at runtime
+  owner_kind: rust_ssot
+  owner_scope: V3-only incremental SSE byte framing, UTF-8/frame validation, canonical
+    frame encoding, limits, and typed transport failures; never owns protocol or business
+    event semantics
+  owner_module: v3/crates/routecodex-v3-sse
+  resource_bindings:
+    writes:
+    - sse.transport_raw_chunk@SseTransportIn01RawChunk
+    - sse.transport_decoded_frame@SseTransportIn02DecodedFrame
+    - sse.transport_validated_frame_stream@SseTransportIn03ValidatedFrameStream
+    - sse.transport_encoded_chunk@SseTransportOut04EncodedChunk
+    reads: []
+    forbidden:
+    - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
+    - metadata.runtime_control@MetaReq04RuntimeControlBound
+    - response.hub_semantic@HubRespChatProcess03Governed
+  canonical_types:
+  - V3SseTransportIn01RawChunk
+  - V3SseTransportIn02DecodedFrame
+  - V3SseTransportIn03ValidatedFrameStream
+  - V3SseTransportOut04EncodedChunk
+  - SseTransportError
+  canonical_builders:
+  - build_v3_sse_transport_in_01_raw_chunk
+  - build_v3_sse_transport_in_02_from_fields
+  - build_v3_sse_transport_in_03_from_v3_sse_transport_in_02
+  - build_v3_sse_transport_out_04_from_v3_sse_transport_in_03
+  - build_v3_sse_transport_out_04_keepalive_comment
+  allowed_paths:
+  - v3/crates/routecodex-v3-sse
+  - v3/crates/routecodex-v3-provider-responses
+  - v3/crates/routecodex-v3-runtime
+  - v3/crates/routecodex-v3-server
+  - docs/architecture/function-map.yml
+  - docs/architecture/verification-map.yml
+  forbidden_paths:
+  - sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core
+  - src/server/handlers
+  - src/modules/llmswitch
+  forbidden_mentions_allowlist:
+  - SseTransportError
+  required_tests:
+  - v3/crates/routecodex-v3-sse/src/lib.rs
+  - v3/crates/routecodex-v3-provider-responses/src/shared.rs
+  - v3/crates/routecodex-v3-runtime/src/shared.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  required_gates:
+  - npm run test:v3-sse-transport-core
+  - npm run test:v3-sse-transport-adapter
+  - npm run verify:sse-architecture-boundary
+  - npm run verify:v3-cargo-fmt
+  - npm run verify:v3-clippy
+  - npm run verify:v3-resource-map
+  migration_target: rust
+  notes:
+  - This is a V3 workspace copy of the protocol-neutral SSE transport core so V3 can
+    build and run independently from the V2 llmswitch-core crate tree.
+  - Protocol semantics, tool governance, continuation, stopless, and provider-specific
+    event projection remain outside this transport module.
+  - V3 server closeout may observe EOF/error/drop transport lifecycle only; it must
+    not parse SSE event names or data JSON for terminal/required_action/failure semantics.
+- feature_id: v3.provider_compat_profile_loading
+  status: active
+  summary: V3 provider compat profiles have an explicit Rust owner between provider
+    semantic/wire nodes and response inbound parsing
+  owner_kind: rust_ssot
+  owner_scope: ProviderReqCompat06ProviderCompat and ProviderRespCompat02ProviderCompat
+    only load/apply provider-family compatibility profiles at the provider-runtime
+    boundary; they must not own routing, tool governance, protocol conversion, fallback,
+    or request/response lifecycle state
+  owner_module: sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core
+  canonical_types:
+  - AdapterContext
+  - ReqOutboundCompatInput
+  - CompatResult
+  - ProviderReqCompat06ProviderCompat
+  - ProviderRespCompat02ProviderCompat
+  canonical_builders:
+  - run_req_outbound_stage3_compat
+  - run_resp_inbound_stage3_compat
+  - apply_request_compat
+  mainline_bindings:
+  - v3-model-bind-04
+  - v3-provider-compat-minimax-anthropic-01
+  allowed_paths:
+  - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core
+  - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/tests
+  - docs/architecture
+  forbidden_paths:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+  - v3/crates/routecodex-v3-target
+  - src/server/runtime/http-server
+  - src/providers
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks
+  required_tests:
+  - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
+  - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/minimax_anthropic.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
+  - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
+  - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
+  - v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs
+  required_gates:
+  - npm run test:v3-provider-compat-profile-loading
+  - npm run test:v3-workspace
+  - npm run verify:v3-resource-map
+  migration_target: rust
+  notes:
+  - This entry registers the real Rust source anchor already present in provider-compat-core;
+    it is not a runtime behavior change.
+  - Provider compat may perform provider-family profile tweaks only at ProviderReqCompat06ProviderCompat
+    / ProviderRespCompat02ProviderCompat.
+  - The chat:minimax Anthropic profile projects standard hosted web-search history
+    to MiniMax-compatible ordinary tool_use/tool_result wire blocks only inside ProviderReqCompat06ProviderCompat;
+    missing, duplicate, or orphan identities fail before provider send.
+  - apply_request_compat is registered as provider-compat internal block edge v3-provider-compat-minimax-anthropic-01
+    under run_req_outbound_stage3_compat, not as a new Hub/VR transition.
+  - Tool governance, stopless, continuation, routing, retry/failure policy, and protocol
+    lifecycle conversion remain owned by their existing Hub/VR/Error nodes.
+- feature_id: v3.v2_config_toml_compat_5555
+  status: active
+  summary: V3 config store can compile a V2 root TOML plus provider config.v2.toml
+    files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555
+    routing contract
+  owner_kind: rust_ssot
+  owner_scope: routecodex-v3-config owns V2 root/provider TOML detection, V2-to-V3
+    authoring projection, shared Hub V1 endpoint/server execution defaults, provider
+    auth-handle publication, and manifest publication for V3 runtime consumption;
+    runtime/server/CLI only consume V3Config05ManifestPublished
+  owner_module: v3/crates/routecodex-v3-config/src/v2_compat.rs
+  resource_bindings:
+    writes:
+    - config.runtime_projection@V3Config05ManifestPublished
+    - config.provider_profile_projection@V3Config05ManifestPublished
+    - config.routing_policy_projection@V3Config05ManifestPublished
+    reads:
+    - config.authoring_surface@V2RootConfig
+    - config.provider_config_text_codec@V2ProviderConfigFile
+    forbidden:
+    - provider.wire_payload@V3ProviderReqOutbound08WirePayload
+    - response.client_payload@V3ServerRespOutbound06ClientFrame
+    - route.selection@V3HubReqTarget06Resolved
+  canonical_types:
+  - V2RootConfig
+  - V2ProviderConfigFile
+  - V3Config02AuthoringParsed
+  - V3Config05ManifestPublished
+  canonical_builders:
+  - compile_v2_config_02_authoring_from_file
+  - compile_v2_root
+  - compile_v2_providers
+  - compile_v2_route_groups
+  allowed_paths:
+  - v3/crates/routecodex-v3-config/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/defaults.rs
+  - v3/crates/routecodex-v3-config/src/store.rs
+  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/validate.rs
+  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+  - docs/architecture
+  - docs/design/v3-routecodex-rust-module-boundaries.md
+  - package.json
+  forbidden_paths:
+  - v3/crates/routecodex-v3-runtime
+  - v3/crates/routecodex-v3-server
+  - v3/crates/routecodex-v3-provider-responses
+  - src/server/runtime/http-server
+  - src/providers
+  forbidden_mentions_allowlist:
+  - V3Config05ManifestPublished
+  required_tests:
+  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+  required_gates:
+  - npm run test:v3-config-v2-compat-5555
+  - npm run verify:v3-cargo-fmt
+  - npm run verify:v3-clippy
+  - npm run test:v3-workspace
+  - npm run verify:v3-resource-map
+  migration_target: rust
+  notes:
+  - V2 compatibility is an explicit input format branch in V3ConfigStore, not a fallback
+    after V3 parse failure. Invalid V2 source fails fast.
+  - V2 literal apiKey values remain apiKey/auth-handle declarations in the V3 manifest
+    and are resolved only at provider transport send time; V3 must not materialize
+    them into .routecodex-v3-secret-handles or a second secret truth.
+  - 'The 5555 route contract is locked by config_store_compiles_v2_root_and_provider_toml_for_5555_contract:
+    thinking/coding/longcontext = GLM 5.2 primary, GPT free backup, GPT paid backup;
+    tools/search/web_search = MiniMax M3 primary, GLM 5.2 backup; multimodal = MiniMax
+    M3 primary, GPT free backup, GPT paid gpt-5.4 fallback; default = de-duplicated
+    ordered union of those targets and must stay non-empty.'
+  - 'V2 provider `[provider.responses]` transport/websocket endpoint declarations
+    are projected into the V3 provider manifest: omitted transport stays HTTP; `transport
+    = "websocket_v2"` requires a `websocket_v2_url`/`websocketV2Url`; V2 model `remote_continuation`
+    still requires `tool_outputs` and WebSocket v2 at compile time.'
+- feature_id: v3.console_human_readable_layering
+  status: active
+  summary: V3 Server projects Runtime-owned Responses observability, post-commit typed
+    Error01, pre-commit Error06, startup, and debug-sink failures into bright human
+    headlines plus complete dim diagnostic detail.
+  owner_kind: rust_v3_server_console_projection
+  owner_scope: routecodex-v3-server owns console-only request/response/provider/Stopless/post-commit
+    Error01/pre-commit Error06/startup/debug-sink presentation; it never creates runtime
+    observability or mutates request, response, routing, provider health, or error
+    truth.
+  owner_module: v3/crates/routecodex-v3-server/src/lib.rs
+  resource_bindings:
+    reads:
+    - request.protocol_context
+    - provider_runtime.observation
+    - error.chain
+    - runtime.http_lifecycle_context
+    - v3.runtime.responses_observability
+    - v3.server.request_identity
+    writes:
+    - debug.artifact
+    - console.terminal_output
+    - v3.console.terminal_output
+    forbidden:
+    - request.normal_payload
+    - response.client_payload
+    - route.selection
+  canonical_types:
+  - V3ConsoleEmissionContext
+  - V3ConsoleLogIdentity
+  - V3ConsoleRequestHeadline
+  - V3ConsoleResponseHeadline
+  - V3ConsoleRouteProjection
+  - V3ConsoleLayeredBlock
+  canonical_builders:
+  - emit_v3_observability_console_lines
+  - emit_v3_provider_observability_console_lines
+  - emit_v3_stopless_console_line
+  - emit_relay_sse_complete_console_lines
+  - emit_direct_sse_complete_console_lines
+  - emit_relay_sse_failure_console_line
+  - emit_direct_sse_failure_console_line
+  - merge_v3_runtime_stream_observation
+  - emit_v3_post_commit_sse_source_console_line_for_context
+  - emit_v3_error_console_line_for_context
+  - emit_v3_frame_error_console_line
+  - emit_v3_debug_sink_console_failure
+  - format_v3_startup_console_block
+  - resolve_v3_console_route_projection
+  - format_v3_console_layered_block_plain
+  - format_v3_console_human_prefix
+  - colorize_v3_layered_console_line
+  allowed_paths:
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-error/src/lib.rs
+  - docs/goals/v3-console-human-readable-layering-test-design.md
+  - docs/goals/v3-console-human-readable-layering-plan.md
+  - docs/architecture/function-map.yml
+  - docs/architecture/mainline-call-map.yml
+  - docs/architecture/verification-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/manifests/v3.console_human_readable_layering.mainline.yml
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-verification-map.yml
+  forbidden_paths:
+  - v3/crates/routecodex-v3-runtime
+  - v3/crates/routecodex-v3-target
+  - v3/crates/routecodex-v3-virtual-router
+  - v3/crates/routecodex-v3-provider-responses
+  - sharedmodule/llmswitch-core
+  - src
+  required_tests:
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-error/src/lib.rs
+  - docs/goals/v3-console-human-readable-layering-test-design.md
+  required_gates:
+  - npm run test:v3-workspace
+  - npm run verify:v3-cargo-fmt
+  - npm run verify:v3-rust-only
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-resource-map
+  migration_target: rust
+  notes:
+  - The typed scoped formatter owns headline/detail structure; rendered console text
+    is never reparsed to recover scope truth.
+  - Pre-route pending request output is forbidden; one routed observability emission
+    owns each Responses Direct/Relay request block when runtime observability is present.
+  - Server-side provider-request dry-run observability synthesis is physically absent;
+    retired dry-run observability fails fast before projection; OpenAI Chat, Anthropic,
+    and Gemini Relay remain unconnected until their runtime owners publish real observability.
+  - Human prefix and headline consume the same fail-fast V3ConsoleRouteProjection;
+    route:selected is forbidden.
+  - Relay/Direct SSE closeout failures retain typed Error01 and cannot fabricate Error06
+    after response commit; terminal Error06 requires Runtime-owned route/default exhaustion
+    proof.
+  - Direct SSE failures retain their original typed Error01 kind, stage, code, message,
+    and links; client disconnect is sourced at V3ServerRespOutbound06ClientFrame and
+    remains health-neutral.
+  - HTTP body Drop first enters the Direct/Relay finalizer and consumes Runtime-owned
+    V3RuntimeStreamObservation; terminal success remains success, terminal failure
+    remains provider failure, and only a missing terminal observation raises client_disconnect.
+  - The call map explicitly separates post-commit Error01 console output from non-stream
+    and pre-commit terminal Error06 projection.
+  - Authoritative elapsed and usage facts are merged into the one success response
+    block; Responses terminal success requires Runtime-owned internal/external timing
+    and missing timing is an explicit observability contract failure.
+  - Bright human response headlines require typed response status and finish reason,
+    include only published numeric usage/timing fields, and never display unreported
+    placeholders; unavailable usage remains diagnostic-only.
+- feature_id: v3.console_request_count_visibility
+  status: active
+  summary: One aggregate-shared V3 request counter serializes every listener, and
+    each atomic identity allocation carries total and local-day counts into both human
+    request and response headlines.
+  owner_kind: rust_v3_server_console_projection
+  owner_scope: File-scoped owner of the aggregate-shared V3RequestIdCounter typed
+    allocation extension and its console projection; no per-listener lock, request-id
+    parsing, second counter, or post-allocation reread.
+  owner_module: v3/crates/routecodex-v3-server/src/lib.rs
+  resource_bindings:
+    reads:
+    - v3.server.request_identity
+    writes:
+    - v3.server.request_identity
+    forbidden:
+    - console.terminal_output
+    - v3.console.terminal_output
+    - request.normal_payload
+    - response.client_payload
+  canonical_types:
+  - V3AllocatedRequestIdentity
+  canonical_builders:
+  - spawn_v3_server_aggregate
+  - next_request_identity
+  - format_v3_console_request_count
+  allowed_paths:
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - docs/goals/v3-console-request-count-visibility-test-design.md
+  - docs/architecture
+  - package.json
+  - .github/workflows/test.yml
+  forbidden_paths:
+  - v3/crates/routecodex-v3-runtime
+  - v3/crates/routecodex-v3-provider-responses
+  - v3/crates/routecodex-v3-target
+  - v3/crates/routecodex-v3-virtual-router
+  - sharedmodule
+  - src
+  required_tests:
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - docs/goals/v3-console-request-count-visibility-test-design.md
+  required_gates:
+  - npm run verify:v3-architecture-docs
+  migration_target: rust
+  mainline_bindings:
+  - v3-console-count-01
+  - v3-console-count-02
+  - v3-console-count-03
+  - v3-console-count-04
+- feature_id: v3.runtime_timing_observability
+  status: active
+  summary: Responses Direct/Relay Runtime owns monotonic total, accumulated provider
+    external, and derived internal timing; Server is a read-only projection.
+  owner_kind: rust_v3_runtime_observability
+  owner_scope: One Runtime timing state spans all provider attempts and publishes
+    only after governed terminal output or Direct SSE clean EOF.
+  owner_module: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+  resource_bindings:
+    reads:
+    - v3.runtime.responses_observability
+    writes:
+    - v3.runtime.responses_timing_observability
+    forbidden:
+    - request.normal_payload
+    - response.client_payload
+    - console.terminal_output
+  canonical_types:
+  - V3RuntimeTimingState
+  - V3RuntimeTimingSummary
+  - V3RuntimeObservabilityAccumulator
+  canonical_builders:
+  - start_external
+  - finish_external
+  - finish_runtime
+  allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+  - v3/crates/routecodex-v3-runtime/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/tests
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+  - docs/goals/v3-runtime-timing-observability-debug-contract.json
+  - docs/goals/v3-runtime-timing-observability-test-design.md
+  - docs/architecture
+  - scripts/architecture/verify-v3-runtime-timing-observability.mjs
+  - scripts/tests/v3-runtime-timing-observability-red-fixtures.mjs
+  - package.json
+  - .github/workflows/test.yml
+  forbidden_paths:
+  - v3/crates/routecodex-v3-sse
+  - v3/crates/routecodex-v3-provider-responses
+  - v3/crates/routecodex-v3-target
+  - v3/crates/routecodex-v3-virtual-router
+  - sharedmodule
+  - src
+  required_tests:
+  - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - docs/goals/v3-runtime-timing-observability-test-design.md
+  required_gates:
+  - npm run verify:v3-runtime-timing-observability
+  - npm run test:v3-runtime-timing-observability-red-fixtures
+  - npm run verify:v3-architecture-docs
+  migration_target: rust
+  mainline_bindings:
+  - v3-runtime-timing-01
+  - v3-runtime-timing-02
+  - v3-runtime-timing-03
+  - v3-runtime-timing-04
+  - v3-runtime-timing-05
+  - v3-runtime-timing-06
+  - v3-runtime-timing-07
+  - v3-runtime-timing-08
+  - v3-runtime-timing-09
+  - v3-runtime-timing-10
+  - v3-runtime-timing-11
+  - v3-runtime-timing-12
+  - v3-runtime-timing-13
+  - v3-runtime-timing-14
+- feature_id: v3.codex_sample_retention_snap_scope
+  status: active
+  summary: V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded
+    diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port
+    cap.
+  owner_kind: rust_v3_bounded_debug_artifact_lifecycle
+  owner_scope: File-scoped Server filesystem owner; Config owns the typed Direct switch,
+    CLI/lifecycle publish authorization, and Debug owns redaction/budget.
+  owner_module: v3/crates/routecodex-v3-server/src/lib.rs
+  resource_bindings:
+    reads:
+    - v3.debug.codex_sample_authorization
+    - v3.debug.payload_budget
+    writes:
+    - v3.debug.codex_sample_filesystem
+    forbidden:
+    - request.normal_payload
+    - provider.wire_payload
+    - response.client_payload
+    - metadata.runtime_control
+    - continuation.scope_state
+  canonical_types:
+  - V3DebugManifest
+  - V3DebugBoundedTextCapture
+  - V3LiveSnapClientResponseSseRecorder
+  - V3LiveSnapDirectClientResponseSseRecorder
+  canonical_builders:
+  - capture_v3_live_raw_request
+  - capture_v3_responses_relay_response
+  - capture_v3_responses_direct_response
+  - capture_v3_responses_relay_provider_snapshots
+  - persist_v3_codex_sample_payload
+  - resolve_v3_codex_samples_root
+  - enforce_v3_codex_sample_listener_retention
+  - enforce_v3_codex_sample_request_retention
+  allowed_paths:
+  - v3/crates/routecodex-v3-config
+  - v3/crates/routecodex-v3-cli
+  - v3/crates/routecodex-v3-lifecycle
+  - v3/crates/routecodex-v3-debug
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/tests
+  - docs/goals/v3-codex-sample-retention-snap-scope-test-design.md
+  - docs/architecture
+  forbidden_paths:
+  - v3/crates/routecodex-v3-runtime
+  - v3/crates/routecodex-v3-provider-responses
+  - v3/crates/routecodex-v3-virtual-router
+  - v3/crates/routecodex-v3-target
+  - sharedmodule
+  - src
+  required_tests:
+  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+  - v3/crates/routecodex-v3-cli/tests/foundation_cli.rs
+  - v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs
+  - v3/crates/routecodex-v3-debug/tests/debug_runtime_contract.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+  required_gates:
+  - npm run verify:v3-debug-payload-budget
+  - npm run test:v3-debug-payload-budget-red-fixtures
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-rust-only
+  - npm run verify:v3-module-boundaries
+  - npm run test:v3-workspace
+  - npm run build:v3-cli
+  migration_target: rust

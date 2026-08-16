@@ -1,0 +1,260 @@
+# Servertool Hook Skeleton Mainline Source
+
+## Purpose
+
+This page locks the target servertool standard processing skeleton. It is a review surface for how CLI lifecycle, response-side hooks, request-side hooks, required/optional hook rules, and verification gates must fit together before servertool TS business semantics can be deleted.
+
+This page is not proof that the skeleton is implemented. The current call-map chain `servertool.hook_skeleton.mainline` is intentionally `binding pending` until Rust scheduler/code symbols exist.
+
+Canonical sources:
+
+- `docs/architecture/mainline-call-map.yml` (`chain_id: servertool.hook_skeleton.mainline`)
+- `docs/design/servertool-rust-only-architecture.md`
+- `docs/goals/servertool-rustification-implementation-plan.md`
+
+Current registry state:
+
+- `hub.servertool_rust_only_closeout` is already registered in `function-map.yml` / `verification-map.yml` as the closeout gate and hook-skeleton contract anchor.
+- That closeout feature is not a runtime-anchored mainline owner. It only proves the gate / contract / review surface has landed.
+- A future runtime owner feature such as `hub.servertool_hook_skeleton` must be added only when request/response runtime owner symbols, blackbox gates, and replay evidence exist.
+
+Until then the mainline edges stay `binding pending`; do not invent canonical builders or pretend the closeout gate means the runtime mainline is anchored.
+
+Current rustification direction:
+
+- Response-side stopless hook ownership is a Rust Chat Process slice. The native gate must own hook-match classification for both `finish_reason=stop` and `finish_reason=tool_calls + reasoningStop`, including intercept kind, schema source, and required/optional hook status.
+- TS response-stage shells are transitional thin wrappers only. They may call native gate/runtime-action/materialization functions, but they must not independently decide whether `reasoningStop` matched, whether stop schema should be validated, or whether terminal vs CLI projection should be chosen.
+
+## CLI Lifecycle Boundary
+
+Business execution remains client-visible CLI:
+
+```text
+servertool response decision
+  -> client-visible exec_command
+  -> client runs: routecodex hook run <toolName> --input-json <json>
+  -> client returns ordinary tool result
+  -> request-side hook parses/restores that result
+  -> normal Hub request pipeline continues
+```
+
+Hook skeleton does not execute the client CLI. Hook skeleton governs injection, restore, intercept, schema validation, CLI projection, and terminal finalization.
+
+## Three-Round Contract
+
+The stopless contract is locked as exactly three semantic rounds. Do not merge
+them, and do not move any of them into SSE/transport.
+
+### Round 1 request
+
+Round 1 request owns only stable per-request injection. These two guidance
+surfaces are injected on every stopless-managed request, not supplied by the
+client:
+
+1. stop-summary / `finish_reason=stop` schema guidance in the system-level stop
+   contract;
+2. model-facing internal tool declaration for `reasoningStop`.
+
+This round must ensure the provider-facing request already tells the model both
+legal stop paths:
+
+- if the model wants to stop without a tool call, it must provide stop schema in
+  assistant-visible text/fence form;
+- if the model wants to stop through the internal hook, it must call
+  `reasoningStop(arguments=<stop-schema-json>)`.
+
+`exec_command` remains part of the normal client tool surface and must not
+become mutually exclusive with `reasoningStop`.
+
+### Round 1 response
+
+Round 1 response owns only response-side interception and normalization:
+
+1. intercept `finish_reason=stop`;
+2. intercept `finish_reason=tool_calls + reasoningStop`;
+3. normalize both trigger arms through the same stop schema gate;
+4. if terminal schema passes, allow normal stop projection;
+5. otherwise convert to client-visible CLI (`exec_command(routecodex hook run reasoningStop ...)`);
+6. persist continuation canonical truth only after that normalized client-visible
+   response exists, then return to the client.
+
+The save point belongs here. Saving pre-normalize/pre-projection truth is
+invalid.
+
+### Round 2 request
+
+Round 2 always starts with continuation restore:
+
+1. restore current request context/canonical truth;
+2. consume the Round 1 CLI execution result only as black-box completion
+   evidence for the client bridge;
+3. remove the `exec_command` shell call/result pair from provider-visible
+   history instead of pairing it as model-visible `reasoningStop` output;
+4. read the Rust-produced StoplessCenter control signal from
+   `MetadataCenter.runtime_control.stopless`;
+5. emit a complete current-turn ordinary user guideline selected by the
+   StoplessCenter policy; it must be transparent to the model and must not
+   mention no-op, CLI, client bridge, `routecodex hook run reasoningStop`, or
+   `finish_reason=stop`;
+6. inject the same per-request stop contract and `reasoningStop` tool again for
+   the new round.
+
+Per-request system/tool injection is not Round-1-only behavior. It repeats on
+every stopless-managed request.
+
+### Round 3 guard
+
+Round 3 adds only one extra rule:
+
+- when `no_schema` has reached 3 consecutive stopless rounds, stop the
+  stop-to-CLI rewrite loop and allow terminal stop handling instead of
+  converting another `finish_reason=stop` into endless shell projection.
+
+## Hook / Continuation Isolation Boundary
+
+The hook skeleton is a request/response processing surface, not a continuation owner. Continuation store/restore (responses `submit_tool_outputs`, `previous_response_id`, relay/materialize, direct vs relay ownership) belongs to the Responses continuation owner defined in `docs/design/responses-continuation-storage-ownership.md` and lives in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs` plus `src/modules/llmswitch/bridge/responses-conversation-store-host.ts`.
+
+Hard rules:
+
+- Request-side and response-side tool rewriting are a paired boundary, not two independent rewrites. The response side projects the shell command before client execution; the request side consumes the ordinary tool result as bridge evidence, removes the shell pair, and emits transparent ordinary user guidance before the request is finalized. If either side moves across the continuation boundary, the next turn sees the wrong shape and the loop becomes misaligned.
+- For continuation-aware turns, the only legal order is: restore/materialize request truth -> run request-side hook restore/rewrite -> stopless/tool governance judgment -> persist canonical continuation truth when the response owner saves. Saving pre-hook truth and restoring post-hook truth, or the reverse, is invalid because request/response tool shapes no longer match.
+- The response-side pair is `ServertoolRespHook03HookResponseInjected -> client-visible exec_command`; the request-side pair is `client-visible exec_command -> ServertoolReqHook01ResultParsed -> ServertoolReqHook02TextRewritten -> ServertoolReqHook03ToolInjected -> ServertoolReqHook04RequestFinalized`.
+- The Responses continuation owner may only consume the finalized request shape after `ServertoolReqHook04RequestFinalized`; it must never be asked to reconcile a shell projection into a built-in tool result.
+- `ServertoolReqHook01ResultParsed` consumes only the tool result of the **current** request. It does not look up continuation store state, does not synthesize session identity, and must not call into `responses-conversation-store` / `responses_resume` to decide whether to restore anything. The "restore" verb here means "after continuation restore, remove the shell `exec_command` evidence and let StoplessCenter produce transparent current-turn guidance", not "rehydrate prior continuation history" and not "emit model-visible `reasoningStop -> function_call_output` for the no-op".
+- Request-side stopless control is a MetadataCenter control signal, not request truth. Rust ReqChatProcess emits `metadata.runtime_control.stopless`; TS may only write that emitted control into the bound MetadataCenter and must not re-derive repeat count, schema feedback, or stopless state.
+- `ServertoolRespHook01Intercepted` / `ServertoolRespHook02SchemaValidated` / `ServertoolRespHook03HookResponseInjected` never read continuation store, never rewrite `previous_response_id`, and never emit `submit_tool_outputs` shells. Generic servertools may project `routecodex hook run <toolName> --input-json <json>` when their contract has inputs; V3 stopless `reasoningStop` is the no-input exception and projects exactly `routecodex hook run reasoningStop`.
+- Continuation `entryKind` / `continuationOwner` / `sessionId` / `conversationId` keys may be read by hooks only as the current request's metadata context, never as a restoration trigger.
+
+The architecture gate must keep this separation: any hook phase that begins to behave as a continuation owner is a regression and must fail the audit.
+
+## Response-Side Skeleton
+
+```text
+HubRespChatProcess03Governed
+  -> ServertoolRespHook01Intercepted
+  -> ServertoolRespHook02SchemaValidated
+  -> ServertoolRespHook03HookResponseInjected
+  -> ServertoolRespHook04ProjectionFinalized
+  -> HubRespOutbound04ClientSemantic
+```
+
+### Response Hook Gate Contract
+
+Response hooks are selected by skeleton-declared trigger gates, not by ad hoc
+projection or dispatch patches. A hook may declare multiple response trigger
+arms:
+
+| Trigger Arm | Match | Schema Source | Required Outcome |
+| --- | --- | --- | --- |
+| `finish_reason=stop` | assistant response is trying to stop | assistant visible text / stop-schema fence (`<rcc_stop_schema>` or standalone stop-schema JSON code fence) | run stop schema gate before terminal projection |
+| `finish_reason=tool_calls` + registered tool name | assistant emits a registered internal servertool call | matching tool call arguments | run the same schema gate before any client-visible projection |
+
+For stopless, the skeleton-owned hook is `stop_message_auto` and the registered
+internal tool name is `reasoningStop`. `reasoningStop` is model-facing/internal
+only. It must never be returned to the client as a client-executable
+`required_action` tool. After schema gate:
+
+- terminal schema: convert to terminal stop, extract safe visible summary, strip
+  internal tool artifacts, and return to normal `HubRespOutbound04ClientSemantic`;
+- non-terminal / missing / invalid schema: project a client-visible
+  `exec_command` that runs `routecodex hook run reasoningStop ...`, while any
+  client-visible prose is ordinary assistant text, not reasoning content or
+  `function_call_output`;
+- client tool result submit: request-side hooks must restore the model-visible
+  pair as `reasoningStop -> function_call_output`, not preserve raw
+  `exec_command` history as model-owned truth.
+
+| Node | Required | Owns | Must Not Do |
+| --- | --- | --- | --- |
+| `ServertoolRespHook01Intercepted` | yes | normal/abnormal response intercept, stopless/internal-tool trigger detect | write client frame or build request |
+| `ServertoolRespHook02SchemaValidated` | yes for schema-managed flows | stop schema / hook schema / tool argument schema validation | silently fix malformed schema or wrap invalid as success |
+| `ServertoolRespHook03HookResponseInjected` | conditional | client-visible `exec_command` projection for non-terminal / invalid / missing schema | execute client CLI or preserve raw internal tool call as client-visible truth |
+| `ServertoolRespHook04ProjectionFinalized` | yes | terminal stop pass-through, summary extraction, internal strip, normal projection handoff | create a second servertool response projector |
+
+## Request-Side Skeleton
+
+```text
+HubReqInbound02Standardized
+  -> ServertoolReqHook01ResultParsed
+  -> ServertoolReqHook02TextRewritten
+  -> ServertoolReqHook03ToolInjected
+  -> ServertoolReqHook04RequestFinalized
+  -> HubReqChatProcess03Governed
+```
+
+| Node | Required | Owns | Must Not Do |
+| --- | --- | --- | --- |
+| `ServertoolReqHook01ResultParsed` | yes when tool result exists | CLI stdout/tool result parse and public hook result validation | recover stopless state from file/sessionDir/tmux |
+| `ServertoolReqHook02TextRewritten` | optional | model-visible guidance rewrite from hook result/schema guidance | replay raw historical tool pairs or leak internal metadata |
+| `ServertoolReqHook03ToolInjected` | yes for servertool-managed turns | request tool declarations, stop hook contract, tool constraints | read provider response or build followup |
+| `ServertoolReqHook04RequestFinalized` | yes | final request semantic before HubReqChatProcess | write provider wire payload |
+
+## Required / Optional Rules
+
+- Every hook declares `required` or `optional`.
+- Required hook missing, failed, or invalid output is fail-fast.
+- Optional hook skipped must emit a no-op event.
+- Optional hook must not fallback into another business path.
+- Multi-hook scheduling is stable: `priority -> order -> id`.
+- Duplicate hook id is fail-fast.
+- Hook output is typed effect/event/projection, not direct provider/client payload mutation.
+
+## Complete Case Matrix
+
+Unit tests must cover:
+
+| Case | Required Coverage |
+| --- | --- |
+| normal response | intercept -> finalize no unintended hook injection |
+| abnormal/error response | explicit error event, no success projection |
+| `finish_reason=stop` stop schema | stop-text/fence schema enters response hook gate before terminal projection |
+| `finish_reason=tool_calls` `reasoningStop` | `reasoningStop.arguments` enters the same schema gate and is never client-visible as a raw required_action tool |
+| empty schema / no_schema | schema deny event + hook response injection when managed flow requires feedback |
+| invalid schema | schema deny event with structured reason/missing fields |
+| malformed hook args | schema error event, fail-fast or feedback according to managed-flow contract |
+| valid terminal schema | final stop allowed, no unnecessary continuation |
+| non-terminal / still-running | hook response or guidance path continues, no premature terminal |
+| already-terminal | no duplicate terminal rewrite or duplicate CLI projection |
+| CLI stdout success | result parsed, optional text rewrite, tool injection as needed |
+| CLI stdout malformed | parse error event, no silent fallback |
+| required hook missing | fail-fast |
+| optional hook skipped | no-op event |
+| multi-hook same phase | deterministic order and deterministic effect merge |
+| request/response symmetric rewrite | response-side shell projection and request-side built-in restoration stay paired on the same semantic layer |
+
+Blackbox tests must cover:
+
+```text
+client in
+  -> provider out
+  -> provider in
+  -> response hook intercept/schema
+  -> client-visible exec_command when needed
+  -> client tool result
+  -> request result parse/text rewrite/tool inject
+  -> provider out
+```
+
+Negative blackbox:
+
+- same-protocol direct/provider-direct does not activate servertool hooks.
+- stopless CLI never uses server-side followup/reenter.
+- internal metadata/debug carriers never reach provider body or client normal response body.
+
+## Current Status
+
+`servertool.hook_skeleton.mainline` is still `binding pending`.
+
+Reason: the stopless response hook slice is anchored in Rust Chat Process, but the broader servertool hook scheduler/runtime still has transitional TS orchestration in servertool engine/server-side-tools/execution/followup dispatch surfaces. The target skeleton must not be marked anchored until Rust scheduler symbols and blackbox gates exist.
+
+## Review Checklist
+
+- Does the change keep client-visible CLI as the business execution lifecycle?
+- Does response-side processing pass through intercept -> schema validate -> terminal pass-through or CLI projection -> finalize?
+- Does the response hook gate cover both `finish_reason=stop` text/fence schema and `finish_reason=tool_calls` registered internal servertool calls such as `reasoningStop`?
+- Does any client-visible continuation expose only shell `exec_command`, never raw internal `reasoningStop`?
+- Does request-side processing pass through result parse -> optional text rewrite -> tool inject -> finalize?
+- Are required/optional hooks declared and tested?
+- Are normal, abnormal, empty schema, invalid schema, malformed args, terminal, non-terminal, already-terminal, and malformed CLI stdout cases covered?
+- Does blackbox prove the mandatory client/provider roundtrip path before release?
+- Is the mainline edge still `binding pending` until real Rust symbols exist?

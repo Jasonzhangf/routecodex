@@ -381,14 +381,17 @@ fn request_declares_v3_web_search_tool(
             .is_some_and(|tools| tools.iter().any(predicate))
     };
     let declares_anywhere = |predicate: fn(&Value) -> bool| {
-        body.get("tools").is_some_and(|tools| declares(tools, predicate))
+        body.get("tools")
+            .is_some_and(|tools| declares(tools, predicate))
             || body
                 .get("input")
                 .and_then(Value::as_array)
                 .is_some_and(|items| {
                     items.iter().any(|item| {
                         item.get("type").and_then(Value::as_str) == Some("additional_tools")
-                            && item.get("tools").is_some_and(|tools| declares(tools, predicate))
+                            && item
+                                .get("tools")
+                                .is_some_and(|tools| declares(tools, predicate))
                     })
                 })
     };
@@ -438,7 +441,10 @@ fn is_v3_web_search_standard_declaration(tool: &Value) -> bool {
         .and_then(Value::as_str)
         .map(|value| value.trim().to_ascii_lowercase())
         .unwrap_or_default();
-    matches!(kind.as_str(), "web_search" | "web_search_preview" | "web_search_20250305")
+    matches!(
+        kind.as_str(),
+        "web_search" | "web_search_preview" | "web_search_20250305"
+    )
 }
 
 fn is_v3_client_tool_declaration(tool: &Value) -> bool {
@@ -628,9 +634,9 @@ mod tests {
     use super::{
         build_v3_chat_req_04_standardized_from_v3_server_03,
         build_v3_req_04_standardized_responses_from_v3_server_03,
-        build_v3_router_request_facts_for_entry, build_v3_router_request_facts_for_entry_with_control,
-        build_v3_router_request_facts_from_v3_req_04_chat,
-        build_v3_server_03_http_request_raw,
+        build_v3_router_request_facts_for_entry,
+        build_v3_router_request_facts_for_entry_with_control,
+        build_v3_router_request_facts_from_v3_req_04_chat, build_v3_server_03_http_request_raw,
     };
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use routecodex_v3_error::V3ProviderFailureSessionScope;

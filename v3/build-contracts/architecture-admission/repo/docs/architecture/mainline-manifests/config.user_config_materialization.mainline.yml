@@ -1,0 +1,45 @@
+lifecycle_id: config.user_config_materialization.mainline
+summary: RouteCodex runtime config loading flows from the public TS shell into the native Rust loader, then into Rust path/provider/materialization owners before returning LoadedRouteCodexConfig.
+owner_feature_id: config.user_config_materialization
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+entrypoint:
+  node_id: ConfigLoad01PublicShell
+  wiki_page: docs/architecture/function-map.yml
+  call_map_chain_id: config.user_config_materialization.mainline
+node_ids:
+  - ConfigLoad01PublicShell
+  - ConfigLoad02NativeBridge
+  - ConfigLoad03RustLoader
+  - ConfigLoad04UserConfigParsed
+  - ConfigLoad05RuntimeManifestCompiled
+  - ConfigLoad06LoadedConfigReturned
+  - HubConfig01PipelineRuntimeArtifact
+  - HubConfig02RuntimePolicyArtifacts
+  - HubConfig03RuntimeRouteTierArtifacts
+  - VrConfig01RustBootstrapArtifact
+  - VrConfig02NativeBootstrap
+step_ids:
+  - cfg-load-01
+  - cfg-load-02
+  - cfg-load-03
+  - cfg-load-04
+  - cfg-load-05
+  - cfg-runtime-vr-01
+  - cfg-runtime-vr-02
+  - cfg-runtime-hub-01
+  - cfg-runtime-hub-02
+  - cfg-runtime-hub-03
+edge_status_counts:
+  anchored: 10
+  partial: 0
+  binding_pending: 0
+  total: 10
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: config.user_config_materialization.mainline
+  min_function_feature: config.user_config_materialization
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

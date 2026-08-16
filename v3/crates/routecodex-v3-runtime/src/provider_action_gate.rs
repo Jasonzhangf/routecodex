@@ -309,9 +309,7 @@ impl V3ProviderActionGate {
                 // A success transition may consume the lane before the pending
                 // recovery witness is observed.  That is a typed re-evaluation,
                 // not an invalid recovery ticket and must not become V3E3.
-                return Ok(V3ProviderActionRecoveryTransition::Consumed(
-                    ticket.clone(),
-                ));
+                return Ok(V3ProviderActionRecoveryTransition::Consumed(ticket.clone()));
             };
             if current_generation < ticket.generation() {
                 return Err(format!(
@@ -713,9 +711,9 @@ impl V3ProviderActionWaiter {
                 "provider action waiter was released by provider success without admission"
                     .to_string(),
             ),
-            V3ProviderActionRecoveryTransition::Consumed(_) => Err(
-                "provider action waiter recovery lane was already consumed".to_string(),
-            ),
+            V3ProviderActionRecoveryTransition::Consumed(_) => {
+                Err("provider action waiter recovery lane was already consumed".to_string())
+            }
         }
     }
 

@@ -1,0 +1,137 @@
+{
+  "debug_id": "v3-runtime-timing-observability-20260729",
+  "state": "edit_allowed",
+  "symptom": {
+    "observed": "Terminal V3 Responses success headlines and diagnostics report time_i=unreported and time_e=unreported while time_t has a numeric Server HTTP elapsed duration.",
+    "expected": "Terminal Responses Direct/Relay success publishes numeric Runtime-owned internal and external durations; Server projects those values without deriving them from Server elapsed.",
+    "entry": "V3 /v1/responses on port 5555, including JSON and SSE terminal closeout.",
+    "ids": [
+      "openai-responses-router-gpt-5.5-20260729T102223233-669944-7581"
+    ],
+    "raw_evidence": [
+      "~/.rcc/logs/server-v3-5555.log:477114",
+      "~/.rcc/logs/server-v3-5555.log:477116",
+      "v3/crates/routecodex-v3-server/src/lib.rs:3650",
+      "v3/crates/routecodex-v3-server/src/lib.rs:3651"
+    ]
+  },
+  "sop_model_flow": {
+    "status": "known",
+    "flow_id": "v3.responses.console_projection",
+    "source_docs": [
+      "docs/architecture/v3-resource-operation-map.yml",
+      "docs/architecture/v3-function-map.yml",
+      "docs/architecture/v3-mainline-call-map.yml",
+      "docs/architecture/v3-verification-map.yml",
+      "docs/goals/v3-console-human-readable-layering-plan.md",
+      "docs/goals/v3-console-human-readable-layering-test-design.md"
+    ],
+    "lifecycle_nodes": [
+      "V3HubReqInbound01ClientRaw",
+      "V3HubReqChatProcess04Governed",
+      "V3HubReqTarget06Resolved",
+      "V3ProviderReqOutbound09TransportRequest",
+      "V3ProviderRespInbound01Raw",
+      "V3HubRespChatProcess03Governed",
+      "V3HubRespOutbound05ClientSemantic",
+      "V3RuntimeObservability",
+      "V3ConsoleResp03HumanBlock"
+    ],
+    "resource_edges": [
+      "Runtime monotonic request span -> v3.runtime.responses_observability",
+      "Provider transport attempt span -> v3.runtime.responses_observability",
+      "SSE clean EOF observation -> V3RuntimeStreamObservationSnapshot",
+      "v3.runtime.responses_observability -> v3.console.terminal_output"
+    ],
+    "forbidden_edges": [
+      "Server HTTP elapsed -> Runtime internal timing",
+      "Server HTTP elapsed -> Runtime external timing",
+      "SSE headers or DONE event -> terminal external timing",
+      "console.terminal_output -> timing truth",
+      "timing diagnostics -> request or response normal payload"
+    ],
+    "owner_graph": [
+      "feature_id:v3.runtime_timing_observability -> routecodex-v3-runtime",
+      "resource_id:v3.runtime.responses_observability -> V3RuntimeObservability",
+      "feature_id:v3.console_human_readable_layering -> routecodex-v3-server projection only"
+    ],
+    "gap_if_new": ""
+  },
+  "hypotheses": [
+    {
+      "id": "H1",
+      "cause": "The Server renderer intentionally hardcodes unreported because V3RuntimeObservability and V3RuntimeStreamObservationSnapshot publish no typed timing.",
+      "modules": [
+        "routecodex-v3-runtime::hub_v1::responses_relay_runtime",
+        "routecodex-v3-runtime::kernel",
+        "routecodex-v3-server"
+      ],
+      "supporting_evidence": "V3RuntimeObservability has no timing field; terminal renderer writes both placeholders literally; existing design explicitly forbids Server synthesis.",
+      "counter_evidence_or_gap": "Would be false if another Runtime-owned typed timing resource already reached the terminal console path.",
+      "verification_action": "Inspect resource/function/mainline maps and every V3RuntimeObservability writer/reader; search Runtime for existing monotonic timing publication.",
+      "confidence": 100
+    },
+    {
+      "id": "H2",
+      "cause": "The values exist in Runtime but are dropped only by console formatting.",
+      "modules": [
+        "routecodex-v3-server"
+      ],
+      "supporting_evidence": "The Server renderer controls the visible fields.",
+      "counter_evidence_or_gap": "Refuted: Runtime observability structs and their only writers contain no timing field.",
+      "verification_action": "Enumerate V3RuntimeObservability fields and construction sites.",
+      "confidence": 0
+    }
+  ],
+  "active_hypothesis": "H1",
+  "confirmed_hypothesis": "H1",
+  "confidence": 100,
+  "first_divergence_node": "V3RuntimeObservability",
+  "root_cause_module": "routecodex-v3-runtime observability owner",
+  "unique_owner": "feature_id:v3.runtime_timing_observability",
+  "owner_graph_confirmed": true,
+  "allowed_paths": [
+    "docs/goals/v3-runtime-timing-observability-debug-contract.json",
+    "v3/crates/routecodex-v3-runtime/src/runtime_timing.rs",
+    "v3/crates/routecodex-v3-runtime/src/lib.rs",
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
+    "v3/crates/routecodex-v3-runtime/src/kernel.rs",
+    "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
+    "v3/crates/routecodex-v3-runtime/tests",
+    "v3/crates/routecodex-v3-server/src/lib.rs",
+    "docs/goals/v3-runtime-timing-observability-test-design.md",
+    "docs/goals/v3-console-request-count-visibility-test-design.md",
+    "docs/goals/v3-console-human-readable-layering-plan.md",
+    "docs/goals/v3-console-human-readable-layering-test-design.md",
+    "docs/architecture",
+    "scripts/architecture/verify-v3-runtime-timing-observability.mjs",
+    "scripts/tests/v3-runtime-timing-observability-red-fixtures.mjs",
+    "scripts/architecture/verify-v3-console-request-count-visibility.mjs",
+    "scripts/tests/v3-console-request-count-visibility-red-fixtures.mjs",
+    "scripts/architecture/verify-architecture-mainline-manifest-sync.mjs",
+    "package.json",
+    ".github/workflows/test.yml",
+    "note.md",
+    "MEMORY.md",
+    ".agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md"
+  ],
+  "forbidden_paths": [
+    "v3/crates/routecodex-v3-virtual-router",
+    "v3/crates/routecodex-v3-target",
+    "v3/crates/routecodex-v3-provider-responses",
+    "v3/crates/routecodex-v3-sse",
+    "sharedmodule",
+    "src"
+  ],
+  "required_verification": [
+    "JSON Runtime timing red/green contract",
+    "Direct SSE clean EOF timing red/green contract",
+    "negative DONE-before-EOF and malformed-tail timing contract",
+    "Server terminal projection red/green contract",
+    "negative Server synthesis and unreported literals gate",
+    "Runtime and Server module regression",
+    "function/resource/mainline/verification map gates",
+    "installed V3 5555 same-entry replay"
+  ],
+  "exact_replay": "~/.rcc/codex-samples/openai-responses/ports/5555/openai-responses-router-gpt-5.5-20260729T102223233-669944-7581"
+}

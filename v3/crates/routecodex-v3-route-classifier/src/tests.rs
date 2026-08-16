@@ -182,10 +182,7 @@ fn shared_route_priority_matches_v2() {
         ..Default::default()
     });
     assert_eq!(coding_long.route_name, "longcontext");
-    assert_eq!(
-        coding_long.candidates,
-        vec!["longcontext", "default"]
-    );
+    assert_eq!(coding_long.candidates, vec!["longcontext", "default"]);
 
     for category in ["thinking", "search", "other"] {
         let long = classify_route(&RouteClassifierInput {
@@ -281,7 +278,11 @@ fn dryrun_search_continuation_cascades_to_tools_and_default() {
     // default as fallbacks so VR can walk the candidate list in order.
     assert_eq!(
         r.candidates,
-        vec!["search".to_string(), "tools".to_string(), "default".to_string()]
+        vec![
+            "search".to_string(),
+            "tools".to_string(),
+            "default".to_string()
+        ]
     );
 }
 

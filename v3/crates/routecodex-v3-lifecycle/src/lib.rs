@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(unused_variables, clippy::zombie_processes))]
+
 use routecodex_v3_config::{V3Config05ManifestPublished, V3ConfigStore};
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde::{Deserialize, Serialize};
@@ -521,7 +523,9 @@ impl V3ManagedLifecycle {
                     instance_id: declaration.instance_id,
                     state: V3ManagedRunState::Stopped,
                     updated_at_epoch_ms: epoch_ms(),
-                    detail: Some(format!("no managed runtime state; query_live failed: {error}")),
+                    detail: Some(format!(
+                        "no managed runtime state; query_live failed: {error}"
+                    )),
                 })
             }
         })
@@ -1410,8 +1414,6 @@ async fn wait_for_listener_set_available(
         tokio::time::sleep(START_TAKEOVER_POLL).await;
     }
 }
-
-
 
 #[cfg(test)]
 mod tests;

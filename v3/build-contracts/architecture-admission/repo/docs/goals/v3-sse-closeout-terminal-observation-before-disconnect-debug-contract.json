@@ -1,0 +1,60 @@
+{
+  "contract_id": "v3-sse-closeout-terminal-observation-before-disconnect",
+  "status": "active",
+  "symptom": "Completed /v1/responses SSE requests are logged as status=499 client_disconnect after the client drops the HTTP body.",
+  "first_divergence": {
+    "node": "V3ServerRespOutbound06ClientFrame",
+    "owner": "v3.console_human_readable_layering",
+    "source": "v3/crates/routecodex-v3-server/src/lib.rs",
+    "behavior": "Direct and Relay closeout Drop currently bypass Runtime stream observation and unconditionally emit client_disconnect."
+  },
+  "lifecycle": [
+    "HTTP response body is dropped before the wrapped stream reaches natural EOF.",
+    "Server reads the Runtime-owned V3RuntimeStreamObservation snapshot.",
+    "completed, done, or requires_action closes as terminal success.",
+    "failed, incomplete, cancelled, canceled, or error closes as explicit provider terminal failure.",
+    "Only a missing terminal observation raises health-neutral client_disconnect at V3ServerRespOutbound06ClientFrame."
+  ],
+  "positive_tests": [
+    "Direct drop after observed completed emits completed and no 499.",
+    "Relay drop after observed completed emits completed and no 499.",
+    "Direct and Relay drop before terminal observation emit typed client_disconnect 499."
+  ],
+  "negative_tests": [
+    "Direct and Relay drop after observed failed emit provider terminal failure, not completed and not 499.",
+    "Server and SSE transport do not parse SSE event names or data JSON.",
+    "No provider health, routing, payload, continuation, keepalive, or session-admission behavior changes."
+  ],
+  "allowed_paths": [
+    "v3/crates/routecodex-v3-server/src/lib.rs",
+    "docs/goals/v3-console-human-readable-layering-test-design.md",
+    "docs/architecture/function-map.yml",
+    "docs/architecture/mainline-call-map.yml",
+    "docs/architecture/verification-map.yml",
+    "docs/architecture/v3-function-map.yml",
+    "docs/architecture/v3-mainline-call-map.yml",
+    "docs/architecture/v3-verification-map.yml",
+    "docs/architecture/manifests/v3.console_human_readable_layering.mainline.yml"
+  ],
+  "forbidden_paths": [
+    "v3/crates/routecodex-v3-runtime",
+    "v3/crates/routecodex-v3-sse",
+    "v3/crates/routecodex-v3-provider-responses",
+    "v3/crates/routecodex-v3-target",
+    "v3/crates/routecodex-v3-virtual-router",
+    "src"
+  ],
+  "required_gates": [
+    "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server direct_sse_console_closeout --lib -- --nocapture",
+    "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server relay_sse_console_closeout --lib -- --nocapture",
+    "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib",
+    "cargo +stable check --manifest-path v3/Cargo.toml -p routecodex-v3-server",
+    "cargo +stable fmt --manifest-path v3/Cargo.toml --all -- --check",
+    "npm run verify:v3-module-boundaries",
+    "npm run verify:v3-rust-only",
+    "npm run verify:v3-architecture-docs",
+    "npm run build:v3-cli",
+    "installed managed restart and normal/disconnect live replay",
+    "codex --profile tcm review with an explicit PASS verdict"
+  ]
+}

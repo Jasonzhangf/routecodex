@@ -1,0 +1,85 @@
+lifecycle_id: direct.semantic_classification.mainline
+summary: Explicit provider/model direct policy compiles to a closed semantic
+  class, resolves only after Virtual Router selects a real target, and drives
+  paired request/response projection plans without payload inference.
+owner_feature_id: hub.direct_semantic_classification
+entrypoint:
+  node_id: ConfigDirect01AuthoringPolicy
+  wiki_page: null
+  call_map_chain_id: direct.semantic_classification.mainline
+node_ids:
+  - ConfigDirect01AuthoringPolicy
+  - ConfigDirect02ValidatedPolicy
+  - DirectReq04ProjectionPlan
+  - DirectResp05ProjectionPlan
+  - VrDirect03ResolvedSemantics
+edges:
+  - step_id: dsc-01
+    from_node: ConfigDirect01AuthoringPolicy
+    to_node: ConfigDirect02ValidatedPolicy
+    status: anchored
+    owner_feature_id: hub.direct_semantic_classification
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.authoring_surface
+      produces:
+        - config.provider_profile_projection
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: dsc-02
+    from_node: ConfigDirect02ValidatedPolicy
+    to_node: VrDirect03ResolvedSemantics
+    status: anchored
+    owner_feature_id: hub.direct_semantic_classification
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.provider_profile_projection
+        - route.selection
+      produces:
+        - direct.semantic_policy
+      side_channel_reads:
+        - route.selection
+      side_channel_writes:
+        - direct.semantic_policy
+  - step_id: dsc-03
+    from_node: VrDirect03ResolvedSemantics
+    to_node: DirectReq04ProjectionPlan
+    status: anchored
+    owner_feature_id: hub.direct_semantic_classification
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - direct.semantic_policy
+        - request.normal_payload
+        - route.selection
+      produces:
+        - provider.wire_payload
+      side_channel_reads:
+        - direct.semantic_policy
+        - route.selection
+      side_channel_writes: []
+  - step_id: dsc-04
+    from_node: VrDirect03ResolvedSemantics
+    to_node: DirectResp05ProjectionPlan
+    status: anchored
+    owner_feature_id: hub.direct_semantic_classification
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - direct.semantic_policy
+        - response.provider_raw
+      produces:
+        - response.client_payload
+      side_channel_reads:
+        - direct.semantic_policy
+      side_channel_writes: []
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

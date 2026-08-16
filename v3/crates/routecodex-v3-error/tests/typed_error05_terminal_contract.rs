@@ -107,10 +107,16 @@ fn provider_failure_projects_only_with_route_and_default_exhaustion_proof() {
         "provider stream is malformed"
     );
     assert!(
-        projected.body["error"].get("route_pool_remaining_after_exclusion").is_none()
-            && projected.body["error"].get("default_pool_available").is_none()
+        projected.body["error"]
+            .get("route_pool_remaining_after_exclusion")
+            .is_none()
+            && projected.body["error"]
+                .get("default_pool_available")
+                .is_none()
             && projected.body["error"].get("target_exhausted").is_none()
-            && projected.body["error"].get("candidates_remaining").is_none()
+            && projected.body["error"]
+                .get("candidates_remaining")
+                .is_none()
             && projected.body["error"].get("stage").is_none()
             && projected.body["error"].get("class").is_none()
             && projected.body["error"].get("decision").is_none()

@@ -1,0 +1,131 @@
+version: 1
+allowed_categories:
+  - payload_side_channel
+  - guard_surface
+  - local_runtime_marker
+  - contract_or_test_surface
+allowed_resolution_tracks:
+  - side_channel_migration
+  - guard_lock
+  - local_marker_rename
+  - contract_boundary_only
+allowed_semantic_families:
+  - request_route_control
+  - request_route_control_contract
+  - response_followup_semantics
+  - response_metadata_contract
+  - response_metadata_protocol_guard
+  - client_response_guard
+  - request_entry_guard
+  - provider_runtime_local_marker
+  - daemon_admin_local_marker
+  - provider_debug_observation
+category_resolution_tracks:
+  payload_side_channel: side_channel_migration
+  guard_surface: guard_lock
+  local_runtime_marker: local_marker_rename
+  contract_or_test_surface: contract_boundary_only
+allowed_owner_queryability:
+  - unique-owner
+  - ambiguous-owner
+allowed_verification_state:
+  - present
+  - missing
+carrier_runtime_surfaces:
+  - carrier_id: routecodex_prefix
+    description: "__routecodex* runtime residues still present before full MetadataCenter/runtime side-channel cleanup."
+    files:
+      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs
+        owner_feature_id: hub.pipeline_contract_surface
+        category: contract_or_test_surface
+        semantic_family: request_route_control_contract
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "Rust contract help names the current boundary token."
+      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
+        owner_feature_id: hub.response_responses_client_projection
+        category: contract_or_test_surface
+        semantic_family: request_route_control_contract
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "Rust response client projection contract test locks source metadata removal; owner is declared here to avoid broad Rust directory owner ambiguity."
+      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs
+        owner_feature_id: server.rust_contract_surface
+        category: contract_or_test_surface
+        semantic_family: request_route_control_contract
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "server contract help documents current boundary token."
+      - path: src/server/handlers/handler-response-common.ts
+        owner_feature_id: server.responses_handler_family
+        category: guard_surface
+        semantic_family: client_response_guard
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "client-visible JSON/SSE internal carrier fail-fast guard."
+      - path: src/server/handlers/handler-utils.ts
+        owner_feature_id: server.responses_handler_family
+        category: guard_surface
+        semantic_family: request_entry_guard
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "client request metadata entry denylist still names retry provider pin residue."
+      - path: src/server/runtime/http-server/executor-metadata.ts
+        owner_feature_id: hub.metadata_center_request_capture
+        category: guard_surface
+        semantic_family: request_route_control
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "request metadata attempt clone only strips stale preselected-route residue on retry/exclusion paths."
+      - path: src/server/runtime/http-server/executor/request-executor-attempt-state.ts
+        owner_feature_id: hub.metadata_center_attempt_merge
+        category: guard_surface
+        semantic_family: request_route_control
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "stale retry provider pin delete guard after MetadataCenter runtime_control migration."
+      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_protocol_spec_semantics.rs
+        owner_feature_id: hub.pipeline_contract_surface
+        category: guard_surface
+        semantic_family: request_route_control_contract
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "provider outbound payload guard rejects internal carrier key prefixes without allowing them as normal payload."
+      - path: src/debug/pipeline-dry-run.ts
+        owner_feature_id: debug.pipeline_dry_run_loop
+        category: local_runtime_marker
+        semantic_family: provider_debug_observation
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "local-only provider-request dry-run carrier; forbidden from provider/client payload by dry-run black-box fixtures and function-map owner."
+      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_runtime_metadata_projection.rs
+        owner_feature_id: hub.direct_runtime_metadata_projection
+        category: local_runtime_marker
+        semantic_family: provider_debug_observation
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "Rust projects the local provider-request dry-run control into direct runtime metadata; the carrier remains forbidden from provider/client normal payload."
+  - carrier_id: response_metadata
+    description: "response.metadata runtime residues still present before full response projection cleanup."
+    files:
+      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs
+        owner_feature_id: hub.pipeline_contract_surface
+        category: contract_or_test_surface
+        semantic_family: response_metadata_contract
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "Rust contract help names client response metadata event."
+      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs
+        owner_feature_id: server.rust_contract_surface
+        category: contract_or_test_surface
+        semantic_family: response_metadata_contract
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "server contract help names response.metadata event."
+      - path: src/debug/pipeline-dry-run.ts
+        owner_feature_id: debug.pipeline_dry_run_loop
+        category: payload_side_channel
+        semantic_family: provider_debug_observation
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "dry-run response metadata is copied only into PipelineExecutionResult metadata; not provider wire or client body truth."

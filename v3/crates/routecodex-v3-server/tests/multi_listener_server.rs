@@ -1,3 +1,5 @@
+#![allow(clippy::clone_on_copy)]
+
 use axum::{
     body::Body,
     extract::State,
@@ -1705,12 +1707,8 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
             responses: manifest.providers["test"].responses.clone(),
             concurrency: manifest.providers["test"].concurrency.clone(),
             health: manifest.providers["test"].health.clone(),
-            provider_request_cleanup: manifest.providers["test"]
-                .provider_request_cleanup
-                .clone(),
-            compatibility_profile: manifest.providers["test"]
-                .compatibility_profile
-                .clone(),
+            provider_request_cleanup: manifest.providers["test"].provider_request_cleanup.clone(),
+            compatibility_profile: manifest.providers["test"].compatibility_profile.clone(),
             features: std::collections::BTreeMap::new(),
             request_timeout_ms: manifest.providers["test"].request_timeout_ms,
             ..manifest.providers["test"].clone()
@@ -1779,25 +1777,35 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
             .find(|model| model["id"] == id)
             .unwrap_or_else(|| panic!("{id} must be listed"));
         assert_eq!(model["support_verbosity"], true, "{id} single provider");
-        assert_eq!(model["supports_reasoning_summaries"], true, "{id} single provider");
+        assert_eq!(
+            model["supports_reasoning_summaries"], true,
+            "{id} single provider"
+        );
         assert_eq!(model["default_verbosity"], "low", "{id} single provider");
-        assert_eq!(model["reasoning_summary_format"], "experimental", "{id} single provider");
+        assert_eq!(
+            model["reasoning_summary_format"], "experimental",
+            "{id} single provider"
+        );
     }
     // shared 被两个 provider 承载：多路由目标，只保留无状态请求能力。
     let shared_entry = data
         .iter()
         .find(|model| model["id"] == "shared")
         .expect("shared must be listed");
-    assert_eq!(shared_entry["support_verbosity"], false, "shared multi-provider");
     assert_eq!(
-        shared_entry["supports_reasoning_summaries"],
-        false,
+        shared_entry["support_verbosity"], false,
         "shared multi-provider"
     );
-    assert_eq!(shared_entry["default_verbosity"], "none", "shared multi-provider");
     assert_eq!(
-        shared_entry["reasoning_summary_format"],
-        "none",
+        shared_entry["supports_reasoning_summaries"], false,
+        "shared multi-provider"
+    );
+    assert_eq!(
+        shared_entry["default_verbosity"], "none",
+        "shared multi-provider"
+    );
+    assert_eq!(
+        shared_entry["reasoning_summary_format"], "none",
         "shared multi-provider"
     );
     // direct 条目（provider.model）恒为单 provider 直连：高级能力始终打开。
@@ -1809,8 +1817,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
         assert_eq!(direct["direct_route"], true, "{direct_id}");
         assert_eq!(direct["support_verbosity"], true, "{direct_id} direct");
         assert_eq!(
-            direct["supports_reasoning_summaries"],
-            true,
+            direct["supports_reasoning_summaries"], true,
             "{direct_id} direct"
         );
     }
@@ -2930,16 +2937,18 @@ async fn responses_inbound_websocket_accepts_binary_response_create_payload() {
 
     let _handshake_capture = captures.recv().await.unwrap();
     let provider_event = captures.recv().await.unwrap();
-    assert!(provider_event.body["input"].as_array().is_some_and(|items| {
-        items.iter().any(|item| {
-            item["role"] == "user"
-                && item["content"].as_array().is_some_and(|content| {
-                    content
-                        .iter()
-                        .any(|part| part["type"] == "input_text" && part["text"] == "binary ok")
-                })
-        })
-    }));
+    assert!(provider_event.body["input"]
+        .as_array()
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item["role"] == "user"
+                    && item["content"].as_array().is_some_and(|content| {
+                        content
+                            .iter()
+                            .any(|part| part["type"] == "input_text" && part["text"] == "binary ok")
+                    })
+            })
+        }));
     assert_control_fields_absent(&provider_event.body);
 
     std::env::remove_var("V3_P6_TEST_KEY");

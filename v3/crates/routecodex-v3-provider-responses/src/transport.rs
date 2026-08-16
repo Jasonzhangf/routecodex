@@ -36,7 +36,9 @@ type SharedResponsesWebSocket = Arc<Mutex<Option<ResponsesWebSocket>>>;
 mod cancellation;
 mod websocket;
 pub use cancellation::V3ProviderCancellation;
-use websocket::{websocket_protocol_error, websocket_server_event_error, websocket_transport_error};
+use websocket::{
+    websocket_protocol_error, websocket_server_event_error, websocket_transport_error,
+};
 
 const OPENAI_BETA_HEADER: &str = "openai-beta";
 const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
@@ -322,7 +324,10 @@ fn provider_request_headers_for_url(
         .ends_with("/v1/messages")
     {
         for header in default_anthropic_messages_compat_headers() {
-            headers.insert(header.name.to_string(), Value::String(header.value.to_string()));
+            headers.insert(
+                header.name.to_string(),
+                Value::String(header.value.to_string()),
+            );
         }
     }
     let provider_headers = match provider_request_headers(stream_intent, provider_headers) {
@@ -615,9 +620,7 @@ impl ProviderResponsesTransport {
         Self {
             client: reqwest::Client::builder()
                 .read_timeout(timeout)
-                .pool_idle_timeout(Duration::from_secs(
-                    V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS,
-                ))
+                .pool_idle_timeout(Duration::from_secs(V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS))
                 .tcp_keepalive(Duration::from_secs(V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS))
                 .build()
                 .expect("valid V3 provider HTTP client read timeout"),
@@ -947,14 +950,10 @@ impl ProviderResponsesTransport {
                     provider_id.clone(),
                     cancellation,
                 );
-                Ok(V3ProviderResp14Raw::from_sse(
-                    request_id,
-                    provider_id,
-                    status,
-                    headers,
-                    stream,
+                Ok(
+                    V3ProviderResp14Raw::from_sse(request_id, provider_id, status, headers, stream)
+                        .with_compatibility_profile(compatibility_profile),
                 )
-                .with_compatibility_profile(compatibility_profile))
             }
             V3ResponsesStreamIntent::Sse => Err(V3ProviderError::UnexpectedContentType {
                 request_id,
@@ -1246,14 +1245,14 @@ async fn resolve_secret(
                 reason: error.to_string(),
             })?,
         V3ProviderAuthSecretHandle::SecretFile { path, key } => {
-            let content = tokio::fs::read_to_string(path)
-                .await
-                .map_err(|error| V3ProviderError::AuthSecretRead {
+            let content = tokio::fs::read_to_string(path).await.map_err(|error| {
+                V3ProviderError::AuthSecretRead {
                     request_id: request_id.to_string(),
                     provider_id: provider_id.to_string(),
                     auth_alias: auth.alias.clone(),
                     reason: error.to_string(),
-                })?;
+                }
+            })?;
             // 解析归 config 层（编译期已校验 key 存在），运行时只取值。
             routecodex_v3_config::resolve_v3_secret_file_key(&content, key).map_err(|reason| {
                 V3ProviderError::AuthSecretRead {
@@ -1277,7 +1276,8 @@ async fn resolve_secret(
     Ok(secret)
 }
 
-fn expand_env_vars(input: &str) -> String {    let bytes = input.as_bytes();
+fn expand_env_vars(input: &str) -> String {
+    let bytes = input.as_bytes();
     let mut result = String::with_capacity(input.len());
     let mut i = 0;
     while i < bytes.len() {

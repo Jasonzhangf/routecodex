@@ -653,7 +653,8 @@ targets = [
 }
 
 #[test]
-fn requested_explicit_model_route_maps_to_declared_targets_without_alias_requirement() {    let source = r#"
+fn requested_explicit_model_route_maps_to_declared_targets_without_alias_requirement() {
+    let source = r#"
 version = 3
 [servers.s]
 bind = "127.0.0.1"
@@ -1522,5 +1523,9 @@ targets = [{ kind = "provider_model", provider = "multi", model = "m", priority 
     assert_eq!(aliases_at(0), vec!["key1", "key2", "key3"]);
     assert_eq!(aliases_at(1), vec!["key2", "key3", "key1"]);
     assert_eq!(aliases_at(2), vec!["key3", "key1", "key2"]);
-    assert_eq!(aliases_at(6), aliases_at(0), "rotation is periodic in entry count");
+    assert_eq!(
+        aliases_at(6),
+        aliases_at(0),
+        "rotation is periodic in entry count"
+    );
 }

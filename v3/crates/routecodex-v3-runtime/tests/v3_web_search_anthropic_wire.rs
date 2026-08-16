@@ -2,6 +2,8 @@
 //! web search）。捕获 anthropic wire 工具声明（确认 web_search 保留 hosted
 //! 工具、无 exec_command 注入），并验证 hosted 结果投影。
 
+#![allow(unused_variables, clippy::manual_contains)]
+
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{

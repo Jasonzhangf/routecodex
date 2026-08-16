@@ -1,0 +1,33 @@
+lifecycle_id: direct.semantic_classification.mainline
+summary: Explicit provider/model direct policy compiles to a closed semantic class, resolves only after Virtual Router selects a real target, and drives paired request/response projection plans without payload inference.
+owner_feature_id: hub.direct_semantic_classification
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+entrypoint:
+  node_id: ConfigDirect01AuthoringPolicy
+  wiki_page: docs/design/direct-semantic-classification.md
+  call_map_chain_id: direct.semantic_classification.mainline
+node_ids:
+  - ConfigDirect01AuthoringPolicy
+  - ConfigDirect02ValidatedPolicy
+  - DirectReq04ProjectionPlan
+  - DirectResp05ProjectionPlan
+  - VrDirect03ResolvedSemantics
+step_ids:
+  - dsc-01
+  - dsc-02
+  - dsc-03
+  - dsc-04
+edge_status_counts:
+  anchored: 4
+  partial: 0
+  binding_pending: 0
+  total: 4
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: direct.semantic_classification.mainline
+  min_function_feature: hub.direct_semantic_classification
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

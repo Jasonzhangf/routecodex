@@ -1,0 +1,430 @@
+version: 1
+verification:
+- feature_id: architecture.repository_filesystem_governance
+  change_risk: low
+  unit:
+  - scripts/architecture/verify-repository-filesystem-governance.mjs
+  - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+  contract:
+  - docs/architecture/repository-filesystem-module-registry.yml
+  - docs/goals/root-generated-artifacts-governance-plan.md
+  integration:
+  - .gitignore
+  - scripts/ci/repo-sanity.mjs
+  - docs/architecture/mainline-call-map.yml
+  smoke:
+  - npm run verify:repo-sanity
+  - npm run verify:architecture-mainline-call-map
+  build:
+  - npm run verify:repo-sanity
+  notes:
+  - Positive gate accepts active .agent-collab and v3 roots; negative fixtures reject
+    deprecated roots, tracked generated residue, and ignored critical source.
+- feature_id: architecture.resource_ownership_model
+  change_risk: high
+  unit:
+  - docs/architecture/resource-operation-map.yml
+  - docs/architecture/resource-taxonomy.md
+  - scripts/architecture/verify-resource-operation-map.mjs
+  - scripts/architecture/verify-resource-source-bindings.mjs
+  - scripts/architecture/audit-resource-global-coverage.mjs
+  - scripts/tests/resource-source-bindings-red-fixtures.mjs
+  contract:
+  - scripts/architecture/verify-v3-resource-map.mjs
+  - scripts/tests/resource-source-bindings-red-fixtures.mjs
+  - scripts/architecture/audit-resource-global-coverage.mjs
+  integration:
+  - docs/architecture/function-map.yml
+  - docs/architecture/mainline-call-map.yml
+  - docs/architecture/verification-map.yml
+  - docs/architecture/resource-global-coverage-report.json
+  smoke:
+  - npm run audit:resource-global-coverage
+  - npm run verify:resource-operation-map
+  - npm run verify:resource-owner-uniqueness
+  - npm run verify:resource-mainline-bindings
+  - npm run verify:resource-forbidden-writes
+  - npm run verify:resource-side-channel-isolation
+  - npm run verify:resource-source-bindings
+  - npm run test:resource-source-bindings-red-fixtures
+  - npm run verify:function-map-compile-gate
+  - npm run verify:architecture-mainline-call-map
+  build:
+  - npm run build:base
+  notes:
+  - M0 resource ownership is map/gate only. Do not start runtime refactors until resource
+    ownership and mainline resource flow are green.
+- feature_id: architecture.agent_collab_protocol
+  change_risk: medium
+  unit:
+  - .agent-collab/PROTOCOL.md
+  - .agent-collab/schema
+  - .agent-collab/examples
+  - scripts/architecture/verify-agent-collab-protocol.mjs
+  - scripts/tests/agent-collab-protocol-red-fixtures.mjs
+  contract:
+  - scripts/architecture/verify-agent-collab-protocol.mjs
+  - scripts/tests/agent-collab-protocol-red-fixtures.mjs
+  integration:
+  - package.json
+  - docs/architecture/function-map.yml
+  - docs/architecture/resource-operation-map.yml
+  - docs/architecture/verification-map.yml
+  smoke:
+  - npm run verify:agent-collab-protocol
+  - npm run test:agent-collab-protocol-red-fixtures
+  - npm run verify:function-map-build-wiring
+  - npm run verify:function-map-compile-gate
+  - npm run verify:architecture-review-surface-light
+  - npm run verify:resource-source-bindings
+  build:
+  - npm run build:base
+  notes:
+  - Project-local .agent-collab protocol is doc/schema/gate governance only and must
+    not mutate runtime behavior.
+  - Completion requires evidence.jsonl; merge/integration defaults to handoff or merge
+    queue.
+- feature_id: vr.route_classifier
+  change_risk: high
+  unit:
+  - sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/tests.rs
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  contract:
+  - docs/goals/v3-v2-route-classifier-parity-test-design.md
+  integration:
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/classifier.rs
+  - v3/crates/routecodex-v3-virtual-router/src/lib.rs
+  smoke:
+  - npm run test:route-classifier-semantics
+  - npm run verify:route-classifier-core-file-size
+  - npm run test:route-classifier-core-file-size-red-fixtures
+  build:
+  - npm run build:v3-cli
+  notes:
+  - Positive cases lock active-turn coding/thinking/search/tools/web_search and typed
+    attachment metadata; negative cases lock declared tools, tool_choice, descriptions,
+    schemas, reasoning fields, history, payload images, and stringified JSON at zero
+    signal.
+  - The same gate must run in CI, build:v3-cli, and global installation before binaries
+    are published.
+- feature_id: conversion.glm_tool_schema_payload_copy_budget
+  change_risk: medium
+  unit:
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs
+  contract:
+  - docs/goals/full-pipeline-glm-tool-schema-payload-copy-budget-test-design.md
+  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs
+  integration:
+  - cargo test -p router-hotpath-napi compat_tool_schema --lib
+  smoke:
+  - npm run verify:resource-operation-map
+  - npm run verify:function-map-compile-gate
+  build:
+  - npm run build:native-hotpath
+  - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+  notes:
+  - 'Positive proof: shell schema and tool-name normalization semantics stay equivalent.'
+  - 'Negative proof: the sanitizer source rejects full branch clones before small
+    GLM compatibility edits.'
+  - RSS improvement remains unclaimed until release install and concurrent large-payload
+    replay are authorized.
+- feature_id: hub.chat_process_responses_continuation
+  change_risk: high
+  unit:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
+  contract:
+  - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
+  - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+  - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+  - scripts/architecture/verify-responses-continuation-immutable-boundary.mjs
+  - scripts/tests/responses-continuation-immutable-boundary-red-fixtures.mjs
+  integration:
+  - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+  smoke:
+  - npm run verify:responses-history-protocol-contract
+  - npm run verify:responses-relay-continuation-writer-uniqueness
+  - npm run verify:responses-continuation-immutable-boundary
+  - npm run test:responses-continuation-immutable-boundary-red-fixtures
+  - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
+  - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow
+  build:
+  - npm run verify:v3-architecture-ci
+  notes:
+  - Validation must prove this continuation block is `/v1/responses`-only and is skipped
+    by chat/messages/non-responses protocol paths.
+  - 'Responses continuation is a Chat Process boundary block: request restore runs
+    after `HubReqInbound02Standardized` and before `HubReqChatProcess03Governed`;
+    response save runs after `HubRespChatProcess03Governed` and before `HubRespOutbound04ClientSemantic`.'
+  - Req/Resp inbound and outbound are normalization/projection-only nodes; all continuation,
+    tool governance, and semantic recovery must happen in Chat Process before save/restore.
+  - 'Validation must prove the save->restore interval is immutable: no handler, bridge,
+    req_inbound, resp_outbound, SSE, or store helper may clean, convert, reorder,
+    patch, or otherwise mutate saved request/response history between canonical save
+    and canonical restore.'
+  - Validation must prove `MetadataCenter.continuation_context.responsesResume` selects
+    the materialized Chat Process payload for repeated submit_tool_outputs capture,
+    preserves model/base payload across rounds, and never replaces it with the raw
+    HTTP tool_outputs body; non-Responses entrypoints must not capture this continuation
+    state.
+  - Validation must prove cross-boundary control state is carried by MetadataCenter
+    families, not by request/response payload or history fields.
+  - Tests must lock current-request explicit evidence, owner resolution, canonical
+    restore, stopless CLI result restore, response schema judgment/projection, post-projection
+    canonical save, stale transient request-id clearing, and released retained state.
+  - 'Tests must lock response save request-id priority: the current active provider
+    request label passed to the Rust record planner wins over stale `requestTruth.requestId`
+    after request-executor rebind.'
+  - 'Tests and residue gates must lock the complete Rust record effect contract: entryKind,
+    continuationOwner, allowScopeContinuation, and optional scope/provider/route fields
+    reach store IO unchanged; TS object reconstruction or field filtering must fail.'
+  - Runtime-state effect tests must pair a valid object/null path with malformed array/scalar
+    rejection in Rust; residue gates must reject TS `asRecord(runtimeStateWrite)`
+    coercion or any malformed-to-null compatibility path.
+  - SSE tests are not continuation gates. `handler-response-sse.ts` must not contain
+    continuation probe, required_action detection, terminal repair, save/restore,
+    tool injection, or stopless schema logic.
+  - Handler response-store integration tests are stale continuation-owner evidence
+    if they expect `sendPipelineResponse` or SSE transport to save continuation; migrate
+    those assertions to bridge/Rust owner tests instead of reintroducing handler-side
+    save logic.
+- feature_id: server.response_inspection_helpers
+- feature_id: v3.sse_transport_core_independent
+  change_risk: high
+  unit:
+  - v3/crates/routecodex-v3-sse/src/lib.rs
+  contract:
+  - docs/architecture/function-map.yml
+  - docs/architecture/verification-map.yml
+  integration:
+  - v3/crates/routecodex-v3-provider-responses/src/shared.rs
+  - v3/crates/routecodex-v3-runtime/src/shared.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  smoke:
+  - npm run test:v3-sse-transport-core
+  - npm run test:v3-sse-transport-adapter
+  - npm run verify:sse-transport-core-shared
+  - npm run verify:sse-architecture-boundary
+  - npm run verify:v3-cargo-fmt
+  - npm run verify:v3-clippy
+  - npm run verify:function-map-compile-gate
+  - npm run verify:architecture-mainline-call-map
+  build:
+  - cargo test --workspace --manifest-path v3/Cargo.toml
+  notes:
+  - Positive tests lock arbitrary UTF-8/chunk boundaries, multiline data, comment/id/retry,
+    CRLF/LF, unknown fields, opaque `[DONE]`, and normal close inside the V3 workspace.
+  - Negative tests lock invalid UTF-8, unterminated EOF, frame/buffer limits, cancellation/upstream
+    failure mapping, and no synthetic terminal success.
+  - V3 crates must import `routecodex-v3-sse`, not `sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core`.
+  - Server closeout wrappers must not parse SSE event names or data JSON to decide
+    terminal, required_action, continuation, tool, stopless, servertool, or provider
+    failure semantics.
+- feature_id: v3.provider_compat_profile_loading
+  change_risk: high
+  unit:
+  - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+  contract:
+  - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
+  - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
+  - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
+  - v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs
+  integration:
+  - npm run test:v3-workspace
+  smoke:
+  - npm run test:v3-provider-compat-profile-loading
+  - npm run verify:function-map-compile-gate
+  - npm run verify:architecture-mainline-call-map
+  build:
+  - cargo test --workspace --manifest-path v3/Cargo.toml
+  notes:
+  - 'This verification entry exists because provider-compat-core declares feature_id:
+    v3.provider_compat_profile_loading.'
+  - Positive coverage must prove profile loading/application at ProviderReqCompat06ProviderCompat
+    and ProviderRespCompat02ProviderCompat, including chat:minimax Anthropic hosted
+    web-search projection to matching ordinary tool_use/tool_result blocks.
+  - Negative coverage must reject missing, duplicate, orphan, and malformed hosted
+    web-search identities/fields and prove provider compat does not own routing, stopless/tool
+    governance, fallback, continuation, or SSE semantics.
+- feature_id: v3.v2_config_toml_compat_5555
+  change_risk: high
+  unit:
+  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/store.rs
+  - v3/crates/routecodex-v3-config/src/validate.rs
+  contract:
+  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+  - npm run test:v3-config-v2-compat-5555
+  integration:
+  - npm run test:v3-workspace
+  smoke:
+  - npm run verify:function-map-compile-gate
+  - npm run verify:architecture-mainline-call-map
+  build:
+  - npm run verify:v3-cargo-fmt
+  - npm run verify:v3-clippy
+  notes:
+  - Positive contract locks V2 root + provider config.v2.toml input, canonical Hub
+    V1 endpoint bindings and server execution declarations, Jason-defined 5555 route
+    ordering, provider type mapping, local token_file handle materialization, and
+    secret-free manifest debug output.
+  - Transport-bound V2 provider responses contract locks WebSocket v2 projection plus
+    negative HTTP-only remote_continuation and missing websocket_v2_url cases.
+  - Live closure still requires global install, V3 managed restart on 5555, health,
+    models, and same-entry route probes after source gates pass.
+- feature_id: v3.runtime_timing_observability
+  change_risk: medium
+  unit:
+  - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+  contract:
+  - docs/goals/v3-runtime-timing-observability-test-design.md
+  - docs/goals/v3-runtime-timing-observability-debug-contract.json
+  - docs/architecture/function-map.yml
+  - docs/architecture/resource-operation-map.yml
+  integration:
+  - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime runtime_timing
+    --lib
+  smoke:
+  - npm run verify:v3-runtime-timing-observability
+  - npm run test:v3-runtime-timing-observability-red-fixtures
+  - npm run verify:function-map-compile-gate
+  build:
+  - npm run build:min
+  notes:
+  - Runtime owns responses timing observability; Server may only project it into console/debug
+    output.
+  - Direct and Relay protocol handoffs carry one opaque Runtime-owned timing and provider-attempt
+    accumulator; Server only moves the typed carrier.
+  - A successful human response headline requires typed response status, finish reason,
+    and Runtime timing; missing usage is omitted from the human line and retained
+    only in dim diagnostics.
+  mainline_bindings:
+  - v3-runtime-timing-01
+  - v3-runtime-timing-02
+  - v3-runtime-timing-03
+  - v3-runtime-timing-04
+  - v3-runtime-timing-05
+  - v3-runtime-timing-06
+  - v3-runtime-timing-07
+  - v3-runtime-timing-08
+  - v3-runtime-timing-09
+  - v3-runtime-timing-10
+  - v3-runtime-timing-11
+  - v3-runtime-timing-12
+  - v3-runtime-timing-13
+  - v3-runtime-timing-14
+- feature_id: v3.console_request_count_visibility
+  change_risk: low
+  unit:
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  contract:
+  - docs/goals/v3-console-request-count-visibility-test-design.md
+  - docs/architecture/function-map.yml
+  - docs/architecture/resource-operation-map.yml
+  integration:
+  - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server request_identity
+    --lib -- --nocapture
+  smoke:
+  - npm run verify:v3-architecture-docs
+  - npm run verify:function-map-compile-gate
+  build:
+  - npm run build:min
+  notes:
+  - Server owns one aggregate-shared request counter, the typed V3AllocatedRequestIdentity
+    allocation extension, and request-count projection; listeners must not create
+    independent locks for the shared persisted file, and console must not parse request
+    ids, create a second counter, emit a duplicate pre-route placeholder block, or
+    mutate request/response payloads.
+  mainline_bindings:
+  - v3-console-count-01
+  - v3-console-count-02
+  - v3-console-count-03
+  - v3-console-count-04
+- feature_id: v3.console_human_readable_layering
+  change_risk: low
+  unit:
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  contract:
+  - docs/goals/v3-console-human-readable-layering-test-design.md
+  - docs/architecture/function-map.yml
+  - docs/architecture/mainline-call-map.yml
+  integration:
+  - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib
+  - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib
+  smoke:
+  - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server console
+    --lib
+  - cargo +stable check --manifest-path v3/Cargo.toml -p routecodex-v3-server
+  - npm run verify:v3-rust-only
+  - npm run verify:v3-module-boundaries
+  - npm run verify:function-map-compile-gate
+  - npm run verify:architecture-mainline-call-map
+  - git diff --check
+  build:
+  - npm run install:v3
+  notes:
+  - Positive tests lock one Responses Direct/Relay routed request block and one terminal
+    response block when runtime observability is present, exact 24/20/36 human columns
+    including oversized ASCII/CJK, fixed 52-column diagnostic scope, bright headline
+    color, blank separator, complete diagnostics, plain output, and preservation of
+    the original Direct SSE Error01 kind/stage/code/message.
+  - Positive disconnect coverage locks source stage V3ServerRespOutbound06ClientFrame,
+    console status 499, and health-neutral post-commit handling.
+  - Positive terminal-observation coverage locks Direct and Relay body Drop after
+    completed as success, and Drop without terminal observation as typed health-neutral
+    499.
+  - Negative terminal-observation coverage locks Direct and Relay body Drop after
+    failed as provider terminal failure 502, never success or client_disconnect.
+  - Negative tests lock no fabricated post-commit Error06, no typed Error01-to-text
+    reconstruction, no provider-stage attribution for client disconnect, no pre-route
+    pending duplicate, no ANSI dim on the human line, no ANSI in plain mode, no diagnostic
+    loss, stable machine-field alignment for oversized sessions, no synthesized internal/external
+    timing, no Server-built dry-run runtime observability, fail-fast retired dry-run
+    and missing route truth, no fabricated OpenAI Chat/Anthropic/Gemini Relay success
+    observability, and no request/response/routing/error semantic mutation.
+- feature_id: v3.codex_sample_retention_snap_scope
+  change_risk: medium
+  unit:
+  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+  - v3/crates/routecodex-v3-cli/tests/foundation_cli.rs
+  - v3/crates/routecodex-v3-debug/tests/debug_runtime_contract.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  contract:
+  - docs/goals/v3-codex-sample-retention-snap-scope-test-design.md
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-verification-map.yml
+  integration:
+  - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-cli --test managed_lifecycle
+  - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test
+    multi_listener_server responses_direct_full_snap_scope_persists_live_json_and_sse_responses
+  - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test
+    multi_listener_server responses_direct_relay_only_snap_scope_writes_no_codex_sample
+  smoke:
+  - npm run verify:v3-debug-payload-budget
+  - npm run test:v3-debug-payload-budget-red-fixtures
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:function-map-compile-gate
+  - npm run verify:architecture-mainline-call-map
+  - npm run verify:v3-rust-only
+  - npm run verify:v3-module-boundaries
+  build:
+  - npm run install:v3
+  notes:
+  - No flag disables persistence regardless of config; --snap authorizes Relay only;
+    --snapall authorizes Relay and Direct; blank stage selectors are rejected.
+  - Server persists only Debug-redacted/budgeted copies, captures live Direct JSON/SSE
+    without changing transport semantics, propagates filesystem scan/write/eviction
+    failures, and retains at most 100 request directories per endpoint/port.
+  - Live closure requires final no-flag restart after controlled --snap and --snapall
+    replays.

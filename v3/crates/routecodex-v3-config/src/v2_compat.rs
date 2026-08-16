@@ -504,10 +504,8 @@ pub(crate) fn resolve_v2_provider_default_compatibility_profile(
     provider_id: &str,
 ) -> Option<String> {
     static PROVIDER_RESOLUTION_CONFIG: LazyLock<V2ProviderResolutionConfig> = LazyLock::new(|| {
-        serde_json::from_str(include_str!(
-            "../../../../sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json"
-        ))
-        .expect("V2 provider resolution compatibility profile config must parse")
+        serde_json::from_str(include_str!("v2_provider_compatibility_defaults.json"))
+            .expect("V3-local V2 provider compatibility defaults must parse")
     });
 
     PROVIDER_RESOLUTION_CONFIG
@@ -648,7 +646,7 @@ fn compile_v2_provider_models(
             (
                 id.clone(),
                 V3ProviderModelAuthoringConfig {
-                    wire_name: model.wire_name.or_else(|| Some(id)),
+                    wire_name: model.wire_name.or(Some(id)),
                     aliases: model.aliases,
                     capabilities: normalize_v2_capabilities(model.capabilities),
                     web_search_execution_mode,
@@ -931,10 +929,7 @@ web_search_backend = "MiniMax-M3"
             "snake_case web_search_execution_mode must parse (found {:?})",
             parsed.web_search_execution_mode()
         );
-        assert_eq!(
-            parsed.web_search_backend.as_deref(),
-            Some("MiniMax-M3")
-        );
+        assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
     }
 
     #[test]
@@ -947,7 +942,10 @@ webSearchBackend = "MiniMax-M3"
 "#,
         )
         .expect("parse");
-        assert_eq!(parsed.web_search_execution_mode().as_str(), "metadata_center_local_search");
+        assert_eq!(
+            parsed.web_search_execution_mode().as_str(),
+            "metadata_center_local_search"
+        );
         assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
     }
 
@@ -979,7 +977,11 @@ apiKey = "test-key"
 "#,
         )
         .expect("parse");
-        assert_eq!(parsed.provider.timeout, Some(900_000), "snake_case timeout must parse");
+        assert_eq!(
+            parsed.provider.timeout,
+            Some(900_000),
+            "snake_case timeout must parse"
+        );
 
         // (2) 端到点：临时 provider 目录 → compile_v2_provider_directory →
         //      manifest request_timeout_ms == 900_000
@@ -1015,11 +1017,9 @@ apiKey = "test-key"
 
         let mut referenced_models: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         referenced_models.insert("test-provider".to_string(), BTreeSet::new());
-        let (providers, _sources) =
-            compile_v2_provider_directory(&tmp, &referenced_models).expect("compile v2 provider dir");
-        let authoring = providers
-            .get("test-provider")
-            .expect("provider compiled");
+        let (providers, _sources) = compile_v2_provider_directory(&tmp, &referenced_models)
+            .expect("compile v2 provider dir");
+        let authoring = providers.get("test-provider").expect("provider compiled");
         assert_eq!(
             authoring.request_timeout_ms, 900_000,
             "V2→V3 end-to-end: timeout=900_000 must land in request_timeout_ms (was silently dropped)"
@@ -1059,17 +1059,14 @@ apiKey = "test-key"
 "#,
             )
             .expect("write");
-        let (providers_default, _sources_default) = compile_v2_provider_directory(
-            &tmp_default,
-            &referenced_models,
-        )
-        .expect("compile v2 provider dir (absent timeout)");
+        let (providers_default, _sources_default) =
+            compile_v2_provider_directory(&tmp_default, &referenced_models)
+                .expect("compile v2 provider dir (absent timeout)");
         let authoring_default = providers_default
             .get("test-provider")
             .expect("provider compiled");
         assert_eq!(
-            authoring_default.request_timeout_ms,
-            DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+            authoring_default.request_timeout_ms, DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
             "absent timeout must fall back to DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS (300_000)"
         );
         std::fs::remove_dir_all(&tmp_default).ok();
@@ -1093,7 +1090,11 @@ apiKey = "test-key"
 "#,
         )
         .expect("parse");
-        assert_eq!(parsed.provider.timeout, Some(900_000), "snake_case timeout must parse");
+        assert_eq!(
+            parsed.provider.timeout,
+            Some(900_000),
+            "snake_case timeout must parse"
+        );
 
         let absent: V2ProviderConfigFile = toml::from_str(
             r#"
@@ -1112,6 +1113,9 @@ apiKey = "test-key"
 "#,
         )
         .expect("parse");
-        assert_eq!(absent.provider.timeout, None, "absent timeout must be None (default applies later)");
+        assert_eq!(
+            absent.provider.timeout, None,
+            "absent timeout must be None (default applies later)"
+        );
     }
 }

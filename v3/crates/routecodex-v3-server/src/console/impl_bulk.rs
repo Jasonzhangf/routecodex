@@ -22,11 +22,8 @@ pub(crate) fn build_v3_console_emission_context(
     headers: &HeaderMap,
     payload: &Value,
 ) -> V3ConsoleEmissionContext {
-    let identity = resolve_v3_console_log_identity_from_parts(
-        headers,
-        payload,
-        &request_identity.request_id,
-    );
+    let identity =
+        resolve_v3_console_log_identity_from_parts(headers, payload, &request_identity.request_id);
     V3ConsoleEmissionContext {
         state: Arc::clone(state),
         entry_protocol: entry_protocol.to_string(),
@@ -101,7 +98,9 @@ pub(crate) fn build_v3_route_selection_event_sink(
     })
 }
 
-pub(crate) fn has_v3_realtime_route_selection_console_event(context: &V3ConsoleEmissionContext) -> bool {
+pub(crate) fn has_v3_realtime_route_selection_console_event(
+    context: &V3ConsoleEmissionContext,
+) -> bool {
     !context
         .realtime_route_selection_keys
         .lock()
@@ -121,7 +120,9 @@ pub(crate) fn mark_v3_route_selection_console_event_once(
         .insert(key)
 }
 
-pub(crate) fn format_v3_route_selection_console_event_key(observability: &V3RuntimeObservability) -> String {
+pub(crate) fn format_v3_route_selection_console_event_key(
+    observability: &V3RuntimeObservability,
+) -> String {
     format!(
         "{}|{}|{}|{}",
         observability.routing_group_id.as_deref().unwrap_or("-"),
@@ -854,7 +855,8 @@ pub(crate) enum V3SseConsoleStreamTerminal {
     Completed,
     Dropped,
     Failed(String),
-}impl V3SseConsoleFinalizer {
+}
+impl V3SseConsoleFinalizer {
     pub(crate) fn complete_relay_sse(mut self) {
         if let Err(error) = merge_v3_runtime_stream_observation(
             &mut self.observability,
@@ -936,7 +938,11 @@ pub(crate) enum V3SseConsoleStreamTerminal {
         self.emit_relay_sse_failure_console_line(499, raise_v3_sse_client_disconnect());
     }
 
-    pub(crate) fn emit_relay_sse_failure_console_line(self, status: u16, source: V3Error01SourceRaised) {
+    pub(crate) fn emit_relay_sse_failure_console_line(
+        self,
+        status: u16,
+        source: V3Error01SourceRaised,
+    ) {
         emit_v3_post_commit_sse_source_console_line_for_context(
             &self.context,
             &self.observability,
@@ -1034,7 +1040,11 @@ impl V3DirectSseConsoleFinalizer {
         )
     }
 
-    pub(crate) fn emit_direct_sse_failure_console_line(self, status: u16, source: V3Error01SourceRaised) {
+    pub(crate) fn emit_direct_sse_failure_console_line(
+        self,
+        status: u16,
+        source: V3Error01SourceRaised,
+    ) {
         emit_v3_post_commit_sse_source_console_line_for_context(
             &self.context,
             &self.observability,
@@ -1093,10 +1103,7 @@ pub(crate) fn is_v3_sse_terminal_success_status(status: &str) -> bool {
 }
 
 pub(crate) fn is_v3_sse_terminal_failure_status(status: &str) -> bool {
-    matches!(
-        status.trim(),
-        "failed" | "cancelled" | "canceled" | "error"
-    )
+    matches!(status.trim(), "failed" | "cancelled" | "canceled" | "error")
 }
 
 #[derive(Debug, Clone)]
@@ -1155,7 +1162,10 @@ pub(crate) fn resolve_v3_console_log_identity_from_parts(
     }
 }
 
-pub(crate) fn resolve_v3_console_project_path(headers: &HeaderMap, payload: &Value) -> Option<String> {
+pub(crate) fn resolve_v3_console_project_path(
+    headers: &HeaderMap,
+    payload: &Value,
+) -> Option<String> {
     let turn_metadata = parse_codex_turn_metadata(headers).ok().flatten();
     resolve_v3_console_project_path_with_metadata(headers, payload, turn_metadata.as_ref())
 }
@@ -1174,7 +1184,7 @@ pub(crate) fn resolve_v3_console_project_path_with_metadata(
     .or_else(|| read_first_scope_value(turn_metadata, TURN_METADATA_WORKDIR_PATHS))
     .or_else(|| read_first_scope_value(Some(payload), BODY_WORKDIR_PATHS))
     .or_else(|| read_v3_environment_context_cwd_from_payload(payload))
-        .or_else(|| console::read_injected_workspace_cwd_from_payload(payload))
+    .or_else(|| console::read_injected_workspace_cwd_from_payload(payload))
 }
 
 pub(crate) fn read_v3_environment_context_cwd_from_payload(payload: &Value) -> Option<String> {

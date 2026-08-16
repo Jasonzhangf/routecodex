@@ -758,9 +758,9 @@ fn request_consumes_noop_cli_and_uses_runtime_control_not_stdout() {
         messages[1],
         json!({"role":"assistant","content":"自然停下的可见文本"})
     );
-    let guidance_system = messages.iter().find(|message| {
-        message.get("role").and_then(Value::as_str) == Some("system")
-    });
+    let guidance_system = messages
+        .iter()
+        .find(|message| message.get("role").and_then(Value::as_str) == Some("system"));
     assert!(
         guidance_system.is_some_and(|message| {
             message
@@ -784,7 +784,8 @@ fn request_consumes_noop_cli_and_uses_runtime_control_not_stdout() {
         "activated Req04 must inject exactly-one provider-visible reasoningStop tool: {serialized}"
     );
     assert_eq!(
-        payload["tool_choice"], json!("required"),
+        payload["tool_choice"],
+        json!("required"),
         "activated Req04 must promote tool_choice to required: {serialized}"
     );
     assert_eq!(state.phase(), V3StoplessCenterPhase::ProviderTurnInFlight);
@@ -1232,10 +1233,7 @@ async fn thinking_relay_request_keeps_auto_tool_choice_and_preserves_effort() {
         .flatten()
         .filter(|tool| {
             tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
-                || tool
-                    .pointer("/function/name")
-                    .and_then(Value::as_str)
-                    == Some("reasoningStop")
+                || tool.pointer("/function/name").and_then(Value::as_str) == Some("reasoningStop")
         })
         .count();
     assert_eq!(
@@ -1561,8 +1559,7 @@ async fn server_override_precedence_applies_after_compiled_global_default() {
     };
     assert_eq!(enabled_body["status"], "completed");
     let enabled_provider_body =
-        serde_json::to_string(enabled_transport.captures.lock().unwrap().first().unwrap())
-            .unwrap();
+        serde_json::to_string(enabled_transport.captures.lock().unwrap().first().unwrap()).unwrap();
     assert!(
         enabled_provider_body.contains("reasoningStop"),
         "server override true with valid scope must inject the stopless reasoningStop tool: {enabled_provider_body}"

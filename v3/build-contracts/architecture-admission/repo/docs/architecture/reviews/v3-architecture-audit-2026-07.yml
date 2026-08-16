@@ -1,0 +1,63 @@
+# V3 架构审计 2026-07-30 Machine Manifest
+schema_version: "1"
+audit_id: "v3_architecture_audit_20260730"
+audited_at: "2026-07-30T18:45:00+08:00"
+
+gates_run:
+  - gate_id: "verify:v3-file-size"
+    status: "FAILED"
+    findings: ["10 files exceed ratchet/limit including kernel.rs 5485 vs 2919, server/lib.rs 10707 vs 8540"]
+  - gate_id: "verify:v3-hub-v1-node-file-topology"
+    status: "FAILED"
+    findings: ["3 mainline call edges missing symbol definitions"]
+  - gate_id: "verify:v3-module-boundaries"
+    status: "FAILED"
+    findings: ["Server must project Runtime output and cannot build or classify Error nodes"]
+  - gate_id: "verify:v3-resource-map"
+    status: "PASSED"
+  - gate_id: "verify:v3-resource-relation-edge-lock"
+    status: "PASSED"
+  - gate_id: "verify:v3-mainline-caller-flow"
+    status: "FAILED"
+    findings: ["chain:v3.debug_error_foundation.mainline fingerprint drift; auth required"]
+  - gate_id: "verify:v3-rust-only"
+    status: "PASSED"
+  - gate_id: "verify:v3-static-hook-registry"
+    status: "FAILED"
+    findings: ["non-adjacent builder patterns", "Hub v1 provider-specific branch vocabulary", "H1 skeleton connects Provider network"]
+  - gate_id: "verify:v3-hub-relay-runtime-closeout"
+    status: "FAILED"
+    findings: ["5 function-map entries missing", "symbol mismatches", "verification map missing test"]
+
+findings_summary:
+  P0: 7
+  P1: 5
+  P2: 3
+  critical_blockers:
+    - "P0-5 fingerprint drift requires Jason authorization; cannot self-modify lock"
+    - "P0-4 10 files exceed file-size ratchet/limit; no green path without decomposition"
+    - "P0-3 core V3 gates not in CI; merge/release has no architecture gate"
+
+phases_planned:
+  - phase: 0
+    name: "Truth freeze"
+    status: "done"
+    blockers: ["P0-5 needs Jason auth"]
+  - phase: 1
+    name: "CI/Build wiring"
+    status: "pending"
+  - phase: 2
+    name: "Registry convergence"
+    status: "pending"
+  - phase: 3
+    name: "Sole-entry proof"
+    status: "pending"
+  - phase: 4
+    name: "Module decomposition"
+    status: "pending"
+  - phase: 5
+    name: "Protocol/error closure"
+    status: "pending"
+  - phase: 6
+    name: "Docs/wiki/live/review closeout"
+    status: "pending"

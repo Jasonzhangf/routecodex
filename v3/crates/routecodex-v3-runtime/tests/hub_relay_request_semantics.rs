@@ -565,9 +565,9 @@ fn stopless_request_hook_consumes_noop_cli_from_runtime_control_not_stdout() {
         messages[1].get("content").and_then(Value::as_str),
         Some("自然停下的可见文本")
     );
-    let guidance_system = messages.iter().find(|message| {
-        message.get("role").and_then(Value::as_str) == Some("system")
-    });
+    let guidance_system = messages
+        .iter()
+        .find(|message| message.get("role").and_then(Value::as_str) == Some("system"));
     assert!(
         guidance_system.is_some_and(|message| {
             message

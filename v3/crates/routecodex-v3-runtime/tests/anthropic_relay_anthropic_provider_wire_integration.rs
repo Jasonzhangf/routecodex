@@ -56,8 +56,7 @@ impl ResponsesTransport for AnthropicProviderProjectionTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        *self.captured_projection.lock().unwrap() =
-            Some(request.provider_request_projection());
+        *self.captured_projection.lock().unwrap() = Some(request.provider_request_projection());
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
             request.provider_id(),

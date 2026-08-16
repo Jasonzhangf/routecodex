@@ -1,0 +1,119 @@
+lifecycle_id: request.mainline
+summary: HTTP request enters host, standardizes in Hub, routes via VR, exits
+  through provider wire build.
+owner_feature_id: hub.req_inbound_responses_context_capture
+entrypoint:
+  node_id: ServerReqInbound01ClientRaw
+  wiki_page: docs/architecture/wiki/mainline-call-graph.md
+  call_map_chain_id: request.mainline
+node_ids:
+  - HubReqChatProcess03Governed
+  - HubReqInbound02Standardized
+  - HubReqOutbound05ProviderSemantic
+  - ProviderReqOutbound06WirePayload
+  - ServerReqInbound01ClientRaw
+  - VrRoute04SelectedTarget
+edges:
+  - step_id: req-00
+    from_node: ServerReqInbound01ClientRaw
+    to_node: HubReqInbound02Standardized
+    status: anchored
+    owner_feature_id: server.responses_request_handler_bridge_surface
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.protocol_context
+      produces:
+        - request.normal_payload
+        - metadata.request_truth
+      side_channel_reads: []
+      side_channel_writes:
+        - metadata.request_truth
+  - step_id: req-01
+    from_node: ServerReqInbound01ClientRaw
+    to_node: HubReqInbound02Standardized
+    status: anchored
+    owner_feature_id: hub.req_inbound_responses_context_capture
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.protocol_context
+        - request.normal_payload
+      produces:
+        - metadata.request_truth
+      side_channel_reads: []
+      side_channel_writes:
+        - metadata.request_truth
+  - step_id: req-02
+    from_node: HubReqInbound02Standardized
+    to_node: HubReqChatProcess03Governed
+    status: anchored
+    owner_feature_id: hub.req_inbound_responses_context_capture
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - metadata.request_truth
+      produces:
+        - request.normal_payload
+      side_channel_reads:
+        - metadata.request_truth
+      side_channel_writes: []
+  - step_id: req-03
+    from_node: HubReqChatProcess03Governed
+    to_node: VrRoute04SelectedTarget
+    status: anchored
+    owner_feature_id: hub.route_selection_bridge
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - metadata.runtime_control
+        - route.retry_exclusion_set
+      produces:
+        - route.selection
+      side_channel_reads:
+        - metadata.runtime_control
+        - route.retry_exclusion_set
+      side_channel_writes:
+        - route.selection
+  - step_id: req-04
+    from_node: VrRoute04SelectedTarget
+    to_node: HubReqOutbound05ProviderSemantic
+    status: anchored
+    owner_feature_id: hub.req_outbound_provider_semantic
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - route.selection
+      produces:
+        - request.provider_semantic
+      side_channel_reads:
+        - route.selection
+      side_channel_writes: []
+  - step_id: req-05
+    from_node: HubReqOutbound05ProviderSemantic
+    to_node: ProviderReqOutbound06WirePayload
+    status: anchored
+    owner_feature_id: responses.request_compat_normalization
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.provider_semantic
+        - route.selection
+      produces:
+        - provider.wire_payload
+      side_channel_reads:
+        - route.selection
+      side_channel_writes: []
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

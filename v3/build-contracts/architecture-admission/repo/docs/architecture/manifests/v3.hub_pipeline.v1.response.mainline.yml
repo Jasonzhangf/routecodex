@@ -1,0 +1,161 @@
+schema_version: 1
+lifecycle_id: v3.hub_pipeline.v1.response
+owner_feature_id: v3.hub_pipeline_static_skeleton
+summary: Fixed Hub v1 response topology. Direct/Relay/JSON/SSE/servertool
+  outcomes merge before the sole client projection and Server frame exit.
+entrypoint:
+  node_id: V3ProviderRespInbound01Raw
+  symbol: build_v3_provider_resp_inbound_01_raw
+  source: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
+  call_map_chain_id: v3.hub_pipeline.v1.response
+return_path:
+  node_id: V3ServerRespOutbound06ClientFrame
+  symbol: build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05
+  source: v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
+canonical_docs:
+  - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+  - docs/architecture/wiki/v3-mainline-skeleton-sop.md
+  - docs/architecture/wiki/v3-mainline-caller-flow.md
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-verification-map.yml
+node_ids:
+  - V3ProviderRespInbound01Raw
+  - ProviderRespCompat02ProviderCompat
+  - V3HubRespInbound02Normalized
+  - V3HubRespChatProcess03Governed
+  - V3HubRespContinuation04Committed
+  - V3HubRespOutbound05ClientSemantic
+  - V3ServerRespOutbound06ClientFrame
+edges:
+  - step_id: v3-hub-resp-01
+    from_node: V3ProviderRespInbound01Raw
+    to_node: ProviderRespCompat02ProviderCompat
+    status: anchored
+    binding_kind: h1_typed_test
+    owner_feature_id: v3.hub_pipeline_static_skeleton
+    caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
+    callee_symbol: build_provider_resp_compat_02_from_v3_provider_resp_inbound_01
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
+    resource_flow:
+      consumes:
+        - v3.response.provider_raw
+        - v3.hub.provider_protocol
+      produces:
+        - v3.hub.response_semantic
+      side_channel_reads:
+        - v3.hub.provider_protocol
+      side_channel_writes: []
+  - step_id: v3-hub-resp-02
+    from_node: ProviderRespCompat02ProviderCompat
+    to_node: V3HubRespInbound02Normalized
+    status: anchored
+    binding_kind: h1_typed_test
+    owner_feature_id: v3.hub_pipeline_static_skeleton
+    caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
+    callee_symbol: build_v3_hub_resp_inbound_02_from_provider_resp_compat_02
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
+    resource_flow:
+      consumes:
+        - v3.response.provider_raw
+        - v3.hub.provider_protocol
+      produces:
+        - v3.hub.response_semantic
+      side_channel_reads:
+        - v3.hub.provider_protocol
+      side_channel_writes: []
+  - step_id: v3-hub-resp-03
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3HubRespChatProcess03Governed
+    status: anchored
+    binding_kind: h1_typed_test
+    owner_feature_id: v3.hub_pipeline_static_skeleton
+    caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
+    callee_symbol: build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    resource_flow:
+      consumes:
+        - v3.hub.response_semantic
+        - v3.hub.execution_plan
+      produces:
+        - v3.hub.response_semantic
+      side_channel_reads:
+        - v3.hub.execution_plan
+      side_channel_writes: []
+  - step_id: v3-hub-resp-04
+    from_node: V3HubRespChatProcess03Governed
+    to_node: V3HubRespContinuation04Committed
+    status: anchored
+    binding_kind: h1_typed_test
+    owner_feature_id: v3.hub_pipeline_static_skeleton
+    caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
+    callee_symbol: build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
+    resource_flow:
+      consumes:
+        - v3.hub.response_semantic
+        - v3.hub.continuation_ownership
+      produces:
+        - v3.continuation.remote_binding
+        - v3.continuation.local_context_truth
+      side_channel_reads:
+        - v3.hub.continuation_ownership
+      side_channel_writes:
+        - v3.continuation.remote_binding
+        - v3.continuation.local_context_truth
+  - step_id: v3-hub-resp-05
+    from_node: V3HubRespContinuation04Committed
+    to_node: V3HubRespOutbound05ClientSemantic
+    status: anchored
+    binding_kind: h1_typed_test
+    owner_feature_id: v3.hub_pipeline_static_skeleton
+    caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
+    resource_flow:
+      consumes:
+        - v3.hub.response_semantic
+        - v3.hub.entry_protocol
+      produces:
+        - v3.response.client_payload
+      side_channel_reads:
+        - v3.hub.entry_protocol
+      side_channel_writes: []
+  - step_id: v3-hub-resp-06
+    from_node: V3HubRespOutbound05ClientSemantic
+    to_node: V3ServerRespOutbound06ClientFrame
+    status: anchored
+    binding_kind: h1_typed_test
+    owner_feature_id: v3.hub_pipeline_static_skeleton
+    caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
+    callee_symbol: build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
+    resource_flow:
+      consumes:
+        - v3.response.client_payload
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+verification_gates:
+  - npm run verify:v3-hub-pipeline-core-manifests
+  - npm run test:v3-hub-pipeline-core-manifest-red-fixtures
+  - npm run verify:v3-hub-v1-node-file-topology
+  - npm run test:v3-hub-v1-node-file-topology-red-fixtures
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs
+  - git diff --check
+completion_boundary:
+  machine_readable_manifest: true
+  source_controlled: true
+  typed_test_bound: true
+  live_cutover: false
+  global_install_restart: false
+  forbidden_claim: This manifest locks the Hub v1 core topology only; it does not
+    claim provider live behavior, Direct cutover, Relay source slice completion,
+    continuation correctness, or P6 deletion.

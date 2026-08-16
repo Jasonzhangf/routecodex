@@ -1,7 +1,7 @@
 use crate::*;
+use axum::body::Body;
 use axum::extract::{Request, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, Response, StatusCode};
-use axum::body::Body;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -173,39 +173,35 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             return Err(());
         }
     };
-    let effective_execution_mode = match resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
-        entry_facts.previous_response_id.as_deref(),
-        execution_mode,
-        &state.responses_direct_continuation,
-        &state.responses_relay_local_continuation,
-        owner_resolution_context
-            .as_ref()
-            .map(|context| &context.direct_scope),
-        owner_resolution_context
-            .as_ref()
-            .map(|context| &context.relay_scope),
-        owner_resolution_context
-            .as_ref()
-            .map(|context| context.now_epoch_ms)
-            .unwrap_or(0),
-    ) {
-        Ok(mode) => responses_effective_execution_mode_for_entry_facts(mode, &entry_facts),
-        Err(error) => {
-            let message = project_v3_responses_previous_response_owner_resolution_error(error)
-                .body
-                .pointer("/error/message")
-                .and_then(Value::as_str)
-                .unwrap_or("Responses continuation owner resolution failed")
-                .to_string();
-            let _ = send_responses_websocket_error(
-                socket,
-                "invalid_request",
-                message,
-            )
-            .await;
-            return Err(());
-        }
-    };
+    let effective_execution_mode =
+        match resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
+            entry_facts.previous_response_id.as_deref(),
+            execution_mode,
+            &state.responses_direct_continuation,
+            &state.responses_relay_local_continuation,
+            owner_resolution_context
+                .as_ref()
+                .map(|context| &context.direct_scope),
+            owner_resolution_context
+                .as_ref()
+                .map(|context| &context.relay_scope),
+            owner_resolution_context
+                .as_ref()
+                .map(|context| context.now_epoch_ms)
+                .unwrap_or(0),
+        ) {
+            Ok(mode) => responses_effective_execution_mode_for_entry_facts(mode, &entry_facts),
+            Err(error) => {
+                let message = project_v3_responses_previous_response_owner_resolution_error(error)
+                    .body
+                    .pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Responses continuation owner resolution failed")
+                    .to_string();
+                let _ = send_responses_websocket_error(socket, "invalid_request", message).await;
+                return Err(());
+            }
+        };
     match effective_execution_mode {
         V3EntryProtocolExecutionMode::Direct => {
             let outcome = execute_responses_direct_server_outcome(
@@ -386,7 +382,9 @@ pub(crate) async fn execute_responses_relay_websocket_output(
     V3ResponsesDirectServerOutcome::RelayOutput(relay_output)
 }
 
-pub(crate) fn responses_websocket_create_payload(bytes: &[u8]) -> Result<serde_json::Value, String> {
+pub(crate) fn responses_websocket_create_payload(
+    bytes: &[u8],
+) -> Result<serde_json::Value, String> {
     let mut event: serde_json::Value = serde_json::from_slice(bytes)
         .map_err(|error| format!("client WebSocket event is not valid JSON: {error}"))?;
     let object = event

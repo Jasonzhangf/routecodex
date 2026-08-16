@@ -1,0 +1,132 @@
+lifecycle_id: v3.codex_sample_retention_snap_scope
+summary: Explicit CLI authorization is published through the managed manifest;
+  Debug bounds diagnostic copies; Server alone persists and trims Codex samples.
+owner_feature_id: v3.codex_sample_retention_snap_scope
+entrypoint:
+  node_id: V3CodexSample01CliAuthorization
+  wiki_page: null
+  call_map_chain_id: v3.codex_sample_retention_snap_scope
+node_ids:
+  - V3CodexSample01CliAuthorization
+  - V3CodexSample02ManifestAuthorizationPublished
+  - V3CodexSample03AuthorizedCapture
+  - V3CodexSample04PayloadBudgeted
+  - V3CodexSample05FilesystemPersisted
+  - V3CodexSample06RetentionEnforced
+  - V3ServerStartup01ListenerSetPreflight
+edges:
+  - step_id: v3-codex-sample-01
+    from_node: V3CodexSample01CliAuthorization
+    to_node: V3CodexSample02ManifestAuthorizationPublished
+    status: anchored
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes: []
+      produces:
+        - v3.debug.codex_sample_authorization
+      side_channel_reads: []
+      side_channel_writes:
+        - v3.debug.codex_sample_authorization
+  - step_id: v3-codex-sample-02
+    from_node: V3CodexSample02ManifestAuthorizationPublished
+    to_node: V3CodexSample03AuthorizedCapture
+    status: anchored
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.runtime_projection
+      produces:
+        - v3.debug.codex_sample_authorization
+      side_channel_reads: []
+      side_channel_writes:
+        - v3.debug.codex_sample_authorization
+  - step_id: v3-codex-sample-03
+    from_node: V3CodexSample03AuthorizedCapture
+    to_node: V3CodexSample04PayloadBudgeted
+    status: anchored
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.debug.codex_sample_authorization
+      produces:
+        - v3.debug.payload_budget
+      side_channel_reads:
+        - v3.debug.codex_sample_authorization
+      side_channel_writes:
+        - v3.debug.payload_budget
+  - step_id: v3-codex-sample-04
+    from_node: V3CodexSample04PayloadBudgeted
+    to_node: V3CodexSample05FilesystemPersisted
+    status: anchored
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.debug.codex_sample_authorization
+        - v3.debug.payload_budget
+      produces:
+        - v3.debug.codex_sample_filesystem
+      side_channel_reads:
+        - v3.debug.codex_sample_authorization
+        - v3.debug.payload_budget
+      side_channel_writes:
+        - v3.debug.codex_sample_filesystem
+  - step_id: v3-codex-sample-05
+    from_node: V3CodexSample04PayloadBudgeted
+    to_node: V3CodexSample05FilesystemPersisted
+    status: anchored
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.debug.payload_budget
+      produces:
+        - v3.debug.codex_sample_filesystem
+      side_channel_reads:
+        - v3.debug.payload_budget
+      side_channel_writes:
+        - v3.debug.codex_sample_filesystem
+  - step_id: v3-codex-sample-06
+    from_node: V3CodexSample05FilesystemPersisted
+    to_node: V3CodexSample06RetentionEnforced
+    status: anchored
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.debug.codex_sample_filesystem
+      produces:
+        - v3.debug.codex_sample_filesystem
+      side_channel_reads:
+        - v3.debug.codex_sample_filesystem
+      side_channel_writes:
+        - v3.debug.codex_sample_filesystem
+  - step_id: v3-codex-sample-07
+    from_node: V3ServerStartup01ListenerSetPreflight
+    to_node: V3CodexSample06RetentionEnforced
+    status: anchored
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.debug.codex_sample_filesystem
+      produces:
+        - v3.debug.codex_sample_filesystem
+      side_channel_reads:
+        - v3.debug.codex_sample_filesystem
+      side_channel_writes:
+        - v3.debug.codex_sample_filesystem
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

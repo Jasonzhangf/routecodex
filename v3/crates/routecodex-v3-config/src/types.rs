@@ -951,9 +951,7 @@ impl V3Config05ManifestPublished {
     /// provider model declarations. The Virtual Router consumes this index to
     /// construct implicit capability pools without interpreting provider
     /// internals itself.
-    pub fn capability_model_candidates(
-        &self,
-    ) -> BTreeMap<String, Vec<V3CapabilityModelCandidate>> {
+    pub fn capability_model_candidates(&self) -> BTreeMap<String, Vec<V3CapabilityModelCandidate>> {
         let mut index: BTreeMap<String, Vec<V3CapabilityModelCandidate>> = BTreeMap::new();
         for provider in self.providers.values() {
             if !provider.enabled {

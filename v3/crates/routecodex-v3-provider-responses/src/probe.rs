@@ -5,8 +5,7 @@ use crate::transport::{
     V3Transport13ResponsesRequest,
 };
 use crate::wire::{
-    build_v3_provider_12_responses_wire_payload, V3ResponsesProviderTarget,
-    V3ResponsesStreamIntent,
+    build_v3_provider_12_responses_wire_payload, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
 };
 
 pub fn build_v3_provider_global_probe_request(
@@ -50,11 +49,17 @@ pub fn build_v3_provider_global_probe_request(
             Vec::new(),
         ),
         "anthropic" => (
-            format!("{}/v1/messages?beta=true", target.base_url.trim_end_matches('/')),
-            [build_v3_anthropic_provider_request_header("anthropic-version", "2023-06-01")]
-                .into_iter()
-                .flatten()
-                .collect(),
+            format!(
+                "{}/v1/messages?beta=true",
+                target.base_url.trim_end_matches('/')
+            ),
+            [build_v3_anthropic_provider_request_header(
+                "anthropic-version",
+                "2023-06-01",
+            )]
+            .into_iter()
+            .flatten()
+            .collect(),
         ),
         "gemini" => (
             format!(

@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports)]
+
 // Red-to-green: Relay Req04 注入 stopless 合约后 handoff 到 SameProtocolDirect，
 // handoff payload 必须撤销当前轮 relay 注入的 stopless 合约（reasoningStop tool、
 // 推进准则、tool_choice），由 Direct 侧按自身配置决定是否注入。

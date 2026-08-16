@@ -392,7 +392,9 @@ targets = [
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
         .expect_err("metadata_center_local_search without backend binding must fail");
     assert!(
-        error.to_string().contains("requires exactly one web_search_backend binding"),
+        error
+            .to_string()
+            .contains("requires exactly one web_search_backend binding"),
         "unexpected error: {error}"
     );
 
@@ -400,10 +402,9 @@ targets = [
         "web_search_execution_mode = \"metadata_center_local_search\"",
         "web_search_execution_mode = \"metadata_center_local_search\"\nweb_search_backend = \"local.search\"",
     );
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&source_with_backend).unwrap(),
-    )
-    .expect("metadata_center_local_search with backend binding must compile");
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source_with_backend).unwrap())
+            .expect("metadata_center_local_search with backend binding must compile");
     assert_eq!(
         manifest.providers["local"].models["local-model"]
             .web_search_backend_binding
@@ -455,7 +456,9 @@ targets = [
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
         .expect_err("same model name with conflicting web_search_execution_mode must fail");
     assert!(
-        error.to_string().contains("conflicting web_search_execution_mode"),
+        error
+            .to_string()
+            .contains("conflicting web_search_execution_mode"),
         "unexpected error: {error}"
     );
 }
@@ -736,10 +739,8 @@ reason_code = "subscription_invalid_without_token"
 message_mode = "code_only"
 "#
     );
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&path_config).unwrap(),
-    )
-    .unwrap();
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&path_config).unwrap()).unwrap();
     let policy = manifest
         .error
         .provider_error_action_policy
@@ -756,15 +757,21 @@ message_mode = "code_only"
     );
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&ambiguous).unwrap())
         .unwrap_err();
-    assert!(error.to_string().contains("both action and path"), "{error}");
+    assert!(
+        error.to_string().contains("both action and path"),
+        "{error}"
+    );
 
     let invalid = path_config.replace(
         "step = \"cooldown\"\nscope = \"provider_instance\"\nduration_ms = 3600000\nprovider_global_failure = true",
         "step = \"project\"\nstatus = 502\nreason_code = \"early_project\"\nmessage_mode = \"code_only\"",
     );
-    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap())
-        .unwrap_err();
-    assert!(error.to_string().contains("project must be the final step"), "{error}");
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(
+        error.to_string().contains("project must be the final step"),
+        "{error}"
+    );
 }
 
 #[test]

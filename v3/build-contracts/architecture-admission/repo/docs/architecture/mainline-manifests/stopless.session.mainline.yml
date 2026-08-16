@@ -1,0 +1,40 @@
+lifecycle_id: stopless.session.mainline
+summary: "Stopless three-round contract inside Chat Process boundary: every managed relay request injects stopless system guidance plus exactly one provider-facing/model-visible internal reasoningStop tool, Round-1/2 missing or invalid stops project a client-visible no-input CLI, the next provider request receives only a StoplessCenter state-machine-selected complete non-persistent ordinary user continuation guideline plus the fresh tool contract, and guard terminal stops without another CLI projection."
+owner_feature_id: hub.servertool_stopless_cli_continuation
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
+entrypoint:
+  node_id: StoplessResp01StopDetected
+  wiki_page: docs/architecture/wiki/stopless-session-mainline-source.md
+  call_map_chain_id: stopless.session.mainline
+node_ids:
+  - StoplessCli04ProjectionPlanned
+  - StoplessCli06ClientExecuted
+  - StoplessReq07ContinuationRestored
+  - StoplessReq08GuidanceRewritten
+  - StoplessReq09SchemaContractInjected
+  - StoplessResp01StopDetected
+  - StoplessResp02SchemaGateEvaluated
+  - StoplessState03RuntimeSnapshotResolved
+  - VrRoute04SelectedTarget
+step_ids:
+  - stl-01
+  - stl-02
+  - stl-03
+  - stl-05
+  - stl-06
+  - stl-07
+  - stl-08
+edge_status_counts:
+  anchored: 7
+  partial: 0
+  binding_pending: 0
+  total: 7
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: stopless.session.mainline
+  min_function_feature: hub.servertool_stopless_cli_continuation
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

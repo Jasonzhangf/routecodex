@@ -722,7 +722,11 @@ async fn responses_relay_openai_chat_target_passes_through_redacted_tool_schema_
 
     assert_eq!(output.status, 200);
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 1, "redacted schema placeholders must reach provider wire");
+    assert_eq!(
+        captures.len(),
+        1,
+        "redacted schema placeholders must reach provider wire"
+    );
     let wire_text = serde_json::to_string(&captures[0]).expect("wire serializable");
     assert!(
         wire_text.contains("[REDACTED]"),
@@ -1625,8 +1629,7 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
     assert_eq!(observability.provider_status, Some(200));
     assert_eq!(observability.attempts, Some(4));
     assert_eq!(observability.unavailable_candidates.len(), 1);
-    assert!(observability.unavailable_candidates[0]
-        .contains("limited:key1:gpt-5.5:availability("));
+    assert!(observability.unavailable_candidates[0].contains("limited:key1:gpt-5.5:availability("));
     assert_eq!(observability.provider_failure_events.len(), 3);
     let provider_event = observability.provider_failure_events.last().unwrap();
     assert_eq!(provider_event.provider_key, "limited:key1:gpt-5.5");

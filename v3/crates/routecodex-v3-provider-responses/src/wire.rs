@@ -254,9 +254,9 @@ fn strip_v3_request_encrypted_reasoning(body: &mut Value, deepseek_compat: bool)
                 .iter()
                 .any(|key| {
                     obj.get(*key).is_some_and(|value| {
-                        !value.is_null()
-                            && !(value.is_array() && value.as_array().is_some_and(Vec::is_empty))
-                            && !(value.as_str().is_some_and(str::is_empty))
+                        !(value.is_null()
+                            || value.as_str().is_some_and(str::is_empty)
+                            || (value.is_array() && value.as_array().is_some_and(Vec::is_empty)))
                     })
                 });
             if !has_plain_content {

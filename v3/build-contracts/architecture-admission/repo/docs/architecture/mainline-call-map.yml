@@ -1,0 +1,2206 @@
+version: 1
+status: seed
+chains:
+- chain_id: architecture.repository_filesystem.mainline
+  summary: Repository authoring policy is verified by the required repo-sanity build
+    and CI gate without entering runtime paths.
+  entry_contract:
+    node: RepoFilesystemAuthoring01Policy
+    owner_doc: docs/architecture/function-map.yml
+  edges:
+  - step_id: repo-filesystem-01
+    from_node: RepoFilesystemAuthoring01Policy
+    to_node: RepoFilesystemVerify02Gate
+    caller_symbol: checkRepositoryFilesystemGovernance
+    caller_file: scripts/ci/repo-sanity.mjs
+    callee_symbol: verifyRepositoryFilesystemGovernance
+    callee_file: scripts/architecture/verify-repository-filesystem-governance.mjs
+    owner_feature_id: architecture.repository_filesystem_governance
+    semantic_input: repository root entries, Git tracked paths, and Git ignore decisions
+    semantic_output: fail-fast repository filesystem contract verdict
+    resource_flow:
+      consumes:
+      - architecture.repository_filesystem_contract
+      produces:
+      - architecture.repository_filesystem_contract
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+- chain_id: v3.v2_config_toml_compat_5555.mainline
+  summary: V3 config store detects explicit V2 root TOML and compiles it with provider
+    config.v2.toml files into the V3 published manifest for 5555.
+  entry_contract:
+    node: V3Config01FileSource
+    owner_doc: docs/architecture/function-map.yml
+  edges:
+  - step_id: v3-v2-config-01
+    from_node: V3Config01FileSource
+    to_node: V3Config02AuthoringParsed
+    caller_symbol: parse_authoring_for_store
+    caller_file: v3/crates/routecodex-v3-config/src/store.rs
+    callee_symbol: compile_v2_config_02_authoring_from_file
+    callee_file: v3/crates/routecodex-v3-config/src/v2_compat.rs
+    owner_feature_id: v3.v2_config_toml_compat_5555
+    semantic_input: config.toml raw bytes with version=2.0.0 and virtualrouterMode=v2
+    semantic_output: V3Config02AuthoringParsed with V2 servers/providers/forwarders/route
+      groups plus canonical Hub V1 endpoint bindings and server execution declarations
+      projected into V3 authoring
+    resource_flow:
+      consumes:
+      - config.authoring_surface
+      - config.provider_config_text_codec
+      produces:
+      - config.runtime_projection
+      - config.provider_profile_projection
+      - config.routing_policy_projection
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-v2-config-02
+    from_node: V3Config02AuthoringParsed
+    to_node: V3Config05ManifestPublished
+    caller_symbol: load_snapshot_with_source_identity
+    caller_file: v3/crates/routecodex-v3-config/src/store.rs
+    callee_symbol: validate_v3_config_03_schema_from_v3_config_02
+    callee_file: v3/crates/routecodex-v3-config/src/lib.rs
+    owner_feature_id: v3.v2_config_toml_compat_5555
+    semantic_input: V2-projected V3 authoring
+    semantic_output: validated V3 manifest consumed by CLI/server/runtime
+    resource_flow:
+      consumes:
+      - config.runtime_projection
+      - config.provider_profile_projection
+      - config.routing_policy_projection
+      produces:
+      - config.runtime_projection
+      - config.provider_profile_projection
+      - config.routing_policy_projection
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+- chain_id: servertool.hook_skeleton.mainline
+  invariant: Stopless has no standalone lifecycle entrypoint; every stopless transition
+    is dispatched by ServertoolReqHook or ServertoolRespHook.
+  summary: 'Servertool standard hook skeleton: CLI remains the business execution
+    lifecycle, while request/result injection, response interception, schema validation,
+    hook response injection, followup/reenter effect planning, and finalization are
+    governed by Rust-owned required/optional hooks.'
+  entry_contract:
+    node: HubRespChatProcess03Governed
+    owner_doc: docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md
+  edges:
+  - step_id: sth-resp-01
+    from_node: HubRespChatProcess03Governed
+    to_node: ServertoolRespHook01Intercepted
+    caller_symbol: govern_v3_hub_relay_response
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    callee_symbol: apply_v3_stop_servertool_hook_at_resp03
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: canonical provider response after Hub response chat-process parsing
+    semantic_output: response interception event for normal response, abnormal/error
+      response, stopless trigger, `finish_reason=stop` schema candidate, `finish_reason=tool_calls`
+      registered internal servertool call candidate, or no-op
+    resource_flow:
+      consumes:
+      - response.hub_semantic
+      - metadata.runtime_control
+      produces:
+      - servertool.followup_state
+      side_channel_reads:
+      - metadata.runtime_control
+      side_channel_writes:
+      - servertool.followup_state
+    status: anchored
+    note: Anchored by Rust Hub response governance calling the stopless response hook
+      skeleton before continuation save, outbound mapping, or SSE projection.
+  - step_id: sth-resp-02
+    from_node: ServertoolRespHook01Intercepted
+    to_node: ServertoolRespHook02SchemaValidated
+    caller_symbol: apply_v3_stop_servertool_hook_at_resp03
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: response_has_stopless_stop_trigger
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: 'response interception event plus skeleton-selected schema source:
+      assistant text/fence for stopless `finish_reason=stop`; registered non-stopless
+      servertools may still supply their own governed arguments'
+    semantic_output: single schema validation event covering valid terminal, non-terminal/still-running,
+      empty schema/no_schema, invalid schema, malformed args, already-terminal cases,
+      and client-projection-required cases
+    resource_flow:
+      consumes:
+      - servertool.followup_state
+      - response.hub_semantic
+      produces:
+      - servertool.followup_state
+      side_channel_reads:
+      - servertool.followup_state
+      side_channel_writes:
+      - servertool.followup_state
+    status: anchored
+    note: Anchored by Rust stop gateway inspection inside the Chat Process response
+      hook skeleton. Stopless schema judgment reads assistant output or internal `reasoningStop`
+      arguments; managed relay declares a fresh provider-facing/model-visible `reasoningStop`
+      tool on request side exactly once, while client-visible continuation still uses
+      the public CLI alias.
+  - step_id: sth-resp-03
+    from_node: ServertoolRespHook02SchemaValidated
+    to_node: ServertoolRespHook03HookResponseInjected
+    caller_symbol: apply_v3_stop_servertool_hook_at_resp03
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: project_stopless_noop_for_stop_candidate
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: schema validation pass/deny/error event
+    semantic_output: terminal-stop summary projection when schema passes, or client-visible
+      shell `exec_command(routecodex hook run reasoningStop ...)` projection plan
+      when feedback/client execution is required
+    resource_flow:
+      consumes:
+      - servertool.followup_state
+      produces:
+      - response.hub_semantic
+      - servertool.followup_state
+      side_channel_reads:
+      - servertool.followup_state
+      side_channel_writes:
+      - servertool.followup_state
+    status: anchored
+    note: Anchored by Rust stopless runtime planning in the response hook skeleton;
+      business execution remains a client-visible CLI projection rather than server-side
+      tool execution.
+  - step_id: sth-resp-06
+    from_node: ServertoolRespHook03HookResponseInjected
+    to_node: ServertoolRespHook06ProjectionFinalized
+    caller_symbol: project_stopless_noop_for_stop_candidate
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: strip_current_stopless_control_text
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: post-intercept governed response candidate plus hook events; server-side
+      runtime action bridge retired
+    semantic_output: final governed response truth with internal tool stripped and
+      client projection handoff selected
+    resource_flow:
+      consumes:
+      - response.hub_semantic
+      - servertool.followup_state
+      produces:
+      - response.hub_semantic
+      side_channel_reads:
+      - servertool.followup_state
+      side_channel_writes: []
+    status: anchored
+    note: Anchored by Rust projection finalization for non-terminal stopless hook
+      results; internal tool semantics are converted to the governed client shell
+      projection before outbound mapping.
+  - step_id: sth-resp-07
+    from_node: ServertoolRespHook06ProjectionFinalized
+    to_node: HubRespOutbound04ClientSemantic
+    caller_symbol: finalize_hub_resp_outbound_04_client_semantic
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    callee_symbol: build_hub_resp_outbound_04_client_payload_for_protocol
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: final servertool governed response truth
+    semantic_output: normal Hub response outbound client semantic
+    resource_flow:
+      consumes:
+      - response.hub_semantic
+      - servertool.followup_state
+      produces:
+      - response.client_payload
+      side_channel_reads:
+      - servertool.followup_state
+      side_channel_writes: []
+    status: anchored
+    note: Anchored by Rust response finalize/remap after the stopless hook payload
+      is selected; servertool returns to the normal Hub response outbound chain.
+  - step_id: sth-cli-01
+    from_node: ServertoolRespHook03HookResponseInjected
+    to_node: ServertoolCli04ClientExecuted
+    caller_symbol: build_stopless_auto_cli_projection_from_engine_json
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: build_stopless_auto_cli_projection_json
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: client-visible exec_command projection plan
+    semantic_output: client executes `routecodex hook run <toolName> --input-json
+      <json>` and returns ordinary tool result
+    resource_flow:
+      consumes:
+      - servertool.followup_state
+      produces:
+      - servertool.followup_state
+      side_channel_reads:
+      - servertool.followup_state
+      side_channel_writes:
+      - servertool.followup_state
+    status: anchored
+    note: Anchored by Rust CLI projection builder emitting the client-visible `routecodex
+      hook run reasoningStop ...` command; the hook still does not execute client
+      CLI.
+  - step_id: sth-req-01
+    from_node: ChatProcReqContinuation03CanonicalRestored
+    to_node: ServertoolReqHook01ResultParsed
+    caller_symbol: run_servertool_request_hooks
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+    callee_symbol: apply_req_process_tool_governance
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: post-continuation-restore request containing ordinary tool result
+      / CLI stdout
+    semantic_output: parsed public hook result event; auto-projected stopless shell
+      call/result evidence is consumed as private control truth and removed before
+      provider projection, while non-stopless servertool results retain their governed
+      semantics
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      - servertool.followup_state
+      produces:
+      - servertool.followup_state
+      side_channel_reads:
+      - servertool.followup_state
+      side_channel_writes:
+      - servertool.followup_state
+    status: anchored
+    note: Anchored by the Rust servertool request hook scheduler after `ChatProcReqContinuation03CanonicalRestored`.
+      Stopless shell call/result pairs are never restored as provider-visible tool
+      history; they collapse into an ordinary user turn before request governance,
+      and no stopless/servertool semantics may run in the continuation save/restore
+      immutable interval.
+  - step_id: sth-req-02
+    from_node: ServertoolReqHook01ResultParsed
+    to_node: ServertoolReqHook02TextRewritten
+    caller_symbol: normalize_responses_input_function_calls
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: build_stop_hook_guidance_text_from_output
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.req_chatprocess_governance
+    semantic_input: parsed hook result plus schema guidance/feedback
+    semantic_output: optional model-visible text rewrite or no-op event
+    resource_flow:
+      consumes:
+      - servertool.followup_state
+      produces:
+      - request.normal_payload
+      side_channel_reads:
+      - servertool.followup_state
+      side_channel_writes: []
+    status: anchored
+    note: Anchored by Rust guidance text construction from the parsed stopless CLI
+      result; malformed or non-terminal schema feedback becomes model-visible corrective
+      guidance without replaying raw shell history.
+  - step_id: sth-req-03
+    from_node: ServertoolReqHook02TextRewritten
+    to_node: ServertoolReqHook03ToolInjected
+    caller_symbol: apply_req_process_tool_governance
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: maybe_apply_servertool_orchestration
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.req_chatprocess_governance
+    semantic_input: request semantic after optional text rewrite
+    semantic_output: request tool declarations and tool constraints injected for servertool-managed
+      turns
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      - servertool.followup_state
+      produces:
+      - request.normal_payload
+      side_channel_reads:
+      - servertool.followup_state
+      side_channel_writes: []
+    status: anchored
+    note: Anchored by Rust req_chatprocess governance applying servertool orchestration
+      operations after stopless/text rewrite. Stopless schema-contract reinjection
+      is represented separately by `stopless.session.mainline` edge `stl-07`.
+  - step_id: sth-req-04
+    from_node: ServertoolReqHook03ToolInjected
+    to_node: ServertoolReqHook04RequestFinalized
+    caller_symbol: apply_req_process_tool_governance
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: build_processed_request
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
+    owner_feature_id: hub.req_chatprocess_governance
+    semantic_input: request semantic with parsed result/rewrite/tool injection events
+    semantic_output: final request semantic ready for HubReqChatProcess03Governed
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      produces:
+      - request.normal_payload
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+    note: Anchored by Rust req_chatprocess governance building the processed request
+      before it re-enters the typed HubReqChatProcess03Governed entrypoint.
+  - step_id: sth-req-05
+    from_node: ServertoolReqHook04RequestFinalized
+    to_node: HubReqChatProcess03Governed
+    caller_symbol: apply_hub_req_chatprocess_03_tool_governance
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_chatprocess_03_governance_boundary.rs
+    callee_symbol: run_hub_req_chatprocess_03_governed_entrypoint
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+    owner_feature_id: hub.req_chatprocess_governance
+    semantic_input: final servertool-governed request semantic
+    semantic_output: normal Hub request chat-process governed semantic
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      produces:
+      - request.normal_payload
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+    note: Anchored by the Rust request-side governance boundary re-entering the normal
+      Hub request chain.
+- chain_id: direct.semantic_classification.mainline
+  summary: Explicit provider/model direct policy compiles to a closed semantic class,
+    resolves only after Virtual Router selects a real target, and drives paired request/response
+    projection plans without payload inference.
+  entry_contract:
+    node: ConfigDirect01AuthoringPolicy
+    owner_doc: docs/design/direct-semantic-classification.md
+  edges:
+  - step_id: dsc-01
+    from_node: ConfigDirect01AuthoringPolicy
+    to_node: ConfigDirect02ValidatedPolicy
+    caller_symbol: normalize_model_direct_policy
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs
+    callee_symbol: validate_config_direct_02
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+    owner_feature_id: hub.direct_semantic_classification
+    semantic_input: provider/model authoring field `direct.semantics` with allowed
+      values routing or passthrough
+    semantic_output: deterministic validated direct policy; missing value materializes
+      routing and unknown value fails validation
+    resource_flow:
+      consumes:
+      - config.authoring_surface
+      produces:
+      - config.provider_profile_projection
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+    note: Provider model authoring is compiled once into the deterministic provider
+      profile projection; missing semantics materializes routing and illegal shapes
+      fail before runtime.
+  - step_id: dsc-02
+    from_node: ConfigDirect02ValidatedPolicy
+    to_node: VrDirect03ResolvedSemantics
+    caller_symbol: resolve_direct_semantic_classification_json
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+    callee_symbol: resolve_direct_semantic_classification
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+    owner_feature_id: hub.direct_semantic_classification
+    semantic_input: compiled provider/model policy plus Virtual Router real selected
+      provider/model target, selected target routeThinking, and directHistoryToolImageCleanup
+    semantic_output: request-scoped DirectSemanticClass, source provenance, route_thinking,
+      and direct history tool image cleanup flag after forwarder resolution
+    resource_flow:
+      consumes:
+      - config.provider_profile_projection
+      - route.selection
+      produces:
+      - direct.semantic_policy
+      side_channel_reads:
+      - route.selection
+      side_channel_writes:
+      - direct.semantic_policy
+    status: anchored
+    note: VR may resolve classification and provenance only. Route thinking must come
+      from RoutePoolTier.thinking through SelectionResult.route_thinking and target.routeThinking,
+      not routeParams. It must not mutate request/response payload, read MetadataCenter
+      as policy truth, or let a forwarder own the policy.
+  - step_id: dsc-03
+    from_node: VrDirect03ResolvedSemantics
+    to_node: DirectReq04ProjectionPlan
+    caller_symbol: plan_request_hooks
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_model_hooks.rs
+    callee_symbol: build_direct_req_04_projection_plan
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+    owner_feature_id: hub.direct_semantic_classification
+    semantic_input: resolved semantic class plus current client request, selected
+      canonical model, route thinking, explicit request thinking, and direct history
+      tool image cleanup flag
+    semantic_output: closed request field projection plan using preserve/set actions
+      plus configured historical tool-output image placeholder cleanup
+    resource_flow:
+      consumes:
+      - direct.semantic_policy
+      - request.normal_payload
+      - route.selection
+      produces:
+      - provider.wire_payload
+      side_channel_reads:
+      - direct.semantic_policy
+      - route.selection
+      side_channel_writes: []
+    status: anchored
+    note: Routing plans canonical model plus route thinking. Passthrough plans preserve
+      client model/thinking. Host performs IO only and cannot branch on semantic class.
+  - step_id: dsc-04
+    from_node: VrDirect03ResolvedSemantics
+    to_node: DirectResp05ProjectionPlan
+    caller_symbol: plan_direct_route_response_action
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_response_action.rs
+    callee_symbol: build_direct_resp_05_projection_plan
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+    owner_feature_id: hub.direct_semantic_classification
+    semantic_input: same request-scoped resolved semantic contract and raw provider
+      JSON/SSE response
+    semantic_output: closed response projection plan using passthrough or restore-original
+      actions
+    resource_flow:
+      consumes:
+      - direct.semantic_policy
+      - response.provider_raw
+      produces:
+      - response.client_payload
+      side_channel_reads:
+      - direct.semantic_policy
+      side_channel_writes: []
+    status: anchored
+    note: Response consumes the same resolved contract as request. It must not infer
+      mode from originalClientModel, payloadChanged, response shape, or provider name.
+- chain_id: vr.route_classifier.mainline
+  summary: V2 Virtual Router consumes the shared Rust current-turn/tool classifier
+    before producing the single selected-route truth.
+  entry_contract:
+    node: HubReqChatProcess03Governed
+    owner_doc: docs/goals/v3-v2-route-classifier-parity-test-design.md
+  edges:
+  - step_id: vrc-01
+    from_node: HubReqChatProcess03Governed
+    to_node: VrRouteClassifier03ActiveTurnSignals
+    caller_symbol: build_routing_features
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
+    callee_symbol: extract_active_turn_signals
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/active_turn.rs
+    owner_feature_id: vr.route_classifier
+    semantic_input: governed request normal payload
+    semantic_output: current active-turn user/tool facts with declarations and history
+      excluded
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      produces:
+      - vr.route_classification_decision
+      side_channel_reads: []
+      side_channel_writes:
+      - vr.route_classification_decision
+    status: anchored
+  - step_id: vrc-02
+    from_node: VrRouteClassifier03ActiveTurnSignals
+    to_node: VrRouteClassifier03ToolClassification
+    caller_symbol: classify_call_value
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/active_turn.rs
+    callee_symbol: classify_tool_call
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/tools.rs
+    owner_feature_id: vr.route_classifier
+    semantic_input: actual current-turn tool name and arguments
+    semantic_output: thinking/coding/search/tools/websearch tool category
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      produces:
+      - vr.route_classification_decision
+      side_channel_reads: []
+      side_channel_writes:
+      - vr.route_classification_decision
+    status: anchored
+  - step_id: vrc-03
+    from_node: VrRouteClassifier03ToolClassification
+    to_node: VrRouteClassifier03ShellClassification
+    caller_symbol: classify_tool_call
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/tools.rs
+    callee_symbol: classify_shell_command
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/shell.rs
+    owner_feature_id: vr.route_classifier
+    semantic_input: actual shell command text
+    semantic_output: V2-compatible shell category
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      produces:
+      - vr.route_classification_decision
+      side_channel_reads: []
+      side_channel_writes:
+      - vr.route_classification_decision
+    status: anchored
+  - step_id: vrc-04
+    from_node: VrRouteClassifier03ActiveTurnSignals
+    to_node: VrRouteClassifier03Classified
+    caller_symbol: classify
+    caller_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    callee_symbol: classify_route
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/route.rs
+    owner_feature_id: vr.route_classifier
+    semantic_input: current-turn facts plus request-scoped metadata and configured
+      longcontext threshold
+    semantic_output: ordered primary, optional configured longcontext, mandatory default
+      route contract
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      - metadata.runtime_control
+      - vr.route_token_estimate
+      produces:
+      - vr.route_classification_decision
+      side_channel_reads:
+      - metadata.runtime_control
+      - vr.route_token_estimate
+      side_channel_writes:
+      - vr.route_classification_decision
+    status: anchored
+  - step_id: vrc-05
+    from_node: VrRouteClassifier03Classified
+    to_node: VrRoute04SelectedTarget
+    caller_symbol: route
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+    callee_symbol: classify
+    callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    owner_feature_id: vr.route_selection
+    semantic_input: shared ordered route classification plus V2 routing group and
+      provider availability
+    semantic_output: single V2 selected route and provider target truth
+    resource_flow:
+      consumes:
+      - vr.route_classification_decision
+      produces:
+      - vr.route_selection_decision
+      side_channel_reads:
+      - vr.route_classification_decision
+      - metadata.runtime_control
+      side_channel_writes:
+      - vr.route_selection_decision
+    status: anchored
+- chain_id: vr.route_token_estimation.mainline
+  summary: Virtual Router derives request token estimate with Rust tiktoken before
+    route classification; image/video bytes do not inflate the estimate.
+  entry_contract:
+    node: HubReqChatProcess03Governed
+    owner_doc: docs/goals/vr-rust-tiktoken-image-body-limit-test-design.md
+  edges:
+  - step_id: vrt-01
+    from_node: HubReqChatProcess03Governed
+    to_node: VrRouteTokenEstimate03Derived
+    caller_symbol: route
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+    callee_symbol: build_routing_features
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
+    owner_feature_id: vr.route_token_estimation
+    semantic_input: governed request body plus route metadata estimate hint
+    semantic_output: Rust tiktoken request token estimate with media payload bytes
+      omitted
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      produces:
+      - vr.route_token_estimate
+      side_channel_reads:
+      - metadata.runtime_control
+      side_channel_writes:
+      - vr.route_token_estimate
+    status: anchored
+  - step_id: vrt-02
+    from_node: VrRouteTokenEstimate03Derived
+    to_node: VrRoute04SelectedTarget
+    caller_symbol: classify
+    caller_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    callee_symbol: long_context_threshold_tokens
+    callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    owner_feature_id: vr.route_selection
+    semantic_input: request feature record with estimated_tokens
+    semantic_output: longcontext candidate reason only when non-media token estimate
+      crosses the threshold
+    resource_flow:
+      consumes:
+      - vr.route_token_estimate
+      produces:
+      - route.selection
+      side_channel_reads:
+      - vr.route_token_estimate
+      side_channel_writes:
+      - route.selection
+    status: anchored
+- chain_id: stopless.session.mainline
+  summary: 'Stopless three-round contract inside Chat Process boundary: every managed
+    relay request injects stopless system guidance plus exactly one provider-facing/model-visible
+    internal reasoningStop tool, Round-1/2 missing or invalid stops project a client-visible
+    no-input CLI, the next provider request receives only a StoplessCenter state-machine-selected
+    complete non-persistent ordinary user continuation guideline plus the fresh tool
+    contract, and guard terminal stops without another CLI projection.'
+  entry_contract:
+    node: StoplessResp01StopDetected
+    owner_doc: docs/architecture/wiki/stopless-session-mainline-source.md
+  edges:
+  - step_id: stl-01
+    from_node: StoplessResp01StopDetected
+    to_node: StoplessResp02SchemaGateEvaluated
+    caller_symbol: govern_v3_hub_relay_response
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: apply_v3_stop_servertool_hook_at_resp03
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: HubRespChatProcess03Governed stop response + requestId + MetadataCenter
+      snapshot carrying requestTruth/session scope and runtime_control.stopless
+    semantic_output: stop schema gate decision and stopless loop state candidate
+    resource_flow:
+      consumes:
+      - response.hub_semantic
+      - metadata.runtime_control
+      produces:
+      - servertool.followup_state
+      side_channel_reads:
+      - metadata.runtime_control
+      side_channel_writes:
+      - servertool.followup_state
+    status: anchored
+    note: Response-side Chat Process exit stage. Same-round managed relay provider
+      request must already contain the complete stop schema system instruction plus
+      exactly one fresh internal `reasoningStop` tool declaration; direct/provider-direct
+      must contain neither.
+  - step_id: stl-02
+    from_node: StoplessResp02SchemaGateEvaluated
+    to_node: StoplessState03RuntimeSnapshotResolved
+    caller_symbol: apply_v3_stop_servertool_hook_at_resp03
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: project_stopless_noop_for_stop_candidate
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: engine execution plus current request-truth session id and MetadataCenter
+      runtime_control.stopless control fields
+    semantic_output: Rust-built stopless execution control plus orchestration plan;
+      no TS session/context composition, no adapterContext carrier, and no persisted/tmux/conversation
+      fallback
+    resource_flow:
+      consumes:
+      - servertool.followup_state
+      - metadata.runtime_control
+      produces:
+      - stopless.schema_gate_state
+      - stopless.runtime_snapshot
+      side_channel_reads:
+      - servertool.followup_state
+      - metadata.runtime_control
+      side_channel_writes:
+      - stopless.schema_gate_state
+      - stopless.runtime_snapshot
+    status: anchored
+  - step_id: stl-03
+    from_node: StoplessState03RuntimeSnapshotResolved
+    to_node: StoplessCli04ProjectionPlanned
+    caller_symbol: project_stopless_noop_for_stop_candidate
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: strip_current_stopless_control_text
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: StoplessCenter state-machine transition plus client-visible assistant
+      text
+    semantic_output: client-visible no-input exec_command using public alias reasoningStop;
+      no input-json, no sessionDir/sessionId/requestId flags; natural-language feedback
+      is deferred to req_chatprocess rewrite
+    resource_flow:
+      consumes:
+      - stopless.schema_gate_state
+      - stopless.runtime_snapshot
+      produces:
+      - stopless.cli_projection
+      side_channel_reads:
+      - stopless.schema_gate_state
+      - stopless.runtime_snapshot
+      side_channel_writes: []
+    status: anchored
+  - step_id: stl-04
+    from_node: StoplessCli04ProjectionPlanned
+    to_node: StoplessCli06ClientExecuted
+    caller_symbol: createServertoolCommand
+    caller_file: v3/crates/routecodex-v3-cli/src/main.rs
+    callee_symbol: build_servertool_cli_binary_run_command_from_client_exec_result
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-cli/src/main.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: exec_command shell string with no input and no state
+    semantic_output: no-op CLI completion output; no trigger/result state, no repeat
+      flags, no schemaFeedback, no model-facing schema guidance text
+    resource_flow:
+      consumes:
+      - stopless.cli_projection
+      produces:
+      - stopless.cli_result
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+    note: Canonical continuation save belongs before client delivery, after Round-1
+      response normalization.
+  - step_id: stl-05
+    from_node: StoplessCli06ClientExecuted
+    to_node: StoplessReq07ContinuationRestored
+    caller_symbol: apply_req_process_tool_governance
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: latest_stopless_cli_output_from_resume
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: next request after Responses continuation restore, including current
+      no-op tool output evidence and the bound MetadataCenter StoplessCenter snapshot
+    semantic_output: private StoplessCenter state loaded into the current request
+      control slot without parsing CLI stdout/provider-visible continuation text and
+      without file persistence
+    resource_flow:
+      consumes:
+      - stopless.cli_result
+      - stopless.runtime_snapshot
+      - continuation.scope_state
+      produces:
+      - stopless.runtime_snapshot
+      side_channel_reads:
+      - stopless.runtime_snapshot
+      - continuation.scope_state
+      side_channel_writes:
+      - stopless.runtime_snapshot
+    status: anchored
+    note: Round-2 starts only after `/v1/responses` continuation restore has completed.
+      Non-responses protocols skip continuation restore and enter the same request-side
+      stopless hook boundary directly from standard request truth.
+  - step_id: stl-06
+    from_node: StoplessReq07ContinuationRestored
+    to_node: StoplessReq08GuidanceRewritten
+    caller_symbol: normalize_responses_input_function_calls
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: build_stop_hook_guidance_text_from_output
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: restored no-op stopless CLI tool_output plus StoplessCenter state
+      and responses/chat request context
+    semantic_output: complete non-persistent ordinary user continuation guideline
+      for the next provider turn selected by StoplessCenter next_request_policy/count;
+      it is model-transparent about the no-op/CLI bridge and only describes restored-context
+      continuation, objective/open-work review, tool-use progress, and completion/blocked
+      evidence requirements while removing all stopless shell/tool history and control
+      fields
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      - stopless.cli_result
+      - stopless.runtime_snapshot
+      produces:
+      - stopless.guidance_rewrite
+      side_channel_reads:
+      - stopless.runtime_snapshot
+      side_channel_writes: []
+    status: anchored
+  - step_id: stl-07
+    from_node: StoplessReq08GuidanceRewritten
+    to_node: StoplessReq09SchemaContractInjected
+    caller_symbol: apply_req_process_tool_governance
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: inject_stopless_system_instruction
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: next-turn request after stopless guidance rewrite
+    semantic_output: stopless schema contract physically rebound to request mainline
+      (`messages` for chat, `instructions` for responses)
+    resource_flow:
+      consumes:
+      - stopless.guidance_rewrite
+      produces:
+      - stopless.schema_contract
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+  - step_id: stl-08
+    from_node: StoplessReq09SchemaContractInjected
+    to_node: VrRoute04SelectedTarget
+    caller_symbol: classify
+    caller_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    callee_symbol: classify
+    callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    semantic_input: stopless followup metadata/current-turn signal plus rebound schema
+      contract
+    semantic_output: thinking route; historical tools route hint must not dominate
+      stopless turn
+    resource_flow:
+      consumes:
+      - stopless.schema_contract
+      - metadata.runtime_control
+      produces:
+      - route.selection
+      side_channel_reads:
+      - metadata.runtime_control
+      side_channel_writes:
+      - route.selection
+    status: anchored
+    note: 'Round-3 guard: after 4 consecutive no_schema rounds (default budget 3 floored to 4 at runtime), do not rewrite another
+      finish_reason=stop into CLI projection.'
+- chain_id: stage_a.p0_rust_migration.mainline
+  summary: 'Stage A locks P0 Rust migration owner boundaries before implementation:
+    servertool followup orchestration, Anthropic conversion, Responses continuation
+    store, and request/response Chat Process tool governance.'
+  entry_contract:
+    node: StageAOwnerBoundary
+    owner_doc: docs/goal-prompts/2026-07-03-rust-hub-pipeline-migration.md
+  edges:
+  - step_id: stage-a-p0-01
+    from_node: HubRespChatProcess03Governed
+    to_node: ServertoolOutcome
+    caller_symbol: run_servertool_response_stage_json
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+    callee_symbol: plan_servertool_outcome_json
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+    owner_feature_id: servertool.followup_orchestration
+    semantic_input: post-Chat-Process governed response and servertool runtime context
+    semantic_output: servertool outcome/followup plan before client projection
+    resource_flow:
+      consumes:
+      - response.hub_semantic
+      - servertool.followup_state
+      produces:
+      - stage_a.servertool_outcome_plan
+      side_channel_reads:
+      - servertool.followup_state
+      side_channel_writes:
+      - stage_a.servertool_outcome_plan
+    status: anchored
+    note: TS servertool shells may execute IO from native plans, but followup/orchestration
+      semantics must remain Rust-owned.
+  - step_id: stage-a-p0-02
+    from_node: AnthropicChatInbound
+    to_node: OpenAiChatCanonical
+    caller_symbol: build_openai_chat_from_anthropic_json
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs
+    callee_symbol: map_chat_tools_to_anthropic_tools
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs
+    owner_feature_id: conversion.shared.anthropic
+    semantic_input: Anthropic messages payload with tools, content blocks, tool_use,
+      tool_result, and thinking blocks
+    semantic_output: canonical OpenAI chat request/response semantics with normalized
+      tool schema and message history
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      produces:
+      - stage_a.protocol_canonical
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+    note: TS anthropic shared utility files are forbidden from owning protocol conversion
+      semantics.
+  - step_id: stage-a-p0-03
+    from_node: HubRespChatProcess03Governed
+    to_node: ResponsesContinuationStore
+    caller_symbol: prepare_responses_conversation_entry_json
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+    callee_symbol: restore_responses_continuation_payload
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+    owner_feature_id: conversion.responses.store
+    semantic_input: Responses request/response continuation truth and scope data
+    semantic_output: persisted/restored continuation payload isolated by entry protocol,
+      continuation owner, and conversation/session scope
+    resource_flow:
+      consumes:
+      - response.hub_semantic
+      - continuation.scope_state
+      produces:
+      - stage_a.continuation_store_state
+      side_channel_reads:
+      - continuation.scope_state
+      side_channel_writes:
+      - stage_a.continuation_store_state
+    status: anchored
+    note: resp_outbound, SSE, handler, and adapter layers are forbidden from reconstructing
+      continuation history.
+  - step_id: stage-a-p0-04
+    from_node: HubReqInbound02Standardized
+    to_node: HubReqChatProcess03Governed
+    caller_symbol: apply_req_process_tool_governance
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs
+    callee_symbol: apply_req_process_tool_governance_json
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs
+    owner_feature_id: hub.req_chatprocess.tool_governance
+    semantic_input: standardized request payload before Chat Process request governance
+    semantic_output: request payload after request-side tool governance, tool injection,
+      and sanitization
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      - metadata.runtime_control
+      produces:
+      - stage_a.req_tool_governance_state
+      side_channel_reads:
+      - metadata.runtime_control
+      side_channel_writes: []
+    status: anchored
+    note: native-chat-process-governance-semantics.ts is a host wrapper only and must
+      not own request payload semantics.
+  - step_id: stage-a-p0-05
+    from_node: HubRespInbound02Parsed
+    to_node: HubRespChatProcess03Governed
+    caller_symbol: govern_response_json
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
+    callee_symbol: strip_orphan_function_calls_tag_json
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
+    owner_feature_id: hub.resp_chatprocess.tool_governance
+    semantic_input: parsed provider response before response-side Chat Process governance
+    semantic_output: response payload after text tool harvest, apply_patch reversal,
+      and internal tool stripping
+    resource_flow:
+      consumes:
+      - response.hub_semantic
+      - metadata.runtime_control
+      produces:
+      - stage_a.resp_tool_governance_state
+      side_channel_reads:
+      - metadata.runtime_control
+      side_channel_writes: []
+    status: anchored
+    note: response outbound projection must not own tool harvest or patch reversal
+      semantics.
+  - step_id: stage-a-p0-06
+    from_node: ResponsesRequestInbound
+    to_node: OpenAiChatCanonical
+    caller_symbol: run_responses_openai_request_codec_json
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs
+    callee_symbol: run_responses_openai_response_codec_json
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs
+    owner_feature_id: conversion.shared.responses_openai
+    semantic_input: OpenAI Responses request payload and explicit request context
+    semantic_output: OpenAI chat request plus Responses response projection without
+      TS hidden ctxMap state
+    resource_flow:
+      consumes:
+      - request.normal_payload
+      produces:
+      - stage_a.protocol_canonical
+      side_channel_reads: []
+    side_channel_writes: []
+    status: anchored
+    note: Retired Responses codec TS shell is forbidden from owning codec state or
+      protocol conversion semantics.
+- chain_id: v3.console_human_readable_layering.mainline
+  summary: Runtime-owned Responses Direct/Relay observability, post-commit typed Error01,
+    pre-commit Error06, listener startup, and debug-sink failures enter Server-owned
+    typed layered console projections without rendered-text reparsing.
+  entry_contract:
+    node: V3ConsoleObs01RuntimeObservability
+    owner_doc: docs/architecture/function-map.yml
+  edges:
+  - step_id: v3-console-01
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleReq02HumanBlock
+    caller_symbol: emit_v3_observability_console_lines
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_request_route_hit_console_line_for_observability
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: entry protocol, project, session, selected provider/model, route,
+      request timing and diagnostic facts
+    semantic_output: one request headline plus one complete diagnostic detail line
+    resource_flow:
+      consumes:
+      - v3.request.protocol_context
+      - v3.runtime.responses_observability
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-02
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleResp03HumanBlock
+    caller_symbol: emit_v3_observability_console_lines
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_request_complete_console_line
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: client status, response status, finish reason, usage, internal/total
+      timing, node count and transport
+    semantic_output: one response headline plus one complete diagnostic detail line
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_observability
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-03
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleProvider04ExceptionalBlock
+    caller_symbol: emit_v3_observability_console_lines
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_provider_observability_console_lines
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: provider failure, switch, and unavailable-candidate observations
+    semantic_output: red provider-failure or request-colored switch/unavailable layered
+      blocks
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_observability
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-04
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleStopless05ExceptionalBlock
+    caller_symbol: emit_v3_observability_console_lines
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_stopless_console_line
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: non-stream or initial runtime Stopless activation truth
+    semantic_output: orange Stopless layered block
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_observability
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-05
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleResp03HumanBlock
+    caller_symbol: emit_relay_sse_complete_console_lines
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_request_complete_console_line
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Relay SSE terminal success merged into runtime observability
+    semantic_output: one Relay SSE terminal response layered block
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_observability
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-06
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleStopless05ExceptionalBlock
+    caller_symbol: emit_relay_sse_complete_console_lines
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_stopless_console_line
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Relay SSE terminal Stopless activation truth
+    semantic_output: orange Relay SSE Stopless layered block
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_observability
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-07
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleResp03HumanBlock
+    caller_symbol: emit_direct_sse_complete_console_lines
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_request_complete_console_line
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Direct SSE terminal success merged into runtime observability
+    semantic_output: one Direct SSE terminal response layered block
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_observability
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-08
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleStopless05ExceptionalBlock
+    caller_symbol: emit_direct_sse_complete_console_lines
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_stopless_console_line
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Direct SSE terminal Stopless activation truth
+    semantic_output: orange Direct SSE Stopless layered block
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_observability
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-09
+    from_node: V3Error01SourceRaised
+    to_node: V3ConsoleError01HumanBlock
+    caller_symbol: emit_relay_sse_failure_console_line
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_post_commit_sse_source_console_line_for_context
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Relay SSE post-commit failure raised by routecodex-v3-error as
+      typed Error01
+    semantic_output: red Relay SSE Error01 layered block without fabricated Error06
+    resource_flow:
+      consumes:
+      - v3.error.source
+      - v3.runtime.responses_observability
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.error.source
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-10
+    from_node: V3Error01SourceRaised
+    to_node: V3ConsoleError01HumanBlock
+    caller_symbol: emit_direct_sse_failure_console_line
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_post_commit_sse_source_console_line_for_context
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Direct SSE post-commit failure retains its original typed Error01
+    semantic_output: red Direct SSE Error01 layered block without fabricated Error06
+    resource_flow:
+      consumes:
+      - v3.error.source
+      - v3.runtime.responses_observability
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.error.source
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-11
+    from_node: V3Error06ClientProjected
+    to_node: V3ConsoleError06HumanBlock
+    caller_symbol: emit_v3_direct_frame_console_lines
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_frame_error_console_line_for_context
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Direct frame Error06 with runtime observability
+    semantic_output: red scoped frame-error layered block
+    resource_flow:
+      consumes:
+      - v3.error.client_projection
+      - v3.runtime.responses_observability
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.error.client_projection
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-12
+    from_node: V3Error06ClientProjected
+    to_node: V3ConsoleError06HumanBlock
+    caller_symbol: emit_v3_direct_frame_console_lines
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_frame_error_console_line_for_state
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Direct frame Error06 without runtime observability
+    semantic_output: red port/project frame-error layered block
+    resource_flow:
+      consumes:
+      - v3.error.client_projection
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.error.client_projection
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-13
+    from_node: V3Error06ClientProjected
+    to_node: V3ConsoleError06HumanBlock
+    caller_symbol: record_and_emit_v3_error_projection
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_error_console_line_for_state
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: recorded non-stream Error06 projection
+    semantic_output: red non-stream error layered block
+    resource_flow:
+      consumes:
+      - v3.error.client_projection
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.error.client_projection
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-14
+    from_node: V3Error06ClientProjected
+    to_node: V3ConsoleError06HumanBlock
+    caller_symbol: allocate_v3_console_request_id
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_error_console_line_for_state
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: request-id allocation failure projected through Error06
+    semantic_output: red request-id failure layered block
+    resource_flow:
+      consumes:
+      - v3.error.client_projection
+      produces:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.error.client_projection
+      side_channel_writes:
+      - v3.debug.artifact
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-15
+    from_node: V3ServerStartup01ListenerSetPreflight
+    to_node: V3ConsoleStartup07HumanBlock
+    caller_symbol: emit_v3_startup_console_line
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: format_v3_startup_console_block
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: validated listener set, package version, binary, and addresses
+    semantic_output: bright startup layered block
+    resource_flow:
+      consumes:
+      - v3.server.listener_set
+      produces:
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.server.listener_set
+      side_channel_writes:
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-16
+    from_node: V3DebugSink01WriteFailed
+    to_node: V3ConsoleDebugFailure08HumanBlock
+    caller_symbol: append_v3_human_console_line
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_debug_sink_console_failure
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: human console debug-sink write failure
+    semantic_output: red debug-sink failure layered block emitted to stderr
+    resource_flow:
+      consumes:
+      - v3.debug.artifact
+      produces:
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.debug.artifact
+      side_channel_writes:
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-17
+    from_node: V3SseTerminalFailureObservation
+    to_node: V3Error01SourceRaised
+    caller_symbol: poll_next
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: raise_v3_sse_provider_failure
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Relay or Server-observed provider SSE failure with typed provider-response
+      stage
+    semantic_output: typed V3Error01SourceRaised at V3ProviderRespInbound01Raw
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_observability
+      produces:
+      - v3.error.source
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.error.source
+    status: anchored
+  - step_id: v3-console-18
+    from_node: V3RuntimeStreamObservation
+    to_node: V3Error01SourceRaised
+    caller_symbol: client_disconnected
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: raise_v3_sse_client_disconnect
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Relay body dropped and the merged Runtime stream observation has
+      no terminal response status
+    semantic_output: health-neutral ClientDisconnect Error01 at V3ServerRespOutbound06ClientFrame
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_observability
+      produces:
+      - v3.error.source
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.error.source
+    status: anchored
+  - step_id: v3-console-19
+    from_node: V3Error06ClientProjected
+    to_node: V3ConsoleError06HumanBlock
+    caller_symbol: error_output_response_for_server_with_project_path
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_frame_error_console_line
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: generic HTTP Error06 frame
+    semantic_output: red generic Error06 terminal block
+    resource_flow:
+      consumes:
+      - v3.error.client_projection
+      produces:
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.error.client_projection
+      side_channel_writes:
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-20
+    from_node: V3Error06ClientProjected
+    to_node: V3ConsoleError06HumanBlock
+    caller_symbol: error_output_response_for_responses_request_with_project_path
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_frame_error_console_line
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Responses HTTP Error06 frame before optional SSE transport projection
+    semantic_output: red Responses Error06 terminal block
+    resource_flow:
+      consumes:
+      - v3.error.client_projection
+      produces:
+      - v3.console.terminal_output
+      side_channel_reads:
+      - v3.error.client_projection
+      side_channel_writes:
+      - v3.console.terminal_output
+    status: anchored
+  - step_id: v3-console-21
+    from_node: V3ServerRespOutbound06ClientFrame
+    to_node: V3RuntimeStreamObservation
+    caller_symbol: wrap_v3_relay_sse_console_stream
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: client_disconnected
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Relay HTTP body dropped before transport EOF
+    semantic_output: Runtime terminal observation merged before closeout classification
+    resource_flow:
+      consumes:
+      - v3.response.client_payload
+      - v3.runtime.responses_observability
+      produces: []
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-console-22
+    from_node: V3ServerRespOutbound06ClientFrame
+    to_node: V3RuntimeStreamObservation
+    caller_symbol: wrap_v3_direct_sse_console_stream
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: client_disconnected
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Direct HTTP body dropped before transport EOF
+    semantic_output: Runtime terminal observation merged before closeout classification
+    resource_flow:
+      consumes:
+      - v3.response.client_payload
+      - v3.runtime.responses_observability
+      produces: []
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-console-23
+    from_node: V3RuntimeStreamObservation
+    to_node: V3Error01SourceRaised
+    caller_symbol: client_disconnected
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: raise_v3_sse_client_disconnect
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    owner_feature_id: v3.console_human_readable_layering
+    semantic_input: Direct body dropped and the merged Runtime stream observation
+      has no terminal response status
+    semantic_output: health-neutral ClientDisconnect Error01 at V3ServerRespOutbound06ClientFrame
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_observability
+      produces:
+      - v3.error.source
+      side_channel_reads:
+      - v3.runtime.responses_observability
+      side_channel_writes:
+      - v3.error.source
+    status: anchored
+- chain_id: v3.console_request_count_visibility.mainline
+  summary: One aggregate-owned request counter handle is shared by every listener,
+    and one atomic V3 request identity allocation carries total and local-day counts
+    into both human request and terminal response headlines.
+  entry_contract:
+    node: V3RequestCounter01AggregateOwned
+    owner_doc: docs/architecture/function-map.yml
+  edges:
+  - step_id: v3-console-count-01
+    from_node: V3RequestCounter01AggregateOwned
+    to_node: V3RequestCounter02ListenerShared
+    caller_symbol: spawn_v3_server_aggregate
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3RequestIdCounter::new
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_request_count_visibility
+    semantic_input: one aggregate process with multiple bound listener ports
+    semantic_output: one Arc<Mutex<V3RequestIdCounter>> cloned into every listener
+    resource_flow:
+      consumes: []
+      produces:
+      - v3.server.request_identity
+      side_channel_reads: []
+      side_channel_writes:
+      - v3.server.request_identity
+    status: anchored
+  - step_id: v3-console-count-02
+    from_node: V3RequestCounter02ListenerShared
+    to_node: V3RequestIdentity03Allocated
+    caller_symbol: next_v3_console_request_identity
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: next_request_identity
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_request_count_visibility
+    semantic_input: the aggregate-shared request counter handle
+    semantic_output: one persisted, unique, typed request identity allocation
+    resource_flow:
+      consumes:
+      - v3.server.request_identity
+      produces:
+      - v3.server.request_identity
+      side_channel_reads:
+      - v3.server.request_identity
+      side_channel_writes:
+      - v3.server.request_identity
+    status: anchored
+  - step_id: v3-console-count-03
+    from_node: V3RequestIdentity03Allocated
+    to_node: V3ConsoleReq02HumanBlock
+    caller_symbol: render_v3_request_console_block
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: format_v3_console_request_count
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_request_count_visibility
+    semantic_input: typed V3AllocatedRequestIdentity total_count and daily_count from
+      the request allocation
+    semantic_output: fixed-width [#total/daily] cell in the human request headline
+    resource_flow:
+      consumes:
+      - v3.server.request_identity
+      produces: []
+      side_channel_reads:
+      - v3.server.request_identity
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-console-count-04
+    from_node: V3RequestIdentity03Allocated
+    to_node: V3ConsoleResp03HumanBlock
+    caller_symbol: render_v3_response_console_block
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: format_v3_console_request_count
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.console_request_count_visibility
+    semantic_input: the same typed V3AllocatedRequestIdentity retained by the request
+      context
+    semantic_output: the same fixed-width [#total/daily] cell in the terminal response
+      headline
+    resource_flow:
+      consumes:
+      - v3.server.request_identity
+      produces: []
+      side_channel_reads:
+      - v3.server.request_identity
+      side_channel_writes: []
+    status: anchored
+- chain_id: v3.runtime_timing_observability.mainline
+  summary: Responses Direct/Relay Runtime starts one monotonic state, accumulates
+    every provider attempt, publishes only at governed terminal or Direct SSE clean
+    EOF, and exposes a read-only Server projection.
+  entry_contract:
+    node: V3RuntimeTimingStart
+    owner_doc: docs/architecture/function-map.yml
+  edges:
+  - step_id: v3-runtime-timing-01
+    from_node: V3RuntimeTimingStart
+    to_node: V3RuntimeTimingExternalAttempt
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    callee_symbol: start_external
+    callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: one Runtime request timing state before a provider transport attempt
+    semantic_output: active external provider-attempt interval
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads: []
+      side_channel_writes:
+      - v3.runtime.responses_timing_observability
+    status: anchored
+  - step_id: v3-runtime-timing-02
+    from_node: V3RuntimeTimingExternalAttempt
+    to_node: V3RuntimeTimingExternalComplete
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    callee_symbol: finish_external
+    callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: complete provider JSON body, provider failure, or materialized
+      SSE clean EOF
+    semantic_output: accumulated external provider duration
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes:
+      - v3.runtime.responses_timing_observability
+    status: anchored
+  - step_id: v3-runtime-timing-03
+    from_node: V3RuntimeTimingExternalComplete
+    to_node: V3RuntimeTimingExternalAttempt
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    callee_symbol: start_external
+    callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: retry or reselect after a completed provider attempt
+    semantic_output: next external provider-attempt interval on the same Runtime state
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes:
+      - v3.runtime.responses_timing_observability
+    status: anchored
+  - step_id: v3-runtime-timing-04
+    from_node: V3RuntimeTimingExternalComplete
+    to_node: V3RuntimeTimingTerminal
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    callee_symbol: finish_runtime
+    callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: governed terminal Relay response with no active external attempt
+    semantic_output: typed runtime_total, external, and internal timing summary
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes:
+      - v3.runtime.responses_timing_observability
+    status: anchored
+  - step_id: v3-runtime-timing-05
+    from_node: V3RuntimeTimingTerminal
+    to_node: V3RuntimeTimingStreamObservation
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    callee_symbol: record_timing
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: terminal Runtime timing summary for a Relay SSE response
+    semantic_output: typed stream observation timing snapshot
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes:
+      - v3.runtime.responses_observability
+    status: anchored
+  - step_id: v3-runtime-timing-06
+    from_node: V3RuntimeTimingStreamObservation
+    to_node: V3RuntimeTimingServerProjection
+    caller_symbol: complete_relay_sse
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: merge_v3_runtime_stream_observation
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: typed terminal timing from the Runtime stream observation
+    semantic_output: typed timing merged into the Server's request-local observability
+      projection
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces: []
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-runtime-timing-07
+    from_node: V3RuntimeTimingTerminal
+    to_node: V3RuntimeTimingObservability
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: finish_runtime
+    callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: governed terminal Direct JSON response
+    semantic_output: typed timing attached to V3RuntimeObservability
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes:
+      - v3.runtime.responses_observability
+    status: anchored
+  - step_id: v3-runtime-timing-08
+    from_node: V3RuntimeTimingObservability
+    to_node: V3RuntimeTimingServerProjection
+    caller_symbol: emit_relay_sse_complete_console_lines
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: emit_v3_request_complete_console_line
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: typed Runtime timing summary
+    semantic_output: read-only handoff to the separately owned console layering emitter
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces: []
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-runtime-timing-09
+    from_node: V3RuntimeTimingStart
+    to_node: V3RuntimeTimingExternalAttempt
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: start_external
+    callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: Direct provider transport attempt before network send; SSE responses
+      keep this same external attempt active until decoder clean EOF
+    semantic_output: active external provider-attempt interval on the Direct timing
+      state
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes:
+      - v3.runtime.responses_timing_observability
+    status: anchored
+  - step_id: v3-runtime-timing-10
+    from_node: V3RuntimeTimingExternalAttempt
+    to_node: V3RuntimeTimingExternalComplete
+    caller_symbol: wrap_direct_sse_provider_event_json_observation_stream
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: finish_external
+    callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: Direct SSE provider stream reached decoder clean EOF without a
+      transport error or terminal-missing failure
+    semantic_output: accumulated external provider duration on the Direct SSE timing
+      state
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes:
+      - v3.runtime.responses_timing_observability
+    status: anchored
+  - step_id: v3-runtime-timing-11
+    from_node: V3RuntimeTimingExternalComplete
+    to_node: V3RuntimeTimingTerminal
+    caller_symbol: wrap_direct_sse_provider_outcome_stream
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    callee_symbol: finish_runtime
+    callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: Direct SSE provider stream completed cleanly and the external
+      attempt was closed
+    semantic_output: typed Runtime timing summary for the Direct SSE response
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes:
+      - v3.runtime.responses_timing_observability
+    status: anchored
+  - step_id: v3-runtime-timing-12
+    from_node: V3RuntimeTimingTerminal
+    to_node: V3RuntimeTimingStreamObservation
+    caller_symbol: wrap_direct_sse_provider_outcome_stream
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    callee_symbol: record_timing
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: typed Direct SSE Runtime timing summary after clean EOF and terminal
+      validation
+    semantic_output: typed timing published into the Direct SSE stream observation
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes:
+      - v3.runtime.responses_observability
+    status: anchored
+  - step_id: v3-runtime-timing-13
+    from_node: V3RuntimeTimingExternalComplete
+    to_node: V3RuntimeTimingProtocolHandoff
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: with_additional_attempts
+    callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: completed Direct or Relay provider attempts before a protocol-owner
+      handoff
+    semantic_output: one typed Runtime timing and attempt accumulator carried outside
+      normal payloads
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes:
+      - v3.runtime.responses_timing_observability
+    status: anchored
+  - step_id: v3-runtime-timing-14
+    from_node: V3RuntimeTimingProtocolHandoff
+    to_node: V3RuntimeTimingExternalAttempt
+    caller_symbol: execute_responses_direct_server_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: opaque typed accumulator moved by Server across Direct or Relay
+      protocol ownership
+    semantic_output: receiving Runtime resumes the same accumulator before its next
+      provider transport attempt
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes: []
+    status: anchored
+- chain_id: v3.codex_sample_retention_snap_scope
+  summary: Explicit CLI authorization is published through the managed manifest; Debug
+    bounds diagnostic copies; Server alone persists and trims Codex samples.
+  entry_contract:
+    node: V3CodexSample01CliAuthorization
+    owner_doc: docs/architecture/function-map.yml
+  edges:
+  - step_id: v3-codex-sample-01
+    from_node: V3CodexSample01CliAuthorization
+    to_node: V3CodexSample02ManifestAuthorizationPublished
+    caller_symbol: configure_v3_snapshot_flags
+    caller_file: v3/crates/routecodex-v3-cli/src/main.rs
+    callee_symbol: with_direct_snapshots_enabled
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    semantic_input: no flag, Relay-only --snap, or Relay-plus-Direct --snapall CLI
+      intent
+    semantic_output: typed managed-lifecycle snapshot authorization
+    resource_flow:
+      consumes: []
+      produces:
+      - v3.debug.codex_sample_authorization
+      side_channel_reads: []
+      side_channel_writes:
+      - v3.debug.codex_sample_authorization
+    status: anchored
+  - step_id: v3-codex-sample-02
+    from_node: V3CodexSample02ManifestAuthorizationPublished
+    to_node: V3CodexSample03AuthorizedCapture
+    caller_symbol: declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: apply_snapshot_authorization_to_manifest
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    semantic_input: compiled config manifest plus explicit per-start authorization
+    semantic_output: published manifest with exact Relay and Direct capture scope
+    resource_flow:
+      consumes:
+      - config.runtime_projection
+      produces:
+      - v3.debug.codex_sample_authorization
+      side_channel_reads: []
+      side_channel_writes:
+      - v3.debug.codex_sample_authorization
+    status: anchored
+  - step_id: v3-codex-sample-03
+    from_node: V3CodexSample03AuthorizedCapture
+    to_node: V3CodexSample04PayloadBudgeted
+    caller_symbol: capture_v3_live_raw_request
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: project_payload_verbatim
+    callee_file: v3/crates/routecodex-v3-debug/src/lib.rs
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    semantic_input: authorized diagnostic copy of a live protocol payload
+    semantic_output: verbatim debug artifact with retention-only bounds
+    resource_flow:
+      consumes:
+      - v3.debug.codex_sample_authorization
+      produces:
+      - v3.debug.payload_budget
+      side_channel_reads:
+      - v3.debug.codex_sample_authorization
+      side_channel_writes:
+      - v3.debug.payload_budget
+    status: anchored
+  - step_id: v3-codex-sample-04
+    from_node: V3CodexSample04PayloadBudgeted
+    to_node: V3CodexSample05FilesystemPersisted
+    caller_symbol: capture_v3_responses_direct_response
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: persist_v3_codex_sample_payload
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    semantic_input: authorized and bounded Direct response diagnostic artifact
+    semantic_output: one request-scoped Codex sample artifact
+    resource_flow:
+      consumes:
+      - v3.debug.codex_sample_authorization
+      - v3.debug.payload_budget
+      produces:
+      - v3.debug.codex_sample_filesystem
+      side_channel_reads:
+      - v3.debug.codex_sample_authorization
+      - v3.debug.payload_budget
+      side_channel_writes:
+      - v3.debug.codex_sample_filesystem
+    status: anchored
+  - step_id: v3-codex-sample-05
+    from_node: V3CodexSample04PayloadBudgeted
+    to_node: V3CodexSample05FilesystemPersisted
+    caller_symbol: capture_v3_responses_relay_provider_snapshots
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: persist_v3_codex_sample_payload
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    semantic_input: bounded Relay provider request or response diagnostic artifact
+    semantic_output: one request-scoped Codex sample artifact
+    resource_flow:
+      consumes:
+      - v3.debug.payload_budget
+      produces:
+      - v3.debug.codex_sample_filesystem
+      side_channel_reads:
+      - v3.debug.payload_budget
+      side_channel_writes:
+      - v3.debug.codex_sample_filesystem
+    status: anchored
+  - step_id: v3-codex-sample-06
+    from_node: V3CodexSample05FilesystemPersisted
+    to_node: V3CodexSample06RetentionEnforced
+    caller_symbol: persist_v3_codex_sample_payload
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: enforce_v3_codex_sample_request_retention
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    semantic_input: successful filesystem persistence under one endpoint and port
+    semantic_output: endpoint and port request-directory count bounded to 100
+    resource_flow:
+      consumes:
+      - v3.debug.codex_sample_filesystem
+      produces:
+      - v3.debug.codex_sample_filesystem
+      side_channel_reads:
+      - v3.debug.codex_sample_filesystem
+      side_channel_writes:
+      - v3.debug.codex_sample_filesystem
+    status: anchored
+  - step_id: v3-codex-sample-07
+    from_node: V3ServerStartup01ListenerSetPreflight
+    to_node: V3CodexSample06RetentionEnforced
+    caller_symbol: spawn_v3_server_aggregate
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: enforce_v3_codex_sample_listener_retention
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    semantic_input: validated listener startup and existing endpoint sample directories
+    semantic_output: all listener endpoint and port request-directory counts bounded
+      to 100
+    resource_flow:
+      consumes:
+      - v3.debug.codex_sample_filesystem
+      produces:
+      - v3.debug.codex_sample_filesystem
+      side_channel_reads:
+      - v3.debug.codex_sample_filesystem
+      side_channel_writes:
+      - v3.debug.codex_sample_filesystem
+    status: anchored
+shared_multi_reference_functions:
+- function_id: architecture.mainline_chain_manifest_projection
+  binding_status: confirmed
+  symbol: buildMainlineChainManifest
+  file: scripts/architecture/generate-mainline-chain-manifests.mjs
+  owner_feature_id: architecture.mainline_chain_manifest_payload_copy_budget
+  reused_by_chains:
+  - debug.unified_surface.mainline
+  note: 'Architecture review block: builds one per-chain manifest projection and passes
+    it directly to YAML serialization without a JSON clone graph.'
+- function_id: native.provider_response_metadata_sync_effect
+  binding_status: confirmed
+  symbol: plan_provider_response_metadata_sync_effect_json
+  file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_response_metadata_sync_effect.rs
+  owner_feature_id: hub.provider_response_metadata_sync_effect_plan
+  reused_by_chains:
+  - response.mainline
+  note: Rust selects provider-response MetadataCenter no-op/bind/write effects; TS
+    executes only opaque center binding and returned writes.
+- function_id: native.provider_response_servertool_retirement_effect
+  binding_status: confirmed
+  symbol: plan_provider_response_servertool_retirement_effect_json
+  file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+  owner_feature_id: hub.provider_response_servertool_retirement_effect_plan
+  reused_by_chains:
+  - response.mainline
+  - servertool.hook_skeleton.mainline
+  note: Rust selects continue/reject and optional stop-gateway write for retired provider-response
+    servertool actions; TS executes only the returned effects.
+- function_id: native.provider_response_stopless_runtime_control_effect
+  binding_status: confirmed
+  symbol: plan_provider_response_stopless_runtime_control_effect_json
+  file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+  owner_feature_id: hub.provider_response_stopless_runtime_control_effect_plan
+  reused_by_chains:
+  - response.mainline
+  - servertool.hook_skeleton.mainline
+  note: Rust validates the direct stopless MetadataCenter write-plan shape and selects
+    no-op/apply_runtime_control with the complete runtime-control projection; TS executes
+    only returned MetadataCenter IO.
+- function_id: native.provider_response_stream_pipe_effect
+  binding_status: confirmed
+  symbol: plan_provider_response_stream_pipe_effect_json
+  file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+  owner_feature_id: hub.provider_response_stream_pipe_effect_plan
+  reused_by_chains:
+  - response.mainline
+  - sse.chat_stream_projection.mainline
+  note: Rust validates metadata-only streamPipe and selects no_pipe/use_pipe with
+    canonical codec/requestId while rejecting effect-owned payload/body; TS reuses
+    the top-level client semantic reference for Node stream IO.
+- function_id: native.provider_response_diagnostic_alarm_effect
+  binding_status: confirmed
+  symbol: plan_provider_response_diagnostic_alarm_effect_json
+  file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+  owner_feature_id: hub.provider_response_diagnostic_alarm_effect_plan
+  reused_by_chains:
+  - response.mainline
+  note: Rust selects diagnostic alarm entries and emits complete console message effects;
+    TS executes console.warn IO only.
+- function_id: native.provider_response_outbound_effect_materialization
+  binding_status: confirmed
+  symbol: materialize_provider_response_outbound_effect_plan_json
+  file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+  owner_feature_id: hub.provider_response_outbound_effect_materialization
+  reused_by_chains:
+  - response.mainline
+  note: Rust validates the total response plan and returns payload, request/diagnostic
+    projection, and normalized runtime effects; TS performs host IO only.
+- function_id: native.provider_response_stage_recorder_effect
+  binding_status: confirmed
+  symbol: plan_provider_response_stage_recorder_effect_json
+  file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+  owner_feature_id: hub.provider_response_stage_recorder_effect_plan
+  reused_by_chains:
+  - response.mainline
+  note: Rust emits ordered response debug stage records; TS only executes recorder
+    IO and does not own stage names or debug payload envelopes.
+- function_id: debug.replay_codex_sample_metadata_projection
+  binding_status: confirmed
+  symbol: stripReplayOnlyClientHeadersFromBody
+  file: scripts/replay-codex-sample.mjs
+  owner_feature_id: debug.replay_codex_sample_payload_copy_budget
+  reused_by_chains:
+  - debug.pipeline_dry_run_loop.mainline
+  note: 'Debug replay block: strips replay-only metadata with path-local shallow owners
+    while preserving unchanged nested request branches.'
+- function_id: debug.replay_codex_sample_provider_request_projection
+  binding_status: confirmed
+  symbol: buildReplayInputFromProviderRequest
+  file: scripts/replay-codex-sample.mjs
+  owner_feature_id: debug.replay_codex_sample_payload_copy_budget
+  reused_by_chains:
+  - debug.pipeline_dry_run_loop.mainline
+  note: 'Debug replay block: projects captured provider request shape into a replayable
+    Responses client request without cloning complete payload branches.'
+- function_id: debug.responses_sse_completed_response_projection
+  binding_status: confirmed
+  symbol: convertEventsToResponsesJson
+  file: sharedmodule/llmswitch-core/scripts/lib/responses-sse-utils.mjs
+  owner_feature_id: debug.responses_sse_utils_payload_copy_budget
+  reused_by_chains:
+  - debug.unified_surface.mainline
+  note: 'Debug script block: returns completed response event objects by reference
+    for golden roundtrip; aggregation only synthesizes responses when no completed
+    response exists.'
+- function_id: debug.cross_protocol_matrix_chat_projection
+  binding_status: confirmed
+  symbol: canonicalizeChat
+  file: sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs
+  owner_feature_id: debug.cross_protocol_matrix_payload_copy_budget
+  reused_by_chains:
+  - debug.unified_surface.mainline
+  note: 'Debug script block: canonicalizes chat parity samples with path-local owners
+    while preserving source isolation and borrowed unchanged schema branches.'
+- function_id: debug.coverage_hub_standardized_parity_projection
+  binding_status: confirmed
+  symbol: chatEnvelopeToStandardizedWithNative
+  file: sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-envelope-to-standardized-native.mjs
+  owner_feature_id: debug.coverage_hub_standardized_payload_copy_budget
+  reused_by_chains:
+  - debug.unified_surface.mainline
+  note: 'Debug coverage block: compares TS/native standardized projections directly
+    instead of materializing JSON-cloned comparison graphs.'
+- function_id: debug.coverage_hub_chat_projection_parity
+  binding_status: confirmed
+  symbol: standardizedToChatEnvelopeWithNative
+  file: sharedmodule/llmswitch-core/scripts/tests/coverage-hub-standardized-to-chat-native.mjs
+  owner_feature_id: debug.coverage_hub_chat_projection_payload_copy_budget
+  reused_by_chains:
+  - debug.unified_surface.mainline
+  note: 'Debug coverage block: compares TS/native standardized-to-chat projections
+    directly instead of materializing JSON-cloned comparison graphs.'
+- function_id: debug.hub_chain_equivalence_sanitized_payload
+  binding_status: confirmed
+  symbol: sanitizePayload
+  file: sharedmodule/llmswitch-core/scripts/tests/hub-chain-equivalence.mjs
+  owner_feature_id: debug.hub_chain_equivalence_payload_copy_budget
+  reused_by_chains:
+  - debug.unified_surface.mainline
+  note: 'Debug equivalence block: removes debug-only comparison fields with path-local
+    owners while borrowing unchanged nested protocol payload branches.'
+- function_id: debug.lmstudio_compat_tools_projection
+  binding_status: confirmed
+  symbol: applyLMStudioCompatibility
+  file: sharedmodule/llmswitch-core/scripts/tests/lmstudio-compatibility-tools-test.mjs
+  owner_feature_id: debug.lmstudio_compat_tools_payload_copy_budget
+  reused_by_chains:
+  - debug.unified_surface.mainline
+  note: 'Debug compatibility block: creates a top-level/parameters projection and
+    normalized tool wrappers while borrowing unchanged nested request branches.'
+- function_id: debug.anthropic_response_regression_projection
+  binding_status: confirmed
+  symbol: buildAnthropicRegressionProjectionWithNative
+  file: sharedmodule/llmswitch-core/scripts/tests/anthropic-response-regression.mjs
+  owner_feature_id: debug.anthropic_response_regression_payload_copy_budget
+  reused_by_chains:
+  - debug.unified_surface.mainline
+  note: 'Debug regression block: serializes the tracked Anthropic sample once into
+    the Rust native projection owner and validates the returned Hub shape without
+    cloning the source graph.'
+- function_id: debug.provider_golden_capture_config_projection
+  binding_status: confirmed
+  symbol: buildDerivedConfig
+  file: scripts/tools/capture-provider-goldens.mjs
+  owner_feature_id: debug.provider_golden_capture_payload_copy_budget
+  reused_by_chains:
+  - debug.unified_surface.mainline
+  note: 'Debug capture block: creates path-local temporary config owners while borrowing
+    unchanged nested provider and config branches until artifact serialization.'
+- function_id: error.err_04_router_policy_applied
+  symbol: report_provider_error
+  file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_runtime_ingress.rs
+  owner_feature_id: error.pipeline_contract
+  binding_status: confirmed
+  reused_by_chains:
+  - error.mainline
+  note: Router policy applied between ErrorErr03 and ErrorErr05; Rust provider runtime
+    ingress normalizes provider error events into ErrorErr04 policy truth.
+split_bindings: []
+maintenance_rules:
+- Do not invent symbols. Use binding_pending until concrete caller/callee is verified
+  in code.
+- Each edge must bind one adjacent mainline transition only.
+- If a facade/wrapper is listed, also record the truth owner feature_id.
+- When a feature changes mainline entry/exit, update this file in the same change
+  set.
+- If runtime orchestration and typed contract builders are different layers, record
+  them in split_bindings instead of compressing them into one fake edge.

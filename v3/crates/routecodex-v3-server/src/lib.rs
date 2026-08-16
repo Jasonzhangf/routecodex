@@ -1,20 +1,16 @@
-mod responses_direct_server_outcome;
-mod session_admission;
 mod console;
-mod models_catalog;
-mod request_id;
 mod endpoint_handlers;
-mod websocket;
-mod live_snapshot;
-mod scope_metadata;
 mod executors;
 mod frame_builders;
+mod live_snapshot;
+mod models_catalog;
+mod request_id;
+mod responses_direct_server_outcome;
+mod scope_metadata;
+mod session_admission;
+mod websocket;
 
 use console::*;
-pub(crate) use live_snapshot::*;
-pub(crate) use scope_metadata::*;
-pub(crate) use frame_builders::*;
-pub use executors::*;
 use endpoint_handlers::{
     allocate_v3_console_request_id, allocate_v3_console_request_identity,
     format_v3_request_id_entry, format_v3_request_id_token,
@@ -24,13 +20,16 @@ use endpoint_handlers::{
     prepend_v3_protocol_plan_trace_to_responses_relay_output,
     prepend_v3_relay_handoff_trace_to_direct_frame,
 };
-use websocket::{
-    responses_websocket_endpoint, responses_websocket_session,
-    send_responses_websocket_sse_stream,
-};
+pub use executors::*;
+pub(crate) use frame_builders::*;
+pub(crate) use live_snapshot::*;
 use request_id::{
     format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
     V3RequestIdCounter,
+};
+pub(crate) use scope_metadata::*;
+use websocket::{
+    responses_websocket_endpoint, responses_websocket_session, send_responses_websocket_sse_stream,
 };
 
 use axum::body::{to_bytes, Body};
@@ -65,7 +64,7 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
-    build_v3_server_03_http_request_raw,
+    build_v3_provider_global_probe_target, build_v3_server_03_http_request_raw,
     execute_v3_anthropic_relay_dry_run_runtime_with_client_headers,
     execute_v3_anthropic_relay_runtime_with_default_transport,
     execute_v3_anthropic_relay_runtime_with_default_transport_and_client_headers,
@@ -79,24 +78,25 @@ use routecodex_v3_runtime::{
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
     execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control,
-    execute_v3_responses_relay_runtime_with_default_transport, V3ChatDirectCodec,
+    execute_v3_responses_relay_runtime_with_default_transport,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target,
-    project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
-    project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
+    probe_v3_provider_global_target, project_v3_anthropic_relay_runtime_failure,
+    project_v3_debug_failure, project_v3_gemini_relay_runtime_failure,
+    project_v3_openai_chat_relay_runtime_failure,
     project_v3_responses_previous_response_owner_resolution_error,
     project_v3_responses_relay_runtime_failure, project_v3_virtual_router_dry_run,
     project_v3_virtual_router_status, register_responses_direct_hooks,
     resolve_v3_responses_previous_response_owner_execution_mode_at_req03,
     V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
-    V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
-    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
-    V3OpenAiChatClientStream, V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput,
-    V3OpenAiChatRelayRuntimeOutput,
-    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3ChatDirectCodec, V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput,
+    V3FoundationRuntimeOutput, V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput,
+    V3GeminiRelayRuntimeOutput, V3OpenAiChatClientStream, V3OpenAiChatRelayClientBody,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
+    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayDryRunOutcome, V3ResponsesRelayLocalContinuationScope,
@@ -107,7 +107,6 @@ use routecodex_v3_runtime::{
     V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
     V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
-    build_v3_provider_global_probe_target, probe_v3_provider_global_target,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -803,7 +802,6 @@ async fn pending_endpoint(
     }
 }
 
-
 /// v3.protocol.pending_projection：尚未实现协议绑定的客户端响应统一由
 /// foundation pending 投影出站（见 v3-resource-operation-map.yml 同名资源）。
 fn pending_binding_output_response(
@@ -944,7 +942,6 @@ fn provider_failure_session_id_from_request_headers(
         ],
     )
 }
-
 
 #[cfg(test)]
 mod tests;

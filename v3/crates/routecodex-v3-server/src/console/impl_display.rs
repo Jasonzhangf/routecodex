@@ -29,7 +29,9 @@ pub(crate) fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSumma
     format!("usage_in={input} usage_out={output} usage_cache={cache} usage_total={total}")
 }
 
-pub(crate) fn format_v3_console_human_usage_summary(usage: Option<&V3RuntimeUsageSummary>) -> Option<String> {
+pub(crate) fn format_v3_console_human_usage_summary(
+    usage: Option<&V3RuntimeUsageSummary>,
+) -> Option<String> {
     let usage = usage?;
     let mut fields = Vec::new();
     let input_tokens = v3_console_effective_input_tokens(usage);
@@ -232,7 +234,9 @@ pub(crate) fn emit_v3_frame_error_console_line_for_context(
     );
 }
 
-pub(crate) fn v3_server_frame_error_body_for_console(frame: &V3Server16HttpFrame) -> Option<&Value> {
+pub(crate) fn v3_server_frame_error_body_for_console(
+    frame: &V3Server16HttpFrame,
+) -> Option<&Value> {
     frame.error_body.as_ref().or_else(|| match &frame.body {
         V3Server16Body::Json(value) => Some(value),
         V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
@@ -460,7 +464,12 @@ pub(crate) struct V3ConsoleLayeredBlock<'a> {
 }
 
 impl<'a> V3ConsoleLayeredBlock<'a> {
-    pub(crate) fn new(human_prefix: &'a str, headline: &'a str, debug: &'a str, session_id: &'a str) -> Self {
+    pub(crate) fn new(
+        human_prefix: &'a str,
+        headline: &'a str,
+        debug: &'a str,
+        session_id: &'a str,
+    ) -> Self {
         assert!(
             !headline.is_empty(),
             "v3 console layered headline must be non-empty"
@@ -551,10 +560,7 @@ pub(crate) fn colorize_v3_error_console_line(
     colorize_v3_layered_console_line(block, ANSI_ERROR_RED, ANSI_DEBUG_DIM)
 }
 
-pub(crate) fn colorize_v3_single_error_console_line(
-    human_prefix: &str,
-    headline: &str,
-) -> String {
+pub(crate) fn colorize_v3_single_error_console_line(human_prefix: &str, headline: &str) -> String {
     let line = if human_prefix.is_empty() {
         headline.to_string()
     } else {
@@ -801,7 +807,9 @@ pub(crate) fn console_timestamp_hhmmss() -> String {
     })
 }
 
-pub(crate) fn console_timestamp_hhmmss_for_epoch_seconds(seconds: libc::time_t) -> Result<String, String> {
+pub(crate) fn console_timestamp_hhmmss_for_epoch_seconds(
+    seconds: libc::time_t,
+) -> Result<String, String> {
     let local = format_v3_tm(seconds, true)?;
     Ok(format!(
         "{:02}:{:02}:{:02}",

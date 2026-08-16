@@ -1,3 +1,5 @@
+#![allow(clippy::bool_comparison)]
+
 use routecodex_v3_runtime::{
     characterize_v3_anthropic_client_input_to_hub_semantic,
     characterize_v3_anthropic_hub_response_semantic_to_client_projection,
@@ -218,7 +220,9 @@ fn multi_turn_tool_history_with_current_image_projects_full_anthropic_wire_shape
     }))
     .expect("multi-turn tool history with image must project to Anthropic wire");
 
-    let messages = provider_request["messages"].as_array().expect("messages array");
+    let messages = provider_request["messages"]
+        .as_array()
+        .expect("messages array");
     assert_eq!(messages.len(), 6, "6 条输入 → 6 条 anthropic 消息（1:1）");
 
     // assistant 带 tool_use
@@ -230,7 +234,10 @@ fn multi_turn_tool_history_with_current_image_projects_full_anthropic_wire_shape
     );
     // reasoning_content 不得泄漏
     assert!(
-        serde_json::to_string(assistant).unwrap().contains("reasoning_content") == false,
+        serde_json::to_string(assistant)
+            .unwrap()
+            .contains("reasoning_content")
+            == false,
         "reasoning_content must not leak into Anthropic wire"
     );
 
