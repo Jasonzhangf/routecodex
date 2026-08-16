@@ -389,13 +389,7 @@
         "suite_id": "v4-control-l2-regression"
       },
       "source_owner": "routecodex-v4-control",
-      "stage": "architecture_stable",
-      "version_base": {
-        "base_artifact_hash": "sha256:bf6b8e426f5bda1962b5c0c4b82bde1be090294eed5e44bbfdc49d7cdc0e0103",
-        "base_source_commit": "389bd3cf0",
-        "new_active_version": "active-v3",
-        "previous_active_version": "active-v2"
-      }
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-error/**",

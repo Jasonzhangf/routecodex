@@ -1,1 +1,29 @@
-{"ai_confidence":0.88,"confidence_rationale":"The exact candidate changes only AppSDK governance state and Protected history; no RouteCodex crate source changes. Control compiles against frozen base-node active-v2 and all 15 mapped tests pass. The isolated branch has a known transient old-consumer gap, so publication must complete the coordinated edge/control/error set before runtime exposure.","created_at":"2026-08-16T04:22:10Z","evidence_ids":["control-sdk013-candidate","control-sdk013-positive","control-sdk013-negative"],"fix_candidate_id":"control-sdk013-candidate","function_map_hash":"sha256:de648247dbbea0ea1ade734be0452cce0d1a894c964660164a5b5078c7f8c969","issue_id":"appsdk-013-migration","mainline_call_map_hash":"sha256:54dfd59d24efbd6a9155eb3a4ff25862d94fad2c156a52691e298ecc052b8e8b","promotion_id":"control-sdk013-promotion","resource_map_hash":"sha256:948ff1cdf30ca889c1054077783ca2c13aeda6ea9b0f5a4f51ebfe5502b391d2","review_id":"control-sdk013-architecture-review","review_kind":"architecture","reviewed_artifact_hash":"sha256:b53e2c19765fe1a0555c982c793d899089fc29a36d30b484fb7182512c97d902","reviewed_commit":"73a427ee5e4a529cc16890cdb8b4a1b5940704c9","reviewed_diff_hash":"sha256:b37ac3d9e153ea32ed4af9c5429b8198bd0dcb7b1c4f9ae96918b5c6e2123b81","reviewed_scope_hash":"sha256:b0e43a8443ea5ccdc5965bddd42853b26d884128f16cd04976453d75305a1559","reviewed_tree_hash":"144f4e0d8c2cdbbaface771797ccb9170e05e9ec","reviewer":{"adapter":"routecodex-codex-adapter","identity":"codex-gpt-5"},"verdict":"pass","verification_map_hash":"sha256:4772f040e33b3ac8f7eec32b9fd9f8c41f4c63053687d4cbc47a899c0f5faa48"}
+{
+  "ai_confidence": 0.88,
+  "confidence_rationale": "The exact candidate changes only AppSDK governance state and Protected history; no RouteCodex crate source changes. Control compiles against frozen base-node active-v2 and all 15 mapped tests pass. The isolated branch has a known transient old-consumer gap, so publication must complete the coordinated edge/control/error set before runtime exposure.",
+  "created_at": "2026-08-16T04:22:10Z",
+  "evidence_ids": [
+    "control-sdk013-candidate",
+    "control-sdk013-positive",
+    "control-sdk013-negative"
+  ],
+  "fix_candidate_id": "control-sdk013-candidate",
+  "function_map_hash": "sha256:de648247dbbea0ea1ade734be0452cce0d1a894c964660164a5b5078c7f8c969",
+  "issue_id": "appsdk-013-migration",
+  "mainline_call_map_hash": "sha256:54dfd59d24efbd6a9155eb3a4ff25862d94fad2c156a52691e298ecc052b8e8b",
+  "promotion_id": "control-sdk013-promotion",
+  "resource_map_hash": "sha256:948ff1cdf30ca889c1054077783ca2c13aeda6ea9b0f5a4f51ebfe5502b391d2",
+  "review_id": "control-sdk013-architecture-review",
+  "review_kind": "architecture",
+  "reviewed_artifact_hash": "sha256:b53e2c19765fe1a0555c982c793d899089fc29a36d30b484fb7182512c97d902",
+  "reviewed_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
+  "reviewed_diff_hash": "sha256:b37ac3d9e153ea32ed4af9c5429b8198bd0dcb7b1c4f9ae96918b5c6e2123b81",
+  "reviewed_scope_hash": "sha256:b0e43a8443ea5ccdc5965bddd42853b26d884128f16cd04976453d75305a1559",
+  "reviewed_tree_hash": "144f4e0d8c2cdbbaface771797ccb9170e05e9ec",
+  "reviewer": {
+    "adapter": "routecodex-codex-adapter",
+    "identity": "codex-gpt-5"
+  },
+  "verdict": "pass",
+  "verification_map_hash": "sha256:4772f040e33b3ac8f7eec32b9fd9f8c41f4c63053687d4cbc47a899c0f5faa48"
+}
