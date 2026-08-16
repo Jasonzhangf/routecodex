@@ -18,6 +18,12 @@ assert.match(source, /follow_latest/);
 assert.match(source, /key\.name === "escape"/);
 assert.match(source, /responseStatus/);
 assert.match(source, /responseBytes/);
+assert.match(source, /sessionId/);
+assert.match(source, /usage/);
+assert.match(source, /reason/);
+assert.match(source, /terminalSize/);
+assert.match(source, /compact/);
+assert.match(source, /liveRows/);
 assert.match(source, /newCount/);
 
 const result = spawnSync(process.execPath, [path.join(root, "tui-simulator.mjs")], {
