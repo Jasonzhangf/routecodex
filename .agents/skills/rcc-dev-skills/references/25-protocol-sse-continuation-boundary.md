@@ -23,6 +23,11 @@ owner projects exactly one standard entry-protocol `event: error` and then a
 clean EOF. Never surface an internal Rust/Hyper body `Err` to the client: that
 turns a classified runtime failure into an undecodable transport disconnect.
 Do not synthesize `response.completed`, `[DONE]`, or successful terminal truth.
+Responses Relay client stream errors must carry typed `V3Error01SourceRaised`,
+never `Err(String)` that asks Server to infer an error kind. Server consumes the
+typed source: provider/runtime sources enter the Error06 SSE error event, while
+`client_disconnect` remains transport-local.
+
 `client_disconnect` is the only transport-local exception because the client is
 already gone; it remains health-neutral and is not projected back onto the dead
 connection.

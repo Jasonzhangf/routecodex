@@ -13,6 +13,7 @@ const runtimeHelpers = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtim
 const response = 'v3/crates/routecodex-v3-runtime/src/shared.rs';
 const server = 'v3/crates/routecodex-v3-server/src/lib.rs';
 const serverScope = 'v3/crates/routecodex-v3-server/src/scope_metadata.rs';
+const relayTypes = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs';
 const configValidate = 'v3/crates/routecodex-v3-config/src/validate.rs';
 const providerTransport = 'v3/crates/routecodex-v3-provider-responses/src/transport.rs';
 const providerWebsocket = 'v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs';
@@ -27,6 +28,7 @@ const cases = [
   ['SSE stream materialized before projection', response, 'let provider_body = raw.into_body();', 'let body_bytes = raw.into_body_bytes().await.unwrap();\n    let provider_body = V3ProviderResponseBody::Json(body_bytes);', /into_body_bytes/],
   ['structured SSE pending record removed', response, 'observation_state.record_pending_response_id(&response_id)?;', '// structured pending record removed', /record_pending_response_id/],
   ['Server store owner', serverScope, 'fn build_responses_direct_continuation_scope(', 'fn forbidden(store: V3RemoteContinuationStore) {}\nfn build_responses_direct_continuation_scope(', /V3RemoteContinuationStore/],
+  ['Relay SSE typed error erased', relayTypes, 'Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>', 'Result<Vec<u8>, String>', /V3Error01SourceRaised|forbidden/],
   ['Implicit continuation capability derivation reintroduced', configValidate, 'fn apply_implicit_provider_model_capabilities(', 'fn apply_implicit_provider_model_capabilities_removed(', /apply_implicit_provider_model_capabilities/],
   ['WebSocket stream field leaks into event', providerTransport, 'event.remove("stream");', '// stream field leak', /event\.remove\("stream"\)/],
   ['WebSocket SSE materialization', providerWebsocket, 'fn websocket_sse_stream(', 'fn materialized() { let mut sse_frames = Vec::new(); sse_frames.push(Vec::<u8>::new()); }\nfn websocket_sse_stream(', /sse_frames/],
@@ -38,6 +40,7 @@ const copied = [
   runtimeCommit,
   runtimeHelpers,
   'v3/crates/routecodex-v3-runtime/src/remote_continuation.rs',
+  relayTypes,
   'v3/crates/routecodex-v3-runtime/src/shared.rs',
   'v3/crates/routecodex-v3-config/src/types.rs',
   configValidate,
@@ -47,6 +50,8 @@ const copied = [
   server,
   serverScope,
   'v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs',
+  'v3/crates/routecodex-v3-server/src/frame_builders.rs',
+  'v3/crates/routecodex-v3-server/src/websocket.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs',
   'v3/crates/routecodex-v3-config/tests/config_v3_contract.rs',
   'v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs',

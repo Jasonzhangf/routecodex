@@ -15,6 +15,9 @@ const providerWebsocketPath = 'v3/crates/routecodex-v3-provider-responses/src/tr
 const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
 const serverScopePath = 'v3/crates/routecodex-v3-server/src/scope_metadata.rs';
 const serverOutcomePath = 'v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs';
+const relayTypesPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs';
+const serverFramesPath = 'v3/crates/routecodex-v3-server/src/frame_builders.rs';
+const serverWebsocketPath = 'v3/crates/routecodex-v3-server/src/websocket.rs';
 const testPath = 'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs';
 const configTestPath = 'v3/crates/routecodex-v3-config/tests/config_v3_contract.rs';
 const websocketTestPath = 'v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs';
@@ -40,6 +43,9 @@ const providerTransportControlSource = providerTransport.replaceAll(
 const server = [serverPath, serverScopePath, serverOutcomePath]
   .map((path) => readFileSync(path, 'utf8'))
   .join('\n');
+const relayTypes = readFileSync(relayTypesPath, 'utf8');
+const serverFrames = readFileSync(serverFramesPath, 'utf8');
+const serverWebsocket = readFileSync(serverWebsocketPath, 'utf8');
 const tests = readFileSync(testPath, 'utf8');
 const configTests = readFileSync(configTestPath, 'utf8');
 const websocketTests = readFileSync(websocketTestPath, 'utf8');
@@ -123,6 +129,16 @@ for (const [owner, text, phrases] of [
     'request payload and client metadata cannot construct continuation control identity',
     'entry_facts.previous_response_id.is_some() || entry_facts.has_function_call_output',
     'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(',
+  ]],
+  [relayTypesPath, relayTypes, [
+    'Stream<Item = Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>>',
+  ]],
+  [serverFramesPath, serverFrames, [
+    'Some(Err(source)) if source.code == "client_disconnect"',
+    'Ok(v3_post_commit_sse_error_event_chunk(source))',
+  ]],
+  [serverWebsocketPath, serverWebsocket, [
+    'Err(error) if error.code == "client_disconnect" => return Err(())',
   ]],
   [testPath, tests, [
     'json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry',
@@ -213,6 +229,9 @@ forbid(response, responsePath, [
   /fallback/i,
   /restore_history|materiali[sz]e_context/i,
   /into_body_bytes\s*\(/,
+]);
+forbid(relayTypes, relayTypesPath, [
+  /V3ResponsesRelayClientStream\s*=\s*[\s\S]{0,160}Result<Vec<u8>, String>/,
 ]);
 forbid(providerTransportControlSource, providerTransportPath, [
   /fallback/i,

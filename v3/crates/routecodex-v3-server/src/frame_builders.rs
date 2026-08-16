@@ -279,10 +279,15 @@ pub(crate) fn v3_relay_client_sse_body(
         }
         match stream.next().await {
             Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-            Some(Err(error)) => Some((
-                Ok(v3_post_commit_sse_error_event_chunk(
-                    raise_v3_sse_provider_failure("provider_response_sse_stream", error),
-                )),
+            Some(Err(source)) if source.code == "client_disconnect" => Some((
+                Err(io::Error::other(format!(
+                    "{}: {}",
+                    source.code, source.message
+                ))),
+                (stream, true),
+            )),
+            Some(Err(source)) => Some((
+                Ok(v3_post_commit_sse_error_event_chunk(source)),
                 (stream, true),
             )),
             None => None,

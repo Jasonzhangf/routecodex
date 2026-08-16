@@ -1644,6 +1644,9 @@ features:
   - post-commit direct and relay SSE failures project one standard Responses error
     event under the existing HTTP 200 stream and then reach clean EOF; client
     disconnect remains transport-local and health-neutral
+  - Responses Relay client streams carry typed Error01 sources rather than String;
+    Server projects provider/runtime sources through Error06 while client_disconnect
+    remains transport-local
   - provider and client normal payloads exclude internal scope pin route auth capability
     and owner truth
   - Config accepts continuation route/protocol declarations without treating remote_continuation/tool_outputs

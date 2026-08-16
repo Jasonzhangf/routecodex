@@ -485,6 +485,7 @@ pub(crate) async fn send_responses_websocket_sse_stream(
         };
         let chunk = match chunk {
             Ok(chunk) => chunk,
+            Err(error) if error.code == "client_disconnect" => return Err(()),
             Err(error) => {
                 return send_responses_websocket_error(
                     socket,
@@ -596,7 +597,12 @@ pub(crate) async fn send_responses_relay_websocket_sse_stream(
         let chunk = match chunk {
             Ok(chunk) => chunk,
             Err(error) => {
-                return send_responses_websocket_error(socket, "runtime_stream_error", error).await;
+                return send_responses_websocket_error(
+                    socket,
+                    "runtime_stream_error",
+                    error.message,
+                )
+                .await;
             }
         };
         let frames = match decoder.push(build_v3_sse_transport_in_01_raw_chunk(&chunk)) {

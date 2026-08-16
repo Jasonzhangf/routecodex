@@ -1070,7 +1070,10 @@ fn observability_prefix_keeps_full_provider_and_key_without_truncation() {
         prefix.contains("default:opencode-go[key2].deepseek-v4-flash"),
         "provider and key must remain fully visible in the response prefix: {prefix}"
     );
-    assert!(!prefix.contains("..."), "provider/key must not truncate: {prefix}");
+    assert!(
+        !prefix.contains("..."),
+        "provider/key must not truncate: {prefix}"
+    );
 }
 
 #[test]
@@ -3229,7 +3232,10 @@ async fn relay_sse_body_error_projects_standard_error_event() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Sse(Box::pin(futures_util::stream::iter(vec![
-            Err("provider relay boom".to_string()),
+            Err(raise_v3_sse_provider_failure(
+                "provider_response_sse_stream",
+                "provider relay boom",
+            )),
         ]))),
         node_trace: vec!["V3HubRespOutbound05ClientSemantic"],
         error_chain: None,
@@ -3254,7 +3260,10 @@ async fn relay_sse_body_abrupt_failure_projects_standard_error_event() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Sse(Box::pin(futures_util::stream::iter(vec![
-            Err("abrupt relay stream close".to_string()),
+            Err(raise_v3_sse_provider_failure(
+                "provider_response_sse_stream",
+                "abrupt relay stream close",
+            )),
         ]))),
         node_trace: vec!["V3HubRespOutbound05ClientSemantic"],
         error_chain: None,
@@ -3271,6 +3280,29 @@ async fn relay_sse_body_abrupt_failure_projects_standard_error_event() {
     let body = String::from_utf8(result.unwrap().to_vec()).unwrap();
     assert!(body.contains("event: error"), "{body}");
     assert!(body.contains("abrupt relay stream close"), "{body}");
+}
+
+#[tokio::test]
+async fn relay_sse_body_client_disconnect_remains_transport_local() {
+    let output = V3ResponsesRelayRuntimeOutput {
+        status: 200,
+        client_body: V3ResponsesRelayClientBody::Sse(Box::pin(futures_util::stream::iter(vec![
+            Err(raise_v3_sse_client_disconnect()),
+        ]))),
+        node_trace: vec!["V3HubRespOutbound05ClientSemantic"],
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+
+    let response = responses_relay_output_response(output, None, Duration::from_millis(3_000));
+    let error = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect_err("client disconnect must not be projected as a provider SSE error event");
+    assert!(error.to_string().contains("client_disconnect"), "{error}");
 }
 
 #[tokio::test]
@@ -3331,7 +3363,7 @@ async fn relay_sse_accept_stream_error_projects_post_commit_provider_failure_not
     // provider 流缺终帧（opencode-go chat SSE 只发 reasoning 增量后 EOF）：
     // codec 已 fail-fast 产出 Err；server 必须投影 post-commit 502，而不是
     // 在无终态时把它当成成功流收口并报 500 runtime_observability_contract。
-    let stream: V3ResponsesRelayClientStream = Box::pin(futures_util::stream::iter(vec![
+    let stream: V3OpenAiChatClientStream = Box::pin(futures_util::stream::iter(vec![
         Ok(b"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"x\"},\"finish_reason\":null,\"index\":0}]}\n\n".to_vec()),
         Err("OpenAI Chat SSE ended without terminal finish_reason".to_string()),
     ]));
@@ -3435,8 +3467,9 @@ async fn completed_responses_sse_reaches_eof_without_late_keepalive_comments() {
 
 #[tokio::test]
 async fn responses_sse_relay_provider_stream_error_projects_standard_error_then_clean_eof() {
-    let provider =
-        futures_util::stream::iter(vec![Err::<Vec<u8>, String>("controlled error".into())]);
+    let provider = futures_util::stream::iter(vec![Err::<Vec<u8>, V3Error01SourceRaised>(
+        raise_v3_sse_provider_failure("provider_response_sse_stream", "controlled error"),
+    )]);
     let body = v3_relay_client_sse_body(Box::pin(provider), Some(Duration::from_millis(10)));
     let mut client = body.into_data_stream();
 

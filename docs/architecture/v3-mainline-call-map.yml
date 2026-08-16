@@ -5843,7 +5843,7 @@ chains:
 
 - chain_id: v3.provider_action_gate.mainline
   owner_feature_id: v3.provider_action_gate
-  summary: V3 provider action gate serializes provider failure recovery, terminal projection, permit ownership, post-commit SSE success/failure observation, and provider response event-codec terminal evidence without Server/SSE owning Error06 semantics.
+  summary: V3 provider action gate serializes provider failure recovery, permit ownership, post-commit SSE success/failure observation, and provider response event-codec terminal evidence; the Server frame owner consumes typed Error01 and performs the sole Error06 client-protocol projection.
   manifest: docs/architecture/manifests/v3.provider_action_gate.mainline.yml
   edges:
     - step_id: v3-provider-action-gate-01

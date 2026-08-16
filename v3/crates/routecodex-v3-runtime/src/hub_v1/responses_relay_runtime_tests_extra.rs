@@ -349,7 +349,8 @@ async fn collect_projected_sse(
 ) -> Vec<Result<String, String>> {
     stream
         .map(|item| {
-            item.and_then(|bytes| String::from_utf8(bytes).map_err(|error| error.to_string()))
+            item.map_err(|error| error.message)
+                .and_then(|bytes| String::from_utf8(bytes).map_err(|error| error.to_string()))
         })
         .collect()
         .await
