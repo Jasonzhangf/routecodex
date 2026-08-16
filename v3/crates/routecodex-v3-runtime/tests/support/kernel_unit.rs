@@ -502,11 +502,16 @@ async fn direct_sse_response_done_without_completed_is_terminal_missing() {
     let mut forwarded_done = false;
     while let Some(result) = governed.next().await {
         match result {
-            Ok(frame) => forwarded_done |= frame.windows(12).any(|window| window == b"data: [DONE]"),
+            Ok(frame) => {
+                forwarded_done |= frame.windows(12).any(|window| window == b"data: [DONE]")
+            }
             Err(source) => error = Some(source),
         }
     }
-    assert!(forwarded_done, "direct must preserve trailing [DONE] after terminal event");
+    assert!(
+        forwarded_done,
+        "direct must preserve trailing [DONE] after terminal event"
+    );
     let error = error.expect("response.done without response.completed must fail closeout");
     assert_eq!(error.code, "provider_response_sse_terminal_missing");
     assert!(error.message.contains("[DONE] without response.completed"));
@@ -1502,9 +1507,14 @@ async fn provider_sse_failure_event_reselects_before_client_stream() {
                         name: "content-type".to_string(),
                         value: b"text/event-stream".to_vec(),
                     }],
-                    Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(
-                        b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"first quota exhausted\"}}}\n\n".to_vec(),
-                    )])),
+                    Box::pin(stream::iter(vec![
+                        Ok::<Vec<u8>, V3ProviderError>(
+                            b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
+                        ),
+                        Ok::<Vec<u8>, V3ProviderError>(
+                            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"first quota exhausted\"}}}\n\n".to_vec(),
+                        ),
+                    ])),
                 ));
             }
             assert_eq!(

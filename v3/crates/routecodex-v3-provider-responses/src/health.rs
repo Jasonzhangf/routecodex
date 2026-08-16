@@ -500,40 +500,6 @@ impl V3ProviderHealthStore {
         Ok(())
     }
 
-    /// post-commit SSE 流失败（流已开始却中断/malformed）直接写 provider 级
-    /// 冷却：这是强故障信号（响应已投影却断流），不等 session 计数达阈值。
-    /// 冷却到期后由后台 probe 复活；不累计 session 计数（流已开始，session
-    /// 计数语义由调用方另行处理）。
-    pub fn record_provider_stream_failure_in_provider_scope(
-        &self,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        // 冷却原因由调用方的 failure record 承载；这里只负责 provider 级
-        // 冷却与探针状态，不把原因写进共享探针状态。
-        _reason: &str,
-        now_ms: u64,
-    ) -> Result<(), V3ProviderHealthError> {
-        let mut state = self
-            .state
-            .write()
-            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        if state.health_disabled.contains(provider_id) {
-            return Ok(());
-        }
-        let policy = state
-            .failure_policies
-            .get(provider_id)
-            .copied()
-            .unwrap_or_default();
-        let cooldown_until_ms = (!policy.until_restart)
-            .then(|| now_ms.saturating_add(policy.cooldown_ms.max(1)));
-        if let Some(until_ms) = cooldown_until_ms {
-            upsert_provider_cooldown_probe(&mut state, provider_id, auth_alias, model_id, until_ms);
-        }
-        Ok(())
-    }
-
     /// provider 级冷却（跨 session 共享）的独立探针状态：冷却期内与
     /// 待探期内 provider 不可达业务请求；冷却到期不自动恢复，后台探针
     /// 通过才清除并恢复可达。与 `V3ProviderGlobalSubscriptionHealthStore`

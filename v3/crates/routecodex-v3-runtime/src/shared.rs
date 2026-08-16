@@ -1,8 +1,7 @@
 use crate::hub_v1::{
     classify_v3_provider_generic_sse_json_data, collect_v3_provider_sse_json_data,
     is_v3_provider_sse_keepalive_text, parse_v3_provider_sse_json_data,
-    v3_feature_enabled_for_server,
-    V3ProviderResponsesJsonFrameOutcome, V3RuntimeStreamObservation,
+    v3_feature_enabled_for_server, V3ProviderResponsesJsonFrameOutcome, V3RuntimeStreamObservation,
 };
 use crate::nodes::{V3ClientBody, V3ClientSseStream, V3Resp15ClientPayload};
 use futures_util::{stream, StreamExt};
@@ -517,7 +516,9 @@ fn observed_sse_client_stream_with_timeout(
             if state.done {
                 return None;
             }
-            let next = match tokio::time::timeout_at(state.semantic_deadline, state.stream.next()).await {
+            let next = match tokio::time::timeout_at(state.semantic_deadline, state.stream.next())
+                .await
+            {
                 Ok(next) => next,
                 Err(_) if state.terminal_observed => {
                     return None;
@@ -549,8 +550,7 @@ fn observed_sse_client_stream_with_timeout(
                     // transport 帧活跃即保活：任何 provider 字节（含 keepalive/
                     // 非语义帧）都刷新帧间隔 deadline，避免"活着但语义安静"
                     // 的流被误杀；只有完全无字节的挂起流才超时。
-                    state.semantic_deadline =
-                        tokio::time::Instant::now() + frame_interval_timeout;
+                    state.semantic_deadline = tokio::time::Instant::now() + frame_interval_timeout;
                     let result = observe_sse_remote_continuation_chunk(
                         &state.provider_id,
                         &chunk,
@@ -1028,6 +1028,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn direct_sse_empty_output_item_then_failed_projects_error_before_client_commit() {
+        let raw = V3ProviderResp14Raw::from_sse(
+            "req".to_string(),
+            "provider".to_string(),
+            201,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(vec![
+                Ok::<Vec<u8>, V3ProviderError>(
+                    b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
+                ),
+                Ok::<Vec<u8>, V3ProviderError>(
+                    b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"provider_failed\",\"message\":\"provider failed after empty lifecycle frame\"}}}\n\n".to_vec(),
+                ),
+            ])),
+        );
+
+        let error = project_provider_raw_to_client_payload(raw)
+            .await
+            .expect_err("empty lifecycle frames must not commit Resp15 before provider failure");
+        assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(error.code, "provider_failed");
+    }
+
+    #[tokio::test]
+    async fn direct_sse_empty_output_item_then_eof_projects_error_before_client_commit() {
+        let raw = V3ProviderResp14Raw::from_sse(
+            "req".to_string(),
+            "provider".to_string(),
+            201,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(
+                b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
+            )])),
+        );
+
+        let error = project_provider_raw_to_client_payload(raw)
+            .await
+            .expect_err("empty lifecycle frames followed by EOF must fail before Resp15 commit");
+        assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(error.code, "provider_response_sse_empty");
+    }
+
+    #[tokio::test]
     async fn direct_sse_first_non_failure_frame_replays_buffered_chunk() {
         let raw = V3ProviderResp14Raw::from_sse(
             "req".to_string(),
@@ -1088,8 +1137,7 @@ mod tests {
     #[tokio::test]
     async fn direct_sse_projection_times_out_after_provider_stalls_between_frames() {
         let first =
-            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n"
-                .to_vec();
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n".to_vec();
         let mut stream = observed_sse_client_stream_with_timeout(
             "provider".to_string(),
             Box::pin(
@@ -1100,7 +1148,11 @@ mod tests {
             V3RuntimeStreamObservation::default(),
             std::time::Duration::from_millis(20),
         );
-        let first = stream.next().await.expect("first frame").expect("valid first frame");
+        let first = stream
+            .next()
+            .await
+            .expect("first frame")
+            .expect("valid first frame");
         assert!(std::str::from_utf8(&first).unwrap().contains("early"));
         let error = stream
             .next()

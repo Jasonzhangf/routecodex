@@ -555,7 +555,7 @@ for (const testName of requiredGateTests) {
   assertRustTest(text.gateTests, files.gateTests, testName);
 }
 for (const token of [
-  'post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_request',
+  'post_commit_sse_failure_closes_action_lane_without_blocking_a_fresh_request',
   'terminal_sse_recovery_does_not_block_a_fresh_request',
   'active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds',
 ]) {

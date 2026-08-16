@@ -247,6 +247,60 @@ fn unavailable_candidate_is_exhaustion_not_runtime_failure() {
     assert!(!attempted_candidates.is_empty());
 }
 
+#[test]
+fn post_commit_sse_failures_never_cool_provider_or_block_fresh_session() {
+    let manifest = target_resolution_manifest("post_commit_sse_transient");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failed_session = test_provider_failure_scope(
+        "post_commit_sse_transient",
+        "post_commit_sse_transient",
+        "failed-session",
+    )
+    .expect("failed session scope");
+    let fresh_session = test_provider_failure_scope(
+        "post_commit_sse_transient",
+        "post_commit_sse_transient",
+        "fresh-session",
+    )
+    .expect("fresh session scope");
+
+    for _ in 0..3 {
+        health
+            .record_post_commit_provider_stream_failure(
+                &failed_session,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                "provider_response_sse_stream",
+                "controlled post-commit SSE EOF",
+            )
+            .expect("post-commit SSE observation must close cleanly");
+    }
+
+    let now_ms = v3_relay_provider_policy_now_epoch_ms().expect("current epoch");
+    assert!(
+        health
+            .store()
+            .availability_for_session(
+                &fresh_session,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                now_ms,
+            )
+            .available,
+        "SSE transport/decode/EOF failures must not blacklist a provider for another session"
+    );
+    assert!(
+        health
+            .store()
+            .provider_cooldown_probe_keys_due(u64::MAX)
+            .expect("provider cooldown probe query")
+            .is_empty(),
+        "SSE transient failures must not create provider cooldown probe state"
+    );
+}
+
 #[tokio::test]
 async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_health_mutation() {
     let manifest = target_resolution_manifest("compat_default_floor");

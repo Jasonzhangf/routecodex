@@ -1051,6 +1051,7 @@ features:
   - docs/goals/v3-vr-target-protocol-execution-decision-sop.md
   test_design:
   - docs/goals/v3-responses-direct-mvp-test-design.md
+  - docs/goals/v3-sse-transient-no-provider-cooldown-test-design.md
   required_contract:
   - P6 owns only adjacent transitions V3Target10ConcreteProviderSelected through V3Server16HttpFrame,
     with V3Execution11ProtocolDecision between Target10 and Direct policy
@@ -1076,6 +1077,9 @@ features:
     the client stream intent
   - Direct provider raw response decode/projection errors enter the same Error01-06
     provider failure policy and reselect before Error06 while alternatives remain
+  - Direct provider SSE lifecycle frames without replay-unsafe business output do not
+    authorize Resp15 commit; failure or EOF in that precommit interval enters Error01-05
+    and may retry or reselect before Error06
   - Direct target-local reselection uses the full captured Target09 candidate set;
     if the newly selected Target10 requires Hub Relay and no Direct-owned previous_response_id
     is active, Direct returns a typed relay handoff side-channel carrying the complete
@@ -3397,6 +3401,14 @@ features:
   - Responses Relay provider-bound request compatibility and wire encoding failures
     enter the shared provider failure policy and typed Error05 action lane before
     retry or reselect.
+  - SSE transport/decode/EOF failure before business-byte commit remains eligible for
+    the existing retry/reselect path; post-commit failure closes its action-gate lane
+    without mutating provider health.
+  required_negative:
+  - Repeated post-commit SSE failures create no provider consecutive-failure count,
+    cooldown, probe, or cross-session unavailability.
+  - Genuine output already committed to the client is never replayed from a second
+    provider into the same stream.
   required_gates:
   - npm run test:v3-provider-action-gate
   - npm run verify:v3-provider-action-gate

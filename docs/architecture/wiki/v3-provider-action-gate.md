@@ -131,6 +131,10 @@ Review locks:
   continuation checks the existing exact-provider lane; when no failure state exists,
   that check returns immediately.
 - Client disconnect is health-neutral and does not enter this gate.
+- SSE transport/decode/malformed-event/EOF/hang is also provider-health-neutral. Before
+  business-byte commit it uses the existing retry/reselect path; after commit it only
+  closes the request-scoped action lane and fails the stream explicitly. It never writes
+  provider consecutive failures, cooldown, probes, or cross-session blacklist state.
 - FIFO waiter tickets preserve deterministic order; cancelling one waiter removes only
   that ticket.
 - Only a typed terminal Error05 exhaustion decision may construct Error06.

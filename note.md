@@ -35642,3 +35642,9 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - 在线真实 replay（0.90.4563，全部 HTTP 200 + 终态 + usage）：5555/5520/10000 `/v1/responses`、10000 `/v1/chat/completions`（usage 进 final chunk + `[DONE]`）、10000 `/v1/messages`（message_delta usage + message_stop）；证据 `/private/tmp/replay_4563_*.sse`；日志无 V3E3/502。
 - DSH review r2（commit=8a76cbc83 base=486d68f68，opencode-go/deepseek-v4-flash）`VERDICT: PASS`，recommendation=deliver；3 条非阻塞 P2：① `_sse.rs` 未列 v3-function-map allowed_paths（doc-lockstep 漂移）；② incomplete reason allowlist 窄（goal-locked fail-fast 取舍）；③ health.rs 测试改写与 SSE 设计 forbidden_paths 范围（对齐 486d68f68 provider-key 跨 session 语义）。
 - 注：HEAD 之上 v4 worker 已提交 `044767d2d`（relay/continuation slice，纯 v4，不影响 V3 SSE 交付）；交付 commit 只含版本 bump + note/MEMORY。
+
+# 2026-08-16 SSE transient 被错误升级为 provider cooldown（修复中）
+- 用户合同：SSE transport/decode/EOF 是可重试瞬态错误，绝不能拉黑 provider/key。pre-commit 必须留在同请求 retry/reselect；post-commit 因客户端已收到业务字节不能混接另一流，只关闭本次 action lane，但不得写 provider failure/cooldown/probe。
+- 根因红证据：`record_post_commit_provider_stream_failure` 同时调用 `record_provider_stream_failure_in_provider_scope` 与 `record_provider_failure_record`，一次 post-commit SSE 失败立即生成 provider cooldown；新增反测在旧实现上失败，fresh session 被错误阻断。
+- 唯一 owner 修复：runtime post-commit helper 仅写 request-scoped action-gate failure；物理删除 provider-health 的 SSE 专用拉黑入口及其错误正测。Responses direct codec 把空 `response.output_item.added` lifecycle frame 保持为 pre-commit buffering，使随后 failed/EOF 能进入既有同请求 retry/reselect。
+- 当前证据：根因反测先红后绿；pre-commit empty-lifecycle failed/EOF、同 provider 三次 retry 后 reselect、post-commit fresh request 200、provider action/session cooldown 正反 gate、resource/module/docs/rust-only gates 均绿。待 workspace/build、全局安装、聚合 restart、线上 200 replay 和 DSH review。

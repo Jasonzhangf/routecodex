@@ -728,28 +728,12 @@ impl V3ProviderFailureRuntimeHealth {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         error_family: &str,
-        reason: &str,
+        _reason: &str,
     ) -> Result<(), String> {
-        // post-commit SSE 流失败是强故障信号（流已开始却中断/malformed）：
-        // 直接写 provider 级冷却（不等 session 计数达阈值），冷却到期后由
-        // 后台 probe 复活，避免"每请求都试"持续命中故障 provider。
-        self.store
-            .record_provider_stream_failure_in_provider_scope(
-                provider_id,
-                auth_alias,
-                model_id,
-                error_family,
-                v3_relay_provider_policy_now_epoch_ms()?,
-            )
-            .map_err(|error| error.to_string())?;
-        self.record_provider_failure_record(
-            failure_session_scope,
-            provider_id,
-            auth_alias,
-            model_id,
-            Some(reason),
-            v3_relay_provider_policy_now_epoch_ms()?,
-        )?;
+        // SSE transport/decode/EOF is retryable transient evidence, not provider-health
+        // evidence. Once client business bytes are committed this request cannot be
+        // replayed safely, but closing its action-gate lane must remain health-neutral:
+        // no consecutive failure, provider cooldown, probe, or cross-session blacklist.
         self.record_provider_action_failure_in_scope(
             failure_session_scope,
             provider_id,

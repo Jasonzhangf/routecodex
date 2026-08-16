@@ -843,6 +843,9 @@ resources:
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStateMutated
     identity: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
+    semantic_contract:
+      provider_failure_rule: only manifest-classified provider failures may increment consecutive failures or create provider cooldown/probe state
+      sse_transient_rule: SSE transport/decode/malformed-event/unexpected-EOF/hang observations never mutate provider health; pre-commit recovery uses retry/reselect and post-commit closes only the request-scoped action gate
     allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_cross_session_revive]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderSessionAvailabilityReader::availability, V3ProviderHealthStore::try_acquire_cross_session_revive]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target]

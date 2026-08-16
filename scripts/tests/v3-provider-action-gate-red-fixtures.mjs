@@ -98,10 +98,10 @@ const cases = [
     name: 'OpenAI post-commit SSE failure loses fresh-request isolation coverage',
     path: 'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
     mutate: (source) => source.replace(
-      'post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_request',
+      'post_commit_sse_failure_closes_action_lane_without_blocking_a_fresh_request',
       'post_commit_sse_failure_has_no_fresh_request_isolation_contract',
     ),
-    diagnostic: /missing active Rust test post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_request/u,
+    diagnostic: /missing active Rust test post_commit_sse_failure_closes_action_lane_without_blocking_a_fresh_request/u,
   },
   {
     name: 'Gemini fresh request starts consuming an unrelated recovery lane',
@@ -471,13 +471,13 @@ const cases = [
     diagnostic: /provider response\.done\/response\.requires_action must not satisfy the response\.completed terminal contract/u,
   },
   {
-    name: 'Direct provider outcome accepts response.done as provider semantic terminal',
+    name: 'Direct provider outcome reclaims provider event semantic ownership',
     path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs',
     mutate: (source) => source.replace(
-      'if event_type == "response.completed" {',
-      'if matches!(event_type, "response.completed" | "response.done") {',
+      'classify_v3_provider_generic_sse_json_data(&data)',
+      'event_type == "response.completed"',
     ),
-    diagnostic: /provider response\.done must not satisfy the response\.completed terminal contract/u,
+    diagnostic: /SSE event metadata must not be used as provider semantic source/u,
   },
   {
     name: 'Relay target-resolution source errors are swallowed as exhaustion',

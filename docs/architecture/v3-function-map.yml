@@ -420,6 +420,8 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/shared.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
   - v3/crates/routecodex-v3-provider-responses/src
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
@@ -452,8 +454,11 @@ features:
   - V3ResponsesDirectRuntimeSharedState
   - responses_direct_route_hook
   - responses_direct_response_projection_hook
+  - classify_v3_provider_responses_json_event
+  - is_empty_v3_provider_responses_output_item_added
   - kernel::tests::direct_protocol_plan_uses_session_bound_cooldown_before_initial_target
   - kernel::tests::provider_response_decode_failure_reselects_without_router_reentry
+  - kernel::tests::provider_sse_failure_event_reselects_before_client_stream
   - kernel::tests::direct_reselect_can_handoff_to_relay_target_after_provider_failure
   - kernel::tests::responses_provider_process_chat_forces_hub_relay
   - build_v3_server_16_http_frame_from_v3_resp_15
@@ -473,6 +478,7 @@ features:
   - docs/design/v3-system-definition.md
   - docs/goals/v3-responses-direct-mvp-implementation-plan.md
   - docs/goals/v3-responses-direct-mvp-test-design.md
+  - docs/goals/v3-sse-transient-no-provider-cooldown-test-design.md
   - docs/goals/v3-vr-target-protocol-execution-decision-sop.md
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
@@ -4220,6 +4226,8 @@ features:
   - v3-provider-action-gate-51
   entry_symbols:
   - V3ProviderActionGate
+  - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
+  - provider_failure_runtime_policy::tests::post_commit_sse_failures_never_cool_provider_or_block_fresh_session
   - V3ProviderActionAdmission::take_permit
   - V3ProviderActionPermit::drop
   - V3ProviderActionGate::abandon_admission
