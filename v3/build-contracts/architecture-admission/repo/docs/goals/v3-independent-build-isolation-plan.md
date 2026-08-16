@@ -1,6 +1,6 @@
 # V3 Independent Build Isolation Plan
 
-Status: source and isolation gates verified; current-line integration, live closeout, and review pending
+Status: current-line source, isolation, packaging, install, aggregate restart, all-listener health, and same-entry replay verified; DSH review findings under repair
 Design ID: `V3-INDEPENDENT-BUILD-ISOLATION-20260816`
 Owner feature: `v3.build.independent_domain`
 Scope root: `v3/`

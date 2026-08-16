@@ -55,6 +55,7 @@ modules:
       - docs/goals/v3-independent-build-isolation-plan.md
       - docs/goals/v3-independent-build-isolation-test-design.md
       - docs/architecture/manifests/v3.build.independent_domain.mainline.yml
+      - docs/architecture/v3-runtime-module-registry.yml
       - docs/architecture/wiki/v3-independent-build-isolation.md
       - docs/architecture/wiki/v3-independent-build-isolation.html
       - v3/package.json

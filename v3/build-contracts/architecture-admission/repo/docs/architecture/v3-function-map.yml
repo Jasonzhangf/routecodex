@@ -4620,6 +4620,7 @@ features:
   - docs/goals/v3-independent-build-isolation-plan.md
   - docs/goals/v3-independent-build-isolation-test-design.md
   - docs/architecture/manifests/v3.build.independent_domain.mainline.yml
+  - docs/architecture/v3-runtime-module-registry.yml
   - docs/architecture/wiki/v3-independent-build-isolation.md
   resource_bindings:
   - v3.build.node_dependency_lock
@@ -4641,6 +4642,7 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-build-tool-module-registry.yml
+  - docs/architecture/v3-runtime-module-registry.yml
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/manifests/v3.build.independent_domain.mainline.yml
   - docs/architecture/wiki/v3-independent-build-isolation.md

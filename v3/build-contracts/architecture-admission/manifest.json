@@ -16,6 +16,12 @@
       "sha256": "563763c4f0dd6e3417b24f616edefe47e90b3608562cd1058d72f896b9240829"
     },
     {
+      "output_path": "repo/.github/workflows/release.yml",
+      "source_path": ".github/workflows/release.yml",
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "c2595d344cbb2cb2737ce3a7c0652bd925e321564da80a709f64ae4a666d7441"
+    },
+    {
       "output_path": "repo/.github/workflows/test.yml",
       "source_path": ".github/workflows/test.yml",
       "source_commit": "3cb6b0be2dc022d46e5680898eb1ce33d6e5f798",
@@ -48,8 +54,8 @@
     {
       "output_path": "repo/docs/architecture/function-map.yml",
       "source_path": "docs/architecture/function-map.yml",
-      "source_commit": "1756d52514158be50c925ccfa0336723248964c0",
-      "sha256": "ef19ff32cebc347175efc9a2a4c897313d90a3e18ecc555c12873ed621e382ed"
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "9dee9e1acd85d868377f8cfb2ec92072c935b98de9bad1b907badf4b84a98f5c"
     },
     {
       "output_path": "repo/docs/architecture/mainline-binding-budget.yml",
@@ -168,8 +174,8 @@
     {
       "output_path": "repo/docs/architecture/mainline-manifests/servertool.hook_skeleton.mainline.yml",
       "source_path": "docs/architecture/mainline-manifests/servertool.hook_skeleton.mainline.yml",
-      "source_commit": "83477663bea26cd9ffb8be326af774c2f0841b47",
-      "sha256": "805862728822e1200ff1510e7e1c072a726ce4b51693d5563ee4c2598833b168"
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "a0a4f09ab64bba25c876e4cf6ee7b50633a3c21f56e3ec20b3f1329c01c32aac"
     },
     {
       "output_path": "repo/docs/architecture/mainline-manifests/sse.chat_stream_projection.mainline.yml",
@@ -192,8 +198,8 @@
     {
       "output_path": "repo/docs/architecture/mainline-manifests/stopless.session.mainline.yml",
       "source_path": "docs/architecture/mainline-manifests/stopless.session.mainline.yml",
-      "source_commit": "5bd01e5caf3e21b1b55f478555a0a2d4d4c34c57",
-      "sha256": "5299b15bde634fcae81f0f5b083c436f1f21b104094c969d86dfafd6a015ecc6"
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "5caa42a947d98f4cc9d435f2d71a697a66d828a52ddd8d2b787dc65be0860de6"
     },
     {
       "output_path": "repo/docs/architecture/mainline-manifests/v3.codex_sample_retention_snap_scope.yml",
@@ -726,8 +732,8 @@
     {
       "output_path": "repo/docs/architecture/v3-build-tool-module-registry.yml",
       "source_path": "docs/architecture/v3-build-tool-module-registry.yml",
-      "source_commit": "3cb6b0be2dc022d46e5680898eb1ce33d6e5f798",
-      "sha256": "a68072712612bb427ed3f79888d10a857954e5f22c63e62c34426c853123c8c2"
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "08bd393be7690037d46bb465a2319a186c1a08b6ca8d925dea9920054ec14fe0"
     },
     {
       "output_path": "repo/docs/architecture/v3-control-plane-data-plane-audit-2026-08-10.md",
@@ -738,8 +744,8 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "adeaf80c4be254ade006bb8fb0f52ce39eb356a8",
-      "sha256": "bf27ce2addf6b34e0787dc9cd731b3897d8509ef64b56034494b474d0adc2af2"
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "08ae6eaa0a5136921da08fae90bf9e0eda24d595e68b82f1425bafabbcdf73fd"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -760,16 +766,22 @@
       "sha256": "80cf909f7e235426932aeaf476269b268d5660e201d225d7b1f7cb7dbebc2de8"
     },
     {
+      "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
+      "source_path": "docs/architecture/v3-runtime-module-registry.yml",
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "d007635fa343f399baa96586ccedf338665e532f484aa028a369e2f6ea98842e"
+    },
+    {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "adeaf80c4be254ade006bb8fb0f52ce39eb356a8",
-      "sha256": "1968ff7acfe138e9af6e7c653c4289ee2acbdd2685190c42fe61d41fc691a719"
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "7a403e28d1b2aa73d37f20d721b88f887e1b3d1e3281af5d9f52a7bb6d19d15a"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
       "source_path": "docs/architecture/verification-map.yml",
-      "source_commit": "1756d52514158be50c925ccfa0336723248964c0",
-      "sha256": "f329e6c5c3c55a62802572a2b288241093164648744895752ea0a794c979038c"
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "7b00ab4a108c4ad6792bc424d08ff89c9cb63d50e1874a77e382029b3e349796"
     },
     {
       "output_path": "repo/docs/architecture/wiki/README.md",
@@ -2148,14 +2160,14 @@
     {
       "output_path": "repo/docs/goals/v3-independent-build-isolation-plan.md",
       "source_path": "docs/goals/v3-independent-build-isolation-plan.md",
-      "source_commit": "3cb6b0be2dc022d46e5680898eb1ce33d6e5f798",
-      "sha256": "dd94d62c9cf02125eb89a90cdd8419b120b3796dcfa37eb417caa29dec6a215f"
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "b76255952d953899faa57cf7ade3352cfabea8e705ff2a06d706613036334f31"
     },
     {
       "output_path": "repo/docs/goals/v3-independent-build-isolation-test-design.md",
       "source_path": "docs/goals/v3-independent-build-isolation-test-design.md",
-      "source_commit": "5d45b25067d849f3b4c8ccad6481e703626649e2",
-      "sha256": "a4d6f6045be4338147a82d135b46ca530607b0ee8f3a79120d853e2a84ff8c32"
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "dcefdab0d4af936528893d3a1a3be7d7f5d635bba5a8014f6753ff3cab4d33a1"
     },
     {
       "output_path": "repo/docs/goals/v3-live-provider-compat-parity-closeout-plan.md",
@@ -2614,5 +2626,5 @@
       "sha256": "2ada8d17e5cc0cb53ff0dfa9acfbeedf10eb4e35f7db239fb43ef88aa7478ea6"
     }
   ],
-  "manifest_digest": "d5fbf33ae87cf18b5b6b1fa7b36cc905fc0f9d3d5ab1b363dd86d755e64fa151"
+  "manifest_digest": "4f885560dc1a2508ccb68d1822d33fef8c82c16ffa1b14e3f1077353987c3ef4"
 }

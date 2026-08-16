@@ -1,6 +1,6 @@
 # V3 Independent Build Isolation Test Design
 
-Status: design pending
+Status: active; positive, negative, distribution, install, live, and review-remediation coverage implemented
 
 ## Goal
 
