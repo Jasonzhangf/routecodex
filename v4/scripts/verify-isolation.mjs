@@ -213,7 +213,7 @@ function checkRootDispatchers(rootPkgPath, workflowPath) {
   if (fs.existsSync(rootPkgPath)) {
     const pkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'));
     for (const [name, command] of Object.entries(pkg.scripts ?? {})) {
-      if (!name.startsWith('verify:v4') && !name.startsWith('test:v4')) continue;
+      if (!name.startsWith('verify:v4') && !name.startsWith('test:v4') && !name.startsWith('build:v4')) continue;
       if (!/^npm --prefix v4 run /.test(command)) {
         out.push(`root package.json ${name}: must be a thin npm --prefix v4 dispatcher (got: ${command})`);
       }
@@ -391,6 +391,15 @@ const outputProblems = scanOutputTargets(
   redDir,
 );
 expectReject('output target escaping v4', () => outputProblems);
+
+// R8: root npm dispatcher must be a thin npm --prefix v4 wrapper.
+const rootPkgFixture = path.join(redDir, 'package.json');
+fs.writeFileSync(
+  rootPkgFixture,
+  '{"scripts":{"build:v4":"node scripts/build.mjs","verify:v4":"npm --prefix v4 run verify:ci"}}\n',
+);
+const rootPkgProblems = checkRootDispatchers(rootPkgFixture, path.join(redDir, 'test.yml'));
+expectReject('root npm dispatcher not thin', () => rootPkgProblems);
 
 if (redFail > 0) {
   console.error(`[v4 isolation] red fixtures failed: ${redFail}`);

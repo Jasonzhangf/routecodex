@@ -20,6 +20,10 @@ unrelated cwd through the absolute V4 package path):
 Root `package.json` and `.github/workflows/test.yml` only dispatch to
 `verify:ci`; they do not enumerate V4 modules or gates.
 
+`v4/.appsdk/maps/verification-map.json` command entries execute with
+`cwd = v4` (declared in `command_context`); they are not runnable from the
+repository root.
+
 ## Locks and toolchain
 
 - `v4/Cargo.lock` is tracked; all cargo gates run `--locked`.
