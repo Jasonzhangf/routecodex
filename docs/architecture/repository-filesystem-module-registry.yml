@@ -8,6 +8,7 @@ modules:
       - scripts/ci/repo-sanity.mjs
       - scripts/architecture/verify-repository-filesystem-governance.mjs
       - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+      - scripts/experiments/v3-console-tui-simulator
       - v3/README.md
       - v3/fixtures
       - deprecated/v2

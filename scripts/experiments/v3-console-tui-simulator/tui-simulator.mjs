@@ -145,6 +145,17 @@ function terminalSize() {
   return { columns, rows };
 }
 
+export function calculateLayout(height, headerRows = 2) {
+  const safeHeight = Math.max(0, height);
+  const visibleHeaderRows = Math.min(headerRows, safeHeight);
+  const liveRows = Math.min(LIVE_PANEL_ROWS, Math.max(0, safeHeight - visibleHeaderRows));
+  return {
+    headerRows: visibleHeaderRows,
+    historyRows: Math.max(0, safeHeight - visibleHeaderRows - liveRows),
+    liveRows,
+  };
+}
+
 function compactDetails(item) {
   return `sid=${item.sessionId} rt=${item.route.replace("router-", "")} pv=${item.provider} rsn=${item.reason} u=${item.usage.inputTokens}/${item.usage.outputTokens}`;
 }
@@ -222,12 +233,12 @@ function render() {
       line(`${WHITE}RouteCodex TUI simulator${RESET}  ${DIM}${now()}  history=${state.history.filter(visible).length}  terminal=${width}x${height}${RESET}`, width),
       line(`${DIM}${width < 100 ? "Narrow mode: compact two-line live rows." : "History scrolls above; live requests stay fixed at bottom."}${RESET}`, width),
     ].slice(0, height);
-    const liveRows = Math.min(LIVE_PANEL_ROWS, Math.max(0, height - header.length));
-    const bodyRows = Math.max(0, height - header.length - liveRows);
+    const layout = calculateLayout(height, header.length);
+    const bodyRows = layout.historyRows;
     const history = historyLines(width, bodyRows);
     const body = history.slice(-bodyRows);
     while (body.length < bodyRows) body.unshift("");
-    const output = [...header, ...body, ...liveLines(width, liveRows)].join("\n");
+    const output = [...header, ...body, ...liveLines(width, layout.liveRows)].join("\n");
     process.stdout.write(`${ESC}H${ESC}J${output}${ESC}${height};1H`);
   });
 }
@@ -253,10 +264,11 @@ function cleanup() {
   process.stdout.write(`${RESET}${ESC}?25h${ESC}0m\n`);
 }
 
-if (!process.stdin.isTTY || !process.stdout.isTTY) {
-  console.error("tui-simulator requires an interactive TTY");
-  process.exit(2);
-}
+if (!process.env.TUI_SIMULATOR_NO_START) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.error("tui-simulator requires an interactive TTY");
+    process.exit(2);
+  }
 
 readline.emitKeypressEvents(process.stdin);
 process.stdin.setRawMode(true);
@@ -291,3 +303,4 @@ state.timer = setInterval(() => {
   render();
 }, TICK_MS);
 render();
+}
