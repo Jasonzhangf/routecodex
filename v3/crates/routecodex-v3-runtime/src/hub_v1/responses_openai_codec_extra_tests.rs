@@ -252,3 +252,50 @@ fn responses_encrypted_only_reasoning_item_keeps_empty_reasoning_content() {
     assert_eq!(messages[0]["content"], json!("previous answer"));
     assert_eq!(messages[1]["role"], json!("user"));
 }
+
+#[test]
+fn responses_summary_reasoning_item_projects_plaintext_reasoning_content() {
+    // 客户端回传 reasoning item 只携带 summary（Codex 响应侧密文剥离后的正常形态）
+    // 时，入口归一化必须把 summary 明文投影为 assistant 轮 reasoning_content；
+    // 若投影成空串，下一轮 Responses wire 重建后 reasoning 只剩 `[thinking redacted]`
+    // 占位，opencode-go Console Go 网关回 400 `reasoning_text must be passed back`。
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "deepseek-v4-flash",
+        "input": [
+            {
+                "type": "reasoning",
+                "id": "reasoning-summary-1",
+                "summary": [
+                    {"type": "summary_text", "text": "**Deciding skill activation**"},
+                    {"type": "summary_text", "text": "**Preparing to read docs**"}
+                ],
+                "encrypted_content": null,
+                "content": null
+            },
+            {
+                "type": "function_call",
+                "id": "fc-1",
+                "call_id": "call-1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"pwd\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call-1",
+                "output": "/tmp"
+            }
+        ]
+    }))
+    .expect("summary reasoning must project into Chat");
+
+    let messages = request["messages"].as_array().expect("messages");
+    let assistant = messages
+        .iter()
+        .find(|message| message.get("tool_calls").is_some())
+        .expect("assistant tool message");
+    assert_eq!(
+        assistant["reasoning_content"],
+        json!("**Deciding skill activation**\n**Preparing to read docs**"),
+        "summary plaintext must be carried as reasoning_content for the next wire"
+    );
+}

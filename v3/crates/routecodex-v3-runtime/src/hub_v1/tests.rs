@@ -1024,3 +1024,74 @@ fn anthropic_outbound_strips_responses_only_reasoning_policy_fields_without_fail
         "messages must remain projected to anthropic wire"
     );
 }
+
+#[test]
+fn responses_reasoning_summary_survives_chat_canonical_round_trip_before_tool_output() {
+    // 复现 opencode-go/Console Go 400 `reasoning_text must be passed back`：
+    // 客户端回传 reasoning item 只携带 summary（content=null、encrypted_content=null），
+    // 后面紧跟 assistant 文本消息与 function_call。chat canonical 阶段必须把
+    // summary 投影为 assistant message 的 reasoning_content，再从 Responses wire
+    // 重建时原样带回 reasoning.summary，禁止变成空 reasoning。
+    let input = json!([
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]},
+        {
+            "type": "reasoning",
+            "id": "item_rsn_1",
+            "summary": [{"type": "summary_text", "text": "**Deciding skill activation and compliance**"}],
+            "encrypted_content": null,
+            "content": null
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "I will read the skill first."}]
+        },
+        {
+            "type": "function_call",
+            "id": "item_fc_1",
+            "call_id": "call_1",
+            "name": "exec_command",
+            "arguments": "{\"cmd\":\"cat SKILL.md\"}"
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "skill body"
+        }
+    ]);
+    let canonical = build_v3_openai_chat_provider_payload_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": input,
+        "reasoning": {"effort": "high", "summary": "detailed"}
+    }))
+    .expect("reasoning summary must canonicalize into Chat");
+    let assistant = canonical["messages"]
+        .as_array()
+        .expect("canonical messages")
+        .iter()
+        .find(|message| message.get("tool_calls").is_some())
+        .expect("assistant tool message must exist");
+    assert_eq!(
+        assistant["reasoning_content"], "**Deciding skill activation and compliance**",
+        "summary must project into assistant reasoning_content before tool call"
+    );
+
+    let rebuilt = build_v3_openai_responses_standard_request_from_chat_canonical(&canonical)
+        .expect("Chat canonical must rebuild into Responses wire");
+    let rebuilt_reasoning = rebuilt["input"]
+        .as_array()
+        .expect("rebuilt input")
+        .iter()
+        .filter(|item| item.get("type") == Some(&json!("reasoning")))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rebuilt_reasoning.len(),
+        1,
+        "rebuild must keep the reasoning item"
+    );
+    assert_eq!(
+        rebuilt_reasoning[0]["summary"],
+        json!([{"type": "summary_text", "text": "**Deciding skill activation and compliance**"}]),
+        "rebuild must carry the full summary as plaintext for the next wire"
+    );
+}

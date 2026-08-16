@@ -759,6 +759,180 @@ mod tests {
     }
 
     #[test]
+    fn wire_moves_deepseek_console_go_interleaved_assistant_after_tool_run_outputs() {
+        // 已证实 400 载体（opencode-go key3 deepseek-v4-flash）：Console Go
+        // 网关把 Responses input 转 Chat 时按 call -> 最近 output 配对；call
+        // 与其 output 之间的 assistant 文本消息会打断配对，导致上游 400
+        // `No tool output found for tool call ...`（DeepSeek 原生 API 接受该
+        // 交错，只有 Console Go Chat 降级不接受）。wire 必须把每个工具 run
+        // 内的 assistant 消息移到该 run 最后一个 output 之后，calls/outputs
+        // 原序保留；并行 calls 的 run 同样后移，且重复构建字节不变。
+        let mut target = target();
+        target.provider_id = "opencode-go".into();
+        target.provider_type = "responses".into();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        target.wire_model = "deepseek-v4-flash".into();
+        target.compatibility_profile = Some("responses:deepseek-console-go".into());
+        let body = json!({
+            "model": "deepseek-v4-flash",
+            "reasoning": {"effort": "high"},
+            "input": [
+                {"type": "reasoning", "id": "rs_first", "summary": [{"type": "summary_text", "text": "plan"}]},
+                {"type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"},
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "retry with int"}]},
+                {"type": "function_call_output", "call_id": "call_1", "output": "/tmp"},
+                {"type": "function_call", "call_id": "call_2", "name": "exec_command", "arguments": "{\"cmd\":\"ls\"}"},
+                {"type": "function_call", "call_id": "call_3", "name": "exec_command", "arguments": "{\"cmd\":\"ls -la\"}"},
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "parallel note"}]},
+                {"type": "function_call_output", "call_id": "call_2", "output": "src"},
+                {"type": "function_call_output", "call_id": "call_3", "output": "src2"},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]}
+            ]
+        });
+        let first = build_v3_provider_12_responses_wire_payload(
+            "req-pairing",
+            target.clone(),
+            body.clone(),
+        )
+        .unwrap();
+        let second =
+            build_v3_provider_12_responses_wire_payload("req-pairing-2", target, body).unwrap();
+        let input = first.body()["input"].as_array().unwrap();
+        let types: Vec<&str> = input
+            .iter()
+            .map(|item| item["type"].as_str().unwrap_or(""))
+            .collect();
+        assert_eq!(
+            &types[1..10],
+            &[
+                "function_call",
+                "function_call_output",
+                "message",
+                "function_call",
+                "function_call",
+                "function_call_output",
+                "function_call_output",
+                "message",
+                "message",
+            ],
+            "single-call run must become call/output/message; parallel run must become call/call/output/output/message"
+        );
+        // 结构化断言：任意 call 与其同名 output 之间不得夹 assistant message。
+        let mut pending: Vec<(&str, usize)> = Vec::new();
+        for (index, item) in input.iter().enumerate() {
+            let kind = item["type"].as_str().unwrap_or("");
+            match kind {
+                "function_call" | "custom_tool_call" => {
+                    pending.push((item["call_id"].as_str().unwrap_or(""), index));
+                }
+                "function_call_output" | "custom_tool_call_output" => {
+                    let call_id = item["call_id"].as_str().unwrap_or("");
+                    let call_index = pending
+                        .iter()
+                        .position(|(candidate, _)| *candidate == call_id)
+                        .expect("output must match an earlier pending call");
+                    let call_input_index = pending[call_index].1;
+                    let gap_has_assistant =
+                        input[call_input_index + 1..index].iter().any(|mid| {
+                        mid["type"].as_str() == Some("message")
+                            && mid["role"].as_str() == Some("assistant")
+                        });
+                    assert!(
+                        !gap_has_assistant,
+                        "no assistant message may sit between a tool call and its output"
+                    );
+                    pending.remove(call_index);
+                }
+                _ => {}
+            }
+        }
+        assert!(pending.is_empty(), "all calls must be matched by outputs");
+        assert_eq!(
+            first.body(),
+            second.body(),
+            "pairing normalization must be deterministic so repeated requests keep the same upstream cache prefix"
+        );
+    }
+
+    #[test]
+    fn wire_keeps_deepseek_console_go_paired_tool_sequence_untouched() {
+        // 反向：call/output 本来就相邻（run 内无 assistant）时，wire 不得移动
+        // 任何条目；run output 之后的 assistant 文本不在配对窗口内，保持原位。
+        let mut target = target();
+        target.provider_id = "opencode-go".into();
+        target.provider_type = "responses".into();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        target.wire_model = "deepseek-v4-flash".into();
+        target.compatibility_profile = Some("responses:deepseek-console-go".into());
+        let body = json!({
+            "model": "deepseek-v4-flash",
+            "reasoning": {"effort": "high"},
+            "input": [
+                {"type": "reasoning", "id": "rs_first", "summary": [{"type": "summary_text", "text": "plan"}]},
+                {"type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "/tmp"},
+                {"type": "function_call", "call_id": "call_2", "name": "exec_command", "arguments": "{\"cmd\":\"ls\"}"},
+                {"type": "function_call_output", "call_id": "call_2", "output": "src"},
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "after run text"}]},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]}
+            ]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-paired", target, body).unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        let types: Vec<&str> = input
+            .iter()
+            .map(|item| item["type"].as_str().unwrap_or(""))
+            .collect();
+        assert_eq!(
+            &types[1..8],
+            &[
+                "function_call",
+                "function_call_output",
+                "reasoning",
+                "function_call",
+                "function_call_output",
+                "message",
+                "message",
+            ],
+            "already-paired runs and post-run assistant text must keep their original order"
+        );
+    }
+
+    #[test]
+    fn wire_keeps_interleaved_assistant_untouched_for_unproven_provider() {
+        // 配对重排与 junction reasoning 同门控：只属于已证实的
+        // opencode-go/Console Go 网关；其他持 deepseek-v4-flash 模型的
+        // Responses provider 必须原样保留客户端交错顺序。
+        let mut target = target();
+        target.provider_id = "some-other-responses".into();
+        target.canonical_model_id = "deepseek-v4-flash".into();
+        target.wire_model = "deepseek-v4-flash".into();
+        let body = json!({
+            "model": "deepseek-v4-flash",
+            "reasoning": {"effort": "high"},
+            "input": [
+                {"type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"},
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "interleaved text"}]},
+                {"type": "function_call_output", "call_id": "call_1", "output": "/tmp"},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]}
+            ]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-unproven-pairing", target, body)
+                .unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        assert_eq!(input[0]["type"], "function_call");
+        assert_eq!(input[1]["type"], "message");
+        assert_eq!(input[1]["role"], "assistant");
+        assert_eq!(input[2]["type"], "function_call_output");
+        assert_eq!(
+            input[0]["call_id"], input[2]["call_id"],
+            "unproven provider must keep the client's interleaved call/assistant/output order untouched"
+        );
+    }
+
+    #[test]
     fn wire_junction_reasoning_does_not_inherit_across_user_turn_boundary() {
         // 上一轮 reasoning 明文不能错配到新一轮工具段：user 消息边界后的
         // output->call 交界必须用确定性占位符（无当前轮 reasoning），否则

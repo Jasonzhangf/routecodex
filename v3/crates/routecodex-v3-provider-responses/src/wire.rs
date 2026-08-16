@@ -155,6 +155,10 @@ pub fn build_v3_provider_12_responses_wire_payload(
             && target.compatibility_profile.as_deref() == Some("responses:deepseek-console-go")
             && v3_wire_payload_is_thinking_mode(&body)
         {
+            // 先做 call/output 配对归一（Console Go Chat 降级契约），再做
+            // junction reasoning 合成；两者同属已证实的 opencode-go/Console Go
+            // 网关契约，deepseek-v4-flash + thinking 模式为已证实载体。
+            normalize_v3_deepseek_console_go_tool_output_pairing(&mut body);
             insert_v3_deepseek_interleaved_tool_segment_reasoning(&mut body);
         }
     }
@@ -291,6 +295,80 @@ fn join_v3_reasoning_plain_text(obj: &Map<String, Value>) -> String {
     String::new()
 }
 
+/// Console Go 网关把 Responses input 转 Chat 时按 `call -> 最近 output` 配对；
+/// call 与其 output 之间的 assistant 文本消息会打断配对，导致上游 400
+/// `No tool output found for tool call ...`（DeepSeek 原生 API 接受该交错，
+/// 只有 Console Go 的 Chat 降级不接受）。把每个工具 run（一个或多个连续
+/// calls + 其 outputs，窗口内只含 calls/outputs/assistant 文本消息）内的
+/// assistant 消息移动到该 run 最后一个 output 之后，保持消息相对顺序；
+/// calls 与 outputs 原序不动。纯函数、确定性，同一请求反复构建 wire 输出
+/// 字节不变。
+fn normalize_v3_deepseek_console_go_tool_output_pairing(body: &mut Value) {
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let mut pending_calls = 0usize;
+    let mut run_assistant: Vec<Value> = Vec::new();
+    let mut index = 0usize;
+    while index < input.len() {
+        let kind = input[index].get("type").and_then(Value::as_str);
+        match kind {
+            Some("function_call" | "custom_tool_call") => {
+                if pending_calls == 0 {
+                    run_assistant.clear();
+                }
+                pending_calls += 1;
+                index += 1;
+            }
+            Some("function_call_output" | "custom_tool_call_output") => {
+                pending_calls = pending_calls.saturating_sub(1);
+                index += 1;
+                if pending_calls == 0 && !run_assistant.is_empty() {
+                    let tail_len = run_assistant.len();
+                    let insert_at = index;
+                    for message in run_assistant.drain(..) {
+                        input.insert(insert_at, message);
+                    }
+                    index += tail_len;
+                }
+            }
+            Some("message") => {
+                let role = input[index]
+                    .get("role")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                if role.as_deref() == Some("assistant") && pending_calls > 0 {
+                    let message = input.remove(index);
+                    run_assistant.push(message);
+                    // 索引不前进：后续条目前移，继续扫描同一位置。
+                } else {
+                    if role.as_deref() == Some("user") && !run_assistant.is_empty() {
+                        // 未闭合 run 遇到轮边界：先放回已收集消息，不丢数据。
+                        let tail_len = run_assistant.len();
+                        let insert_at = index;
+                        for message in run_assistant.drain(..) {
+                            input.insert(insert_at, message);
+                        }
+                        index += tail_len;
+                    }
+                    if role.as_deref() == Some("user") {
+                        pending_calls = 0;
+                    }
+                    index += 1;
+                }
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+    // 畸形输入：pending calls 未闭合时把 run 内 assistant 消息追加到末尾，
+    // 不丢数据、确定性输出。
+    if !run_assistant.is_empty() {
+        input.append(&mut run_assistant);
+    }
+}
+
 /// DeepSeek thinking mode 的交错工具段兼容：opencode-go Console Go 网关把
 /// Responses input 转 Chat 时，`function_call_output/custom_tool_call_output`
 /// 后直接跟随的 `function_call/custom_tool_call` 会生成新的 assistant tool_calls
@@ -349,7 +427,8 @@ fn insert_v3_deepseek_interleaved_tool_segment_reasoning(body: &mut Value) {
         let is_assistant_message = matches!(
             input[index].get("type").and_then(Value::as_str),
             Some("message")
-        ) && input[index].get("role").and_then(Value::as_str) == Some("assistant");
+        ) && input[index].get("role").and_then(Value::as_str)
+            == Some("assistant");
         if is_assistant_message && next_is_call && last_reasoning_text.is_none() {
             input.insert(
                 index + 1,

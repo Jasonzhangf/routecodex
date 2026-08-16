@@ -1126,15 +1126,27 @@ fn collect_v3_openai_chat_reasoning_segments(value: Option<&Value>) -> Vec<Strin
             .iter()
             .flat_map(|item| collect_v3_openai_chat_reasoning_segments(Some(item)))
             .collect(),
-        Value::Object(row) => row
-            .get("text")
-            .or_else(|| row.get("content"))
-            .or_else(|| row.get("summary"))
-            .or_else(|| row.get("reasoning_content"))
-            .or_else(|| row.get("thinking"))
-            .into_iter()
-            .flat_map(|item| collect_v3_openai_chat_reasoning_segments(Some(item)))
-            .collect(),
+        Value::Object(row) => {
+            // Codex 回传的 reasoning item 常带显式 `content: null` 占位（明文在
+            // `summary`），JSON null 等价于缺失，必须按 key 顺序取第一个非 null 值。
+            let mut picked = None;
+            for key in [
+                "text",
+                "content",
+                "summary",
+                "reasoning_content",
+                "thinking",
+            ] {
+                if let Some(value) = row.get(key).filter(|value| !value.is_null()) {
+                    picked = Some(value);
+                    break;
+                }
+            }
+            picked
+                .into_iter()
+                .flat_map(|item| collect_v3_openai_chat_reasoning_segments(Some(item)))
+                .collect()
+        }
         _ => Vec::new(),
     }
 }
