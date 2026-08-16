@@ -54,8 +54,8 @@
     {
       "output_path": "repo/docs/architecture/function-map.yml",
       "source_path": "docs/architecture/function-map.yml",
-      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
-      "sha256": "9dee9e1acd85d868377f8cfb2ec92072c935b98de9bad1b907badf4b84a98f5c"
+      "source_commit": "13833b7e538e3079719f19480fca0c46c3ca57b5",
+      "sha256": "787cf6594210ee2d1060baf25613126aa759e07f559dddfcc5169758377291f6"
     },
     {
       "output_path": "repo/docs/architecture/mainline-binding-budget.yml",
@@ -648,8 +648,8 @@
     {
       "output_path": "repo/docs/architecture/repository-filesystem-module-registry.yml",
       "source_path": "docs/architecture/repository-filesystem-module-registry.yml",
-      "source_commit": "8f9ae9cadc065be5aa8fdf462a570f6e18513604",
-      "sha256": "ace154b7422ef4bf6bbf5fc84a7c7ba84a7b683a6f66232f20f37aafb9a7c735"
+      "source_commit": "13833b7e538e3079719f19480fca0c46c3ca57b5",
+      "sha256": "b8b9f22a61271105bdecdda58942829a63333bfd06bd158ea552346a8d52a3e4"
     },
     {
       "output_path": "repo/docs/architecture/resource-global-coverage-report.json",
@@ -780,8 +780,8 @@
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
       "source_path": "docs/architecture/verification-map.yml",
-      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
-      "sha256": "7b00ab4a108c4ad6792bc424d08ff89c9cb63d50e1874a77e382029b3e349796"
+      "source_commit": "13833b7e538e3079719f19480fca0c46c3ca57b5",
+      "sha256": "2a9210474746c554845fa426ed36937427228a71f315c8c99ebc6f662f7bfcf1"
     },
     {
       "output_path": "repo/docs/architecture/wiki/README.md",
@@ -1768,6 +1768,12 @@
       "sha256": "03deff707d4aa03a1447c48c6977ca17662504b42a15d5752ca9d676512a9002"
     },
     {
+      "output_path": "repo/docs/goals/repository-root-retirement-v4-v3-integration-plan.md",
+      "source_path": "docs/goals/repository-root-retirement-v4-v3-integration-plan.md",
+      "source_commit": "f23286b350f6e053a6a4fbc263eeeff207745b77",
+      "sha256": "007d9e146253740358fc865fce60848d957da3fe2defeb9115b4c60aab07e28f"
+    },
+    {
       "output_path": "repo/docs/goals/request-error-provider-model-observation-test-design.md",
       "source_path": "docs/goals/request-error-provider-model-observation-test-design.md",
       "source_commit": "c5f940e58f79dfd4cee56198b9457bc04ce9bcb9",
@@ -1800,8 +1806,8 @@
     {
       "output_path": "repo/docs/goals/root-generated-artifacts-governance-plan.md",
       "source_path": "docs/goals/root-generated-artifacts-governance-plan.md",
-      "source_commit": "abd8b21f883a6de6f7760d09d8262f5d2390803a",
-      "sha256": "736c60bfd1e3ca0a1739e3a0d15e9334e0bdf09e206b489a3c247614d69bf1a7"
+      "source_commit": "f23286b350f6e053a6a4fbc263eeeff207745b77",
+      "sha256": "089fd5d474ae9d8492e2f0aa171f4eef620831fb0038cf4717de69178a73792d"
     },
     {
       "output_path": "repo/docs/goals/routecodex-appsdk-migration-plan.md",
@@ -2626,5 +2632,5 @@
       "sha256": "2ada8d17e5cc0cb53ff0dfa9acfbeedf10eb4e35f7db239fb43ef88aa7478ea6"
     }
   ],
-  "manifest_digest": "a017b3f30388da7ec2e6835f15b71c4b90f2977abc48c5b4604720d0beadfe7a"
+  "manifest_digest": "097faf49c7965455e2bb8357a3d6f8243ed1bc05e0bfca380380feab49b5d0a7"
 }

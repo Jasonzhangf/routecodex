@@ -15,12 +15,14 @@ owners:
   allowed_paths:
   - .gitignore
   - scripts/ci/repo-sanity.mjs
+  - scripts/ci/mempalace-scan-artifact-audit.mjs
   - scripts/architecture/verify-repository-filesystem-governance.mjs
   - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
   - .agents/skills/rcc-dev-skills/SKILL.md
   - .agents/skills/rcc-dev-skills/references
   - .agents/skills/rcc-v3-architecture/SKILL.md
   - docs/architecture/repository-filesystem-module-registry.yml
+  - docs/audits/repository-root-layout-v3-v2-audit.md
   - docs/architecture/function-map.yml
   - docs/architecture/mainline-call-map.yml
   - docs/architecture/resource-operation-map.yml
@@ -30,6 +32,7 @@ owners:
   - docs/design/payload-copy-hotspot-inventory.md
   - docs/goals/root-generated-artifacts-governance-plan.md
   - docs/goals/root-generated-artifacts-governance-execution-prompt.md
+  - docs/goals/repository-root-retirement-v4-v3-integration-plan.md
   - v3/fixtures
   - scripts/architecture/verify-agent-p0-payload-control-guard.mjs
   - scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs

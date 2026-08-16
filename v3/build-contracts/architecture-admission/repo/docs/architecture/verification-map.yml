@@ -8,6 +8,7 @@ verification:
   contract:
   - docs/architecture/repository-filesystem-module-registry.yml
   - docs/goals/root-generated-artifacts-governance-plan.md
+  - docs/goals/repository-root-retirement-v4-v3-integration-plan.md
   integration:
   - .gitignore
   - scripts/ci/repo-sanity.mjs

@@ -56,7 +56,7 @@ Current root classification:
 
 Root is reserved for:
 
-- project entry documents: `AGENTS.md`, `README.md`, `DELIVERY.md`, `MEMORY.md`, `note.md`;
+- project entry documents: `AGENTS.md`, `README.md`, `MEMORY.md`, `note.md`;
 - package/toolchain manifests: `package.json`, `package-lock.json`, `tsconfig*.json`, `jest.config.js`, `eslint.config.js`, `.gitignore`, `.gitattributes`;
 - source/config/test/documentation roots: `v3/`, `src/`, `sharedmodule/`, `config/`, `configsamples/`, `docs/`, `scripts/`, `tests/`, `samples/`, `webui/`;
 - retired source archive root: `deprecated/`; only `deprecated/v2/` is approved, and it is never an active runtime/build/package surface;
