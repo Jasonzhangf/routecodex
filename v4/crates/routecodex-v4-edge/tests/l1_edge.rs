@@ -275,6 +275,128 @@ fn edge_control_flow_scope_isolation() {
 }
 
 #[test]
+fn red_control_duplicate_register_fails_fast() {
+    let mut scopes = ScopeRegistry::new();
+    let first = EdgeSpec::control_flow(
+        "edge.ctrl.first",
+        "request",
+        "v4-hub-1",
+        "V4HubReqChatProcess04Governed",
+        "v4.control.side_channel",
+        "register",
+        "continuation.restore",
+        vec!["req-A".to_string()],
+        true,
+    );
+    validate_edge(&first, &nodes(), &resources(), &[], &mut scopes).unwrap();
+
+    let duplicate = EdgeSpec::control_flow(
+        "edge.ctrl.duplicate",
+        "request",
+        "v4-hub-1",
+        "V4HubReqChatProcess04Governed",
+        "v4.control.side_channel",
+        "register",
+        "continuation.restore",
+        vec!["req-B".to_string()],
+        true,
+    );
+    assert!(matches!(
+        validate_edge(&duplicate, &nodes(), &resources(), &[], &mut scopes),
+        Err(EdgeError::ControlAlreadyRegistered)
+    ));
+}
+
+#[test]
+fn red_control_release_requires_registered_same_scope() {
+    let mut scopes = ScopeRegistry::new();
+    let missing = EdgeSpec::control_flow(
+        "edge.ctrl.release.missing",
+        "request",
+        "v4-hub-1",
+        "V4HubReqChatProcess04Governed",
+        "v4.control.side_channel",
+        "release",
+        "continuation.restore",
+        vec!["req-A".to_string()],
+        true,
+    );
+    assert!(matches!(
+        validate_edge(&missing, &nodes(), &resources(), &[], &mut scopes),
+        Err(EdgeError::ControlNotRegistered)
+    ));
+
+    let register = EdgeSpec::control_flow(
+        "edge.ctrl.release.register",
+        "request",
+        "v4-hub-1",
+        "V4HubReqChatProcess04Governed",
+        "v4.control.side_channel",
+        "register",
+        "continuation.restore",
+        vec!["req-A".to_string()],
+        true,
+    );
+    validate_edge(&register, &nodes(), &resources(), &[], &mut scopes).unwrap();
+    let foreign = EdgeSpec::control_flow(
+        "edge.ctrl.release.foreign",
+        "request",
+        "v4-hub-1",
+        "V4HubReqChatProcess04Governed",
+        "v4.control.side_channel",
+        "release",
+        "continuation.restore",
+        vec!["req-B".to_string()],
+        true,
+    );
+    assert!(matches!(
+        validate_edge(&foreign, &nodes(), &resources(), &[], &mut scopes),
+        Err(EdgeError::ScopeMismatch)
+    ));
+}
+
+#[test]
+fn red_control_key_must_be_present_and_non_empty() {
+    let mut scopes = ScopeRegistry::new();
+    let mut missing_key = EdgeSpec::control_flow(
+        "edge.ctrl.empty-key",
+        "request",
+        "v4-hub-1",
+        "V4HubReqChatProcess04Governed",
+        "v4.control.side_channel",
+        "register",
+        "continuation.restore",
+        vec!["req-A".to_string()],
+        true,
+    );
+    missing_key.control_key = None;
+    assert!(matches!(
+        validate_edge(&missing_key, &nodes(), &resources(), &[], &mut scopes),
+        Err(EdgeError::ControlKeyRequired)
+    ));
+}
+
+#[test]
+fn red_control_flow_rejects_data_axis_resource() {
+    let mut scopes = ScopeRegistry::new();
+    let data_target = EdgeSpec::control_flow(
+        "edge.ctrl.data-target",
+        "request",
+        "v4-hub-1",
+        "V4HubReqChatProcess04Governed",
+        "v4.request.normal_payload",
+        "register",
+        "continuation.restore",
+        vec!["req-A".to_string()],
+        true,
+    );
+    assert!(matches!(
+        validate_edge(&data_target, &nodes(), &resources(), &[], &mut scopes),
+        Err(EdgeError::ResourceAxisMismatch)
+    ));
+}
+
+#[test]
 fn edge_debug_subscription_read_only() {
     let edge = EdgeSpec::debug_subscription(
         "edge.debug.1",

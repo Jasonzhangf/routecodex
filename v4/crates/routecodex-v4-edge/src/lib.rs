@@ -283,6 +283,9 @@ pub enum EdgeError {
     NonAdjacentEdge,
     ResourceAxisMismatch,
     ControlRecordRequired,
+    ControlKeyRequired,
+    ControlAlreadyRegistered,
+    ControlNotRegistered,
     ScopeMismatch,
     DebugSubscriptionNotReadOnly,
     ErrorIntakeUnTyped,
@@ -374,11 +377,21 @@ pub fn validate_edge(
             if !edge.record_required {
                 return Err(EdgeError::ControlRecordRequired);
             }
-            let _axis = resource_axis(&edge.to)?;
-            let key = edge.control_key.clone().unwrap_or_default();
+            if resource_axis(&edge.to)? != Axis::Control {
+                return Err(EdgeError::ResourceAxisMismatch);
+            }
+            let key = edge
+                .control_key
+                .as_ref()
+                .filter(|key| !key.is_empty())
+                .ok_or(EdgeError::ControlKeyRequired)?
+                .clone();
             let scope_id = ScopeRegistry::scope_identity(&edge.scope_keys);
             match edge.operation.as_deref() {
                 Some("register") => {
+                    if scopes.registered.contains_key(&key) {
+                        return Err(EdgeError::ControlAlreadyRegistered);
+                    }
                     scopes.registered.insert(key, scope_id);
                     Ok(())
                 }
@@ -387,8 +400,14 @@ pub fn validate_edge(
                     _ => Err(EdgeError::ScopeMismatch),
                 },
                 Some("release") => {
-                    scopes.registered.remove(&key);
-                    Ok(())
+                    match scopes.registered.get(&key) {
+                        Some(registered) if *registered == scope_id => {
+                            scopes.registered.remove(&key);
+                            Ok(())
+                        }
+                        Some(_) => Err(EdgeError::ScopeMismatch),
+                        None => Err(EdgeError::ControlNotRegistered),
+                    }
                 }
                 _ => Err(EdgeError::ControlRecordRequired),
             }
