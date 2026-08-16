@@ -5491,3 +5491,24 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
   VERDICT: PASS（无 P0/P1），P2-1 闭环。
 - 经验：count/consistency 类 gate 必须有独立权威锚（frozen baseline）而非
   仅从同一来源自推导 actual；协调塌缩是红测必测类，防“一致删减”静默漂移。
+
+## 2026-08-16 V3 SSE terminal/cooldown 交付闭环（追加确证）
+- 提交 `8a76cbc83`（base 486d68f68）修复 Responses→Chat/Anthropic SSE 终态与
+  ClientDisconnect 冷却：`response.incomplete` 以 `[DONE]`+finish_reason 终态；
+  `status=failed` 才投影 `response.failed`；ClientDisconnect health-neutral
+  （relay 不写 cooldown）；codec 对缺/未知 `incomplete_details.reason` fail-fast；
+  拆 `openai_chat_relay_runtime_sse.rs`（include!，父文件 <1500 行）；删除
+  `record_response_status`/`global_subscription_store()` 死代码。
+- 全局交付：0.90.4563 安装（sha256 6e8cba54…，dist/bin==~/.local/bin）、
+  config check ok（servers=4）、一次聚合 restart（instance v3-b4b08354…）、
+  四端口 /health ok（build_version=0.90.4563）；在线 replay 5555/5520/10000
+  responses + 10000 chat + 10000 messages 全部 200/终态/usage；日志无 V3E3/502。
+- DSH r2 PASS（commit 8a76cbc83，opencode-go/deepseek-v4-flash，
+  `~/.dsh/reviews/v3-sse-usage-delivery-fix-r2/`），3 条非阻塞 P2：
+  `_sse.rs` 未进 v3-function-map allowed_paths（doc-lockstep，下次同步）；
+  incomplete reason allowlist 窄（goal-locked fail-fast 取舍）；
+  health.rs 测试随 486d68f68 provider-key 语义改写（业务确认：同 key 跨
+  session 共享失败计数，key 级 3 次失败冷却）。
+- 经验：install:v3 的 gen-build-info.mjs 每次自动 bump patch 版本并改写
+  package.json/package-lock/src/build-info.ts；安装后这些文件变脏是机械产物，
+  交付 commit 需包含该 bump，使 HEAD 版本与已安装/在线验证的运行版本一致。
