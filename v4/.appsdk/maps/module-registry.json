@@ -209,6 +209,24 @@
       ]
     },
     {
+      "module_id": "routecodex-v4-cordis-bridge",
+      "status": "active",
+      "owner": "routecodex-v4-cordis-bridge",
+      "owned_paths": [
+        "crates/routecodex-v4-cordis-bridge/**"
+      ],
+      "forbidden_paths": [
+        "active/lib/**",
+        "protected/**",
+        "generated/**"
+      ],
+      "verification_gates": [
+        "v4_plugin_bridge_l2_regression",
+        "v4_parity_gate_cordis_bridge",
+        "v4_parity_gate_cordis_bridge_red"
+      ]
+    },
+    {
       "module_id": "routecodex-v4-runtime",
       "status": "active",
       "owner": "routecodex-v4-runtime",

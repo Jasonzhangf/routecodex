@@ -130,6 +130,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v4-cordis-bridge"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-plugin-contract",
+ "routecodex-v4-plugin-plan",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "routecodex-v4-plugin-catalog"
 version = "0.1.0"
 dependencies = [

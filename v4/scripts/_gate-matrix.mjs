@@ -8,6 +8,7 @@
 export const ARCHITECTURE_GATES = [
   'verify-v4-active-link.mjs',
   'verify-v4-capability-isolation.mjs',
+  'verify-v4-cordis-bridge.mjs',
   'verify-v4-execution-binding.mjs',
   'verify-v4-feature-gap.mjs',
   'verify-v4-node-graph.mjs',
@@ -22,6 +23,7 @@ export const ARCHITECTURE_GATES = [
 ];
 
 export const RED_SUITES = [
+  ['verify-v4-cordis-bridge.mjs', '--red-self-test'],
   ['verify-v4-feature-gap.mjs', '--red-self-test'],
   ['verify-v4-node-graph.mjs', '--red-self-test'],
   ['verify-v4-plugin-plan.mjs', '--red-self-test'],
