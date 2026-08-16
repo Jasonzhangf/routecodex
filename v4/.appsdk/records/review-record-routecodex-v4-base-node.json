@@ -1,6 +1,6 @@
 {
-  "ai_confidence": 0.92,
-  "confidence_rationale": "Exact candidate contains only governance contracts, lifecycle state, and immutable Protected history; no V3 or V4 crate source changed. Base-node compiles, all 12 mapped tests pass, the public artifact bytes match active-v1, and old/new SDK boundaries fail closed. Remaining dependent modules are explicitly deferred by dependency order.",
+  "ai_confidence": 0.93,
+  "confidence_rationale": "Post-merge architecture re-audit confirms the migration candidate remains governance-only, while current maps bind real debug/router/provider/server symbols and runtime-owned typed control resources. Base-node remains frozen behind Active artifacts; owner, payload-isolation, dependency, and verification boundaries are explicit and fail closed.",
   "created_at": "2026-08-16T04:04:00Z",
   "evidence_ids": [
     "base-sdk013-candidate",
@@ -8,11 +8,11 @@
     "base-sdk013-negative"
   ],
   "fix_candidate_id": "base-sdk013-candidate",
-  "function_map_hash": "sha256:de648247dbbea0ea1ade734be0452cce0d1a894c964660164a5b5078c7f8c969",
+  "function_map_hash": "sha256:cf80ecfb2c2dd64b5fa3b32987a504ec0de5708364c675898cf756bf31c94bd4",
   "issue_id": "appsdk-013-migration",
-  "mainline_call_map_hash": "sha256:54dfd59d24efbd6a9155eb3a4ff25862d94fad2c156a52691e298ecc052b8e8b",
+  "mainline_call_map_hash": "sha256:9fbbde4c43db6ebc4a3c86909a8589e7c7309e847493b3e00042625ce0e30280",
   "promotion_id": "base-sdk013-promotion",
-  "resource_map_hash": "sha256:948ff1cdf30ca889c1054077783ca2c13aeda6ea9b0f5a4f51ebfe5502b391d2",
+  "resource_map_hash": "sha256:19c93149cd6f02edfe688b454273d1a703e67b4ef40c458860b50015c1470768",
   "review_id": "base-sdk013-architecture-review",
   "review_kind": "architecture",
   "reviewed_artifact_hash": "sha256:16b93ccf529ec4a940c1ddeab745af7a8e70daf148396f5b8f5ba88ce1d08f70",
@@ -25,5 +25,5 @@
     "identity": "codex-gpt-5"
   },
   "verdict": "pass",
-  "verification_map_hash": "sha256:4772f040e33b3ac8f7eec32b9fd9f8c41f4c63053687d4cbc47a899c0f5faa48"
+  "verification_map_hash": "sha256:56344905a4a24e6c9d57b4a2d0c2d0ae2e92aa20c56bfcb035f5837f4e20dd99"
 }
