@@ -221,7 +221,14 @@ pub(crate) fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -
 fn v3_post_commit_sse_error_event_chunk(source: V3Error01SourceRaised) -> Vec<u8> {
     let projected = project_v3_post_commit_sse_source(source, 502);
     let (code, message) = v3_error_body_code_message(&projected.body);
-    v3_sse_error_event_chunk(projected.status, &code, &message)
+    let event = json!({
+        "type": "error",
+        "error": {
+            "code": code,
+            "message": message
+        }
+    });
+    format!("event: error\ndata: {event}\n\n").into_bytes()
 }
 
 pub(crate) fn responses_direct_output_response_with_console(

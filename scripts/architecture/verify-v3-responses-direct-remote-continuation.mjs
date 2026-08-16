@@ -251,6 +251,7 @@ forbid(runtimeHelpers, runtimeHelpersPath, [
 ]);
 forbid(serverFrames, serverFramesPath, [
   /\.code\s*==\s*"client_disconnect"/,
+  /v3_sse_error_event_chunk\(projected\.status/,
 ]);
 forbid(relayWebsocketFunction, `${serverWebsocketPath}#send_responses_relay_websocket_sse_stream`, [
   /\.code\s*==\s*"client_disconnect"/,

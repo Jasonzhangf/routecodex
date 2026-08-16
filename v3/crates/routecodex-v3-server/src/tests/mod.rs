@@ -3483,6 +3483,10 @@ async fn responses_sse_relay_provider_stream_error_projects_standard_error_then_
     assert!(error.contains("provider_response_sse_stream"), "{error}");
     assert!(error.contains("controlled error"), "{error}");
     assert!(
+        !error.contains("\"status\":"),
+        "post-commit SSE event must not contradict the committed HTTP 200: {error}"
+    );
+    assert!(
         tokio::time::timeout(Duration::from_millis(50), client.next())
             .await
             .unwrap()
@@ -3517,6 +3521,10 @@ async fn responses_sse_direct_runtime_error_projects_standard_error_then_clean_e
     assert!(
         error.contains("remote continuation binding failed"),
         "{error}"
+    );
+    assert!(
+        !error.contains("\"status\":"),
+        "post-commit SSE event must not contradict the committed HTTP 200: {error}"
     );
     assert!(client.next().await.is_none());
 }
