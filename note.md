@@ -35655,3 +35655,10 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
 - Architecture/maps updated for Req02 -> Error01 failure edge and generated caller-flow sync.
 - Independent baseline gaps: Hub Relay red-fixture harness references removed
   `responses_relay_json_hooks.rs`; repository-wide cargo fmt has unrelated pre-existing drift.
+## 2026-08-16 — V3 Responses invalid reasoning effort projection
+
+- Exact captured request `openai-responses-router-deepseek-v4-flash-20260816T000815469-817406-202` contains `reasoning.effort: definitely_invalid`; inbound codec correctly rejects it.
+- First incorrect divergence was Error-chain projection: `InboundCanonical` was collapsed into `RuntimeFailure`, yielding HTTP 500 `responses_relay_runtime_error`.
+- Owning fix keeps validation fail-fast and maps that typed inbound failure to `InvalidRequest` at `V3HubReqInbound02Normalized`, HTTP 400 `invalid_responses_request`; payload is neither cleaned nor rewritten.
+- Red/green test, negative control, runtime tests, relay-closeout tests, architecture gates, full build, and global install passed. Installed candidate is `rccv3 0.90.4567`, SHA-256 `2167c25e99e5cd0a94e7b6543b18cd6dc97e06a30429f5ff1ab40bcf872eda32`.
+- Known unrelated baseline gaps: the red-fixture harness references retired `responses_relay_json_hooks.rs`; repository-wide rustfmt has pre-existing drift. Focused modified-file rustfmt passed.
