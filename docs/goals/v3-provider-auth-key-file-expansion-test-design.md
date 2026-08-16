@@ -60,4 +60,3 @@ published manifest, Debug, Error, provider payload, or client payload.
    run global `routecodex config check`, then aggregate `routecodex restart`.
 5. Verify every configured listener health and use provider-request dry-run / live route
    evidence to prove multiple aliases were expanded without exposing secret values.
-
