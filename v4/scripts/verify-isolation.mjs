@@ -11,9 +11,12 @@
  *  5. Every tracked V4 source/build file belongs to exactly one module in
  *     the module registry; build edges are declared and adjacent.
  *  6. Root package.json and CI contain only approved V4 dispatcher forms,
- *     and the CI job running V4 canonical verification is on a macOS runner
- *     matching the aarch64-apple-darwin Active artifact target.
- *  7. No V4 build command writes outside V4-owned output roots.
+ *     and the CI job running V4 canonical verification is on an arm64 macOS
+ *     runner matching the aarch64-apple-darwin Active artifact target.
+ *  7. The architecture gate/consumer matrix executed by verify/verify:red is
+ *     exactly the matrix declared in verification-map.json (no drift in
+ *     either direction).
+ *  8. No V4 build command writes outside V4-owned output roots.
  *
  * Red fixtures prove each negative class fails through the same code paths.
  */
@@ -22,6 +25,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import yaml from 'js-yaml';
 import { v4Root, runCapture } from './_common.mjs';
+import { ARCHITECTURE_GATES, RED_SUITES, CONSUMER_REGRESSIONS } from './_gate-matrix.mjs';
 import { loadV3Baseline } from './architecture/_v3-baseline.mjs';
 
 const failures = [];
@@ -242,18 +246,65 @@ function checkCIPlatform(workflowPath) {
   const out = [];
   if (!fs.existsSync(workflowPath)) return out;
   const workflow = yaml.load(fs.readFileSync(workflowPath, 'utf8'));
+  const allowedRunners = new Set(['macos-14']);
   for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
     const steps = Array.isArray(job.steps)
       ? job.steps.map((step) => step.run ?? '').join('\n')
       : '';
     if (steps.includes('verify:ci')) {
       const runner = String(job['runs-on'] ?? '');
-      if (!/^macos-/.test(runner)) {
+      if (!allowedRunners.has(runner)) {
         out.push(
-          `CI job ${jobName} runs V4 verify:ci on ${runner || '(missing runs-on)'}; Active artifacts are aarch64-apple-darwin, so canonical V4 verification must run on a macOS runner`,
+          `CI job ${jobName} runs V4 verify:ci on ${runner || '(missing runs-on)'}; Active artifacts are aarch64-apple-darwin, so canonical V4 verification must run on an arm64 macOS runner (allowed: ${[...allowedRunners].join(', ')})`,
         );
       }
     }
+  }
+  return out;
+}
+
+function checkDeclaredExecutedBinding(verificationMapPath, architectureDir) {
+  const out = [];
+  const declaredGates = new Set();
+  const declaredConsumers = new Set();
+  const map = JSON.parse(fs.readFileSync(verificationMapPath, 'utf8'));
+  for (const gate of map.gates ?? []) {
+    const command = String(gate.command ?? '');
+    for (const match of command.matchAll(/node scripts\/architecture\/(verify-v4-[a-z0-9-]+\.mjs)/g)) {
+      declaredGates.add(match[1]);
+    }
+    for (const match of command.matchAll(/test-consumer[^\n]*--consumer\s+([a-z0-9-]+)/g)) {
+      declaredConsumers.add(match[1]);
+    }
+  }
+  const executedGates = new Set(ARCHITECTURE_GATES);
+  for (const [gate] of RED_SUITES) executedGates.add(gate);
+  const executedConsumers = new Set(CONSUMER_REGRESSIONS.map(([consumer]) => consumer));
+
+  const unregistered = [...executedGates].filter((gate) => !declaredGates.has(gate));
+  if (unregistered.length > 0) {
+    out.push(`architecture gates executed but not registered in verification-map.json: ${unregistered.join(', ')}`);
+  }
+  const neverExecuted = [...declaredGates].filter((gate) => !executedGates.has(gate));
+  if (neverExecuted.length > 0) {
+    out.push(`architecture gates registered in verification-map.json but not executed: ${neverExecuted.join(', ')}`);
+  }
+  for (const gate of declaredGates) {
+    if (!fs.existsSync(path.join(architectureDir, gate))) {
+      out.push(`architecture gate file missing: ${gate}`);
+    }
+  }
+  if (fs.existsSync(architectureDir)) {
+    for (const file of fs.readdirSync(architectureDir)) {
+      if (/^verify-v4-[a-z0-9-]+\.mjs$/.test(file) && !executedGates.has(file)) {
+        out.push(`architecture gate file never executed: ${file}`);
+      }
+    }
+  }
+  const declaredList = [...declaredConsumers].sort();
+  const executedList = [...executedConsumers].sort();
+  if (JSON.stringify(declaredList) !== JSON.stringify(executedList)) {
+    out.push(`declared consumers ${JSON.stringify(declaredList)} != executed consumers ${JSON.stringify(executedList)}`);
   }
   return out;
 }
@@ -306,6 +357,13 @@ const ciPlatformFailures = checkCIPlatform(
 );
 if (ciPlatformFailures.length > 0) {
   failures.push(`CI platform:\n${ciPlatformFailures.join('\n')}`);
+}
+const bindingFailures = checkDeclaredExecutedBinding(
+  path.join(v4Root, '.appsdk/maps/verification-map.json'),
+  path.join(v4Root, 'scripts/architecture'),
+);
+if (bindingFailures.length > 0) {
+  failures.push(`declared vs executed gate binding:\n${bindingFailures.join('\n')}`);
 }
 reportAndExit('positive');
 
@@ -439,6 +497,35 @@ fs.writeFileSync(
 );
 const ciPlatformProblems = checkCIPlatform(path.join(ciPlatformDir, 'test.yml'));
 expectReject('V4 verify:ci on non-macOS runner', () => ciPlatformProblems);
+
+// R10: verification-map declared gates must match the executed matrix.
+const bindingDir = path.join(redDir, 'binding');
+fs.mkdirSync(path.join(bindingDir, 'architecture'), { recursive: true });
+fs.writeFileSync(
+  path.join(bindingDir, 'verification-map.json'),
+  JSON.stringify({
+    gates: [
+      { gate_id: 'g1', command: 'node scripts/architecture/verify-v4-declared-only.mjs' },
+      { gate_id: 'g2', command: 'node scripts/architecture/verify-v4-executed.mjs' },
+    ],
+  }),
+);
+fs.writeFileSync(path.join(bindingDir, 'architecture/verify-v4-executed.mjs'), '');
+const bindingProblems = checkDeclaredExecutedBinding(
+  path.join(bindingDir, 'verification-map.json'),
+  path.join(bindingDir, 'architecture'),
+);
+expectReject('declared vs executed gate binding drift', () => bindingProblems);
+
+// R11: V4 verify:ci must run on an arm64 macOS runner, not an x86 macOS runner.
+const ciPlatformX86Dir = path.join(redDir, 'ci-platform-x86');
+fs.mkdirSync(ciPlatformX86Dir, { recursive: true });
+fs.writeFileSync(
+  path.join(ciPlatformX86Dir, 'test.yml'),
+  'jobs:\n  test:\n    runs-on: macos-13\n    steps:\n      - run: npm --prefix v4 run verify:ci\n',
+);
+const ciPlatformX86Problems = checkCIPlatform(path.join(ciPlatformX86Dir, 'test.yml'));
+expectReject('V4 verify:ci on x86 macOS runner', () => ciPlatformX86Problems);
 
 if (redFail > 0) {
   console.error(`[v4 isolation] red fixtures failed: ${redFail}`);

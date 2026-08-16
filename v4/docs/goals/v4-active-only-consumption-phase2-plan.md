@@ -127,7 +127,7 @@ Design ID: `V4-ACTIVE-LINK-002`（本计划）；上游设计：`v4/docs/design/
    无 witness 调 `chain.classify()` 必须编译失败，带 witness 的正向片段必须编译成功。
    `v4_error_compile_fail_regression` 已恢复至 `v4/.appsdk/maps/verification-map.json`，
    命令改为 `cargo test -p routecodex-v4-build-link --test resolver_red_tests
-   negative_error_classify_without_witness_compile_fails --manifest-path v4/Cargo.toml`；
+   negative_error_classify_without_witness_compile_fails --manifest-path Cargo.toml`；
    function-map `v4.error.mainline` 对该 gate 的引用随之恢复有效，不删除。
    `src/lib.rs` 的 `compile_fail` 文档保留为 API 契约说明，不再作为可执行 cargo doc gate。
 2. **fixture 路径**：hermetic fixture 实际位于 `v4/tests/resources/active-link-fixture/`

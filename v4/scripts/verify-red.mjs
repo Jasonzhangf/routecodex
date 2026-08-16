@@ -6,13 +6,7 @@
  * per verify:ci.
  */
 import { run } from './_common.mjs';
-
-const RED_SUITES = [
-  ['verify-v4-feature-gap.mjs', '--red-self-test'],
-  ['verify-v4-relay-continuation.mjs', '--red-self-test'],
-  ['verify-v4-resource-binding.mjs', '--red-self-test'],
-  ['verify-v4-v3-resource-coverage.mjs', '--red-self-test'],
-];
+import { RED_SUITES } from './_gate-matrix.mjs';
 
 for (const [gate, flag] of RED_SUITES) {
   run(`node scripts/architecture/${gate} ${flag}`);

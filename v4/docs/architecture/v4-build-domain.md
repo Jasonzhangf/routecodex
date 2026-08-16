@@ -15,7 +15,7 @@ unrelated cwd through the absolute V4 package path):
 | `npm run verify` | `v4/scripts/verify.mjs` | workspace build, hermetic Active restore, 11 architecture gates, 9 consumer regressions, Active index gen/verify, isolation positive/red matrix |
 | `npm run verify:red` | `v4/scripts/verify-red.mjs` | verifier red self-test suites (isolation matrix is owned by the `verify` positive surface) |
 | `npm run verify:ci` | `v4/scripts/verify-ci.mjs` | complete admission matrix (workspace tests + `verify` + `verify:red`; build and isolation run inside `verify`) |
-| `node scripts/verify-isolation.mjs` | `v4/scripts/verify-isolation.mjs` | isolation positive + red gates (workspace/target ownership, path deps, forbidden refs, Node resolution, module ownership, root dispatchers, CI platform, output targets) |
+| `node scripts/verify-isolation.mjs` | `v4/scripts/verify-isolation.mjs` | isolation positive + red gates (workspace/target ownership, path deps, forbidden refs, Node resolution, module ownership, root dispatchers, arm64 CI runner allowlist, declared↔executed gate binding vs verification-map, output targets) |
 
 Root `package.json` and `.github/workflows/test.yml` only dispatch to
 `verify:ci`; they do not enumerate V4 modules or gates.

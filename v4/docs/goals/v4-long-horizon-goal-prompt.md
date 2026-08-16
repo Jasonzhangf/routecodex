@@ -124,7 +124,7 @@ Cordis 插件框架运行完整垂直切片，与 V3 同入口真实样本行为
 
 验证总纲（每 Phase 套用）：
 - 定向测试 + 红测（正反成对）-> cargo test --workspace --manifest-path
-  v4/Cargo.toml -> build-link test-consumer（全部模块）-> verify:v4-foundation
+  Cargo.toml -> build-link test-consumer（全部模块）-> verify:v4-foundation
   -> verify:v4-foundation-red -> appsdk verify v4 / appsdk verify --admission v4
   -> gen/verify-index -> DSH review（opencode-go/deepseek-v4-flash）语义 PASS。
 - 涉及 runtime 行为/配置的 Phase，增加全局安装、聚合 restart（仅

@@ -19,7 +19,7 @@
 3. 冻结基线不失效：base-node / edge / control / error 的 active artifact 未被修改；
    若新增资源确需由已冻结 crate 拥有（如 control 的 stopless/record_ledger），走完整
    begin-version -> re-freeze 生命周期，或按实现证据迁移 owner 到未冻结模块并记录偏差。
-4. 构建门禁统一：`cargo test --workspace --manifest-path v4/Cargo.toml` 覆盖全部
+4. 构建门禁统一：`cargo test --workspace --manifest-path Cargo.toml` 覆盖全部
    workspace 成员；workspace 外 crate 全部经 build-link test-consumer 跑 L2 回归，
    verification-map 的 `v4_cargo_workspace_build` 与 CI `v4-build` job（macos-14，V4 canonical `verify:ci`）不遗漏任何模块。
 5. 所有新 gate 先红后绿：红自测覆盖"资源缺 owner/缺 symbol/owner crate 不存在/
@@ -110,7 +110,7 @@
    payload 泄漏 / 双源漂移 / 未注册 node），确认当前红。
 2. L2 白盒/黑盒：每 crate 至少覆盖生命周期正向 + 反向（重复 register / 未注册
    consume / 已释放复用 / 越权写入 / 跨 session 复用），正反成对。
-3. 构建/门禁矩阵：`cargo test --workspace --manifest-path v4/Cargo.toml`、
+3. 构建/门禁矩阵：`cargo test --workspace --manifest-path Cargo.toml`、
    build-link test-consumer（全部模块）、`npm run verify:v4-foundation`、
    `npm run verify:v4-foundation-red`、`appsdk verify --admission v4`、
    gen/verify-index、fmt/release build。
@@ -213,7 +213,7 @@ validator：
 - `verify:v4-foundation-red` 绿（resource-binding 12/12）；
 - test-consumer：edge 15、config 11、control 15、error 23、runtime 21、
   debug 5、router 1、provider 1、server 3 全绿；
-- `cargo test --workspace --manifest-path v4/Cargo.toml`、release build、
+- `cargo test --workspace --manifest-path Cargo.toml`、release build、
   `cargo fmt --check`、gen/verify-index 全绿。
 
 ### 9.4 DSH review 两轮 FAIL 修复与干净 checkout 证据（2026-08-16）
