@@ -2429,6 +2429,7 @@ features:
   - npm run test:v3-protocol-conversion-field-parity
   - npm run verify:v3-protocol-conversion-field-parity
   - npm run test:v3-protocol-conversion-field-parity-red-fixtures
+  - npm run verify:v3-protocol-conversion-field-parity-ci
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries

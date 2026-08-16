@@ -35705,3 +35705,28 @@ multimodal > web_search > longcontext > thinking > coding > search > tools > def
   findings exactly describe the pre-follow-up state already fixed in those files. A scoped
   checkpoint commit is required so DSH can review the actual fix; Codex Review is not an
   authorized substitute for a valid DSH FAIL.
+
+# 2026-08-16 DSH malformed-input finding closed + 0.90.4575 online proof
+- DSH `dsh-1786871878883-bd6a8eb9` reviewed committed follow-up `61de8b4bb` and found one
+  remaining P1: structurally malformed Responses `reasoning.effort` reached the relay
+  runtime-failure projection and became HTTP 500. Unknown non-empty strings remain valid
+  forward-compatible input and must still reach the target mapper; only invalid JSON type
+  or empty string is a client protocol error.
+- `InboundCanonical` failure now enters the typed error chain as
+  `invalid_responses_request` at `V3HubReqInbound02Normalized` and projects HTTP 400 with a
+  single canonical message. A positive runtime test locks this standard client-error
+  projection; the exact unknown-string acceptance sample remains a distinct HTTP 200 test.
+- The architecture CI now runs the complete protocol field-parity gate, including 109 red
+  mutations and runtime parity tests. The verifier also rejects resurrection of the removed
+  shared `apply_deepseek_max_request_compat` mapper; function/verification maps and test
+  designs bind the unique ProviderReqCompat06 owner and strict scoped-secret behavior.
+- Full build passed with architecture CI 36/36 and runtime 467/467 before the final message
+  de-duplication; the focused de-duplication test passed afterward. `install:v3` installed
+  0.90.4575 with matching repo/global SHA-256
+  `4a133ca6b38e7c3b017acb82957831ed47c72f491b343c625295f890329f5f47`.
+- Config validation is green (`servers=4`). One aggregate restart recovered the same managed
+  instance on 0.90.4575; ports 10000/5520/5555/4444 all return `/health` HTTP 200.
+- Online exact sample on port 10000 with `reasoning.effort=definitely_invalid` returned HTTP
+  200/completed, target projection `reasoning.effort=high`, and exact final marker
+  `RCC_V3_REASONING_EFFORT_200_OK`. Negative structural sample with numeric effort returned
+  HTTP 400, code `invalid_responses_request`, and no duplicated prefix.

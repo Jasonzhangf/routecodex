@@ -17,6 +17,7 @@ const files = [
   'docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html',
   'scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
   'scripts/architecture/verify-v3-architecture-ci.mjs',
+  'sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs',
   'v3/crates/routecodex-v3-runtime/tables/request_field_map.json',
   'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs',
@@ -54,6 +55,13 @@ const files = [
 ];
 
 const cases = [
+  {
+    name: 'Shared provider compat reintroduces a second DeepSeek effort owner',
+    file: 'sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs',
+    from: 'fn normalize_responses_tool_parameters(raw: Option<&Value>) -> Value {',
+    to: 'fn apply_deepseek_max_request_compat(payload: Value) -> Value { payload }\n\nfn normalize_responses_tool_parameters(raw: Option<&Value>) -> Value {',
+    diagnostic: /target_effort_unique_owner|apply_deepseek_max_request_compat/u,
+  },
   {
     name: 'OpenAI Chat custom declaration is relabeled as a function tool',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',

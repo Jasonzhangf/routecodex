@@ -25,7 +25,8 @@ legal target-protocol control. The exact old sample must return HTTP 200.
 - Target-protocol compatibility owner: `provider_req_compat_06_provider_compat.rs`,
   shared by Relay ProviderReqCompat06 and Direct `responses_direct_request_projection_hook`
   before `V3Provider12ResponsesWirePayload`.
-- DeepSeek Chat profile owner: `provider-compat-core::apply_deepseek_max_request_compat`.
+- DeepSeek target effort owner: `ProviderReqCompat06::project_reasoning_effort_for_selected_target`;
+  shared provider compat must not implement a second effort mapper.
 - Allowed: validate type/non-empty shape; preserve the source value until the concrete
   target is selected; perform an explicit lossy target-protocol projection at the registered
   Provider compatibility owner.
@@ -57,7 +58,8 @@ Compatibility table:
 - Red/green inbound: unknown non-empty effort previously fails, then survives Req02.
 - Red/green Provider12: unknown canonical effort previously reached upstream unchanged;
   it now reaches standard Responses as `medium` and DeepSeek as `high`.
-- Reverse: null, non-string, and empty/whitespace-only effort still fail Req02.
+- Reverse: null, non-string, and empty/whitespace-only effort still fail Req02 and project
+  as client-invalid HTTP 400; unknown non-empty strings remain valid and must reach HTTP 200.
 - Cross-protocol reverse: Anthropic maps to its legal qualitative domain; MiniMax maps
   active effort to adaptive thinking without an unsupported effort field.
 - Live old sample: exact captured request must return a successful terminal response,

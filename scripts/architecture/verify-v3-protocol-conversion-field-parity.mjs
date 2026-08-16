@@ -24,6 +24,7 @@ const paths = {
   requestOutboundMetadata: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   requestOutboundFormatExtraTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
   providerReqCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+  providerCompatCore: 'sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs',
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesRuntimeInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
@@ -108,6 +109,9 @@ const targetReasoningEffortProjection = functionSlice(
   'fn project_reasoning_effort_for_selected_target',
   'pub(crate) fn provider_req_compat_reasoning_effort_explicit',
 );
+forbid(text.providerCompatCore, `${paths.providerCompatCore}::target_effort_unique_owner`, [
+  /fn apply_deepseek_max_request_compat/u,
+]);
 for (const phrase of [
   'request.reasoning_effort',
   'request.reasoning_budget_tokens',
@@ -1196,8 +1200,8 @@ for (const command of [
     failures.push(`${paths.packageJson}: verify:v3-protocol-conversion-field-parity-ci must include ${command}`);
   }
 }
-if (!String(text.v3ArchitectureCi ?? '').includes("'verify:v3-protocol-conversion-field-parity'")) {
-  failures.push(`${paths.v3ArchitectureCi}: verify:v3-architecture-ci must run verify:v3-protocol-conversion-field-parity`);
+if (!String(text.v3ArchitectureCi ?? '').includes("'verify:v3-protocol-conversion-field-parity-ci'")) {
+  failures.push(`${paths.v3ArchitectureCi}: verify:v3-architecture-ci must run verify:v3-protocol-conversion-field-parity-ci`);
 }
 if (pkg.scripts?.['render:v3-protocol-semantic-field-matrix'] !== 'node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs') {
   failures.push(`${paths.packageJson}: render:v3-protocol-semantic-field-matrix must run node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs`);

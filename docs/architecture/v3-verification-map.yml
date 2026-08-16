@@ -2066,6 +2066,7 @@ features:
   - npm run test:v3-protocol-conversion-field-parity
   - npm run verify:v3-protocol-conversion-field-parity
   - npm run test:v3-protocol-conversion-field-parity-red-fixtures
+  - npm run verify:v3-protocol-conversion-field-parity-ci
   - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime responses_reasoning_effort_preserves_unknown_non_empty_value_for_forward_compatibility --lib
   - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime openai_responses_wire_preserves_unknown_non_empty_reasoning_effort --lib
   - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough direct_kernel_maps_unknown_responses_reasoning_effort_to_protocol_neutral_medium

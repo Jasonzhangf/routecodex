@@ -46,6 +46,8 @@ published manifest, Debug, Error, provider payload, or client payload.
 
 - Empty provider id, empty file, malformed line, empty key, empty value, duplicate key,
   or duplicate derived alias fails at config compile time.
+- The same strict full-file parser is used at runtime secret resolution: a non-comment,
+  non-blank line without `name = value` fails explicitly instead of being ignored.
 - A file containing only keys scoped to another provider fails instead of adopting those
   keys as unscoped aliases for the requested provider.
 - Top-level `secretFile` mixed with explicit `entries`, `apiKey`, `env`, or `tokenFile`
