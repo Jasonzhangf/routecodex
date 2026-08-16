@@ -1,5 +1,5 @@
 {
-  "artifact_hash": "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0",
+  "artifact_hash": "sha256:f44c0ae0fee3f077fe36e128406f777261947ce8f2ab9988577274232878a038",
   "command": {
     "args": [
       "run",
@@ -19,21 +19,21 @@
     "program": "cargo",
     "working_directory": "."
   },
-  "created_at": "2026-08-16T03:15:00Z",
+  "created_at": "2026-08-16T04:25:10Z",
   "failed": 0,
-  "input_hash": "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0",
+  "input_hash": "sha256:f44c0ae0fee3f077fe36e128406f777261947ce8f2ab9988577274232878a038",
   "module_id": "routecodex-v4-edge",
   "passed": 15,
   "producer": {
     "adapter": "cargo",
-    "identity": "appsdk-regression-gate"
+    "identity": "routecodex-v4-edge-regression"
   },
-  "public_api_hash": "sha256:e97ff7522d76b5567db2bf6ba9745479ea6f14b12ccfcb54b876fbf73325dd76",
-  "regression_report_id": "regression-edge-v3",
+  "public_api_hash": "sha256:a986908c5eb56e5b39d1e941f18c6f7b4f9fd41266285ac54139d9907119da96",
+  "regression_report_id": "edge-sdk013-regression",
   "result": "pass",
   "scope_hash": "sha256:fb0002a89089b892f7c8323cb555a8d50d261bc125c4116b76578bc79c4520ad",
   "skipped": 0,
-  "source_commit": "8bef032e6",
+  "source_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
   "suite_id": "v4-edge-l1-regression",
   "test_characteristics": {
     "blackbox": true,

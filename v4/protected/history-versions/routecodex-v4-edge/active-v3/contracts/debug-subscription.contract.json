@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-debug-subscription",
+  "status": "design",
+  "owner_feature_id": "v4.debug_subscription",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
+    "docs/architecture/v3-resource-operation-map.yml"
+  ],
+  "baseline_scope": "v3 anchored debug resources are the compatibility baseline; v4 cannot relax any locked relation",
+  "resources": [
+    {"v4_resource": "v4.debug.trace_context", "v3_baseline": "v3.debug.trace_context", "writers": ["V4DebugRuntime::start_trace"], "readers": ["v4.debug.event_ledger", "v4.debug.raw_capture", "v4.debug.snapshot_session"], "may_enter_metadata_center": false},
+    {"v4_resource": "v4.debug.event_ledger", "v3_baseline": "v3.debug.event_ledger", "writers": ["V4DebugRuntime::record_node_event"], "readers": ["developer_diagnostics"], "may_enter_metadata_center": false},
+    {"v4_resource": "v4.debug.raw_capture", "v3_baseline": "v3.debug.raw_capture", "writers": ["V4DebugRuntime::capture_raw_request", "V4DebugRuntime::capture_raw_response"], "readers": ["developer_diagnostics"], "verbatim": true, "may_enter_metadata_center": false},
+    {"v4_resource": "v4.debug.snapshot_session", "v3_baseline": "v3.debug.snapshot_session", "writers": ["V4DebugRuntime::start_snapshot_session", "V4DebugRuntime::record_snapshot", "V4DebugRuntime::release_snapshot_session"], "readers": ["developer_diagnostics"], "may_enter_metadata_center": false},
+    {"v4_resource": "v4.debug.dry_run_fixture", "v3_baseline": "v3.debug.dry_run_fixture", "writers": ["V4DebugRuntime::register_dry_run_fixture"], "readers": ["V4DebugRuntime::build_dry_run_execution_plan"], "may_enter_metadata_center": false},
+    {"v4_resource": "v4.debug.dry_run_execution", "v3_baseline": "v3.debug.dry_run_execution", "writers": ["V4DebugRuntime::execute_dry_run_no_network_effect"], "readers": ["developer_diagnostics"], "may_enter_metadata_center": false},
+    {"v4_resource": "v4.debug.codex_sample_authorization", "v3_baseline": "v3.debug.codex_sample_authorization", "writers": ["V4Config05ManifestPublished"], "readers": ["V4DebugRuntime::should_capture_snapshot_stage"], "may_enter_metadata_center": false},
+    {"v4_resource": "v4.debug.payload_budget", "v3_baseline": "v3.debug.payload_budget", "writers": ["V4DebugRuntime::project_payload_verbatim", "V4DebugRuntime::append_bounded_text"], "readers": ["developer_diagnostics"], "verbatim": true, "error_force_write": true, "retention_cap": 200, "may_enter_metadata_center": false},
+    {"v4_resource": "v4.debug.codex_sample_filesystem", "v3_baseline": "v3.debug.codex_sample_filesystem", "writers": ["V4DebugRuntime::persist", "V4DebugRuntime::enforce_listener_retention"], "readers": ["developer_diagnostics", "replay_codex_sample"], "may_enter_metadata_center": false},
+    {"v4_resource": "v4.debug.observability", "v3_baseline": "v3.runtime.responses_observability", "writers": ["V4RuntimeObservabilityAccumulator"], "readers": ["v4.console.terminal_output"], "may_enter_metadata_center": false},
+    {"v4_resource": "v4.debug.timing_observability", "v3_baseline": "v3.runtime.responses_timing_observability", "writers": ["V4RuntimeTimingState"], "readers": ["v4.debug.observability", "v4.console.terminal_output"], "may_enter_metadata_center": false},
+    {"v4_resource": "v4.console.terminal_output", "v3_baseline": "v3.console.terminal_output", "writers": ["V4ConsoleProjection"], "readers": ["developer_terminal"], "may_enter_metadata_center": false},
+    {"v4_resource": "v4.server.request_identity", "v3_baseline": "v3.server.request_identity", "writers": ["V4RequestIdCounter::next_request_identity"], "readers": ["v4.console.terminal_output"], "may_enter_metadata_center": false},
+    {"v4_resource": "v4.error.raw_wire_evidence", "v3_baseline": "v3.error.raw_wire_evidence", "writers": ["V4ErrorEvidenceFlushOnTerminalFailure"], "readers": ["developer_diagnostics", "incident_replay"], "may_enter_metadata_center": false}
+  ],
+  "subscriptions": [
+    {"topic": "node_event", "direction": "subscribe", "read_only": true, "payload_carrier": false, "decision_plane": false},
+    {"topic": "state_transition", "direction": "subscribe", "read_only": true, "payload_carrier": false, "decision_plane": false},
+    {"topic": "diagnostic", "direction": "subscribe", "read_only": true, "payload_carrier": false, "decision_plane": false},
+    {"topic": "node_entry", "direction": "subscribe", "read_only": true, "diagnostic_only": true, "live_input": false},
+    {"topic": "node_exit", "direction": "subscribe", "read_only": true, "diagnostic_only": true, "live_input": false},
+    {"topic": "node_error", "direction": "subscribe", "read_only": true, "diagnostic_only": true, "live_input": false}
+  ],
+  "module_switch": {
+    "contract_id": "v4-debug-module-switch",
+    "scope": ["module_id", "node_id", "chain_version", "scope"],
+    "kinds": ["debug", "snapshot", "dry_run", "route_probe"],
+    "levels": ["off", "error", "warn", "info", "debug", "trace"],
+    "default_from_manifest": true,
+    "dynamic_live_update": true,
+    "switch_owner": "routecodex-v4-debug",
+    "rules": [
+      "module switch is diagnostic-only; it never affects business result, control decision, or payload",
+      "runtime switches are recorded in the immutable audit ledger with scope, kind, level, and old/new value",
+      "switch scope is per module/node and per closed-loop request scope; it must not leak across loops",
+      "snapshot switch gates snapshot capture only; route_probe gates dry-run/probe observation only",
+      "module switch state must never enter provider wire, client wire, normal payload, MetadataCenter, or the error chain",
+      "failure to apply a switch must fail-fast with an explicit diagnostic record; no silent strip, no fallback"
+    ],
+    "forbidden_edges": [
+      {"from": "v4.debug.module_switch", "to": "v4.pipeline.mainline"},
+      {"from": "v4.debug.module_switch", "to": "v4.control.metadata_center"},
+      {"from": "v4.debug.module_switch", "to": "v4.control.error_chain"},
+      {"from": "v4.debug.module_switch", "to": "v4.request.provider_wire_payload"},
+      {"from": "v4.debug.module_switch", "to": "v4.response.client_wire_payload"}
+    ]
+  },
+  "dry_run_chain": {
+    "contract_id": "v4-debug-dry-run-chain",
+    "per_module": true,
+    "entry_exit": {
+      "entry_defined": "optional",
+      "exit_defined": "optional",
+      "default": "when entry/exit are not defined, the dry-run runs the full request or response chain",
+      "input": "correct payload fixture must be provided as the chain input; fixture must match the declared data_in kind"
+    },
+    "rules": [
+      "every module supports dry-run with an explicit chain entry and exit, or the full request/response chain when unspecified",
+      "dry-run input is the correct payload fixture for the declared chain; no real provider call is allowed",
+      "dry-run chain definitions are diagnostic-only and never consumed as live runtime input",
+      "dry-run execution produces typed evidence (input hash, entry/exit, operator results, terminal state)",
+      "dry-run must not write provider wire or client wire",
+      "dry-run failure is explicit and recorded; no fallback to live execution"
+    ],
+    "forbidden_edges": [
+      {"from": "v4.debug.dry_run_chain", "to": "v4.pipeline.mainline"},
+      {"from": "v4.debug.dry_run_chain", "to": "v4.request.provider_wire_payload"},
+      {"from": "v4.debug.dry_run_chain", "to": "v4.response.client_wire_payload"}
+    ]
+  },
+  "forbidden_edges": [
+    {"from": "v4.debug.*", "to": "v4.request.provider_wire_payload"},
+    {"from": "v4.debug.*", "to": "v4.response.client_wire_payload"},
+    {"from": "v4.debug.*", "to": "v4.request.normal_payload"},
+    {"from": "v4.debug.*", "to": "v4.response.normal_payload"},
+    {"from": "v4.debug.*", "to": "v4.control.metadata_center"},
+    {"from": "v4.debug.*", "to": "v4.pipeline.mainline"},
+    {"from": "v4.debug.*", "to": "v4.control.route_facts"},
+    {"from": "v4.debug.*", "to": "v4.control.error_chain"}
+  ]
+}

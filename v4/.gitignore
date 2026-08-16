@@ -2,10 +2,10 @@
 .appsdk-control/
 .appsdk/sdk.bin
 /active/lib/
-/protected/
 /generated/
-Cargo.lock
 # END APPSDK MANAGED
+
+Cargo.lock
 
 # V4 resolver build work area (deterministic index + per-consumer rustc output)
 /build-control/

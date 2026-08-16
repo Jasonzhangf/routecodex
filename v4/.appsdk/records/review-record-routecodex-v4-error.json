@@ -1,19 +1,29 @@
 {
-  "ai_confidence": 0.99,
-  "confidence_rationale": "resolver hermetic record graph, error test-consumer regression through the Active surface, workspace tests, release build and admission all pass for active-v3",
-  "created_at": "2026-08-15T13:27:00Z",
+  "ai_confidence": 0.88,
+  "confidence_rationale": "The exact candidate changes only AppSDK governance state and Protected history; no RouteCodex crate source changes. Error compiles against frozen base-node active-v2 and all 23 mapped tests pass. The isolated branch has a known transient old-consumer gap, so publication must complete the coordinated edge/control/error set before runtime exposure.",
+  "created_at": "2026-08-16T04:23:20Z",
   "evidence_ids": [
-    "evidence-error-v3"
+    "error-sdk013-candidate",
+    "error-sdk013-positive",
+    "error-sdk013-negative"
   ],
-  "issue_id": "routecodex-v4-foundation",
-  "promotion_id": "promotion-error-v3",
-  "review_id": "review-error-v3",
-  "reviewed_artifact_hash": "sha256:c26ccfc3ee6c847b1b4b2f812b72071a20df81f98fe40e60d457c41b3aed5d3f",
-  "reviewed_commit": "389bd3cf0",
+  "fix_candidate_id": "error-sdk013-candidate",
+  "function_map_hash": "sha256:de648247dbbea0ea1ade734be0452cce0d1a894c964660164a5b5078c7f8c969",
+  "issue_id": "appsdk-013-migration",
+  "mainline_call_map_hash": "sha256:54dfd59d24efbd6a9155eb3a4ff25862d94fad2c156a52691e298ecc052b8e8b",
+  "promotion_id": "error-sdk013-promotion",
+  "resource_map_hash": "sha256:948ff1cdf30ca889c1054077783ca2c13aeda6ea9b0f5a4f51ebfe5502b391d2",
+  "review_id": "error-sdk013-architecture-review",
+  "review_kind": "architecture",
+  "reviewed_artifact_hash": "sha256:e172b55e1d30076d9adba3d6b9f12dc7ce6f7adc73bbe2fbf8b5abe8fd61ca74",
+  "reviewed_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
+  "reviewed_diff_hash": "sha256:b37ac3d9e153ea32ed4af9c5429b8198bd0dcb7b1c4f9ae96918b5c6e2123b81",
   "reviewed_scope_hash": "sha256:4693a7972e4743e7e0be3f2e6ab48c86039a26e51eb8f590abc40ca70ec42d27",
+  "reviewed_tree_hash": "144f4e0d8c2cdbbaface771797ccb9170e05e9ec",
   "reviewer": {
-    "adapter": "codex",
-    "identity": "codex::architecture-review"
+    "adapter": "routecodex-codex-adapter",
+    "identity": "codex-gpt-5"
   },
-  "verdict": "pass"
+  "verdict": "pass",
+  "verification_map_hash": "sha256:4772f040e33b3ac8f7eec32b9fd9f8c41f4c63053687d4cbc47a899c0f5faa48"
 }

@@ -1,19 +1,29 @@
 {
-  "ai_confidence": 0.99,
-  "confidence_rationale": "approved design V4-EDGE-CONTROL-LIFECYCLE-20260816 has baseline, positive and reverse intervention evidence; the unique Edge owner now rejects duplicate register, invalid release, missing key and non-control resource axes with exact typed errors",
-  "created_at": "2026-08-16T03:15:00Z",
+  "ai_confidence": 0.88,
+  "confidence_rationale": "The exact candidate changes only AppSDK governance state and Protected history; no RouteCodex crate source changes. Edge compiles against frozen base-node active-v2 and all 15 mapped tests pass. The isolated branch has a known transient old-consumer gap, so publication must complete the coordinated edge/control/error set before runtime exposure.",
+  "created_at": "2026-08-16T04:21:00Z",
   "evidence_ids": [
-    "evidence-edge-v3"
+    "edge-sdk013-candidate",
+    "edge-sdk013-positive",
+    "edge-sdk013-negative"
   ],
-  "issue_id": "v4-edge-control-lifecycle-20260816",
-  "promotion_id": "promotion-edge-v3",
-  "review_id": "review-edge-v3",
-  "reviewed_artifact_hash": "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0",
-  "reviewed_commit": "8bef032e6",
+  "fix_candidate_id": "edge-sdk013-candidate",
+  "function_map_hash": "sha256:de648247dbbea0ea1ade734be0452cce0d1a894c964660164a5b5078c7f8c969",
+  "issue_id": "appsdk-013-migration",
+  "mainline_call_map_hash": "sha256:54dfd59d24efbd6a9155eb3a4ff25862d94fad2c156a52691e298ecc052b8e8b",
+  "promotion_id": "edge-sdk013-promotion",
+  "resource_map_hash": "sha256:948ff1cdf30ca889c1054077783ca2c13aeda6ea9b0f5a4f51ebfe5502b391d2",
+  "review_id": "edge-sdk013-architecture-review",
+  "review_kind": "architecture",
+  "reviewed_artifact_hash": "sha256:f44c0ae0fee3f077fe36e128406f777261947ce8f2ab9988577274232878a038",
+  "reviewed_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
+  "reviewed_diff_hash": "sha256:b37ac3d9e153ea32ed4af9c5429b8198bd0dcb7b1c4f9ae96918b5c6e2123b81",
   "reviewed_scope_hash": "sha256:fb0002a89089b892f7c8323cb555a8d50d261bc125c4116b76578bc79c4520ad",
+  "reviewed_tree_hash": "144f4e0d8c2cdbbaface771797ccb9170e05e9ec",
   "reviewer": {
-    "adapter": "codex",
-    "identity": "codex::architecture-review"
+    "adapter": "routecodex-codex-adapter",
+    "identity": "codex-gpt-5"
   },
-  "verdict": "pass"
+  "verdict": "pass",
+  "verification_map_hash": "sha256:4772f040e33b3ac8f7eec32b9fd9f8c41f4c63053687d4cbc47a899c0f5faa48"
 }

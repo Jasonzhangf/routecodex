@@ -38,9 +38,14 @@
     ],
     "protected_root": "protected/**",
     "record_contracts": [
+      "contracts/records/worktree-record.schema.json",
+      "contracts/records/reproduction-record.schema.json",
       "contracts/records/evidence-record.schema.json",
+      "contracts/records/fix-candidate-record.schema.json",
       "contracts/records/goal-clarification-record.schema.json",
       "contracts/records/review-record.schema.json",
+      "contracts/records/effectiveness-record.schema.json",
+      "contracts/records/merge-record.schema.json",
       "contracts/records/promotion-record.schema.json",
       "contracts/records/regression-report.schema.json",
       "contracts/records/freeze-record.schema.json",
@@ -951,6 +956,6 @@
     "bundle_manifest": ".appsdk/contracts/sdk-bundle.manifest.json",
     "name": "appsdk",
     "resource_record": ".appsdk/sdk-resources.json",
-    "version": "0.1.2"
+    "version": "0.1.3"
   }
 }
