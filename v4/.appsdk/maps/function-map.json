@@ -19,6 +19,12 @@
     {"function_id":"v4.server.console_identity_evidence","owner":"routecodex-v4-server","entry_symbols":["V4ConsoleTerminalOutput::new","V4ConsoleTerminalOutput::write","V4ConsoleTerminalOutput::lines","ConsoleProjection::new","ConsoleProjection::write","ConsoleProjection::lines","V4RequestIdCounter::new","V4RequestIdCounter::next_request_identity","V4ErrorEvidenceFlushOnTerminalFailure::new","V4ErrorEvidenceFlushOnTerminalFailure::flush","V4ErrorEvidenceFlushOnTerminalFailure::records"],"required_gates":["v4_server_l2_regression","v4_parity_gate_resource_binding","v4_parity_gate_execution_binding","v4_parity_gate_plane_isolation"]},
     {"function_id":"v4.build_link.resolve_active_artifact","owner":"routecodex-v4-build-link","entry_symbols":["resolver::resolve"],"required_gates":["v4_active_link_resolver"]},
     {"function_id":"v4.build_link.emit_link_flags","owner":"routecodex-v4-build-link","entry_symbols":["resolver::emit_link_flags"],"required_gates":["v4_active_link_resolver"]},
-    {"function_id":"v4.build_link.resolve_source_dep","owner":"routecodex-v4-build-link","entry_symbols":["resolver::source_dep_link_args","resolver::frozen_module_ids"],"required_gates":["v4_active_link_resolver"]}
+    {"function_id":"v4.build_link.resolve_source_dep","owner":"routecodex-v4-build-link","entry_symbols":["resolver::source_dep_link_args","resolver::frozen_module_ids"],"required_gates":["v4_active_link_resolver"]},
+    {"function_id":"v4.build.build","owner":"appsdk::build_domain","entry_symbols":["scripts/build.mjs"],"required_gates":["v4_cargo_workspace_build"]},
+    {"function_id":"v4.build.test","owner":"appsdk::build_domain","entry_symbols":["scripts/test.mjs"],"required_gates":["v4_workspace_tests"]},
+    {"function_id":"v4.build.verify","owner":"appsdk::build_domain","entry_symbols":["scripts/verify.mjs"],"required_gates":["v4_build_verify_positive"]},
+    {"function_id":"v4.build.verify_red","owner":"appsdk::build_domain","entry_symbols":["scripts/verify-red.mjs"],"required_gates":["v4_build_verify_red"]},
+    {"function_id":"v4.build.verify_ci","owner":"appsdk::build_domain","entry_symbols":["scripts/verify-ci.mjs"],"required_gates":["v4_build_verify_ci"]},
+    {"function_id":"v4.build.verify_isolation","owner":"appsdk::build_domain","entry_symbols":["scripts/verify-isolation.mjs"],"required_gates":["v4_isolation_positive"]}
   ]
 }
