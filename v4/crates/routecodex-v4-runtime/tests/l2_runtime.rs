@@ -97,7 +97,7 @@ fn positive_request_chain_produces_wire_and_stable_binding() {
         execution_binding(plan),
         "execution binding must match the loaded plan"
     );
-    assert_eq!(report.trace.len(), 3, "three request nodes must be traced");
+    assert_eq!(report.trace.len(), 7, "seven request nodes must be traced");
     let scope_value = report
         .continuation_scope
         .as_deref()
@@ -294,7 +294,7 @@ fn positive_mock_response_chain_projects_client_frame() {
         report.continuation_committed,
         "continuation truth committed at chat process exit"
     );
-    assert_eq!(report.trace.len(), 3, "three response nodes must be traced");
+    assert_eq!(report.trace.len(), 6, "six response nodes must be traced");
 }
 
 #[test]
@@ -305,7 +305,7 @@ fn red_invalid_input_flows_typed_error_path_to_terminal_projection() {
         .execute_request("bad:input", "r-error-1")
         .expect_err("invalid entry protocol must fail the request chain");
     assert_eq!(fault.code, "input_validate");
-    assert_eq!(fault.node_id.as_deref(), Some("V4ReqInbound01Raw"));
+    assert_eq!(fault.node_id.as_deref(), Some("V4HubReqInbound03Normalized"));
 
     let projection = project_runtime_fault(&mut chain, fault).expect("fault must project");
     assert_eq!(projection.code, "input_validate");
@@ -323,7 +323,7 @@ fn red_unknown_plugin_fails_fast() {
     let plan = test_plan(vec![ChainDefinition {
         chain_id: "request".to_string(),
         nodes: vec![slot(
-            "V4ReqInbound01Raw",
+            "V4ServerReqInbound01ClientRaw",
             1,
             true,
             true,
@@ -498,8 +498,8 @@ fn control_resources_lifecycle_positive_and_red() {
         .execute(
             "fixture-1",
             "exec-1",
-            "V4ReqInbound01Raw",
-            "V4RespOutbound04ClientSemantic",
+            "V4ServerReqInbound01ClientRaw",
+            "V4ServerRespOutbound06ClientFrame",
             "sha256:input",
         )
         .expect("dry-run must execute");
@@ -509,8 +509,8 @@ fn control_resources_lifecycle_positive_and_red() {
         dry_run.execute(
             "",
             "exec-2",
-            "V4ReqInbound01Raw",
-            "V4RespOutbound04ClientSemantic",
+            "V4ServerReqInbound01ClientRaw",
+            "V4ServerRespOutbound06ClientFrame",
             "sha256:input"
         ),
         Err(DryRunExecutionError::FixtureMissing)

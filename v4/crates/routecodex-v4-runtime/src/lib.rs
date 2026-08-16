@@ -1404,7 +1404,7 @@ impl SkeletonRuntime {
         self.active_requests.borrow_mut().remove(request_id);
     }
 
-    /// Minimal request slice: ReqInbound -> ReqProcess -> ReqOutbound.
+    /// Fixed request slice: server entry -> Hub governance -> provider boundary.
     pub fn execute_request(
         &self,
         raw_entry: &str,
@@ -1432,8 +1432,8 @@ impl SkeletonRuntime {
         result
     }
 
-    /// Minimal response slice with a mock provider frame:
-    /// MockProviderResponse -> RespProcess -> ClientProjection.
+    /// Fixed response slice with a mock provider frame:
+    /// provider boundary -> Hub governance -> server projection.
     pub fn execute_mock_response(
         &self,
         provider_raw: &str,
