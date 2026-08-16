@@ -30,6 +30,7 @@ export function collectV3BuildTestArtifactBudgetFailures(sources) {
   requireMatch(sources.wrapper, /belongsToExecutable[\s\S]*removePath\(path\)/u, 'V3 test wrapper must release only rcgu objects matching executables from this invocation');
   requireMatch(sources.wrapper, /-p\\s\+routecodex-v3/u, 'V3 test wrapper must detect cargo test -p routecodex-v3-* builders without manifest or target paths');
   requireMatch(sources.wrapper, /function isBareWorkspaceCargoBuildOrTest\(command\)[\s\S]*cargo\\s\+[\s\S]*\(\?:build\|test\)[\s\S]*--workspace/u, 'V3 test wrapper must detect bare cargo build/test --workspace builders');
+  requireMatch(sources.wrapper, /function builderCommandUsesOwnedV3Domain\(line,[\s\S]*command\.includes\(manifestPath\)[\s\S]*command\.includes\(targetDir\)[\s\S]*relative\(v3Root, resolve\(cwd\)\)[\s\S]*relativeCwd\.startsWith/u, 'V3 test wrapper must scope active builder detection to this V3 worktree and target domain');
   requireMatch(sources.wrapper, /function currentProcessCwd\(pid\)[\s\S]*readlinkSync\(`\/proc\/\$\{pid\}\/cwd`\)[\s\S]*'lsof',\s*\['-a',\s*'-p',\s*String\(pid\),\s*'-d',\s*'cwd',\s*'-Fn'\]/u, 'V3 test wrapper must inspect builder cwd before treating bare workspace commands as V3 builders');
   if (/createdByFailedInvocation/u.test(sources.wrapper)) {
     failures.push('V3 test wrapper must not timestamp-delete rcgu objects from other Cargo invocations');

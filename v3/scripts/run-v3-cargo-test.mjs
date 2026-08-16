@@ -180,24 +180,27 @@ function activeV3BuilderCommands() {
     .map((line) => line.trim())
     .filter(Boolean)
     .filter((line) => !line.startsWith(`${ownPid} `))
-    .filter((line) => {
-      const match = line.match(/^(\d+)\s+(.+)$/u);
-      if (!match) return false;
-      const pid = Number(match[1]);
-      const command = match[2];
-      if (!/(?:^|\s)(?:\S*\/)?(?:cargo|rustc)(?:\s|$)/u.test(command)) return false;
-      if (
-        command.includes('v3/Cargo.toml')
-        || command.includes(`${sep}v3${sep}target${sep}`)
-        || /(?:^|\s)-p\s+routecodex-v3[-\w]*/u.test(command)
-        || /\broutecodex[-_]v3[-_]/u.test(command)
-      ) {
-        return true;
-      }
-      if (!isBareWorkspaceCargoBuildOrTest(command)) return false;
-      const cwd = Number.isInteger(pid) ? currentProcessCwd(pid) : null;
-      return cwd === null || resolve(cwd) === v3Root;
-    });
+    .filter((line) => builderCommandUsesOwnedV3Domain(line));
+}
+
+export function builderCommandUsesOwnedV3Domain(line, cwdReader = currentProcessCwd) {
+  const match = line.match(/^(\d+)\s+(.+)$/u);
+  if (!match) return false;
+  const pid = Number(match[1]);
+  const command = match[2];
+  if (!/(?:^|\s)(?:\S*\/)?(?:cargo|rustc)(?:\s|$)/u.test(command)) return false;
+  if (command.includes(manifestPath) || command.includes(targetDir)) return true;
+  const looksLikeV3Builder = command.includes('v3/Cargo.toml')
+    || command.includes(`${sep}v3${sep}target${sep}`)
+    || /(?:^|\s)-p\s+routecodex-v3[-\w]*/u.test(command)
+    || /\broutecodex[-_]v3[-_]/u.test(command)
+    || isBareWorkspaceCargoBuildOrTest(command);
+  if (!looksLikeV3Builder) return false;
+  const cwd = Number.isInteger(pid) ? cwdReader(pid) : null;
+  if (cwd === null) return true;
+  const relativeCwd = relative(v3Root, resolve(cwd));
+  return relativeCwd === ''
+    || (!relativeCwd.startsWith(`..${sep}`) && relativeCwd !== '..' && !isAbsolute(relativeCwd));
 }
 
 function isBareWorkspaceCargoBuildOrTest(command) {

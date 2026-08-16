@@ -8,6 +8,7 @@ import {
   readV3BuildTestArtifactBudgetSources,
 } from '../../scripts/architecture/verify-v3-build-test-artifact-budget.mjs';
 import {
+  builderCommandUsesOwnedV3Domain,
   currentProcessIdentity,
   enforceV3DebugBudget,
   lockOwnerMatchesProcess,
@@ -18,6 +19,30 @@ import {
 const root = resolve(new URL('../..', import.meta.url).pathname);
 const sources = readV3BuildTestArtifactBudgetSources(root);
 assert.deepEqual(collectV3BuildTestArtifactBudgetFailures(sources), []);
+assert.equal(
+  builderCommandUsesOwnedV3Domain(
+    '123 cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server',
+    () => root,
+  ),
+  true,
+  'a builder in this V3 domain must block cleanup',
+);
+assert.equal(
+  builderCommandUsesOwnedV3Domain(
+    '124 cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server',
+    () => '/tmp/foreign-routecodex/v3',
+  ),
+  false,
+  'an isolated worktree builder must not block cleanup in this V3 domain',
+);
+assert.equal(
+  builderCommandUsesOwnedV3Domain(
+    `125 cargo test --manifest-path ${join(root, 'Cargo.toml')} -p routecodex-v3-server`,
+    () => '/tmp/foreign-routecodex/v3',
+  ),
+  true,
+  'an absolute manifest path into this V3 domain must block cleanup',
+);
 assert.equal(
   lockOwnerMatchesProcess(
     { pid: 123, processStartedAt: '2026-08-02T00:00:00.000Z' },
@@ -138,7 +163,7 @@ const mutations = [
     name: 'bare V3 package builder detection removed',
     sources: {
       ...sources,
-      wrapper: sources.wrapper.replace("        || /(?:^|\\s)-p\\s+routecodex-v3[-\\w]*/u.test(command)\n", ''),
+      wrapper: sources.wrapper.replace("    || /(?:^|\\s)-p\\s+routecodex-v3[-\\w]*/u.test(command)\n", ''),
     },
   },
   {
@@ -148,6 +173,16 @@ const mutations = [
       wrapper: sources.wrapper.replace(
         'function isBareWorkspaceCargoBuildOrTest(command)',
         'function isBareWorkspaceCargoBuildOrTestDisabled(command)',
+      ),
+    },
+  },
+  {
+    name: 'foreign V3 worktree isolation removed',
+    sources: {
+      ...sources,
+      wrapper: sources.wrapper.replace(
+        '  const relativeCwd = relative(v3Root, resolve(cwd));',
+        "  const relativeCwd = '';",
       ),
     },
   },
