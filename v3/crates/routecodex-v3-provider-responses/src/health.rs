@@ -665,29 +665,6 @@ impl V3ProviderHealthStore {
         Ok(())
     }
 
-    /// probe 失败：保持冷却，推后下一次探针。
-    pub fn complete_provider_cooldown_probe_failure(
-        &self,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        now_ms: u64,
-    ) -> Result<(), V3ProviderHealthError> {
-        let provider_identity = provider_key_label(provider_id, auth_alias, model_id);
-        let mut state = self
-            .state
-            .write()
-            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let Some(cooldown) = state.provider_cooldowns.get_mut(&provider_identity) else {
-            return Ok(());
-        };
-        cooldown.probe_in_flight = false;
-        cooldown.next_probe_at_ms = Some(
-            now_ms.saturating_add(V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS),
-        );
-        Ok(())
-    }
-
     pub fn try_acquire_cross_session_revive(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
