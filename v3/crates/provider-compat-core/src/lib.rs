@@ -2019,54 +2019,24 @@ mod tests {
 
     #[test]
     fn passthrough_profile_does_not_harvest_minimax_text() {
-        let input = ReqOutboundCompatInput {
-            payload: json!({
-                "object": "response",
-                "output": [{
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "<function_calls>{\"tool_calls\":[{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}]}</function_calls>"}]
-                }]
-            }),
-            adapter_context: AdapterContext {
-                compatibility_profile: None,
-                provider_protocol: Some("openai-responses".to_string()),
-                ..Default::default()
-            },
-            explicit_profile: None,
-        };
-        let result = run_resp_inbound_stage3_compat(input).unwrap();
-        assert_eq!(result.applied_profile, None);
-        assert_eq!(result.payload["output"][0]["type"], "message");
-    }
-
-    #[test]
-    fn response_compat_preserves_top_level_payload_fields_on_passthrough_branches() {
-        let payload = json!({"object":"response","id":"resp_passthrough_fields_1","output":[],"semantics":{"internal":true},"processed":{"marker":"must-preserve"},"processingMetadata":{"marker":"must-preserve"}});
-        let check = |compatibility_profile, provider_protocol| {
-            run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
+        let payload = json!({"object":"response","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"<function_calls>{\"tool_calls\":[{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}]}</function_calls>"}]}],"semantics":{"internal":true},"processed":{"marker":"must-preserve"},"processingMetadata":{"marker":"must-preserve"}});
+        for (profile, protocol) in [
+            (None, "openai-responses"),
+            (Some("responses:cc"), "anthropic-messages"),
+        ] {
+            let result = run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
                 payload: payload.clone(),
                 adapter_context: AdapterContext {
-                    compatibility_profile,
-                    provider_protocol,
+                    compatibility_profile: profile.map(str::to_string),
+                    provider_protocol: Some(protocol.to_string()),
                     ..Default::default()
                 },
                 explicit_profile: None,
             })
-            .unwrap()
-        };
-        assert_eq!(
-            check(None, Some("openai-responses".into())).payload,
-            payload
-        );
-        assert_eq!(
-            check(
-                Some("responses:cc".into()),
-                Some("anthropic-messages".into())
-            )
-            .payload,
-            payload
-        );
+            .unwrap();
+            assert_eq!(result.applied_profile, None);
+            assert_eq!(result.payload, payload);
+        }
     }
 
     #[test]
