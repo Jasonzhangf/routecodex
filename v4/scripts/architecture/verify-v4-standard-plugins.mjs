@@ -232,6 +232,7 @@ const FORBIDDEN_SOURCE = [
   'use routecodex_v4_edge',
   'use routecodex_v4_control',
   'use routecodex_v4_error',
+  'use routecodex_v4_node_container',
   'provider_family',
   'match provider_id',
 ];
