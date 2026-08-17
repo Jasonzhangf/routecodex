@@ -643,7 +643,7 @@
       "output_path": "repo/docs/architecture/no-fallback-diff-rules.json",
       "source_path": "docs/architecture/no-fallback-diff-rules.json",
       "source_commit": "00123160c7d24beb2d803f860c5693fddea13fe8",
-      "sha256": "a8be34189b33dfd9e2c9905d8f2ca7a0f8dc8b7615f0322d520e5e6d11289c23"
+      "sha256": "7b83d37138ee6051add58d12a97d27df7d5af96298afd87e327419aa81b7b535"
     },
     {
       "output_path": "repo/docs/architecture/repository-filesystem-module-registry.yml",
@@ -2632,5 +2632,5 @@
       "sha256": "2ada8d17e5cc0cb53ff0dfa9acfbeedf10eb4e35f7db239fb43ef88aa7478ea6"
     }
   ],
-  "manifest_digest": "485f37c54cec17b0acafea04f81ce16e661765bc2ac56ec1811f0b62cd325f70"
+  "manifest_digest": "f39d667cede620d85dc47a16c567c14a8b7c7cd2d5673b1c344194e8ee295402"
 }
