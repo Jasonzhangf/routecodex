@@ -268,7 +268,10 @@ fn negative_scope_consume_rejects_non_object_control() {
         )
         .expect_err("non-object control must surface as typed bridge failure");
     assert!(
-        matches!(error, NodeContainerError::Bridge(BridgeError::HandleError { .. })),
+        matches!(
+            error,
+            NodeContainerError::Bridge(BridgeError::HandleError { .. })
+        ),
         "expected typed HandleError, got {error:?}"
     );
     container.drain().unwrap();
@@ -336,7 +339,10 @@ fn negative_error_intake_rejects_non_object_control() {
             &registry,
         )
         .expect_err("non-object control must fail typed error intake");
-    assert!(matches!(error, NodeContainerError::Bridge(BridgeError::HandleError { .. })));
+    assert!(matches!(
+        error,
+        NodeContainerError::Bridge(BridgeError::HandleError { .. })
+    ));
     container.drain().unwrap();
     container.dispose().unwrap();
 }
