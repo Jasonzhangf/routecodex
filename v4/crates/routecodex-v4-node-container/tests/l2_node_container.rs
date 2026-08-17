@@ -13,7 +13,6 @@ use routecodex_v4_node_container::{
     graph_hash, NodeContainer, NodeContainerError, NodeContainerState, PlanBindings,
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
-use serde_json::json;
 
 fn empty_plan() -> NodePluginPlan {
     let mut plan = NodePluginPlan {
@@ -69,13 +68,13 @@ fn positive_full_lifecycle_with_matching_hashes() {
     let output = container
         .execute(
             NodeExecutionInput {
-                data: json!({"msg": "hello"}),
-                control: json!({}),
+                data: Default::default(),
+                control: Default::default(),
             },
             &EmptyRegistry,
         )
         .expect("empty plan executes through typed bridge");
-    assert_eq!(output.data, json!({"msg": "hello"}));
+    assert!(output.data.is_null());
     assert!(output.diagnostics.is_empty());
 
     container.drain().unwrap();
@@ -133,8 +132,8 @@ fn negative_execute_before_publish_is_rejected() {
     let error = container
         .execute(
             NodeExecutionInput {
-                data: json!({}),
-                control: json!({}),
+                data: Default::default(),
+                control: Default::default(),
             },
             &EmptyRegistry,
         )

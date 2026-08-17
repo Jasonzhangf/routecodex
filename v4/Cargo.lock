@@ -157,7 +157,6 @@ version = "0.1.0"
 dependencies = [
  "routecodex-v4-cordis-bridge",
  "routecodex-v4-plugin-plan",
- "serde_json",
  "sha2",
 ]
 

@@ -77,6 +77,20 @@ function walkFiles(dir, rel = '', out = []) {
   return out;
 }
 
+function trackedFiles() {
+  const result = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '--', '.'], {
+    cwd: v4Root,
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    throw new Error(`git ls-files failed: ${result.stderr || result.stdout}`);
+  }
+  return result.stdout
+    .split('\n')
+    .filter(Boolean)
+    .filter((file) => !file.split('/').some((part) => IGNORED_DIRS.has(part)));
+}
+
 function globToRegExp(pattern) {
   let source = '';
   for (let i = 0; i < pattern.length; i += 1) {
@@ -358,10 +372,15 @@ function checkCIRunnerArch(ci, arch) {
     : [`CI node process arch=${arch}; Active artifacts are aarch64-apple-darwin, so V4 verify:ci must run on an arm64 runner`];
 }
 
-function checkDeclaredExecutedBinding(verificationMapPath, architectureDir) {
+function checkDeclaredExecutedBinding(
+  verificationMapPath,
+  architectureDir,
+  testScriptPath = path.join(v4Root, 'scripts/test.mjs'),
+) {
   const out = [];
   const declaredGates = new Set();
   const declaredConsumers = new Set();
+  const declaredFunctionalTests = new Set();
   const declaredConsumerDetails = new Map();
   const map = JSON.parse(fs.readFileSync(verificationMapPath, 'utf8'));
   const seenGateIds = new Set();
@@ -376,6 +395,9 @@ function checkDeclaredExecutedBinding(verificationMapPath, architectureDir) {
     }
     for (const match of command.matchAll(/test-consumer[^\n]*--consumer\s+([a-z0-9-]+)/g)) {
       declaredConsumers.add(match[1]);
+    }
+    if (command.startsWith('node --test ')) {
+      declaredFunctionalTests.add(command);
     }
     const consumer = command.match(/test-consumer[^\n]*--consumer\s+([a-z0-9-]+)/)?.[1];
     if (!consumer) continue;
@@ -406,6 +428,14 @@ function checkDeclaredExecutedBinding(verificationMapPath, architectureDir) {
   for (const gate of declaredGates) {
     if (!fs.existsSync(path.join(architectureDir, gate))) {
       out.push(`architecture gate file missing: ${gate}`);
+    }
+  }
+  const testScript = fs.existsSync(testScriptPath)
+    ? fs.readFileSync(testScriptPath, 'utf8')
+    : '';
+  for (const command of declaredFunctionalTests) {
+    if (!testScript.includes(command)) {
+      out.push(`required functional test not executed by scripts/test.mjs: ${command}`);
     }
   }
   if (fs.existsSync(architectureDir)) {
@@ -450,7 +480,7 @@ if (path.resolve(metadata.target_directory) !== path.resolve(path.join(v4Root, '
   failures.push(`cargo target_directory=${metadata.target_directory} (must be ${path.join(v4Root, 'target')})`);
 }
 
-const allFiles = walkFiles(v4Root);
+const allFiles = trackedFiles();
 failures.push(...scanCargoPathDeps(allFiles));
 failures.push(...scanForbiddenReferences(allFiles));
 failures.push(...scanOutputTargets(allFiles));
@@ -650,6 +680,26 @@ const bindingProblems = checkDeclaredExecutedBinding(
   path.join(bindingDir, 'architecture'),
 );
 expectReject('declared vs executed gate binding drift', () => bindingProblems);
+
+const functionalBindingDir = path.join(redDir, 'functional-test-binding');
+fs.mkdirSync(path.join(functionalBindingDir, 'architecture'), { recursive: true });
+fs.writeFileSync(
+  path.join(functionalBindingDir, 'verification-map.json'),
+  JSON.stringify({
+    gates: [
+      {
+        gate_id: 'v4_cordis_host_l3_regression',
+        command: 'node --test cordis/routecodex-v4-cordis-host/tests/host.test.mjs',
+      },
+    ],
+  }),
+);
+fs.writeFileSync(path.join(functionalBindingDir, 'test.mjs'), '');
+expectReject('required functional test not executed', () => checkDeclaredExecutedBinding(
+  path.join(functionalBindingDir, 'verification-map.json'),
+  path.join(functionalBindingDir, 'architecture'),
+  path.join(functionalBindingDir, 'test.mjs'),
+));
 
 // R10b: duplicate gate_id and underscore gate commands are registry drift the
 // binding gate must reject (dangling commands must not be regex-invisible).
