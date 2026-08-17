@@ -2005,7 +2005,7 @@ mod tests {
         assert_eq!(out["flowId"], "servertool_fixture");
         assert_eq!(
             out["execCommand"],
-            "routecodex hook run servertool_fixture --input-json '{\"value\":1}'"
+            "routecodex servertool run servertool_fixture --input-json '{\"value\":1}'"
         );
     }
 
@@ -2328,7 +2328,7 @@ mod tests {
         assert_eq!(out["flowId"], "servertool_cli_projection");
         assert_eq!(
             out["execCommand"].as_str(),
-            Some("routecodex hook run servertool_fixture --input-json '{\"value\":1}'")
+            Some("routecodex servertool run servertool_fixture --input-json '{\"value\":1}'")
         );
         assert!(out.get("schemaGuidance").is_none());
     }

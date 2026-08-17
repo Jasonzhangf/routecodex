@@ -1341,13 +1341,16 @@ mod tests {
             })),
             provider_key: None,
         });
-        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnHandlerPlan);
-        assert_eq!(plan.compare_context.reason, "stop_schema_missing");
-        assert_eq!(plan.stopless_trigger_hint.as_deref(), Some("no_schema"));
-        let persist_plan = plan.persist_plan.as_ref().expect("persist plan");
-        assert_eq!(persist_plan.next_used, 3);
-        assert_eq!(persist_plan.next_max_repeats, 3);
-        assert!(plan.terminal_chat_response.is_none());
+        assert_eq!(
+            plan.action,
+            StopMessageAutoPlanAction::ReturnSchemaAllowStop
+        );
+        assert_eq!(
+            plan.compare_context.reason,
+            "stop_schema_loop_guard_passthrough"
+        );
+        assert!(plan.persist_plan.is_none());
+        assert!(plan.terminal_chat_response.is_some());
     }
 
     #[test]
