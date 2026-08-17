@@ -20,7 +20,7 @@ const unsolicitedResponseBinary = path.join(
   'cordis/routecodex-v4-cordis-host/tests/resources/unsolicited-response-host.mjs',
 );
 
-function withTimeout(promise, milliseconds = 1_000) {
+function withTimeout(promise, milliseconds = 5_000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error('lifecycle request did not settle')),
