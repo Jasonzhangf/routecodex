@@ -7,10 +7,7 @@ use serde_json::Value;
 /// 仅做 minimax provider sentinel text stripping（响应侧，与 web_search 无关）。
 pub(crate) const MODE_A_NATIVE_REMOTE_SEARCH: &str = "native_remote_search_tool_mix";
 
-pub(crate) fn apply_request_compat(
-    payload: Value,
-    _mode: Option<&str>,
-) -> Result<Value, String> {
+pub(crate) fn apply_request_compat(payload: Value, _mode: Option<&str>) -> Result<Value, String> {
     Ok(payload)
 }
 

@@ -1198,7 +1198,12 @@ fn normalize_function_call_id(call_id: Option<&str>, fallback: &str) -> String {
     }
     let mut hasher = Sha256::new();
     hasher.update(raw.as_bytes());
-    let hash = hasher.finalize().iter().take(5).map(|byte| format!("{byte:02x}")).collect::<String>();
+    let hash = hasher
+        .finalize()
+        .iter()
+        .take(5)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let room = 64usize.saturating_sub("fc_".len() + 1 + hash.len()).max(1);
     let head = sanitize_id_token(&safe.chars().take(room).collect::<String>());
     format!("fc_{head}_{hash}")
@@ -2111,8 +2116,7 @@ mod tests {
         );
         // #3: 请求侧不再无条件剥离 reasoning content——reasoning 明文原样透传。
         assert_eq!(
-            result.payload["input"][0]["content"][0]["text"],
-            "old",
+            result.payload["input"][0]["content"][0]["text"], "old",
             "reasoning content must pass through verbatim (no unconditional strip)"
         );
     }
