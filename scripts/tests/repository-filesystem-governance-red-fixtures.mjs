@@ -50,6 +50,12 @@ const cases = [
     'active machine map must not bind retired V2 archive',
     '{"pathContains":"deprecated/v2/monitoring/v2-monitoring-analysis.mjs"}\n',
   ],
+  [
+    'retired V2 exact root binding',
+    'docs/architecture/v3-runtime-module-registry.yml',
+    'active machine map must not bind retired V2 archive',
+    '  - deprecated/v2\n',
+  ],
 ];
 
 function run(root, args) {

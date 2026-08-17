@@ -40,6 +40,7 @@ function verifyRepositoryFilesystemGovernance() {
     'docs/architecture/v3-verification-map.yml',
     'docs/architecture/repository-filesystem-module-registry.yml',
     'docs/architecture/v3-build-tool-module-registry.yml',
+    'docs/architecture/v3-runtime-module-registry.yml',
   ];
   let moduleOwner;
   const moduleRegistryPath = path.join(
@@ -92,7 +93,8 @@ function verifyRepositoryFilesystemGovernance() {
   for (const relativePath of activeMachineMaps) {
     const absolutePath = path.join(repoRoot, relativePath);
     if (!fs.existsSync(absolutePath)) continue;
-    if (fs.readFileSync(absolutePath, 'utf8').includes('deprecated/v2/')) {
+    const content = fs.readFileSync(absolutePath, 'utf8');
+    if (content.includes('deprecated/v2/') || /deprecated\/v2(?=[\s"'\n]|$)/.test(content)) {
       failures.push(`active machine map must not bind retired V2 archive: ${relativePath}`);
     }
   }
