@@ -1939,6 +1939,7 @@ features:
   - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
   design:
   - docs/goals/v3-protocol-conversion-field-parity-test-design.md
+  - docs/goals/v3-responses-malformed-input-error-origin-test-design.md
   - docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md
   - docs/architecture/reviews/v3-protocol-semantic-matrix-review.md
   - docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml
@@ -2046,6 +2047,7 @@ features:
   - npm run test:v3-protocol-conversion-field-parity
   - npm run verify:v3-protocol-conversion-field-parity
   - npm run test:v3-protocol-conversion-field-parity-red-fixtures
+  - npm run verify:v3-protocol-conversion-field-parity-ci
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-rust-only
   - npm run verify:v3-architecture-docs

@@ -71,6 +71,71 @@ fn non_target_runtime_failure_remains_runtime_error() {
 }
 
 #[test]
+fn client_inbound_reasoning_effort_validation_failure_projects_http_400() {
+    let output = project_v3_responses_relay_runtime_failure(
+        V3ResponsesRelayRuntimeError::ClientInboundCanonical(
+            "Responses inbound canonicalization failed: Responses reasoning.effort has an invalid value"
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(output.status, 400);
+    let body = match &output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => {
+            panic!("client inbound validation failure must project as JSON")
+        }
+    };
+    assert_eq!(body["error"]["code"], "invalid_responses_request");
+    assert_eq!(
+        body["error"]["message"],
+        "Responses inbound canonicalization failed: Responses reasoning.effort has an invalid value"
+    );
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+    );
+}
+
+#[test]
+fn provider_response_projection_failure_is_not_client_invalid_request() {
+    let output = project_v3_responses_relay_runtime_failure(
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "Anthropic provider response projection failed".to_string(),
+        ),
+    );
+
+    assert_eq!(output.status, 500);
+    let body = match &output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => {
+            panic!("provider response projection failure must project as JSON")
+        }
+    };
+    assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
+    assert_ne!(body["error"]["code"], "invalid_responses_request");
+}
+
+#[test]
+fn internal_web_search_canonicalization_failure_is_not_client_invalid_request() {
+    let output = project_v3_responses_relay_runtime_failure(
+        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
+            "servertool followup canonicalization failed".to_string(),
+        ),
+    );
+
+    assert_eq!(output.status, 500);
+    let body = match &output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => {
+            panic!("internal web search invariant failure must project as JSON")
+        }
+    };
+    assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
+    assert_ne!(body["error"]["code"], "invalid_responses_request");
+}
+
+#[test]
 fn provider_failure_output_projects_error_chain_body_without_success_wrapping() {
     let terminal_projection = V3ErrorHandlingCenter::project_terminal_decision(
         V3ErrorHandlingCenter::decide_provider(
