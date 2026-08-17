@@ -3732,8 +3732,8 @@ features:
     source: V3-local isolation, admission, positive/red suites, architecture CI,
       workspace tests, clippy, and release build pass from the canonical V3 root.
     runtime: global install live-verified at rccv3 0.90.4574; install-time
-      v3/dist/bin/rccv3 and ~/.local/bin/rccv3 hashes matched at SHA256
-      94c5f56d9a41ef729287cae6217e3105abcf1f428e89ebfa22387c23856d7e62,
+      v3/dist/bin/rccv3 and ~/.local/bin/rccv3 SHA256 equality is recorded in
+      the collaboration evidence ledger,
       exactly one aggregate restart (instance v3-aed76aa41c519c15962a), all five
       configured listeners HTTP 200 build_version=0.90.4574, Direct Responses
       JSON/SSE and Chat JSON/Anthropic Relay JSON markers replay, log audit clean,
