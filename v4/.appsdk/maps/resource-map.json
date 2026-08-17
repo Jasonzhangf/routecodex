@@ -940,6 +940,7 @@
       "allowed_operations": [
         "declare",
         "publish",
+        "fail",
         "execute",
         "drain",
         "dispose"

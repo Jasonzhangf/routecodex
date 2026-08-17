@@ -62,6 +62,7 @@ const isKnownOwner = (crate) => CRATE_DIRS.includes(crate) || CORDIS_DIRS.includ
 // count, so `owner_symbols` cannot be satisfied by text presence alone.
 const DECL_RE = /^(?:pub(?:\([^)]*\))?\s+)?(struct|enum|trait|fn|type|const|static)\s+([A-Za-z_][A-Za-z0-9_]*)\b/gm;
 const REUSE_RE = /^pub use [^\n]*\b([A-Za-z_][A-Za-z0-9_]*)\b/gm;
+const JS_DECL_RE = /^(?:export\s+)?(?:class|function|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b/gm;
 
 function collectDeclaredSymbols(crate) {
   const crateRoot = path.join(root, 'crates', crate, 'src');
@@ -90,6 +91,28 @@ function collectDeclaredSymbols(crate) {
   };
   if (fs.existsSync(crateRoot)) {
     walk(crateRoot);
+  }
+  return symbols;
+}
+
+function collectDeclaredCordisSymbols(module) {
+  const moduleRoot = path.join(root, 'cordis', module, 'src');
+  const symbols = new Set();
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.name.endsWith('.mjs') || entry.name.endsWith('.js')) {
+        const source = fs.readFileSync(full, 'utf8');
+        for (const match of source.matchAll(JS_DECL_RE)) {
+          symbols.add(match[1]);
+        }
+      }
+    }
+  };
+  if (fs.existsSync(moduleRoot)) {
+    walk(moduleRoot);
   }
   return symbols;
 }
@@ -155,7 +178,10 @@ function validate(resourceMap, appsdkMap, verificationMap, nodeIds) {
   const gateIds = new Set((verificationMap.gates ?? []).map((gate) => gate.gate_id));
   const appsdkById = new Map((appsdkMap.resources ?? []).map((resource) => [resource.resource_id, resource]));
   const declaredSymbols = new Map(
-    CRATE_DIRS.map((crate) => [crate, collectDeclaredSymbols(crate)]),
+    [
+      ...CRATE_DIRS.map((crate) => [crate, collectDeclaredSymbols(crate)]),
+      ...CORDIS_DIRS.map((module) => [module, collectDeclaredCordisSymbols(module)]),
+    ],
   );
 
   for (const resource of resourceMap.resources ?? []) {
@@ -191,14 +217,14 @@ function validate(resourceMap, appsdkMap, verificationMap, nodeIds) {
       if (!Array.isArray(symbols) || symbols.length === 0) {
         failures.push(`${id}: anchored resource requires non-empty owner_symbols`);
       }
-    } else if (crate && CRATE_DIRS.includes(crate)) {
+    } else if (crate && isKnownOwner(crate)) {
       const symbols = resource.owner_symbols;
       if (!Array.isArray(symbols) || symbols.length === 0) {
         failures.push(`${id}: design resource with implemented owner crate requires owner_symbols (no design pretending to be truth)`);
       }
     }
     const symbols = Array.isArray(resource.owner_symbols) ? resource.owner_symbols : [];
-    if (crate && CRATE_DIRS.includes(crate) && symbols.length > 0) {
+    if (crate && isKnownOwner(crate) && symbols.length > 0) {
       const present = declaredSymbols.get(crate) ?? new Set();
       const missing = symbols.filter((symbol) => !present.has(symbol));
       if (missing.length > 0) {
@@ -284,6 +310,10 @@ function runSelfTest() {
     ['anchored symbol missing', (m) => {
       const resource = m.resources.find((r) => r.binding_status === 'anchored');
       resource.owner_symbols = ['routecodex_v4_symbol_does_not_exist'];
+    }],
+    ['Cordis owner symbol missing', (m) => {
+      const resource = m.resources.find((r) => r.resource_id === 'v4.cordis.node_context');
+      resource.owner_symbols = ['CordisGhostSymbol'];
     }],
     ['method name is not a symbol', (m) => {
       const resource = m.resources.find((r) => r.binding_status === 'anchored');

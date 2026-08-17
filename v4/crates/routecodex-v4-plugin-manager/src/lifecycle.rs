@@ -1,7 +1,6 @@
-//! Strict-fake lifecycle port used by tests and by Manager when the real
-//! Cordis adapter (Track A) is not bound. Performs in-memory mount/drain/
-//! dispose so the Manager can be unit-tested in isolation without pulling
-//! Cordis internals into this crate.
+//! Strict-fake lifecycle port used by tests while the M8 JS host-to-Rust
+//! binding remains pending. Performs in-memory mount/drain/dispose so the
+//! Manager can be tested without pulling Cordis internals into this crate.
 
 use std::collections::BTreeMap;
 

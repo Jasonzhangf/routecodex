@@ -60,9 +60,10 @@ draft -> compiled -> validated -> smoke_passed -> published
 ```
 
 `publish` 必须比较 expected active base hash，调用 typed
-`NodeContainerLifecyclePort::mount_candidate`，通过后原子更新 active，再请求旧
-container drain/dispose。该 port 是 Track A 的集成边界；本线用严格 fake 做测试，
-不得仿制 Cordis 或复制 NodeContainer。
+`LifecyclePort::mount_candidate`，通过后原子更新 active，再请求旧 container
+drain/dispose。该 port 的 JS host-to-Rust 实现是 M8 接线边界；当前只允许严格
+fake 做测试，不得把 pending binding 伪报为 active，不得仿制 Cordis 或复制
+NodeContainer。
 
 ### RuntimeInspector
 

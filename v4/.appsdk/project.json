@@ -1167,7 +1167,7 @@
           "crates/routecodex-v4-server/tests/l2_server.rs",
           "contracts/node-graph.contract.json"
         ],
-        "minimum_test_count": 3,
+        "minimum_test_count": 4,
         "ordinary_mode_after_freeze": "disabled",
         "reenable_on": [
           "source_change",
@@ -1522,10 +1522,11 @@
         },
         "input_paths": [
           "crates/routecodex-v4-node-container/src/lib.rs",
+          "crates/routecodex-v4-node-container/tests/l2_node_container.rs",
           "contracts/node-container.contract.json",
           "contracts/node-plugin.contract.json"
         ],
-        "minimum_test_count": 2,
+        "minimum_test_count": 9,
         "ordinary_mode_after_freeze": "disabled",
         "reenable_on": [
           "source_change",

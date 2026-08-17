@@ -566,7 +566,7 @@
         "NodeContainer::execute",
         "NodeContainer::drain",
         "NodeContainer::dispose",
-        "NodeContainerLifecyclePort",
+        "NodeContainer::fail",
         "PlanBindings",
         "graph_hash"
       ],

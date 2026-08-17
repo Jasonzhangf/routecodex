@@ -22,9 +22,9 @@ use thiserror::Error;
 
 use crate::audit::{AuditAction, AuditRecord, AuditResult, AuditSink};
 
-/// Typed contract for the per-node host lifecycle. The real adapter is owned
-/// by the node-container crate (Track A); this crate ships a strict fake
-/// (`NullLifecyclePort`) for unit tests and integration tests.
+/// Typed contract for the per-node host lifecycle. The real JS host-to-Rust
+/// binding remains `binding pending` until the M8 native bridge is wired;
+/// this crate ships `NullLifecyclePort` only as a strict test double.
 pub trait LifecyclePort {
     fn mount_candidate(
         &mut self,

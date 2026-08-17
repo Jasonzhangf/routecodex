@@ -1837,7 +1837,6 @@ resources:
   owner_symbols:
   - NodeContainer
   - NodeContainerState
-  - NodeContainerLifecyclePort
   identity:
   - nodeId
   allowed_writers:

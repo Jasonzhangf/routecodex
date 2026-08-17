@@ -216,9 +216,9 @@ function checkModuleCoverage(registry, files) {
   return out;
 }
 
-function checkMainlineEdges() {
+function checkMainlineEdges(mainlinePath = path.join(v4Root, '.appsdk/maps/mainline-call-map.json')) {
   const out = [];
-  const mainline = JSON.parse(fs.readFileSync(path.join(v4Root, '.appsdk/maps/mainline-call-map.json'), 'utf8'));
+  const mainline = JSON.parse(fs.readFileSync(mainlinePath, 'utf8'));
   const allowedOwners = new Set(['appsdk::goal', 'appsdk::lifecycle', 'appsdk::regression_gate', 'appsdk::compiler', 'appsdk::publisher', 'appsdk::freezer', 'appsdk::verifier', 'appsdk::workspace', 'appsdk::init', 'appsdk::verify', 'appsdk::build_domain', 'routecodex-v4-build-link', 'routecodex-v4-edge::validate_edge', 'routecodex-v4-control::metadata_center', 'routecodex-v4-error::error_chain', 'routecodex-v4-base-node::BaseNode', 'routecodex-v4-config::config_node', 'routecodex-v4-config::validate_edges', 'routecodex-v4-config::parse_v4_config_02_from_v4_config_01', 'routecodex-v4-config::validate_v4_config_03_from_v4_config_02', 'routecodex-v4-config::build_v4_config_04_from_v4_config_03', 'routecodex-v4-config::publish_v4_config_05_from_v4_config_04', 'routecodex-v4-runtime::ExecutionContext', 'routecodex-v4-runtime::SkeletonRuntime', 'routecodex-v4-plugin-plan::compile_node_plan', 'routecodex-v4-plugin-catalog::register', 'routecodex-v4-cordis-bridge::compile_node', 'routecodex-v4-cordis-bridge::execute_plan']);
   allowedOwners.add('routecodex-v4-runtime::NodePlugin');
   allowedOwners.add('routecodex-v4-plugin-manager');
@@ -230,12 +230,48 @@ function checkMainlineEdges() {
   allowedOwners.add('routecodex-v4-admin::query');
   allowedOwners.add('routecodex-v4-cordis-host::CordisNodeHost');
   allowedOwners.add('routecodex-v4-node-container::NodeContainer');
+  const pathExists = (candidate) => {
+    const trimmed = candidate.trim();
+    const concrete = trimmed.endsWith('/**') ? trimmed.slice(0, -3) : trimmed;
+    return fs.existsSync(path.join(v4Root, concrete));
+  };
   for (const edge of mainline.edges ?? []) {
     if (!edge.from || !edge.to || !edge.owner) {
       out.push(`mainline edge missing from/to/owner: ${JSON.stringify(edge)}`);
     }
     if (!allowedOwners.has(edge.owner)) {
       out.push(`mainline edge unregistered owner ${edge.owner} (${edge.from}->${edge.to})`);
+    }
+    if (edge.status === 'binding pending' && (edge.symbols ?? []).length > 0) {
+      out.push(`mainline pending edge must not claim bound symbols (${edge.from}->${edge.to})`);
+    }
+    if (edge.status !== 'active' || !edge.path) continue;
+    const declaredPaths = String(edge.path).split(',');
+    if (!declaredPaths.some(pathExists)) {
+      out.push(`mainline active edge missing bound path ${edge.path} (${edge.from}->${edge.to})`);
+      continue;
+    }
+    const sourceFiles = declaredPaths
+      .map((candidate) => candidate.trim())
+      .filter((candidate) => !candidate.endsWith('/**'))
+      .map((candidate) => path.join(v4Root, candidate))
+      .filter((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile());
+    if ((edge.symbols ?? []).length === 0) continue;
+    const source = sourceFiles.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
+    const identifiers = new Set(source.match(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g) ?? []);
+    for (const symbol of edge.symbols) {
+      const parts = String(symbol).split('::');
+      const base = parts[0];
+      if (!identifiers.has(base)) {
+        out.push(`mainline active edge symbol ${symbol} missing from ${edge.path} (${edge.from}->${edge.to})`);
+        continue;
+      }
+      if (parts.length < 2) continue;
+      const method = parts[parts.length - 1];
+      const escaped = method.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (!source.includes(`${base}::${method}`) && !new RegExp(`\\b${escaped}\\(`).test(source)) {
+        out.push(`mainline active edge method ${symbol} not invoked in ${edge.path} (${edge.from}->${edge.to})`);
+      }
     }
   }
   return out;
@@ -643,6 +679,38 @@ const duplicateBindingProblems = checkDeclaredExecutedBinding(
   path.join(duplicateBindingDir, 'architecture'),
 );
 expectReject('duplicate gate_id / dangling underscore gate script', () => duplicateBindingProblems);
+
+// R10c: active mainline edges require a real path/symbol binding, while
+// binding-pending edges must not claim symbols that are not wired yet.
+const mainlineFixtureDir = path.join(redDir, 'mainline-binding');
+fs.mkdirSync(mainlineFixtureDir, { recursive: true });
+const mainlineFixturePath = path.join(mainlineFixtureDir, 'mainline-call-map.json');
+fs.writeFileSync(
+  mainlineFixturePath,
+  JSON.stringify({
+    edges: [
+      {
+        from: 'routecodex-v4-cordis-host',
+        to: 'routecodex-v4-node-container',
+        owner: 'routecodex-v4-cordis-host::CordisNodeHost',
+        edge_type: 'lifecycle_port',
+        symbols: ['mount'],
+        path: 'cordis/routecodex-v4-cordis-host/src/index.mjs',
+        status: 'binding pending',
+      },
+      {
+        from: 'routecodex-v4-node-container',
+        to: 'routecodex-v4-cordis-bridge',
+        owner: 'routecodex-v4-node-container::NodeContainer',
+        edge_type: 'typed_plan_execution',
+        symbols: ['GhostSymbol'],
+        path: 'crates/routecodex-v4-node-container/src/lib.rs',
+        status: 'active',
+      },
+    ],
+  }),
+);
+expectReject('mainline pending/active binding drift', () => checkMainlineEdges(mainlineFixturePath));
 
 // R11: V4 verify:ci must run on an arm64 macOS runner, not an Intel macOS
 // runner (macos-14-large is the current GitHub-hosted x86_64 label).

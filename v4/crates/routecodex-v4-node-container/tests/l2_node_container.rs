@@ -164,6 +164,35 @@ fn negative_dispose_outside_draining_or_failed_is_rejected() {
 }
 
 #[test]
+fn positive_failed_candidate_can_dispose() {
+    let plan = empty_plan();
+    let bindings = binding_for(&plan);
+    let mut container = NodeContainer::declare("node-a", plan, bindings).expect("valid binding");
+    container.context_created().unwrap();
+    container.plugins_mounted().unwrap();
+    container.fail().unwrap();
+    assert_eq!(container.state(), NodeContainerState::Failed);
+    container.dispose().unwrap();
+    assert_eq!(container.state(), NodeContainerState::Disposed);
+}
+
+#[test]
+fn negative_fail_after_publish_is_rejected() {
+    let plan = empty_plan();
+    let bindings = binding_for(&plan);
+    let mut container =
+        full_lifecycle(NodeContainer::declare("node-a", plan, bindings).expect("valid binding"));
+    let error = container.fail().unwrap_err();
+    assert!(matches!(
+        error,
+        NodeContainerError::InvalidState {
+            state: NodeContainerState::Accepting,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn graph_hash_is_deterministic_sha256() {
     let a = graph_hash("canonical-graph");
     let b = graph_hash("canonical-graph");

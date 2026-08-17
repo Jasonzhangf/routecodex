@@ -252,10 +252,8 @@
       "owner": "routecodex-v4-runtime::ExecutionContext",
       "edge_type": "symbol_dependency",
       "symbols": [
-        "MetadataCenter::new",
-        "MetadataCenter::register",
-        "MetadataCenter::consume",
-        "MetadataCenter::release"
+        "MetadataCenter",
+        "MetadataCenter::new"
       ],
       "path": "crates/routecodex-v4-runtime/src/lib.rs",
       "status": "active"
@@ -670,13 +668,8 @@
       "to": "routecodex-v4-node-container",
       "owner": "routecodex-v4-cordis-host::CordisNodeHost",
       "edge_type": "lifecycle_port",
-      "symbols": [
-        "mount",
-        "drain",
-        "dispose"
-      ],
       "path": "cordis/routecodex-v4-cordis-host/src/index.mjs",
-      "status": "active"
+      "status": "binding pending"
     },
     {
       "from": "routecodex-v4-node-container",

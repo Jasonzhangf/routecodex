@@ -1,9 +1,9 @@
 //! Rust side of the V4 NodeContainer boundary.
 //!
 //! Cordis owns Context/Fiber/Effect creation and disposal in the host module.
-//! This crate owns only the immutable typed plan binding and the lifecycle
-//! port consumed by management code. It never creates a Cordis-like runtime,
-//! scans plugins, or chooses plugin order.
+//! This crate owns only the immutable typed plan binding and lifecycle state
+//! machine consumed by management code. It never creates a Cordis-like
+//! runtime, scans plugins, or chooses plugin order.
 
 use routecodex_v4_cordis_bridge::{
     execute_plan, BridgeError, HandleRegistry, NodeExecutionInput, NodeExecutionOutput,
@@ -69,19 +69,6 @@ impl From<BridgeError> for NodeContainerError {
     fn from(error: BridgeError) -> Self {
         Self::Bridge(error)
     }
-}
-
-/// Host-owned lifecycle port. Implementations must call the real Cordis host;
-/// a Rust implementation is intentionally not supplied by this crate.
-pub trait NodeContainerLifecyclePort {
-    fn mount_candidate(
-        &mut self,
-        node_id: &str,
-        plan_hash: &str,
-        graph_hash: &str,
-    ) -> Result<(), String>;
-    fn drain(&mut self, node_id: &str) -> Result<(), String>;
-    fn dispose(&mut self, node_id: &str) -> Result<(), String>;
 }
 
 #[derive(Debug)]
@@ -152,6 +139,23 @@ impl NodeContainer {
             NodeContainerState::Accepting,
             "publish",
         )
+    }
+
+    /// Reject a candidate before publish. Published containers must follow
+    /// the normal accepting -> draining -> disposed path.
+    pub fn fail(&mut self) -> Result<(), NodeContainerError> {
+        match self.state {
+            NodeContainerState::Declared
+            | NodeContainerState::ContextCreated
+            | NodeContainerState::PluginsMounted => {
+                self.state = NodeContainerState::Failed;
+                Ok(())
+            }
+            state => Err(NodeContainerError::InvalidState {
+                state,
+                operation: "fail",
+            }),
+        }
     }
 
     pub fn execute(

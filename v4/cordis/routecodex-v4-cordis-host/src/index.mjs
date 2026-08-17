@@ -66,6 +66,7 @@ export class CordisNodeHost {
     try {
       for (const plugin of plugins) {
         const fiber = this.#node.plugin(plugin.factory, plugin.config);
+        mounted.push({ id: plugin.id, fiber });
         await fiber.await();
         if (fiber.state !== FiberState.ACTIVE) {
           throw new CordisHostError(
@@ -73,7 +74,6 @@ export class CordisNodeHost {
             `plugin ${plugin.id} did not reach ACTIVE (state=${fiber.state})`,
           );
         }
-        mounted.push({ id: plugin.id, fiber });
       }
       this.#fibers = mounted;
       return this;

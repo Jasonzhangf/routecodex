@@ -43,6 +43,25 @@ test('pending dependency is rejected and mounted fibers roll back', async () => 
   assert.equal(host.fibers.length, 0);
 });
 
+test('failing in-flight fiber is disposed before mount rejects', async () => {
+  const events = [];
+  const host = new CordisNodeHost({
+    nodeId: 'node-failed',
+    descriptor: { roleId: 'request_chat_process' },
+  });
+  await assert.rejects(
+    host.mount([
+      createNodePlugin('failing', (ctx) => {
+        ctx.effect(() => () => events.push('failing:dispose'));
+        throw new Error('mount failed after effect start');
+      }),
+    ]),
+    /mount failed after effect start/,
+  );
+  assert.deepEqual(events, ['failing:dispose']);
+  assert.equal(host.fibers.length, 0);
+});
+
 test('node context is real Cordis Context and service names are isolated', () => {
   const host = new CordisNodeHost({
     nodeId: 'node-c',
