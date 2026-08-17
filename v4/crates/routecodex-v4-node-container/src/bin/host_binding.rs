@@ -1,10 +1,15 @@
+use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
+use routecodex_v4_cordis_bridge::{
+    BridgeError, ExecCtx, HandleRegistry, NodeExecutionInput, NodeExecutionOutput, PluginHandle,
+};
 use routecodex_v4_node_container::{
     NodeContainer, NodeContainerError, NodeContainerState, NodeExecutionGuard, PlanBindings,
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use serde_json::value::RawValue;
 
 #[derive(Debug, Deserialize)]
@@ -39,6 +44,11 @@ enum HostRequest {
     },
     Dispose {
         request_id: String,
+    },
+    ExecuteNode {
+        request_id: String,
+        plan_hash: String,
+        input: NodeExecutionInput,
     },
     Status {
         request_id: String,
@@ -89,6 +99,7 @@ impl HostRequest {
             | Self::Drain { request_id }
             | Self::Fail { request_id }
             | Self::Dispose { request_id }
+            | Self::ExecuteNode { request_id, .. }
             | Self::Status { request_id } => request_id,
         }
     }
@@ -104,6 +115,7 @@ impl HostRequest {
             Self::Drain { .. } => LifecycleOperation::Drain,
             Self::Fail { .. } => LifecycleOperation::Fail,
             Self::Dispose { .. } => LifecycleOperation::Dispose,
+            Self::ExecuteNode { .. } => LifecycleOperation::ExecuteNode,
             Self::Status { .. } => LifecycleOperation::Status,
         }
     }
@@ -143,7 +155,9 @@ struct HostResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     in_flight: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    failure: Option<LifecycleFailureFact>,
+    failure: Option<HostFailureFact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<NodeExecutionOutput>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -159,6 +173,7 @@ enum LifecycleOperation {
     Drain,
     Fail,
     Dispose,
+    ExecuteNode,
     Status,
 }
 
@@ -174,6 +189,18 @@ enum LifecycleFailureCode {
     BridgeError,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ExecutionFailureCode {
+    PlanHashMismatch,
+    InvalidState,
+    UnregisteredHandle,
+    HandleError,
+    EffectViolation,
+    BridgeError,
+    ProtocolError,
+}
+
 /// Typed control-plane failure fact for the lifecycle port. This is distinct
 /// from the product request/response Error01-06 chain.
 #[derive(Debug, Clone, Serialize)]
@@ -187,10 +214,122 @@ pub struct LifecycleFailureFact {
     message: String,
 }
 
-#[derive(Default)]
+/// Typed execution failure fact for the NodeContainer execution port. It is
+/// separate from lifecycle failures and from product Error01-06 because node
+/// execution has no request/session/target scope on this management channel.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExecutionFailureFact {
+    resource_id: &'static str,
+    request_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    node_id: Option<String>,
+    operation: LifecycleOperation,
+    code: ExecutionFailureCode,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+enum HostFailureFact {
+    Lifecycle(LifecycleFailureFact),
+    Execution(ExecutionFailureFact),
+}
+
+/// Keyless built-in typed handles for the M3 vertical slice. The real Cordis
+/// plugins own lifecycle/registration identity; Rust owns these handles and
+/// only runs them through the compiled plan.
+struct StepEchoHandle {
+    plugin_id: &'static str,
+}
+
+impl PluginHandle for StepEchoHandle {
+    fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
+        let mut data = ctx.read_data().clone();
+        let object = data
+            .as_object_mut()
+            .ok_or_else(|| "node data must be an object".to_string())?;
+        let steps = object
+            .entry("steps".to_string())
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or_else(|| "node data.steps must be an array".to_string())?;
+        steps.push(Value::String(self.plugin_id.to_string()));
+        ctx.write_data(data).map_err(|error| error.to_string())
+    }
+}
+
+struct ControlHandle;
+
+impl PluginHandle for ControlHandle {
+    fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
+        let mut control = ctx.read_control().clone();
+        let object = control
+            .as_object_mut()
+            .ok_or_else(|| "node control must be an object".to_string())?;
+        object.insert(
+            "written_by".to_string(),
+            Value::String("control".to_string()),
+        );
+        ctx.write_control(control).map_err(|error| error.to_string())
+    }
+}
+
+struct ObserveHandle;
+
+impl PluginHandle for ObserveHandle {
+    fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
+        ctx.emit("node.observed", "observer saw node");
+        Ok(())
+    }
+}
+
+struct BuiltinHandleRegistry {
+    handles: HashMap<String, Box<dyn PluginHandle>>,
+}
+
+impl BuiltinHandleRegistry {
+    fn new() -> Self {
+        let mut handles: HashMap<String, Box<dyn PluginHandle>> = HashMap::new();
+        handles.insert(
+            "v4.test.control".to_string(),
+            Box::new(ControlHandle),
+        );
+        handles.insert(
+            "v4.test.echo".to_string(),
+            Box::new(StepEchoHandle {
+                plugin_id: "v4.test.echo",
+            }),
+        );
+        handles.insert(
+            "v4.test.observe".to_string(),
+            Box::new(ObserveHandle),
+        );
+        Self { handles }
+    }
+}
+
+impl HandleRegistry for BuiltinHandleRegistry {
+    fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
+        self.handles.get(plugin_id).map(|boxed| boxed.as_ref())
+    }
+}
+
 struct HostBindingRuntime {
     container: Option<NodeContainer>,
     guards: Vec<NodeExecutionGuard>,
+    registry: BuiltinHandleRegistry,
+    last_output: Option<NodeExecutionOutput>,
+}
+
+impl Default for HostBindingRuntime {
+    fn default() -> Self {
+        Self {
+            container: None,
+            guards: Vec::new(),
+            registry: BuiltinHandleRegistry::new(),
+            last_output: None,
+        }
+    }
 }
 
 impl HostBindingRuntime {
@@ -237,13 +376,34 @@ impl HostBindingRuntime {
             HostRequest::Drain { .. } => self.container_mut()?.drain(),
             HostRequest::Fail { .. } => self.container_mut()?.fail(),
             HostRequest::Dispose { .. } => self.container_mut()?.dispose(),
+            HostRequest::ExecuteNode { plan_hash, input, .. } => {
+                let container = self.container_ref()?;
+                let output = container.execute_with_plan_hash(&plan_hash, input, &self.registry)?;
+                self.last_output = Some(output);
+                Ok(())
+            }
             HostRequest::Status { .. } => self.container_ref().map(|_| ()),
         })();
         match result {
-            Ok(()) => success(request_id, self.container.as_ref()),
+            Ok(()) => {
+                let output = self.last_output.take();
+                success(request_id, output, self.container.as_ref())
+            }
             Err(error) => {
-                let failure =
-                    LifecycleFailureFact::from_error(request_id, node_id, operation, &error);
+                let failure = if matches!(operation, LifecycleOperation::ExecuteNode) {
+                    HostFailureFact::Execution(ExecutionFailureFact::from_error(
+                        request_id,
+                        node_id,
+                        &error,
+                    ))
+                } else {
+                    HostFailureFact::Lifecycle(LifecycleFailureFact::from_error(
+                        request_id,
+                        node_id,
+                        operation,
+                        &error,
+                    ))
+                };
                 failure_response(failure, self.container.as_ref())
             }
         }
@@ -311,26 +471,73 @@ impl LifecycleFailureFact {
     }
 }
 
-fn success(request_id: String, container: Option<&NodeContainer>) -> HostResponse {
+fn success(
+    request_id: String,
+    output: Option<NodeExecutionOutput>,
+    container: Option<&NodeContainer>,
+) -> HostResponse {
     HostResponse {
         ok: true,
         request_id,
         state: container.map(|value| state_name(value.state())),
         in_flight: container.map(NodeContainer::in_flight),
         failure: None,
+        output,
+    }
+}
+
+impl HostFailureFact {
+    fn request_id(&self) -> &str {
+        match self {
+            Self::Lifecycle(fact) => fact.request_id.as_str(),
+            Self::Execution(fact) => fact.request_id.as_str(),
+        }
+    }
+}
+
+impl ExecutionFailureFact {
+    fn from_error(
+        request_id: String,
+        node_id: Option<String>,
+        error: &NodeContainerError,
+    ) -> Self {
+        let code = match error {
+            NodeContainerError::PlanHashMismatch => ExecutionFailureCode::PlanHashMismatch,
+            NodeContainerError::BindingMismatch => ExecutionFailureCode::ProtocolError,
+            NodeContainerError::InFlightExecutions(_) => ExecutionFailureCode::InvalidState,
+            NodeContainerError::InvalidState { .. } => ExecutionFailureCode::InvalidState,
+            NodeContainerError::HostLifecycle(_) => ExecutionFailureCode::ProtocolError,
+            NodeContainerError::Bridge(bridge) => match bridge {
+                BridgeError::PlanHashMismatch => ExecutionFailureCode::PlanHashMismatch,
+                BridgeError::UnregisteredHandle(_) => ExecutionFailureCode::UnregisteredHandle,
+                BridgeError::HandleError { .. } => ExecutionFailureCode::HandleError,
+                BridgeError::EffectViolation { .. } => ExecutionFailureCode::EffectViolation,
+                BridgeError::Compile(_) => ExecutionFailureCode::BridgeError,
+                BridgeError::Protocol(_) => ExecutionFailureCode::ProtocolError,
+            },
+        };
+        Self {
+            resource_id: "v4.node_container.execution_failure",
+            request_id,
+            node_id,
+            operation: LifecycleOperation::ExecuteNode,
+            code,
+            message: error.to_string(),
+        }
     }
 }
 
 fn failure_response(
-    failure: LifecycleFailureFact,
+    failure: HostFailureFact,
     container: Option<&NodeContainer>,
 ) -> HostResponse {
     HostResponse {
         ok: false,
-        request_id: failure.request_id.clone(),
+        request_id: failure.request_id().to_string(),
         state: container.map(|value| state_name(value.state())),
         in_flight: container.map(NodeContainer::in_flight),
         failure: Some(failure),
+        output: None,
     }
 }
 
@@ -367,7 +574,10 @@ fn main() -> io::Result<()> {
                         .or(node_id),
                     error,
                 );
-                failure_response(failure, runtime.container.as_ref())
+                failure_response(
+                    HostFailureFact::Lifecycle(failure),
+                    runtime.container.as_ref(),
+                )
             }
         };
         write_response(&mut stdout, &response)?;

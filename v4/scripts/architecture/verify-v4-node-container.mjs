@@ -11,6 +11,9 @@ const required = [
   'pub fn fail',
   'PlanBindings',
   'execute_plan',
+  'pub fn execute_with_plan_hash',
+  'expected_plan_hash != self.plan.hash',
+  'PlanHashMismatch',
   'NodeContainerState',
   'loaded_plan_hash != plan.hash',
   'pub fn enter_execution',
@@ -32,6 +35,10 @@ function validate(source, binding, tests) {
     || !binding.includes("use serde_json::value::RawValue;")
     || !binding.includes('pub struct LifecycleFailureFact')
     || !binding.includes('resource_id: "v4.node_container.lifecycle_failure"')
+    || !binding.includes('ExecuteNode {')
+    || !binding.includes('pub struct ExecutionFailureFact')
+    || !binding.includes('resource_id: "v4.node_container.execution_failure"')
+    || !binding.includes('execute_with_plan_hash(')
     || !binding.includes('EnterExecution')
     || !binding.includes('NodeContainer::declare')
     || !binding.includes('NodeContainerError::InFlightExecutions')
@@ -41,8 +48,10 @@ function validate(source, binding, tests) {
   if (
     !tests.includes('positive_in_flight_guard_tracks_and_releases_execution')
     || !tests.includes('negative_drain_rejects_measured_in_flight_execution')
+    || !tests.includes('positive_execute_is_bound_to_active_plan_hash')
+    || !tests.includes('negative_execute_rejects_plan_hash_drift')
   ) {
-    failures.push('in-flight positive/negative lifecycle tests missing');
+    failures.push('in-flight/plan-hash positive/negative lifecycle tests missing');
   }
   return failures;
 }
@@ -55,6 +64,7 @@ function runSelfTest() {
     ['synthetic Cordis runtime', (source) => `${source}\nstruct Context;`],
     ['plan binding guard removed', (source) => source.replace('loaded_plan_hash != plan.hash', 'false')],
     ['failed-state transition removed', (source) => source.replace('pub fn fail', 'fn fail')],
+    ['plan-hash execution binding removed', (source) => source.replace('expected_plan_hash != self.plan.hash', 'false')],
   ];
   let missed = 0;
   for (const [name, mutate] of cases) {
@@ -102,8 +112,27 @@ function runSelfTest() {
   } else {
     console.log(`[v4 node container red] typed lifecycle failure removed: FAIL as expected (${failureFactFailures.length})`);
   }
+  const untypedExecutionFailureBinding = binding.replace(
+    'pub struct ExecutionFailureFact',
+    'struct StringExecutionFailureProjection',
+  );
+  const executionFailureFailures = validate(baseline, untypedExecutionFailureBinding, tests);
+  if (executionFailureFailures.length === 0) {
+    console.error('[v4 node container red] typed execution failure removed: expected FAIL, got PASS');
+    missed += 1;
+  } else {
+    console.log(`[v4 node container red] typed execution failure removed: FAIL as expected (${executionFailureFailures.length})`);
+  }
+  const executionOpRemovedBinding = binding.replaceAll('ExecuteNode {', 'Status {');
+  const executionOpFailures = validate(baseline, executionOpRemovedBinding, tests);
+  if (executionOpFailures.length === 0) {
+    console.error('[v4 node container red] execute_node operation removed: expected FAIL, got PASS');
+    missed += 1;
+  } else {
+    console.log(`[v4 node container red] execute_node operation removed: FAIL as expected (${executionOpFailures.length})`);
+  }
   if (missed > 0) process.exit(1);
-  console.log('[v4 node container red] OK red self-test 7/7');
+  console.log('[v4 node container red] OK red self-test 10/10');
 }
 
 if (process.argv.includes('--red-self-test')) {

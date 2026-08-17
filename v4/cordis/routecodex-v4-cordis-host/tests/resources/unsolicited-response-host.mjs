@@ -5,6 +5,29 @@ const lines = readline.createInterface({ input: process.stdin });
 lines.once('line', () => {
   const unknownField = process.argv[2] === 'unknown-field';
   const failureMode = process.argv[2];
+  if (failureMode === 'malformed-output') {
+    process.stdout.write(`${JSON.stringify({
+      ok: true,
+      request_id: 'host-1',
+      state: 'accepting',
+      in_flight: 0,
+      output: {
+        data: {},
+        control: {},
+        diagnostics: [{ kind: 1 }],
+      },
+    })}\n`);
+    return;
+  }
+  if (failureMode === 'missing-output') {
+    process.stdout.write(`${JSON.stringify({
+      ok: true,
+      request_id: 'host-1',
+      state: 'accepting',
+      in_flight: 0,
+    })}\n`);
+    return;
+  }
   const failure = failureMode === 'malformed-failure'
     ? {
         resource_id: 'v4.node_container.lifecycle_failure',

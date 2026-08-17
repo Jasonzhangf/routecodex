@@ -10,6 +10,7 @@ const bindingContractPath = path.join(root, 'contracts/node-container-host-bindi
 const functionMapPath = path.join(root, '.appsdk/maps/function-map.json');
 const mainlinePath = path.join(root, '.appsdk/maps/mainline-call-map.json');
 const resourceMapPath = path.join(root, '.appsdk/maps/resource-map.json');
+const clone = (value) => JSON.parse(JSON.stringify(value));
 const required = [
   'from \'cordis\'',
   'new Context()',
@@ -23,6 +24,14 @@ const required = [
   'computeNodePluginPlanHash',
   'declare(nodeId, plan, bindings, ...extra)',
   'status(...fields)',
+  'executeNode(planHash, input, ...extra)',
+  'async executeNode(planHash, input)',
+  'EXECUTION_FAILURE_CODES',
+  'decodeExecutionOutput',
+  'validateExecutionInput',
+  "const allowedKeys = new Set(['data', 'control']);",
+  "const allowedKeys = new Set(['data', 'control', 'diagnostics']);",
+  "failure.resource_id === 'v4.node_container.execution_failure'",
   'await this.#port.drain()',
   'await this.#port.status()',
 ];
@@ -57,9 +66,17 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     || !bindingTests.includes('Rust lifecycle decoder rejects undeclared metadata and business fields')
     || !bindingTests.includes('JS lifecycle encoder rejects fields not declared by the operation')
     || !bindingTests.includes("error.failure?.resource_id === 'v4.node_container.lifecycle_failure'")
+    || !bindingTests.includes("error.failure?.resource_id === 'v4.node_container.execution_failure'")
     || !bindingTests.includes("error.code === 'in_flight'")
+    || !bindingTests.includes('real Cordis fibers drive ordered Rust NodePluginPlan execution')
+    || !bindingTests.includes('execution plan hash mismatch fails before Rust handles run')
+    || !bindingTests.includes('unregistered plugin handle fails fast with typed execution failure')
+    || !bindingTests.includes('JS and Rust reject undeclared execution fields')
+    || !bindingTests.includes('execute after drain rejects invalid_state')
+    || !bindingTests.includes('JS execution response decoder rejects malformed output')
+    || !bindingTests.includes('JS execution response decoder rejects missing output')
   ) {
-    failures.push('joint Cordis/Rust lifecycle tests missing');
+    failures.push('joint Cordis/Rust lifecycle/execution tests missing');
   }
   if (
     bindingContract.status !== 'active'
@@ -67,6 +84,9 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     || bindingContract.owner_feature_ids?.callee !== 'v4.node_container.lifecycle_dispatch'
     || !bindingContract.required_tests?.includes('in-flight execution rejects drain and leaves state accepting')
     || !bindingContract.failure_rule?.includes('v4.node_container.lifecycle_failure')
+    || !bindingContract.execution_rule?.includes('execute_with_plan_hash')
+    || !bindingContract.execution_failure_rule?.includes('v4.node_container.execution_failure')
+    || !bindingContract.required_tests?.includes('real Cordis fibers drive ordered Rust NodePluginPlan execution')
   ) {
     failures.push('host binding contract is missing or drifted');
   }
@@ -82,7 +102,10 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     || edge.caller_path !== 'cordis/routecodex-v4-cordis-host/src/index.mjs'
     || edge.callee_path !== 'crates/routecodex-v4-node-container/src/bin/host_binding.rs'
     || !edge.caller_symbols?.includes('CordisBoundNodeHost')
+    || !edge.caller_symbols?.includes('RustNodeContainerPort::executeNode')
+    || !edge.callee_symbols?.includes('HostRequest')
     || !edge.callee_symbols?.includes('HostBindingRuntime::handle')
+    || !edge.symbols?.includes('NodeContainer::execute_with_plan_hash')
   ) {
     failures.push('Cordis host -> NodeContainer mainline edge is not active');
   }
@@ -115,6 +138,22 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
   ) {
     failures.push('typed lifecycle failure resource/edge is missing or owned outside NodeContainer');
   }
+  const executionEdge = mainline.edges.find((entry) => (
+    entry.edge_type === 'execution_failure_projection'
+    && entry.resource_id === 'v4.node_container.execution_failure'
+  ));
+  const executionResource = resourceMap.resources.find(
+    (entry) => entry.resource_id === 'v4.node_container.execution_failure',
+  );
+  if (
+    executionEdge?.from !== 'routecodex-v4-node-container'
+    || executionEdge?.to !== 'routecodex-v4-cordis-host'
+    || executionEdge?.owner !== 'routecodex-v4-node-container::HostBindingRuntime'
+    || executionResource?.owner !== 'routecodex-v4-node-container::ExecutionFailureFact'
+    || executionResource?.status !== 'active'
+  ) {
+    failures.push('typed execution failure resource/edge is missing or owned outside NodeContainer');
+  }
   return failures;
 }
 
@@ -132,6 +171,18 @@ function runSelfTest() {
     ['failed Fiber tracking moved after await', (candidate) => candidate.replace(
       'mounted.push({ id: plugin.id, fiber });\n        await fiber.await();',
       'await fiber.await();\n        mounted.push({ id: plugin.id, fiber });',
+    )],
+    ['generic execution payload surface restored', (candidate) => candidate.replace(
+      "const allowedKeys = new Set(['data', 'control']);",
+      "const allowedKeys = new Set(['payload']);",
+    )],
+    ['executeNode surface removed', (candidate) => candidate.replace(
+      'executeNode(planHash, input, ...extra)',
+      'executeGhost(planHash, input, ...extra)',
+    )],
+    ['execution failure decoder removed', (candidate) => candidate.replace(
+      "failure.resource_id === 'v4.node_container.execution_failure'",
+      'false',
     )],
   ];
   let missed = 0;
@@ -164,7 +215,31 @@ function runSelfTest() {
     }
   }
   if (missed > 0) process.exit(1);
-  console.log('[v4 cordis host red] OK red self-test 6/6');
+  const executionMaps = {
+    mainline: clone(mainline),
+    resourceMap: clone(resourceMap),
+  };
+  executionMaps.mainline.edges = executionMaps.mainline.edges.filter(
+    (entry) => !(
+      entry.edge_type === 'execution_failure_projection'
+      && entry.resource_id === 'v4.node_container.execution_failure'
+    ),
+  );
+  executionMaps.resourceMap.resources = executionMaps.resourceMap.resources.filter(
+    (entry) => entry.resource_id !== 'v4.node_container.execution_failure',
+  );
+  const executionResourceFailures = validate(
+    source, tests, bindingTests, bindingContract, functionMap,
+    executionMaps.mainline, executionMaps.resourceMap,
+  );
+  if (executionResourceFailures.length === 0) {
+    console.error('[v4 cordis host red] execution failure resource/edge removed: expected FAIL, got PASS');
+    missed += 1;
+  } else {
+    console.log(`[v4 cordis host red] execution failure resource/edge removed: FAIL as expected (${executionResourceFailures.length})`);
+  }
+  if (missed > 0) process.exit(1);
+  console.log('[v4 cordis host red] OK red self-test 10/10');
 }
 
 if (process.argv.includes('--red-self-test')) {

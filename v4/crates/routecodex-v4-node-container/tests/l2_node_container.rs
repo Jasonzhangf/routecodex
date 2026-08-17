@@ -2,6 +2,8 @@
 //!
 //! Positive: a compiled plan with three-way matching hashes declares and runs
 //! the full lifecycle through publish, execute, drain and dispose.
+//! Positive/negative pair: execute must be bound to the active plan hash;
+//! a caller-named hash that differs from the container plan fails fast.
 //! Negative pairs prove the guards fail fast:
 //! - stale/drifting plan or binding hash is rejected before any state change;
 //! - lifecycle transitions outside the declared order are rejected;
@@ -212,6 +214,46 @@ fn positive_in_flight_guard_tracks_and_releases_execution() {
         .expect("accepting container enters execution");
     assert_eq!(container.in_flight(), 1);
     drop(guard);
+    assert_eq!(container.in_flight(), 0);
+}
+
+#[test]
+fn positive_execute_is_bound_to_active_plan_hash() {
+    let plan = empty_plan();
+    let bindings = binding_for(&plan);
+    let container =
+        full_lifecycle(NodeContainer::declare("node-a", plan.clone(), bindings).expect("valid binding"));
+    let output = container
+        .execute_with_plan_hash(
+            &plan.hash,
+            NodeExecutionInput {
+                data: Default::default(),
+                control: Default::default(),
+            },
+            &EmptyRegistry,
+        )
+        .expect("matching plan hash executes");
+    assert!(output.data.is_null());
+    assert!(output.diagnostics.is_empty());
+}
+
+#[test]
+fn negative_execute_rejects_plan_hash_drift() {
+    let plan = empty_plan();
+    let bindings = binding_for(&plan);
+    let container =
+        full_lifecycle(NodeContainer::declare("node-a", plan, bindings).expect("valid binding"));
+    let error = container
+        .execute_with_plan_hash(
+            &"0".repeat(64),
+            NodeExecutionInput {
+                data: Default::default(),
+                control: Default::default(),
+            },
+            &EmptyRegistry,
+        )
+        .unwrap_err();
+    assert!(matches!(error, NodeContainerError::PlanHashMismatch));
     assert_eq!(container.in_flight(), 0);
 }
 

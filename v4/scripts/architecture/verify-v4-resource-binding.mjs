@@ -287,6 +287,13 @@ function validate(resourceMap, appsdkMap, verificationMap, nodeIds) {
       failures.push(`${resource.resource_id}: declared in .appsdk resource-map.json without YAML declaration`);
     }
   }
+  if (
+    !(resourceMap.resources ?? []).some(
+      (resource) => resource.resource_id === 'v4.node_container.execution_failure',
+    )
+  ) {
+    failures.push('v4.node_container.execution_failure: required resource missing from YAML');
+  }
   return failures;
 }
 
@@ -326,6 +333,14 @@ function runSelfTest() {
         status: 'design',
       });
     }],
+    ['execution failure resource removed', (resourceMap, appsdkMap) => {
+      resourceMap.resources = resourceMap.resources.filter(
+        (resource) => resource.resource_id !== 'v4.node_container.execution_failure',
+      );
+      appsdkMap.resources = appsdkMap.resources.filter(
+        (resource) => resource.resource_id !== 'v4.node_container.execution_failure',
+      );
+    }],
     ['anchored owner_node not in catalog', (m) => {
       const resource = m.resources.find((r) => r.binding_status === 'anchored');
       resource.owner_node = 'V4GhostNode99';
@@ -354,6 +369,8 @@ function runSelfTest() {
     const appsdkMap = clone(baseAppsdkMap);
     if (name === 'unregistered .appsdk v4 resource' || name === 'appsdk owner symbol not declared') {
       mutate(appsdkMap);
+    } else if (name === 'execution failure resource removed') {
+      mutate(resourceMap, appsdkMap);
     } else {
       mutate(resourceMap, appsdkMap);
     }

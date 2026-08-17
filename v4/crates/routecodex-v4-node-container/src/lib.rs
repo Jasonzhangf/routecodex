@@ -195,6 +195,21 @@ impl NodeContainer {
         execute_plan(&self.plan, input, registry).map_err(Into::into)
     }
 
+    /// Execute only against the immutable plan the caller names. The host
+    /// port sends a plan hash instead of a second plan body so the active
+    /// container plan remains the only plan truth for a request.
+    pub fn execute_with_plan_hash(
+        &self,
+        expected_plan_hash: &str,
+        input: NodeExecutionInput,
+        registry: &dyn HandleRegistry,
+    ) -> Result<NodeExecutionOutput, NodeContainerError> {
+        if expected_plan_hash != self.plan.hash {
+            return Err(NodeContainerError::PlanHashMismatch);
+        }
+        self.execute(input, registry)
+    }
+
     pub fn drain(&mut self) -> Result<(), NodeContainerError> {
         let in_flight = self.in_flight();
         if in_flight != 0 {
