@@ -95,7 +95,6 @@ verification:
   - docs/goals/v3-v2-route-classifier-parity-test-design.md
   integration:
   - v3/crates/routecodex-v3-virtual-router/src/lib.rs
-  - v3/crates/routecodex-v3-virtual-router/src/lib.rs
   smoke:
   - npm run test:route-classifier-semantics
   - npm run verify:route-classifier-core-file-size
@@ -109,27 +108,6 @@ verification:
     signal.
   - The same gate must run in CI, build:v3-cli, and global installation before binaries
     are published.
-- feature_id: conversion.glm_tool_schema_payload_copy_budget
-  change_risk: medium
-  unit:
-  - v3/crates/provider-compat-core/src/lib.rs
-  contract:
-  - docs/goals/full-pipeline-glm-tool-schema-payload-copy-budget-test-design.md
-  - v3/crates/provider-compat-core/src/lib.rs
-  integration:
-  - cargo test -p provider-compat-core --lib
-  smoke:
-  - npm run verify:resource-operation-map
-  - npm run verify:function-map-compile-gate
-  build:
-  - npm run build:native-hotpath
-  - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
-  notes:
-  - 'Positive proof: shell schema and tool-name normalization semantics stay equivalent.'
-  - 'Negative proof: the sanitizer source rejects full branch clones before small
-    GLM compatibility edits.'
-  - RSS improvement remains unclaimed until release install and concurrent large-payload
-    replay are authorized.
 - feature_id: hub.chat_process_responses_continuation
   change_risk: high
   unit:

@@ -83,7 +83,7 @@ TypeScript-owned provider/Hub semantics.
 | Owner | Provider runtime wire codec/transport/auth/error capture owner features, with provider-specific logic contained inside provider runtime only. |
 | Feature map | Provider runtime, outbound codec, inbound parser, and error capture features. |
 | Mainline | Adjacent edges covering `HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload`, `ProviderReqOutbound06WirePayload -> ProviderReqOutbound07TransportRequest`, `ProviderRespInbound01Raw -> HubRespInbound02Parsed`, and error entry into `ErrorErr01SourceRaised -> ErrorErr02HostCaptured`. |
-| Whitebox | Focused provider runtime/codec/parser tests for touched owner; `npm run verify:llmswitch-rustification-audit`; provider error/reroute gates listed in `verification-map.yml`. |
+| Whitebox | Focused provider runtime/codec/parser tests for touched owner; `npm --prefix v3 run verify:v3-rust-only`; provider error/reroute gates listed in `verification-map.yml`. |
 | Blackbox | Provider replay or recorded fixture replay when provider wire body, stream parse, auth, retry/reroute error capture, or upstream response parse changes. |
 | Quality | Provider-specific differences stay in provider runtime. No Hub/VR provider special case, no TS fallback conversion, no metadata in provider wire body/options, no swallowed parse/transport errors. |
 | Evidence | run log must classify each provider path as `rust_ssot`, `native_shell_ok`, `ts_io_shell_ok`, or `ts_semantic_debt`, and list any runtime-only provider-specific exceptions. |
