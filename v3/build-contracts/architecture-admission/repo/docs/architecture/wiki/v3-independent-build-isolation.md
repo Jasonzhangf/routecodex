@@ -16,7 +16,7 @@ flowchart LR
 
 | Node | Owner | Contract |
 | --- | --- | --- |
-| `V3BuildDomain00RootDispatcher` | root npm/CI/release | Thin `npm --prefix v3` dispatch only; no crate/gate/version/artifact enumeration. |
+| `V3BuildDomain00RootDispatcher` | root npm/CI/release | Thin `npm --prefix v3` dispatch only; the admission compiler mutation-locks retired root bin/lifecycle aliases and root build-info isolation. |
 | `V3BuildDomain01LocalContractsLoaded` | `v3/package.json` | Load V3-local Node, Cargo, toolchain, version, and tracked admission inputs. |
 | `V3BuildDomain02AdmissionVerified` | `v3/scripts/verify-isolation.mjs` | Fail on missing, stale, tampered, escaping, or root-fallback inputs. |
 | `V3BuildDomain03LocalArtifactsProduced` | `v3/scripts/**` | Write compilation, test, assembly, and package staging only under declared V3 roots. |
@@ -59,13 +59,13 @@ flowchart LR
 
 - [x] Every build resource has a real owner/path/gate.
 - [x] Cargo metadata has zero path dependencies outside V3.
-- [ ] Root package/CI/release are thin dispatchers.
+- [x] Root package/CI/release are thin V3 dispatchers; obsolete root `bin` and start/dev aliases are retired, so root `dist/bin/rccv3` is not published or executed.
 - [x] Canonical build/test/verify write set stays under V3.
 - [x] Shared crate owners are physically retired with no duplicate fallback.
 - [x] Positive and red isolation/admission gates pass from V3.
 - [x] Runtime request/response/error topology and payload/control separation are unchanged.
-- [ ] Global install, one aggregate restart, all health endpoints, and old samples pass.
-- [ ] DSH Review passes after live evidence.
+- [x] Global install, one aggregate restart, all health endpoints, and old samples pass.
+- [ ] Post-live review passes; DSH r4 is explicitly unavailable on quota, so Codex Review is the authorized fallback.
 
 ## Canonical Sources
 

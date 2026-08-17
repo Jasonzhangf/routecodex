@@ -13,6 +13,7 @@ import {
 import { dirname, relative, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { verifyV3RootThinDispatch } from './v3-root-thin-dispatch-contract.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const requireFromV3 = createRequire(resolve(repoRoot, 'v3', 'package.json'));
@@ -39,6 +40,7 @@ const sourceRoots = [
   'docs/schemas',
   'scripts/architecture/architecture-wiki-lib.mjs',
   'scripts/architecture/mainline-call-map-lib.mjs',
+  'scripts/architecture/v3-root-thin-dispatch-contract.mjs',
   'scripts/architecture/wiki-html-lib.mjs',
 ];
 
@@ -189,6 +191,8 @@ function verifyAdmissionLockstep() {
 }
 
 try {
+  const rootFailures = verifyV3RootThinDispatch({ repoRoot });
+  if (rootFailures.length > 0) throw new Error(rootFailures.join('; '));
   const checkOnly = process.argv.includes('--check');
   const manifest = checkOnly ? verifyAdmissionLockstep() : compileAdmission();
   process.stdout.write(

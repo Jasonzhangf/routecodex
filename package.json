@@ -1,15 +1,9 @@
 {
   "name": "routecodex",
-  "version": "0.90.4574",
+  "version": "0.90.4565",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
-  "bin": {
-    "routecodex": "dist/bin/rccv3",
-    "rcc": "dist/bin/rccv3",
-    "rccv3": "dist/bin/rccv3"
-  },
   "files": [
-    "dist/",
     "sharedmodule/llmswitch-core/dist/",
     "sharedmodule/llmswitch-core/package.json",
     "config/",
@@ -36,8 +30,6 @@
     "build:dev:full": "npm --prefix v3 run build",
     "prepack": "echo skip-prepack",
     "build:watch": "tsc --watch",
-    "start": "npm run -s start:bg",
-    "dev": "dist/bin/rccv3 server start --foreground",
     "test": "npm --prefix v3 run test",
     "test:regressions": "npm run test:unified-hub-shadow && npm run verify:errorsamples",
     "compile:v3-build-admission": "node scripts/architecture/compile-v3-build-admission.mjs",
@@ -213,8 +205,6 @@
     "install:global": "./scripts/install-global.sh",
     "install:release": "./scripts/install-release.sh",
     "audit:tool-text": "node scripts/audit-tool-text.mjs",
-    "start:bg": "bash scripts/run-bg.sh -- 'dist/bin/rccv3 server start'",
-    "start:fg": "bash scripts/run-fg-gtimeout.sh 12 -- 'dist/bin/rccv3 server start --foreground'",
     "smoke:protocol": "node scripts/protocol-smoke.mjs",
     "monitor:diff": "node scripts/monitor-diff.mjs",
     "monitor:capture:responses": "node scripts/upstream-multiturn-capture.mjs",

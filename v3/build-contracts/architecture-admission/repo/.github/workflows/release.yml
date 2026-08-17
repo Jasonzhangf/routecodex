@@ -43,6 +43,8 @@ jobs:
         run: node scripts/ci/repo-sanity.mjs
 
       - name: V3 admission snapshot lockstep
+        env:
+          V3_ISOLATION_BASE_COMMIT: ${{ github.event.before }}
         run: node scripts/architecture/compile-v3-build-admission.mjs --check
 
       - name: Verify V3 canonical build domain

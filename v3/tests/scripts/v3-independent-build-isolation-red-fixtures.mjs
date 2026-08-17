@@ -115,6 +115,17 @@ const externalToolchain = collectIsolationFailures({
 });
 assert(externalToolchain.some((failure) => failure.includes('external RUSTUP_TOOLCHAIN')));
 
+for (const tempVar of ['TMPDIR', 'TMP', 'TEMP']) {
+  const externalTemp = collectIsolationFailures({
+    env: { [tempVar]: '/tmp/routecodex-v3-external-temp' },
+    fileExists: (path) => completeFiles.has(path),
+    read: validRead,
+    inspectCargo: noCargoFailures,
+    resolveNodeDependency: localYaml,
+  });
+  assert(externalTemp.some((failure) => failure.includes(`external ${tempVar}`)), `external ${tempVar} must fail`);
+}
+
 const scriptToolchainOverride = collectIsolationFailures({
   env: {},
   fileExists: (path) => completeFiles.has(path),

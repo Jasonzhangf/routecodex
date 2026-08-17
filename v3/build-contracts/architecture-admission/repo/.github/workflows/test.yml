@@ -36,6 +36,8 @@ jobs:
       - name: Repo sanity (no root junk)
         run: node scripts/ci/repo-sanity.mjs
       - name: V3 admission snapshot lockstep
+        env:
+          V3_ISOLATION_BASE_COMMIT: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: node scripts/architecture/compile-v3-build-admission.mjs --check
       - name: V3 canonical verification (build/test/gates/red/isolation)
         run: npm --prefix v3 run verify:ci

@@ -37,16 +37,17 @@ test('removes an internally owned Cargo target after failure', async () => {
 });
 
 test('rejects an explicitly supplied Cargo target outside V3', async () => {
-  const targetDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-v3-external-target-'));
-  try {
-    await assert.rejects(
-      () => withOwnedV3CargoTarget(() => {}, { CARGO_TARGET_DIR: targetDir }),
-      /external CARGO_TARGET_DIR is forbidden/,
-    );
-    assert.equal(fs.existsSync(targetDir), true);
-  } finally {
-    fs.rmSync(targetDir, { recursive: true, force: true });
-  }
+  const targetDir = path.join(
+    path.parse(process.cwd()).root,
+    'tmp',
+    `routecodex-v3-external-target-${process.pid}`,
+  );
+  assert.equal(fs.existsSync(targetDir), false);
+  await assert.rejects(
+    () => withOwnedV3CargoTarget(() => {}, { CARGO_TARGET_DIR: targetDir }),
+    /external CARGO_TARGET_DIR is forbidden/,
+  );
+  assert.equal(fs.existsSync(targetDir), false);
 });
 
 test('missing child command rejects once without invalid process-group wait', async () => {

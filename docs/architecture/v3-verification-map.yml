@@ -3722,6 +3722,10 @@ features:
   - No fallback build path, duplicate crate implementation, root version/build-info
     input, root dist/artifact output, OS-temp staging, stop/start lifecycle, broad kill,
     or per-port restart is allowed.
+  - Root package bin/start/dev aliases cannot publish or execute dist/bin/rccv3 and
+    must remain physically absent; managed runtime control uses installed routecodex restart.
+  - The root admission compiler runs mutation-backed thin-dispatch checks and rejects
+    V3 change sets that modify src/build-info.ts.
   required_gates:
   - npm --prefix v3 run verify:isolation
   - npm --prefix v3 run test:isolation:red

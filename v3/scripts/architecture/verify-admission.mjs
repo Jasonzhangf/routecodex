@@ -10,6 +10,7 @@ const admissionRoot = resolve(v3Root, 'build-contracts', 'architecture-admission
 const requiredSources = new Map([
   ['repo/.github/workflows/release.yml', '.github/workflows/release.yml'],
   ['repo/.github/workflows/test.yml', '.github/workflows/test.yml'],
+  ['repo/scripts/architecture/v3-root-thin-dispatch-contract.mjs', 'scripts/architecture/v3-root-thin-dispatch-contract.mjs'],
   ['repo/docs/architecture/v3-build-tool-module-registry.yml', 'docs/architecture/v3-build-tool-module-registry.yml'],
   ['repo/docs/architecture/v3-function-map.yml', 'docs/architecture/v3-function-map.yml'],
   ['repo/docs/architecture/v3-mainline-call-map.yml', 'docs/architecture/v3-mainline-call-map.yml'],

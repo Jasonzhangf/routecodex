@@ -32,6 +32,11 @@ export function buildV3CargoEnv(sourceEnv = process.env) {
   if (!Object.prototype.hasOwnProperty.call(env, 'CARGO_NET_OFFLINE')) {
     env.CARGO_NET_OFFLINE = 'true';
   }
+  const v3TempDir = path.join(v3Root, 'build-control', 'temp');
+  fs.mkdirSync(v3TempDir, { recursive: true });
+  env.TMPDIR = v3TempDir;
+  env.TMP = v3TempDir;
+  env.TEMP = v3TempDir;
   const ownsCargoTargetDir = !env.CARGO_TARGET_DIR;
   if (ownsCargoTargetDir) {
     fs.mkdirSync(path.join(v3Root, 'build-control', 'install-target'), { recursive: true });

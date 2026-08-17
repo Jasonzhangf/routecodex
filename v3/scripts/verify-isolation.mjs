@@ -91,6 +91,15 @@ export function collectIsolationFailures({
     failures.push(`external RUSTUP_TOOLCHAIN is forbidden: ${suppliedToolchain}`);
   }
 
+  for (const tempVar of ['TMPDIR', 'TMP', 'TEMP']) {
+    const suppliedTemp = String(env[tempVar] ?? '').trim();
+    if (!suppliedTemp) continue;
+    const resolvedTemp = isAbsolute(suppliedTemp) ? resolve(suppliedTemp) : resolve(v3Root, suppliedTemp);
+    if (!isInside(v3Root, resolvedTemp)) {
+      failures.push(`external ${tempVar} is forbidden: ${resolvedTemp}`);
+    }
+  }
+
   if (fileExists('rust-toolchain.toml')) {
     const toolchainContract = read('rust-toolchain.toml');
     if (!toolchainContract.includes(`channel = "${pinnedRustToolchain}"`)) {

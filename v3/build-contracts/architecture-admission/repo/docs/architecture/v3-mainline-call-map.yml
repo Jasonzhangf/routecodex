@@ -7066,6 +7066,8 @@ chains:
     semantic_contract:
     - Root npm, CI, and release surfaces may dispatch through npm --prefix v3 only.
     - Root orchestration cannot enumerate V3 crates, gates, version inputs, or artifact paths.
+    - Retired root start/dev command aliases stay absent; managed runtime control uses the installed routecodex restart lifecycle only.
+    - The admission compiler executes the root thin-dispatch contract and rejects any V3 change set that modifies root src/build-info.ts.
     resource_flow:
       consumes: []
       produces:

@@ -503,6 +503,10 @@ is an explicit final publication of the verified V3 binary.
 ### Phase 5: Root npm, CI, and Release Thinning
 
 1. Convert root V3 aliases to thin `npm --prefix v3` dispatchers.
+   Retire the obsolete root runtime aliases (`start`, `dev`, `start:bg`, `start:fg`)
+   instead of mapping start-shaped commands onto restart. Root `bin` must not publish
+   or execute the retired root `dist/bin/rccv3` path; managed runtime control uses
+   the globally installed `routecodex restart` lifecycle.
 2. Replace root CI's individual V3 gate/build/install/test matrix with the V3
    canonical entrypoint, retaining separate jobs only when platform/runtime isolation
    requires it and still invoking V3-owned commands.

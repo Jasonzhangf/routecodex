@@ -31,12 +31,12 @@
 <body>
   <header>
     <h1>V3 Independent Build Isolation</h1>
-    <p class="status">Active. Canonical V3 build-domain gates pass locally; global publication and live runtime evidence remain explicit release steps.</p>
+    <p class="status">Active. Canonical V3 build-domain and live runtime gates are verified; post-live review remains the delivery gate.</p>
     <p>Review surface for <code>v3.build.independent_domain</code>. Runtime protocol and control-plane semantics are excluded.</p>
   </header>
   <main>
     <section class="flow" aria-label="Build isolation lifecycle">
-      <div class="node"><strong>V3BuildDomain00RootDispatcher</strong><span>Thin root dispatch only.</span></div>
+      <div class="node"><strong>V3BuildDomain00RootDispatcher</strong><span>Thin root dispatch with mutation-locked bin, lifecycle, and build-info isolation.</span></div>
       <div class="node"><strong>V3BuildDomain01LocalContractsLoaded</strong><span>V3-local locks, toolchain, version, admission.</span></div>
       <div class="node"><strong>V3BuildDomain02AdmissionVerified</strong><span>Reject stale, missing, tampered, or escaping inputs.</span></div>
       <div class="node"><strong>V3BuildDomain03LocalArtifactsProduced</strong><span>All mutable build and staging output stays under V3.</span></div>
@@ -58,9 +58,9 @@
     <ul>
       <li>Every build resource has a real path, owner, symbol, and red/green gate.</li>
       <li>Cargo metadata shows zero escaping dependencies and one V3-local owner for each relocated crate.</li>
-      <li>Root package, CI, and release thinning remains an integration prerequisite.</li>
+      <li>Root package, CI, and release are thin V3 dispatchers; obsolete root bin and start/dev aliases stay physically absent.</li>
       <li>No build identity or artifact may enter request/response/provider wire, MetadataCenter, continuation, debug, or Error payloads.</li>
-      <li>Global install, one aggregate restart, all health endpoints, old sample replay, and post-live DSH Review are required.</li>
+      <li>Global install, one aggregate restart, all health endpoints, old sample replay, and post-live review are required.</li>
     </ul>
 
     <h2>Canonical Sources</h2>

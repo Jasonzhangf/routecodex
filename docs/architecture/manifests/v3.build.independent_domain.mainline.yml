@@ -28,6 +28,7 @@ edges:
     from: V3BuildDomain00RootDispatcher
     to: V3BuildDomain01LocalContractsLoaded
     binding_status: anchored
+    guard: scripts/architecture/v3-root-thin-dispatch-contract.mjs
   - edge_id: v3-build-domain-02
     from: V3BuildDomain01LocalContractsLoaded
     to: V3BuildDomain02AdmissionVerified
@@ -39,7 +40,7 @@ edges:
   - edge_id: v3-build-domain-04
     from: V3BuildDomain03LocalArtifactsProduced
     to: V3BuildDomain04ReleaseSurfaceReady
-    binding_status: pending
+    binding_status: anchored
 resource_flow:
   source_contracts:
     - v3.build.node_dependency_lock

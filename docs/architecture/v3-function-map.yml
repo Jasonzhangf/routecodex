@@ -4654,6 +4654,7 @@ features:
   - .github/workflows/test.yml
   - .github/workflows/release.yml
   - scripts/architecture/compile-v3-build-admission.mjs
+  - scripts/architecture/v3-root-thin-dispatch-contract.mjs
   - sharedmodule/llmswitch-core/rust-core/Cargo.toml
   forbidden_paths:
   - v4

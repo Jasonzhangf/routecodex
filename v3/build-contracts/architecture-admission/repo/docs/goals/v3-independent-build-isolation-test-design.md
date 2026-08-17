@@ -44,6 +44,10 @@ must remain equivalent.
   artifact path escaping V3.
 - Reject root dependency/module fallback, root version/build-info input, sharedmodule
   crate revival, duplicate crate owner, and duplicate package source identity.
+- Reject root `bin` publication, root `dist/` package output, and resurrection of the
+  retired root `start`/`dev`/`start:bg`/`start:fg` lifecycle aliases.
+- Reject a V3 isolation change set that modifies root `src/build-info.ts`; the root
+  admission compiler owns this diff-aware integration check and its mutation fixtures.
 - Reject root package, CI, or release enumeration of V3 crates or internal gates.
 - Reject missing/empty test resources and skipped gate matrices.
 - Reject build/install/package identity in request/response/provider wire,
@@ -55,6 +59,8 @@ must remain equivalent.
 
 - Run canonical build, test, verify, install-build, and pack from `v3/`.
 - Run root thin dispatchers and the absolute V3 package entry from an unrelated cwd.
+- Confirm root runtime aliases remain absent and managed runtime control is only the
+  globally installed `routecodex restart` lifecycle.
 - Run a standalone V3 copy with root package, root modules, root scripts, V4,
   sharedmodule source, and ancestor Cargo config unavailable.
 - Compare pre/post Cargo metadata, tree, focused crate tests, workspace tests, CLI
@@ -77,15 +83,18 @@ must remain equivalent.
 - `npm run verify:function-map-compile-gate`
 - `npm run verify:v3-architecture-docs`
 - `npm run verify:v3-module-boundaries`
-- V3-local isolation positive/red gates: pending implementation
-- V3-local full architecture CI: pending implementation
-- V3-local distribution/install/pack tests: pending implementation
-- Filesystem write-set audit: pending implementation
-- Post-install DSH Review: pending live closeout
+- `npm --prefix v3 run verify:isolation`
+- `npm --prefix v3 run test:isolation:red`
+- `npm --prefix v3 run verify:admission`
+- `npm --prefix v3 run test:admission:red`
+- `npm --prefix v3 run verify:ci`
+- `npm --prefix v3 run test:distribution`
+- `npm --prefix v3 run test:install-cleanup`
+- Filesystem write-set audit recorded in the collaboration evidence ledger.
+- Post-install review after canonical install, one aggregate restart, all-listener
+  health, and same-entry protocol replay.
 
 ## Known Gaps
 
-The current root-owned build wrappers, scripts, architecture inputs, install target,
-dist/artifact outputs, shared crate paths, and CI matrices intentionally make the
-future isolation red gate fail. No design entry may be promoted to active until its
-real path, symbol, gate, and runtime evidence exist.
+The source and live gates are implemented. Delivery remains open until the repaired
+change set receives a post-live review with no blocking finding.

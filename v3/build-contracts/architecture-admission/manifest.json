@@ -19,13 +19,13 @@
       "output_path": "repo/.github/workflows/release.yml",
       "source_path": ".github/workflows/release.yml",
       "source_commit": "86cebaf9463c978dc2f3a37526a766d98262c878",
-      "sha256": "e064a16aaef2b5e89645a1aa78a2717517cad0d8ccb099debbe0ba609125df4d"
+      "sha256": "80c1ba4148d7e2dd4a1aa584e005c7bb95df86b88ae6723784ad05e05e30ca01"
     },
     {
       "output_path": "repo/.github/workflows/test.yml",
       "source_path": ".github/workflows/test.yml",
       "source_commit": "86cebaf9463c978dc2f3a37526a766d98262c878",
-      "sha256": "37d6533268265e0a8ec738f49bdcf4238be8372e63a63b33e0ecc4feb706b5ce"
+      "sha256": "33370227d6530e709c40d2835f44dba0685730f069b40cf0d17985c58fd29ab1"
     },
     {
       "output_path": "repo/docs/architecture/README.md",
@@ -397,7 +397,7 @@
       "output_path": "repo/docs/architecture/manifests/v3.build.independent_domain.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.build.independent_domain.mainline.yml",
       "source_commit": "3cb6b0be2dc022d46e5680898eb1ce33d6e5f798",
-      "sha256": "8a1778a6737a51cf73cf1af5045c3c90e08e0490eed7b39671ae46aaa69a2d78"
+      "sha256": "2d4e67cea656db778e6d13dde926b43d2af97ab3495da4d50d61bbb16737c5aa"
     },
     {
       "output_path": "repo/docs/architecture/manifests/v3.build_test_artifact_budget.mainline.yml",
@@ -733,7 +733,7 @@
       "output_path": "repo/docs/architecture/v3-build-tool-module-registry.yml",
       "source_path": "docs/architecture/v3-build-tool-module-registry.yml",
       "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
-      "sha256": "08bd393be7690037d46bb465a2319a186c1a08b6ca8d925dea9920054ec14fe0"
+      "sha256": "0cffa50b0d29c7880e9148e089a32e24f968d18bfcfbcc3e17b1798c27b0f9c7"
     },
     {
       "output_path": "repo/docs/architecture/v3-control-plane-data-plane-audit-2026-08-10.md",
@@ -745,7 +745,7 @@
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
       "source_commit": "4a448923ba3c5b7c660a036e0535d7bbd60eda93",
-      "sha256": "ebc3b9d446ae6cb150de855e1b568484f08cc1427b3ad5000138dff3aa111f00"
+      "sha256": "0fd63101ea732671424a7c8940dde5e617abac21357411397eb39a3207744938"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -757,7 +757,7 @@
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
       "source_commit": "86cebaf9463c978dc2f3a37526a766d98262c878",
-      "sha256": "993040a82be1486b3bb4a8bdc3dd38419902075701583da83896aa6d32dd7665"
+      "sha256": "c0bc178ac7b95c836d55b9debe2e1f9719c5f9188c38818b3c5a6a8440d2c1c7"
     },
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
@@ -775,7 +775,7 @@
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
       "source_commit": "206a86e8d70ad9bfceab6017e3e2fb0eca5c98f6",
-      "sha256": "7eb112a465c9fa26c21580f84150b9f053672cf00a081b9f7814dbdd5d20ff08"
+      "sha256": "b29e4ca4d02ad13aa5abc49d8deb194a65605f51fdfea4c6938abe26a79e3808"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -1189,13 +1189,13 @@
       "output_path": "repo/docs/architecture/wiki/v3-independent-build-isolation.html",
       "source_path": "docs/architecture/wiki/v3-independent-build-isolation.html",
       "source_commit": "3cb6b0be2dc022d46e5680898eb1ce33d6e5f798",
-      "sha256": "7cdf3df91a553b665d032ee5f11da24030d8b9132e42e4106d3663ae3ebf0339"
+      "sha256": "0b4ab661dca0c9b054cb998d34ecc025454eb063be06b130219918bb75a976b2"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-independent-build-isolation.md",
       "source_path": "docs/architecture/wiki/v3-independent-build-isolation.md",
       "source_commit": "3cb6b0be2dc022d46e5680898eb1ce33d6e5f798",
-      "sha256": "ed361a88946b28017ae8125dc74659b9bfb7744b98b767823419ee4c287fdd75"
+      "sha256": "faa44be213a9a84fcf3e2d2ee13032b708f3258d8058dfa73a60b50e97f7bcee"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-live-provider-compat-parity.md",
@@ -2161,13 +2161,13 @@
       "output_path": "repo/docs/goals/v3-independent-build-isolation-plan.md",
       "source_path": "docs/goals/v3-independent-build-isolation-plan.md",
       "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
-      "sha256": "b76255952d953899faa57cf7ade3352cfabea8e705ff2a06d706613036334f31"
+      "sha256": "3bbecf15868ed56e316a10d1b59b502ec0f394f6765eb914f3fa122dffbf1136"
     },
     {
       "output_path": "repo/docs/goals/v3-independent-build-isolation-test-design.md",
       "source_path": "docs/goals/v3-independent-build-isolation-test-design.md",
       "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
-      "sha256": "dcefdab0d4af936528893d3a1a3be7d7f5d635bba5a8014f6753ff3cab4d33a1"
+      "sha256": "d34cda9a98bb15d2ac40ea4d741e70820bba2501a442842ed6bd03162d0e574b"
     },
     {
       "output_path": "repo/docs/goals/v3-live-provider-compat-parity-closeout-plan.md",
@@ -2614,6 +2614,12 @@
       "sha256": "0555bd1b479bb9899fd7a1aa9b988cfb132b7d09773d9e87081d513172f7b0d2"
     },
     {
+      "output_path": "repo/scripts/architecture/v3-root-thin-dispatch-contract.mjs",
+      "source_path": "scripts/architecture/v3-root-thin-dispatch-contract.mjs",
+      "source_commit": "0a25c74d07c1ab83ad5b74070901af6674785f3e",
+      "sha256": "2affebd909d0fc6ca7705ceccf8fbe51bdff0c6f49b0755b9eabe3bfed491aac"
+    },
+    {
       "output_path": "repo/scripts/architecture/wiki-html-lib.mjs",
       "source_path": "scripts/architecture/wiki-html-lib.mjs",
       "source_commit": "2c42772c25df754609f11ed1e709f192f2afa09e",
@@ -2626,5 +2632,5 @@
       "sha256": "077c84512cbdacb0ce9778d3a5487585a0a77d959c8882caa806ba717151b195"
     }
   ],
-  "manifest_digest": "028a6e55d0f97e516d397ef5069913193e0482c40939a70ee265038ac578b1a1"
+  "manifest_digest": "7243fc327d622c0e00bba4767327ffc12ded46c6e08cb445bbbfea9acaae225a"
 }

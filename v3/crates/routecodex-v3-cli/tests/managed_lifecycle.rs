@@ -11,6 +11,16 @@ use tempfile::TempDir;
 
 const SECRET: &str = "managed-lifecycle-controlled-secret";
 
+fn managed_test_command(binary: &str) -> Command {
+    let mut command = Command::new(binary);
+    command
+        .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .env("TMPDIR", "build-control/temp")
+        .env("TMP", "build-control/temp")
+        .env("TEMP", "build-control/temp");
+    command
+}
+
 const HUB_V1_TEST_DECLARATION: &str = r#"
 [pipelines.hub_v1]
 skeleton = "hub_v1"
@@ -206,7 +216,7 @@ fn run(binary: &str, state_root: &Path, config: &Path, command: &str) -> Output 
 }
 
 fn run_with_pid(binary: &str, state_root: &Path, config: &Path, command: &str) -> (u32, Output) {
-    let child = Command::new(binary)
+    let child = managed_test_command(binary)
         .args(["server", command, "--config"])
         .arg(config)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
@@ -231,7 +241,7 @@ fn run_with_timeout(
     command: &str,
     timeout_ms: u64,
 ) -> Output {
-    Command::new(binary)
+    managed_test_command(binary)
         .args(["server", command, "--config"])
         .arg(config)
         .arg("--timeout-ms")
@@ -247,7 +257,7 @@ fn run_with_timeout(
 }
 
 fn run_top_level(binary: &str, state_root: &Path, config: &Path, command: &str) -> Output {
-    Command::new(binary)
+    managed_test_command(binary)
         .args([command, "--config"])
         .arg(config)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
@@ -322,7 +332,7 @@ fn top_level_status_json(binary: &str, state_root: &Path, config: &Path) -> Valu
 }
 
 fn spawn_top_level_start(binary: &str, state_root: &Path, config: &Path) -> Child {
-    Command::new(binary)
+    managed_test_command(binary)
         .args(["start", "--config"])
         .arg(config)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
@@ -345,7 +355,7 @@ fn spawn_top_level_start_with_args_and_home(
     extra_args: &[&str],
     home: &Path,
 ) -> Child {
-    let mut command = Command::new(binary);
+    let mut command = managed_test_command(binary);
     command.args(["start", "--config"]).arg(config);
     command.args(extra_args);
     command
@@ -363,7 +373,7 @@ fn spawn_top_level_start_with_args_and_home(
 }
 
 fn spawn_top_level_start_without_config(binary: &str, state_root: &Path, home: &Path) -> Child {
-    Command::new(binary)
+    managed_test_command(binary)
         .arg("start")
         .env("HOME", home)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
@@ -388,7 +398,7 @@ fn run_top_level_without_config(
     home: &Path,
     command: &str,
 ) -> Output {
-    Command::new(binary)
+    managed_test_command(binary)
         .arg(command)
         .env("HOME", home)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
@@ -1155,7 +1165,7 @@ fn top_level_restart_snap_forces_debug_snapshots() {
     assert_eq!(before["debug"]["snapshots_enabled"], false);
     assert_eq!(before["debug"]["codex_samples_enabled"], false);
 
-    let restart = Command::new(binary)
+    let restart = managed_test_command(binary)
         .args(["restart", "--config"])
         .arg(&config)
         .arg("--snap")
@@ -1573,7 +1583,7 @@ fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
     let mut occupied = spawn_sigterm_resistant_multi_listener(ports);
     let config = write_config(&root, ports);
     let binary = env!("CARGO_BIN_EXE_rccv3");
-    let mut start = Command::new(binary)
+    let mut start = managed_test_command(binary)
         .args(["start", "--config"])
         .arg(&config)
         .env("ROUTECODEX_V3_STATE_DIR", &state_root)
@@ -1637,7 +1647,7 @@ fn stop_force_kills_explicit_listener_pid_after_graceful_timeout() {
     let config = write_config(&root, ports);
     let binary = env!("CARGO_BIN_EXE_rccv3");
 
-    let stop = Command::new(binary)
+    let stop = managed_test_command(binary)
         .args(["server", "stop", "--config"])
         .arg(&config)
         .arg("--timeout-ms")
@@ -1819,7 +1829,7 @@ fn start_refuses_to_signal_unmanaged_listener_pid_that_owns_sibling_ports() {
     );
     let binary = env!("CARGO_BIN_EXE_rccv3");
 
-    let start = Command::new(binary)
+    let start = managed_test_command(binary)
         .args(["server", "start", "--config"])
         .arg(&single_port_config)
         .env("ROUTECODEX_V3_STATE_DIR", &state_root)
