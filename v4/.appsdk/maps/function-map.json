@@ -280,10 +280,10 @@
         "BridgeResponse",
         "dispatch",
         "ExecCtx::read_data",
-        "ExecCtx::read_control",
+        "ExecCtx::read_control_resource",
         "ExecCtx::emit",
         "ExecCtx::write_data",
-        "ExecCtx::write_control"
+        "ExecCtx::write_control_resource"
       ],
       "required_gates": [
         "v4_plugin_bridge_l2_regression",

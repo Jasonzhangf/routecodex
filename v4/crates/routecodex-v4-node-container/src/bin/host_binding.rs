@@ -9,8 +9,8 @@ use routecodex_v4_node_container::{
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use serde_json::value::RawValue;
+use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -262,15 +262,20 @@ struct ControlHandle;
 
 impl PluginHandle for ControlHandle {
     fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
-        let mut control = ctx.read_control().clone();
-        let object = control
+        let mut metadata = ctx
+            .read_control_resource("v4.control.metadata_center")
+            .map_err(|error| error.to_string())?
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let object = metadata
             .as_object_mut()
-            .ok_or_else(|| "node control must be an object".to_string())?;
+            .ok_or_else(|| "metadata center must be an object".to_string())?;
         object.insert(
             "written_by".to_string(),
             Value::String("control".to_string()),
         );
-        ctx.write_control(control).map_err(|error| error.to_string())
+        ctx.write_control_resource("v4.control.metadata_center", metadata)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -290,20 +295,14 @@ struct BuiltinHandleRegistry {
 impl BuiltinHandleRegistry {
     fn new() -> Self {
         let mut handles: HashMap<String, Box<dyn PluginHandle>> = HashMap::new();
-        handles.insert(
-            "v4.test.control".to_string(),
-            Box::new(ControlHandle),
-        );
+        handles.insert("v4.test.control".to_string(), Box::new(ControlHandle));
         handles.insert(
             "v4.test.echo".to_string(),
             Box::new(StepEchoHandle {
                 plugin_id: "v4.test.echo",
             }),
         );
-        handles.insert(
-            "v4.test.observe".to_string(),
-            Box::new(ObserveHandle),
-        );
+        handles.insert("v4.test.observe".to_string(), Box::new(ObserveHandle));
         Self { handles }
     }
 }
@@ -397,32 +396,27 @@ impl HostBindingRuntime {
                 self.container_mut()?.dispose()?;
                 Ok(None)
             }
-            HostRequest::ExecuteNode { plan_hash, input, .. } => {
+            HostRequest::ExecuteNode {
+                plan_hash, input, ..
+            } => {
                 let container = self.container_ref()?;
                 let output = container
                     .execute_with_plan_hash(&plan_hash, input, &self.registry)
                     .map(Some)?;
                 Ok(output)
             }
-            HostRequest::Status { .. } => {
-                self.container_ref().map(|_| None)
-            }
+            HostRequest::Status { .. } => self.container_ref().map(|_| None),
         })();
         match result {
             Ok(output) => success(request_id, output, self.container.as_ref()),
             Err(error) => {
                 let failure = if matches!(operation, LifecycleOperation::ExecuteNode) {
                     HostFailureFact::Execution(ExecutionFailureFact::from_error(
-                        request_id,
-                        node_id,
-                        &error,
+                        request_id, node_id, &error,
                     ))
                 } else {
                     HostFailureFact::Lifecycle(LifecycleFailureFact::from_error(
-                        request_id,
-                        node_id,
-                        operation,
-                        &error,
+                        request_id, node_id, operation, &error,
                     ))
                 };
                 failure_response(failure, self.container.as_ref())
@@ -517,11 +511,7 @@ impl HostFailureFact {
 }
 
 impl ExecutionFailureFact {
-    fn from_error(
-        request_id: String,
-        node_id: Option<String>,
-        error: &NodeContainerError,
-    ) -> Self {
+    fn from_error(request_id: String, node_id: Option<String>, error: &NodeContainerError) -> Self {
         let code = match error {
             NodeContainerError::PlanHashMismatch => ExecutionFailureCode::PlanHashMismatch,
             NodeContainerError::BindingMismatch => ExecutionFailureCode::ProtocolError,
@@ -532,7 +522,10 @@ impl ExecutionFailureFact {
                 BridgeError::PlanHashMismatch => ExecutionFailureCode::PlanHashMismatch,
                 BridgeError::UnregisteredHandle(_) => ExecutionFailureCode::UnregisteredHandle,
                 BridgeError::HandleError { .. } => ExecutionFailureCode::HandleError,
-                BridgeError::EffectViolation { .. } => ExecutionFailureCode::EffectViolation,
+                BridgeError::EffectViolation { .. }
+                | BridgeError::ResourceAccessViolation { .. } => {
+                    ExecutionFailureCode::EffectViolation
+                }
                 BridgeError::Compile(_) => ExecutionFailureCode::BridgeError,
                 BridgeError::Protocol(_) => ExecutionFailureCode::ProtocolError,
             },
@@ -548,10 +541,7 @@ impl ExecutionFailureFact {
     }
 }
 
-fn failure_response(
-    failure: HostFailureFact,
-    container: Option<&NodeContainer>,
-) -> HostResponse {
+fn failure_response(failure: HostFailureFact, container: Option<&NodeContainer>) -> HostResponse {
     HostResponse {
         ok: false,
         request_id: failure.request_id().to_string(),

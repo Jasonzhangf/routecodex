@@ -12,9 +12,7 @@
 //!   control (the write guards reject any mutation).
 
 use routecodex_v4_plugin_contract::{PluginEffect, ResourceRegistry};
-use routecodex_v4_plugin_plan::{
-    compile_node_plan, AuthoringPlugin, NodePluginPlan, PlanError,
-};
+use routecodex_v4_plugin_plan::{compile_node_plan, AuthoringPlugin, NodePluginPlan, PlanError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -55,6 +53,11 @@ pub enum BridgeError {
         plugin_id: String,
         message: String,
     },
+    ResourceAccessViolation {
+        plugin_id: String,
+        resource_id: String,
+        operation: &'static str,
+    },
     Compile(PlanError),
     Protocol(String),
 }
@@ -66,7 +69,10 @@ impl std::fmt::Display for BridgeError {
                 write!(formatter, "plan hash mismatch: compiled plan drifted")
             }
             Self::UnregisteredHandle(plugin_id) => {
-                write!(formatter, "unregistered native handle for plugin {plugin_id}")
+                write!(
+                    formatter,
+                    "unregistered native handle for plugin {plugin_id}"
+                )
             }
             Self::HandleError { plugin_id, message } => {
                 write!(formatter, "plugin {plugin_id} handle failed: {message}")
@@ -74,6 +80,14 @@ impl std::fmt::Display for BridgeError {
             Self::EffectViolation { plugin_id, message } => {
                 write!(formatter, "plugin {plugin_id} effect violation: {message}")
             }
+            Self::ResourceAccessViolation {
+                plugin_id,
+                resource_id,
+                operation,
+            } => write!(
+                formatter,
+                "plugin {plugin_id} cannot {operation} undeclared control resource {resource_id}"
+            ),
             Self::Compile(error) => write!(formatter, "plan compile failed: {error}"),
             Self::Protocol(message) => write!(formatter, "protocol error: {message}"),
         }
@@ -96,6 +110,9 @@ pub struct ExecCtx<'a> {
     state: &'a mut ExecState,
     effect: PluginEffect,
     plugin_id: &'a str,
+    reads: &'a [String],
+    writes: &'a [String],
+    resource_violation: Option<BridgeError>,
 }
 
 impl ExecCtx<'_> {
@@ -103,8 +120,29 @@ impl ExecCtx<'_> {
         &self.state.data
     }
 
-    pub fn read_control(&self) -> &Value {
-        &self.state.control
+    pub fn read_control_resource(
+        &mut self,
+        resource_id: &str,
+    ) -> Result<Option<&Value>, BridgeError> {
+        if !self
+            .reads
+            .iter()
+            .any(|declared_id| declared_id == resource_id)
+        {
+            return Err(self.deny_resource_access(resource_id, "read"));
+        }
+        let Some(key) = control_resource_key(resource_id) else {
+            return Err(self.deny_resource_access(resource_id, "read"));
+        };
+        if !self.state.control.is_object() {
+            return Err(self.deny_resource_access(resource_id, "read from non-object carrier"));
+        }
+        let control = self
+            .state
+            .control
+            .as_object()
+            .expect("control object checked before read");
+        Ok(control.get(key))
     }
 
     pub fn emit(&mut self, kind: &str, message: impl Into<String>) {
@@ -126,7 +164,11 @@ impl ExecCtx<'_> {
         Ok(())
     }
 
-    pub fn write_control(&mut self, value: Value) -> Result<(), BridgeError> {
+    pub fn write_control_resource(
+        &mut self,
+        resource_id: &str,
+        value: Value,
+    ) -> Result<(), BridgeError> {
         if !matches!(
             self.effect,
             PluginEffect::Semantic | PluginEffect::ControlOnly
@@ -136,8 +178,53 @@ impl ExecCtx<'_> {
                 message: format!("effect {:?} cannot write control", self.effect),
             });
         }
-        self.state.control = value;
+        if !self
+            .writes
+            .iter()
+            .any(|declared_id| declared_id == resource_id)
+        {
+            return Err(self.deny_resource_access(resource_id, "write"));
+        }
+        let Some(key) = control_resource_key(resource_id) else {
+            return Err(self.deny_resource_access(resource_id, "write"));
+        };
+        if !self.state.control.is_object() {
+            return Err(self.deny_resource_access(resource_id, "write to non-object carrier"));
+        }
+        let control = self
+            .state
+            .control
+            .as_object_mut()
+            .expect("control object checked before mutation");
+        control.insert(key.to_string(), value);
         Ok(())
+    }
+
+    fn deny_resource_access(&mut self, resource_id: &str, operation: &'static str) -> BridgeError {
+        let error = BridgeError::ResourceAccessViolation {
+            plugin_id: self.plugin_id.to_string(),
+            resource_id: resource_id.to_string(),
+            operation,
+        };
+        if self.resource_violation.is_none() {
+            self.resource_violation = Some(error.clone());
+        }
+        error
+    }
+
+    fn take_resource_violation(&mut self) -> Option<BridgeError> {
+        self.resource_violation.take()
+    }
+}
+
+fn control_resource_key(resource_id: &str) -> Option<&'static str> {
+    match resource_id {
+        "v4.control.metadata_center" => Some("metadata_center"),
+        "v4.lifecycle.payload_cycle" => Some("payload_cycle"),
+        "v4.control.error_chain" => Some("error_chain"),
+        "v4.control.route_facts" => Some("route_facts"),
+        "v4.control.target_selection" => Some("target_selection"),
+        _ => None,
     }
 }
 
@@ -189,13 +276,18 @@ pub fn execute_plan(
             state: &mut state,
             effect: entry.effect,
             plugin_id: &entry.plugin_id,
+            reads: &entry.reads,
+            writes: &entry.writes,
+            resource_violation: None,
         };
-        handle
-            .execute(&mut ctx, &Value::Null)
-            .map_err(|message| BridgeError::HandleError {
-                plugin_id: entry.plugin_id.clone(),
-                message,
-            })?;
+        let result = handle.execute(&mut ctx, &Value::Null);
+        if let Some(error) = ctx.take_resource_violation() {
+            return Err(error);
+        }
+        result.map_err(|message| BridgeError::HandleError {
+            plugin_id: entry.plugin_id.clone(),
+            message,
+        })?;
     }
 
     // Diagnostic-only entries: read-only concurrent observers with a private
@@ -205,9 +297,8 @@ pub fn execute_plan(
         control: state.control.clone(),
         diagnostics: Vec::new(),
     };
-    let sink: std::sync::Mutex<
-        Vec<(usize, Result<Vec<DiagnosticFact>, BridgeError>)>,
-    > = std::sync::Mutex::new(Vec::new());
+    let sink: std::sync::Mutex<Vec<(usize, Result<Vec<DiagnosticFact>, BridgeError>)>> =
+        std::sync::Mutex::new(Vec::new());
     let sink = std::sync::Arc::new(sink);
     std::thread::scope(|scope| {
         for (index, entry) in plan
@@ -227,13 +318,21 @@ pub fn execute_plan(
                             state: &mut scratch,
                             effect: PluginEffect::DiagnosticOnly,
                             plugin_id: &plugin_id,
+                            reads: &entry.reads,
+                            writes: &entry.writes,
+                            resource_violation: None,
                         };
-                        match handle.execute(&mut ctx, &Value::Null) {
-                            Ok(()) => Ok(ctx.state.diagnostics.clone()),
-                            Err(message) => Err(BridgeError::HandleError {
-                                plugin_id: plugin_id.clone(),
-                                message,
-                            }),
+                        let result = handle.execute(&mut ctx, &Value::Null);
+                        if let Some(error) = ctx.take_resource_violation() {
+                            Err(error)
+                        } else {
+                            match result {
+                                Ok(()) => Ok(ctx.state.diagnostics.clone()),
+                                Err(message) => Err(BridgeError::HandleError {
+                                    plugin_id: plugin_id.clone(),
+                                    message,
+                                }),
+                            }
                         }
                     }
                     None => Err(BridgeError::UnregisteredHandle(plugin_id.clone())),
@@ -299,7 +398,9 @@ pub struct NodeSpec {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum BridgeRequest {
-    Ping { request_id: String },
+    Ping {
+        request_id: String,
+    },
     CompileNode {
         request_id: String,
         node: NodeSpec,
@@ -343,10 +444,7 @@ fn fail(request_id: String, kind: &str, error: String) -> BridgeResponse {
 
 /// Dispatch one typed request to a stateless response. `registry` is only
 /// required for execute requests; a `None` registry fails fast.
-pub fn dispatch(
-    request: &BridgeRequest,
-    registry: Option<&dyn HandleRegistry>,
-) -> BridgeResponse {
+pub fn dispatch(request: &BridgeRequest, registry: Option<&dyn HandleRegistry>) -> BridgeResponse {
     match request {
         BridgeRequest::Ping { request_id } => BridgeResponse {
             ok: true,

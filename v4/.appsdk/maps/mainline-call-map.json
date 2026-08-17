@@ -834,7 +834,9 @@
       "symbols": [
         "PluginHandle",
         "HandleRegistry",
-        "ExecCtx"
+        "ExecCtx",
+        "ExecCtx::read_control_resource",
+        "ExecCtx::write_control_resource"
       ],
       "path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
       "status": "active"

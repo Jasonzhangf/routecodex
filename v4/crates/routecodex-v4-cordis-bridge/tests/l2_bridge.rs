@@ -33,6 +33,14 @@ fn registry() -> ResourceRegistry {
                 axis: ResourceAxis::Control,
             },
             ResourceEntry {
+                resource_id: "v4.control.error_chain".to_string(),
+                axis: ResourceAxis::Control,
+            },
+            ResourceEntry {
+                resource_id: "v4.control.route_facts".to_string(),
+                axis: ResourceAxis::Control,
+            },
+            ResourceEntry {
                 resource_id: "v4.debug.event_ledger".to_string(),
                 axis: ResourceAxis::Diagnostic,
             },
@@ -44,6 +52,8 @@ fn allowed_reads() -> Vec<String> {
     vec![
         "v4.request.normal_payload".to_string(),
         "v4.control.metadata_center".to_string(),
+        "v4.control.error_chain".to_string(),
+        "v4.control.route_facts".to_string(),
         "v4.debug.event_ledger".to_string(),
     ]
 }
@@ -52,6 +62,8 @@ fn allowed_writes() -> Vec<String> {
     vec![
         "v4.request.normal_payload".to_string(),
         "v4.control.metadata_center".to_string(),
+        "v4.control.error_chain".to_string(),
+        "v4.control.route_facts".to_string(),
     ]
 }
 
@@ -124,8 +136,8 @@ impl PluginHandle for StepHandle {
     }
 }
 
-/// Control-only plugin: write_data must be rejected by the guard, write_control
-/// must succeed.
+/// Control-only plugin: write_data must be rejected by the guard, while its
+/// declared control resource remains writable.
 struct ControlHandle;
 
 impl PluginHandle for ControlHandle {
@@ -133,15 +145,19 @@ impl PluginHandle for ControlHandle {
         if ctx.write_data(json!({"leak": true})).is_ok() {
             return Err("control-only plugin must not write normal data".to_string());
         }
-        let mut control = ctx.read_control().clone();
-        let object = control
+        let mut metadata = ctx
+            .read_control_resource("v4.control.metadata_center")
+            .map_err(|error| error.to_string())?
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let object = metadata
             .as_object_mut()
-            .ok_or_else(|| "control must be an object".to_string())?;
+            .ok_or_else(|| "metadata center must be an object".to_string())?;
         object.insert(
             "written_by".to_string(),
             Value::String("control".to_string()),
         );
-        ctx.write_control(control)
+        ctx.write_control_resource("v4.control.metadata_center", metadata)
             .map_err(|error| error.to_string())
     }
 }
@@ -169,6 +185,44 @@ impl PluginHandle for LeakyHandle {
             return Err("read-only plugin must not write normal data".to_string());
         }
         Ok(())
+    }
+}
+
+struct MetadataIsolationHandle;
+
+impl PluginHandle for MetadataIsolationHandle {
+    fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
+        let _ = ctx.read_control_resource("v4.control.error_chain");
+        let _ = ctx.write_control_resource("v4.control.route_facts", json!({"leaked": true}));
+        Ok(())
+    }
+}
+
+struct ErrorIsolationHandle;
+
+impl PluginHandle for ErrorIsolationHandle {
+    fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
+        let _ = ctx.read_control_resource("v4.control.metadata_center");
+        let _ = ctx.write_control_resource("v4.control.metadata_center", json!({"leaked": true}));
+        Ok(())
+    }
+}
+
+struct ErrorWriteHandle;
+
+impl PluginHandle for ErrorWriteHandle {
+    fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
+        let mut error_chain = ctx
+            .read_control_resource("v4.control.error_chain")
+            .map_err(|error| error.to_string())?
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        error_chain
+            .as_object_mut()
+            .ok_or_else(|| "error chain must be an object".to_string())?
+            .insert("updated".to_string(), json!(true));
+        ctx.write_control_resource("v4.control.error_chain", error_chain)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -284,7 +338,87 @@ fn control_only_plugin_writes_control_never_normal_data() {
     let output = execute_plan(&plan, input(input_data.clone(), json!({})), &registry)
         .expect("node executes");
     assert_eq!(output.data, input_data);
-    assert_eq!(output.control, json!({"written_by": "control"}));
+    assert_eq!(
+        output.control,
+        json!({"metadata_center": {"written_by": "control"}})
+    );
+}
+
+#[test]
+fn metadata_only_plugin_cannot_read_error_or_overwrite_route_facts() {
+    let authoring = vec![authoring_plugin(
+        "v4.request.metadata",
+        PluginKind::Control,
+        PluginEffect::ControlOnly,
+        PluginPhase::Control,
+        100,
+        vec!["v4.control.metadata_center".to_string()],
+        vec!["v4.control.metadata_center".to_string()],
+    )];
+    let plan = compile_one_node(&authoring);
+    let registry = MapRegistry::new().register("v4.request.metadata", MetadataIsolationHandle);
+    let error = execute_plan(&plan, input(json!({}), json!({})), &registry)
+        .expect_err("caught handle errors cannot bypass resource capabilities");
+    assert_eq!(
+        error,
+        BridgeError::ResourceAccessViolation {
+            plugin_id: "v4.request.metadata".to_string(),
+            resource_id: "v4.control.error_chain".to_string(),
+            operation: "read",
+        }
+    );
+}
+
+#[test]
+fn error_only_plugin_cannot_read_or_overwrite_metadata_center() {
+    let authoring = vec![authoring_plugin(
+        "v4.request.error",
+        PluginKind::Control,
+        PluginEffect::ControlOnly,
+        PluginPhase::Control,
+        100,
+        vec!["v4.control.error_chain".to_string()],
+        vec!["v4.control.error_chain".to_string()],
+    )];
+    let plan = compile_one_node(&authoring);
+    let registry = MapRegistry::new().register("v4.request.error", ErrorIsolationHandle);
+    let error = execute_plan(&plan, input(json!({}), json!({})), &registry)
+        .expect_err("caught handle errors cannot bypass resource capabilities");
+    assert_eq!(
+        error,
+        BridgeError::ResourceAccessViolation {
+            plugin_id: "v4.request.error".to_string(),
+            resource_id: "v4.control.metadata_center".to_string(),
+            operation: "read",
+        }
+    );
+}
+
+#[test]
+fn error_only_plugin_preserves_metadata_center() {
+    let authoring = vec![authoring_plugin(
+        "v4.request.error",
+        PluginKind::Control,
+        PluginEffect::ControlOnly,
+        PluginPhase::Control,
+        100,
+        vec!["v4.control.error_chain".to_string()],
+        vec!["v4.control.error_chain".to_string()],
+    )];
+    let plan = compile_one_node(&authoring);
+    let registry = MapRegistry::new().register("v4.request.error", ErrorWriteHandle);
+    let control = json!({
+        "metadata_center": {"scope": "request"},
+        "error_chain": {"stage": "source_raised"}
+    });
+
+    let output = execute_plan(&plan, input(json!({}), control), &registry)
+        .expect("declared error access remains resource scoped");
+    assert_eq!(output.control["error_chain"]["updated"], json!(true));
+    assert_eq!(
+        output.control["metadata_center"],
+        json!({"scope": "request"})
+    );
 }
 
 #[test]

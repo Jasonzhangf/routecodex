@@ -21,7 +21,8 @@
  * 6. The crate source exposes the typed handle registry, the eight category
  *    modules and the deterministic registration/compile surface, and carries
  *    no fallback / second-runtime / cross-node-dispatch / payload
- *    reconstruction / provider-specific hardcode tokens.
+ *    reconstruction / provider-specific hardcode tokens. Control handles use
+ *    only resource-scoped ExecCtx access declared by their PlanEntry.
  *
  * Run with --red-self-test to prove the gate fails on each negative class.
  */
@@ -392,6 +393,27 @@ function validate(
     (registry.consumers ?? []).map((consumer) => `${consumer.consumer}->${consumer.dependency}`),
   );
   const mainlineEdges = (mainline?.edges ?? []);
+  const bridgeEdge = mainlineEdges.find(
+    (edge) =>
+      edge.from === MODULE
+      && edge.to === 'routecodex-v4-cordis-bridge'
+      && edge.owner === 'routecodex-v4-standard-plugins::StandardHandleRegistry'
+      && edge.edge_type === 'typed_handle_execution'
+      && edge.status === 'active',
+  );
+  if (!bridgeEdge) {
+    failures.push(`${MODULE}: scoped bridge execution edge missing`);
+  } else {
+    for (const symbol of [
+      'ExecCtx',
+      'ExecCtx::read_control_resource',
+      'ExecCtx::write_control_resource',
+    ]) {
+      if (!(bridgeEdge.symbols ?? []).includes(symbol)) {
+        failures.push(`${MODULE}: bridge execution edge missing ${symbol}`);
+      }
+    }
+  }
   const nodeContainerEdge = mainlineEdges.find(
     (edge) =>
       edge.from === MODULE &&
@@ -430,6 +452,17 @@ function validate(
       if (source.includes(token)) {
         failures.push(`${MODULE}: forbidden source token ${token}`);
       }
+    }
+    for (const token of ['.read_control_resource(', '.write_control_resource(']) {
+      if (!source.includes(token)) {
+        failures.push(`${MODULE}: missing resource-scoped control access ${token}`);
+      }
+    }
+    if (/\.read_control\s*\(\s*\)/.test(source)) {
+      failures.push(`${MODULE}: broad control carrier read reintroduced`);
+    }
+    if (/\.write_control\s*\(/.test(source)) {
+      failures.push(`${MODULE}: broad control carrier write reintroduced`);
     }
 
     const descriptors = parseStandardDescriptors(source);
@@ -585,6 +618,18 @@ function runSelfTest() {
     }],
     ['fallback handler reintroduced', (state) => {
       state.source = `${source}\nfn fallback() {}`;
+    }],
+    ['broad control carrier access reintroduced', (state) => {
+      state.source = `${source}\nfn broad(ctx: &ExecCtx<'_>) { let _ = ctx.read_control(); }`;
+    }],
+    ['scoped bridge symbol removed from mainline', (state) => {
+      const edge = state.mainline.edges.find(
+        (candidate) => candidate.from === MODULE
+          && candidate.to === 'routecodex-v4-cordis-bridge',
+      );
+      edge.symbols = edge.symbols.filter(
+        (symbol) => symbol !== 'ExecCtx::read_control_resource',
+      );
     }],
     ['retired node selector reintroduced', (state) => {
       state.source = source.replace(

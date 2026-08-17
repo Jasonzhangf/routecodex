@@ -270,9 +270,9 @@ fn negative_scope_consume_rejects_non_object_control() {
     assert!(
         matches!(
             error,
-            NodeContainerError::Bridge(BridgeError::HandleError { .. })
+            NodeContainerError::Bridge(BridgeError::ResourceAccessViolation { .. })
         ),
-        "expected typed HandleError, got {error:?}"
+        "expected typed ResourceAccessViolation, got {error:?}"
     );
     container.drain().unwrap();
     container.dispose().unwrap();
@@ -302,13 +302,26 @@ fn positive_scope_consume_records_object_control_carrier() {
             &hash,
             NodeExecutionInput {
                 data: json!({}),
-                control: json!({}),
+                control: json!({
+                    "error_chain": {"stage": "source_raised"},
+                    "route_facts": {"selected": false}
+                }),
             },
             &registry,
         )
         .expect("scope carrier executes on typed object control");
     let control = output.control.as_object().expect("control is object");
-    assert_eq!(control["scope"]["consumed"], json!(true));
+    assert_eq!(control["metadata_center"]["scope"]["consumed"], json!(true));
+    assert_eq!(
+        control["error_chain"],
+        json!({"stage": "source_raised"}),
+        "metadata-only handle cannot overwrite the error resource"
+    );
+    assert_eq!(
+        control["route_facts"],
+        json!({"selected": false}),
+        "metadata-only handle cannot overwrite route facts"
+    );
     container.drain().unwrap();
     container.dispose().unwrap();
 }
@@ -341,7 +354,7 @@ fn negative_error_intake_rejects_non_object_control() {
         .expect_err("non-object control must fail typed error intake");
     assert!(matches!(
         error,
-        NodeContainerError::Bridge(BridgeError::HandleError { .. })
+        NodeContainerError::Bridge(BridgeError::ResourceAccessViolation { .. })
     ));
     container.drain().unwrap();
     container.dispose().unwrap();

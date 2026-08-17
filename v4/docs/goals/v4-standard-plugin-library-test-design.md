@@ -53,7 +53,7 @@ a conflict.
 | hashes | artifact/contract hashes are deterministic sha256 of canonical bytes | non-canonical hash -> rejected |
 | handles | every plugin id has exactly one typed handle in `StandardHandleRegistry` | unknown id -> `None` (unregistered handle fail-fast) |
 | effect guards | semantic writes data, control-only writes control, diagnostic only emits | read-only/diagnostic `write_data` -> `EffectViolation`; control-only `write_data` -> `EffectViolation` |
-| side channels | control/error/diagnostic facts never enter `data` | payload field carrying control marker -> test fails |
+| side channels | `ExecCtx` binds current `PlanEntry.reads/writes`; metadata-only and error-only handles can access only their declared control resource; control/error/diagnostic facts never enter `data` | metadata handle reads error or writes route facts; error handle reads/writes metadata; handle catches an access error; broad carrier access; payload field carrying control marker -> executor still fails |
 | no fallback | handle error propagates as `HandleError` | swallowed error / silent strip -> test fails |
 
 ## 4. L2 module tests (tests/ directory, cargo test + test-consumer)
@@ -84,7 +84,10 @@ a conflict.
   diagnostics; lifecycle reaches disposed.
 - Negative: plan-hash drift -> `PlanHashMismatch`; unregistered handle ->
   `UnregisteredHandle`; diagnostic handle writing data -> `EffectViolation`
-  (never silently stripped); execute before publish -> `InvalidState`.
+  (never silently stripped); undeclared control-resource read/write ->
+  `ResourceAccessViolation`; execute before publish -> `InvalidState`.
+- Isolation pair: metadata-only execution preserves pre-existing error/route
+  resources byte-for-byte; error-only execution preserves metadata center.
 
 ### 4.4 Test-consumer regression (active-link conventions)
 
@@ -103,13 +106,17 @@ registered; `.appsdk` resource `v4.plugin.standard_library` stays
 category/side-channel/keyless/no-fallback rules; source tokens prove the typed
 registry and category modules; forbidden tokens (payload reconstruction,
 fallback, second runtime, cross-node dispatch, provider-specific hardcode)
-absent.
+absent. The bridge gate rejects broad `read_control` / `write_control` APIs and
+requires both serial and diagnostic contexts to bind `PlanEntry.reads/writes`;
+the standard-library gate requires resource-scoped calls and the matching
+mainline symbols.
 
 Red self-tests (run with `--red-self-test`) mutate copies and assert each
 negative class fails: contract rule removed, module unregistered, gate
 unregistered, function-map symbol missing, resource drifted to active,
 forbidden source token reintroduced, retired node selector, active-node
-role/position mismatch and provider-semantic reversal.
+role/position mismatch, provider-semantic reversal, broad control access and
+missing plan-resource binding.
 
 ## 6. Known gaps (M5 baseline)
 

@@ -8,7 +8,8 @@
  * 3. every Cargo path dependency is registered as a transitional source edge;
  * 4. plan hash and handle registration fail before execution;
  * 5. effect guards keep normal data, control and diagnostics physically split;
- * 6. diagnostic concurrency is deterministic and fails fast on handle errors.
+ * 6. every control read/write is scoped by the current plan entry resources;
+ * 7. diagnostic concurrency is deterministic and fails fast on handle errors.
  *
  * Run with --red-self-test to prove every protected class fails closed.
  */
@@ -219,6 +220,41 @@ function validate(state) {
   ) {
     failures.push(`${MODULE_ID}: control write guard missing`);
   }
+  for (const token of [
+    "reads: &'a [String]",
+    "writes: &'a [String]",
+    'resource_violation: Option<BridgeError>',
+    'pub fn read_control_resource',
+    'pub fn write_control_resource',
+    'if let Some(error) = ctx.take_resource_violation()',
+  ]) {
+    if (!state.source.includes(token)) {
+      failures.push(`${MODULE_ID}: scoped resource capability token missing: ${token}`);
+    }
+  }
+  if (/pub\s+fn\s+read_control\s*\(/.test(state.source)) {
+    failures.push(`${MODULE_ID}: broad control read API reintroduced`);
+  }
+  if (/pub\s+fn\s+write_control\s*\(/.test(state.source)) {
+    failures.push(`${MODULE_ID}: broad control write API reintroduced`);
+  }
+  const readBindings = state.source.match(/reads:\s*&entry\.reads/g)?.length ?? 0;
+  const writeBindings = state.source.match(/writes:\s*&entry\.writes/g)?.length ?? 0;
+  const violationChecks = state.source.match(
+    /if let Some\(error\) = ctx\.take_resource_violation\(\)/g,
+  )?.length ?? 0;
+  if (readBindings !== 2 || writeBindings !== 2) {
+    failures.push(
+      `${MODULE_ID}: serial/diagnostic contexts must bind plan entry resources `
+        + `(reads=${readBindings}, writes=${writeBindings})`,
+    );
+  }
+  if (violationChecks !== 2) {
+    failures.push(
+      `${MODULE_ID}: serial/diagnostic contexts must fail caught resource violations `
+        + `(checks=${violationChecks})`,
+    );
+  }
   for (const field of ['data', 'control']) {
     if (!new RegExp(`pub ${field}: Value`).test(state.source)) {
       failures.push(`${MODULE_ID}: typed ${field} field missing`);
@@ -253,6 +289,9 @@ function validate(state) {
     'tampered_plan_hash_is_rejected_before_handles_run',
     'unregistered_handle_fails_fast',
     'read_only_handle_cannot_write_normal_data',
+    'metadata_only_plugin_cannot_read_error_or_overwrite_route_facts',
+    'error_only_plugin_cannot_read_or_overwrite_metadata_center',
+    'error_only_plugin_preserves_metadata_center',
     'positive_execution_input_accepts_typed_data_and_control',
     'negative_execution_input_rejects_undeclared_fields',
   ]) {
@@ -337,6 +376,21 @@ function runSelfTest() {
         'matches!(self.effect, PluginEffect::Semantic | PluginEffect::ReadOnly)',
       );
     }],
+    ['broad control access resurrected', (state) => {
+      state.source = state.source.replace(
+        'pub fn read_control_resource(',
+        'pub fn read_control(&self) -> &Value { &self.state.control }\n\n    pub fn read_control_resource(',
+      );
+    }],
+    ['plan resource binding removed', (state) => {
+      state.source = state.source.replace('reads: &entry.reads,', 'reads: &[],');
+    }],
+    ['caught resource violation accepted', (state) => {
+      state.source = state.source.replace(
+        'if let Some(error) = ctx.take_resource_violation()',
+        'if let Some(error) = None',
+      );
+    }],
     ['diagnostic order removed', (state) => {
       state.source = state.source.replace('outcomes.sort_by_key', 'outcomes.iter_mut');
     }],
@@ -361,7 +415,7 @@ function runSelfTest() {
     }
   }
   if (missed > 0) process.exit(1);
-  console.log('[v4_parity_gate_cordis_bridge] OK red self-test 11/11');
+  console.log(`[v4_parity_gate_cordis_bridge] OK red self-test ${cases.length}/${cases.length}`);
 }
 
 if (process.argv.includes('--red-self-test')) {
@@ -373,5 +427,5 @@ if (process.argv.includes('--red-self-test')) {
     console.error(failures.join('\n'));
     process.exit(1);
   }
-  console.log('[v4_parity_gate_cordis_bridge] OK bridge module/effects/hash/fail-fast bound');
+  console.log('[v4_parity_gate_cordis_bridge] OK bridge module/effects/resources/hash/fail-fast bound');
 }

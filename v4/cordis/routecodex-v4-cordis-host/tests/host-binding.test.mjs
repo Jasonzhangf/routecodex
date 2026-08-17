@@ -367,7 +367,9 @@ test('real Cordis fibers drive ordered Rust NodePluginPlan execution', async (t)
     control: {},
   });
   assert.deepEqual(output.data, { steps: ['v4.test.echo'] });
-  assert.deepEqual(output.control, { written_by: 'control' });
+  assert.deepEqual(output.control, {
+    metadata_center: { written_by: 'control' },
+  });
   assert.equal(output.diagnostics.length, 1);
   assert.equal(output.diagnostics[0].kind, 'node.observed');
   assert.equal(host.fibers.length, 3);

@@ -59,12 +59,21 @@ control/error/diagnostic 资源不进入 normal/provider/client payload。
 
 标准插件只通过 `ExecCtx` 的 typed data/control 通道执行：
 
+- `execute_plan` 将当前 `PlanEntry.reads/writes` 绑定进 `ExecCtx`；control handle
+  只能通过 `read_control_resource(resource_id)` / `write_control_resource(resource_id, value)`
+  访问该 entry 已声明的单个资源，未声明访问立即记录并返回
+  `ResourceAccessViolation`；handle 即使捕获返回值，executor 也会 fail-fast；
 - control-only 插件只写 `v4.control.*` / `v4.lifecycle.payload_cycle`；
 - diagnostic-only 插件只 emit diagnostics，不写 data/control；
 - error 插件只写 `v4.control.error_chain`；
 - provider capability/auth/transport mock 只在 provider wire boundary 读取并校验
   已登记资源，不写 normal data 或 control；
 - 任何控制、error、diagnostic 事实不得进入 `data`，payload 不得重建控制状态。
+
+control carrier 内的 `metadata_center`、`payload_cycle`、`error_chain`、
+`route_facts`、`target_selection` 是彼此独立的资源槽。metadata-only 插件不能观察
+或回写 error/route 资源，error-only 插件也不能观察或回写 metadata center；执行后
+未声明资源必须逐值保持不变。
 
 标准库不实现 fallback、silent strip、第二 runtime/kernel、跨节点 dispatch、
 payload reconstruction 或 provider/client metadata 泄漏。

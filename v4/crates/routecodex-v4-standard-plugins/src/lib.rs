@@ -755,45 +755,59 @@ fn snapshot_record(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn scope_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut control = ctx.read_control().clone();
-    let object = control
+    let mut metadata = ctx
+        .read_control_resource("v4.control.metadata_center")
+        .map_err(|error| error.to_string())?
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let object = metadata
         .as_object_mut()
-        .ok_or_else(|| "scope_consume requires typed control object".to_string())?;
+        .ok_or_else(|| "scope_consume requires typed metadata object".to_string())?;
     object.insert("scope".to_string(), json!({"consumed": true}));
-    ctx.write_control(control)
+    ctx.write_control_resource("v4.control.metadata_center", metadata)
         .map_err(|error| error.to_string())
 }
 
 fn payload_cycle_record(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut control = ctx.read_control().clone();
-    let object = control
+    let mut payload_cycle = ctx
+        .read_control_resource("v4.lifecycle.payload_cycle")
+        .map_err(|error| error.to_string())?
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let object = payload_cycle
         .as_object_mut()
-        .ok_or_else(|| "payload_cycle_record requires typed control object".to_string())?;
-    object.insert("payload_cycle".to_string(), json!({"recorded": true}));
-    ctx.write_control(control)
+        .ok_or_else(|| "payload_cycle_record requires typed cycle object".to_string())?;
+    object.insert("recorded".to_string(), json!(true));
+    ctx.write_control_resource("v4.lifecycle.payload_cycle", payload_cycle)
         .map_err(|error| error.to_string())
 }
 
 fn error_intake(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut control = ctx.read_control().clone();
-    let object = control
+    let mut error_chain = ctx
+        .read_control_resource("v4.control.error_chain")
+        .map_err(|error| error.to_string())?
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let object = error_chain
         .as_object_mut()
-        .ok_or_else(|| "error_intake requires typed control object".to_string())?;
-    object.insert(
-        "error_chain".to_string(),
-        json!({"stage": "source_raised", "kind": "keyless_mock"}),
-    );
-    ctx.write_control(control)
+        .ok_or_else(|| "error_intake requires typed error object".to_string())?;
+    object.insert("stage".to_string(), json!("source_raised"));
+    object.insert("kind".to_string(), json!("keyless_mock"));
+    ctx.write_control_resource("v4.control.error_chain", error_chain)
         .map_err(|error| error.to_string())
 }
 
 fn error_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut control = ctx.read_control().clone();
-    let object = control
+    let mut error_chain = ctx
+        .read_control_resource("v4.control.error_chain")
+        .map_err(|error| error.to_string())?
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let object = error_chain
         .as_object_mut()
-        .ok_or_else(|| "error_projection requires typed control object".to_string())?;
+        .ok_or_else(|| "error_projection requires typed error object".to_string())?;
     object.insert("error_projection".to_string(), json!({"projected": true}));
-    ctx.write_control(control)
+    ctx.write_control_resource("v4.control.error_chain", error_chain)
         .map_err(|error| error.to_string())
 }
 
@@ -822,28 +836,23 @@ fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn route_facts_produce(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut control = ctx.read_control().clone();
-    let object = control
-        .as_object_mut()
-        .ok_or_else(|| "route_facts_produce requires typed control object".to_string())?;
-    object.insert("route_facts".to_string(), json!({"keyless": true}));
-    ctx.write_control(control)
+    ctx.write_control_resource("v4.control.route_facts", json!({"keyless": true}))
         .map_err(|error| error.to_string())
 }
 
 fn route_facts_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut control = ctx.read_control().clone();
-    if control.get("route_facts").is_none() {
+    if ctx
+        .read_control_resource("v4.control.route_facts")
+        .map_err(|error| error.to_string())?
+        .is_none()
+    {
         return Err("route facts consumer requires typed route facts".to_string());
     }
-    if let Some(object) = control.as_object_mut() {
-        object.insert(
-            "target_selection".to_string(),
-            json!({"selected": "keyless_mock"}),
-        );
-    }
-    ctx.write_control(control)
-        .map_err(|error| error.to_string())
+    ctx.write_control_resource(
+        "v4.control.target_selection",
+        json!({"selected": "keyless_mock"}),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn capability_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
