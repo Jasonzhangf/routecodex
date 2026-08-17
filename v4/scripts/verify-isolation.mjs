@@ -228,6 +228,8 @@ function checkMainlineEdges() {
   allowedOwners.add('routecodex-v4-admin');
   allowedOwners.add('routecodex-v4-admin::execute');
   allowedOwners.add('routecodex-v4-admin::query');
+  allowedOwners.add('routecodex-v4-cordis-host::CordisNodeHost');
+  allowedOwners.add('routecodex-v4-node-container::NodeContainer');
   for (const edge of mainline.edges ?? []) {
     if (!edge.from || !edge.to || !edge.owner) {
       out.push(`mainline edge missing from/to/owner: ${JSON.stringify(edge)}`);

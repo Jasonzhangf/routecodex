@@ -536,6 +536,45 @@
         "v4_admin_l2_regression",
         "v4_parity_gate_admin"
       ]
+    },
+    {
+      "function_id": "v4.cordis.host",
+      "owner": "routecodex-v4-cordis-host",
+      "entry_symbols": [
+        "CordisNodeHost",
+        "CordisNodeHost::mount",
+        "CordisNodeHost::drain",
+        "CordisNodeHost::dispose",
+        "createNodePlugin",
+        "CordisHostError"
+      ],
+      "required_gates": [
+        "v4_cordis_host_l3_regression",
+        "v4_parity_gate_cordis_host",
+        "v4_parity_gate_cordis_host_red"
+      ]
+    },
+    {
+      "function_id": "v4.node_container.lifecycle",
+      "owner": "routecodex-v4-node-container",
+      "entry_symbols": [
+        "NodeContainer",
+        "NodeContainer::declare",
+        "NodeContainer::context_created",
+        "NodeContainer::plugins_mounted",
+        "NodeContainer::publish",
+        "NodeContainer::execute",
+        "NodeContainer::drain",
+        "NodeContainer::dispose",
+        "NodeContainerLifecyclePort",
+        "PlanBindings",
+        "graph_hash"
+      ],
+      "required_gates": [
+        "v4_node_container_l2_regression",
+        "v4_parity_gate_node_container",
+        "v4_parity_gate_node_container_red"
+      ]
     }
   ]
 }

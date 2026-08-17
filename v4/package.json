@@ -18,9 +18,11 @@
     "verify:v4-node-graph": "node scripts/architecture/verify-v4-node-graph.mjs",
     "verify:v4-node-graph-red": "node scripts/architecture/verify-v4-node-graph.mjs --red-self-test",
     "verify:v4-foundation": "node scripts/verify.mjs",
-    "verify:v4-foundation-red": "node scripts/verify-red.mjs"
+    "verify:v4-foundation-red": "node scripts/verify-red.mjs",
+    "test:cordis-host": "node --test cordis/routecodex-v4-cordis-host/tests/host.test.mjs"
   },
   "dependencies": {
+    "cordis": "^4.0.0-rc.8",
     "js-yaml": "^4.1.0"
   }
 }

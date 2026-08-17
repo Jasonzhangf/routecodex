@@ -1,0 +1,9 @@
+{
+  "name": "routecodex-v4-cordis-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "cordis": "^4.0.0-rc.8"
+  }
+}

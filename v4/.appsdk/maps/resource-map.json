@@ -909,6 +909,52 @@
         "read"
       ],
       "status": "active"
+    },
+    {
+      "resource_id": "v4.cordis.node_context",
+      "owner": "routecodex-v4-cordis-host::CordisNodeHost",
+      "truth_store": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "allowed_operations": [
+        "create",
+        "mount",
+        "drain",
+        "dispose"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.cordis.plugin_fibers",
+      "owner": "routecodex-v4-cordis-host::CordisNodeHost",
+      "truth_store": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "allowed_operations": [
+        "mount",
+        "read",
+        "dispose"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.node_container.lifecycle",
+      "owner": "routecodex-v4-node-container::NodeContainer",
+      "truth_store": "crates/routecodex-v4-node-container/src/lib.rs",
+      "allowed_operations": [
+        "declare",
+        "publish",
+        "execute",
+        "drain",
+        "dispose"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.node_container.plan_bindings",
+      "owner": "routecodex-v4-node-container::PlanBindings",
+      "truth_store": "crates/routecodex-v4-node-container/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
     }
   ]
 }

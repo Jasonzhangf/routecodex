@@ -152,6 +152,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v4-node-container"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-cordis-bridge",
+ "routecodex-v4-plugin-contract",
+ "routecodex-v4-plugin-plan",
+ "sha2",
+]
+
+[[package]]
 name = "routecodex-v4-plugin-catalog"
 version = "0.1.0"
 dependencies = [
