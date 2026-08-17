@@ -353,6 +353,16 @@ function checkRepositoryFilesystemGovernance() {
   }
 }
 
+function checkRootPackageLock() {
+  const root = process.cwd();
+  const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+  const rootPackage = lock.packages?.[''];
+  if (!rootPackage || rootPackage.name !== packageJson.name || rootPackage.version !== packageJson.version) {
+    throw new Error('root package-lock.json root package does not match package.json');
+  }
+}
+
 const files = runGit(['ls-files']).split('\n').map((s) => s.trim()).filter(Boolean);
 const forbidden = [];
 for (const p of files) {
@@ -369,6 +379,7 @@ if (forbidden.length) {
 }
 
 checkRootLayout();
+checkRootPackageLock();
 checkApprovedGeneratedSubroots();
 checkRootGeneratedResidue();
 checkRootWriteSources();

@@ -23,19 +23,10 @@
     "typeRoots": ["./node_modules/@types", "./src/types"],
     "incremental": false,
     "baseUrl": ".",
-    "paths": {
-      "@jsonstudio/llms/api": [
-        "sharedmodule/llmswitch-core/dist/api.d.ts"
-      ],
-      "@jsonstudio/llms/guidance": [
-        "sharedmodule/llmswitch-core/dist/guidance/index.d.ts"
-      ],
-    }
+    "paths": {}
   },
   "include": ["src/**/*"],
   "exclude": [
-    "../sharedmodule/**/*",
-    "sharedmodule/**/*",
     "node_modules",
     "dist",
     "tests",
