@@ -762,7 +762,7 @@
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "adeaf80c4be254ade006bb8fb0f52ce39eb356a8",
+      "source_commit": "d9eeabb2d4e7dafec30694ccfd96da08e3bd48e9",
       "sha256": "2af78ec9ae112957ea902338d9ed822df295758dcc2ad2aaa2e54d010e19c540"
     },
     {
@@ -2070,8 +2070,8 @@
     {
       "output_path": "repo/docs/goals/v3-full-ts-removal-and-archive-plan.md",
       "source_path": "docs/goals/v3-full-ts-removal-and-archive-plan.md",
-      "source_commit": "9a2505e8f775ee27fad48a09b886fb5bb3effe3a",
-      "sha256": "76aee691949af2912b2ba1a10411093f3376565ada415dda86b95a0283e6d6d7"
+      "source_commit": "9cc3c7daf6d4d2baad7aceb879127b6501256a3b",
+      "sha256": "a133519baac75be2839be96167bf28570a2e433b693118dbf53c72689e2178fa"
     },
     {
       "output_path": "repo/docs/goals/v3-gemini-codec-characterization-plan.md",
@@ -2166,8 +2166,8 @@
     {
       "output_path": "repo/docs/goals/v3-independent-build-isolation-plan.md",
       "source_path": "docs/goals/v3-independent-build-isolation-plan.md",
-      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
-      "sha256": "f1a66139e8f91990f27da82256886aa16324f5f20b40cc5e3d1367809fa186ba"
+      "source_commit": "9cc3c7daf6d4d2baad7aceb879127b6501256a3b",
+      "sha256": "14f7a7d88c3beb47034891d99647ce8696dcc0c8839380ffc83f7c596f0706f3"
     },
     {
       "output_path": "repo/docs/goals/v3-independent-build-isolation-test-design.md",
@@ -2632,5 +2632,5 @@
       "sha256": "2ada8d17e5cc0cb53ff0dfa9acfbeedf10eb4e35f7db239fb43ef88aa7478ea6"
     }
   ],
-  "manifest_digest": "5aedac761ffea5271769c0499d3bf342f34589fd1279a08ddd28ec024b0e6b73"
+  "manifest_digest": "091b29186f734ced29e922fa29f3126cf98d566fd33d92245c7db5a851051df7"
 }

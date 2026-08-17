@@ -64,12 +64,8 @@ The implementation must re-audit these facts from the approved base before editi
 - V3 has no local Node package/lock or local `scripts/` owner surface.
 - `scripts/run-v3-cargo-test.mjs` is rooted at the repository and owns the V3 Cargo
   test artifact budget/cleanup contract.
-- `scripts/install-v3-cli.mjs` reads root package/version/build-info, writes an
-  install Cargo target in the OS temporary directory, assembles root
-  `dist/bin/rccv3`, and then publishes the global binary.
-- `scripts/pack-v3-release.mjs` reads root package version, writes root
-  `dist/bin/rccv3` and root `artifacts/pack`, and stages packages in the OS temporary
-  directory.
+- V3 install and pack entrypoints now read only `v3/package.json` and write only
+  declared V3 build/install/pack roots.
 - Root build-info generation has been retired. V3 version/build truth is now owned
   under `v3/`; root build dispatch must not recreate a root version-bump path.
 - `test:v3-provider-compat-profile-loading` directly builds the sharedmodule Cargo
