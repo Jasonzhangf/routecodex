@@ -74,7 +74,7 @@ requireIncludes('release_install_sync row', sectionFor(matrix, 'release_install_
   'ROUTECODEX_INSTALL_VERIFY_PORT=<port>',
   'npm run install:release',
   'npm --prefix v3 run pack:npm',
-  '/health.version === package.json.version',
+  '/health.version === v3/package.json.version',
   'no repo path leaks',
   'no symlinked `rcc-llmswitch-core`',
   'no stale live version accepted',
