@@ -17,8 +17,9 @@
 3. Positive near-limit: from 90% through 100% of `short`, Target10 keeps `short` eligible but selects normal-class `long` first.
 4. Positive tokenizer calibration: a configured `17000` basis-point scale turns `2400` RCC tokens into `4080` candidate tokens and filters a `4000`-token model before transport.
 4. Positive retained boundary: at exactly 100%, if normal-class alternatives are unavailable, Target10 may still select `short`.
-5. Negative oversized: above 100%, Target10 filters `short`; it cannot be revived by provider health or default-floor behavior.
+5. Negative oversized: above 100%, Target10 filters `short`; provider health and direct/default availability semantics cannot revive it.
 6. Negative all oversized: when every declared candidate is oversized, Target10 exhausts before provider transport and reports each context admission rejection.
+7. Negative exact pin: an oversized explicit `provider.model` target exhausts before transport instead of bypassing context admission.
 
 ## White-box impact
 

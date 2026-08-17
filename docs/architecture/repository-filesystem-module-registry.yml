@@ -49,22 +49,29 @@ modules:
     status: implementation_active
     owned_paths:
       - v3/crates/routecodex-v3-target/**
-    allowed_paths:
-      - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      - v3/crates/routecodex-v3-runtime/src/kernel.rs
-      - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
-      - docs/goals/v3-virtual-router-target-interpreter-plan.md
       - docs/goals/v3-target-priority-context-heuristic-test-design.md
+      - docs/goals/v3-v2-route-classifier-parity-test-design.md
       - docs/architecture/v3-resource-operation-map.yml
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-mainline-call-map.yml
       - docs/architecture/v3-verification-map.yml
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+      - v3/crates/routecodex-v3-runtime/src/hooks.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
+      - v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+      - v3/crates/routecodex-v3-virtual-router/src/tests/mod.rs
+      - docs/goals/v3-virtual-router-target-interpreter-plan.md
+      - docs/architecture/repository-filesystem-module-registry.yml
     forbidden_paths:
-      - src
       - sharedmodule/llmswitch-core/rust-core
       - v3/crates/routecodex-v3-provider-responses/src/transport.rs
       - v3/crates/routecodex-v3-provider-responses/src/wire.rs
-      - v3/crates/routecodex-v3-server
+      - v3/crates/routecodex-v3-server/src
     allowed_edges:
       - from: V3Router07OpaqueTargetHitOnce
         to: V3Target08KindClassified
@@ -72,6 +79,77 @@ modules:
         to: V3Target09CandidateSetExpanded
       - from: V3Target09CandidateSetExpanded
         to: V3Target10ConcreteProviderSelected
+    forbidden_resources:
+      - v3.request.normal_payload
+      - v3.provider.wire_payload
+      - v3.response.client_payload
+      - v3.metadata.runtime_control
+  - module_id: v3.context_token_estimate_config
+    owner_feature_id: v3.config_interpreter_contract
+    status: implementation_active
+    owned_paths:
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/src/v2_compat.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+    allowed_paths:
+      - v3/crates/routecodex-v3-target/src/lib.rs
+      - v3/crates/routecodex-v3-target/src/tests/mod.rs
+      - docs/goals/v3-target-priority-context-heuristic-test-design.md
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+    forbidden_paths:
+      - v3/crates/routecodex-v3-provider-responses/src
+      - v3/crates/routecodex-v3-server/src
+      - sharedmodule
+      - src
+    forbidden_resources:
+      - v3.request.normal_payload
+      - v3.provider.wire_payload
+      - v3.response.client_payload
+      - v3.metadata.runtime_control
+  - module_id: v3.target_context_contract_consumers
+    owner_feature_id: v3.virtual_router_target_interpreter
+    status: implementation_active
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hooks.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
+      - v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+      - v3/crates/routecodex-v3-virtual-router/src/tests/mod.rs
+    allowed_paths:
+      - v3/crates/routecodex-v3-target/src/lib.rs
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+    forbidden_paths:
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+      - v3/crates/routecodex-v3-provider-responses/src/wire.rs
+      - sharedmodule
+      - src
+    forbidden_resources:
+      - v3.request.normal_payload
+      - v3.provider.wire_payload
+      - v3.response.client_payload
+      - v3.metadata.runtime_control
+  - module_id: v3.release_version_identity
+    owner_feature_id: v3.global_binary_install
+    status: implementation_active
+    owned_paths:
+      - package.json
+      - package-lock.json
+      - src/build-info.ts
+    allowed_paths:
+      - scripts/install-v3-cli.mjs
+      - v3/crates/routecodex-v3-config/build.rs
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+    forbidden_paths:
+      - src/modules
+      - src/providers
+      - src/server
+      - sharedmodule
     forbidden_resources:
       - v3.request.normal_payload
       - v3.provider.wire_payload

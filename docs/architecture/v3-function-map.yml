@@ -121,6 +121,7 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-config/src/store.rs
   - v3/crates/routecodex-v3-config/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/types.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - v3/crates/routecodex-v3-config/src/defaults.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
@@ -637,10 +638,17 @@ features:
   - reselect_from_captured_target_plan
   allowed_paths:
   - v3/crates/routecodex-v3-target
+  - v3/crates/routecodex-v3-config/src/types.rs
+  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/validate.rs
+  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - v3/crates/routecodex-v3-runtime
   - v3/crates/routecodex-v3-server
+  - v3/crates/routecodex-v3-virtual-router/src/tests/mod.rs
+  - docs/architecture/repository-filesystem-module-registry.yml
   - docs/goals/v3-virtual-router-target-interpreter-plan.md
   - docs/goals/v3-target-priority-context-heuristic-test-design.md
+  - docs/goals/v3-v2-route-classifier-parity-test-design.md
   - docs/design/v3-system-definition.md
   - docs/design/v3-routecodex-rust-module-boundaries.md
   - docs/design/v3-routecodex-runtime-resource-contract.md
@@ -652,8 +660,6 @@ features:
   forbidden_paths:
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
   - v3/crates/routecodex-v3-provider-responses/src/wire.rs
-  - v3/crates/routecodex-v3-config/src
-  - src
   - sharedmodule
   - ~/.rcc
   - live config
@@ -662,6 +668,10 @@ features:
   required_gates:
   - npm run test:v3-p5-router-target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target context_admission_preserves_normal_priority_demotes_near_limit_and_filters_oversized
+    -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target context_admission_rejects_oversized_exact_pin_before_transport
+    -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --test config_v3_contract context_token_estimate_scale_defaults_to_10000_and_rejects_out_of_range_values
     -- --nocapture
   - npm run test:v3-p5-server-blackbox
   - 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests:': --
@@ -4373,8 +4383,13 @@ features:
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/v3-build-tool-module-registry.yml
   - .github/workflows/test.yml
+  - package.json
+  - package-lock.json
+  - src/build-info.ts
   forbidden_paths:
-  - src
+  - src/modules
+  - src/providers
+  - src/server
   - sharedmodule
   - ~/.rcc/install
   required_gates:
