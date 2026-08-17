@@ -314,7 +314,8 @@ chains:
       side_channel_writes: []
 - chain_id: v3.config.compile
   owner_feature_id: v3.config_interpreter_contract
-  summary: Unique config.v3 read/parse/validate/registry/publish chain.
+  summary: Unique config.v3 read/parse/validate/registry/publish chain; provider secretFile
+    authoring is expanded here into named auth handles without publishing secret values.
   edges:
   - step_id: v3-cfg-01
     from_node: V3Config01FileSource
@@ -378,6 +379,8 @@ chains:
     callee_symbol: publish_v3_config_05_manifest_from_v3_config_04
     callee_file: v3/crates/routecodex-v3-config/src/lib.rs
     owner_feature_id: v3.config_interpreter_contract
+    semantic_input: resource registry with provider auth declarations and validated secret-file key names
+    semantic_output: published manifest containing only named provider auth handles, never secret values
     resource_flow:
       consumes:
       - v3.config.resource_registry

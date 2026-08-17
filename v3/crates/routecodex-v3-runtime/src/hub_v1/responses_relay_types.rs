@@ -250,6 +250,22 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
     pub(crate) source_stage: &'static str,
     pub(crate) observability: Option<V3RuntimeObservability>,
     pub(crate) terminal_projection: Option<routecodex_v3_error::V3Error06ClientProjected>,
+    pub(crate) matched_policy: Option<V3ProviderFailureDirective>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct V3ProviderFailureDirective {
+    policy: V3ProviderErrorActionPolicyManifest,
+}
+
+impl V3ProviderFailureDirective {
+    pub(crate) fn from_matched_policy(policy: V3ProviderErrorActionPolicyManifest) -> Self {
+        Self { policy }
+    }
+
+    pub(crate) fn policy(&self) -> &V3ProviderErrorActionPolicyManifest {
+        &self.policy
+    }
 }
 
 pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
@@ -1088,6 +1104,8 @@ pub enum V3ResponsesRelayRuntimeError {
     ProviderSseTransport(String),
     #[error("V3 Responses Relay provider response event codec failed: {0}")]
     ProviderResponseEventCodec(String),
+    #[error("V3 Responses Relay provider response body is empty for provider {provider_id}")]
+    ProviderResponseEmpty { provider_id: String },
     #[error("V3 Responses Relay Runtime timing failed: {0}")]
     RuntimeTiming(String),
     #[error("V3 Responses Relay provider semantic failure {code} status {status}: {message}")]

@@ -69,9 +69,7 @@ pub struct RevisionStore {
 
 impl RevisionStore {
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self {
-            path: path.into(),
-        }
+        Self { path: path.into() }
     }
 
     pub fn path(&self) -> &Path {
@@ -131,7 +129,9 @@ impl RevisionStore {
             "revisions": revisions,
         }))
         .map_err(|error| V3ConfigMgmtError::Revision(error.to_string()))?;
-        let temp_path = self.path.with_extension(format!("json.tmp-{}", std::process::id()));
+        let temp_path = self
+            .path
+            .with_extension(format!("json.tmp-{}", std::process::id()));
         std::fs::write(&temp_path, payload)?;
         std::fs::rename(&temp_path, &self.path)?;
         Ok(revision)
@@ -197,9 +197,7 @@ impl ConfigMgmtStore {
         self.validate(authoring)?;
         let source_sha256 = match std::fs::read(&self.config_path) {
             Ok(raw) => format!("{:x}", Sha256::digest(raw)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                "absent".to_string()
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => "absent".to_string(),
             Err(error) => return Err(V3ConfigMgmtError::Io(error.to_string())),
         };
         let backup = if self.config_path.exists() {

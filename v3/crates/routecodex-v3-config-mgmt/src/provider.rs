@@ -36,22 +36,28 @@ pub fn list_provider_ids(config_dir: &Path) -> Result<Vec<String>, String> {
                 if !entry.path().is_dir() {
                     continue;
                 }
-                let candidate = entry
-                    .path()
-                    .join(V2_PROVIDER_CONFIG_FILE_NAME);
+                let candidate = entry.path().join(V2_PROVIDER_CONFIG_FILE_NAME);
                 if candidate.is_file() {
                     ids.push(entry.file_name().to_string_lossy().to_string());
                 }
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("scan provider directory {} failed: {error}", root.display())),
+        Err(error) => {
+            return Err(format!(
+                "scan provider directory {} failed: {error}",
+                root.display()
+            ))
+        }
     }
     ids.sort();
     Ok(ids)
 }
 
-pub fn read_provider_file(config_dir: &Path, provider_id: &str) -> Result<ProviderFileEntry, String> {
+pub fn read_provider_file(
+    config_dir: &Path,
+    provider_id: &str,
+) -> Result<ProviderFileEntry, String> {
     let path = provider_config_file_path(config_dir, provider_id);
     let raw = std::fs::read_to_string(&path)
         .map_err(|error| format!("provider config {} read failed: {error}", path.display()))?;
@@ -59,10 +65,7 @@ pub fn read_provider_file(config_dir: &Path, provider_id: &str) -> Result<Provid
         .map_err(|error| format!("provider config {} parse failed: {error}", path.display()))?;
     Ok(ProviderFileEntry {
         provider_id: provider_id.to_string(),
-        directory: path
-            .parent()
-            .unwrap_or(&path)
-            .to_path_buf(),
+        directory: path.parent().unwrap_or(&path).to_path_buf(),
         config,
     })
 }
@@ -84,8 +87,12 @@ pub fn write_provider_file(
     let raw = generate_v2_provider_config_file(config)
         .map_err(|error| format!("generate provider config failed: {error}"))?;
     let temp_path = path.with_extension(format!("toml.tmp-{}", std::process::id()));
-    std::fs::write(&temp_path, raw)
-        .map_err(|error| format!("write provider temp {} failed: {error}", temp_path.display()))?;
+    std::fs::write(&temp_path, raw).map_err(|error| {
+        format!(
+            "write provider temp {} failed: {error}",
+            temp_path.display()
+        )
+    })?;
     std::fs::rename(&temp_path, &path)
         .map_err(|error| format!("atomic replace provider {} failed: {error}", path.display()))?;
     Ok(path)
@@ -114,9 +121,7 @@ pub fn timestamp_compact() -> String {
     let hour = seconds_of_day / 3600;
     let minute = (seconds_of_day % 3600) / 60;
     let second = seconds_of_day % 60;
-    format!(
-        "{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}"
-    )
+    format!("{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}")
 }
 
 /// days since 1970-01-01 -> (year, month, day)；Howard Hinnant civil 算法。

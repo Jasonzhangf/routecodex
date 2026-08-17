@@ -30,4 +30,3 @@ impl V3ProviderErrorFingerprint {
         Ok(fingerprint)
     }
 }
-

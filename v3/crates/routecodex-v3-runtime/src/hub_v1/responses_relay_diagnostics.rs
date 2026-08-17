@@ -47,6 +47,7 @@ pub(super) struct V3ProviderSemanticErrorProjection {
     pub(super) message: String,
     pub(super) provider_global_failure: bool,
     pub(super) cooldown_ms: Option<u64>,
+    pub(super) matched_policy: Option<V3ProviderFailureDirective>,
 }
 
 pub(super) fn anthropic_cyber_refusal_error_from_payload(
@@ -73,6 +74,7 @@ pub(super) fn anthropic_cyber_refusal_error_from_payload(
         ),
         provider_global_failure: false,
         cooldown_ms: None,
+        matched_policy: None,
     })
 }
 
@@ -170,6 +172,9 @@ pub(super) fn provider_response_semantic_error_from_manifest(
                         _ => None,
                     })
                     .or(policy.action.cooldown_ms),
+                matched_policy: Some(V3ProviderFailureDirective::from_matched_policy(
+                    policy.clone(),
+                )),
             }
         })
 }
@@ -189,7 +194,7 @@ fn provider_error_action_policy_matches(
         model,
         200,
         provider_code,
-    ) && provider_error_matcher_matches(&policy.matcher, payload)
+    ) && provider_error_matcher_matches(&policy.matcher, 200, payload)
 }
 
 fn provider_payload_provider_code(payload: &Value) -> Option<&str> {
@@ -206,9 +211,51 @@ fn provider_payload_provider_code(payload: &Value) -> Option<&str> {
 
 fn provider_error_matcher_matches(
     matcher: &V3ProviderErrorMatcherManifest,
+    http_status: u16,
     payload: &Value,
 ) -> bool {
-    if matcher.http_status.is_some_and(|status| status != 200) {
+    if matcher
+        .http_status
+        .is_some_and(|expected| expected != http_status)
+    {
+        return false;
+    }
+    let provider_code = provider_payload_provider_code(payload);
+    if matcher
+        .provider_code
+        .as_deref()
+        .is_some_and(|expected| provider_code != Some(expected))
+    {
+        return false;
+    }
+    let provider_type_code = [
+        payload.pointer("/error/type"),
+        payload.pointer("/response/error/type"),
+        payload.get("error_type"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(Value::as_str);
+    if matcher
+        .provider_type_code
+        .as_deref()
+        .is_some_and(|expected| provider_type_code != Some(expected))
+    {
+        return false;
+    }
+    let terminal_status = [
+        payload.pointer("/response/status"),
+        payload.get("status"),
+        payload.get("stop_reason"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(Value::as_str);
+    if matcher
+        .terminal_status
+        .as_deref()
+        .is_some_and(|expected| terminal_status != Some(expected))
+    {
         return false;
     }
     let usage = extract_v3_runtime_usage_summary(payload);
@@ -237,7 +284,7 @@ fn provider_error_matcher_matches(
     if matcher
         .finish_reason
         .as_deref()
-        .is_some_and(|expected| !payload_choices_have_finish_reason(payload, expected))
+        .is_some_and(|expected| !provider_payload_has_finish_reason(payload, expected))
     {
         return false;
     }
@@ -255,17 +302,19 @@ fn provider_error_matcher_matches(
     true
 }
 
-fn payload_choices_have_finish_reason(payload: &Value, expected: &str) -> bool {
-    payload
-        .get("choices")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .any(|choice| choice.get("finish_reason").and_then(Value::as_str) == Some(expected))
+fn provider_payload_has_finish_reason(payload: &Value, expected: &str) -> bool {
+    payload.get("finish_reason").and_then(Value::as_str) == Some(expected)
+        || payload.get("stop_reason").and_then(Value::as_str) == Some(expected)
+        || payload
+            .get("choices")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|choice| choice.get("finish_reason").and_then(Value::as_str) == Some(expected))
 }
 
 fn provider_payload_has_valid_model_output(payload: &Value) -> bool {
-    payload
+    if payload
         .get("choices")
         .and_then(Value::as_array)
         .into_iter()
@@ -283,22 +332,125 @@ fn provider_payload_has_valid_model_output(payload: &Value) -> bool {
                     .and_then(Value::as_str)
                     .is_some_and(|content| !content.trim().is_empty())
         })
+    {
+        return true;
+    }
+    [
+        payload.get("content"),
+        payload.get("output"),
+        payload.pointer("/response/output"),
+    ]
+    .into_iter()
+    .flatten()
+    .any(provider_output_value_has_content)
 }
 
 fn provider_payload_content_contains_any(payload: &Value, phrases: &[String]) -> bool {
-    payload
-        .get("choices")
-        .and_then(Value::as_array)
+    let mut texts = Vec::new();
+    collect_provider_response_texts(payload, &mut texts);
+    texts
         .into_iter()
-        .flatten()
-        .filter_map(|choice| choice.get("message").and_then(Value::as_object))
-        .filter_map(|message| message.get("content").and_then(Value::as_str))
         .any(|content| phrases.iter().any(|phrase| content.contains(phrase)))
+}
+
+fn provider_output_value_has_content(value: &Value) -> bool {
+    provider_output_value_has_content_at_depth(value, 0)
+}
+
+fn provider_output_value_has_content_at_depth(value: &Value, depth: usize) -> bool {
+    if depth >= 4 {
+        return false;
+    }
+    match value {
+        Value::String(text) => !text.trim().is_empty(),
+        Value::Array(items) => items
+            .iter()
+            .take(64)
+            .any(|item| provider_output_value_has_content_at_depth(item, depth + 1)),
+        Value::Object(object) => {
+            object
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| !text.trim().is_empty())
+                || object.get("content").is_some_and(|content| {
+                    provider_output_value_has_content_at_depth(content, depth + 1)
+                })
+                || object
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .is_some_and(|calls| !calls.is_empty())
+                || object.get("function_call").is_some_and(Value::is_object)
+        }
+        _ => false,
+    }
+}
+
+fn collect_provider_response_texts<'payload>(
+    payload: &'payload Value,
+    texts: &mut Vec<&'payload str>,
+) {
+    for pointer in [
+        "/error/message",
+        "/response/error/message",
+        "/message",
+        "/output_text",
+    ] {
+        if let Some(text) = payload.pointer(pointer).and_then(Value::as_str) {
+            texts.push(text);
+        }
+    }
+    if let Some(choices) = payload.get("choices").and_then(Value::as_array) {
+        for choice in choices.iter().take(32) {
+            for key in ["message", "delta"] {
+                if let Some(content) = choice.pointer(&format!("/{key}/content")) {
+                    collect_bounded_content_texts(content, texts, 0);
+                }
+            }
+        }
+    }
+    for value in [
+        payload.get("content"),
+        payload.get("output"),
+        payload.pointer("/response/output"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        collect_bounded_content_texts(value, texts, 0);
+    }
+}
+
+fn collect_bounded_content_texts<'payload>(
+    value: &'payload Value,
+    texts: &mut Vec<&'payload str>,
+    depth: usize,
+) {
+    if depth >= 4 || texts.len() >= 64 {
+        return;
+    }
+    match value {
+        Value::String(text) => texts.push(text),
+        Value::Array(items) => {
+            for item in items.iter().take(64) {
+                collect_bounded_content_texts(item, texts, depth + 1);
+            }
+        }
+        Value::Object(object) => {
+            if let Some(text) = object.get("text").and_then(Value::as_str) {
+                texts.push(text);
+            }
+            if let Some(content) = object.get("content") {
+                collect_bounded_content_texts(content, texts, depth + 1);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::provider_payload_provider_code;
+    use super::{provider_error_matcher_matches, provider_payload_provider_code};
+    use routecodex_v3_config::V3ProviderErrorMatcherManifest;
     use serde_json::json;
 
     #[test]
@@ -317,5 +469,67 @@ mod tests {
             provider_payload_provider_code(&json!({"error":{"code":"  "}})),
             None
         );
+    }
+
+    #[test]
+    fn bounded_provider_response_facts_match_supported_protocol_shapes() {
+        let matcher = V3ProviderErrorMatcherManifest {
+            http_status: Some(200),
+            terminal_status: Some("failed".to_string()),
+            provider_code: Some("upstream_overloaded".to_string()),
+            provider_type_code: Some("server_error".to_string()),
+            content_contains_any: vec!["mac超负荷运载".to_string()],
+            has_valid_model_output: Some(false),
+            ..Default::default()
+        };
+        let payload = json!({
+            "type": "response.failed",
+            "response": {
+                "status": "failed",
+                "error": {
+                    "type": "server_error",
+                    "code": "upstream_overloaded",
+                    "message": "mac超负荷运载，应该是挂了"
+                }
+            }
+        });
+        assert!(provider_error_matcher_matches(&matcher, 200, &payload));
+
+        let anthropic = V3ProviderErrorMatcherManifest {
+            http_status: Some(200),
+            terminal_status: Some("refusal".to_string()),
+            finish_reason: Some("refusal".to_string()),
+            content_contains_any: vec!["overloaded".to_string()],
+            has_valid_model_output: Some(false),
+            ..Default::default()
+        };
+        assert!(provider_error_matcher_matches(
+            &anthropic,
+            200,
+            &json!({"stop_reason":"refusal","error":{"message":"upstream overloaded"}})
+        ));
+    }
+
+    #[test]
+    fn bounded_provider_response_facts_do_not_treat_normal_output_as_error() {
+        let matcher = V3ProviderErrorMatcherManifest {
+            http_status: Some(200),
+            content_contains_any: vec!["overloaded".to_string()],
+            has_valid_model_output: Some(false),
+            ..Default::default()
+        };
+        assert!(!provider_error_matcher_matches(
+            &matcher,
+            200,
+            &json!({
+                "choices":[{"message":{"content":"the word overloaded is quoted"},"finish_reason":"stop"}],
+                "usage":{"total_tokens":12}
+            })
+        ));
+        assert!(!provider_error_matcher_matches(
+            &matcher,
+            200,
+            &json!({"id":"overloaded","metadata":{"debug":"overloaded"}})
+        ));
     }
 }

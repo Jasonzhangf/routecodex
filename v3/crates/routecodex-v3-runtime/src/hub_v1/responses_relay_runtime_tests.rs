@@ -876,19 +876,34 @@ fn openai_chat_visible_zero_output_text_with_real_usage_remains_success() {
 #[test]
 fn openai_chat_upstream_overload_diagnostic_is_provider_error() {
     let manifest = glmrelay_error_policy_manifest();
+    let provider_payload = json!({
+        "id": "chatcmpl_overload_diagnostic",
+        "model": "glm-5.2",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "mac超负荷运载，应该是挂了"
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
+    });
+    let projection = responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
+        Some(&manifest),
+        Some("glmrelay_openai"),
+        &provider_payload,
+    )
+    .expect("configured diagnostic policy must match");
+    assert_eq!(
+        projection
+            .matched_policy
+            .as_ref()
+            .map(V3ProviderFailureDirective::policy)
+            .map(|policy| policy.policy_id.as_str()),
+        Some("glmrelay_openai_200_diagnostic_zero_usage")
+    );
     let error = build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
-        &json!({
-            "id": "chatcmpl_overload_diagnostic",
-            "model": "glm-5.2",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "mac超负荷运载，应该是挂了"
-                },
-                "finish_reason": "stop"
-            }],
-            "usage": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
-        }),
+        &provider_payload,
         &json!({"tools": [{"type":"function","function":{"name":"exec_command"}}]}),
         Some(&manifest),
         Some("glmrelay_openai"),

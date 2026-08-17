@@ -990,11 +990,7 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
                     id: "MiniMax-M3".into(),
                     wire_name: "MiniMax-M3".into(),
                     aliases: vec![],
-                    capabilities: vec![
-                        "text".into(),
-                        "multimodal".into(),
-                        "web_search".into(),
-                    ],
+                    capabilities: vec!["text".into(), "multimodal".into(), "web_search".into()],
                     web_search_execution_mode: V3WebSearchExecutionMode::None,
                     web_search_backend_binding: None,
                     supports_streaming: true,
@@ -1032,7 +1028,11 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    let tier_ids: Vec<&str> = plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect();
+    let tier_ids: Vec<&str> = plan
+        .tiers
+        .iter()
+        .map(|tier| tier.pool_id.as_str())
+        .collect();
     assert!(
         tier_ids.iter().any(|id| *id == "implicit:multimodal"),
         "implicit multimodal pool tier must exist when no explicit pool: {tier_ids:?}"
@@ -1080,7 +1080,11 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    let tier_ids: Vec<&str> = plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect();
+    let tier_ids: Vec<&str> = plan
+        .tiers
+        .iter()
+        .map(|tier| tier.pool_id.as_str())
+        .collect();
     let web_index = tier_ids
         .iter()
         .position(|id| *id == "implicit:web_search")

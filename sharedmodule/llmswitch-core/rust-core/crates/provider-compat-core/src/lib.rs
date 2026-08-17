@@ -10,6 +10,7 @@ use serde_json::{json, Map, Number, Value};
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod cc_sol;
 mod deepseek_console_go;
 mod minimax_anthropic;
 pub mod namespace_tools;
@@ -20,6 +21,16 @@ pub mod namespace_tools;
 /// 否则客户端不执行调用、下一轮历史缺 output（孤儿 call）触发上游 400。
 pub fn apply_deepseek_console_go_response_compat(payload: Value) -> Value {
     deepseek_console_go::apply_response_compat(payload)
+}
+
+/// DeepSeek Console Go request-side 400 compatibility owner.
+pub fn apply_deepseek_v4_request_compat(payload: &mut Value) {
+    deepseek_console_go::apply_deepseek_v4_request_compat(payload)
+}
+
+/// cc-sol direct responses reasoning/tag compatibility.
+pub fn apply_cc_sol_response_compat(payload: Value) -> Value {
+    cc_sol::apply_response_compat(payload)
 }
 
 // feature_id: v3.provider_compat_profile_loading
@@ -1198,7 +1209,12 @@ fn normalize_function_call_id(call_id: Option<&str>, fallback: &str) -> String {
     }
     let mut hasher = Sha256::new();
     hasher.update(raw.as_bytes());
-    let hash = hasher.finalize().iter().take(5).map(|byte| format!("{byte:02x}")).collect::<String>();
+    let hash = hasher
+        .finalize()
+        .iter()
+        .take(5)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let room = 64usize.saturating_sub("fc_".len() + 1 + hash.len()).max(1);
     let head = sanitize_id_token(&safe.chars().take(room).collect::<String>());
     format!("fc_{head}_{hash}")
@@ -2111,8 +2127,7 @@ mod tests {
         );
         // #3: 请求侧不再无条件剥离 reasoning content——reasoning 明文原样透传。
         assert_eq!(
-            result.payload["input"][0]["content"][0]["text"],
-            "old",
+            result.payload["input"][0]["content"][0]["text"], "old",
             "reasoning content must pass through verbatim (no unconditional strip)"
         );
     }

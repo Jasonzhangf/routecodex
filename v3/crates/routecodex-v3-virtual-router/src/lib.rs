@@ -465,8 +465,8 @@ fn build_implicit_capability_pool_tier(
     let mut targets = Vec::new();
     for candidate in models {
         if let Some(client) = client_model {
-            let matches = candidate.model == client
-                || candidate.aliases.iter().any(|alias| alias == client);
+            let matches =
+                candidate.model == client || candidate.aliases.iter().any(|alias| alias == client);
             if !matches {
                 continue;
             }
@@ -492,7 +492,8 @@ fn build_implicit_capability_pool_tier(
     })
 }
 
-fn select_best_matching_pool<'a, F>(    group_id: &str,
+fn select_best_matching_pool<'a, F>(
+    group_id: &str,
     pools: &'a BTreeMap<String, V3RoutePoolManifest>,
     facts: &V3RouterRequestFacts,
     mut candidate_matches: F,

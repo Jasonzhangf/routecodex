@@ -1070,13 +1070,17 @@ fn observability_prefix_keeps_full_provider_and_key_without_truncation() {
         prefix.contains("default:opencode-go[key2].deepseek-v4-flash"),
         "provider and key must remain fully visible in the response prefix: {prefix}"
     );
-    assert!(!prefix.contains("..."), "provider/key must not truncate: {prefix}");
+    assert!(
+        !prefix.contains("..."),
+        "provider/key must not truncate: {prefix}"
+    );
 }
 
 #[test]
-#[should_panic(expected = "v3 console route projection requires pool_id or routing_group_id")]
-fn console_route_projection_rejects_missing_route_truth() {
-    let _ = resolve_v3_console_route_projection(&V3RuntimeObservability::default());
+fn console_route_projection_surfaces_missing_route_without_panicking() {
+    let projection = resolve_v3_console_route_projection(&V3RuntimeObservability::default());
+    assert_eq!(projection.label, "-");
+    assert_eq!(projection.reason, "route:missing");
 }
 
 #[test]
@@ -3293,7 +3297,8 @@ async fn relay_sse_closeout_emits_failed_terminal_on_stream_error() {
 }
 
 #[tokio::test]
-async fn relay_sse_accept_stream_error_projects_post_commit_provider_failure_not_contract_failure() {
+async fn relay_sse_accept_stream_error_projects_post_commit_provider_failure_not_contract_failure()
+{
     let log_file = test_v3_console_log_file("relay-sse-accept-error");
     let _ = std::fs::remove_file(&log_file);
     let state = test_v3_listener_state(&log_file, 5555);

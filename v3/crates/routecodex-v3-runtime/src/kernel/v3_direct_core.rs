@@ -440,6 +440,29 @@ pub async fn execute_v3_direct_runtime_kernel_core<
         };
         trace.push("V3ProviderResp14Raw");
         if provider_raw.status() >= 400 {
+            let provider_status = provider_raw.status();
+            let provider_name = provider_raw.provider_id().to_string();
+            let provider_detail = provider_raw
+                .into_body_bytes()
+                .await
+                .ok()
+                .and_then(|body| {
+                    serde_json::from_slice::<serde_json::Value>(&body)
+                        .ok()
+                        .and_then(|value| {
+                            value
+                                .pointer("/error/message")
+                                .or_else(|| value.pointer("/message"))
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_string)
+                        })
+                        .or_else(|| {
+                            String::from_utf8(body)
+                                .ok()
+                                .filter(|text| !text.trim().is_empty())
+                                .map(|text| text.chars().take(512).collect())
+                        })
+                });
             if let Err(timing_error) = runtime_timing.finish_external() {
                 return error_output(
                     runtime_source("V3RuntimeTimingExternal", timing_error),
@@ -450,19 +473,21 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             let source = build_v3_error_01_source_raised_external(
                 V3ErrorSourceKind::ProviderFailure,
                 "V3ProviderResp14Raw",
-                format!("provider_http_{}", provider_raw.status()),
-                format!(
-                    "provider {} returned {}",
-                    provider_raw.provider_id(),
-                    provider_raw.status()
+                format!("provider_http_{provider_status}"),
+                provider_detail.as_deref().map_or_else(
+                    || format!("provider {provider_name} returned {provider_status}"),
+                    |detail| format!("provider {provider_name} returned {provider_status}: {detail}"),
                 ),
                 V3ExternalErrorLink {
                     kind: V3ExternalErrorKind::Provider,
-                    status: Some(provider_raw.status()),
-                    code: Some(format!("HTTP_{}", provider_raw.status())),
-                    provider_id: Some(provider_raw.provider_id().to_string()),
+                    status: Some(provider_status),
+                    code: Some(format!("HTTP_{provider_status}")),
+                    provider_id: Some(provider_name),
                     upstream_request_id: None,
-                    message: Some(format!("provider returned HTTP {}", provider_raw.status())),
+                    message: Some(provider_detail.as_deref().map_or_else(
+                        || format!("provider returned HTTP {provider_status}"),
+                        |detail| format!("provider returned HTTP {provider_status}: {detail}"),
+                    )),
                 },
             );
             drop(provider_action_permit.take());
@@ -478,7 +503,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                 },
                 C::policy_target(&policy),
                 source,
-                provider_raw.status(),
+                provider_status,
                 &mut V3DirectProviderFailurePolicyState {
                     failed_candidates: &mut failed_candidates,
                     same_candidate_retries: &mut same_candidate_retries,
@@ -548,7 +573,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                         C::policy_target(&policy),
                         C::ENTRY_PROTOCOL,
                         "json",
-                        Some(provider_raw.status()),
+                        Some(provider_status),
                         "failed",
                         provider_failure_events.clone(),
                         false,

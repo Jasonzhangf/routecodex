@@ -268,7 +268,9 @@ impl V3TargetInterpreter {
         // health cooldowns are reported but never veto the pinned provider.
         // Explicit exclusions still block via the exhaustion path below.
         let direct_route = expanded.route.pool_id == "direct";
+        let default_pool_route = expanded.route.pool_id == "default";
         let mut direct_fallback: Option<(usize, V3TargetCandidate)> = None;
+        let mut default_floor_fallback: Option<(usize, V3TargetCandidate)> = None;
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
@@ -301,6 +303,12 @@ impl V3TargetInterpreter {
             {
                 direct_fallback = Some((index, candidate.clone()));
             }
+            if default_pool_route
+                && candidate.default_pool_member
+                && default_floor_fallback.is_none()
+            {
+                default_floor_fallback = Some((index, candidate.clone()));
+            }
             unavailable.push(format_candidate_availability_unavailable(
                 candidate,
                 &projection,
@@ -313,6 +321,15 @@ impl V3TargetInterpreter {
                 unavailable_candidates: unavailable,
                 attempts: index + 1,
                 default_floor_protected: false,
+            });
+        }
+        if let Some((index, candidate)) = default_floor_fallback {
+            return Ok(V3Target10ConcreteProviderSelected {
+                route: expanded.route,
+                candidate,
+                unavailable_candidates: unavailable,
+                attempts: index + 1,
+                default_floor_protected: true,
             });
         }
         Err(V3TargetExhaustion {

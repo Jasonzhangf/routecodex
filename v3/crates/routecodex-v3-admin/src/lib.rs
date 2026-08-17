@@ -28,7 +28,8 @@ pub struct ProviderHealthEntry {
 pub struct AppState {
     pub config_path: PathBuf,
     pub store: ConfigMgmtStore,
-    pub health_cache: Arc<tokio::sync::Mutex<std::collections::BTreeMap<String, ProviderHealthEntry>>>,
+    pub health_cache:
+        Arc<tokio::sync::Mutex<std::collections::BTreeMap<String, ProviderHealthEntry>>>,
 }
 
 impl AppState {

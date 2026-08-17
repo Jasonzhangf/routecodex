@@ -653,7 +653,8 @@ targets = [
 }
 
 #[test]
-fn requested_explicit_model_route_maps_to_declared_targets_without_alias_requirement() {    let source = r#"
+fn requested_explicit_model_route_maps_to_declared_targets_without_alias_requirement() {
+    let source = r#"
 version = 3
 [servers.s]
 bind = "127.0.0.1"
@@ -1307,6 +1308,130 @@ targets = [
 }
 
 #[test]
+fn context_admission_keeps_exact_pin_eligible() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.pinned]
+type = "responses"
+base_url = "http://pinned.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "PINNED_KEY" }] }
+[providers.pinned.models.m]
+capabilities = ["text"]
+max_context_tokens = 1000
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "key", priority = 1 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("pinned.m".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 2000,
+                route_classification: RouteClassification::default(),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "direct");
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    let selected = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(selected.candidate.provider_id, "pinned");
+    assert!(selected
+        .unavailable_candidates
+        .iter()
+        .any(|entry| entry.contains("context_window_exceeded(")));
+}
+
+#[test]
+fn context_admission_preserves_default_floor_resilience() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.pinned]
+type = "responses"
+base_url = "http://pinned.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "PINNED_KEY" }] }
+[providers.pinned.models.m]
+capabilities = ["text"]
+max_context_tokens = 1000
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "key", priority = 1 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::new(),
+                input_tokens: 1500,
+                route_classification: test_route("longcontext", &["longcontext", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "default");
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    let selected_floor = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(selected_floor.candidate.provider_id, "pinned");
+    assert!(selected_floor
+        .unavailable_candidates
+        .iter()
+        .any(|entry| entry.contains("context_window_exceeded(")));
+}
+
+#[test]
 fn forwarder_weighted_and_round_robin_order_are_deterministic() {
     let mut weighted = manifest();
     let inner = weighted.forwarders.get_mut("inner").unwrap();
@@ -1522,5 +1647,9 @@ targets = [{ kind = "provider_model", provider = "multi", model = "m", priority 
     assert_eq!(aliases_at(0), vec!["key1", "key2", "key3"]);
     assert_eq!(aliases_at(1), vec!["key2", "key3", "key1"]);
     assert_eq!(aliases_at(2), vec!["key3", "key1", "key2"]);
-    assert_eq!(aliases_at(6), aliases_at(0), "rotation is periodic in entry count");
+    assert_eq!(
+        aliases_at(6),
+        aliases_at(0),
+        "rotation is periodic in entry count"
+    );
 }

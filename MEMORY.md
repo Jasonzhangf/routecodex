@@ -5574,3 +5574,131 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
   参数：`inject` 对 host 容器服务 + 节点内插件 `services_provided` 联合校验
   （15 tests）；`playground/**` 归 routecodex-v4-governance 模块。
 Tags: #v4 #cordis #node-container #plugin #isolation #experiment
+## 2026-08-16 - GLM/context fields + provider-key cooldown 闭环（verified, DSH semantic PASS）
+- 正式提交：`45af93e9d` + `71f1d51c8`（base `27e93c862`）。Provider Health 的
+  session/global/default-floor/diagnostics availability 统一消费
+  `provider_cooldown_probe_pending`；普通 business success、health success、时间到期
+  均不能复活 provider key，只有注册 probe success 清除 probe state。Runtime/Target
+  只读，不新增 provider 特例或 payload control 字段。
+- 同版修复：GLM HTTP-200 精确错误短语进入 typed error chain；selected-target web search
+  投影；hosted GPT text+image 声明投影 hosted text options；DeepSeek maximal call group
+  紧邻同轮 reasoning；Direct SSE first/inter-event no-byte deadline 均为 120 秒；5555
+  longcontext 移除不满足 262144 token 的 Fable 成员。
+- 验证：Provider Health 54/54、Runtime 465/465、cooldown contracts 8/8、provider probe
+  8/8、provider action 22/22、protocol parity 107 mutation 全拒绝、architecture CI
+  36/36、release build/install；0.90.4566 二进制 SHA256
+  `b5db372afe3551674b705537594ef0b6c2aa5cf9e6bd689ff4137c6823195e51`，一次聚合
+  restart 后 4444/5520/5555/10000 health 全绿。
+- 在线：旧 965400-byte opencode 请求 HTTP 200 + response.completed（227831 input）；
+  cc-sol text+image 深上下文 HTTP 200 + response.completed（236568 input）；key1 HTTP
+  401 达 cooldown 后，在 listener health 仍绿时 fresh sessions 未再选 key1。
+- DSH `dsh-1786854141612-0e3c1546` final 明确 “No P0/P1 findings” 且两次字面
+  `VERDICT: PASS`，仅 4 条 P2；MCP 外层 state 因分类器误判为 fail，按项目语义 PASS
+  规则交付。已知独立基线缺口：provider-action red fixture 仍定位迁移前 Direct terminal
+  字符串，base 同样失败；功能 gate 22/22 绿，未混入本修复。
+# V4 独立构建域（2026-08-16 确证，DSH PASS）
+- Design `V4-INDEPENDENT-BUILD-ISOLATION-20260816`，owner feature `v4.build.independent_domain`，plan `docs/goals/v4-independent-build-isolation-plan.md`；分支 `codex/v4-build-isolation`，base ca668dd68，commits 68d9677e9 / d1dabdca3 / dc84eca2d / 7a5a23671。
+- 唯一 canonical 入口：`cd v4 && npm ci --ignore-scripts && npm run verify:ci`；root 仅薄 dispatcher（`npm --prefix v4 run …`），CI 只装 v4 依赖并调 `verify:ci`。V4 自有 `package.json`/`package-lock.json`（唯一依赖 js-yaml）、tracked `Cargo.lock`、`rust-toolchain.toml`（1.97.1）；Cargo workspace root `v4`，target `v4/target`。
+- 11 个 V4 verifier 从 root `scripts/architecture/` 物理迁入 `v4/scripts/architecture/`，路径一律 `import.meta.url` 解析，禁止 `process.cwd()`；V3 兼容只读 immutable baseline `v4/contracts/v3-baseline/`（feature digest fb4bf4ce…6c9 ← V3 c7192b3a9；resource digest 6943977f…35b8 ← V3 249284bcd），普通 build/verify 禁读活动 V3 maps。
+- 验证证据：verify:ci 全绿（11 gates + 9 consumers + active-index + 4 red suites + isolation 7 red fixtures）；root dispatcher 与无关 cwd 均通过；AppSDK 0.1.2（digest 3685149e…）admission `contract_bound`；负测 `cd v4 && cargo … --manifest-path v4/Cargo.toml --root v4` 稳定失败；write-set 前后 diff 为空（仅 v4/{active,build-control,target} 写入）。
+- DSH review r2 `v4-build-isolation-review-r2`（opencode-go/deepseek-v4-flash）：`VERDICT: PASS`，无 P0/P1；剩余 P2：macOS V4 build/test 覆盖随旧 v4-active-link job 移除（`v4/docs/goals/v4-resource-anchor-complete-plan.md` 残留旧引用待同步）、ubuntu test job 45m 吸收全 V4 矩阵、verify:ci 中 cargo build 与 verify-isolation 因自包含入口各执行两次。
+- 本任务未改 V3、root runtime、sharedmodule、payload/control-plane、冻结 Active/Protected；无全局安装/重启/live traffic 需求（纯 build-governance）。
+- 遗留清理（2026-08-16）：commit 7f633befe 同步全部 V4 goal/design 文档到当前 CI/路径，verify:ci 去重复 build、verify:red 去重复 isolation（verify 正面面独占）；r3 后 verification-map `command_context.cwd=v4` 成文，isolation gate 守护 `build:v4` 且 R8 red fixture 就位；DSH r3 `v4-build-isolation-review-r3` PASS（无 P0/P1）。更早条目中 `scripts/architecture/verify-v4-*.mjs` 是迁移前历史状态，路径已删除，唯一真源 `v4/scripts/architecture/`。
+
+## 2026-08-16 V3 provider response error policy（source/live positive verified；failing replay pending）
+- Provider-local canonical authoring is `response_error_policy`; legacy `semantic_error_policy` is an alias. Both compile into the existing unified provider error action manifest with compiler-injected provider scope; there is no second runtime policy center.
+- A terminal response policy is matched once from bounded protocol facts, then carried by typed `V3ProviderFailureDirective` on the failure side-channel. Error05 must consume that exact policy and must not re-match response-only facts from compressed messages or business payload.
+- Retry timing contract: `max_attempts` includes the initial request; exponential configured backoff saturates at 60s; effective admission delay is `max(configured_backoff, Provider Action Gate delay)`. `retry_same` retries before reselection; `reselect_before_client_projection` selects another candidate first and uses remaining same-provider retry budget only after alternatives are exhausted.
+- Installed/runtime positive evidence: `0.90.4566`, binary SHA256 `977ce9930b5f5ac64f2a225cc9f4732ddbf611e9ebd2f196068c88b1f8c71f52`, aggregate restart running, all 4444/5520/5555/10000 health green, exact GLM OpenAI provider live request completed HTTP 200 with `output_text=OK` and real usage. No canonical archived sample reproduced the wrapped-200 phrases, so failing-shape live replay and DSH Review are still mandatory before claiming full closeout.
+
+## 2026-08-16 V3/V4 根目录退役顺序（Jason 决策）
+- `deprecated/` 不是长期保留面。先清理零消费者旧文件，再完成并验证 V4 独立构建，然后完成并验证 V3 独立构建；仅在两个版本的 canonical build/test/isolation gates 均正常后，物理删除整个 `deprecated/` 并同步移除 archive allowlist、map、gate、red fixture 和文档绑定。
+- 迁移前仍是活动 build input 的文件不得抢先删除；其旧路径删除必须与 V4/V3 owning migration 原子发生。禁止为了过渡把新的旧文件迁入 `deprecated/`，确认退役后直接删除。
+
+## 2026-08-16 V3 route authoring uses keyless provider targets
+- Normal V3 route and forwarder authoring must omit `key`; `V3TargetInterpreter::expand_provider` is the sole owner that expands all provider auth entries and rotates their starting order by deterministic request sample. Explicit `key` is reserved for exact-pin internal control such as continuation, not ordinary user routing config.
+- A forwarder is not required to enumerate multiple auth entries of one provider. The live 10000 default now uses one keyless `opencode-go.deepseek-v4-flash` provider target; after aggregate restart, real route selections rotated across key4/key3/key5. Keep forwarders only for cross-provider aggregation or client-model-to-wire-model mapping.
+Tags: #v3 #config #keyless-target #provider-auth-expansion #forwarder
+
+## 2026-08-16 V3 provider auth secretFile is the key-list truth
+- Provider authoring may reference one `provider.auth.secretFile`; the config compiler is the sole owner that enumerates either one scoped key (`provider = value`) or scoped/unscoped aliases (`provider.keyN = value` / `keyN = value`) and emits existing named auth handles. User TOML must not repeat every key name, and multi-key provider expansion does not require a forwarder.
+- Only `secret_file + secret_key` handles enter the compiled manifest. Secret values remain transport-only and must never enter manifests, payloads, metadata, errors, debug output, or snapshots. Malformed, duplicate, empty, ambiguous mixed-scope, and foreign-only scoped files fail fast.
+- Closure evidence: clean branch `codex/provider-auth-key-file` at `d09120be3`; config crate 24+49+8 tests and architecture mutation gates passed; installed V3 `0.90.4572`; config check, aggregate restart, health on 4444/5520/5555/10000, and a real port-10000 OpenCode Go Responses request returning exact `AUTH_OK` passed; DSH r2 returned `VERDICT: PASS` with no P0/P1.
+Tags: #v3 #config #provider-auth #secret-file #key-expansion #secret-isolation
+
+## 2026-08-16 V4 node-graph Phase 1 closed（DSH r2 PASS）+ AppSDK 0.1.3 冲突教训
+- V4 node-graph Phase 1 已闭环：分支 `codex/v4-node-graph` @ `2e4222dfc`（base 64c1e67ea，即 v4-build-isolation r7 PASS 基线）；`node-graph.contract.json` status=active，request 7 / response 6 / error 6 / config 5，`v4-resource-operation-map.yml` 49/49 `owner_node` 锚定；`verify:ci` exit 0（test OK + gates=12 consumers=9 active-index=ok isolation=ok + red suites=5：node-graph 25/25、relay continuation 17/17、resource binding 12/12、v3 resource coverage 10/10、feature gap 11/11）。
+- DSH `v4-node-graph-r2`（opencode-go/deepseek-v4-flash，base 64c1e67ea..2e4222dfc）：`VERDICT: PASS`，无 P0/P1；P2 三条非阻塞：server/provider 边界节点 owner 在 contract vs mainline-call-map vs audit doc 间待锁不一致（无 gate）、red self-test 用 substring marker 判定（latent 风险）、历史 perl 单点替换的 P0 例外记录。
+- 关键教训：AppSDK 0.1.3 lifecycle migration 与 node-graph Active/Protected fixture 是同一 Active 边界的竞争者，**不能手改 fixture 或简单 merge 合流**；`da0c6c99a` 合并 0.1.3 后 canon 必红（migration records 新 hash vs tracked fixture 旧 hash 双源冲突）。正解是分离生命周期：node-graph 留在 0.1.2 基线收口（已 reset 掉 merge，仅保留 2e4222dfc），0.1.3 走独立正式 migration（分支 `codex/v4-appsdk-013-main-integration` @ 37dbb271c 完整保留）；verify 的 restoreHermeticActive 每次先 rm 再 cp，手放 active fixture 不可作为验证真相。
+- 下一步长线目标：`v4/docs/goals/v4-long-horizon-goal-prompt.md` Phase 2（Cordis NodeContainer + 插件框架）。
+Tags: #v4 #node-graph #appsdk #lifecycle-boundary #dsh-pass
+
+## 2026-08-16 V3 context-window routing correction
+- Codex 本机 `model_catalog.cc.json` / `profile-models.json` 是 cc-sol `gpt-5.6-sol` 的模型目录真值：`context_window=max_context_window=272000`；provider authoring 中旧 `maxContext=200000` 不能据此断言真实上游容量只有 200K。
+- Context admission 统一用 RCC 的 `request_input_tokens` 对比候选的 `max_context_tokens`：低于 90% 保持配置优先级；达到 90% 但未超过 100% 时只降低优先级、保留候选；超过 100% 时在 transport 前过滤该候选。不同 provider tokenizer 不同，不能用 fable 返回的 `344473` 反推 cc-sol 的请求 token 数或把 cc-sol 502 直接定性为超限。
+- Fable 的候选窗口为 262144；当 RCC 估算已超过该窗口时必须过滤。若 RCC 估算未超限但 provider 因 tokenizer 差异明确返回 context 400，则保持 health-neutral、进入 Error01-05 并切换。HTTP 502 只有状态和无 body 证据时只能判定为上游 502，不能推断具体请求原因。
+Tags: #v3 #context-window #priority #90-percent #hard-filter #provider-tokenizer #evidence-boundary
+
+## 2026-08-16 V4 AppSDK 0.1.3 node-graph closeout delivered（merge d6ea7ee42）
+- 交付线：`codex/v4-node-graph-appsdk013-closeout`（b07e639d3，DSH r2 字面 VERDICT: PASS、无 P0/P1）--no-ff 合入本地 main；merge commit `d6ea7ee42`。DSH r2 3 条 P2 非阻塞：ToolHarvest 标记 Observer 待 M3 消费方、PluginKind::kind() write-only、source-binding gate 仍为 string-presence。
+- merge 后主 tree 验证全绿：`cd v4 && npm run verify:ci`（red suites=8）、root `npm run verify:v4`、runtime build-consumer + l2 test-consumer 21/21、appsdk 0.1.3 `verify --admission v4` => `{"ok":true,"stage":"contract_bound"}`。
+- admission 经验：verify:ci 会在 `v4/generated/` 写 project.compiled.json；若该文件来自旧 0.1.2 compile，admission 报 INVALID_ARTIFACT_SCHEMA。closeout 标准是先跑完 build/test-consumer，再把 generated 移到 /tmp（可再生忽略产物），再跑 admission。
+- 交付边界：未 push origin/main（本地 main 与远端 V3-admin 线 diverged，非 FF 不 force）；未删 worktree/branch；V3 dirty 工作树原样保留（note/MEMORY/package.json 冲突以两边内容都保留解决，未提交）。
+Tags: #v4 #appsdk013 #node-graph #closeout #delivery #dsh-pass
+
+## 2026-08-16 Track B V4 Phase2 plugin-manager/admin 交付（DSH r4 PASS）
+- 交付线 `codex/v4-plugin-management-admin` @ `aff16a636`（base d6ea7ee42）；handoff `.agent-collab/handoff/v4-phase2-plugin-manager-admin-worker.json`；未合并 main、未 push。
+- 已确证：`publish_gate` Poisoned 必须 `into_inner` 恢复、只有 WouldBlock 才是 `ConcurrentPublish`（红测证明 pre-fix 永久返回 ConcurrentPublish）；`ManagerView` 单锁快照是 inspector 唯一读取面；`current_release_rlibs` 只消费 cargo 图，不扫 deps 目录。
+- DSH r4 字面 `VERDICT: PASS` 无 P0/P1；2 条 P2 非阻塞：`v4_plugin_manager_l2_regression` gate id 未登记 resource/verification map；red/green 跨 commit（原始红测已录 evidence.jsonl）。
+- 未完成：Track A（cordis host / NodeContainer）未合入；LifecyclePort 真 adapter 绑定归 Track A 验收；Track B crates 进 main `v4/Cargo.toml` members 待 merge。
+Tags: #v4 #phase2 #track-b #plugin-manager #runtime-inspector #admin #dsh-pass
+
+## 2026-08-16 Track B 收尾：资源 map L2 gate 登记（DSH r5 PASS）
+- 交付线更新为 `codex/v4-plugin-management-admin` @ `889f4f3a8`（在 aff16a636 之上）。
+- 已确证：`v4-resource-operation-map.yml` 的 `v4.plugin_management.*` / `v4.admin.projection` `verification_gate` 必须显式登记 L2 regression gate id；`verify-v4-resource-binding.mjs` 会机器校验 gate 存在于 verification-map.json（53 resources anchored）。此模式对后续新资源（如 Track A node-container）同样适用。
+- DSH r5 字面 `VERDICT: PASS` 无 P0/P1/P2；Track B 无未结 findings。
+Tags: #v4 #phase2 #track-b #resource-map #l2-gate #dsh-pass
+
+## 2026-08-16 V4 Phase 2 Track A Cordis/NodeContainer 收口（DSH PASS）
+- Local main `b3703a340` contains Track A after a fast-forward merge: real Cordis `Context/Fiber/Effect` host, Rust typed `NodeContainer` lifecycle and plan-hash binding, lifecycle failure/dispose pairs, and canonical functional-gate wiring.
+- A verification-map functional command is not a real required gate until the canonical `scripts/test.mjs` executes it; `verify-isolation.mjs` now enforces this with a negative fixture. File ownership scanning uses tracked plus ordinary untracked non-ignored files, preventing ignored package artifacts from creating local/CI drift without hiding real source additions.
+- Closure evidence: V4 `verify:ci` complete admission matrix PASS, Cordis host 4/4, NodeContainer L2 9/9, AppSDK 0.1.3 admission `contract_bound`; DSH `v4-tracka-full-range-r3-20260816` returned `VERDICT: PASS` with no P0/P1.
+- Honest boundary: JS host to Rust NodeContainer execution binding remains `binding pending` and belongs to M8. Before activation, M8 must replace/remove the host's hardcoded drain projection, define the lifecycle transition mapping, and add a joint JS-Rust integration test; independent green suites do not prove that pending edge.
+Tags: #v4 #phase2 #track-a #cordis #node-container #functional-gate #dsh-pass #m8
+- 2026-08-16: Jason confirmed the observability direction: abandon the TUI experiment; WebUI is the default request/response surface with workdir+session grouping, success/error views, collapsible details, global statistics, and a standard chronological order mode. `routecodex start` must not take over the invoking terminal by default; local request printing is opt-in via `--print`, while per-port file logs remain separate. Tags: #webui #console-silent #print-flag #request-observability
+
+## 2026-08-16 — Responses malformed input must retain typed error origin
+
+- `reasoning.effort` is a qualitative string field. A numeric value such as `7` is malformed client payload; Req02 must reject it rather than coerce, strip, map to a budget, or send it upstream.
+- Responses Relay request canonicalization failures require a dedicated typed error origin. Only `ClientInboundCanonical` may project HTTP 400 `invalid_responses_request` through Error01-06.
+- Provider-response projection failures and internally generated servertool/web-search request canonicalization failures must retain their separate runtime origins and must never be relabeled as client input.
+- Verified on installed V3 0.90.4576: exact numeric replay HTTP 400 with no provider observability; valid `reasoning.effort = "high"` replay HTTP 200 completed; DSH review PASS.
+- 2026-08-16: 6666 cc-sol Responses SSE silent-close root cause was an empty `response.output_item.added` lifecycle frame committing Resp15 before provider failure/EOF. Rust provider SSE codec now buffers empty in-progress message/reasoning items; non-empty output commits normally. Candidate `7ff223474` installed/restarted as `rccv3 0.90.4566`; live 6666 request 832649 completed HTTP 200, and provider 502 sample 832675 switched explicitly. V2 opencode-go auth requires each key's `secretFile + secretKey`.
+- 2026-08-16 follow-up: provider HTTP 400 must not enter cross-session/global provider health. Runtime policy records a session-scoped transient bypass for the affected provider/key, then reselects; other sessions remain eligible. Installed/restarted `rccv3 0.90.4567`; all configured listener health checks pass.
+
+## 2026-08-17 V4 NodeContainer host-binding candidate (c2eda3fd4)
+- Real Cordis `Context/Fiber/Effect` host drives Rust `NodeContainer` typed lifecycle port; Rust owns lifecycle state and atomic `in_flight`; JS mirrors and cross-checks after enter/exit; drain rejects non-zero in-flight; graph/plan hash drift rejected before Rust declaration.
+- AppSDK project dependency validation is sequential: a module must appear before any module that lists it in `dependency_modules`. `routecodex-v4-node-container` must precede `routecodex-v4-cordis-host`.
+- `npm run verify:ci` and `appsdk verify --admission v4` are green on the candidate; DSH review, merge, production install/restart/live replay are remaining.
+Tags: #v4 #phase2 #cordis #node-container #host-binding #appsdk #m8
+
+## 2026-08-17 V4 NodeContainer host-binding delivered（merge 30fd809c）
+- Lifecycle failures must not enter `v4.control.error_chain`; NodeContainer has no product request/session/target scope. They use control resource `v4.node_container.lifecycle_failure` projected only on the lifecycle port.
+- Rust `host_binding.rs` is the typed lifecycle contract owner (`LifecycleOperation`, `LifecycleFailureCode`, `LifecycleFailureFact`, `HostResponse.failure`, `HostRequestIdentity.node_id`); JS `index.mjs` is a strict decoder/encoder and fails fast on unsolicited/malformed responses. Protocol decode errors are typed failure facts.
+- DSH `v4-phase2-host-binding-dsh-r5` PASSed exact branch commit `3b322703c601cce73eafbf73f8cc6b7fde55aac1` with 4 non-blocking P2 items; r4 is not evidence because it used a truncated commit hash. Branch merged into local main as `30fd809c74d83143146a60f5f8104648690c5766` via `--no-ff`, preserving unrelated V3 dirty worktree.
+- Post-merge verification passed: `npm run test:cordis-host` 15/15, `npm run verify:ci` complete admission matrix (NodeContainer L2 11/11, gates=19, red suites=13), `appsdk verify --admission v4` contract_bound. No production install/restart/live replay is claimed for this V4 source/contract slice.
+Tags: #v4 #phase2 #cordis #node-container #host-binding #lifecycle-failure #dsh-pass #m8
+
+## 2026-08-17 V4 M3 real Cordis -> Rust execution bridge delivered
+- Main HEAD `6497190b8` adds the real Cordis host -> Rust `NodeContainer::execute_with_plan_hash` execution bridge. `execute_node` is plan-hash bound, uses typed keyless M3 builtin handles (`v4.test.control`, `v4.test.echo`, `v4.test.observe`), and keeps lifecycle and execution response schemas separate.
+- Rust owns execution and typed failure facts; JS owns strict bridge encoding/decoding. `NodeExecutionInput` denies unknown fields. Control failures remain side-channel resources and never enter provider/client payloads.
+- DSH `v4-m3-execution-bridge-20260817-r2` completed with literal `VERDICT: PASS` after the r1 P2 repair. Review left only non-blocking P2 observations in the final: dead lifecycle decoder branch/asymmetric keys and a malformed-output fixture that should dispatch through `executeNode`.
+- Evidence: node-container 13/13, cordis-bridge 7/7, Cordis host 22/22, V4 `verify:ci` complete admission matrix (gates=19, consumers=13, isolation=ok, red suites=13), AppSDK admission `contract_bound`. No install/restart/live V4 traffic, origin push, or worktree/branch cleanup claimed.
+Tags: #v4 #phase2 #m3 #cordis #node-container #execution-bridge #dsh-pass
+
+## 2026-08-17 V3 provider priority health policy contract
+- Unified policy is error-class/key based, never cc-sol/model/provider hard-coded. Priority only controls candidate selection: before threshold, failure reselects the next lower-priority candidate; the next request starts from the highest-priority available key.
+- HTTP 401/403 are non-recoverable account errors: same provider key requires 2 consecutive failures before a 1-hour cooldown; probe interval is 1 hour; only explicit probe success restores availability.
+- HTTP 429 and all 5xx, including 502, are recoverable errors: 3 consecutive failures before a 15-minute cooldown; probe interval is 15 minutes; only explicit probe success restores availability.
+- Success clears that key's consecutive-failure counter but cannot bypass an active provider cooldown. The health owner must classify typed error family and key; generic provider config must not collapse these categories into one threshold.
+Tags: #v3 #provider-health #priority-routing #cooldown #probe #account-error #recoverable-error

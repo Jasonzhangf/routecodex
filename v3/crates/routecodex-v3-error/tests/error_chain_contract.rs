@@ -75,9 +75,15 @@ fn error_handling_center_owns_error01_06_and_preserves_provider_error_status() {
             && projected.body["error"].get("class").is_none()
             && projected.body["error"].get("decision").is_none()
             && projected.body["error"].get("target_exhausted").is_none()
-            && projected.body["error"].get("candidates_remaining").is_none()
-            && projected.body["error"].get("route_pool_remaining_after_exclusion").is_none()
-            && projected.body["error"].get("default_pool_available").is_none()
+            && projected.body["error"]
+                .get("candidates_remaining")
+                .is_none()
+            && projected.body["error"]
+                .get("route_pool_remaining_after_exclusion")
+                .is_none()
+            && projected.body["error"]
+                .get("default_pool_available")
+                .is_none()
             && projected.body["error"].get("external_error").is_none()
             && projected.body["error"].get("internal_code").is_none(),
         "Error06 body must not carry control-plane fields: {}",
@@ -112,10 +118,7 @@ fn error_handling_center_never_projects_an_error_as_http_success() {
 
     assert_eq!(projected.status, 502);
     assert!(projected.status >= 400);
-    assert_eq!(
-        projected.body["error"]["code"],
-        "provider_business_error"
-    );
+    assert_eq!(projected.body["error"]["code"], "provider_business_error");
     assert!(
         projected.body["error"].get("decision").is_none(),
         "Error06 body must not carry the execution decision: {}",
@@ -297,12 +300,19 @@ fn internal_runtime_failure_projects_numbered_internal_code_without_external_lin
     });
 
     assert_eq!(projected.status, 500);
-    assert_eq!(projected.body["error"]["code"], "provider_auth_handle_missing");
+    assert_eq!(
+        projected.body["error"]["code"],
+        "provider_auth_handle_missing"
+    );
     assert!(
         projected.body["error"].get("internal_code").is_none()
             && projected.body["error"].get("internal_node").is_none()
-            && projected.body["error"].get("internal_owner_feature_id").is_none()
-            && projected.body["error"].get("internal_module_block").is_none(),
+            && projected.body["error"]
+                .get("internal_owner_feature_id")
+                .is_none()
+            && projected.body["error"]
+                .get("internal_module_block")
+                .is_none(),
         "Error06 body must not carry internal error identity: {}",
         projected.body["error"]
     );

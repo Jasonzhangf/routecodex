@@ -127,7 +127,7 @@ resources:
     lifecycle: v3.config.compile
     owner_crate: routecodex-v3-config
     owner_node: V3Config05ManifestPublished
-    identity: [providerId, authAlias, envOrTokenFileHandle]
+    identity: [providerId, authAlias, envOrTokenFileOrSecretFileHandle]
     allowed_writers: [V3Config05ManifestPublished]
     allowed_readers: [V3Transport13ResponsesHttpRequest]
     forbidden_writers: [V3DebugArtifact, V3Error06ClientProjected]

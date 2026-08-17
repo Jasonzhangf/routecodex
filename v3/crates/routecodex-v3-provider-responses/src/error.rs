@@ -33,15 +33,9 @@ pub enum V3ProviderError {
     #[error("Responses stream flag for request {request_id} must be boolean")]
     InvalidStreamIntent { request_id: String },
     #[error("namespace tool flattening failed for request {request_id}: {detail}")]
-    NamespaceToolFlattenFailed {
-        request_id: String,
-        detail: String,
-    },
+    NamespaceToolFlattenFailed { request_id: String, detail: String },
     #[error("Responses function tool shape failed for request {request_id}: {detail}")]
-    FunctionToolShapeFailed {
-        request_id: String,
-        detail: String,
-    },
+    FunctionToolShapeFailed { request_id: String, detail: String },
     #[error("invalid data:{media_type} payload for request {request_id}: {reason}")]
     InvalidDataImage {
         request_id: String,

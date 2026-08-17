@@ -62,9 +62,7 @@ pub fn new_forwarder_with_target(
     }
 }
 
-pub fn forwarder_target_providers(
-    forwarder: &V3ForwarderAuthoringConfig,
-) -> Vec<String> {
+pub fn forwarder_target_providers(forwarder: &V3ForwarderAuthoringConfig) -> Vec<String> {
     forwarder
         .targets
         .iter()

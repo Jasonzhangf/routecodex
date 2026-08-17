@@ -327,7 +327,10 @@ pub struct V3ProviderSemanticErrorPolicyAuthoringConfig {
     pub policy_id: String,
     #[serde(rename = "match")]
     pub matcher: V3ProviderErrorMatcherAuthoringConfig,
-    pub action: V3ProviderErrorActionAuthoringConfig,
+    #[serde(default)]
+    pub path: Option<Vec<V3ProviderDispositionStepAuthoringConfig>>,
+    #[serde(default)]
+    pub action: Option<V3ProviderErrorActionAuthoringConfig>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -477,7 +480,7 @@ pub struct V3ServerAuthoringConfig {
     pub bind: String,
     pub port: u16,
     pub routing_group: String,
-    #[serde(default = "default_responses_endpoint")]
+    #[serde(default = "default_all_entry_protocols")]
     pub endpoints: Vec<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
@@ -521,7 +524,11 @@ pub struct V3ProviderAuthoringConfig {
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     #[serde(default)]
     pub health: Option<V3ProviderHealthAuthoringConfig>,
-    #[serde(default)]
+    #[serde(
+        default,
+        rename = "response_error_policy",
+        alias = "semantic_error_policy"
+    )]
     pub semantic_error_policy: Vec<V3ProviderSemanticErrorPolicyAuthoringConfig>,
     #[serde(default)]
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
@@ -956,9 +963,7 @@ impl V3Config05ManifestPublished {
     /// provider model declarations. The Virtual Router consumes this index to
     /// construct implicit capability pools without interpreting provider
     /// internals itself.
-    pub fn capability_model_candidates(
-        &self,
-    ) -> BTreeMap<String, Vec<V3CapabilityModelCandidate>> {
+    pub fn capability_model_candidates(&self) -> BTreeMap<String, Vec<V3CapabilityModelCandidate>> {
         let mut index: BTreeMap<String, Vec<V3CapabilityModelCandidate>> = BTreeMap::new();
         for provider in self.providers.values() {
             if !provider.enabled {
@@ -1303,6 +1308,11 @@ fn default_hub_v1_skeleton() -> String {
     "hub_v1".to_string()
 }
 
-fn default_responses_endpoint() -> Vec<String> {
-    vec!["responses".to_string()]
+fn default_all_entry_protocols() -> Vec<String> {
+    vec![
+        "responses".to_string(),
+        "anthropic".to_string(),
+        "gemini".to_string(),
+        "openai_chat".to_string(),
+    ]
 }

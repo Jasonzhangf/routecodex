@@ -134,28 +134,38 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
 
 pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
     provider_protocol: V3HubProviderWireProtocol,
-    provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: &V3RuntimeStreamObservation,
     anthropic_context: &V3AnthropicResponsesProjectionContext,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    // upstream 200 + body 0 字节（如 glmrelay_anthropic / glmrelay_openai 在
+    // /v1/responses 上声明 text/event-stream 但不发帧）：先把 stream 的第一个
+    // chunk 抽出判定；零 chunk 必须在 contract 边界区分成 ProviderResponseEmpty，
+    // 而不是走 codec EOF-WITHOUT-TERMINAL，避免被误归类为协议缺陷，并允许
+    // Error05 policy 把它当 provider_runtime_error 立即切 provider。
+    let Some(first_chunk) = futures_util::StreamExt::next(&mut provider).await else {
+        let provider_id = format!("{provider_protocol:?}");
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEmpty { provider_id });
+    };
+    let replayed = merge_first_chunk_back_into_provider_stream(first_chunk, provider);
     match provider_protocol {
         V3HubProviderWireProtocol::Responses => {
             build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
-                provider,
+                replayed,
                 observation,
             )
             .await
         }
         V3HubProviderWireProtocol::OpenAiChat => {
             build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
-                provider,
+                replayed,
                 observation,
             )
             .await
         }
         V3HubProviderWireProtocol::Anthropic => {
             build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events_with_context(
-                provider,
+                replayed,
                 observation,
                 anthropic_context,
             )
@@ -165,6 +175,15 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
             format!("Responses relay cannot decode provider stream protocol {other:?}"),
         )),
     }
+}
+
+fn merge_first_chunk_back_into_provider_stream(
+    first_chunk: Result<Vec<u8>, routecodex_v3_provider_responses::V3ProviderError>,
+    tail: routecodex_v3_provider_responses::V3ProviderSseStream,
+) -> routecodex_v3_provider_responses::V3ProviderSseStream {
+    use futures_util::stream;
+    let head = stream::once(async move { first_chunk });
+    Box::pin(head.chain(tail))
 }
 
 #[derive(Default)]

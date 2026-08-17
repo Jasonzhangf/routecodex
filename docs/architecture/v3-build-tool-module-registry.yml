@@ -1,6 +1,24 @@
 version: 1
 status: active
 modules:
+  - module_id: v3-entry-protocol-config
+    owner_feature_id: v3.entry_protocol_registry_contract
+    owned_paths:
+      - v3/crates/routecodex-v3-config/src/defaults.rs
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+    allowed_dependencies:
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-runtime
+    forbidden_paths:
+      - ~/.rcc
+      - src
+      - sharedmodule
+    required_gates:
+      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config
+      - npm run verify:v3-entry-protocol-endpoint-binding
+      - npm run verify:v3-module-boundaries
+
   - module_id: v3-global-binary-install
     owner_feature_id: v3.global_binary_install
     owned_paths:

@@ -276,6 +276,9 @@ verification:
     V1 endpoint bindings and server execution declarations, Jason-defined 5555 route
     ordering, provider type mapping, local token_file handle materialization, and
     secret-free manifest debug output.
+  - Provider auth key-file coverage locks single-key and list expansion into ordered
+    secret_file + secret_key handles, rejects malformed/duplicate/empty keys and mixed
+    explicit authoring, and proves no secret value is materialized in manifest entries.
   - Transport-bound V2 provider responses contract locks WebSocket v2 projection plus
     negative HTTP-only remote_continuation and missing websocket_v2_url cases.
   - Live closure still requires global install, V3 managed restart on 5555, health,
@@ -383,8 +386,10 @@ verification:
     499.
   - Negative terminal-observation coverage locks Direct and Relay body Drop after
     failed as provider terminal failure 502, never success or client_disconnect.
-  - Negative tests lock no fabricated post-commit Error06, no typed Error01-to-text
-    reconstruction, no provider-stage attribution for client disconnect, no pre-route
+  - Negative tests lock no fabricated post-commit Error06 for client disconnect or
+    clean EOF; provider Error01 is projected once through the shared Error01-06
+    terminal SSE event path, with no typed Error01-to-text reconstruction, no
+    provider-stage attribution for client disconnect, no pre-route
     pending duplicate, no ANSI dim on the human line, no ANSI in plain mode, no diagnostic
     loss, stable machine-field alignment for oversized sessions, no synthesized internal/external
     timing, no Server-built dry-run runtime observability, fail-fast retired dry-run
@@ -421,8 +426,8 @@ verification:
   build:
   - npm run install:v3
   notes:
-  - No flag disables persistence regardless of config; --snap authorizes Relay only;
-    --snapall authorizes Relay and Direct; blank stage selectors are rejected.
+  - No flag enables only error samples; --snap and --snapall authorize full Direct
+    and Relay samples; blank stage selectors are rejected.
   - Server persists only Debug-redacted/budgeted copies, captures live Direct JSON/SSE
     without changing transport semantics, propagates filesystem scan/write/eviction
     failures, and retains at most 100 request directories per endpoint/port.

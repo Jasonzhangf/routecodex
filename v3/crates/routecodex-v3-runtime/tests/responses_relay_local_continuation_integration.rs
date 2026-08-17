@@ -3316,10 +3316,7 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
     assert_eq!(tools[0]["type"], "function");
     assert_eq!(tools[0]["function"]["name"], "exec");
     assert_eq!(tool_name(tools.last().unwrap()), Some("reasoningStop"));
-    assert!(
-        tools[0]["function"]["parameters"].is_object(),
-        "{tools:?}"
-    );
+    assert!(tools[0]["function"]["parameters"].is_object(), "{tools:?}");
     assert!(tools[0].get("custom").is_none(), "{tools:?}");
     match result.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
@@ -4505,7 +4502,9 @@ async fn responses_thinking_field_reaches_responses_provider_wire() {
         12_000,
     )
     .await
-    .expect("responses provider wire must accept Codex thinking field without UnmappedOutboundFields");
+    .expect(
+        "responses provider wire must accept Codex thinking field without UnmappedOutboundFields",
+    );
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 1, "provider send must occur: {captures:?}");

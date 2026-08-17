@@ -167,28 +167,13 @@ fn normalize_deepseek_thinking_stopless_tool_choice(
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
 ) {
-    if !matches!(
+    if matches!(
         provider_protocol,
         V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Responses
-    ) || (selected.model_id != "deepseek-v4-flash" && selected.wire_model != "deepseek-v4-flash")
-        || !payload_is_thinking_mode(payload)
+    ) && (selected.model_id == "deepseek-v4-flash" || selected.wire_model == "deepseek-v4-flash")
+        && payload_is_thinking_mode(payload)
     {
-        return;
-    }
-    let has_reasoning_stop = payload
-        .get("tools")
-        .and_then(Value::as_array)
-        .is_some_and(|tools| {
-            tools.iter().any(|tool| {
-                tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
-                    || tool.pointer("/function/name").and_then(Value::as_str)
-                        == Some("reasoningStop")
-            })
-        });
-    if has_reasoning_stop {
-        if let Some(object) = payload.as_object_mut() {
-            object.remove("tool_choice");
-        }
+        provider_compat_core::apply_deepseek_v4_request_compat(payload);
     }
 }
 
@@ -239,6 +224,7 @@ mod tests {
             model_capabilities: vec!["text".to_string()],
             web_search_execution_mode: V3WebSearchExecutionMode::None,
             max_context_tokens: None,
+            context_token_estimate_scale_bps: 10_000,
             base_url: "https://provider.invalid/v1".to_string(),
             responses_process: None,
             responses_transport: V3ResponsesTransportKind::Http,

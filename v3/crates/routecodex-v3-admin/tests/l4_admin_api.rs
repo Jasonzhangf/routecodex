@@ -1,7 +1,7 @@
 // feature_id: v3.admin_api_integration
 // Admin REST API 黑盒集成测试：使用 axum 自带 test server 拉起 in-process
 // 服务，覆盖 Dashboard / Routes / Providers / Revisions / Reload 端点。
-use routecodex_v3_admin::{AppState, ProviderHealthEntry, router};
+use routecodex_v3_admin::{router, AppState, ProviderHealthEntry};
 use routecodex_v3_config::{
     V3Config02AuthoringParsed, V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind,
     V3SelectionPolicy, V3SelectionStrategy, V3ServerAuthoringConfig,
@@ -152,13 +152,31 @@ async fn routes_get_returns_tree() {
         .expect("routes response");
     assert!(response.status().is_success());
     let body: serde_json::Value = response.json().await.expect("routes json");
-    let groups = body.get("groups").and_then(|v| v.as_array()).expect("groups array");
+    let groups = body
+        .get("groups")
+        .and_then(|v| v.as_array())
+        .expect("groups array");
     assert!(!groups.is_empty(), "groups populated from authored config");
-    let ports = groups[0].get("ports").and_then(|v| v.as_array()).expect("ports");
-    let pools = ports[0].get("pools").and_then(|v| v.as_array()).expect("pools");
-    let tiers = pools[0].get("tiers").and_then(|v| v.as_array()).expect("tiers");
-    let members = tiers[0].get("members").and_then(|v| v.as_array()).expect("members");
-    assert_eq!(members[0].get("provider").and_then(|v| v.as_str()), Some("p1"));
+    let ports = groups[0]
+        .get("ports")
+        .and_then(|v| v.as_array())
+        .expect("ports");
+    let pools = ports[0]
+        .get("pools")
+        .and_then(|v| v.as_array())
+        .expect("pools");
+    let tiers = pools[0]
+        .get("tiers")
+        .and_then(|v| v.as_array())
+        .expect("tiers");
+    let members = tiers[0]
+        .get("members")
+        .and_then(|v| v.as_array())
+        .expect("members");
+    assert_eq!(
+        members[0].get("provider").and_then(|v| v.as_str()),
+        Some("p1")
+    );
 }
 
 #[tokio::test]

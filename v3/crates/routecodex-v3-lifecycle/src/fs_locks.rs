@@ -1,6 +1,8 @@
 use super::*;
 
-pub(crate) fn validate_auth_handles(manifest: &V3Config05ManifestPublished) -> Result<(), V3LifecycleError> {
+pub(crate) fn validate_auth_handles(
+    manifest: &V3Config05ManifestPublished,
+) -> Result<(), V3LifecycleError> {
     for provider in manifest
         .providers
         .values()
@@ -156,7 +158,10 @@ pub(crate) fn write_status(
     )
 }
 
-pub(crate) fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), V3LifecycleError> {
+pub(crate) fn write_json_atomic<T: Serialize>(
+    path: &Path,
+    value: &T,
+) -> Result<(), V3LifecycleError> {
     let parent = path.parent().ok_or_else(|| {
         V3LifecycleError::Validation(format!("state path has no parent: {}", path.display()))
     })?;
@@ -178,4 +183,3 @@ pub(crate) fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<
 pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, V3LifecycleError> {
     Ok(serde_json::from_reader(File::open(path)?)?)
 }
-

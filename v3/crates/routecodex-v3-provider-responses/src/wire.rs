@@ -445,27 +445,12 @@ fn normalize_deepseek_thinking_stopless_tool_choice(
     body: &mut Value,
     target: &V3ResponsesProviderTarget,
 ) {
-    if target.provider_type != "openai_chat"
-        || (target.canonical_model_id != "deepseek-v4-flash"
-            && target.wire_model != "deepseek-v4-flash")
-        || !v3_wire_payload_is_thinking_mode(body)
+    if target.provider_type == "openai_chat"
+        && (target.canonical_model_id == "deepseek-v4-flash"
+            || target.wire_model == "deepseek-v4-flash")
+        && v3_wire_payload_is_thinking_mode(body)
     {
-        return;
-    }
-    let has_reasoning_stop = body
-        .get("tools")
-        .and_then(Value::as_array)
-        .is_some_and(|tools| {
-            tools.iter().any(|tool| {
-                tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
-                    || tool.pointer("/function/name").and_then(Value::as_str)
-                        == Some("reasoningStop")
-            })
-        });
-    if has_reasoning_stop {
-        if let Some(object) = body.as_object_mut() {
-            object.remove("tool_choice");
-        }
+        provider_compat_core::apply_deepseek_v4_request_compat(body);
     }
 }
 

@@ -292,7 +292,8 @@ impl V3DebugRuntime {
             execution_id: scope.execution_id.clone(),
             node_id: node_id.into(),
             event: event.into(),
-            details: details.map(|value| project_debug_value_verbatim(&self.config.redaction, value)),
+            details: details
+                .map(|value| project_debug_value_verbatim(&self.config.redaction, value)),
         };
         {
             let mut state = self.write_state()?;

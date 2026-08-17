@@ -80,7 +80,10 @@ pub(crate) fn publish_manifest(
     })
 }
 const HUB_V1_ENTRY_PROTOCOLS: [&str; 4] = ["responses", "anthropic", "gemini", "openai_chat"];
-use crate::entry_protocol_validation::{endpoint_patterns as expected_entry_protocol_endpoint_patterns, execution_modes as expected_entry_protocol_execution_modes};
+use crate::entry_protocol_validation::{
+    endpoint_patterns as expected_entry_protocol_endpoint_patterns,
+    execution_modes as expected_entry_protocol_execution_modes,
+};
 fn compile_hub_v1(
     authoring: Option<V3HubV1AuthoringConfig>,
 ) -> Result<Option<V3HubV1Manifest>, V3ConfigError> {
@@ -115,7 +118,9 @@ fn compile_hub_v1(
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
     if protocols.len() != authoring.entry_protocols.len() {
-        return Err(validation("hub_v1 entry_protocols contain duplicate protocol"));
+        return Err(validation(
+            "hub_v1 entry_protocols contain duplicate protocol",
+        ));
     }
     for protocol in &protocols {
         if !HUB_V1_ENTRY_PROTOCOLS.contains(protocol) {
@@ -125,7 +130,9 @@ fn compile_hub_v1(
         }
     }
     if protocols.len() != HUB_V1_ENTRY_PROTOCOLS.len() {
-        return Err(validation("hub_v1 entry_protocols must declare all closed protocols"));
+        return Err(validation(
+            "hub_v1 entry_protocols must declare all closed protocols",
+        ));
     }
     if authoring.hook_set_id.trim().is_empty() {
         return Err(validation("hub_v1 hook_set_id is empty"));
@@ -283,7 +290,9 @@ fn compile_entry_protocol_bindings(
     for binding in authoring {
         let entry_protocol = binding.entry_protocol.trim().to_string();
         if entry_protocol.is_empty() {
-            return Err(validation("entry protocol binding has empty entry_protocol"));
+            return Err(validation(
+                "entry protocol binding has empty entry_protocol",
+            ));
         }
         if !HUB_V1_ENTRY_PROTOCOLS.contains(&entry_protocol.as_str()) {
             return Err(validation(format!(
@@ -411,7 +420,9 @@ fn compile_entry_protocol_bindings(
     }
 
     if protocols != declared {
-        return Err(validation("hub_v1 entry protocol binding registry must declare all hub_v1 entry protocols"));
+        return Err(validation(
+            "hub_v1 entry protocol binding registry must declare all hub_v1 entry protocols",
+        ));
     }
     bindings.sort_by(|left, right| {
         let left_index = HUB_V1_ENTRY_PROTOCOLS
@@ -645,8 +656,8 @@ fn compile_providers(
                     routing_group: None,
                 },
                 matcher: policy.matcher,
-                path: None,
-                action: Some(policy.action),
+                path: policy.path,
+                action: policy.action,
             }
         }));
         providers.insert(
@@ -684,14 +695,14 @@ fn normalize_v3_provider_compatibility_profile(profile: Option<String>) -> Optio
 
 /// v3-native inline provider 的 compatibility profile 编译默认：只允许已
 /// 登记给 v3-native 的条目，避免 v2 provider-directory 的整表默认静默改变
-/// v3-native 既有配置的 wire 行为。当前唯一已登记条目是 opencode-go 的
+/// v3-native 既有配置的 wire 行为。已登记条目包括 opencode-go 的
 /// `responses:deepseek-console-go`（Console Go 网关工具映射 + 交错工具段
-/// reasoning 注入契约）。
-fn resolve_v3_native_provider_default_compatibility_profile(
-    provider_id: &str,
-) -> Option<String> {
+/// reasoning 注入契约）和 cc-sol 的 `responses:thinking-tags`（direct
+/// 当前轮 thinking tag / reasoning_content 投影）。
+fn resolve_v3_native_provider_default_compatibility_profile(provider_id: &str) -> Option<String> {
     match provider_id.trim() {
         "opencode-go" => Some("responses:deepseek-console-go".to_string()),
+        "cc-sol" => Some("responses:thinking-tags".to_string()),
         _ => None,
     }
 }
@@ -861,21 +872,34 @@ fn compile_auth(
                 "provider {provider_id} auth {} secret_file and secret_key must be declared together", entry.alias
             )));
         }
-        if entry.secret_file.as_deref().is_some_and(|path| path.trim().is_empty()) {
+        if entry
+            .secret_file
+            .as_deref()
+            .is_some_and(|path| path.trim().is_empty())
+        {
             return Err(validation(format!(
-                "provider {provider_id} auth {} secret_file cannot be empty", entry.alias
+                "provider {provider_id} auth {} secret_file cannot be empty",
+                entry.alias
             )));
         }
-        if entry.secret_key.as_deref().is_some_and(|key| key.trim().is_empty()) {
+        if entry
+            .secret_key
+            .as_deref()
+            .is_some_and(|key| key.trim().is_empty())
+        {
             return Err(validation(format!(
-                "provider {provider_id} auth {} secret_key cannot be empty", entry.alias
+                "provider {provider_id} auth {} secret_key cannot be empty",
+                entry.alias
             )));
         }
         if let (Some(secret_file), Some(secret_key)) = (&entry.secret_file, &entry.secret_key) {
             // 集中 secret 文件在编译期解析校验：文件可读、key 存在、值非空——fail-fast
             // 在 config check / 启动阶段暴露；值不写入 manifest（避免明文进快照）。
             crate::read_v3_secret_file_key(secret_file, secret_key).map_err(|error| {
-                validation(format!("provider {provider_id} auth {} secret_file validation failed: {error}", entry.alias))
+                validation(format!(
+                    "provider {provider_id} auth {} secret_file validation failed: {error}",
+                    entry.alias
+                ))
             })?;
         }
         if let Some(env) = &entry.env {
@@ -948,7 +972,8 @@ fn compile_models(
                 return Err(validation(format!(
                     "provider {provider_id} model {id} capability streaming is a transport intent, not a model capability; use supports_streaming"
                 )));
-            }            if !matches!(
+            }
+            if !matches!(
                 capability.as_str(),
                 "text"
                     | "reasoning"
@@ -972,9 +997,13 @@ fn compile_models(
                 )));
             }
         }
-        match (model.web_search_execution_mode, model.web_search_backend.as_deref()) {
-            (mode, binding) if mode.is_metadata_center_local_search()
-                && binding.is_none_or(|value| value.trim().is_empty()) =>
+        match (
+            model.web_search_execution_mode,
+            model.web_search_backend.as_deref(),
+        ) {
+            (mode, binding)
+                if mode.is_metadata_center_local_search()
+                    && binding.is_none_or(|value| value.trim().is_empty()) =>
             {
                 return Err(validation(format!(
                     "provider {provider_id} model {id} metadata_center_local_search requires exactly one web_search_backend binding"
@@ -1051,13 +1080,27 @@ fn compile_forwarders(
                 match target.kind {
                     V3RouteTargetKind::ProviderModel => {
                         let provider = target.provider.as_deref().ok_or_else(|| {
-                            validation(format!("forwarder {id} provider_model target missing provider"))
+                            validation(format!(
+                                "forwarder {id} provider_model target missing provider"
+                            ))
                         })?;
                         let model = target.model.as_deref().ok_or_else(|| {
-                            validation(format!("forwarder {id} provider_model target missing model"))
+                            validation(format!(
+                                "forwarder {id} provider_model target missing model"
+                            ))
                         })?;
-                        validate_provider_model_ref(&format!("forwarder {id}"), provider, model, providers)?;
-                        validate_auth_alias_ref(&format!("forwarder {id}"), provider, target.key.as_deref(), providers)?;
+                        validate_provider_model_ref(
+                            &format!("forwarder {id}"),
+                            provider,
+                            model,
+                            providers,
+                        )?;
+                        validate_auth_alias_ref(
+                            &format!("forwarder {id}"),
+                            provider,
+                            target.key.as_deref(),
+                            providers,
+                        )?;
                         if target.id.is_some() {
                             return Err(validation(format!(
                                 "forwarder {id} provider_model target cannot define id"
@@ -1236,7 +1279,9 @@ fn compile_pool_match(
     authoring: V3RoutePoolMatchAuthoringConfig,
 ) -> Result<V3RoutePoolMatchManifest, V3ConfigError> {
     let precedence = authoring.precedence.ok_or_else(|| {
-        validation(format!("route group {group_id} non-default pool {pool_id} must declare precedence"))
+        validation(format!(
+            "route group {group_id} non-default pool {pool_id} must declare precedence"
+        ))
     })?;
     if pool_id == "longcontext" && authoring.min_input_tokens.is_none() {
         return Err(validation(format!(
@@ -1448,12 +1493,28 @@ mod dev_sample_default_tests {
 }
 
 #[cfg(test)]
+mod compatibility_profile_default_tests {
+    use super::resolve_v3_native_provider_default_compatibility_profile;
+
+    #[test]
+    fn cc_sol_defaults_to_thinking_tag_response_compat() {
+        assert_eq!(
+            resolve_v3_native_provider_default_compatibility_profile("cc-sol").as_deref(),
+            Some("responses:thinking-tags")
+        );
+    }
+}
+
+#[cfg(test)]
 mod secret_file_compile_tests {
     use super::*;
     use std::fs;
 
     fn authoring_with(entry: V3ProviderAuthEntryAuthoringConfig) -> V3ProviderAuthAuthoringConfig {
-        V3ProviderAuthAuthoringConfig { auth_type: V3ProviderAuthType::ApiKey, entries: vec![entry] }
+        V3ProviderAuthAuthoringConfig {
+            auth_type: V3ProviderAuthType::ApiKey,
+            entries: vec![entry],
+        }
     }
 
     #[test]
@@ -1464,27 +1525,60 @@ mod secret_file_compile_tests {
         fs::write(&file, "opencode-go.key1 = \"sk-one\"\n").unwrap();
         let file_str = file.display().to_string();
 
-        let ok = compile_auth("p", authoring_with(V3ProviderAuthEntryAuthoringConfig {
-            alias: "key1".to_string(), env: None, token_file: None, api_key: None,
-            secret_file: Some(file_str.clone()), secret_key: Some("opencode-go.key1".to_string()),
-        }))
+        let ok = compile_auth(
+            "p",
+            authoring_with(V3ProviderAuthEntryAuthoringConfig {
+                alias: "key1".to_string(),
+                env: None,
+                token_file: None,
+                api_key: None,
+                secret_file: Some(file_str.clone()),
+                secret_key: Some("opencode-go.key1".to_string()),
+            }),
+        )
         .unwrap();
-        assert_eq!(ok.entries[0].secret_file.as_deref(), Some(file_str.as_str()));
-        assert_eq!(ok.entries[0].secret_key.as_deref(), Some("opencode-go.key1"));
+        assert_eq!(
+            ok.entries[0].secret_file.as_deref(),
+            Some(file_str.as_str())
+        );
+        assert_eq!(
+            ok.entries[0].secret_key.as_deref(),
+            Some("opencode-go.key1")
+        );
 
-        let err = compile_auth("p", authoring_with(V3ProviderAuthEntryAuthoringConfig {
-            alias: "key1".to_string(), env: None, token_file: None, api_key: None,
-            secret_file: Some(file_str), secret_key: Some("missing.key".to_string()),
-        }))
+        let err = compile_auth(
+            "p",
+            authoring_with(V3ProviderAuthEntryAuthoringConfig {
+                alias: "key1".to_string(),
+                env: None,
+                token_file: None,
+                api_key: None,
+                secret_file: Some(file_str),
+                secret_key: Some("missing.key".to_string()),
+            }),
+        )
         .unwrap_err();
-        assert!(err.to_string().contains("secret_file validation failed"), "{err}");
+        assert!(
+            err.to_string().contains("secret_file validation failed"),
+            "{err}"
+        );
 
-        let pair_err = compile_auth("p", authoring_with(V3ProviderAuthEntryAuthoringConfig {
-            alias: "key1".to_string(), env: None, token_file: None, api_key: None,
-            secret_file: Some("x".to_string()), secret_key: None,
-        }))
+        let pair_err = compile_auth(
+            "p",
+            authoring_with(V3ProviderAuthEntryAuthoringConfig {
+                alias: "key1".to_string(),
+                env: None,
+                token_file: None,
+                api_key: None,
+                secret_file: Some("x".to_string()),
+                secret_key: None,
+            }),
+        )
         .unwrap_err();
-        assert!(pair_err.to_string().contains("declared together"), "{pair_err}");
+        assert!(
+            pair_err.to_string().contains("declared together"),
+            "{pair_err}"
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 }

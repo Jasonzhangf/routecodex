@@ -4,9 +4,8 @@
 use routecodex_v3_config::{compile_v3_config_05_manifest, V3Config02AuthoringParsed};
 use routecodex_v3_config_mgmt::{
     apply_route_group_view_to_authoring, list_provider_ids, new_default_pool_view,
-    new_forwarder_with_target, read_provider_file, route_groups_from_authoring,
-    upsert_forwarder, write_provider_file, ConfigMgmtStore, RevisionStore,
-    V2_PROVIDER_CONFIG_FILE_NAME,
+    new_forwarder_with_target, read_provider_file, route_groups_from_authoring, upsert_forwarder,
+    write_provider_file, ConfigMgmtStore, RevisionStore, V2_PROVIDER_CONFIG_FILE_NAME,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -96,15 +95,9 @@ fn route_view_roundtrip_preserves_pool_semantics() {
     assert_eq!(pool.tiers.len(), 2, "two priority tiers");
     assert_eq!(pool.tiers[0].priority, 1);
     assert_eq!(pool.tiers[0].members.len(), 1);
-    assert_eq!(
-        pool.tiers[0].members[0].provider.as_deref(),
-        Some("p1")
-    );
+    assert_eq!(pool.tiers[0].members[0].provider.as_deref(), Some("p1"));
     assert_eq!(pool.tiers[1].priority, 2);
-    assert_eq!(
-        pool.tiers[1].members[0].provider.as_deref(),
-        Some("p2")
-    );
+    assert_eq!(pool.tiers[1].members[0].provider.as_deref(), Some("p2"));
 
     let mut mutated = authoring.clone();
     apply_route_group_view_to_authoring(&mut mutated, group);
@@ -150,7 +143,10 @@ targets = [
     );
     let groups = route_groups_from_authoring(&authoring);
     let pool = &groups[0].ports[0].pools[0];
-    assert_eq!(pool.selection_strategy, routecodex_v3_config::V3SelectionStrategy::Weighted);
+    assert_eq!(
+        pool.selection_strategy,
+        routecodex_v3_config::V3SelectionStrategy::Weighted
+    );
     assert_eq!(pool.tiers.len(), 1, "same priority merges into one tier");
     let members = &pool.tiers[0].members;
     assert_eq!(members.len(), 2);
@@ -186,7 +182,10 @@ fn provider_file_write_then_read_roundtrip() {
         },
     };
     let path = write_provider_file(&home, "test-provider", &config).expect("write provider");
-    assert_eq!(path.file_name().unwrap().to_str().unwrap(), V2_PROVIDER_CONFIG_FILE_NAME);
+    assert_eq!(
+        path.file_name().unwrap().to_str().unwrap(),
+        V2_PROVIDER_CONFIG_FILE_NAME
+    );
 
     let ids = list_provider_ids(&home).expect("list provider ids");
     assert_eq!(ids, vec!["test-provider".to_string()]);
@@ -194,7 +193,10 @@ fn provider_file_write_then_read_roundtrip() {
     let entry = read_provider_file(&home, "test-provider").expect("read provider");
     assert_eq!(entry.config.provider.id, "test-provider");
     assert_eq!(entry.config.provider.provider_type, "openai");
-    assert_eq!(entry.config.provider.auth.env.as_deref(), Some("TEST_PROVIDER_KEY"));
+    assert_eq!(
+        entry.config.provider.auth.env.as_deref(),
+        Some("TEST_PROVIDER_KEY")
+    );
 }
 
 #[test]
@@ -238,7 +240,12 @@ fn commit_with_backup_creates_backup_and_revision() {
     let backup = outcome.backup.expect("backup created");
     assert!(backup.exists(), "backup file exists: {}", backup.display());
     assert!(
-        backup.file_name().unwrap().to_str().unwrap().contains("config.v3.toml.bak-"),
+        backup
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("config.v3.toml.bak-"),
         "backup follows naming convention: {}",
         backup.display()
     );
@@ -252,7 +259,9 @@ fn commit_with_backup_creates_backup_and_revision() {
 
     let reread = store.read_authoring().expect("reread after commit");
     assert!(
-        reread.route_groups["routecodex_v3_4444"].pools.contains_key("extra"),
+        reread.route_groups["routecodex_v3_4444"]
+            .pools
+            .contains_key("extra"),
         "new pool visible after commit"
     );
     compile_v3_config_05_manifest(reread.clone()).expect("committed config compiles");
@@ -324,8 +333,12 @@ fn forwarder_build_and_upsert() {
 fn revision_store_roundtrip_and_monotonic_seq() {
     let home = temp_home();
     let store = RevisionStore::new(home.join("state").join("config-revisions.json"));
-    let first = store.append("a1", "config.v3.toml", "r1", None, "hash1", "committed").unwrap();
-    let second = store.append("a2", "config.v3.toml", "r2", None, "hash2", "committed").unwrap();
+    let first = store
+        .append("a1", "config.v3.toml", "r1", None, "hash1", "committed")
+        .unwrap();
+    let second = store
+        .append("a2", "config.v3.toml", "r2", None, "hash2", "committed")
+        .unwrap();
     assert_eq!(first.seq, 1);
     assert_eq!(second.seq, 2);
     let listed = store.list().unwrap();

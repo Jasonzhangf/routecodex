@@ -189,7 +189,39 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
             );
         }
     }
-    Ok(Value::Object(root))
+    let mut payload = Value::Object(root);
+    apply_deepseek_v4_thinking_chat_compat(&mut payload);
+    Ok(payload)
+}
+
+/// Single request-side owner for DeepSeek V4/OpenCode Go 400 compatibility.
+/// Handles both Responses input history and projected OpenAI Chat messages.
+pub fn apply_deepseek_v4_request_compat(payload: &mut Value) {
+    apply_deepseek_v4_thinking_chat_compat(payload);
+}
+
+fn apply_deepseek_v4_thinking_chat_compat(payload: &mut Value) {
+    let thinking = payload
+        .get("reasoning_effort")
+        .and_then(Value::as_str)
+        .or_else(|| payload.pointer("/reasoning/effort").and_then(Value::as_str))
+        .is_some_and(|effort| !effort.trim().is_empty() && effort != "none");
+    if !thinking {
+        return;
+    }
+    if let Some(root) = payload.as_object_mut() {
+        root.remove("tool_choice");
+    }
+    if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            let Some(object) = message.as_object_mut() else { continue; };
+            if object.get("role").and_then(Value::as_str) != Some("assistant") { continue; }
+            object.entry("reasoning_content".to_string()).or_insert_with(|| Value::String(String::new()));
+            if object.get("content").is_none_or(Value::is_null) {
+                object.insert("content".to_string(), Value::String(String::new()));
+            }
+        }
+    }
 }
 
 pub(crate) fn apply_response_compat(payload: Value) -> Value {
@@ -248,6 +280,40 @@ mod tests {
                 {"type": "custom", "name": "exec_command", "description": "run", "format": "custom"}
             ]
         })
+    }
+
+    #[test]
+    fn thinking_chat_400_rules_are_applied_by_single_request_owner() {
+        let mut body = json!({
+            "model": "deepseek-v4-flash",
+            "reasoning_effort": "high",
+            "tool_choice": "auto",
+            "messages": [
+                {"role": "assistant", "content": null, "tool_calls": [{"id": "call_1"}]},
+                {"role": "user", "content": "next"}
+            ]
+        });
+
+        apply_deepseek_console_go_request_compat(&mut body);
+
+        assert!(body.get("tool_choice").is_none());
+        assert_eq!(body["messages"][0]["content"], "");
+        assert_eq!(body["messages"][0]["reasoning_content"], "");
+    }
+
+    #[test]
+    fn non_thinking_chat_keeps_tool_choice() {
+        let mut body = json!({
+            "model": "deepseek-v4-flash",
+            "reasoning_effort": "none",
+            "tool_choice": "required",
+            "messages": [{"role": "assistant", "content": null}]
+        });
+
+        apply_deepseek_console_go_request_compat(&mut body);
+
+        assert_eq!(body["tool_choice"], "required");
+        assert!(body["messages"][0].get("reasoning_content").is_none());
     }
 
     #[test]
@@ -310,9 +376,15 @@ mod tests {
         assert_eq!(mapped["tools"][0]["type"], json!("function"));
         assert_eq!(mapped["input"][0]["type"], json!("function_call"));
         assert_eq!(mapped["input"][0]["name"], json!("tool_search"));
-        assert_eq!(mapped["input"][0]["arguments"], json!("{\"query\":\"dsh\"}"));
+        assert_eq!(
+            mapped["input"][0]["arguments"],
+            json!("{\"query\":\"dsh\"}")
+        );
         assert_eq!(mapped["input"][1]["type"], json!("function_call_output"));
-        assert_eq!(mapped["input"][1]["output"], json!("[{\"name\":\"dsh_review_start\"}]"));
+        assert_eq!(
+            mapped["input"][1]["output"],
+            json!("[{\"name\":\"dsh_review_start\"}]")
+        );
     }
 
     #[test]

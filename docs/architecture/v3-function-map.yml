@@ -155,6 +155,7 @@ features:
   - compile_error
   - default_hub_v1_authoring
   - default_server_execution
+  - discover_v3_secret_file_auth_handles
   allowed_paths:
   - v3/crates/routecodex-v3-config
   - docs/architecture/v3-resource-operation-map.yml
@@ -164,6 +165,7 @@ features:
   - docs/architecture/wiki/v3-config-compact-hub-v1-defaults-sop.md
   - docs/architecture/wiki/v3-responses-direct-mainline.md
   - docs/goals/v3-foundation-p0-p2-test-design.md
+  - docs/goals/v3-provider-auth-key-file-expansion-test-design.md
   - scripts/architecture/verify-v3-resource-relation-edge-lock.mjs
   - scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs
   forbidden_paths:
@@ -280,6 +282,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/provider_error_policy_matching.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
   - v3.request.protocol_context
@@ -596,6 +599,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/tests/protocol_mode_lock.rs
   - v3/crates/routecodex-v3-runtime/src/nodes.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
   - v3.config.published_manifest
@@ -4617,3 +4621,79 @@ features:
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-architecture-docs
   runtime_status: source_controlled_live_verification_required
+
+- feature_id: v3.provider_response_error_policy_closeout
+  status: implementation_in_progress
+  change_risk: critical
+  owner_kind: rust_v3_provider_terminal_response_error_policy
+  owner_scope: Provider-local response error authoring, bounded terminal response fact extraction, one-shot typed failure directive, configured retry/backoff consumption, and Error06 projection before provider success or Resp04 continuation commit.
+  owner_crates:
+  - routecodex-v3-config
+  - routecodex-v3-runtime
+  owner_files:
+  - v3/crates/routecodex-v3-config/src/types.rs
+  - v3/crates/routecodex-v3-config/src/validate.rs
+  - v3/crates/routecodex-v3-config/src/validate/provider_error_policy.rs
+  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_diagnostics.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
+  resource_bindings:
+  - v3.response.provider_raw
+  - v3.error.source
+  - v3.error.execution_decision
+  - v3.error.provider_action_gate
+  - v3.provider.health_state
+  - v3.continuation.local_context_truth
+  mainline_bindings:
+  - v3-hub-relay-response-failure-01
+  - v3-provider-action-gate-15
+  - v3-provider-action-gate-50
+  - v3-provider-action-gate-51
+  entry_symbols:
+  - V3ProviderSemanticErrorPolicyAuthoringConfig
+  - provider_response_semantic_error_from_manifest
+  - V3ProviderFailureDirective
+  - provider_semantic_failure
+  - run_v3_relay_provider_failure_policy
+  - V3ProviderActionGate::record_failure_with_minimum_delay
+  allowed_paths:
+  - v3/crates/routecodex-v3-config/src
+  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_diagnostics.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
+  - v3/crates/routecodex-v3-runtime/tests
+  - docs/architecture
+  - docs/goals/v3-provider-response-error-policy-test-design.md
+  forbidden_paths:
+  - v3/crates/routecodex-v3-sse
+  - v3/crates/routecodex-v3-server
+  - v3/crates/routecodex-v3-provider-responses
+  - src
+  - sharedmodule
+  - MetadataCenter
+  required_gates:
+  - npm run test:v3-provider-action-gate
+  - npm run verify:v3-provider-action-gate
+  - npm run test:v3-provider-action-gate-red-fixtures
+  - npm run test:v3-hub-relay-runtime-closeout
+  - npm run verify:v3-hub-relay-runtime-closeout
+  - npm run test:v3-hub-relay-runtime-closeout-red-fixtures
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-cargo-fmt
+  - npm run test:v3-workspace
+  - git diff --check
+  runtime_status: implementation_in_progress

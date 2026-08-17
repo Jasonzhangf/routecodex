@@ -2,7 +2,8 @@
 use routecodex_v3_config::{
     compile_v3_config_05_manifest, default_v3_config_path, parse_v3_config_02_authoring,
     resolve_v3_http_sse_keepalive_ms, V3ConfigStore, V3HubFixedNode, V3HubHookPhase,
-    V3HubHookProfile, V3HubHookRequirement, V3RouteTargetKind, V3SelectionStrategy,
+    V3HubHookProfile, V3HubHookRequirement, V3ProviderDispositionStepManifest,
+    V3ProviderErrorRetryMode, V3RouteTargetKind, V3SelectionStrategy,
     V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS,
 };
 use std::fs;
@@ -337,6 +338,11 @@ targets = [
         .expect("explicit web-search execution modes must compile");
 
     assert_eq!(
+        manifest.servers["test"].endpoints,
+        ["responses", "anthropic", "gemini", "openai_chat"]
+    );
+
+    assert_eq!(
         manifest.providers["native"].models["gpt-native"]
             .web_search_execution_mode
             .as_str(),
@@ -361,6 +367,91 @@ targets = [
             .as_str(),
         "none",
         "web_search capability alone must not infer native or ServerTool execution"
+    );
+}
+
+#[test]
+fn context_token_estimate_scale_defaults_to_10000_and_rejects_out_of_range_values() {
+    let source = r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+
+[providers.default_scale]
+type = "responses"
+base_url = "http://default.invalid/v1"
+default_model = "default-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "DEFAULT_KEY" }] }
+[providers.default_scale.models.default-model]
+capabilities = ["text"]
+
+[providers.low_scale]
+type = "responses"
+base_url = "http://low.invalid/v1"
+default_model = "low-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "LOW_KEY" }] }
+[providers.low_scale.models.low-model]
+capabilities = ["text"]
+context_token_estimate_scale_bps = 9999
+
+[providers.high_scale]
+type = "responses"
+base_url = "http://high.invalid/v1"
+default_model = "high-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "HIGH_KEY" }] }
+[providers.high_scale.models.high-model]
+capabilities = ["text"]
+context_token_estimate_scale_bps = 100001
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "default_scale", model = "default-model", priority = 1 },
+  { kind = "provider_model", provider = "low_scale", model = "low-model", priority = 2 },
+  { kind = "provider_model", provider = "high_scale", model = "high-model", priority = 3 }
+]
+"#;
+
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect("valid scale and omitted default must compile");
+    assert_eq!(
+        manifest.providers["default_scale"].models["default-model"]
+            .context_token_estimate_scale_bps,
+        10_000
+    );
+    assert_eq!(
+        manifest.providers["low_scale"].models["low-model"].context_token_estimate_scale_bps,
+        9999
+    );
+
+    let low_only = source.replace(
+        "[providers.high_scale]\ntype = \"responses\"\nbase_url = \"http://high.invalid/v1\"\ndefault_model = \"high-model\"\nauth = { type = \"api_key\", entries = [{ alias = \"key\", env = \"HIGH_KEY\" }] }\n[providers.high_scale.models.high-model]\ncapabilities = [\"text\"]\ncontext_token_estimate_scale_bps = 100001\n",
+        "",
+    );
+    let low_error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&low_only).unwrap())
+        .expect_err("scale below 10000 must fail config compilation");
+    assert!(
+        low_error
+            .to_string()
+            .contains("context_token_estimate_scale_bps must be between 10000 and 100000"),
+        "unexpected low-scale error: {low_error}"
+    );
+
+    let high_only = source.replace(
+        "[providers.low_scale]\ntype = \"responses\"\nbase_url = \"http://low.invalid/v1\"\ndefault_model = \"low-model\"\nauth = { type = \"api_key\", entries = [{ alias = \"key\", env = \"LOW_KEY\" }] }\n[providers.low_scale.models.low-model]\ncapabilities = [\"text\"]\ncontext_token_estimate_scale_bps = 9999\n",
+        "",
+    );
+    let high_error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&high_only).unwrap())
+            .expect_err("scale above 100000 must fail config compilation");
+    assert!(
+        high_error
+            .to_string()
+            .contains("context_token_estimate_scale_bps must be between 10000 and 100000"),
+        "unexpected high-scale error: {high_error}"
     );
 }
 
@@ -392,7 +483,9 @@ targets = [
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
         .expect_err("metadata_center_local_search without backend binding must fail");
     assert!(
-        error.to_string().contains("requires exactly one web_search_backend binding"),
+        error
+            .to_string()
+            .contains("requires exactly one web_search_backend binding"),
         "unexpected error: {error}"
     );
 
@@ -400,10 +493,9 @@ targets = [
         "web_search_execution_mode = \"metadata_center_local_search\"",
         "web_search_execution_mode = \"metadata_center_local_search\"\nweb_search_backend = \"local.search\"",
     );
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&source_with_backend).unwrap(),
-    )
-    .expect("metadata_center_local_search with backend binding must compile");
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source_with_backend).unwrap())
+            .expect("metadata_center_local_search with backend binding must compile");
     assert_eq!(
         manifest.providers["local"].models["local-model"]
             .web_search_backend_binding
@@ -455,7 +547,9 @@ targets = [
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
         .expect_err("same model name with conflicting web_search_execution_mode must fail");
     assert!(
-        error.to_string().contains("conflicting web_search_execution_mode"),
+        error
+            .to_string()
+            .contains("conflicting web_search_execution_mode"),
         "unexpected error: {error}"
     );
 }
@@ -736,10 +830,8 @@ reason_code = "subscription_invalid_without_token"
 message_mode = "code_only"
 "#
     );
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&path_config).unwrap(),
-    )
-    .unwrap();
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&path_config).unwrap()).unwrap();
     let policy = manifest
         .error
         .provider_error_action_policy
@@ -756,15 +848,21 @@ message_mode = "code_only"
     );
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&ambiguous).unwrap())
         .unwrap_err();
-    assert!(error.to_string().contains("both action and path"), "{error}");
+    assert!(
+        error.to_string().contains("both action and path"),
+        "{error}"
+    );
 
     let invalid = path_config.replace(
         "step = \"cooldown\"\nscope = \"provider_instance\"\nduration_ms = 3600000\nprovider_global_failure = true",
         "step = \"project\"\nstatus = 502\nreason_code = \"early_project\"\nmessage_mode = \"code_only\"",
     );
-    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap())
-        .unwrap_err();
-    assert!(error.to_string().contains("project must be the final step"), "{error}");
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(
+        error.to_string().contains("project must be the final step"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -1187,6 +1285,48 @@ fn enforces_hook_resource_profile_and_optional_contracts() {
         .find(|hook| hook.requirement == V3HubHookRequirement::Optional)
         .expect("typed optional hook");
     assert!(!optional.enabled);
+}
+
+#[test]
+fn provider_response_error_policy_accepts_full_path_and_injects_provider_scope() {
+    let raw = FULL_CONFIG.replace(
+        "[[providers.cc.semantic_error_policy]]\npolicy_id = \"cc_200_diagnostic_zero_usage\"",
+        "[[providers.cc.response_error_policy]]\npolicy_id = \"cc_200_diagnostic_zero_usage\"",
+    )
+    .replace(
+        "[providers.cc.semantic_error_policy.match]",
+        "[providers.cc.response_error_policy.match]",
+    )
+    .replace(
+        "[providers.cc.semantic_error_policy.match.sse]",
+        "[providers.cc.response_error_policy.match.sse]",
+    )
+    .replace(
+        "[providers.cc.semantic_error_policy.action]\nkind = \"periodic_recovery\"\nreason_code = \"provider_diagnostic_zero_usage\"\nretry_mode = \"reselect_before_client_projection\"\ncooldown_ms = 300000\ndisable_scope = \"provider_model\"",
+        "[[providers.cc.response_error_policy.path]]\nstep = \"wait_retry\"\nretry_mode = \"retry_same\"\nmax_attempts = 3\nbackoff_ms = 1000\nbackoff_multiplier = 2\n\n[[providers.cc.response_error_policy.path]]\nstep = \"cooldown\"\nscope = \"provider_model\"\nduration_ms = 300000\n\n[[providers.cc.response_error_policy.path]]\nstep = \"project\"\nstatus = 503\nreason_code = \"provider_diagnostic_zero_usage\"\npublic_code = \"upstream_overloaded\"\nmessage_mode = \"code_only\"",
+    );
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap())
+        .expect("provider-local full path must compile");
+    let policy = &manifest.error.provider_error_action_policy[0];
+    assert_eq!(policy.scope.provider_id.as_deref(), Some("cc"));
+    assert_eq!(policy.scope.provider_type.as_deref(), Some("responses"));
+    assert!(matches!(
+        policy.path.first(),
+        Some(V3ProviderDispositionStepManifest::WaitRetry {
+            retry_mode: V3ProviderErrorRetryMode::RetrySame,
+            max_attempts: 3,
+            backoff_ms: 1000,
+            backoff_multiplier: Some(2),
+        })
+    ));
+    assert!(matches!(
+        policy.path.last(),
+        Some(V3ProviderDispositionStepManifest::Project {
+            status: 503,
+            public_code: Some(code),
+            ..
+        }) if code == "upstream_overloaded"
+    ));
 }
 
 #[test]
@@ -1656,6 +1796,52 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
             "fwd.paid.gpt-5.4",
         ],
     );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v2_compat_provider_auth_secret_file_expands_key_names_without_values() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-v2-auth-key-file-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+    );
+    let secret_file = root.join("opencode-go.conf");
+    fs::write(
+        &secret_file,
+        "cc-sol.key1 = first-secret\ncc-sol.key2 = second-secret\n",
+    )
+    .unwrap();
+    let provider_path = root.join("provider/cc-sol/config.v2.toml");
+    let provider_raw = fs::read_to_string(&provider_path).unwrap().replace(
+        "apiKey = \"secret-cc-sol-key1\"",
+        &format!("secretFile = \"{}\"", secret_file.display()),
+    );
+    fs::write(&provider_path, provider_raw).unwrap();
+    let config_path = root.join("config.toml");
+    fs::write(&config_path, V2_SINGLE_RESPONSES_CONFIG).unwrap();
+
+    let manifest = V3ConfigStore::new(&config_path).load_snapshot().unwrap();
+    let auth = &manifest.providers["cc-sol"].auth.entries;
+    assert_eq!(auth.len(), 2);
+    assert_eq!(auth[0].alias, "key1");
+    assert_eq!(auth[0].secret_file.as_deref(), secret_file.to_str());
+    assert_eq!(auth[0].secret_key.as_deref(), Some("cc-sol.key1"));
+    assert_eq!(auth[1].alias, "key2");
+    assert_eq!(auth[1].secret_key.as_deref(), Some("cc-sol.key2"));
+    assert!(auth.iter().all(|entry| entry.api_key.is_none()));
+    let debug = format!("{manifest:?}");
+    assert!(!debug.contains("first-secret"));
+    assert!(!debug.contains("second-secret"));
 
     fs::remove_dir_all(root).unwrap();
 }

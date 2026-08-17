@@ -93,7 +93,8 @@ impl V3ProviderGlobalSubscriptionHealthStore {
         now_ms: u64,
         policy: &V3ProviderGlobalSubscriptionPolicy,
     ) -> Result<V3ProviderGlobalSubscriptionDecision, String> {
-        if policy.failure_threshold == 0 || policy.cooldown_ms == 0 || policy.probe_interval_ms == 0 {
+        if policy.failure_threshold == 0 || policy.cooldown_ms == 0 || policy.probe_interval_ms == 0
+        {
             return Err("provider global subscription policy values must be non-zero".to_string());
         }
         let provider = global_key(provider_id, auth_alias, model_id);
@@ -265,8 +266,11 @@ impl V3ProviderGlobalSubscriptionHealthStore {
         provider_state.probe_in_flight = false;
         // 订阅类故障通常数小时后由上游恢复：失败后不 suspend-until-restart，
         // 按 probe interval 排下一次探针，探针通过才拉回路由池。
-        provider_state.next_probe_at_ms =
-            Some(permit.started_at_ms.saturating_add(permit.probe_interval_ms));
+        provider_state.next_probe_at_ms = Some(
+            permit
+                .started_at_ms
+                .saturating_add(permit.probe_interval_ms),
+        );
         Ok(())
     }
 

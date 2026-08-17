@@ -57,6 +57,7 @@ pub(crate) fn provider_http_failure(
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         observability,
         terminal_projection: None,
+        matched_policy: None,
     }
 }
 
@@ -97,6 +98,7 @@ pub(crate) fn provider_runtime_failure(
         source_stage: provider_runtime_failure_stage(&error),
         observability,
         terminal_projection,
+        matched_policy: None,
     }
 }
 
@@ -108,6 +110,7 @@ pub(crate) fn provider_semantic_failure(
 ) -> V3ResponsesRelayProviderFailure {
     let policy_error_type = error.code.clone();
     let policy_error_message = error.message.clone();
+    let matched_policy = error.matched_policy.clone();
     V3ResponsesRelayProviderFailure {
         status,
         policy_error_type,
@@ -116,6 +119,7 @@ pub(crate) fn provider_semantic_failure(
         source_stage: "V3ProviderRespInbound01Raw",
         observability,
         terminal_projection: None,
+        matched_policy,
     }
 }
 
@@ -138,6 +142,7 @@ pub(crate) fn provider_response_stream_relay_failure(
             source_stage: "V3ProviderRespInbound01Raw",
             observability,
             terminal_projection: None,
+            matched_policy: None,
         },
         other => provider_runtime_failure(
             provider_response_stream_failure(other, request_id, provider_id),
@@ -178,6 +183,7 @@ pub(crate) fn provider_request_relay_failure(
         source_stage,
         observability,
         terminal_projection: None,
+        matched_policy: None,
     })
 }
 
@@ -188,6 +194,15 @@ pub(crate) fn provider_response_stream_failure(
 ) -> V3ProviderError {
     match error {
         V3ResponsesRelayRuntimeError::Provider(error) => error,
+        V3ResponsesRelayRuntimeError::ProviderResponseEmpty { .. } => {
+            V3ProviderError::ResponseBody {
+                request_id: request_id.to_string(),
+                provider_id: provider_id.to_string(),
+                reason:
+                    "provider response body is empty: upstream declared SSE but emitted zero bytes"
+                        .to_string(),
+            }
+        }
         V3ResponsesRelayRuntimeError::ProviderSseTransport(reason) => {
             V3ProviderError::MalformedSse {
                 request_id: request_id.to_string(),
@@ -212,6 +227,7 @@ pub(crate) fn is_v3_responses_provider_response_failure(
             | V3ResponsesRelayRuntimeError::ProviderJson(_)
             | V3ResponsesRelayRuntimeError::ProviderSseTransport(_)
             | V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(_)
+            | V3ResponsesRelayRuntimeError::ProviderResponseEmpty { .. }
             | V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure { .. }
             | V3ResponsesRelayRuntimeError::Response(
                 V3HubRelayResponseError::ProviderResponseNotObject
@@ -245,6 +261,7 @@ pub(crate) fn provider_response_hook_failure(
                 source_stage: "V3HubRespChatProcess03Governed",
                 observability,
                 terminal_projection: None,
+                matched_policy: None,
             }
         }
     }

@@ -1,46 +1,81 @@
 version: 1
 status: active
 modules:
-  - module_id: architecture.repository_filesystem_governance
-    owner_feature_id: architecture.repository_filesystem_governance
-    owned_paths:
-      - .gitignore
-      - scripts/ci/repo-sanity.mjs
-      - scripts/architecture/verify-repository-filesystem-governance.mjs
-      - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
-      - v3/README.md
-      - v3/fixtures
-      - deprecated/v2
-      - .agents/skills/rcc-dev-skills/SKILL.md
-      - .agents/skills/rcc-dev-skills/references
-      - .agents/skills/rcc-v3-architecture/SKILL.md
-      - docs/architecture/repository-filesystem-module-registry.yml
-      - docs/goals/root-generated-artifacts-governance-plan.md
-      - docs/goals/root-generated-artifacts-governance-execution-prompt.md
-    allowed_paths:
-      - docs/architecture/function-map.yml
-      - docs/architecture/mainline-call-map.yml
-      - docs/architecture/resource-operation-map.yml
-      - docs/architecture/verification-map.yml
-      - docs/architecture/wiki/mainline-call-graph.md
-      - docs/architecture/wiki/html/mainline-call-graph.html
-      - docs/design/payload-copy-hotspot-inventory.md
-      - deprecated/v2/retirement-manifest.yml
-      - scripts/architecture/verify-agent-p0-payload-control-guard.mjs
-      - scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs
-      - docs/architecture/reviews/agent-worker-p0-architecture-guard-audit.md
-    forbidden_paths:
-      - src
-      - sharedmodule/llmswitch-core/rust-core
-      - v3/crates
-      - config
-    allowed_edges:
-      - from: RepoFilesystemAuthoring01Policy
-        to: RepoFilesystemVerify02Gate
-      - from: RepoFilesystemVerify02Gate
-        to: RepoFilesystemBuild03Required
-    forbidden_resources:
-      - request.normal_payload
-      - provider.wire_payload
-      - response.client_payload
-      - metadata.runtime_control
+- module_id: architecture.repository_filesystem_governance
+  owner_feature_id: architecture.repository_filesystem_governance
+  owned_paths:
+  - .gitignore
+  - scripts/ci/repo-sanity.mjs
+  - scripts/architecture/verify-repository-filesystem-governance.mjs
+  - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+  - v3/README.md
+  - v3/fixtures
+  - deprecated/v2
+  - .agents/skills/rcc-dev-skills/SKILL.md
+  - .agents/skills/rcc-dev-skills/references
+  - .agents/skills/rcc-v3-architecture/SKILL.md
+  - docs/architecture/repository-filesystem-module-registry.yml
+  - docs/goals/root-generated-artifacts-governance-plan.md
+  - docs/goals/root-generated-artifacts-governance-execution-prompt.md
+  allowed_paths:
+  - docs/architecture/function-map.yml
+  - docs/architecture/mainline-call-map.yml
+  - docs/architecture/resource-operation-map.yml
+  - docs/architecture/verification-map.yml
+  - docs/architecture/wiki/mainline-call-graph.md
+  - docs/architecture/wiki/html/mainline-call-graph.html
+  - docs/design/payload-copy-hotspot-inventory.md
+  - deprecated/v2/retirement-manifest.yml
+  - scripts/architecture/verify-agent-p0-payload-control-guard.mjs
+  - scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs
+  - docs/architecture/reviews/agent-worker-p0-architecture-guard-audit.md
+  forbidden_paths:
+  - src
+  - sharedmodule/llmswitch-core/rust-core
+  - v3/crates
+  - config
+  allowed_edges:
+  - from: RepoFilesystemAuthoring01Policy
+    to: RepoFilesystemVerify02Gate
+  - from: RepoFilesystemVerify02Gate
+    to: RepoFilesystemBuild03Required
+  forbidden_resources:
+  - request.normal_payload
+  - provider.wire_payload
+  - response.client_payload
+  - metadata.runtime_control
+- module_id: v3.config_management
+  owner_feature_id: v3.config_management
+  status: implementation_active
+  owned_paths:
+  - v3/crates/routecodex-v3-config-mgmt/**
+  - v3/crates/routecodex-v3-admin/**
+  - v3/crates/routecodex-v3-cli/src/init.rs
+  - docs/design/RCC_V4_Config_Management_Design_v1.0.md
+  allowed_paths:
+  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/store.rs
+  - v3/crates/routecodex-v3-config/src/lib.rs
+  - scripts/tests/v3-config-mgmt*
+  forbidden_paths:
+  - src
+  - sharedmodule/llmswitch-core/rust-core
+  - v3/crates/routecodex-v3-runtime/src/hub_v1
+  - v3/crates/routecodex-v3-virtual-router/src
+  - v3/crates/routecodex-v3-target/src
+  allowed_edges:
+  - from: V3CliInitCommand01Source
+    to: V3ConfigMgmtStore02Core
+  - from: V3ConfigMgmtStore02Core
+    to: V3ConfigStore03AtomicWrite
+  - from: V3AdminRoutesApi04TreeEditor
+    to: V3ConfigMgmtStore02Core
+  - from: V3AdminProvidersApi05ProviderFiles
+    to: V3ProviderDirectory06CompatLayer
+  - from: V3AdminReloadApi07RuntimeRestart
+    to: V3ManagedLifecycle08Restart
+  forbidden_resources:
+  - request.normal_payload
+  - provider.wire_payload
+  - response.client_payload
+  - metadata.runtime_control

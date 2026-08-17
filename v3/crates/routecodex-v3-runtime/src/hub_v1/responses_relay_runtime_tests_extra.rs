@@ -176,6 +176,7 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
             source_stage: "V3ProviderReqOutbound09TransportRequest",
             terminal_projection: Some(terminal_projection),
             observability: None,
+            matched_policy: None,
         },
         vec!["V3ProviderReqOutbound09TransportRequest"],
         0,
@@ -434,6 +435,32 @@ async fn provider_sse_eof_without_terminal_fails_before_client_projection() {
     assert!(error
         .to_string()
         .contains("provider response event stream ended before response.completed"));
+}
+
+#[tokio::test]
+async fn provider_sse_empty_body_classifies_as_provider_response_empty() {
+    let provider = Box::pin(stream::empty::<
+        std::result::Result<Vec<u8>, routecodex_v3_provider_responses::V3ProviderError>,
+    >());
+    let error = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Responses,
+        provider,
+    )
+    .await
+    .unwrap_err();
+
+    match &error {
+        V3ResponsesRelayRuntimeError::ProviderResponseEmpty { .. } => {}
+        other => panic!("expected ProviderResponseEmpty, got {other:?}"),
+    }
+    assert!(is_v3_responses_provider_response_failure(&error));
+    let typed = provider_response_stream_failure(error, "req-empty", "glmrelay_anthropic");
+    match typed {
+        V3ProviderError::ResponseBody { reason, .. } => {
+            assert!(reason.contains("provider response body is empty"));
+        }
+        other => panic!("expected ResponseBody, got {other:?}"),
+    }
 }
 
 #[tokio::test]

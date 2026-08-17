@@ -11,8 +11,7 @@ pub mod route;
 pub mod store;
 
 pub use forwarder::{
-    forwarders_from_authoring, new_forwarder_with_target, remove_forwarder,
-    upsert_forwarder,
+    forwarders_from_authoring, new_forwarder_with_target, remove_forwarder, upsert_forwarder,
 };
 pub use provider::{
     list_provider_ids, provider_config_file_path, provider_directory, read_provider_file,
@@ -24,5 +23,5 @@ pub use route::{
     RoutePoolView, RoutePortView, RouteTierView,
 };
 pub use store::{
-    ConfigMgmtStore, ConfigRevision, RevisionStore, V3ConfigMgmtError, default_revision_store_path,
+    default_revision_store_path, ConfigMgmtStore, ConfigRevision, RevisionStore, V3ConfigMgmtError,
 };

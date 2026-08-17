@@ -1,6 +1,6 @@
 // feature_id: v3.admin_dashboard
 // Dashboard API：runtime/port/provider 状态、流量概览、修订历史。
-use crate::{AppState, metrics};
+use crate::{metrics, AppState};
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -103,7 +103,10 @@ async fn overview(State(state): State<AppState>) -> Json<Overview> {
     if let Ok(entries) = std::fs::read_dir(&config_dir.join("logs")) {
         for entry in entries.flatten() {
             let path = entry.path();
-            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
             if name.starts_with("server-v3-") && name.ends_with(".log") {
                 log_sources.push(path.clone());
                 let stats = metrics::scan_server_log(&path);
@@ -211,8 +214,14 @@ fn read_request_counter(path: &Path) -> RequestCounter {
         Err(_) => return RequestCounter::default(),
     };
     RequestCounter {
-        total_requests: parsed.get("totalRequests").and_then(|v| v.as_u64()).unwrap_or(0),
-        daily_requests: parsed.get("dailyRequests").and_then(|v| v.as_u64()).unwrap_or(0),
+        total_requests: parsed
+            .get("totalRequests")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        daily_requests: parsed
+            .get("dailyRequests")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
         last_request_at_epoch_ms: parsed.get("lastRequestAtMs").and_then(|v| v.as_u64()),
     }
 }

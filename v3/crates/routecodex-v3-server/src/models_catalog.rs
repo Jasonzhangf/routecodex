@@ -47,7 +47,11 @@ pub fn build_v3_models_catalog(
             builtin_model_id,
             None,
             Some(&capabilities),
-            is_v3_route_group_single_provider_visible_model(manifest, routing_group, builtin_model_id),
+            is_v3_route_group_single_provider_visible_model(
+                manifest,
+                routing_group,
+                builtin_model_id,
+            ),
         );
         item.insert("owned_by".to_string(), json!("openai"));
         seen.insert(builtin_model_id.to_string());
@@ -210,7 +214,10 @@ fn build_v3_supported_reasoning_levels(efforts: &[String], has_preset: bool) -> 
     };
     let descriptions = [
         ("low", "Fast responses with lighter reasoning"),
-        ("medium", "Balances speed and reasoning depth for everyday tasks"),
+        (
+            "medium",
+            "Balances speed and reasoning depth for everyday tasks",
+        ),
         ("high", "Greater reasoning depth for complex problems"),
         ("xhigh", "Extra high reasoning depth for complex problems"),
         ("max", "Maximum reasoning depth for the hardest tasks"),
@@ -295,10 +302,8 @@ fn build_v3_codex_model_metadata(
     let supported_reasoning_efforts = preset
         .map(|defaults| defaults.reasoning_efforts.clone())
         .unwrap_or_default();
-    let supported_reasoning_levels = build_v3_supported_reasoning_levels(
-        &supported_reasoning_efforts,
-        preset.is_some(),
-    );
+    let supported_reasoning_levels =
+        build_v3_supported_reasoning_levels(&supported_reasoning_efforts, preset.is_some());
     let capability_projection = build_v3_model_capability_projection(capabilities, preset);
     let mut item = Map::from_iter([
         ("id".to_string(), json!(visible_id)),

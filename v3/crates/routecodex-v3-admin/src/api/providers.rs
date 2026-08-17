@@ -6,8 +6,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use routecodex_v3_config::V2ProviderConfigFile;
 use routecodex_v3_config_mgmt::{
-    list_provider_ids, read_provider_file, route_groups_from_authoring, write_provider_file,
-    forwarders_from_authoring,
+    forwarders_from_authoring, list_provider_ids, read_provider_file, route_groups_from_authoring,
+    write_provider_file,
 };
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -16,7 +16,10 @@ use std::time::Duration;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/providers", get(list_providers))
-        .route("/api/providers/:id", get(provider_detail).put(update_provider))
+        .route(
+            "/api/providers/:id",
+            get(provider_detail).put(update_provider),
+        )
         .route("/api/providers/:id/health-test", post(health_test))
 }
 pub fn provider_ids(config_dir: &Path) -> Vec<String> {
@@ -88,10 +91,12 @@ async fn provider_detail(
     let config_dir = config_dir(&state);
     let entry = read_provider_file(&config_dir, &id)
         .map_err(|error| (axum::http::StatusCode::NOT_FOUND, error))?;
-    let authoring = state
-        .store
-        .read_authoring()
-        .map_err(|error| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let authoring = state.store.read_authoring().map_err(|error| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        )
+    })?;
     let mut references = Vec::new();
     for group in route_groups_from_authoring(&authoring) {
         for port in &group.ports {
@@ -149,7 +154,10 @@ async fn update_provider(
     if request.config.provider.id != id {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
-            format!("config id {} does not match path {id}", request.config.provider.id),
+            format!(
+                "config id {} does not match path {id}",
+                request.config.provider.id
+            ),
         ));
     }
     let path = write_provider_file(&config_dir, &id, &request.config)
@@ -165,8 +173,15 @@ async fn update_provider(
             "provider-file",
             "committed",
         )
-        .map_err(|error| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    Ok(Json(serde_json::json!({ "ok": true, "provider": id, "path": path.display().to_string() })))
+        .map_err(|error| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                error.to_string(),
+            )
+        })?;
+    Ok(Json(
+        serde_json::json!({ "ok": true, "provider": id, "path": path.display().to_string() }),
+    ))
 }
 
 async fn health_test(
@@ -213,7 +228,11 @@ async fn health_test(
             error: Some("timeout after 5s".to_string()),
         },
     };
-    state.health_cache.lock().await.insert(id.clone(), health.clone());
+    state
+        .health_cache
+        .lock()
+        .await
+        .insert(id.clone(), health.clone());
     Ok(Json(health))
 }
 

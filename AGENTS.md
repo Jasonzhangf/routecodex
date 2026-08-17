@@ -176,7 +176,6 @@ client-visible error
    - `docs/routing-instructions.md`
    - `docs/stop-message-auto.md`
    - `docs/design/servertool-stopmessage-lifecycle.md`
-   - `docs/design/servertool-followup-rebuild-from-origin.md`
    - `docs/design/pipeline-type-topology-and-module-boundaries.md`
 
 ## Debug 优先级（强制）

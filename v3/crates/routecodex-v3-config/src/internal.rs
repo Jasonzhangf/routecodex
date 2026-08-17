@@ -102,9 +102,10 @@ static INTERNAL_CONFIG: LazyLock<InternalConfig> = LazyLock::new(|| {
 /// 违反控制面规则；查找层按 trim+lowercase 归一化匹配，资产值必须已归一化，
 /// 否则合法资产会静默 miss 落到消费方降级）。
 fn validate_internal_config(config: &InternalConfig) {
-    let gpt_family = config.model_families.get(GPT_FAMILY_KEY).unwrap_or_else(|| {
-        panic!("internal.toml must define [model_families.{GPT_FAMILY_KEY}]")
-    });
+    let gpt_family = config
+        .model_families
+        .get(GPT_FAMILY_KEY)
+        .unwrap_or_else(|| panic!("internal.toml must define [model_families.{GPT_FAMILY_KEY}]"));
     assert!(
         gpt_family.prefix.is_some() || !gpt_family.exact.is_empty(),
         "internal.toml [model_families.{GPT_FAMILY_KEY}] must define prefix or exact"
@@ -252,7 +253,11 @@ pub fn v3_builtin_model_defaults(model_id: &str) -> Option<&'static V3BuiltinMod
 /// 模型目录 / 能力面暴露。
 pub fn is_v3_hidden_codex_future_model(model_id: &str) -> bool {
     let normalized = normalized_model_id(model_id);
-    INTERNAL_CONFIG.hidden_models.exact.iter().any(|id| *id == normalized)
+    INTERNAL_CONFIG
+        .hidden_models
+        .exact
+        .iter()
+        .any(|id| *id == normalized)
         || INTERNAL_CONFIG
             .hidden_models
             .prefixes
@@ -298,8 +303,8 @@ mod tests {
 
     #[test]
     fn internal_toml_is_valid_and_non_empty() {
-        let config: InternalConfig = toml::from_str(INTERNAL_CONFIG_TOML)
-            .expect("embedded internal.toml must parse");
+        let config: InternalConfig =
+            toml::from_str(INTERNAL_CONFIG_TOML).expect("embedded internal.toml must parse");
         validate_internal_config(&config);
         assert!(config.model_families.contains_key(GPT_FAMILY_KEY));
         assert!(!config.builtin_catalog_models.ids.is_empty());
@@ -345,7 +350,10 @@ mod tests {
             empty_hidden_prefix,
         ] {
             let result = std::panic::catch_unwind(|| validate_internal_config(&invalid));
-            assert!(result.is_err(), "semantically invalid internal asset must fail fast");
+            assert!(
+                result.is_err(),
+                "semantically invalid internal asset must fail fast"
+            );
         }
     }
 
