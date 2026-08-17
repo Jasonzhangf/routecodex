@@ -648,8 +648,8 @@
     {
       "output_path": "repo/docs/architecture/repository-filesystem-module-registry.yml",
       "source_path": "docs/architecture/repository-filesystem-module-registry.yml",
-      "source_commit": "13833b7e538e3079719f19480fca0c46c3ca57b5",
-      "sha256": "b8b9f22a61271105bdecdda58942829a63333bfd06bd158ea552346a8d52a3e4"
+      "source_commit": "9a2505e8f775ee27fad48a09b886fb5bb3effe3a",
+      "sha256": "1a0b3203beb7a6d1b31972801673e0f2e78176a4275751b01b6a43e6985db923"
     },
     {
       "output_path": "repo/docs/architecture/resource-global-coverage-report.json",
@@ -738,8 +738,8 @@
     {
       "output_path": "repo/docs/architecture/v3-control-plane-data-plane-audit-2026-08-10.md",
       "source_path": "docs/architecture/v3-control-plane-data-plane-audit-2026-08-10.md",
-      "source_commit": "a786deaf2d34963be4e545ebc548e9729ef9a474",
-      "sha256": "4a0b538a37483004f44debb6437ab32fb5874cc28b440e9a78ae4e94bc13f498"
+      "source_commit": "9a2505e8f775ee27fad48a09b886fb5bb3effe3a",
+      "sha256": "6d80f2c1c904d0cb4a3f4f8c8096806828e6579cd9925925266929c49bb7f0f5"
     },
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
@@ -1806,8 +1806,8 @@
     {
       "output_path": "repo/docs/goals/root-generated-artifacts-governance-plan.md",
       "source_path": "docs/goals/root-generated-artifacts-governance-plan.md",
-      "source_commit": "f23286b350f6e053a6a4fbc263eeeff207745b77",
-      "sha256": "089fd5d474ae9d8492e2f0aa171f4eef620831fb0038cf4717de69178a73792d"
+      "source_commit": "9a2505e8f775ee27fad48a09b886fb5bb3effe3a",
+      "sha256": "7e2521e7cd6369144138def7a30dc2c40a9df71edf40820bc6fd80c1776e43d8"
     },
     {
       "output_path": "repo/docs/goals/routecodex-appsdk-migration-plan.md",
@@ -2070,8 +2070,8 @@
     {
       "output_path": "repo/docs/goals/v3-full-ts-removal-and-archive-plan.md",
       "source_path": "docs/goals/v3-full-ts-removal-and-archive-plan.md",
-      "source_commit": "83477663bea26cd9ffb8be326af774c2f0841b47",
-      "sha256": "d508af5b1a01cf5988319ce5344588211633b3015317807a3aa855da42644b65"
+      "source_commit": "9a2505e8f775ee27fad48a09b886fb5bb3effe3a",
+      "sha256": "3e14f0cb990c9fa5d7efe0aeb415a36d672faade4ae35689b18c87b7f8acba87"
     },
     {
       "output_path": "repo/docs/goals/v3-gemini-codec-characterization-plan.md",
@@ -2632,5 +2632,5 @@
       "sha256": "2ada8d17e5cc0cb53ff0dfa9acfbeedf10eb4e35f7db239fb43ef88aa7478ea6"
     }
   ],
-  "manifest_digest": "98eed829fee6abbc468382af5b890ba052e41c557253193fb487bd7e90a3563b"
+  "manifest_digest": "00fc72ddb6da94cc242001e5679c762a58c8ac40a997d8e25fd1f329134e0f64"
 }
