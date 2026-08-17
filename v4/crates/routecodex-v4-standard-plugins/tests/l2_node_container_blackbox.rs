@@ -145,7 +145,9 @@ fn positive_error_plugin_writes_typed_error_side_channel_only() {
             &hash,
             NodeExecutionInput {
                 data: request_data(),
-                control: json!({}),
+                control: json!({
+                    "error_chain": {"code": "provider_failure"}
+                }),
             },
             &registry,
         )
@@ -303,6 +305,7 @@ fn positive_scope_consume_records_object_control_carrier() {
             NodeExecutionInput {
                 data: json!({}),
                 control: json!({
+                    "metadata_center": {"scope_id": "scope-1"},
                     "error_chain": {"stage": "source_raised"},
                     "route_facts": {"selected": false}
                 }),
@@ -358,6 +361,92 @@ fn negative_error_intake_rejects_non_object_control() {
     ));
     container.drain().unwrap();
     container.dispose().unwrap();
+}
+
+fn assert_missing_control_resource_fails(
+    node_id: &str,
+    role_id: &str,
+    chain: &str,
+    position: u32,
+    plugin_id: &str,
+    resource_name: &str,
+) {
+    let plan = compile_standard_plan(node_id, role_id, chain, position, &[plugin_id])
+        .expect("standard plan compiles");
+    let hash = plan.plan_hash();
+    let mut container = NodeContainer::declare(node_id, plan.clone(), plan_bindings(&plan))
+        .expect("binding passes");
+    container = publish_container(container);
+    let registry = StandardHandleRegistry::new();
+    let error = container
+        .execute_with_plan_hash(
+            &hash,
+            NodeExecutionInput {
+                data: json!({}),
+                control: json!({}),
+            },
+            &registry,
+        )
+        .expect_err("missing typed control resource must fail fast");
+    assert!(
+        matches!(
+            &error,
+            NodeContainerError::Bridge(BridgeError::HandleError { message, .. })
+                if message.contains(resource_name)
+                    && message.contains("requires existing typed")
+        ),
+        "expected explicit missing {resource_name} failure, got {error:?}"
+    );
+    container.drain().unwrap();
+    container.dispose().unwrap();
+}
+
+#[test]
+fn negative_scope_consume_rejects_missing_metadata_center() {
+    assert_missing_control_resource_fails(
+        "V4MetadataCenter01ScopeRegistry",
+        "control_center",
+        "control",
+        0,
+        "v4.std.control.scope_consume",
+        "metadata center",
+    );
+}
+
+#[test]
+fn negative_payload_cycle_record_rejects_missing_payload_cycle() {
+    assert_missing_control_resource_fails(
+        "V4PayloadCycleRegistry",
+        "control_center",
+        "control",
+        0,
+        "v4.std.control.payload_cycle_record",
+        "payload cycle",
+    );
+}
+
+#[test]
+fn negative_error_intake_rejects_missing_error_chain() {
+    assert_missing_control_resource_fails(
+        "V4Error01SourceRaised",
+        "error_source",
+        "error",
+        1,
+        "v4.std.error.typed_intake",
+        "error chain",
+    );
+}
+
+#[test]
+fn negative_error_projection_rejects_missing_error_chain() {
+    assert_missing_control_resource_fails(
+        "V4Error06ClientProjected",
+        "error_projection",
+        "error",
+        6,
+        "v4.std.error.projection_adapter",
+        "error chain",
+    );
 }
 
 #[test]

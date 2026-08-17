@@ -759,7 +759,9 @@ fn scope_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .read_control_resource("v4.control.metadata_center")
         .map_err(|error| error.to_string())?
         .cloned()
-        .unwrap_or_else(|| json!({}));
+        .ok_or_else(|| {
+            "scope_consume requires existing typed metadata center resource".to_string()
+        })?;
     let object = metadata
         .as_object_mut()
         .ok_or_else(|| "scope_consume requires typed metadata object".to_string())?;
@@ -773,7 +775,9 @@ fn payload_cycle_record(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .read_control_resource("v4.lifecycle.payload_cycle")
         .map_err(|error| error.to_string())?
         .cloned()
-        .unwrap_or_else(|| json!({}));
+        .ok_or_else(|| {
+            "payload_cycle_record requires existing typed payload cycle resource".to_string()
+        })?;
     let object = payload_cycle
         .as_object_mut()
         .ok_or_else(|| "payload_cycle_record requires typed cycle object".to_string())?;
@@ -787,7 +791,7 @@ fn error_intake(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .read_control_resource("v4.control.error_chain")
         .map_err(|error| error.to_string())?
         .cloned()
-        .unwrap_or_else(|| json!({}));
+        .ok_or_else(|| "error_intake requires existing typed error chain resource".to_string())?;
     let object = error_chain
         .as_object_mut()
         .ok_or_else(|| "error_intake requires typed error object".to_string())?;
@@ -802,7 +806,9 @@ fn error_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .read_control_resource("v4.control.error_chain")
         .map_err(|error| error.to_string())?
         .cloned()
-        .unwrap_or_else(|| json!({}));
+        .ok_or_else(|| {
+            "error_projection requires existing typed error chain resource".to_string()
+        })?;
     let object = error_chain
         .as_object_mut()
         .ok_or_else(|| "error_projection requires typed error object".to_string())?;

@@ -197,6 +197,7 @@ enum ExecutionFailureCode {
     UnregisteredHandle,
     HandleError,
     EffectViolation,
+    ResourceAccessViolation,
     BridgeError,
     ProtocolError,
 }
@@ -522,9 +523,9 @@ impl ExecutionFailureFact {
                 BridgeError::PlanHashMismatch => ExecutionFailureCode::PlanHashMismatch,
                 BridgeError::UnregisteredHandle(_) => ExecutionFailureCode::UnregisteredHandle,
                 BridgeError::HandleError { .. } => ExecutionFailureCode::HandleError,
-                BridgeError::EffectViolation { .. }
-                | BridgeError::ResourceAccessViolation { .. } => {
-                    ExecutionFailureCode::EffectViolation
+                BridgeError::EffectViolation { .. } => ExecutionFailureCode::EffectViolation,
+                BridgeError::ResourceAccessViolation { .. } => {
+                    ExecutionFailureCode::ResourceAccessViolation
                 }
                 BridgeError::Compile(_) => ExecutionFailureCode::BridgeError,
                 BridgeError::Protocol(_) => ExecutionFailureCode::ProtocolError,

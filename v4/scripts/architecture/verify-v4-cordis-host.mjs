@@ -27,6 +27,7 @@ const required = [
   'executeNode(planHash, input, ...extra)',
   'async executeNode(planHash, input)',
   'EXECUTION_FAILURE_CODES',
+  "'resource_access_violation'",
   'decodeExecutionOutput',
   'validateExecutionInput',
   "const allowedKeys = new Set(['data', 'control']);",
@@ -71,6 +72,8 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     || !bindingTests.includes('real Cordis fibers drive ordered Rust NodePluginPlan execution')
     || !bindingTests.includes('execution plan hash mismatch fails before Rust handles run')
     || !bindingTests.includes('unregistered plugin handle fails fast with typed execution failure')
+    || !bindingTests.includes('resource access violation retains its typed execution failure code')
+    || !bindingTests.includes("error.code === 'resource_access_violation'")
     || !bindingTests.includes('JS and Rust reject undeclared execution fields')
     || !bindingTests.includes('execute after drain rejects invalid_state')
     || !bindingTests.includes('JS execution response decoder rejects malformed output')
@@ -86,6 +89,8 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     || !bindingContract.failure_rule?.includes('v4.node_container.lifecycle_failure')
     || !bindingContract.execution_rule?.includes('execute_with_plan_hash')
     || !bindingContract.execution_failure_rule?.includes('v4.node_container.execution_failure')
+    || !bindingContract.execution_failure_codes?.includes('resource_access_violation')
+    || !bindingContract.required_tests?.includes('resource access violation retains its typed execution failure code')
     || !bindingContract.required_tests?.includes('real Cordis fibers drive ordered Rust NodePluginPlan execution')
   ) {
     failures.push('host binding contract is missing or drifted');
@@ -183,6 +188,10 @@ function runSelfTest() {
     ['execution failure decoder removed', (candidate) => candidate.replace(
       "failure.resource_id === 'v4.node_container.execution_failure'",
       'false',
+    )],
+    ['resource access execution code removed', (candidate) => candidate.replace(
+      "  'resource_access_violation',\n",
+      '',
     )],
   ];
   let missed = 0;

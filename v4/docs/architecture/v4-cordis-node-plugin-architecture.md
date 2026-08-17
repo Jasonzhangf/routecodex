@@ -216,7 +216,8 @@ ExecuteNode 是与 lifecycle 并列的 typed line op：仅 ExecuteNode 的 succe
 `data` / `control` / `diagnostics` 三个独立 typed field，lifecycle success 永远不投影
 `output`；对应失败走 `v4.node_container.execution_failure` typed fact，错误码集合为
 `plan_hash_mismatch` / `invalid_state` / `unregistered_handle` / `handle_error` /
-`effect_violation` / `bridge_error` / `protocol_error`。JS port `#settle` 按 request_id
+`effect_violation` / `resource_access_violation` / `bridge_error` / `protocol_error`。
+资源能力越权与 effect 类型越权保持独立 typed code，不得合并投影。JS port `#settle` 按 request_id
 对应 pending op 选择 `decodeLifecycleResponse`（无 `output`）或 `decodeExecutionResponse`
 （带 typed output），两条 schema 互不耦合，防止 lifecycle success 误携带 execution output。
 
