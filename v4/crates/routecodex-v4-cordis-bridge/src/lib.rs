@@ -29,6 +29,7 @@ pub struct DiagnosticFact {
 /// Typed per-node execution input. Data and control stay in separate fields;
 /// no synthetic metadata blob is accepted.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NodeExecutionInput {
     pub data: Value,
     pub control: Value,

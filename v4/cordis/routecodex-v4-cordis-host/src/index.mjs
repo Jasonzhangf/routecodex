@@ -53,11 +53,74 @@ const LIFECYCLE_FAILURE_CODES = new Set([
   'bridge_error',
 ]);
 
+const EXECUTION_OPERATION = 'execute_node';
+const EXECUTION_FAILURE_CODES = new Set([
+  'plan_hash_mismatch',
+  'invalid_state',
+  'unregistered_handle',
+  'handle_error',
+  'effect_violation',
+  'bridge_error',
+  'protocol_error',
+]);
+
+function decodeDiagnosticFact(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CordisHostError('binding_protocol', 'diagnostic fact must be an object');
+  }
+  const allowedKeys = new Set(['kind', 'plugin_id', 'message']);
+  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
+  if (unknown) {
+    throw new CordisHostError('binding_protocol', `unknown diagnostic fact field ${unknown}`);
+  }
+  if (
+    typeof value.kind !== 'string'
+    || typeof value.plugin_id !== 'string'
+    || typeof value.message !== 'string'
+  ) {
+    throw new CordisHostError('binding_protocol', 'diagnostic fact fields must be strings');
+  }
+}
+
+function decodeExecutionOutput(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CordisHostError('binding_protocol', 'execution output must be an object');
+  }
+  const allowedKeys = new Set(['data', 'control', 'diagnostics']);
+  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
+  if (unknown) {
+    throw new CordisHostError('binding_protocol', `unknown execution output field ${unknown}`);
+  }
+  if (!Object.hasOwn(value, 'data') || !Object.hasOwn(value, 'control')) {
+    throw new CordisHostError('binding_protocol', 'execution output requires data and control');
+  }
+  if (!Array.isArray(value.diagnostics)) {
+    throw new CordisHostError('binding_protocol', 'execution diagnostics must be an array');
+  }
+  for (const fact of value.diagnostics) {
+    decodeDiagnosticFact(fact);
+  }
+}
+
+function validateExecutionInput(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CordisHostError('binding_protocol', 'execution input must be an object');
+  }
+  const allowedKeys = new Set(['data', 'control']);
+  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
+  if (unknown) {
+    throw new CordisHostError('binding_protocol', `unknown execution input field ${unknown}`);
+  }
+  if (!Object.hasOwn(value, 'data') || !Object.hasOwn(value, 'control')) {
+    throw new CordisHostError('binding_protocol', 'execution input requires data and control');
+  }
+}
+
 function decodeLifecycleResponse(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new CordisHostError('binding_protocol', 'lifecycle response must be an object');
   }
-  const successKeys = new Set(['ok', 'request_id', 'state', 'in_flight']);
+  const successKeys = new Set(['ok', 'request_id', 'state', 'in_flight', 'output']);
   const failureKeys = new Set([...successKeys, 'failure']);
   const allowedKeys = value.ok === true ? successKeys : failureKeys;
   if (value.ok !== true && value.ok !== false) {
@@ -77,6 +140,9 @@ function decodeLifecycleResponse(value) {
     throw new CordisHostError('binding_protocol', 'lifecycle response in_flight is invalid');
   }
   if (value.ok === false) {
+    if (value.output !== undefined) {
+      throw new CordisHostError('binding_protocol', 'failed response cannot include execution output');
+    }
     const failure = value.failure;
     if (!failure || typeof failure !== 'object' || Array.isArray(failure)) {
       throw new CordisHostError('binding_protocol', 'failed lifecycle response requires failure fact');
@@ -93,11 +159,25 @@ function decodeLifecycleResponse(value) {
     if (unknownFailure) {
       throw new CordisHostError('binding_protocol', `unknown lifecycle failure field ${unknownFailure}`);
     }
+    if (failure.resource_id === 'v4.node_container.lifecycle_failure') {
+      if (
+        !LIFECYCLE_OPERATIONS.has(failure.operation)
+        || !LIFECYCLE_FAILURE_CODES.has(failure.code)
+      ) {
+        throw new CordisHostError('binding_protocol', 'lifecycle failure fact is invalid');
+      }
+    } else if (failure.resource_id === 'v4.node_container.execution_failure') {
+      if (
+        failure.operation !== EXECUTION_OPERATION
+        || !EXECUTION_FAILURE_CODES.has(failure.code)
+      ) {
+        throw new CordisHostError('binding_protocol', 'execution failure fact is invalid');
+      }
+    } else {
+      throw new CordisHostError('binding_protocol', 'host failure resource id is invalid');
+    }
     if (
-      failure.resource_id !== 'v4.node_container.lifecycle_failure'
-      || failure.request_id !== value.request_id
-      || !LIFECYCLE_OPERATIONS.has(failure.operation)
-      || !LIFECYCLE_FAILURE_CODES.has(failure.code)
+      failure.request_id !== value.request_id
       || typeof failure.message !== 'string'
       || failure.message.length === 0
       || (failure.node_id !== undefined && (
@@ -106,6 +186,8 @@ function decodeLifecycleResponse(value) {
     ) {
       throw new CordisHostError('binding_protocol', 'lifecycle failure fact is invalid');
     }
+  } else if (value.output !== undefined) {
+    decodeExecutionOutput(value.output);
   }
   return value;
 }
@@ -285,6 +367,20 @@ export class RustNodeContainerPort {
     return this.#requestWithoutFields('dispose', fields);
   }
 
+  executeNode(planHash, input, ...extra) {
+    if (extra.length > 0) this.#rejectFields('execute_node');
+    if (typeof planHash !== 'string' || planHash.length !== 64) {
+      throw new CordisHostError('binding_protocol', 'execute_node requires a sha256 plan hash');
+    }
+    validateExecutionInput(input);
+    return this.#request({ op: 'execute_node', plan_hash: planHash, input }).then((response) => {
+      if (response.output === undefined) {
+        throw new CordisHostError('binding_protocol', 'execute_node response requires typed output');
+      }
+      return response;
+    });
+  }
+
   status(...fields) {
     return this.#requestWithoutFields('status', fields);
   }
@@ -424,6 +520,26 @@ export class CordisBoundNodeHost extends CordisNodeHost {
       }
       await releaseRequest;
     };
+  }
+
+  async executeNode(planHash, input) {
+    if (!this.#mounted || this.disposed) {
+      throw new CordisHostError('invalid_state', 'host is not accepting executions');
+    }
+    if (planHash !== this.#plan.hash) {
+      throw new CordisHostError('plan_hash_mismatch', 'execution plan hash does not match host');
+    }
+    if (
+      this.fibers.length === 0
+      || this.fibers.some(({ fiber }) => fiber.state !== FiberState.ACTIVE)
+    ) {
+      throw new CordisHostError(
+        'plugin_not_active',
+        'Cordis plugin fibers must be ACTIVE before Rust plan execution',
+      );
+    }
+    const response = await this.#port.executeNode(planHash, input);
+    return response.output;
   }
 
   async drain() {

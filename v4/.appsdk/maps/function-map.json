@@ -567,6 +567,7 @@
         "NodeContainer::plugins_mounted",
         "NodeContainer::publish",
         "NodeContainer::execute",
+        "NodeContainer::execute_with_plan_hash",
         "NodeContainer::enter_execution",
         "NodeContainer::in_flight",
         "NodeContainer::drain",
@@ -588,9 +589,11 @@
       "entry_symbols": [
         "CordisBoundNodeHost::mount",
         "CordisBoundNodeHost::beginExecution",
+        "CordisBoundNodeHost::executeNode",
         "CordisBoundNodeHost::drain",
         "CordisBoundNodeHost::dispose",
         "RustNodeContainerPort::declare",
+        "RustNodeContainerPort::executeNode",
         "RustNodeContainerPort::status"
       ],
       "entry_paths": [
@@ -609,8 +612,10 @@
         "HostBindingRuntime::handle",
         "HostRequest",
         "LifecycleFailureFact",
+        "ExecutionFailureFact",
         "NodeContainer::declare",
         "NodeContainer::enter_execution",
+        "NodeContainer::execute_with_plan_hash",
         "NodeContainer::drain",
         "NodeContainer::dispose"
       ],

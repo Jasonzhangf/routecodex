@@ -674,7 +674,9 @@
       "callee_path": "crates/routecodex-v4-node-container/src/bin/host_binding.rs",
       "caller_symbols": [
         "CordisBoundNodeHost",
-        "RustNodeContainerPort"
+        "CordisBoundNodeHost::executeNode",
+        "RustNodeContainerPort",
+        "RustNodeContainerPort::executeNode"
       ],
       "callee_symbols": [
         "HostBindingRuntime::handle",
@@ -689,6 +691,8 @@
         "NodeContainer::context_created",
         "NodeContainer::plugins_mounted",
         "NodeContainer::publish",
+        "NodeContainer::execute",
+        "NodeContainer::execute_with_plan_hash",
         "NodeContainer::enter_execution",
         "NodeContainer::drain",
         "NodeContainer::dispose"
@@ -725,11 +729,39 @@
     },
     {
       "from": "routecodex-v4-node-container",
+      "to": "routecodex-v4-cordis-host",
+      "owner": "routecodex-v4-node-container::HostBindingRuntime",
+      "edge_type": "execution_failure_projection",
+      "caller_feature_id": "v4.node_container.lifecycle_dispatch",
+      "callee_feature_id": "v4.cordis.host_binding",
+      "caller_path": "crates/routecodex-v4-node-container/src/bin/host_binding.rs",
+      "callee_path": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "caller_symbols": [
+        "HostBindingRuntime::handle",
+        "ExecutionFailureFact"
+      ],
+      "callee_symbols": [
+        "RustNodeContainerPort",
+        "CordisHostError"
+      ],
+      "symbols": [
+        "HostBindingRuntime",
+        "ExecutionFailureFact",
+        "RustNodeContainerPort",
+        "CordisHostError"
+      ],
+      "resource_id": "v4.node_container.execution_failure",
+      "path": "crates/routecodex-v4-node-container/src/bin/host_binding.rs,cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-node-container",
       "to": "routecodex-v4-cordis-bridge",
       "owner": "routecodex-v4-node-container::NodeContainer",
       "edge_type": "typed_plan_execution",
       "symbols": [
         "execute_plan",
+        "execute_with_plan_hash",
         "NodeExecutionInput",
         "NodeExecutionOutput"
       ],

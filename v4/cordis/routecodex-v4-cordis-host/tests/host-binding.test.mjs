@@ -63,6 +63,32 @@ function observerEntry(order = 900) {
   };
 }
 
+function semanticEntry(pluginId = 'v4.test.echo', order = 300) {
+  return {
+    plugin_id: pluginId,
+    version: '0.1.0',
+    kind: 'operator',
+    effect: 'semantic',
+    phase: 'semantic',
+    order,
+    reads: ['v4.request.normal_payload'],
+    writes: ['v4.request.normal_payload'],
+  };
+}
+
+function controlEntry(order = 100) {
+  return {
+    plugin_id: 'v4.test.control',
+    version: '0.1.0',
+    kind: 'control',
+    effect: 'control_only',
+    phase: 'control',
+    order,
+    reads: ['v4.control.metadata_center'],
+    writes: ['v4.control.metadata_center'],
+  };
+}
+
 function plan(entries = [observerEntry()]) {
   const value = {
     node_id: 'V4HubReqChatProcess04Governed',
@@ -318,6 +344,158 @@ test('JS lifecycle encoder rejects fields not declared by the operation', async 
   t.after(() => port.close());
   assert.throws(
     () => port.status({ metadata: { route: 'forbidden' } }),
+    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+  );
+});
+
+test('real Cordis fibers drive ordered Rust NodePluginPlan execution', async (t) => {
+  const port = new RustNodeContainerPort({ binaryPath });
+  t.after(() => port.close());
+  const entries = [controlEntry(), semanticEntry(), observerEntry()];
+  const nodePlan = plan(entries);
+  const events = [];
+  const host = new CordisBoundNodeHost({
+    port,
+    plan: nodePlan,
+    nodeId: nodePlan.node_id,
+    descriptor: { roleId: nodePlan.role_id },
+  });
+
+  await host.mount(entries.map((entry) => plugin(entry, events)));
+  const output = await host.executeNode(nodePlan.hash, {
+    data: { steps: [] },
+    control: {},
+  });
+  assert.deepEqual(output.data, { steps: ['v4.test.echo'] });
+  assert.deepEqual(output.control, { written_by: 'control' });
+  assert.equal(output.diagnostics.length, 1);
+  assert.equal(output.diagnostics[0].kind, 'node.observed');
+  assert.equal(host.fibers.length, 3);
+  assert.deepEqual(events, ['active', 'active', 'active']);
+
+  await host.drain();
+  await host.dispose();
+  assert.deepEqual(events, ['active', 'active', 'active', 'disposed', 'disposed', 'disposed']);
+});
+
+test('execution plan hash mismatch fails before Rust handles run', async (t) => {
+  const port = new RustNodeContainerPort({ binaryPath });
+  t.after(() => port.close());
+  const nodePlan = plan([semanticEntry()]);
+  const host = new CordisBoundNodeHost({
+    port,
+    plan: nodePlan,
+    nodeId: nodePlan.node_id,
+    descriptor: { roleId: nodePlan.role_id },
+  });
+
+  await host.mount([plugin(nodePlan.entries[0])]);
+  await assert.rejects(
+    host.executeNode('0'.repeat(64), { data: { steps: [] }, control: {} }),
+    (error) => error instanceof CordisHostError && error.code === 'plan_hash_mismatch',
+  );
+  await assert.rejects(
+    port.executeNode('0'.repeat(64), { data: { steps: [] }, control: {} }),
+    (error) => (
+      error instanceof CordisHostError
+      && error.code === 'plan_hash_mismatch'
+      && error.failure?.resource_id === 'v4.node_container.execution_failure'
+      && error.failure?.operation === 'execute_node'
+    ),
+  );
+  assert.equal((await port.status()).in_flight, 0);
+
+  await host.drain();
+  await host.dispose();
+});
+
+test('unregistered plugin handle fails fast with typed execution failure', async (t) => {
+  const port = new RustNodeContainerPort({ binaryPath });
+  t.after(() => port.close());
+  const ghost = semanticEntry('v4.test.ghost', 500);
+  const nodePlan = plan([ghost]);
+  const host = new CordisBoundNodeHost({
+    port,
+    plan: nodePlan,
+    nodeId: nodePlan.node_id,
+    descriptor: { roleId: nodePlan.role_id },
+  });
+
+  await host.mount([plugin(ghost)]);
+  await assert.rejects(
+    host.executeNode(nodePlan.hash, { data: { steps: [] }, control: {} }),
+    (error) => (
+      error instanceof CordisHostError
+      && error.code === 'unregistered_handle'
+      && error.failure?.resource_id === 'v4.node_container.execution_failure'
+      && error.failure?.operation === 'execute_node'
+    ),
+  );
+
+  await host.drain();
+  await host.dispose();
+});
+
+test('JS and Rust reject undeclared execution fields', async (t) => {
+  const port = new RustNodeContainerPort({ binaryPath });
+  t.after(() => port.close());
+  assert.throws(
+    () => port.executeNode('0'.repeat(64), { data: {}, control: {}, extra: true }),
+    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+  );
+
+  const response = await sendRawLifecycleRequest({
+    op: 'execute_node',
+    request_id: 'raw-execution-field',
+    plan_hash: '0'.repeat(64),
+    input: { data: {}, control: {}, extra: true },
+  });
+  assert.equal(response.ok, false);
+  assert.equal(response.failure.resource_id, 'v4.node_container.lifecycle_failure');
+  assert.equal(response.failure.operation, 'protocol_decode');
+  assert.equal(response.failure.code, 'protocol_error');
+});
+
+test('execute after drain rejects invalid_state', async (t) => {
+  const port = new RustNodeContainerPort({ binaryPath });
+  t.after(() => port.close());
+  const nodePlan = plan([semanticEntry()]);
+  const host = new CordisBoundNodeHost({
+    port,
+    plan: nodePlan,
+    nodeId: nodePlan.node_id,
+    descriptor: { roleId: nodePlan.role_id },
+  });
+
+  await host.mount([plugin(nodePlan.entries[0])]);
+  await host.drain();
+  await assert.rejects(
+    host.executeNode(nodePlan.hash, { data: { steps: [] }, control: {} }),
+    (error) => error instanceof CordisHostError && error.code === 'invalid_state',
+  );
+  await host.dispose();
+});
+
+test('JS execution response decoder rejects malformed output', async (t) => {
+  const port = new RustNodeContainerPort({
+    binaryPath: process.execPath,
+    binaryArgs: [unsolicitedResponseBinary, 'malformed-output'],
+  });
+  t.after(() => port.close());
+  await assert.rejects(
+    withTimeout(port.status()),
+    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+  );
+});
+
+test('JS execution response decoder rejects missing output', async (t) => {
+  const port = new RustNodeContainerPort({
+    binaryPath: process.execPath,
+    binaryArgs: [unsolicitedResponseBinary, 'missing-output'],
+  });
+  t.after(() => port.close());
+  await assert.rejects(
+    withTimeout(port.executeNode('0'.repeat(64), { data: {}, control: {} })),
     (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
   );
 });

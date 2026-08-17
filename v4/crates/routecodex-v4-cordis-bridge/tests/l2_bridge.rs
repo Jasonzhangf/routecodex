@@ -198,6 +198,28 @@ fn input(data: Value, control: Value) -> NodeExecutionInput {
 }
 
 #[test]
+fn positive_execution_input_accepts_typed_data_and_control() {
+    let decoded: NodeExecutionInput = serde_json::from_value(json!({
+        "data": {"steps": []},
+        "control": {},
+    }))
+    .expect("typed execution input decodes");
+    assert_eq!(decoded.data, json!({"steps": []}));
+    assert_eq!(decoded.control, json!({}));
+}
+
+#[test]
+fn negative_execution_input_rejects_undeclared_fields() {
+    let error = serde_json::from_value::<NodeExecutionInput>(json!({
+        "data": {},
+        "control": {},
+        "extra": true,
+    }))
+    .unwrap_err();
+    assert!(error.to_string().contains("unknown field `extra`"));
+}
+
+#[test]
 fn ordered_serial_execution_in_plan_order_with_read_only_observer() {
     let authoring = vec![
         authoring_plugin(

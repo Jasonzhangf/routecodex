@@ -224,6 +224,11 @@ function validate(state) {
       failures.push(`${MODULE_ID}: typed ${field} field missing`);
     }
   }
+  const inputIndex = state.source.indexOf('pub struct NodeExecutionInput');
+  const denyIndex = state.source.lastIndexOf('#[serde(deny_unknown_fields)]');
+  if (inputIndex < 0 || denyIndex < 0 || denyIndex > inputIndex) {
+    failures.push(`${MODULE_ID}: NodeExecutionInput must deny unknown fields`);
+  }
   if (/pub\s+metadata\s*:/.test(state.source)) {
     failures.push(`${MODULE_ID}: generic metadata field entered bridge payload`);
   }
@@ -248,6 +253,8 @@ function validate(state) {
     'tampered_plan_hash_is_rejected_before_handles_run',
     'unregistered_handle_fails_fast',
     'read_only_handle_cannot_write_normal_data',
+    'positive_execution_input_accepts_typed_data_and_control',
+    'negative_execution_input_rejects_undeclared_fields',
   ]) {
     if (!state.tests.includes(`fn ${testName}()`)) {
       failures.push(`${MODULE_ID}: missing L2 test ${testName}`);
@@ -321,6 +328,9 @@ function runSelfTest() {
     ['plan verification removed', (state) => {
       state.source = state.source.replace('if !plan.verify()', 'if false');
     }],
+    ['NodeExecutionInput unknown fields accepted', (state) => {
+      state.source = state.source.replace('#[serde(deny_unknown_fields)]', '#[serde(default)]');
+    }],
     ['normal-data guard widened', (state) => {
       state.source = state.source.replace(
         'matches!(self.effect, PluginEffect::Semantic)',
@@ -351,7 +361,7 @@ function runSelfTest() {
     }
   }
   if (missed > 0) process.exit(1);
-  console.log('[v4_parity_gate_cordis_bridge] OK red self-test 10/10');
+  console.log('[v4_parity_gate_cordis_bridge] OK red self-test 11/11');
 }
 
 if (process.argv.includes('--red-self-test')) {
