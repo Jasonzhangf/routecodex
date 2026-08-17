@@ -425,7 +425,7 @@
     },
     {
       "gate_id": "v4_node_container_test_consumer",
-      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-node-container --deps routecodex-v4-base-node --source-deps routecodex-v4-cordis-bridge,routecodex-v4-plugin-contract",
+      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-node-container --deps routecodex-v4-base-node --source-deps routecodex-v4-cordis-bridge,routecodex-v4-plugin-plan",
       "required_for": [
         "routecodex-v4-node-container:architecture_stable"
       ]

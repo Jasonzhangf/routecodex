@@ -16,7 +16,6 @@ pub enum NodeContainerState {
     Declared,
     ContextCreated,
     PluginsMounted,
-    Published,
     Accepting,
     Draining,
     Disposed,
@@ -130,17 +129,29 @@ impl NodeContainer {
     }
 
     pub fn context_created(&mut self) -> Result<(), NodeContainerError> {
-        self.transition(NodeContainerState::Declared, NodeContainerState::ContextCreated, "context_created")
+        self.transition(
+            NodeContainerState::Declared,
+            NodeContainerState::ContextCreated,
+            "context_created",
+        )
     }
 
     pub fn plugins_mounted(&mut self) -> Result<(), NodeContainerError> {
-        self.transition(NodeContainerState::ContextCreated, NodeContainerState::PluginsMounted, "plugins_mounted")
+        self.transition(
+            NodeContainerState::ContextCreated,
+            NodeContainerState::PluginsMounted,
+            "plugins_mounted",
+        )
     }
 
     pub fn publish(&mut self) -> Result<(), NodeContainerError> {
-        self.transition(NodeContainerState::PluginsMounted, NodeContainerState::Published, "publish")?;
-        self.state = NodeContainerState::Accepting;
-        Ok(())
+        // publish 即进入可接收状态：新请求使用新 plan，旧 in-flight 由 drain 收敛。
+        // 不保留不可观测的 Published 中间态（生命周期表以可观测状态为准）。
+        self.transition(
+            NodeContainerState::PluginsMounted,
+            NodeContainerState::Accepting,
+            "publish",
+        )
     }
 
     pub fn execute(
@@ -158,7 +169,11 @@ impl NodeContainer {
     }
 
     pub fn drain(&mut self) -> Result<(), NodeContainerError> {
-        self.transition(NodeContainerState::Accepting, NodeContainerState::Draining, "drain")
+        self.transition(
+            NodeContainerState::Accepting,
+            NodeContainerState::Draining,
+            "drain",
+        )
     }
 
     pub fn dispose(&mut self) -> Result<(), NodeContainerError> {
@@ -219,7 +234,10 @@ mod tests {
             hash: String::new(),
         };
         let hash = plan.plan_hash();
-        let plan = routecodex_v4_plugin_plan::NodePluginPlan { hash: hash.clone(), ..plan };
+        let plan = routecodex_v4_plugin_plan::NodePluginPlan {
+            hash: hash.clone(),
+            ..plan
+        };
         let bindings = PlanBindings {
             graph_hash: hash.clone(),
             manifest_hash: hash.clone(),
@@ -243,10 +261,21 @@ mod tests {
         let hash = plan.plan_hash();
         let mut container = NodeContainer::declare(
             "node",
-            routecodex_v4_plugin_plan::NodePluginPlan { hash: hash.clone(), ..plan },
-            PlanBindings { graph_hash: hash.clone(), manifest_hash: hash.clone(), loaded_plan_hash: hash },
-        ).expect("valid binding");
-        assert!(matches!(container.dispose(), Err(NodeContainerError::InvalidState { .. })));
+            routecodex_v4_plugin_plan::NodePluginPlan {
+                hash: hash.clone(),
+                ..plan
+            },
+            PlanBindings {
+                graph_hash: hash.clone(),
+                manifest_hash: hash.clone(),
+                loaded_plan_hash: hash,
+            },
+        )
+        .expect("valid binding");
+        assert!(matches!(
+            container.dispose(),
+            Err(NodeContainerError::InvalidState { .. })
+        ));
         container.context_created().unwrap();
         container.plugins_mounted().unwrap();
         container.publish().unwrap();

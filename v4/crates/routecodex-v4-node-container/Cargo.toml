@@ -12,4 +12,5 @@ path = "src/lib.rs"
 routecodex-v4-cordis-bridge = { path = "../routecodex-v4-cordis-bridge" }
 routecodex-v4-plugin-contract = { path = "../routecodex-v4-plugin-contract" }
 routecodex-v4-plugin-plan = { path = "../routecodex-v4-plugin-plan" }
+serde_json = "1"
 sha2 = "0.10"

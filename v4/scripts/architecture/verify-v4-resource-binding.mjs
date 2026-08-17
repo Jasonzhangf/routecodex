@@ -47,6 +47,15 @@ const CRATE_DIRS = fs
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name);
 
+// JS module hosts (v4/cordis/*) are also valid resource owners: they own
+// lifecycle/context resources without exposing Rust crate symbols.
+const CORDIS_DIRS = fs
+  .readdirSync(path.join(root, 'cordis'), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name);
+
+const isKnownOwner = (crate) => CRATE_DIRS.includes(crate) || CORDIS_DIRS.includes(crate);
+
 // Only crate-level declarations bind a resource: column-0
 // `pub [struct|enum|trait|fn|type|const|static]` items and `pub use`
 // re-exports. Impl-method names (`fn new`, `fn execute`) and locals never
@@ -172,9 +181,9 @@ function validate(resourceMap, appsdkMap, verificationMap, nodeIds) {
     }
 
     const crate = resource.owner_crate;
-    if (crate && !CRATE_DIRS.includes(crate)) {
+    if (crate && !isKnownOwner(crate)) {
       if (status === 'anchored') {
-        failures.push(`${id}: anchored resource owner_crate ${crate} does not exist in v4/crates`);
+        failures.push(`${id}: anchored resource owner_crate ${crate} does not exist in v4/crates or v4/cordis`);
       }
     }
     if (status === 'anchored') {
@@ -196,7 +205,7 @@ function validate(resourceMap, appsdkMap, verificationMap, nodeIds) {
         failures.push(`${id}: owner_symbols not declared in ${crate} src: ${missing.join(', ')}`);
       }
     }
-    if (crate && CRATE_DIRS.includes(crate) && status === 'anchored') {
+    if (crate && isKnownOwner(crate) && status === 'anchored') {
       const ownerNode = resource.owner_node;
       const ownerBound = nodeIds.has(ownerNode) || symbols.includes(ownerNode);
       if (!ownerBound) {

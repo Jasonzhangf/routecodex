@@ -20,8 +20,8 @@ if (forbidden.some((token) => source.includes(token))) {
 }
 if (red) {
   if (source.includes('struct Context')) {
-    console.log('[v4 node container red] OK synthetic-Cordis mutation detected');
-    process.exit(0);
+    console.error('[v4 node container red] synthetic-Cordis fixture NOT rejected by guard');
+    process.exit(1);
   }
   console.log('[v4 node container red] OK guard rejects synthetic-Cordis fixture');
   process.exit(0);

@@ -3,7 +3,7 @@
   "contract_id": "v4-node-graph",
   "status": "active",
   "owner_feature_id": "v4.node_graph",
-  "graph_hash": "sha256:80e6ad59e07962093021f3c1b125fa186cd3c6305cf6685218171df66c99ef90",
+  "graph_hash": "sha256:e86ea52fc5f9acee7ca7c28ee2ea564c4d327a17262ea1d74482b6a9be6f378c",
   "canonical_docs": [
     "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
@@ -1653,6 +1653,13 @@
       "role_id": "control_ledger",
       "scope": "web UI projection consumer (future)",
       "owner": "routecodex-v4-webui"
+    },
+    {
+      "node_id": "V4CordisNodeHost",
+      "family": "ControlCenterNode",
+      "role_id": "control_ledger",
+      "scope": "real Cordis Context/Fiber/Effect host lifecycle",
+      "owner": "routecodex-v4-cordis-host"
     }
   ],
   "registered_nodes_rule": "registered_nodes is the single machine node catalog: fixed chain nodes, group-private nodes, and control/diagnostic/lifecycle side nodes all resolve here; every entry needs unique family/role/scope/owner; skeleton checkpoints and resource relations may only reference catalog nodes",

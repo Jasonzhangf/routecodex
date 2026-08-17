@@ -177,6 +177,27 @@
       "mode": "source_path",
       "status": "transitional",
       "manifest_path": "crates/routecodex-v4-admin/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-node-container",
+      "dependency": "routecodex-v4-cordis-bridge",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-node-container/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-node-container",
+      "dependency": "routecodex-v4-plugin-contract",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-node-container/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-node-container",
+      "dependency": "routecodex-v4-plugin-plan",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-node-container/Cargo.toml"
     }
   ],
   "forbidden_path_roots": [
