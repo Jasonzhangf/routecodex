@@ -88,13 +88,13 @@ verification:
 - feature_id: vr.route_classifier
   change_risk: high
   unit:
-  - sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/tests.rs
-  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
+  - v3/crates/routecodex-v3-route-classifier/src/tests.rs
+  - v3/crates/routecodex-v3-virtual-router/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/nodes.rs
   contract:
   - docs/goals/v3-v2-route-classifier-parity-test-design.md
   integration:
-  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/classifier.rs
+  - v3/crates/routecodex-v3-virtual-router/src/lib.rs
   - v3/crates/routecodex-v3-virtual-router/src/lib.rs
   smoke:
   - npm run test:route-classifier-semantics
@@ -112,12 +112,12 @@ verification:
 - feature_id: conversion.glm_tool_schema_payload_copy_budget
   change_risk: medium
   unit:
-  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs
+  - v3/crates/provider-compat-core/src/lib.rs
   contract:
   - docs/goals/full-pipeline-glm-tool-schema-payload-copy-budget-test-design.md
-  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs
+  - v3/crates/provider-compat-core/src/lib.rs
   integration:
-  - cargo test -p router-hotpath-napi compat_tool_schema --lib
+  - cargo test -p provider-compat-core --lib
   smoke:
   - npm run verify:resource-operation-map
   - npm run verify:function-map-compile-gate
@@ -223,7 +223,7 @@ verification:
     CRLF/LF, unknown fields, opaque `[DONE]`, and normal close inside the V3 workspace.
   - Negative tests lock invalid UTF-8, unterminated EOF, frame/buffer limits, cancellation/upstream
     failure mapping, and no synthetic terminal success.
-  - V3 crates must import `routecodex-v3-sse`, not `sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core`.
+  - V3 crates must import the V3-local `routecodex-v3-sse`; no external workspace SSE crate is permitted.
   - Server closeout wrappers must not parse SSE event names or data JSON to decide
     terminal, required_action, continuation, tool, stopless, servertool, or provider
     failure semantics.

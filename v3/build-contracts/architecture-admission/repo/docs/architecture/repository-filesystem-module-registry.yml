@@ -37,7 +37,6 @@ modules:
       - docs/architecture/reviews/agent-worker-p0-architecture-guard-audit.md
     forbidden_paths:
       - src
-      - sharedmodule/llmswitch-core/rust-core
       - v3/crates
       - config
     allowed_edges:
@@ -67,7 +66,6 @@ modules:
       - docs/architecture/v3-verification-map.yml
     forbidden_paths:
       - src
-      - sharedmodule/llmswitch-core/rust-core
       - v3/crates/routecodex-v3-provider-responses/src/transport.rs
       - v3/crates/routecodex-v3-provider-responses/src/wire.rs
       - v3/crates/routecodex-v3-server
