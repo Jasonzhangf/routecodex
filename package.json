@@ -12,7 +12,6 @@
     "dist/",
     "sharedmodule/llmswitch-core/dist/",
     "sharedmodule/llmswitch-core/package.json",
-    "config/",
     "scripts/",
     "README.md",
     "LICENSE",
