@@ -24,6 +24,15 @@ const fixtures = [
     diagnostic: /source must have exactly one module owner: v3\/crates\/routecodex-v3-target.*v3\.target,v3\.target_duplicate/,
   },
   {
+    name: 'build registry claims runtime source ownership',
+    file: 'docs/architecture/v3-build-tool-module-registry.yml',
+    transform: (source) => source.replace(
+      '      - v3/build-contracts\n    referenced_paths:',
+      '      - v3/build-contracts\n      - v3/crates/provider-compat-core\n    referenced_paths:',
+    ),
+    diagnostic: /source ownership overlaps build\/runtime registries: v3\/crates\/provider-compat-core owners=v3-independent-build-domain,v3\.provider_compat_core/,
+  },
+  {
     name: 'module owner feature is undeclared',
     file: 'docs/architecture/v3-runtime-module-registry.yml',
     transform: (source) => source.replace(
@@ -224,6 +233,7 @@ for (const fixture of fixtures) {
     });
     mkdirSync(join(root, 'docs/architecture'), { recursive: true });
     for (const name of [
+      'v3-build-tool-module-registry.yml',
       'v3-runtime-module-registry.yml',
       'v3-function-map.yml',
       'function-map.yml',

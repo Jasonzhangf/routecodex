@@ -341,16 +341,6 @@ pub fn run_resp_inbound_stage3_compat(
     Ok(build_compat_result(input.payload, None))
 }
 
-fn strip_top_level_provider_internal_fields(payload: Value) -> Value {
-    let Some(mut root) = payload.as_object().cloned() else {
-        return payload;
-    };
-    root.remove("semantics");
-    root.remove("processed");
-    root.remove("processingMetadata");
-    Value::Object(root)
-}
-
 fn normalize_profile(profile: Option<&String>) -> Option<String> {
     profile
         .map(|profile| profile.trim())
@@ -365,7 +355,7 @@ fn pick_compat_profile(input: &ReqOutboundCompatInput) -> Option<String> {
 
 fn build_compat_result(payload: Value, profile: Option<String>) -> CompatResult {
     CompatResult {
-        payload: strip_top_level_provider_internal_fields(payload),
+        payload,
         applied_profile: profile,
         native_applied: true,
     }
@@ -2051,33 +2041,24 @@ mod tests {
     }
 
     #[test]
-    fn request_stage_loads_profile_without_payload_cleanup() {
-        let input = ReqOutboundCompatInput {
-            payload: json!({
-                "messages": [{"role": "user", "content": "hi"}],
-                "semantics": {"internal": true},
-                "processed": {"marker": "must-preserve"},
-                "processingMetadata": {"marker": "must-preserve"}
-            }),
-            adapter_context: AdapterContext {
-                compatibility_profile: Some("chat:minimax".to_string()),
-                provider_protocol: Some("openai-responses".to_string()),
-                ..Default::default()
-            },
-            explicit_profile: None,
-        };
-        let result = run_req_outbound_stage3_compat(input).unwrap();
-        assert_eq!(result.applied_profile.as_deref(), Some("chat:minimax"));
-        assert_eq!(result.payload["semantics"], json!({"internal": true}));
-        assert_eq!(
-            result.payload["processed"],
-            json!({"marker": "must-preserve"})
-        );
-        assert_eq!(
-            result.payload["processingMetadata"],
-            json!({"marker": "must-preserve"})
-        );
-        assert_eq!(result.payload["messages"][0]["content"], "hi");
+    fn request_compat_preserves_top_level_payload_fields() {
+        for compatibility_profile in [Some("chat:minimax".to_string()), None] {
+            let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+                payload: json!({"messages":[{"role":"user","content":"hi"}],"semantics":{"internal":true},"processed":{"marker":"must-preserve"},"processingMetadata":{"marker":"must-preserve"}}),
+                adapter_context: AdapterContext { compatibility_profile, provider_protocol: Some("openai-responses".to_string()), ..Default::default() },
+                explicit_profile: None,
+            })
+            .expect("compatibility must preserve the input payload");
+            assert_eq!(result.payload["semantics"], json!({"internal": true}));
+            assert_eq!(
+                result.payload["processed"],
+                json!({"marker": "must-preserve"})
+            );
+            assert_eq!(
+                result.payload["processingMetadata"],
+                json!({"marker": "must-preserve"})
+            );
+        }
     }
 
     #[test]

@@ -42,6 +42,7 @@ function fail(message) {
 const all = files('v3/crates');
 const read = (path) => readFileSync(resolveV3Path(path), 'utf8');
 const moduleRegistryPath = 'docs/architecture/v3-runtime-module-registry.yml';
+const buildModuleRegistryPath = 'docs/architecture/v3-build-tool-module-registry.yml';
 const functionMapPaths = ['docs/architecture/v3-function-map.yml', 'docs/architecture/function-map.yml'];
 const declaredFeatureIds = new Set();
 for (const functionMapPath of functionMapPaths) {
@@ -88,6 +89,37 @@ if (moduleRegistry?.status !== 'active' || !Array.isArray(moduleRegistry.modules
     }
     if (!Array.isArray(module.owned_paths) || module.owned_paths.length === 0) {
       fail(`${moduleRegistryPath} module ${module.module_id ?? '<unknown>'} requires owned_paths`);
+    }
+  }
+}
+
+const buildModuleRegistry = YAML.parse(read(buildModuleRegistryPath));
+if (buildModuleRegistry?.status !== 'active' || !Array.isArray(buildModuleRegistry.modules)) {
+  fail(`${buildModuleRegistryPath} must contain an active modules array`);
+} else if (Array.isArray(moduleRegistry?.modules)) {
+  const pathRoot = (path) => path.endsWith('/**') ? path.slice(0, -3) : path;
+  const pathsOverlap = (left, right) => {
+    const leftRoot = pathRoot(left);
+    const rightRoot = pathRoot(right);
+    return leftRoot === rightRoot
+      || leftRoot.startsWith(`${rightRoot}/`)
+      || rightRoot.startsWith(`${leftRoot}/`);
+  };
+  const runtimeOwners = moduleRegistry.modules.flatMap((module) =>
+    (module.owned_paths ?? []).map((path) => ({ module_id: module.module_id, path })));
+  for (const module of buildModuleRegistry.modules) {
+    for (const ownedPath of module.owned_paths ?? []) {
+      for (const runtimeOwner of runtimeOwners) {
+        if (pathsOverlap(ownedPath, runtimeOwner.path)) {
+          fail(`V3 source ownership overlaps build/runtime registries: ${ownedPath} owners=${module.module_id},${runtimeOwner.module_id}`);
+        }
+      }
+    }
+    for (const referencedPath of module.referenced_paths ?? []) {
+      const owners = runtimeOwners.filter((owner) => pathsOverlap(referencedPath, owner.path));
+      if (owners.length !== 1) {
+        fail(`V3 build reference must resolve to exactly one runtime module owner: ${referencedPath} owners=${owners.map((owner) => owner.module_id).join(',') || 'none'}`);
+      }
     }
   }
 }

@@ -396,7 +396,7 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.build.independent_domain.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.build.independent_domain.mainline.yml",
-      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
+      "source_commit": "7d49e88a44db31317783aa0b3d47abfb95ff58c3",
       "sha256": "1a7f29cceb3c4990f7a6916c12338193327324c2277286b76dfeba007191be76"
     },
     {
@@ -732,8 +732,8 @@
     {
       "output_path": "repo/docs/architecture/v3-build-tool-module-registry.yml",
       "source_path": "docs/architecture/v3-build-tool-module-registry.yml",
-      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
-      "sha256": "a65610a7d9c9eb59ac22bf8aab9381b6c56a8ec4505430ab2d0494b735013c62"
+      "source_commit": "7d49e88a44db31317783aa0b3d47abfb95ff58c3",
+      "sha256": "5667e7bbd7458c09f3b7867514d35250e3d116edd02b84cc41a0a60bdcc068f6"
     },
     {
       "output_path": "repo/docs/architecture/v3-control-plane-data-plane-audit-2026-08-10.md",
@@ -744,7 +744,7 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
+      "source_commit": "7d49e88a44db31317783aa0b3d47abfb95ff58c3",
       "sha256": "c9b816cebd03b276724124bcc8fe9ce33117180cec3c91fccad4c08e3e8460f4"
     },
     {
@@ -756,7 +756,7 @@
     {
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
-      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
+      "source_commit": "7d49e88a44db31317783aa0b3d47abfb95ff58c3",
       "sha256": "7b9f35ea7d9f3d15ebff3d226baa747dffd16a1771730baab214912df96e245d"
     },
     {
@@ -774,7 +774,7 @@
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
+      "source_commit": "7d49e88a44db31317783aa0b3d47abfb95ff58c3",
       "sha256": "48fbe4a14d4243f78c79804d2dfd494bfdf23a788c358771b88a588577722a7f"
     },
     {
@@ -954,7 +954,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
-      "source_commit": "86cebaf9463c978dc2f3a37526a766d98262c878",
+      "source_commit": "7d49e88a44db31317783aa0b3d47abfb95ff58c3",
       "sha256": "0a4a98d206c8453ea8031712cad30ca32166668090e98d1a8a375620edd7e267"
     },
     {
@@ -1206,7 +1206,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
-      "source_commit": "86cebaf9463c978dc2f3a37526a766d98262c878",
+      "source_commit": "7d49e88a44db31317783aa0b3d47abfb95ff58c3",
       "sha256": "499106c68af16ad15897f8c6a86a01018c7f880ae917875668141964f30fe49e"
     },
     {
@@ -2628,13 +2628,13 @@
     {
       "output_path": "repo/scripts/install-global.sh",
       "source_path": "scripts/install-global.sh",
-      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "source_commit": "7d49e88a44db31317783aa0b3d47abfb95ff58c3",
       "sha256": "7d43bcd53696d6d4f994950dbb711551ab91fbcd835d558e163e71b32da86f10"
     },
     {
       "output_path": "repo/scripts/install-release.sh",
       "source_path": "scripts/install-release.sh",
-      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "source_commit": "7d49e88a44db31317783aa0b3d47abfb95ff58c3",
       "sha256": "cceb837b17d02c3d17aa6e1f6886df530c1c94992ef200674c33f399f0dafae3"
     },
     {
@@ -2644,5 +2644,5 @@
       "sha256": "077c84512cbdacb0ce9778d3a5487585a0a77d959c8882caa806ba717151b195"
     }
   ],
-  "manifest_digest": "f22b2a2f93b60f1a377a4f7fca2d0027697d8a67e6edb98755bfb4202e15ecac"
+  "manifest_digest": "93a1c80b61457f3066951d9d052057d7f9c0bb2aeec66c9439c85e2119167b4c"
 }

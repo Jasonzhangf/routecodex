@@ -69,9 +69,10 @@ modules:
       - v3/scripts
       - v3/tests
       - v3/build-contracts
-      - v3/crates/provider-compat-core
-      - v3/crates/servertool-core
-      - v3/crates/stop-message-core
+    referenced_paths:
+      - v3/crates/provider-compat-core/**
+      - v3/crates/servertool-core/**
+      - v3/crates/stop-message-core/**
     allowed_dependencies:
       - node:child_process
       - node:crypto
