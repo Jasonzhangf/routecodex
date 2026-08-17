@@ -68,26 +68,12 @@ test('missing child command rejects once without invalid process-group wait', as
 });
 
 for (const [signal, expectedCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
-  test(`stops the command tree before removing an owned target after ${signal}`, async () => {
+  test(`stops the directly owned child before removing an owned target after ${signal}`, async () => {
     const modulePath = new URL('../../scripts/install-cli.mjs', import.meta.url).href;
-    const descendantMarker = path.join(
+    const childMarker = path.join(
       os.tmpdir(),
-      `routecodex-v3-descendant-${process.pid}-${signal}`,
+      `routecodex-v3-child-${process.pid}-${signal}`,
     );
-    const descendantSource = `
-      setTimeout(() => {
-        require('node:fs').writeFileSync(process.env.DESCENDANT_MARKER, 'still-running');
-      }, 300);
-      setTimeout(() => {}, 30000);
-    `;
-    const childSource = `
-      require('node:child_process').spawn(
-        process.execPath,
-        ['-e', ${JSON.stringify(descendantSource)}],
-        { env: process.env, stdio: 'ignore' },
-      );
-      setTimeout(() => {}, 30000);
-    `;
     const source = `
       import { runInterruptibleCommand, withOwnedV3CargoTarget } from ${JSON.stringify(modulePath)};
       try {
@@ -95,9 +81,9 @@ for (const [signal, expectedCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
           process.stdout.write(build.cargoTargetDir + '\\n');
           await runInterruptibleCommand(
             process.execPath,
-            ['-e', ${JSON.stringify(childSource)}],
+            ['-e', 'setTimeout(() => { require("node:fs").writeFileSync(process.env.DESCENDANT_MARKER, "still-running"); }, 300); setTimeout(() => {}, 30000);'],
             {
-              env: { ...process.env, DESCENDANT_MARKER: ${JSON.stringify(descendantMarker)} },
+              env: { ...process.env, DESCENDANT_MARKER: ${JSON.stringify(childMarker)} },
               stdio: 'ignore',
             },
             build,
@@ -125,6 +111,6 @@ for (const [signal, expectedCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
     assert.equal(exitCode, expectedCode);
     assert.equal(fs.existsSync(targetDir), false);
     await new Promise((resolve) => setTimeout(resolve, 400));
-    assert.equal(fs.existsSync(descendantMarker), false);
+    assert.equal(fs.existsSync(childMarker), false);
   });
 }

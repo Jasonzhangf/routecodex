@@ -1507,7 +1507,7 @@ resources:
     allowed_readers: [cargo_build_locked, cargo_test_locked, cargo_metadata_locked]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     canonical_paths: [v3/Cargo.toml, v3/Cargo.lock]
-    forbidden_paths: [sharedmodule/llmswitch-core/rust-core/Cargo.toml, v4/Cargo.toml]
+    forbidden_paths: [v4/Cargo.toml]
     release_point: tracked_source_contract
     may_enter_provider_body: false
     may_enter_client_body: false

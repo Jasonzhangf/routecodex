@@ -78,7 +78,7 @@ export function runInterruptibleCommand(command, args, options, build, label) {
       if (spawnFailed) {
         return;
       }
-      await waitForOwnedProcessTreeExit(build.interruptedPids);
+      await waitForOwnedPidsExit(build.interruptedPids);
       build.activeChild = null;
       build.activeChildRootPid = null;
       if (build.interruptedSignal) {
@@ -106,54 +106,25 @@ function processExists(pid) {
   }
 }
 
-function collectOwnedProcessTreePids(rootPid) {
-  if (!Number.isInteger(rootPid) || rootPid <= 0 || process.platform === 'win32') {
-    return Number.isInteger(rootPid) && rootPid > 0 ? [rootPid] : [];
-  }
-  const result = spawnSync('ps', ['-A', '-o', 'pid=', '-o', 'ppid='], {
-    encoding: 'utf8',
-  });
-  if (result.status !== 0 || result.error) {
-    return [rootPid];
-  }
-  const childrenByParent = new Map();
-  for (const line of result.stdout.split('\n')) {
-    const [pidText, ppidText] = line.trim().split(/\s+/);
-    const pid = Number.parseInt(pidText, 10);
-    const ppid = Number.parseInt(ppidText, 10);
-    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) {
-      continue;
-    }
-    const children = childrenByParent.get(ppid) ?? [];
-    children.push(pid);
-    childrenByParent.set(ppid, children);
-  }
-  const ordered = [];
-  const visit = (pid) => {
-    for (const childPid of childrenByParent.get(pid) ?? []) {
-      visit(childPid);
-    }
-    ordered.push(pid);
-  };
-  visit(rootPid);
-  return ordered;
-}
-
-function signalOwnedProcessTree(rootPid, signal) {
-  const pids = collectOwnedProcessTreePids(rootPid);
-  for (const pid of pids) {
+function signalOwnedChild(build, signal) {
+  if (Number.isInteger(build.activeChildRootPid) && build.activeChildRootPid > 0) {
     try {
-      process.kill(pid, signal);
+      process.kill(build.activeChildRootPid, signal);
+      return [build.activeChildRootPid];
     } catch (error) {
-      if (error?.code !== 'ESRCH') {
-        throw error;
+      if (error?.code === 'ESRCH') {
+        return [];
       }
+      throw error;
     }
   }
-  return pids;
+  if (build.activeChild && !build.activeChild.killed) {
+    build.activeChild.kill(signal);
+  }
+  return [];
 }
 
-async function waitForOwnedProcessTreeExit(pids) {
+async function waitForOwnedPidsExit(pids) {
   for (const pid of pids ?? []) {
     while (processExists(pid)) {
       await new Promise((resolve) => setTimeout(resolve, 25));
@@ -162,9 +133,8 @@ async function waitForOwnedProcessTreeExit(pids) {
 }
 
 async function waitForOwnedTargetSafeToRemove(build) {
-  await waitForOwnedProcessTreeExit(build.interruptedPids);
-  if (build.activeChildRootPid) {
-    await waitForOwnedProcessTreeExit([build.activeChildRootPid]);
+  if (Number.isInteger(build.activeChildRootPid) && build.activeChildRootPid > 0) {
+    await waitForOwnedPidsExit([build.activeChildRootPid]);
   }
 }
 
@@ -240,7 +210,7 @@ export async function withOwnedV3CargoTarget(run, sourceEnv = process.env) {
   const handleSignal = (signal) => {
     build.interruptedSignal ??= signal;
     if (Number.isInteger(build.activeChildRootPid)) {
-      build.interruptedPids = signalOwnedProcessTree(build.activeChildRootPid, signal);
+      build.interruptedPids = signalOwnedChild(build, signal);
     } else if (build.activeChild && !build.activeChild.killed) {
       build.activeChild.kill(signal);
     }
