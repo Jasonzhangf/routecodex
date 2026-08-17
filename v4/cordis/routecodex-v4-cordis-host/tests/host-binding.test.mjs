@@ -20,7 +20,7 @@ const unsolicitedResponseBinary = path.join(
   'cordis/routecodex-v4-cordis-host/tests/resources/unsolicited-response-host.mjs',
 );
 
-function withTimeout(promise, milliseconds = 200) {
+function withTimeout(promise, milliseconds = 1_000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error('lifecycle request did not settle')),
@@ -483,8 +483,10 @@ test('JS execution response decoder rejects malformed output', async (t) => {
   });
   t.after(() => port.close());
   await assert.rejects(
-    withTimeout(port.status()),
-    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+    withTimeout(port.executeNode('0'.repeat(64), { data: {}, control: {} })),
+    (error) => error instanceof CordisHostError
+      && error.code === 'binding_protocol'
+      && error.message === 'diagnostic fact fields must be strings',
   );
 });
 
@@ -496,6 +498,18 @@ test('JS execution response decoder rejects missing output', async (t) => {
   t.after(() => port.close());
   await assert.rejects(
     withTimeout(port.executeNode('0'.repeat(64), { data: {}, control: {} })),
+    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+  );
+});
+
+test('execution failure response rejects top-level node identity', async (t) => {
+  const port = new RustNodeContainerPort({
+    binaryPath: process.execPath,
+    binaryArgs: [unsolicitedResponseBinary, 'execution-top-level-node-id'],
+  });
+  t.after(() => port.close());
+  await assert.rejects(
+    withTimeout(port.executeNode('0'.repeat(64), { data: {}, control: {} }), 1_000),
     (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
   );
 });

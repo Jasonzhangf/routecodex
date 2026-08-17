@@ -38,6 +38,24 @@ lines.once('line', () => {
     })}\n`);
     return;
   }
+  if (failureMode === 'execution-top-level-node-id') {
+    process.stdout.write(`${JSON.stringify({
+      ok: false,
+      request_id: 'host-1',
+      node_id: 'node-top-level',
+      state: 'accepting',
+      in_flight: 0,
+      failure: {
+        resource_id: 'v4.node_container.execution_failure',
+        request_id: 'host-1',
+        node_id: 'node-failure',
+        operation: 'execute_node',
+        code: 'invalid_state',
+        message: 'invalid state',
+      },
+    })}\n`);
+    return;
+  }
   const failure = failureMode === 'malformed-failure'
     ? {
         resource_id: 'v4.node_container.lifecycle_failure',

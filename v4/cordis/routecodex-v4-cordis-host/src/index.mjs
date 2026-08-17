@@ -123,7 +123,6 @@ function decodeExecutionResponse(value) {
   const failureKeys = new Set([
     'ok',
     'request_id',
-    'node_id',
     'state',
     'in_flight',
     'failure',
@@ -200,9 +199,6 @@ function decodeLifecycleResponse(value) {
     throw new CordisHostError('binding_protocol', 'lifecycle response in_flight is invalid');
   }
   if (value.ok === false) {
-    if (value.output !== undefined) {
-      throw new CordisHostError('binding_protocol', 'failed response cannot include execution output');
-    }
     const failure = value.failure;
     if (!failure || typeof failure !== 'object' || Array.isArray(failure)) {
       throw new CordisHostError('binding_protocol', 'failed lifecycle response requires failure fact');
@@ -246,8 +242,6 @@ function decodeLifecycleResponse(value) {
     ) {
       throw new CordisHostError('binding_protocol', 'lifecycle failure fact is invalid');
     }
-  } else if (value.output !== undefined) {
-    decodeExecutionOutput(value.output);
   }
   return value;
 }
