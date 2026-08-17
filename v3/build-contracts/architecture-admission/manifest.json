@@ -744,7 +744,7 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "source_commit": "4a448923ba3c5b7c660a036e0535d7bbd60eda93",
       "sha256": "ebc3b9d446ae6cb150de855e1b568484f08cc1427b3ad5000138dff3aa111f00"
     },
     {
@@ -774,8 +774,8 @@
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "86cebaf9463c978dc2f3a37526a766d98262c878",
-      "sha256": "7c450309227c526cf30120776ec4fd34d539402b7108fa288cb809fcaf2b11b7"
+      "source_commit": "4a448923ba3c5b7c660a036e0535d7bbd60eda93",
+      "sha256": "ae921a2a0303b8f3b4967c7ce53cbc5e954971dc4240482f86f35e26eb03e982"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -2626,5 +2626,5 @@
       "sha256": "077c84512cbdacb0ce9778d3a5487585a0a77d959c8882caa806ba717151b195"
     }
   ],
-  "manifest_digest": "f0061f267aea71ad98e77c09fb1025c7f8571d10499403ec8a08b99afd96718a"
+  "manifest_digest": "75fcda230712d553c65f83c5b41f1b892e03fecee9583af7d1adcfb27bf521db"
 }
