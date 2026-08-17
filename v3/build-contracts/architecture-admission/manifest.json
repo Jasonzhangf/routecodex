@@ -18,13 +18,13 @@
     {
       "output_path": "repo/.github/workflows/release.yml",
       "source_path": ".github/workflows/release.yml",
-      "source_commit": "86cebaf9463c978dc2f3a37526a766d98262c878",
+      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
       "sha256": "80c1ba4148d7e2dd4a1aa584e005c7bb95df86b88ae6723784ad05e05e30ca01"
     },
     {
       "output_path": "repo/.github/workflows/test.yml",
       "source_path": ".github/workflows/test.yml",
-      "source_commit": "86cebaf9463c978dc2f3a37526a766d98262c878",
+      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
       "sha256": "33370227d6530e709c40d2835f44dba0685730f069b40cf0d17985c58fd29ab1"
     },
     {
@@ -396,7 +396,7 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.build.independent_domain.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.build.independent_domain.mainline.yml",
-      "source_commit": "3cb6b0be2dc022d46e5680898eb1ce33d6e5f798",
+      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
       "sha256": "2d4e67cea656db778e6d13dde926b43d2af97ab3495da4d50d61bbb16737c5aa"
     },
     {
@@ -732,7 +732,7 @@
     {
       "output_path": "repo/docs/architecture/v3-build-tool-module-registry.yml",
       "source_path": "docs/architecture/v3-build-tool-module-registry.yml",
-      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
       "sha256": "0cffa50b0d29c7880e9148e089a32e24f968d18bfcfbcc3e17b1798c27b0f9c7"
     },
     {
@@ -744,7 +744,7 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "4a448923ba3c5b7c660a036e0535d7bbd60eda93",
+      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
       "sha256": "0fd63101ea732671424a7c8940dde5e617abac21357411397eb39a3207744938"
     },
     {
@@ -756,7 +756,7 @@
     {
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
-      "source_commit": "86cebaf9463c978dc2f3a37526a766d98262c878",
+      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
       "sha256": "c0bc178ac7b95c836d55b9debe2e1f9719c5f9188c38818b3c5a6a8440d2c1c7"
     },
     {
@@ -774,7 +774,7 @@
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "206a86e8d70ad9bfceab6017e3e2fb0eca5c98f6",
+      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
       "sha256": "b29e4ca4d02ad13aa5abc49d8deb194a65605f51fdfea4c6938abe26a79e3808"
     },
     {
@@ -1188,13 +1188,13 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-independent-build-isolation.html",
       "source_path": "docs/architecture/wiki/v3-independent-build-isolation.html",
-      "source_commit": "3cb6b0be2dc022d46e5680898eb1ce33d6e5f798",
+      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
       "sha256": "0b4ab661dca0c9b054cb998d34ecc025454eb063be06b130219918bb75a976b2"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-independent-build-isolation.md",
       "source_path": "docs/architecture/wiki/v3-independent-build-isolation.md",
-      "source_commit": "3cb6b0be2dc022d46e5680898eb1ce33d6e5f798",
+      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
       "sha256": "faa44be213a9a84fcf3e2d2ee13032b708f3258d8058dfa73a60b50e97f7bcee"
     },
     {
@@ -2160,13 +2160,13 @@
     {
       "output_path": "repo/docs/goals/v3-independent-build-isolation-plan.md",
       "source_path": "docs/goals/v3-independent-build-isolation-plan.md",
-      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
       "sha256": "3bbecf15868ed56e316a10d1b59b502ec0f394f6765eb914f3fa122dffbf1136"
     },
     {
       "output_path": "repo/docs/goals/v3-independent-build-isolation-test-design.md",
       "source_path": "docs/goals/v3-independent-build-isolation-test-design.md",
-      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
       "sha256": "d34cda9a98bb15d2ac40ea4d741e70820bba2501a442842ed6bd03162d0e574b"
     },
     {
@@ -2616,7 +2616,7 @@
     {
       "output_path": "repo/scripts/architecture/v3-root-thin-dispatch-contract.mjs",
       "source_path": "scripts/architecture/v3-root-thin-dispatch-contract.mjs",
-      "source_commit": "0a25c74d07c1ab83ad5b74070901af6674785f3e",
+      "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
       "sha256": "2affebd909d0fc6ca7705ceccf8fbe51bdff0c6f49b0755b9eabe3bfed491aac"
     },
     {
@@ -2632,5 +2632,5 @@
       "sha256": "077c84512cbdacb0ce9778d3a5487585a0a77d959c8882caa806ba717151b195"
     }
   ],
-  "manifest_digest": "7243fc327d622c0e00bba4767327ffc12ded46c6e08cb445bbbfea9acaae225a"
+  "manifest_digest": "5c4e6172c2d1d89cfc69550dbee0f9407eea110fe1e2da3ec9477c37d12c0a94"
 }
