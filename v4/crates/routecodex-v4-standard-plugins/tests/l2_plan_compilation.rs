@@ -144,7 +144,8 @@ fn negative_selection_group_multi_active_rejected() {
     let mut authoring = standard_authoring(&[
         "v4.std.protocol.mock_codec",
         "v4.std.protocol.mock_codec_alt",
-    ]);
+    ])
+    .expect("standard authoring succeeds for known ids");
     // Both protocol variants enabled -> group has two active variants.
     for plugin in &mut authoring {
         plugin.enabled = true;
@@ -165,7 +166,8 @@ fn negative_order_tie_without_relation_rejected() {
     let mut authoring = standard_authoring(&[
         "v4.std.chat_process.request_governance",
         "v4.std.diagnostic.debug_observe",
-    ]);
+    ])
+    .expect("standard authoring succeeds for known ids");
     // Force the same phase + order without a before/after relation.
     authoring[0].descriptor.phase = PluginPhase::Observation;
     authoring[0].descriptor.order = 900;
@@ -182,7 +184,8 @@ fn negative_order_tie_without_relation_rejected() {
 
 #[test]
 fn negative_unauthorized_write_rejected() {
-    let mut authoring = standard_authoring(&["v4.std.chat_process.request_governance"]);
+    let mut authoring = standard_authoring(&["v4.std.chat_process.request_governance"])
+        .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.writes = vec!["v4.response.client_wire_payload".to_string()];
     let error = compile_authoring(
         "V4HubReqChatProcess04Governed",
@@ -197,7 +200,8 @@ fn negative_unauthorized_write_rejected() {
 
 #[test]
 fn negative_missing_before_target_rejected() {
-    let mut authoring = standard_authoring(&["v4.std.chat_process.request_governance"]);
+    let mut authoring = standard_authoring(&["v4.std.chat_process.request_governance"])
+        .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.before = vec!["v4.std.ghost.plugin".to_string()];
     let error = compile_authoring(
         "V4HubReqChatProcess04Governed",
@@ -212,7 +216,8 @@ fn negative_missing_before_target_rejected() {
 
 #[test]
 fn negative_unknown_node_id_rejected() {
-    let mut authoring = standard_authoring(&["v4.std.protocol.mock_codec"]);
+    let mut authoring = standard_authoring(&["v4.std.protocol.mock_codec"])
+        .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.node_selector.node_id =
         "V4ProviderReqOutbound06WirePayload".to_string();
     let error = compile_authoring(
@@ -228,7 +233,8 @@ fn negative_unknown_node_id_rejected() {
 
 #[test]
 fn negative_active_node_role_mismatch_rejected() {
-    let authoring = standard_authoring(&["v4.std.protocol.mock_codec"]);
+    let authoring = standard_authoring(&["v4.std.protocol.mock_codec"])
+        .expect("standard authoring succeeds for known id");
     let error = compile_authoring(
         "V4ProviderReqCompat06Compat",
         "request_chat_process",
@@ -242,7 +248,8 @@ fn negative_active_node_role_mismatch_rejected() {
 
 #[test]
 fn negative_active_node_position_mismatch_rejected() {
-    let authoring = standard_authoring(&["v4.std.protocol.mock_codec"]);
+    let authoring = standard_authoring(&["v4.std.protocol.mock_codec"])
+        .expect("standard authoring succeeds for known id");
     let error = compile_authoring(
         "V4ProviderReqCompat06Compat",
         "request_outbound",
@@ -258,8 +265,22 @@ fn negative_active_node_position_mismatch_rejected() {
 }
 
 #[test]
+fn negative_unknown_plugin_id_returns_typed_plan_error() {
+    let error = compile_standard_plan(
+        "V4HubReqChatProcess04Governed",
+        "request_chat_process",
+        "request",
+        4,
+        &["v4.std.ghost.plugin"],
+    )
+    .expect_err("unknown standard plugin id must surface as typed plan error");
+    assert!(matches!(error, PlanError::UnregisteredOperator(_)));
+}
+
+#[test]
 fn negative_non_adjacent_provider_semantic_reversal_rejected() {
-    let mut authoring = standard_authoring(&["v4.std.protocol.mock_codec"]);
+    let mut authoring = standard_authoring(&["v4.std.protocol.mock_codec"])
+        .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.writes = vec!["v4.request.normal_payload".to_string()];
     let error = compile_authoring(
         "V4ProviderReqCompat06Compat",

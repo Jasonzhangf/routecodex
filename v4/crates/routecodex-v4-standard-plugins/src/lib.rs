@@ -659,7 +659,9 @@ pub fn register_standard_library(
     Ok(catalog.snapshot().entries().len())
 }
 
-fn authoring_for(ids: &[&str]) -> Vec<AuthoringPlugin> {
+fn authoring_for(
+    ids: &[&str],
+) -> Result<Vec<AuthoringPlugin>, routecodex_v4_plugin_plan::PlanError> {
     let plugins = standard_plugins();
     let by_id: HashMap<&str, &StandardPlugin> = plugins
         .iter()
@@ -667,19 +669,21 @@ fn authoring_for(ids: &[&str]) -> Vec<AuthoringPlugin> {
         .collect();
     let mut authoring = Vec::new();
     for id in ids {
-        let plugin = by_id.get(id).unwrap_or_else(|| {
-            panic!("standard plugin id {id} is not registered in standard_plugins()")
-        });
+        let plugin = by_id.get(id).ok_or_else(|| {
+            routecodex_v4_plugin_plan::PlanError::UnregisteredOperator((*id).to_string())
+        })?;
         authoring.push(AuthoringPlugin {
             descriptor: plugin.descriptor.clone(),
             enabled: true,
         });
     }
-    authoring
+    Ok(authoring)
 }
 
 /// Build authoring entries for the named standard plugin ids.
-pub fn standard_authoring(ids: &[&str]) -> Vec<AuthoringPlugin> {
+pub fn standard_authoring(
+    ids: &[&str],
+) -> Result<Vec<AuthoringPlugin>, routecodex_v4_plugin_plan::PlanError> {
     authoring_for(ids)
 }
 
@@ -693,12 +697,13 @@ pub fn compile_standard_plan(
 ) -> Result<NodePluginPlan, routecodex_v4_plugin_plan::PlanError> {
     let allowed_reads = standard_node_allowed_reads(node_id);
     let allowed_writes = standard_node_allowed_writes(node_id);
+    let authoring = authoring_for(ids)?;
     compile_node_plan(
         node_id,
         role_id,
         chain,
         position,
-        &authoring_for(ids),
+        &authoring,
         &allowed_reads,
         &allowed_writes,
         &standard_resource_registry(),
@@ -751,39 +756,43 @@ fn snapshot_record(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 
 fn scope_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut control = ctx.read_control().clone();
-    if let Some(object) = control.as_object_mut() {
-        object.insert("scope".to_string(), json!({"consumed": true}));
-    }
+    let object = control
+        .as_object_mut()
+        .ok_or_else(|| "scope_consume requires typed control object".to_string())?;
+    object.insert("scope".to_string(), json!({"consumed": true}));
     ctx.write_control(control)
         .map_err(|error| error.to_string())
 }
 
 fn payload_cycle_record(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut control = ctx.read_control().clone();
-    if let Some(object) = control.as_object_mut() {
-        object.insert("payload_cycle".to_string(), json!({"recorded": true}));
-    }
+    let object = control
+        .as_object_mut()
+        .ok_or_else(|| "payload_cycle_record requires typed control object".to_string())?;
+    object.insert("payload_cycle".to_string(), json!({"recorded": true}));
     ctx.write_control(control)
         .map_err(|error| error.to_string())
 }
 
 fn error_intake(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut control = ctx.read_control().clone();
-    if let Some(object) = control.as_object_mut() {
-        object.insert(
-            "error_chain".to_string(),
-            json!({"stage": "source_raised", "kind": "keyless_mock"}),
-        );
-    }
+    let object = control
+        .as_object_mut()
+        .ok_or_else(|| "error_intake requires typed control object".to_string())?;
+    object.insert(
+        "error_chain".to_string(),
+        json!({"stage": "source_raised", "kind": "keyless_mock"}),
+    );
     ctx.write_control(control)
         .map_err(|error| error.to_string())
 }
 
 fn error_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut control = ctx.read_control().clone();
-    if let Some(object) = control.as_object_mut() {
-        object.insert("error_projection".to_string(), json!({"projected": true}));
-    }
+    let object = control
+        .as_object_mut()
+        .ok_or_else(|| "error_projection requires typed control object".to_string())?;
+    object.insert("error_projection".to_string(), json!({"projected": true}));
     ctx.write_control(control)
         .map_err(|error| error.to_string())
 }
@@ -814,9 +823,10 @@ fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 
 fn route_facts_produce(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut control = ctx.read_control().clone();
-    if let Some(object) = control.as_object_mut() {
-        object.insert("route_facts".to_string(), json!({"keyless": true}));
-    }
+    let object = control
+        .as_object_mut()
+        .ok_or_else(|| "route_facts_produce requires typed control object".to_string())?;
+    object.insert("route_facts".to_string(), json!({"keyless": true}));
     ctx.write_control(control)
         .map_err(|error| error.to_string())
 }

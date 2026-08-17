@@ -239,8 +239,112 @@ fn negative_execute_rejects_plan_hash_drift() {
 }
 
 #[test]
+fn negative_scope_consume_rejects_non_object_control() {
+    let plan = compile_standard_plan(
+        "V4MetadataCenter01ScopeRegistry",
+        "control_center",
+        "control",
+        0,
+        &["v4.std.control.scope_consume"],
+    )
+    .expect("scope plan compiles");
+    let hash = plan.plan_hash();
+    let mut container = NodeContainer::declare(
+        "V4MetadataCenter01ScopeRegistry",
+        plan.clone(),
+        plan_bindings(&plan),
+    )
+    .expect("binding passes");
+    container = publish_container(container);
+    let registry = StandardHandleRegistry::new();
+    let error = container
+        .execute_with_plan_hash(
+            &hash,
+            NodeExecutionInput {
+                data: json!({}),
+                control: json!("scalar"),
+            },
+            &registry,
+        )
+        .expect_err("non-object control must surface as typed bridge failure");
+    assert!(
+        matches!(error, NodeContainerError::Bridge(BridgeError::HandleError { .. })),
+        "expected typed HandleError, got {error:?}"
+    );
+    container.drain().unwrap();
+    container.dispose().unwrap();
+}
+
+#[test]
+fn positive_scope_consume_records_object_control_carrier() {
+    let plan = compile_standard_plan(
+        "V4MetadataCenter01ScopeRegistry",
+        "control_center",
+        "control",
+        0,
+        &["v4.std.control.scope_consume"],
+    )
+    .expect("scope plan compiles");
+    let hash = plan.plan_hash();
+    let mut container = NodeContainer::declare(
+        "V4MetadataCenter01ScopeRegistry",
+        plan.clone(),
+        plan_bindings(&plan),
+    )
+    .expect("binding passes");
+    container = publish_container(container);
+    let registry = StandardHandleRegistry::new();
+    let output = container
+        .execute_with_plan_hash(
+            &hash,
+            NodeExecutionInput {
+                data: json!({}),
+                control: json!({}),
+            },
+            &registry,
+        )
+        .expect("scope carrier executes on typed object control");
+    let control = output.control.as_object().expect("control is object");
+    assert_eq!(control["scope"]["consumed"], json!(true));
+    container.drain().unwrap();
+    container.dispose().unwrap();
+}
+
+#[test]
+fn negative_error_intake_rejects_non_object_control() {
+    let plan = compile_standard_plan(
+        "V4Error01SourceRaised",
+        "error_source",
+        "error",
+        1,
+        &["v4.std.error.typed_intake"],
+    )
+    .expect("error plan compiles");
+    let hash = plan.plan_hash();
+    let mut container =
+        NodeContainer::declare("V4Error01SourceRaised", plan.clone(), plan_bindings(&plan))
+            .expect("binding passes");
+    container = publish_container(container);
+    let registry = StandardHandleRegistry::new();
+    let error = container
+        .execute_with_plan_hash(
+            &hash,
+            NodeExecutionInput {
+                data: json!({}),
+                control: json!([1, 2, 3]),
+            },
+            &registry,
+        )
+        .expect_err("non-object control must fail typed error intake");
+    assert!(matches!(error, NodeContainerError::Bridge(BridgeError::HandleError { .. })));
+    container.drain().unwrap();
+    container.dispose().unwrap();
+}
+
+#[test]
 fn negative_unregistered_handle_fails_fast() {
-    let mut authoring = standard_authoring(&["v4.std.chat_process.request_governance"]);
+    let mut authoring = standard_authoring(&["v4.std.chat_process.request_governance"])
+        .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.plugin_id = "v4.real.product.plugin".to_string();
     let plan = compile_node_plan(
         "V4HubReqChatProcess04Governed",
@@ -310,7 +414,8 @@ fn negative_execute_before_publish_is_rejected() {
 fn negative_effect_violation_diagnostic_write_data_is_rejected() {
     // A diagnostic-only plan entry whose handle tries to write normal data is
     // rejected by the typed bridge write guard — never silently stripped.
-    let mut authoring = standard_authoring(&["v4.std.diagnostic.debug_observe"]);
+    let mut authoring = standard_authoring(&["v4.std.diagnostic.debug_observe"])
+        .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.writes = vec!["v4.debug.event_ledger".to_string()];
     let error = compile_node_plan(
         "V4HubReqChatProcess04Governed",

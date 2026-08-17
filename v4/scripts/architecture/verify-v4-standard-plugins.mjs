@@ -309,6 +309,7 @@ function validate(
   registry,
   nodeGraph,
   resourceOperations,
+  mainline,
   source,
 ) {
   const failures = [];
@@ -389,6 +390,15 @@ function validate(
   const registeredEdges = new Set(
     (registry.consumers ?? []).map((consumer) => `${consumer.consumer}->${consumer.dependency}`),
   );
+  const mainlineEdges = (mainline?.edges ?? []);
+  const nodeContainerEdge = mainlineEdges.find(
+    (edge) =>
+      edge.from === MODULE &&
+      edge.to === 'routecodex-v4-node-container',
+  );
+  if (nodeContainerEdge) {
+    failures.push(`${MODULE}: test-only node-container dependency must not enter the mainline call map`);
+  }
   for (const dependency of SOURCE_DEPS) {
     const edge = (registry.consumers ?? []).find(
       (consumer) => consumer.consumer === MODULE && consumer.dependency === dependency,
@@ -523,6 +533,7 @@ function runSelfTest() {
   const registry = readJson('contracts/active-link/frozen-consumer-registry.json');
   const nodeGraph = readJson('contracts/node-graph.contract.json');
   const resourceOperations = readYaml('docs/architecture/v4-resource-operation-map.yml');
+  const mainline = readJson('.appsdk/maps/mainline-call-map.json');
   const source = readSource();
 
   const cases = [
@@ -614,6 +625,20 @@ function runSelfTest() {
       resource.owner_node = 'V4HubReqInbound03Normalized';
       resource.allowed_writers = [];
     }],
+    ['production dependency on NodeContainer reintroduced', (state) => {
+      state.source = `${source}\nuse routecodex_v4_node_container::NodeContainer;`;
+    }],
+    ['test-only edge reintroduced as active mainline', (state) => {
+      state.mainline.edges.push({
+        from: 'routecodex-v4-standard-plugins',
+        to: 'routecodex-v4-node-container',
+        owner: 'routecodex-v4-standard-plugins',
+        edge_type: 'symbol_dependency',
+        symbols: ['NodeContainer'],
+        path: 'crates/routecodex-v4-standard-plugins/src/lib.rs',
+        status: 'active',
+      });
+    }],
   ];
 
   let failed = 0;
@@ -627,6 +652,7 @@ function runSelfTest() {
       registry: clone(registry),
       nodeGraph: clone(nodeGraph),
       resourceOperations: clone(resourceOperations),
+      mainline: clone(mainline),
       source: clone(source),
     };
     mutate(state);
@@ -639,6 +665,7 @@ function runSelfTest() {
       state.registry,
       state.nodeGraph,
       state.resourceOperations,
+      state.mainline,
       state.source,
     );
     if (failures.length === 0) {
@@ -667,6 +694,7 @@ if (isRedSelfTest) {
     readJson('contracts/active-link/frozen-consumer-registry.json'),
     readJson('contracts/node-graph.contract.json'),
     readYaml('docs/architecture/v4-resource-operation-map.yml'),
+    readJson('.appsdk/maps/mainline-call-map.json'),
     readSource(),
   );
   if (failures.length > 0) {
