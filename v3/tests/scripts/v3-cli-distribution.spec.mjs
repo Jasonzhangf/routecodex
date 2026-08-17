@@ -46,6 +46,8 @@ test('pack owns V3-local release target, staging, dist, and final artifacts', ()
   assert.ok(packScript.includes("path.join(v3Root, 'dist', 'bin'"));
   assert.ok(packScript.includes("'--locked',\n    '--release'"));
   assert.ok(packScript.includes("CARGO_TARGET_DIR: cargoTarget"));
+  assert.ok(packScript.includes('run(process.execPath, [isolationGate], { env })'));
+  assert.match(packScript, /TMPDIR: v3TempDir,[\s\S]*run\(process\.execPath, \[isolationGate\], \{ env \}\)/);
   assert.ok(packScript.includes("fs.rmSync(runRoot, { recursive: true, force: true })"));
   assert.ok(packScript.includes("'--pack-destination', npmOutput"));
   assert.ok(packScript.includes("routecodex: 'dist/bin/rccv3'"));

@@ -100,7 +100,6 @@ echo "installed RouteCodex V3 ${version} to $BIN_DIR/rccv3"
 }
 
 function buildReleaseBinary(runRoot, version) {
-  run(process.execPath, [isolationGate]);
   const cargoTarget = path.join(runRoot, 'cargo-target');
   const v3TempDir = path.join(v3Root, 'build-control', 'temp');
   fs.mkdirSync(v3TempDir, { recursive: true });
@@ -113,6 +112,7 @@ function buildReleaseBinary(runRoot, version) {
     TMP: v3TempDir,
     TEMP: v3TempDir,
   };
+  run(process.execPath, [isolationGate], { env });
   run('cargo', [
     'build',
     '--locked',
