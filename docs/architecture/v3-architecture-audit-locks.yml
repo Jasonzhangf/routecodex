@@ -459,8 +459,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:243be5703ebf7daaef25f91dff36a08baf40a4114bfd75d72efe8a14887e6f87
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:d0074891924aa83d4c4d5e8d75615af66bf4a0293cbbde7def9981d106786a46
+    last_manual_authorization_id: auth-20260816-v3-independent-build-isolation
   - item_id: chain:v3.route_classifier.facts_classification
     chain_id: v3.route_classifier.facts_classification
     status: audited_locked
@@ -494,6 +494,13 @@ locked_items:
     fingerprint: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
     last_manual_authorization_id: auth-20260813-v3-provider-global-subscription-probe-fingerprint-refresh
 manual_authorizations:
+  - authorization_id: auth-20260816-v3-independent-build-isolation
+    item_id: chain:v3.build_test_artifact_budget
+    approved_by: Jason
+    approved_at: '2026-08-16T05:17:32-07:00'
+    reason: "Jason explicitly authorized the V3 independent build-domain migration. This refresh changes only the three Cargo test owner file paths from root scripts/ to v3/scripts/ after the owners were physically migrated; chain nodes, symbols, edges, resources, cleanup semantics, and the 2 GiB budget remain unchanged."
+    fingerprint_before: sha256:243be5703ebf7daaef25f91dff36a08baf40a4114bfd75d72efe8a14887e6f87
+    fingerprint_after: sha256:d0074891924aa83d4c4d5e8d75615af66bf4a0293cbbde7def9981d106786a46
   - authorization_id: auth-20260816-v3-build-domain-path-migration-global-install
     item_id: chain:v3.global_binary_install
     approved_by: Jason

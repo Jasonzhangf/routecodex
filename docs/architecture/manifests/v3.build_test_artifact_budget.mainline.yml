@@ -8,13 +8,13 @@ entrypoint: V3BuildTest01CommandAccepted
 return_path: V3BuildTest04BudgetVerified
 nodes:
   - node_id: V3BuildTest01CommandAccepted
-    owner: scripts/cargo-test-artifact-runner.mjs
+    owner: v3/scripts/cargo-test-artifact-runner.mjs
   - node_id: V3BuildTest02ArtifactsProduced
     owner: cargo test
   - node_id: V3BuildTest03OwnedArtifactsReleased
-    owner: scripts/run-v3-cargo-test.mjs
+    owner: v3/scripts/run-v3-cargo-test.mjs
   - node_id: V3BuildTest04BudgetVerified
-    owner: scripts/run-v3-cargo-test.mjs
+    owner: v3/scripts/run-v3-cargo-test.mjs
 edges:
   - edge_id: v3-build-test-budget-01
     from: V3BuildTest01CommandAccepted
@@ -26,5 +26,5 @@ edges:
     from: V3BuildTest03OwnedArtifactsReleased
     to: V3BuildTest04BudgetVerified
 verification_gates:
-  - npm run verify:v3-build-test-artifact-budget
-  - npm run test:v3-build-test-artifact-budget-red-fixtures
+  - npm --prefix v3 run verify:v3-build-test-artifact-budget
+  - npm --prefix v3 run test:v3-build-test-artifact-budget-red-fixtures

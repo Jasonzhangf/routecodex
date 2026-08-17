@@ -6839,9 +6839,9 @@ chains:
       from_node: V3BuildTest01CommandAccepted
       to_node: V3BuildTest02ArtifactsProduced
       caller_symbol: runV3CargoTest
-      caller_file: scripts/run-v3-cargo-test.mjs
+      caller_file: v3/scripts/run-v3-cargo-test.mjs
       callee_symbol: executeCargo
-      callee_file: scripts/run-v3-cargo-test.mjs
+      callee_file: v3/scripts/run-v3-cargo-test.mjs
       status: anchored
       owner_feature_id: v3.build_test_artifact_budget
       resource_flow:
@@ -6853,9 +6853,9 @@ chains:
       from_node: V3BuildTest02ArtifactsProduced
       to_node: V3BuildTest03OwnedArtifactsReleased
       caller_symbol: runV3CargoTest
-      caller_file: scripts/run-v3-cargo-test.mjs
+      caller_file: v3/scripts/run-v3-cargo-test.mjs
       callee_symbol: releaseOwnedTestArtifacts
-      callee_file: scripts/run-v3-cargo-test.mjs
+      callee_file: v3/scripts/run-v3-cargo-test.mjs
       status: anchored
       owner_feature_id: v3.build_test_artifact_budget
       resource_flow:
@@ -6867,9 +6867,9 @@ chains:
       from_node: V3BuildTest03OwnedArtifactsReleased
       to_node: V3BuildTest04BudgetVerified
       caller_symbol: runV3CargoTest
-      caller_file: scripts/run-v3-cargo-test.mjs
+      caller_file: v3/scripts/run-v3-cargo-test.mjs
       callee_symbol: verifyV3DebugBudget
-      callee_file: scripts/run-v3-cargo-test.mjs
+      callee_file: v3/scripts/run-v3-cargo-test.mjs
       status: anchored
       owner_feature_id: v3.build_test_artifact_budget
       resource_flow:

@@ -2582,9 +2582,9 @@ features:
     -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity
     -- --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib hub_v1::tests::resp04_only_coalesces_the_latest_appended_response_suffix_and_keeps_history_immutable
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib hub_v1::tests::resp04_only_coalesces_the_latest_appended_response_suffix_and_keeps_history_immutable
     -- --exact --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test responses_relay_local_continuation_integration
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test responses_relay_local_continuation_integration
     -- --nocapture
   - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
   - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures

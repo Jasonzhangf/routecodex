@@ -598,7 +598,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_responses_session_admission"><code>v3.responses_session_admission</code></a><br/>v 3.responses_session_admission</td><td><span class="status audited_locked">locked by Jason</span></td><td>3</td><td>4</td><td><code>v3.responses_session_inflight_admission</code></td><td><code>sha256:3b53f2fc2ecb…</code></td></tr>
 <tr><td><a href="#chain-v3_sse_http_keepalive_boundary"><code>v3.sse.http_keepalive_boundary</code></a><br/>v 3.sse.http_keepalive_boundary</td><td><span class="status audited_locked">locked by Jason</span></td><td>1</td><td>3</td><td><code>v3.sse_http_keepalive_boundary</code></td><td><code>sha256:efbfef1b5d98…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_action_gate_mainline"><code>v3.provider_action_gate.mainline</code></a><br/>v 3.provider_action_gate.mainline</td><td><span class="status audited_locked">locked by Jason</span></td><td>49</td><td>3</td><td><code>v3.provider_action_gate</code></td><td><code>sha256:f8acb52362dc…</code></td></tr>
-<tr><td><a href="#chain-v3_build_test_artifact_budget"><code>v3.build_test_artifact_budget</code></a><br/>v 3.build_test_artifact_budget</td><td><span class="status audited_locked">locked by Jason</span></td><td>3</td><td>2</td><td><code>v3.build_test_artifact_budget</code></td><td><code>sha256:243be5703ebf…</code></td></tr>
+<tr><td><a href="#chain-v3_build_test_artifact_budget"><code>v3.build_test_artifact_budget</code></a><br/>v 3.build_test_artifact_budget</td><td><span class="status audited_locked">locked by Jason</span></td><td>3</td><td>2</td><td><code>v3.build_test_artifact_budget</code></td><td><code>sha256:d0074891924a…</code></td></tr>
 <tr><td><a href="#chain-v3_route_classifier_facts_classification"><code>v3.route_classifier.facts_classification</code></a><br/>v 3.route_classifier.facts_classification</td><td><span class="status audited_locked">locked by Jason</span></td><td>1</td><td>2</td><td><code>v3.route_classifier_local_owner</code></td><td><code>sha256:36f4b1ffde37…</code></td></tr>
 <tr><td><a href="#chain-v3_sse_protocol_codec_projection_boundary"><code>v3.sse.protocol_codec_projection_boundary</code></a><br/>v 3.sse.protocol_codec_projection_boundary</td><td><span class="status audited_locked">locked by Jason</span></td><td>3</td><td>7</td><td><code>v3.sse_protocol_codec_projection_boundary</code></td><td><code>sha256:f9cef82020d2…</code></td></tr>
 <tr><td><a href="#chain-vr_current_turn_typed_route_facts"><code>vr.current_turn_typed_route_facts</code></a><br/>vr.current_turn_typed_route_facts</td><td><span class="status audited_locked">locked by Jason</span></td><td>2</td><td>3</td><td><code>vr.current_turn_typed_route_facts</code></td><td><code>sha256:572f913b7701…</code></td></tr>
@@ -708,7 +708,7 @@ flowchart TD
             <span class="chain-id">v 3.build_test_artifact_budget</span>
             <span>V3BuildTest01CommandAccepted → V3BuildTest04BudgetVerified</span>
             <span><code>v3.build_test_artifact_budget</code></span>
-            <span>3 edges · 2 resources · scripts</span>
+            <span>3 edges · 2 resources · v3/scripts</span>
             <span class="status audited_locked">locked by Jason</span>
           </a>
 <a class="branch-card" href="#chain-v3_route_classifier_facts_classification">
@@ -3889,7 +3889,7 @@ flowchart TD
         <div class="branch-meta">
           <span>owner: <code>v3.build_test_artifact_budget</code></span>
           <span>audit: <span class="status audited_locked">locked by Jason</span></span>
-          <span>modules: <code>scripts</code></span>
+          <span>modules: <code>v3/scripts</code></span>
           <span>resources: <code>2</code></span>
           <span>manifest: <code>docs/architecture/manifests/v3.build_test_artifact_budget.mainline.yml</code></span>
 
@@ -3901,9 +3901,9 @@ flowchart TD
   n_v3_build_test_artifact_budget_1[&quot;&lt;b&gt;Build Test 02 Artifacts Produced&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildTest02ArtifactsProduced&lt;/small&gt;&quot;]
   n_v3_build_test_artifact_budget_2[&quot;&lt;b&gt;Build Test 03 Owned Artifacts Released&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildTest03OwnedArtifactsReleased&lt;/small&gt;&quot;]
   n_v3_build_test_artifact_budget_3[&quot;&lt;b&gt;Build Test 04 Budget Verified&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildTest04BudgetVerified&lt;/small&gt;&quot;]
-  n_v3_build_test_artifact_budget_0 --&gt;|v3-build-test-budget-01&lt;br/&gt;scripts → scripts| n_v3_build_test_artifact_budget_1
-  n_v3_build_test_artifact_budget_1 --&gt;|v3-build-test-budget-02&lt;br/&gt;scripts → scripts| n_v3_build_test_artifact_budget_2
-  n_v3_build_test_artifact_budget_2 --&gt;|v3-build-test-budget-03&lt;br/&gt;scripts → scripts| n_v3_build_test_artifact_budget_3
+  n_v3_build_test_artifact_budget_0 --&gt;|v3-build-test-budget-01&lt;br/&gt;v3/scripts → v3/scripts| n_v3_build_test_artifact_budget_1
+  n_v3_build_test_artifact_budget_1 --&gt;|v3-build-test-budget-02&lt;br/&gt;v3/scripts → v3/scripts| n_v3_build_test_artifact_budget_2
+  n_v3_build_test_artifact_budget_2 --&gt;|v3-build-test-budget-03&lt;br/&gt;v3/scripts → v3/scripts| n_v3_build_test_artifact_budget_3
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
   class n_v3_build_test_artifact_budget_0,n_v3_build_test_artifact_budget_1,n_v3_build_test_artifact_budget_2,n_v3_build_test_artifact_budget_3 node;</pre>
@@ -3911,9 +3911,9 @@ flowchart TD
         <table>
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
 <tbody>
-<tr><td><code>v3-build-test-budget-01</code></td><td><code>V3BuildTest01CommandAccepted</code><br/>→ <code>V3BuildTest02ArtifactsProduced</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.build.dependency_cache</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.build.test_artifact_store</code></div></td><td><code>runV3CargoTest</code><br/><small>scripts/run-v3-cargo-test.mjs</small></td><td><code>executeCargo</code><br/><small>scripts/run-v3-cargo-test.mjs</small></td></tr>
-<tr><td><code>v3-build-test-budget-02</code></td><td><code>V3BuildTest02ArtifactsProduced</code><br/>→ <code>V3BuildTest03OwnedArtifactsReleased</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.build.test_artifact_store</code></div></td><td><code>runV3CargoTest</code><br/><small>scripts/run-v3-cargo-test.mjs</small></td><td><code>releaseOwnedTestArtifacts</code><br/><small>scripts/run-v3-cargo-test.mjs</small></td></tr>
-<tr><td><code>v3-build-test-budget-03</code></td><td><code>V3BuildTest03OwnedArtifactsReleased</code><br/>→ <code>V3BuildTest04BudgetVerified</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.build.dependency_cache</code></div></td><td><code>runV3CargoTest</code><br/><small>scripts/run-v3-cargo-test.mjs</small></td><td><code>verifyV3DebugBudget</code><br/><small>scripts/run-v3-cargo-test.mjs</small></td></tr>
+<tr><td><code>v3-build-test-budget-01</code></td><td><code>V3BuildTest01CommandAccepted</code><br/>→ <code>V3BuildTest02ArtifactsProduced</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.build.dependency_cache</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.build.test_artifact_store</code></div></td><td><code>runV3CargoTest</code><br/><small>v3/scripts/run-v3-cargo-test.mjs</small></td><td><code>executeCargo</code><br/><small>v3/scripts/run-v3-cargo-test.mjs</small></td></tr>
+<tr><td><code>v3-build-test-budget-02</code></td><td><code>V3BuildTest02ArtifactsProduced</code><br/>→ <code>V3BuildTest03OwnedArtifactsReleased</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.build.test_artifact_store</code></div></td><td><code>runV3CargoTest</code><br/><small>v3/scripts/run-v3-cargo-test.mjs</small></td><td><code>releaseOwnedTestArtifacts</code><br/><small>v3/scripts/run-v3-cargo-test.mjs</small></td></tr>
+<tr><td><code>v3-build-test-budget-03</code></td><td><code>V3BuildTest03OwnedArtifactsReleased</code><br/>→ <code>V3BuildTest04BudgetVerified</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.build.dependency_cache</code></div></td><td><code>runV3CargoTest</code><br/><small>v3/scripts/run-v3-cargo-test.mjs</small></td><td><code>verifyV3DebugBudget</code><br/><small>v3/scripts/run-v3-cargo-test.mjs</small></td></tr>
 </tbody>
 </table>
       </div>

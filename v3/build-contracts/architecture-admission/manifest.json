@@ -19,13 +19,13 @@
       "output_path": "repo/.github/workflows/release.yml",
       "source_path": ".github/workflows/release.yml",
       "source_commit": "8c6203d2fa7ce2d68262727fc6e0b12923d1c49e",
-      "sha256": "d7e149ed19f87c1084d56e6d6adb07ce4fa578aace4188e04a87ad5d5141994c"
+      "sha256": "e064a16aaef2b5e89645a1aa78a2717517cad0d8ccb099debbe0ba609125df4d"
     },
     {
       "output_path": "repo/.github/workflows/test.yml",
       "source_path": ".github/workflows/test.yml",
       "source_commit": "3cb6b0be2dc022d46e5680898eb1ce33d6e5f798",
-      "sha256": "4fb5a56526db5676ba6e3f3ed036c2bcb14d5c1290be9af22f3ac690fca4147e"
+      "sha256": "37d6533268265e0a8ec738f49bdcf4238be8372e63a63b33e0ecc4feb706b5ce"
     },
     {
       "output_path": "repo/docs/architecture/README.md",
@@ -403,7 +403,7 @@
       "output_path": "repo/docs/architecture/manifests/v3.build_test_artifact_budget.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.build_test_artifact_budget.mainline.yml",
       "source_commit": "1519efee567e924d25ac536924724503f7c4e613",
-      "sha256": "a33c45aeb92484049d1c9a30aa40e90c868881bd6f392fc025136ddda4050476"
+      "sha256": "cc0168aa90ee2478b22d7cf0ba136723ae183d3e2a7f4983e5e22fed7c473b06"
     },
     {
       "output_path": "repo/docs/architecture/manifests/v3.codex_sample_retention_snap_scope.yml",
@@ -727,7 +727,7 @@
       "output_path": "repo/docs/architecture/v3-architecture-audit-locks.yml",
       "source_path": "docs/architecture/v3-architecture-audit-locks.yml",
       "source_commit": "adeaf80c4be254ade006bb8fb0f52ce39eb356a8",
-      "sha256": "44dd3289788c85f4eb8f9e38c0add9271c6f62c14a2a77e9f27d002a5bb660c8"
+      "sha256": "829e9621c0b742241312bc8669f99adf45138cc80a82b644cd822455f48119b1"
     },
     {
       "output_path": "repo/docs/architecture/v3-build-tool-module-registry.yml",
@@ -757,7 +757,7 @@
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
       "source_commit": "adeaf80c4be254ade006bb8fb0f52ce39eb356a8",
-      "sha256": "cf7121bc8a8940fc29e90d40b142c5bb520aa8ce06ff15f640de70aedb8e3550"
+      "sha256": "993040a82be1486b3bb4a8bdc3dd38419902075701583da83896aa6d32dd7665"
     },
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
@@ -775,7 +775,7 @@
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
       "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
-      "sha256": "7a403e28d1b2aa73d37f20d721b88f887e1b3d1e3281af5d9f52a7bb6d19d15a"
+      "sha256": "18f51f531438b47b138a5bdbbcfc92b4c4488dad3e1e037a726521d5f0ea843a"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -955,7 +955,7 @@
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_commit": "adeaf80c4be254ade006bb8fb0f52ce39eb356a8",
-      "sha256": "c63df5c039eed4ef8e8b07c74b90451de512a088d9c8a9adf870e052c6e98124"
+      "sha256": "85ada545b9dbf0a418990a1c14e1eb68c30d83448ad7fea30c0eb50636e52d59"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-skeleton-sop.html",
@@ -1135,7 +1135,7 @@
       "output_path": "repo/docs/architecture/wiki/v3-build-test-artifact-budget.md",
       "source_path": "docs/architecture/wiki/v3-build-test-artifact-budget.md",
       "source_commit": "1519efee567e924d25ac536924724503f7c4e613",
-      "sha256": "d11facf0607da4063f8b705a9021546d686996c0c4e2ab2a0d9460aba46dd6c9"
+      "sha256": "5f9bf045bcaabad1589f6399539a17a751326c86e9f71a0cd8217b2fc9e6d029"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-config-compact-hub-v1-defaults-sop.md",
@@ -1207,7 +1207,7 @@
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_commit": "adeaf80c4be254ade006bb8fb0f52ce39eb356a8",
-      "sha256": "edd554c49437c8c741c926042f8799a16aad9319b97b73c63e738e8f5d9a0e7d"
+      "sha256": "a2c9c8382d83f25d43db4e5802c912dd6f520382ed247e14930b64b766aa9a33"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-skeleton-sop.md",
@@ -2281,7 +2281,7 @@
       "output_path": "repo/docs/goals/v3-provider-auth-key-file-expansion-test-design.md",
       "source_path": "docs/goals/v3-provider-auth-key-file-expansion-test-design.md",
       "source_commit": "59ab6d39e98f2f18cb7603d99434267e380c49ad",
-      "sha256": "9062d04753e27ae17c60ec83b0c4b97d8fc7216ad7319134cad076a973a4207f"
+      "sha256": "0fc75a4c0ac809af81bfe7028104dc59a0ee7a5146a886bc5d3d46d9c717cb9e"
     },
     {
       "output_path": "repo/docs/goals/v3-provider-directory-config-test-design.md",
@@ -2626,5 +2626,5 @@
       "sha256": "2ada8d17e5cc0cb53ff0dfa9acfbeedf10eb4e35f7db239fb43ef88aa7478ea6"
     }
   ],
-  "manifest_digest": "a017b3f30388da7ec2e6835f15b71c4b90f2977abc48c5b4604720d0beadfe7a"
+  "manifest_digest": "fb682664bb901d54ac916b502a679de57725b104542ef0ca04027a3a04f6a287"
 }

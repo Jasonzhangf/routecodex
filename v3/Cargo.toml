@@ -23,6 +23,26 @@ edition = "2021"
 license = "MIT"
 publish = false
 
+[workspace.lints.clippy]
+bool_assert_comparison = "allow"
+collapsible_if = "allow"
+implicit_saturating_sub = "allow"
+large_enum_variant = "allow"
+len_zero = "allow"
+manual_pattern_char_comparison = "allow"
+needless_borrow = "allow"
+question_mark = "allow"
+redundant_guards = "allow"
+redundant_closure = "allow"
+single_element_loop = "allow"
+some_filter = "allow"
+too_many_arguments = "allow"
+unnecessary_cast = "allow"
+unnecessary_fold = "allow"
+
+[workspace.lints.rust]
+dead_code = "allow"
+
 [workspace.dependencies]
 async-trait = "0.1"
 axum = "0.7"

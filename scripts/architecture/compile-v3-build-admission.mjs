@@ -11,16 +11,22 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import YAML from 'yaml';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const requireFromV3 = createRequire(resolve(repoRoot, 'v3', 'package.json'));
+const YAML = requireFromV3('yaml');
 const outputRoot = resolve(
   repoRoot,
   'v3',
   'build-contracts',
   'architecture-admission',
 );
+const providerCompatCanonicalPath =
+  'v3/crates/routecodex-v3-config/src/v2_provider_compatibility_defaults.json';
+const providerCompatLegacyMirrorPath =
+  'sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json';
 const sourceRoots = [
   '.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md',
   '.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md',
@@ -72,6 +78,28 @@ function canonicalJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+function verifyProviderCompatLegacyMirror() {
+  const canonical = JSON.parse(
+    readFileSync(resolve(repoRoot, providerCompatCanonicalPath), 'utf8'),
+  );
+  const legacyMirror = JSON.parse(
+    readFileSync(resolve(repoRoot, providerCompatLegacyMirrorPath), 'utf8'),
+  );
+  if (!Array.isArray(canonical.compatibilityProfileBlocks)) {
+    throw new Error(
+      `${providerCompatCanonicalPath} must declare compatibilityProfileBlocks`,
+    );
+  }
+  if (
+    canonicalJson(canonical.compatibilityProfileBlocks)
+    !== canonicalJson(legacyMirror.compatibilityProfileBlocks)
+  ) {
+    throw new Error(
+      `legacy provider compatibility mirror drift: ${providerCompatLegacyMirrorPath}`,
+    );
+  }
+}
+
 function readSource(path) {
   const absolutePath = resolve(repoRoot, path);
   if (!existsSync(absolutePath)) {
@@ -114,6 +142,7 @@ function expectedAdmission() {
 }
 
 function compileAdmission() {
+  verifyProviderCompatLegacyMirror();
   const expected = expectedAdmission();
   rmSync(resolve(outputRoot, 'repo'), { recursive: true, force: true });
   for (const entry of expected.files) {
@@ -128,6 +157,7 @@ function compileAdmission() {
 }
 
 function verifyAdmissionLockstep() {
+  verifyProviderCompatLegacyMirror();
   const expected = expectedAdmission();
   const failures = [];
   for (const entry of expected.files) {

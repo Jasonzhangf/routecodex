@@ -45,7 +45,9 @@ published manifest, Debug, Error, provider payload, or client payload.
 ## Negative tests
 
 - Empty provider id, empty file, malformed line, empty key, empty value, duplicate key,
-  or duplicate derived alias fails at config compile time.
+  or duplicate derived alias fails at config compile time. The same strict parser is
+  intentionally reused when provider transport rereads the selected secret handle,
+  so post-compile file corruption also fails before authentication transport.
 - Top-level `secretFile` mixed with explicit `entries`, `apiKey`, `env`, or `tokenFile`
   fails instead of choosing one source.
 - Unreadable `secretFile` fails with a config validation error.

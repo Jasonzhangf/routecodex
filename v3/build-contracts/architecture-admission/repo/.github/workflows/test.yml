@@ -39,6 +39,10 @@ jobs:
         run: node scripts/architecture/compile-v3-build-admission.mjs --check
       - name: V3 canonical verification (build/test/gates/red/isolation)
         run: npm --prefix v3 run verify:ci
+      - name: Repository file line limit
+        run: node scripts/ci/check-file-line-limit.mjs
+      - name: Repository ServerTool Rust-only boundary
+        run: node scripts/verify-servertool-rust-only.mjs
       - name: V4 install local build dependencies
         run: npm ci --prefix v4 --ignore-scripts
       - name: V4 canonical verification (build/test/gates/red/isolation)

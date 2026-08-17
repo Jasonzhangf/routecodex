@@ -15,8 +15,8 @@ flowchart LR
 
 ## Ownership
 
-- Command and cleanup owner: `scripts/run-v3-cargo-test.mjs`.
-- Direct Cargo test runner: `scripts/cargo-test-artifact-runner.mjs`.
+- Command and cleanup owner: `v3/scripts/run-v3-cargo-test.mjs`.
+- Direct Cargo test runner: `v3/scripts/cargo-test-artifact-runner.mjs`.
 - Profile owner: `v3/Cargo.toml`.
 - Module registry: `docs/architecture/v3-build-tool-module-registry.yml`.
 

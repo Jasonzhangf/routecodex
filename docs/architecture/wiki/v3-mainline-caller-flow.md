@@ -41,7 +41,6 @@ flowchart TD
   module_routecodex_v3_sse -->|2 edges / 1 paths| module_routecodex_v3_sse
   module_scripts -->|2 edges / 1 paths| module_docs
   module_scripts -->|1 edges / 1 paths| module_docs__manifest
-  module_scripts -->|3 edges / 1 paths| module_scripts
   module_v3_cli -->|1 edges / 1 paths| module_v3_lifecycle
   module_v3_config -->|1 edges / 1 paths| module_docs__manifest
   module_v3_config -->|12 edges / 4 paths| module_v3_config
@@ -71,7 +70,7 @@ flowchart TD
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
   module_v3_server -->|25 edges / 14 paths| module_v3_server
   module_v3_package_json -->|3 edges / 1 paths| module_v3_scripts
-  module_v3_scripts -->|3 edges / 1 paths| module_v3_scripts
+  module_v3_scripts -->|6 edges / 2 paths| module_v3_scripts
 ```
 
 | From module | To module | Edges | Functional paths |
@@ -82,7 +81,6 @@ flowchart TD
 | routecodex-v3-sse | routecodex-v3-sse | 2 | `v3.sse.transport_boundary` |
 | scripts | docs | 2 | `v3.live_provider_compat.parity` |
 | scripts | docs::manifest | 1 | `v3.live_provider_compat.parity` |
-| scripts | scripts | 3 | `v3.build_test_artifact_budget` |
 | v3-cli | v3-lifecycle | 1 | `v3.server.managed_lifecycle` |
 | v3-config | docs::manifest | 1 | `v3.entry_protocol_endpoint_binding.mainline` |
 | v3-config | v3-config | 12 | `v3.config.compact_hub_v1_defaults`<br/>`v3.config.compile`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.entry_protocol_registry_contract.mainline` |
@@ -112,7 +110,7 @@ flowchart TD
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
 | v3-server | v3-server | 25 | `v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3/package.json | v3/scripts | 3 | `v3.build.independent_domain` |
-| v3/scripts | v3/scripts | 3 | `v3.global_binary_install` |
+| v3/scripts | v3/scripts | 6 | `v3.build_test_artifact_budget`<br/>`v3.global_binary_install` |
 
 ## Auto audit /补救清单
 
@@ -2296,11 +2294,11 @@ Manifest: `docs/architecture/manifests/v3.build_test_artifact_budget.mainline.ym
 
 ```mermaid
 flowchart TD
-  subgraph c_53_v3_build_test_artifact_budget_m_scripts["scripts"]
-    c_53_v3_build_test_artifact_budget_0["scripts<br/>runV3CargoTest<br/><small>scripts/run-v3-cargo-test.mjs</small>"]
-    c_53_v3_build_test_artifact_budget_1["scripts<br/>executeCargo<br/><small>scripts/run-v3-cargo-test.mjs</small>"]
-    c_53_v3_build_test_artifact_budget_2["scripts<br/>releaseOwnedTestArtifacts<br/><small>scripts/run-v3-cargo-test.mjs</small>"]
-    c_53_v3_build_test_artifact_budget_3["scripts<br/>verifyV3DebugBudget<br/><small>scripts/run-v3-cargo-test.mjs</small>"]
+  subgraph c_53_v3_build_test_artifact_budget_m_v3_scripts["v3/scripts"]
+    c_53_v3_build_test_artifact_budget_0["v3/scripts<br/>runV3CargoTest<br/><small>v3/scripts/run-v3-cargo-test.mjs</small>"]
+    c_53_v3_build_test_artifact_budget_1["v3/scripts<br/>executeCargo<br/><small>v3/scripts/run-v3-cargo-test.mjs</small>"]
+    c_53_v3_build_test_artifact_budget_2["v3/scripts<br/>releaseOwnedTestArtifacts<br/><small>v3/scripts/run-v3-cargo-test.mjs</small>"]
+    c_53_v3_build_test_artifact_budget_3["v3/scripts<br/>verifyV3DebugBudget<br/><small>v3/scripts/run-v3-cargo-test.mjs</small>"]
   end
   c_53_v3_build_test_artifact_budget_0 -->|v3-build-test-budget-01<br/>V3BuildTest01CommandAccepted → V3BuildTest02ArtifactsProduced| c_53_v3_build_test_artifact_budget_1
   c_53_v3_build_test_artifact_budget_0 -->|v3-build-test-budget-02<br/>V3BuildTest02ArtifactsProduced → V3BuildTest03OwnedArtifactsReleased| c_53_v3_build_test_artifact_budget_2
@@ -2309,9 +2307,9 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-build-test-budget-01` | `V3BuildTest01CommandAccepted` → `V3BuildTest02ArtifactsProduced` | anchored | runV3CargoTest<br/><small>scripts/run-v3-cargo-test.mjs</small> | executeCargo<br/><small>scripts/run-v3-cargo-test.mjs</small> | `v3.build_test_artifact_budget` |
-| `v3-build-test-budget-02` | `V3BuildTest02ArtifactsProduced` → `V3BuildTest03OwnedArtifactsReleased` | anchored | runV3CargoTest<br/><small>scripts/run-v3-cargo-test.mjs</small> | releaseOwnedTestArtifacts<br/><small>scripts/run-v3-cargo-test.mjs</small> | `v3.build_test_artifact_budget` |
-| `v3-build-test-budget-03` | `V3BuildTest03OwnedArtifactsReleased` → `V3BuildTest04BudgetVerified` | anchored | runV3CargoTest<br/><small>scripts/run-v3-cargo-test.mjs</small> | verifyV3DebugBudget<br/><small>scripts/run-v3-cargo-test.mjs</small> | `v3.build_test_artifact_budget` |
+| `v3-build-test-budget-01` | `V3BuildTest01CommandAccepted` → `V3BuildTest02ArtifactsProduced` | anchored | runV3CargoTest<br/><small>v3/scripts/run-v3-cargo-test.mjs</small> | executeCargo<br/><small>v3/scripts/run-v3-cargo-test.mjs</small> | `v3.build_test_artifact_budget` |
+| `v3-build-test-budget-02` | `V3BuildTest02ArtifactsProduced` → `V3BuildTest03OwnedArtifactsReleased` | anchored | runV3CargoTest<br/><small>v3/scripts/run-v3-cargo-test.mjs</small> | releaseOwnedTestArtifacts<br/><small>v3/scripts/run-v3-cargo-test.mjs</small> | `v3.build_test_artifact_budget` |
+| `v3-build-test-budget-03` | `V3BuildTest03OwnedArtifactsReleased` → `V3BuildTest04BudgetVerified` | anchored | runV3CargoTest<br/><small>v3/scripts/run-v3-cargo-test.mjs</small> | verifyV3DebugBudget<br/><small>v3/scripts/run-v3-cargo-test.mjs</small> | `v3.build_test_artifact_budget` |
 
 ## v3.route_classifier.facts_classification
 
