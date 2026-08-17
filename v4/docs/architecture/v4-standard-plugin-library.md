@@ -63,6 +63,9 @@ control/error/diagnostic 资源不进入 normal/provider/client payload。
   只能通过 `read_control_resource(resource_id)` / `write_control_resource(resource_id, value)`
   访问该 entry 已声明的单个资源，未声明访问立即记录并返回
   `ResourceAccessViolation`；handle 即使捕获返回值，executor 也会 fail-fast；
+- 读取已声明但尚不存在的 control/error/lifecycle 资源同样 fail-fast；标准 handle
+  只能更新 owner 已创建的 typed resource，不能用空对象创建 MetadataCenter、
+  payload-cycle 或 Error-chain 真相；
 - control-only 插件只写 `v4.control.*` / `v4.lifecycle.payload_cycle`；
 - diagnostic-only 插件只 emit diagnostics，不写 data/control；
 - error 插件只写 `v4.control.error_chain`；

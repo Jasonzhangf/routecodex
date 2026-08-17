@@ -38,6 +38,7 @@ function validate(source, binding, tests) {
     || !binding.includes('ExecuteNode {')
     || !binding.includes('pub struct ExecutionFailureFact')
     || !binding.includes('resource_id: "v4.node_container.execution_failure"')
+    || !binding.includes('ExecutionFailureCode::ResourceAccessViolation')
     || !binding.includes('execute_with_plan_hash(')
     || !binding.includes('EnterExecution')
     || !binding.includes('NodeContainer::declare')
@@ -122,6 +123,17 @@ function runSelfTest() {
     missed += 1;
   } else {
     console.log(`[v4 node container red] typed execution failure removed: FAIL as expected (${executionFailureFailures.length})`);
+  }
+  const collapsedResourceFailureBinding = binding.replace(
+    'ExecutionFailureCode::ResourceAccessViolation',
+    'ExecutionFailureCode::EffectViolation',
+  );
+  const resourceFailureFailures = validate(baseline, collapsedResourceFailureBinding, tests);
+  if (resourceFailureFailures.length === 0) {
+    console.error('[v4 node container red] resource access code collapsed: expected FAIL, got PASS');
+    missed += 1;
+  } else {
+    console.log(`[v4 node container red] resource access code collapsed: FAIL as expected (${resourceFailureFailures.length})`);
   }
   const executionOpRemovedBinding = binding.replaceAll('ExecuteNode {', 'Status {');
   const executionOpFailures = validate(baseline, executionOpRemovedBinding, tests);
