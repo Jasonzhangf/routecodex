@@ -229,6 +229,17 @@ Host 必须直接使用实际 Cordis，并依赖 frozen BaseNode、Control、Err
 
 黑盒：通过 NodeContainer 公共 API 在实际 Cordis Context 装载三个插件，验证 Fiber、顺序、输出、记录、Rust handle 和卸载，不读取 Cordis/Rust 内部 Map/Vec。
 
+当前实现状态：`host/container lifecycle binding active`。`CordisBoundNodeHost`
+用真实 Cordis Fiber mount/dispose 驱动 Rust `NodeContainer` 的 declare/context-created/
+plugins-mounted/publish/enter-execution/drain/dispose 状态；Rust 原子计数是 in-flight
+唯一真源，JS 只消费 typed status。联合黑盒已覆盖 graph/plan 漂移、drain 期间仍有
+in-flight、Accepting dispose 无副作用拒绝、mount 失败后的 failed->disposed 回收。
+业务插件执行 handle 仍在后续真实 Pipeline
+迁移中逐节点接入，不把生命周期 binding 扩张为通用 payload bridge。
+生命周期失败由 NodeContainer dispatch owner 记录为
+`v4.node_container.lifecycle_failure` typed fact，并经同一 lifecycle port 投影；该管理通道
+不具备 product request/session/target scope，因此不伪造 scope 接入 Error01-06。
+
 ### M4：Skeleton Runtime
 
 实现：

@@ -35,7 +35,9 @@
     "v4.response.normal_payload->v4.control.metadata_center",
     "v4.debug.snapshot_ledger->v4.pipeline.mainline",
     "v4.control.error_chain->v4.request.provider_wire_payload",
-    "v4.control.error_chain->v4.response.client_wire_payload"
+    "v4.control.error_chain->v4.response.client_wire_payload",
+    "v4.node_container.lifecycle_failure->v4.request.provider_wire_payload",
+    "v4.node_container.lifecycle_failure->v4.response.client_wire_payload"
   ],
   "red_test_gates": [
     {"gate_id":"RED-01","name":"non_adjacent_conversion","required_for":["compile","architecture_gate"]},

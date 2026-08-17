@@ -200,3 +200,36 @@ fn graph_hash_is_deterministic_sha256() {
     assert_ne!(a, c);
     assert_eq!(a.len(), 64);
 }
+
+#[test]
+fn positive_in_flight_guard_tracks_and_releases_execution() {
+    let plan = empty_plan();
+    let bindings = binding_for(&plan);
+    let container =
+        full_lifecycle(NodeContainer::declare("node-a", plan, bindings).expect("valid binding"));
+    let guard = container
+        .enter_execution()
+        .expect("accepting container enters execution");
+    assert_eq!(container.in_flight(), 1);
+    drop(guard);
+    assert_eq!(container.in_flight(), 0);
+}
+
+#[test]
+fn negative_drain_rejects_measured_in_flight_execution() {
+    let plan = empty_plan();
+    let bindings = binding_for(&plan);
+    let mut container =
+        full_lifecycle(NodeContainer::declare("node-a", plan, bindings).expect("valid binding"));
+    let guard = container
+        .enter_execution()
+        .expect("accepting container enters execution");
+    let error = container.drain().unwrap_err();
+    assert!(matches!(error, NodeContainerError::InFlightExecutions(1)));
+    assert_eq!(container.state(), NodeContainerState::Accepting);
+    drop(guard);
+    container
+        .drain()
+        .expect("drain succeeds after the guard is released");
+    assert_eq!(container.state(), NodeContainerState::Draining);
+}

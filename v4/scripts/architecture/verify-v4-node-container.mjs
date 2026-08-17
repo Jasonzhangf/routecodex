@@ -4,6 +4,8 @@ import path from 'node:path';
 
 const root = path.resolve(new URL('.', import.meta.url).pathname, '..', '..');
 const sourcePath = path.join(root, 'crates/routecodex-v4-node-container/src/lib.rs');
+const bindingPath = path.join(root, 'crates/routecodex-v4-node-container/src/bin/host_binding.rs');
+const testsPath = path.join(root, 'crates/routecodex-v4-node-container/tests/l2_node_container.rs');
 const required = [
   'pub struct NodeContainer',
   'pub fn fail',
@@ -11,19 +13,44 @@ const required = [
   'execute_plan',
   'NodeContainerState',
   'loaded_plan_hash != plan.hash',
+  'pub fn enter_execution',
+  'pub fn in_flight',
+  'NodeExecutionGuard',
+  'InFlightExecutions',
 ];
 const forbidden = ['struct Context', 'struct Fiber', 'struct Effect', 'serde_json::Value'];
 
-function validate(source) {
+function validate(source, binding, tests) {
   const failures = required.filter((token) => !source.includes(token));
   if (forbidden.some((token) => source.includes(token))) {
     failures.push('Rust node-container contains a Cordis-like runtime or generic payload');
+  }
+  if (
+    !binding.includes('enum HostRequest')
+    || !binding.includes('#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]')
+    || !binding.includes('serde_ignored::deserialize')
+    || !binding.includes("use serde_json::value::RawValue;")
+    || !binding.includes('pub struct LifecycleFailureFact')
+    || !binding.includes('resource_id: "v4.node_container.lifecycle_failure"')
+    || !binding.includes('EnterExecution')
+    || !binding.includes('NodeContainer::declare')
+    || !binding.includes('NodeContainerError::InFlightExecutions')
+  ) {
+    failures.push('typed host lifecycle binding missing');
+  }
+  if (
+    !tests.includes('positive_in_flight_guard_tracks_and_releases_execution')
+    || !tests.includes('negative_drain_rejects_measured_in_flight_execution')
+  ) {
+    failures.push('in-flight positive/negative lifecycle tests missing');
   }
   return failures;
 }
 
 function runSelfTest() {
   const baseline = fs.readFileSync(sourcePath, 'utf8');
+  const binding = fs.readFileSync(bindingPath, 'utf8');
+  const tests = fs.readFileSync(testsPath, 'utf8');
   const cases = [
     ['synthetic Cordis runtime', (source) => `${source}\nstruct Context;`],
     ['plan binding guard removed', (source) => source.replace('loaded_plan_hash != plan.hash', 'false')],
@@ -31,7 +58,7 @@ function runSelfTest() {
   ];
   let missed = 0;
   for (const [name, mutate] of cases) {
-    const failures = validate(mutate(baseline));
+    const failures = validate(mutate(baseline), binding, tests);
     if (failures.length === 0) {
       console.error(`[v4 node container red] ${name}: expected FAIL, got PASS`);
       missed += 1;
@@ -40,7 +67,43 @@ function runSelfTest() {
     }
   }
   if (missed > 0) process.exit(1);
-  console.log('[v4 node container red] OK red self-test 3/3');
+  const inFlightCandidate = baseline.replace('pub fn enter_execution', 'fn enter_execution');
+  const inFlightFailures = validate(inFlightCandidate, binding, tests);
+  if (inFlightFailures.length === 0) {
+    console.error('[v4 node container red] in-flight owner removed: expected FAIL, got PASS');
+    missed += 1;
+  } else {
+    console.log(`[v4 node container red] in-flight owner removed: FAIL as expected (${inFlightFailures.length})`);
+  }
+  const permissiveBinding = binding.replace(', deny_unknown_fields)]', ')]');
+  const protocolFailures = validate(baseline, permissiveBinding, tests);
+  if (protocolFailures.length === 0) {
+    console.error('[v4 node container red] permissive lifecycle decoder: expected FAIL, got PASS');
+    missed += 1;
+  } else {
+    console.log(`[v4 node container red] permissive lifecycle decoder: FAIL as expected (${protocolFailures.length})`);
+  }
+  const nestedPermissiveBinding = binding.replace('serde_ignored::deserialize', 'serde_json::from_str');
+  const nestedProtocolFailures = validate(baseline, nestedPermissiveBinding, tests);
+  if (nestedProtocolFailures.length === 0) {
+    console.error('[v4 node container red] nested unknown-field detector removed: expected FAIL, got PASS');
+    missed += 1;
+  } else {
+    console.log(`[v4 node container red] nested unknown-field detector removed: FAIL as expected (${nestedProtocolFailures.length})`);
+  }
+  const untypedFailureBinding = binding.replace(
+    'pub struct LifecycleFailureFact',
+    'struct StringFailureProjection',
+  );
+  const failureFactFailures = validate(baseline, untypedFailureBinding, tests);
+  if (failureFactFailures.length === 0) {
+    console.error('[v4 node container red] typed lifecycle failure removed: expected FAIL, got PASS');
+    missed += 1;
+  } else {
+    console.log(`[v4 node container red] typed lifecycle failure removed: FAIL as expected (${failureFactFailures.length})`);
+  }
+  if (missed > 0) process.exit(1);
+  console.log('[v4 node container red] OK red self-test 7/7');
 }
 
 if (process.argv.includes('--red-self-test')) {
@@ -48,9 +111,13 @@ if (process.argv.includes('--red-self-test')) {
   process.exit(0);
 }
 
-const failures = validate(fs.readFileSync(sourcePath, 'utf8'));
+const failures = validate(
+  fs.readFileSync(sourcePath, 'utf8'),
+  fs.readFileSync(bindingPath, 'utf8'),
+  fs.readFileSync(testsPath, 'utf8'),
+);
 if (failures.length) {
   console.error(failures.join('\n'));
   process.exit(1);
 }
-console.log('[v4 node container] OK typed lifecycle state machine and plan binding');
+console.log('[v4 node container] OK typed lifecycle, in-flight truth and host binding');

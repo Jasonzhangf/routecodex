@@ -941,9 +941,23 @@
         "declare",
         "publish",
         "fail",
+        "enter_execution",
+        "exit_execution",
+        "read_status",
         "execute",
         "drain",
         "dispose"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.node_container.lifecycle_failure",
+      "owner": "routecodex-v4-node-container::LifecycleFailureFact",
+      "truth_store": "crates/routecodex-v4-node-container/src/bin/host_binding.rs",
+      "allowed_operations": [
+        "record",
+        "project",
+        "read"
       ],
       "status": "active"
     },

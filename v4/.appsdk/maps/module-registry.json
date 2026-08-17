@@ -455,6 +455,7 @@
       ],
       "verification_gates": [
         "v4_node_container_l2_regression",
+        "v4_cordis_host_l3_regression",
         "v4_node_container_test_consumer",
         "v4_parity_gate_node_container",
         "v4_parity_gate_node_container_red"

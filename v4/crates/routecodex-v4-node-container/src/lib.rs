@@ -10,6 +10,8 @@ use routecodex_v4_cordis_bridge::{
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeContainerState {
@@ -45,6 +47,7 @@ pub enum NodeContainerError {
     },
     PlanHashMismatch,
     BindingMismatch,
+    InFlightExecutions(usize),
     HostLifecycle(String),
     Bridge(BridgeError),
 }
@@ -57,6 +60,12 @@ impl std::fmt::Display for NodeContainerError {
             }
             Self::PlanHashMismatch => write!(f, "node plugin plan hash mismatch"),
             Self::BindingMismatch => write!(f, "Cordis graph/manifest/loaded plan hashes differ"),
+            Self::InFlightExecutions(count) => {
+                write!(
+                    f,
+                    "cannot drain node container while {count} execution(s) are in flight"
+                )
+            }
             Self::HostLifecycle(message) => write!(f, "host lifecycle failed: {message}"),
             Self::Bridge(error) => write!(f, "typed bridge failed: {error}"),
         }
@@ -77,6 +86,7 @@ pub struct NodeContainer {
     plan: NodePluginPlan,
     bindings: PlanBindings,
     state: NodeContainerState,
+    in_flight: Arc<AtomicUsize>,
 }
 
 impl NodeContainer {
@@ -96,6 +106,7 @@ impl NodeContainer {
             plan,
             bindings,
             state: NodeContainerState::Declared,
+            in_flight: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -113,6 +124,23 @@ impl NodeContainer {
 
     pub fn state(&self) -> NodeContainerState {
         self.state
+    }
+
+    pub fn in_flight(&self) -> usize {
+        self.in_flight.load(Ordering::Acquire)
+    }
+
+    pub fn enter_execution(&self) -> Result<NodeExecutionGuard, NodeContainerError> {
+        if self.state != NodeContainerState::Accepting {
+            return Err(NodeContainerError::InvalidState {
+                state: self.state,
+                operation: "enter_execution",
+            });
+        }
+        self.in_flight.fetch_add(1, Ordering::AcqRel);
+        Ok(NodeExecutionGuard {
+            in_flight: Arc::clone(&self.in_flight),
+        })
     }
 
     pub fn context_created(&mut self) -> Result<(), NodeContainerError> {
@@ -163,16 +191,15 @@ impl NodeContainer {
         input: NodeExecutionInput,
         registry: &dyn HandleRegistry,
     ) -> Result<NodeExecutionOutput, NodeContainerError> {
-        if self.state != NodeContainerState::Accepting {
-            return Err(NodeContainerError::InvalidState {
-                state: self.state,
-                operation: "execute",
-            });
-        }
+        let _guard = self.enter_execution()?;
         execute_plan(&self.plan, input, registry).map_err(Into::into)
     }
 
     pub fn drain(&mut self) -> Result<(), NodeContainerError> {
+        let in_flight = self.in_flight();
+        if in_flight != 0 {
+            return Err(NodeContainerError::InFlightExecutions(in_flight));
+        }
         self.transition(
             NodeContainerState::Accepting,
             NodeContainerState::Draining,
@@ -208,6 +235,18 @@ impl NodeContainer {
         }
         self.state = next;
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct NodeExecutionGuard {
+    in_flight: Arc<AtomicUsize>,
+}
+
+impl Drop for NodeExecutionGuard {
+    fn drop(&mut self) {
+        let previous = self.in_flight.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(previous > 0, "node execution guard underflow");
     }
 }
 
