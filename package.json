@@ -10,8 +10,6 @@
   },
   "files": [
     "dist/",
-    "sharedmodule/llmswitch-core/dist/",
-    "sharedmodule/llmswitch-core/package.json",
     "scripts/",
     "README.md",
     "LICENSE",
@@ -308,7 +306,6 @@
     "rcc-basemodule": "^0.2.7",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",
-    "rcc-llmswitch-core": "file:sharedmodule/llmswitch-core",
     "socket.io": "^4.8.1",
     "tiktoken": "^1.0.22",
     "zod": "^3.23.8"

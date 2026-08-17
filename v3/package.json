@@ -144,7 +144,6 @@
     "test:v3-local-continuation-contract-store-red-fixtures": "node scripts/tests/v3-local-continuation-contract-store-red-fixtures.mjs",
     "verify:v3-anthropic-relay-controlled-replay-harness": "node scripts/architecture/verify-v3-anthropic-relay-controlled-replay-harness.mjs",
     "test:v3-anthropic-relay-controlled-replay-harness-red-fixtures": "node scripts/tests/v3-anthropic-relay-controlled-replay-harness-red-fixtures.mjs",
-    "verify:v3-text-tool-harvest-orphan-surfaces": "node scripts/architecture/verify-v3-text-tool-harvest-orphan-surfaces.mjs",
     "test:v3-file-size-red-fixtures": "node scripts/tests/v3-file-size-red-fixtures.mjs",
     "test:v3-hub-skeleton-doc-red-fixtures": "node scripts/tests/v3-hub-skeleton-doc-red-fixtures.mjs",
     "test:v3-workspace": "npm run verify:v3-file-size && npm run verify:v3-console-request-count-visibility && npm run verify:v3-responses-session-admission && npm run verify:v3-runtime-timing-observability && node scripts/run-v3-cargo-test.mjs --workspace -- --nocapture",

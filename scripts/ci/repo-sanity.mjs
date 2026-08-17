@@ -87,7 +87,6 @@ function checkRootLayout() {
     'package-lock.json',
     'package.json',
     'scripts',
-    'sharedmodule',
     'src',
     'task.md',
     'tests',
@@ -336,20 +335,6 @@ function checkTrackedSecrets() {
   }
 }
 
-function checkLlmswitchRustificationAudit() {
-  const out = spawnSync('node', ['scripts/ci/llmswitch-rustification-audit.mjs'], {
-    encoding: 'utf8',
-  });
-  if (out.status !== 0) {
-    console.error('[repo-sanity] llmswitch rustification audit failed');
-    const stdout = String(out.stdout || '').trim();
-    const stderr = String(out.stderr || '').trim();
-    if (stdout) console.error(stdout);
-    if (stderr) console.error(stderr);
-    process.exit(2);
-  }
-}
-
 function checkRepositoryFilesystemGovernance() {
   const checks = [
     ['scripts/architecture/verify-repository-filesystem-governance.mjs'],
@@ -391,6 +376,5 @@ checkLegacyInstallScriptsDeleted();
 checkUntrackedNotIgnored();
 checkTrackedSecrets();
 checkRepositoryFilesystemGovernance();
-checkLlmswitchRustificationAudit();
 
 console.log('[repo-sanity] ok');

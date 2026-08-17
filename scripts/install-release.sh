@@ -78,7 +78,7 @@ check_rust() {
     echo "✅ Rust cargo: $("$HOME/.cargo/bin/cargo" --version)"
     return
   fi
-  fail "cargo 未安装或不可用；build:min 需要 Rust native build（sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs）"
+  fail "cargo 未安装或不可用；V3 build:min 需要 Rust native build"
 }
 
 check_curl() {
@@ -121,25 +121,6 @@ prepare_isolated_build_root() {
     fi
   }
 
-  copy_llmswitch_core() {
-    local relative="sharedmodule/llmswitch-core"
-    local source_path="$SOURCE_ROOT/$relative"
-    local target_path="$INSTALL_BUILD_ROOT/$relative"
-    mkdir -p "$(dirname "$target_path")"
-    mkdir -p "$target_path"
-    (cd "$source_path" && COPYFILE_DISABLE=1 tar \
-      --exclude './rust-core/target' \
-      --exclude './node_modules' \
-      --exclude './dist' \
-      --exclude './coverage' \
-      --exclude './test-results' \
-      --exclude './tsconfig.tsbuildinfo' \
-      -cf - .) | (cd "$target_path" && tar -xf -)
-    if [ -d "$SOURCE_ROOT/$relative/node_modules" ]; then
-      ln -s "$SOURCE_ROOT/$relative/node_modules" "$target_path/node_modules"
-    fi
-  }
-
   copy_v3_source() {
     local relative="v3"
     local source_path="$SOURCE_ROOT/$relative"
@@ -171,7 +152,6 @@ prepare_isolated_build_root() {
   copy_v3_source
   copy_isolated_path ".agents/skills/rcc-dev-skills"
   copy_agent_collab_contract
-  copy_llmswitch_core
 
   if [ -d "$SOURCE_ROOT/node_modules" ]; then
     ln -s "$SOURCE_ROOT/node_modules" "$INSTALL_BUILD_ROOT/node_modules"
@@ -229,7 +209,6 @@ build_release_project() {
   prepare_dependencies
   (
     cd "$INSTALL_BUILD_ROOT"
-    node scripts/build-core.mjs
     BUILD_MODE=release ROUTECODEX_SKIP_AUTO_BUMP="${ROUTECODEX_SKIP_AUTO_BUMP:-1}" npm run build:min
     node scripts/ensure-cli-executable.mjs
   )
