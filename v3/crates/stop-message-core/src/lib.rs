@@ -903,7 +903,6 @@ pub fn evaluate_stop_schema_gate_with_reasoning_stop_arguments(
         ),
     }
 }
-#[allow(clippy::too_many_arguments)]
 fn schema_invalid_followup(
     _assistant_text: &str,
     reason_code: &str,
@@ -931,7 +930,6 @@ fn schema_invalid_followup(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn schema_missing_followup(
     _assistant_text: &str,
     reason_code: &str,
@@ -1091,7 +1089,6 @@ fn build_terminal_visible_stop_text(text: &str) -> String {
     visible.trim().to_string()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn schema_followup(
     _assistant_text: &str,
     reason_code: &str,
@@ -1189,15 +1186,16 @@ fn should_upgrade_stop_message_text(snapshot: &StopMessageSnapshot) -> bool {
 
 fn terminal_missing_fields(parsed: &StopSchemaParsed, stopreason: u8) -> Vec<String> {
     let mut missing = Vec::new();
-    if stopreason == 1
-        && parsed
+    if stopreason == 1 {
+        if parsed
             .reason
             .as_deref()
             .map(str::trim)
             .unwrap_or("")
             .is_empty()
-    {
-        missing.push("reason".to_string());
+        {
+            missing.push("reason".to_string());
+        }
     }
     if parsed.has_evidence != Some(1) {
         missing.push("has_evidence".to_string());
@@ -1354,7 +1352,6 @@ fn resolve_no_change_count(
     }
 }
 
-#[allow(clippy::large_enum_variant)]
 enum StopSchemaParseResult {
     Missing,
     InvalidJson,
@@ -1737,7 +1734,7 @@ mod tests {
         let result = evaluate_stop_schema_gate(text.as_str(), 0, 3, "", 0);
         assert_eq!(result.action, StopSchemaGateAction::AllowStop);
         assert_eq!(result.reason_code, "stop_schema_finished");
-        assert!(!result.count_budget);
+        assert_eq!(result.count_budget, false);
         assert!(result.missing_fields.is_empty());
     }
 
@@ -2236,16 +2233,17 @@ mod tests {
         assert_eq!(missing_evidence_flag.action, StopSchemaGateAction::Followup);
         assert!(missing_evidence_flag.count_budget);
 
-        let (payload, missing_field) = (
+        for (payload, missing_field) in [(
             r#"{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"","issue_cause":"已验证","excluded_factors":"无关配置","diagnostic_order":"测试","done_steps":"修改代码","next_step":""}"#,
             "evidence",
-        );
-        let wrapped = tagged_stop_schema(payload);
-        let decision = evaluate_stop_schema_gate(wrapped.as_str(), 0, 3, "", 0);
-        assert_eq!(decision.action, StopSchemaGateAction::Followup);
-        assert_eq!(decision.reason_code, "stop_schema_terminal_missing_fields");
-        assert!(decision.missing_fields.contains(&missing_field.to_string()));
-        assert!(decision.count_budget);
+        )] {
+            let wrapped = tagged_stop_schema(payload);
+            let decision = evaluate_stop_schema_gate(wrapped.as_str(), 0, 3, "", 0);
+            assert_eq!(decision.action, StopSchemaGateAction::Followup);
+            assert_eq!(decision.reason_code, "stop_schema_terminal_missing_fields");
+            assert!(decision.missing_fields.contains(&missing_field.to_string()));
+            assert!(decision.count_budget);
+        }
     }
 
     #[test]
@@ -2826,6 +2824,7 @@ mod tests {
         assert_eq!(decision.observation_hash, "");
     }
 
+    /// Loop-guard passthrough still returns the final observation hash.
     #[test]
     fn loop_guard_passthrough_returns_observation_hash() {
         let first = evaluate_stop_schema_gate("普通停止文本", 0, 3, "", 0);
@@ -2845,9 +2844,10 @@ mod tests {
         );
         assert_eq!(third.action, StopSchemaGateAction::AllowStop);
         assert_eq!(third.reason_code, "stop_schema_loop_guard_passthrough");
-        assert!(!third.observation_hash.is_empty());
+        assert!(third.observation_hash.len() > 0);
     }
 
+    /// no_change_count from schema_invalid_followup paths
     #[test]
     fn invalid_schema_no_change_count_accumulates() {
         let invalid_stopreason = r#"{"stopreason":"xyz"}"#;

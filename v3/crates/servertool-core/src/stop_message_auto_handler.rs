@@ -685,7 +685,8 @@ fn build_finalize_context(
     Value::Object(context)
 }
 
-#[allow(clippy::too_many_arguments)]
+// ── Missing functions ──────────────────────────────────────────────────────
+
 fn build_decision_context(
     signals: &StoplessDecisionContextSignals,
     stop_gateway: &StopGatewayContext,
@@ -710,7 +711,7 @@ fn build_decision_context(
             .unwrap()
             .insert("plan_mode_active".to_string(), json!(true));
     }
-    if let Some(mc) = metadata_center_stopless {
+    if let Some(ref mc) = metadata_center_stopless {
         if mc.get("active") == Some(&Value::Bool(false)) {
             ctx.as_object_mut()
                 .unwrap()
@@ -741,7 +742,7 @@ fn build_decision_context(
             "runtime_snapshot".to_string(),
             json!({
                 "used": used,
-                "maxRepeats": runtime_max.unwrap_or(default_config.max_repeats),
+                "maxRepeats": runtime_max.unwrap_or(default_config.max_repeats as i64),
                 "text": runtime_text,
             }),
         );
@@ -810,6 +811,9 @@ fn serialize_schema_gate(gate: &SchemaGateResult) -> Value {
 }
 
 fn run_stop_message_auto_handler_native(decision: &StopMessageDecision, base: &Value) -> Value {
+    // This mirrors the logic from the existing run_stop_message_auto_handler_json
+    // in chat_servertool_orchestration.rs. In production the NAPI call is used;
+    // here we provide a minimal inline version.
     if decision.action != "trigger" {
         return json!({
             "chat_response": base,
@@ -856,6 +860,8 @@ fn plan_stop_message_persist_snapshot_with_input(
         },
     )
 }
+
+// ── Helper functions ────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -1335,16 +1341,13 @@ mod tests {
             })),
             provider_key: None,
         });
-        assert_eq!(
-            plan.action,
-            StopMessageAutoPlanAction::ReturnSchemaAllowStop
-        );
-        assert_eq!(
-            plan.compare_context.reason,
-            "stop_schema_loop_guard_passthrough"
-        );
-        assert!(plan.persist_plan.is_none());
-        assert!(plan.terminal_chat_response.is_some());
+        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnHandlerPlan);
+        assert_eq!(plan.compare_context.reason, "stop_schema_missing");
+        assert_eq!(plan.stopless_trigger_hint.as_deref(), Some("no_schema"));
+        let persist_plan = plan.persist_plan.as_ref().expect("persist plan");
+        assert_eq!(persist_plan.next_used, 3);
+        assert_eq!(persist_plan.next_max_repeats, 3);
+        assert!(plan.terminal_chat_response.is_none());
     }
 
     #[test]

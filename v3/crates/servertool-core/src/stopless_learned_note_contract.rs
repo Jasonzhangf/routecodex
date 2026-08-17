@@ -207,6 +207,7 @@ mod tests {
     }
 
     #[test]
+    #[test]
     fn trims_explicit_working_directory_and_session_id() {
         let plan = plan_stopless_learned_note_write(StoplessLearnedNotePlanInput {
             request_id: "req_trim".to_string(),

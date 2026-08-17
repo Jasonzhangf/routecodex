@@ -131,7 +131,7 @@ pub fn plan_auto_hook_runtime_attempt(
         },
         has_planned_result: input.has_planned_result,
         has_materialized_result: input.has_materialized_result,
-        message: has_error.then_some(error_reason),
+        message: Some(error_reason).filter(|_| has_error),
         flow_id: None,
         materialized_flow_id: input.materialized_flow_id,
     });

@@ -310,7 +310,7 @@ fn inspect_responses(
     }
 
     // Tool-like output items
-    if output_items.iter().any(has_tool_like_output) {
+    if output_items.iter().any(|item| has_tool_like_output(item)) {
         return StopGatewayContext {
             observed: true,
             eligible: false,
@@ -373,8 +373,8 @@ fn has_embedded_tool_markers(message: Option<&ChatMessage>) -> bool {
 fn contains_tool_marker(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::String(s) => contains_tool_marker_text(s),
-        serde_json::Value::Array(arr) => arr.iter().any(contains_tool_marker),
-        serde_json::Value::Object(obj) => obj.values().any(contains_tool_marker),
+        serde_json::Value::Array(arr) => arr.iter().any(|v| contains_tool_marker(v)),
+        serde_json::Value::Object(obj) => obj.values().any(|v| contains_tool_marker(v)),
         _ => false,
     }
 }

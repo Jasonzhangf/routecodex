@@ -6,8 +6,6 @@
 //! - `stop_message_counter`: budget counter logic
 //! - `cli_contract`: servertool binary input/output contract
 
-#![allow(clippy::bool_assert_comparison)]
-
 pub mod auto_hook_execution_contract;
 pub mod auto_hook_runtime_contract;
 pub mod blocked_report_contract;

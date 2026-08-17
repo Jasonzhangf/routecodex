@@ -1,6 +1,8 @@
 //! Pure Rust provider compatibility profile core.
 //!
-//! NAPI-free provider compatibility profiles for the V3 runtime and CLI.
+//! This crate is intentionally NAPI-free so V3 runtime/CLI can link it without
+//! Node symbols. The profile ids and behavior are carried from the existing
+//! `req_outbound_stage3_compat` Rust profile surface used by V2.
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -11,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod deepseek_console_go;
 mod minimax_anthropic;
 pub mod namespace_tools;
+
 /// DeepSeek Console Go responses 网关的响应侧 custom/function 工具回射入口：
 /// 上游以 `function_call` 返回映射过的 function 工具（exec_command 等），客户端
 /// 声明的是 custom 工具形态，必须在进入客户端前回射为 `custom_tool_call`，
@@ -432,7 +435,7 @@ fn apply_deepseek_max_request_compat(
             "medium" => "medium",
             "high" => "high",
             "xhigh" | "max" => "max",
-            "" => {
+            value if value.is_empty() => {
                 return Err(
                     "MalformedReasoningEffort profile=chat:deepseek-max reason=non_empty_string_required"
                         .to_string(),
@@ -1195,12 +1198,7 @@ fn normalize_function_call_id(call_id: Option<&str>, fallback: &str) -> String {
     }
     let mut hasher = Sha256::new();
     hasher.update(raw.as_bytes());
-    let hash = hasher
-        .finalize()
-        .iter()
-        .take(5)
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    let hash = hasher.finalize().iter().take(5).map(|byte| format!("{byte:02x}")).collect::<String>();
     let room = 64usize.saturating_sub("fc_".len() + 1 + hash.len()).max(1);
     let head = sanitize_id_token(&safe.chars().take(room).collect::<String>());
     format!("fc_{head}_{hash}")
@@ -2111,8 +2109,10 @@ mod tests {
             result.payload["tools"][0]["parameters"]["properties"]["q"]["type"],
             "string"
         );
+        // #3: 请求侧不再无条件剥离 reasoning content——reasoning 明文原样透传。
         assert_eq!(
-            result.payload["input"][0]["content"][0]["text"], "old",
+            result.payload["input"][0]["content"][0]["text"],
+            "old",
             "reasoning content must pass through verbatim (no unconditional strip)"
         );
     }
@@ -2176,6 +2176,7 @@ mod tests {
         assert!(result.payload.get("web_search").is_none());
         assert!(result.payload["tools"][0].get("googleSearch").is_some());
     }
+
     #[test]
     fn lmstudio_response_profile_adds_chat_defaults_and_harvests_qwen_tokens() {
         let input = ReqOutboundCompatInput {

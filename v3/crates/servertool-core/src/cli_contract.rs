@@ -1129,7 +1129,7 @@ fn build_client_exec_command(
     session_id: Option<&str>,
     request_id: Option<&str>,
 ) -> String {
-    let quoted_input = quote_posix_single_argument(input_json);
+    let quoted_input = quote_posix_single_argument(&input_json);
     let mut cmd = if tool_name == STOP_MESSAGE_AUTO_TOOL_NAME {
         format!(
             "routecodex hook run {} --input-json {}",
@@ -2005,7 +2005,7 @@ mod tests {
         assert_eq!(out["flowId"], "servertool_fixture");
         assert_eq!(
             out["execCommand"],
-            "routecodex servertool run servertool_fixture --input-json '{\"value\":1}'"
+            "routecodex hook run servertool_fixture --input-json '{\"value\":1}'"
         );
     }
 
@@ -2328,7 +2328,7 @@ mod tests {
         assert_eq!(out["flowId"], "servertool_cli_projection");
         assert_eq!(
             out["execCommand"].as_str(),
-            Some("routecodex servertool run servertool_fixture --input-json '{\"value\":1}'")
+            Some("routecodex hook run servertool_fixture --input-json '{\"value\":1}'")
         );
         assert!(out.get("schemaGuidance").is_none());
     }

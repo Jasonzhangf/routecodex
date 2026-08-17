@@ -5,10 +5,12 @@ use serde_json::Value;
 /// `server_tool_use`/`web_search_tool_result` → `web_search_call` +
 /// `function_call_output` 配对投影）由 v3 anthropic_codec 完成；本层
 /// 仅做 minimax provider sentinel text stripping（响应侧，与 web_search 无关）。
-#[cfg(test)]
 pub(crate) const MODE_A_NATIVE_REMOTE_SEARCH: &str = "native_remote_search_tool_mix";
 
-pub(crate) fn apply_request_compat(payload: Value, _mode: Option<&str>) -> Result<Value, String> {
+pub(crate) fn apply_request_compat(
+    payload: Value,
+    _mode: Option<&str>,
+) -> Result<Value, String> {
     Ok(payload)
 }
 

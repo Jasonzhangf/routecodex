@@ -214,7 +214,7 @@ fn strip_inline_reasoning_stop_json_call(line: &str, reasoning_start: usize) -> 
     let prefix = line[..reasoning_start].trim_end();
     let suffix_start = consume_inline_reasoning_stop_trailer(line, object_end + 1);
     let suffix = line[suffix_start..]
-        .trim_start_matches([')', ']', '}', ',', ';', '，', '；'])
+        .trim_start_matches(|ch: char| matches!(ch, ')' | ']' | '}' | ',' | ';' | '，' | '；'))
         .trim();
     Some(join_visible_inline_parts(prefix, Some(suffix)))
 }
@@ -968,7 +968,6 @@ fn strip_terminal_visible_reasoning_fields(value: &mut Value) {
     }
 }
 
-#[allow(clippy::unnecessary_fold)]
 fn strip_terminal_visible_response_tool_items(value: &mut Value) -> bool {
     match value {
         Value::Array(items) => items.iter_mut().fold(false, |changed, item| {

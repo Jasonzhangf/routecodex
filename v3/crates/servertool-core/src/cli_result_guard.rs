@@ -92,7 +92,9 @@ fn scan_value_for_route_hint(value: &Value, depth: usize, seen: &mut usize) -> O
         }
         return None;
     }
-    let record = value.as_object()?;
+    let Some(record) = value.as_object() else {
+        return None;
+    };
     for item in record.values() {
         if let Some(route_hint) = scan_value_for_route_hint(item, depth + 1, seen) {
             return Some(route_hint);
@@ -124,7 +126,9 @@ fn scan_value_for_stopless_snapshot(
         }
         return None;
     }
-    let record = value.as_object()?;
+    let Some(record) = value.as_object() else {
+        return None;
+    };
     for item in record.values() {
         if let Some(snapshot) = scan_value_for_stopless_snapshot(item, depth + 1, seen) {
             return Some(snapshot);
