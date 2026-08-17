@@ -583,7 +583,7 @@
       ]
     },
     {
-      "function_id": "v4.node_container.host_binding",
+      "function_id": "v4.cordis.host_binding",
       "owner": "routecodex-v4-cordis-host",
       "entry_symbols": [
         "CordisBoundNodeHost::mount",
@@ -593,14 +593,30 @@
         "RustNodeContainerPort::request"
       ],
       "entry_paths": [
-        "cordis/routecodex-v4-cordis-host/src/index.mjs",
-        "crates/routecodex-v4-node-container/src/bin/host_binding.rs"
+        "cordis/routecodex-v4-cordis-host/src/index.mjs"
       ],
       "required_gates": [
         "v4_cordis_host_l3_regression",
-        "v4_node_container_l2_regression",
         "v4_parity_gate_cordis_host",
-        "v4_parity_gate_cordis_host_red",
+        "v4_parity_gate_cordis_host_red"
+      ]
+    },
+    {
+      "function_id": "v4.node_container.lifecycle_dispatch",
+      "owner": "routecodex-v4-node-container",
+      "entry_symbols": [
+        "HostBindingRuntime::handle",
+        "HostRequest",
+        "NodeContainer::declare",
+        "NodeContainer::enter_execution",
+        "NodeContainer::drain",
+        "NodeContainer::dispose"
+      ],
+      "entry_paths": [
+        "crates/routecodex-v4-node-container/src/bin/host_binding.rs"
+      ],
+      "required_gates": [
+        "v4_node_container_l2_regression",
         "v4_parity_gate_node_container",
         "v4_parity_gate_node_container_red"
       ]

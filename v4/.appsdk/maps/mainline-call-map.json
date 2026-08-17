@@ -668,9 +668,23 @@
       "to": "routecodex-v4-node-container",
       "owner": "routecodex-v4-cordis-host::CordisBoundNodeHost",
       "edge_type": "lifecycle_port",
+      "caller_feature_id": "v4.cordis.host_binding",
+      "callee_feature_id": "v4.node_container.lifecycle_dispatch",
+      "caller_path": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "callee_path": "crates/routecodex-v4-node-container/src/bin/host_binding.rs",
+      "caller_symbols": [
+        "CordisBoundNodeHost",
+        "RustNodeContainerPort"
+      ],
+      "callee_symbols": [
+        "HostBindingRuntime::handle",
+        "HostRequest"
+      ],
       "symbols": [
         "CordisBoundNodeHost",
         "RustNodeContainerPort",
+        "HostBindingRuntime::handle",
+        "HostRequest",
         "NodeContainer::declare",
         "NodeContainer::context_created",
         "NodeContainer::plugins_mounted",

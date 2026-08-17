@@ -942,6 +942,8 @@
         "publish",
         "fail",
         "enter_execution",
+        "exit_execution",
+        "read_status",
         "execute",
         "drain",
         "dispose"

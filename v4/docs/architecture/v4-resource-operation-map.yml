@@ -1844,6 +1844,7 @@ resources:
   allowed_writers:
   - V4NodeContainer
   allowed_readers:
+  - V4CordisNodeHost
   - V4RuntimeInspector
   - V4Admin
   forbidden_writers:

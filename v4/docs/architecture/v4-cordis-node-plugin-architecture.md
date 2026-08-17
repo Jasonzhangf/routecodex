@@ -190,12 +190,14 @@ CordisBoundNodeHost.drain
   -> NodeContainer::drain (measured in_flight must be 0)
 
 CordisBoundNodeHost.dispose
+  -> verify Rust state is draining or failed
   -> reverse Cordis Fiber disposal
   -> NodeContainer::dispose
 ```
 
-Rust `NodeContainer` 是生命周期状态与 in-flight 计数 owner；JS host 只镜像并逐次
-核对该计数。`drain()` 禁止生成固定 `inFlight: 0` 投影。实际 Cordis 插件条目必须
+Rust `NodeContainer` 是生命周期状态与 in-flight 计数唯一 owner；JS host 只消费 typed
+status，不保存第二份计数。`drain()` 禁止生成固定 `inFlight: 0` 投影。Accepting 状态
+必须先成功进入 Draining，才允许销毁 Cordis Fiber；预条件失败不得改变任一侧。实际 Cordis 插件条目必须
 与 immutable `NodePluginPlan.entries` 全等，随后由 `graph_hash == manifest_hash ==
 loaded_plan_hash == plan.hash` 四值绑定；任一漂移在 Rust declaration 前失败。
 生命周期 port 只承载声明过的 lifecycle op/status，不承载业务 payload、metadata、

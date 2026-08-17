@@ -209,7 +209,6 @@ export class RustNodeContainerPort {
 export class CordisBoundNodeHost extends CordisNodeHost {
   #port;
   #plan;
-  #inFlight = 0;
   #mounted = false;
 
   constructor({ port, plan, ...hostOptions }) {
@@ -223,10 +222,6 @@ export class CordisBoundNodeHost extends CordisNodeHost {
     }
     this.#port = port;
     this.#plan = Object.freeze(structuredClone(plan));
-  }
-
-  get inFlight() {
-    return this.#inFlight;
   }
 
   async mount(plugins) {
@@ -260,20 +255,16 @@ export class CordisBoundNodeHost extends CordisNodeHost {
     if (!this.#mounted || this.disposed) {
       throw new CordisHostError('invalid_state', 'host is not accepting executions');
     }
-    const status = await this.#port.request('enter_execution');
-    this.#inFlight += 1;
-    if (status.in_flight !== this.#inFlight) {
-      throw new CordisHostError('binding_drift', 'host/Rust in-flight counters diverged');
-    }
-    let released = false;
+    await this.#port.request('enter_execution');
+    let releaseRequest;
     return async () => {
-      if (released) return;
-      released = true;
-      const next = await this.#port.request('exit_execution');
-      this.#inFlight -= 1;
-      if (next.in_flight !== this.#inFlight) {
-        throw new CordisHostError('binding_drift', 'host/Rust in-flight counters diverged');
+      if (!releaseRequest) {
+        releaseRequest = this.#port.request('exit_execution').catch((error) => {
+          releaseRequest = undefined;
+          throw error;
+        });
       }
+      await releaseRequest;
     };
   }
 
@@ -282,14 +273,18 @@ export class CordisBoundNodeHost extends CordisNodeHost {
       throw new CordisHostError('host_disposed', `node ${this.nodeId} is disposed`);
     }
     const status = await this.#port.request('drain');
-    if (status.in_flight !== this.#inFlight) {
-      throw new CordisHostError('binding_drift', 'host/Rust in-flight counters diverged');
-    }
     return { nodeId: this.nodeId, state: status.state, inFlight: status.in_flight };
   }
 
   async dispose() {
     if (this.disposed) return;
+    const status = await this.#port.request('status');
+    if (status.state !== 'draining' && status.state !== 'failed') {
+      throw new CordisHostError(
+        'invalid_state',
+        `cannot dispose Cordis host while Rust NodeContainer is ${status.state}`,
+      );
+    }
     await super.dispose();
     await this.#port.request('dispose');
     this.#mounted = false;

@@ -67,21 +67,49 @@ test('real Cordis host drives the Rust NodeContainer lifecycle', async (t) => {
 
   await host.mount([plugin(nodePlan.entries[0], events)]);
   const release = await host.beginExecution();
-  assert.equal(host.inFlight, 1);
+  assert.equal((await port.request('status')).in_flight, 1);
   await assert.rejects(
     host.drain(),
     (error) => error instanceof CordisHostError && error.code === 'in_flight',
   );
   assert.equal((await port.request('status')).state, 'accepting');
 
-  await release();
-  assert.equal(host.inFlight, 0);
+  await Promise.all([release(), release()]);
+  assert.equal((await port.request('status')).in_flight, 0);
   assert.deepEqual(await host.drain(), {
     nodeId: nodePlan.node_id,
     state: 'draining',
     inFlight: 0,
   });
   await host.dispose();
+  assert.equal((await port.request('status')).state, 'disposed');
+  assert.deepEqual(events, ['active', 'disposed']);
+});
+
+test('accepting-state disposal rejects before either lifecycle owner is mutated', async (t) => {
+  const port = new RustNodeContainerPort({ binaryPath });
+  t.after(() => port.close());
+  const events = [];
+  const nodePlan = plan();
+  const host = new CordisBoundNodeHost({
+    port,
+    plan: nodePlan,
+    nodeId: nodePlan.node_id,
+    descriptor: { roleId: nodePlan.role_id },
+  });
+
+  await host.mount([plugin(nodePlan.entries[0], events)]);
+  await assert.rejects(
+    host.dispose(),
+    (error) => error instanceof CordisHostError && error.code === 'invalid_state',
+  );
+  assert.equal(host.disposed, false);
+  assert.equal((await port.request('status')).state, 'accepting');
+  assert.deepEqual(events, ['active']);
+
+  await host.drain();
+  await host.dispose();
+  assert.equal(host.disposed, true);
   assert.equal((await port.request('status')).state, 'disposed');
   assert.deepEqual(events, ['active', 'disposed']);
 });

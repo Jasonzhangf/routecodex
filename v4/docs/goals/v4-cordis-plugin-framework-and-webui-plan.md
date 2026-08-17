@@ -232,8 +232,9 @@ Host 必须直接使用实际 Cordis，并依赖 frozen BaseNode、Control、Err
 当前实现状态：`host/container lifecycle binding active`。`CordisBoundNodeHost`
 用真实 Cordis Fiber mount/dispose 驱动 Rust `NodeContainer` 的 declare/context-created/
 plugins-mounted/publish/enter-execution/drain/dispose 状态；Rust 原子计数是 in-flight
-真源，JS 仅镜像核对。联合黑盒已覆盖 graph/plan 漂移、drain 期间仍有 in-flight、
-mount 失败后的 failed->disposed 回收。业务插件执行 handle 仍在后续真实 Pipeline
+唯一真源，JS 只消费 typed status。联合黑盒已覆盖 graph/plan 漂移、drain 期间仍有
+in-flight、Accepting dispose 无副作用拒绝、mount 失败后的 failed->disposed 回收。
+业务插件执行 handle 仍在后续真实 Pipeline
 迁移中逐节点接入，不把生命周期 binding 扩张为通用 payload bridge。
 
 ### M4：Skeleton Runtime
