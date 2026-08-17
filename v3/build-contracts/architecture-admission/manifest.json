@@ -642,7 +642,7 @@
     {
       "output_path": "repo/docs/architecture/no-fallback-diff-rules.json",
       "source_path": "docs/architecture/no-fallback-diff-rules.json",
-      "source_commit": "00123160c7d24beb2d803f860c5693fddea13fe8",
+      "source_commit": "346fb2e226465675915aae5a43fc890f68a097b9",
       "sha256": "7b83d37138ee6051add58d12a97d27df7d5af96298afd87e327419aa81b7b535"
     },
     {
@@ -763,7 +763,7 @@
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
       "source_commit": "adeaf80c4be254ade006bb8fb0f52ce39eb356a8",
-      "sha256": "80cf909f7e235426932aeaf476269b268d5660e201d225d7b1f7cb7dbebc2de8"
+      "sha256": "2af78ec9ae112957ea902338d9ed822df295758dcc2ad2aaa2e54d010e19c540"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
@@ -2071,7 +2071,7 @@
       "output_path": "repo/docs/goals/v3-full-ts-removal-and-archive-plan.md",
       "source_path": "docs/goals/v3-full-ts-removal-and-archive-plan.md",
       "source_commit": "9a2505e8f775ee27fad48a09b886fb5bb3effe3a",
-      "sha256": "3e14f0cb990c9fa5d7efe0aeb415a36d672faade4ae35689b18c87b7f8acba87"
+      "sha256": "76aee691949af2912b2ba1a10411093f3376565ada415dda86b95a0283e6d6d7"
     },
     {
       "output_path": "repo/docs/goals/v3-gemini-codec-characterization-plan.md",
@@ -2167,7 +2167,7 @@
       "output_path": "repo/docs/goals/v3-independent-build-isolation-plan.md",
       "source_path": "docs/goals/v3-independent-build-isolation-plan.md",
       "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
-      "sha256": "b76255952d953899faa57cf7ade3352cfabea8e705ff2a06d706613036334f31"
+      "sha256": "f1a66139e8f91990f27da82256886aa16324f5f20b40cc5e3d1367809fa186ba"
     },
     {
       "output_path": "repo/docs/goals/v3-independent-build-isolation-test-design.md",
@@ -2632,5 +2632,5 @@
       "sha256": "2ada8d17e5cc0cb53ff0dfa9acfbeedf10eb4e35f7db239fb43ef88aa7478ea6"
     }
   ],
-  "manifest_digest": "f39d667cede620d85dc47a16c567c14a8b7c7cd2d5673b1c344194e8ee295402"
+  "manifest_digest": "5aedac761ffea5271769c0499d3bf342f34589fd1279a08ddd28ec024b0e6b73"
 }

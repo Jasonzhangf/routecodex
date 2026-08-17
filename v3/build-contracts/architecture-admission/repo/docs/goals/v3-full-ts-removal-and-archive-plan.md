@@ -32,7 +32,8 @@ Scope: 全仓移除 TypeScript 生产代码，其余无用统一归档/移除，
 - `src/cli.ts`（484 行）仍是完整 TS CLI，编译为 `dist/cli.js`。
 - guardian daemon 仍以 `node dist/cli.js __guardian-daemon` 运行（实测 PID 2192），监听 localhost:50415。
 - Rust CLI（`v3/crates/routecodex-v3-cli/src/main.rs`）已覆盖 `server start/status/stop` 等；**未覆盖** guardian daemon、launcher、restart/stop/start 编排、code/claude/codex 命令、guardian 客户端。
-- `build:base` 仍跑 `tsc`（`node scripts/gen-build-info.mjs && tsc && node scripts/copy-v3-cli-bin.mjs`）。
+- 历史基线曾由 root `gen-build-info` 加 `tsc` 驱动；当前 `build:base` 已由
+  root 薄分发器转发到 `npm --prefix v3 run build`，不再生成 root build-info。
 
 ## 3. 退役边界与前置依赖
 

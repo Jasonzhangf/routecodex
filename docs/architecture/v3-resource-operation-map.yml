@@ -1567,7 +1567,7 @@ resources:
     allowed_readers: [v3_build_entrypoint, v3_install_entrypoint, v3_pack_entrypoint, cargo_build]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     canonical_path: v3/package.json
-    forbidden_paths: [package.json, src/build-info.ts]
+    forbidden_paths: [package.json]
     release_point: explicit_version_change
     may_enter_provider_body: false
     may_enter_client_body: false

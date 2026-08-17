@@ -70,8 +70,8 @@ The implementation must re-audit these facts from the approved base before editi
 - `scripts/pack-v3-release.mjs` reads root package version, writes root
   `dist/bin/rccv3` and root `artifacts/pack`, and stages packages in the OS temporary
   directory.
-- Root `scripts/gen-build-info.mjs` may update root package/lock and root
-  `src/build-info.ts`; it must not remain a V3 build dependency.
+- Root build-info generation has been retired. V3 version/build truth is now owned
+  under `v3/`; root build dispatch must not recreate a root version-bump path.
 - `test:v3-provider-compat-profile-loading` directly builds the sharedmodule Cargo
   workspace instead of the V3 workspace.
 - `docs/architecture/v3-build-tool-module-registry.yml` currently assigns V3 build
@@ -308,8 +308,8 @@ must drive:
 - dev/npm package names;
 - release workflow tag/artifact lookup.
 
-Root `package.json`, root `src/build-info.ts`, and root version auto-bump are forbidden
-V3 compile inputs or side effects.
+Root `package.json` and any root version auto-bump are forbidden V3 compile inputs or
+side effects. The retired root `src/build-info.ts` path no longer exists.
 
 Required output ownership:
 
