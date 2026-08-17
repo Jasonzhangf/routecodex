@@ -4,6 +4,11 @@ mod provider_directory;
 mod store;
 mod types;
 mod v2_compat;
+pub use v2_compat::{
+    generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderConfig,
+    V2ProviderConfigFile, V2ProviderAuthConfig, V2ProviderAuthEntry, V2ProviderConcurrencyConfig,
+    V2ProviderModelConfig, V2ProviderResponsesConfig, V2ProviderV3Config,
+};
 mod validate;
 mod validate_relations;
 

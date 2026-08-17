@@ -34,6 +34,7 @@ pub struct V3TargetCandidate {
     pub websocket_v2_url: Option<String>,
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
     pub request_timeout_ms: u64,
+    pub sse_first_frame_timeout_ms: Option<u64>,
     pub initial_concurrency_budget: u32,
     pub compatibility_profile: Option<String>,
     pub env_name: Option<String>,
@@ -510,6 +511,7 @@ impl V3TargetInterpreter {
                     .and_then(|responses| responses.websocket_v2_url.clone()),
                 provider_request_cleanup: provider.provider_request_cleanup.clone(),
                 request_timeout_ms: provider.request_timeout_ms,
+                sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
                 initial_concurrency_budget: provider
                     .concurrency
                     .as_ref()

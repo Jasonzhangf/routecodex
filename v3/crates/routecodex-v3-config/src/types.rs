@@ -532,6 +532,11 @@ pub struct V3ProviderAuthoringConfig {
     /// per-request 总超时（毫秒）；默认 300_000（300s）。
     #[serde(default = "default_provider_request_timeout_ms")]
     pub request_timeout_ms: u64,
+    /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30_000（30s）。
+    /// 本地慢部署（如 dwarfstar 缓存未命中可数分钟出首帧）按 provider 配置
+    /// 放宽，避免 idle 误杀；大多数 provider 无需配置。
+    #[serde(default, alias = "sseFirstFrameTimeoutMs")]
+    pub sse_first_frame_timeout_ms: Option<u64>,
 }
 
 /// provider per-request 总超时默认值（毫秒）：300s。
@@ -1068,6 +1073,8 @@ pub struct V3ProviderManifest {
     pub features: BTreeMap<String, bool>,
     /// per-request 总超时（毫秒）
     pub request_timeout_ms: u64,
+    /// provider SSE 首帧/帧间隔超时（毫秒）；None = 默认 30s。
+    pub sse_first_frame_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

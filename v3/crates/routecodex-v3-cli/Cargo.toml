@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 clap.workspace = true
 routecodex-v3-config = { path = "../routecodex-v3-config" }
+routecodex-v3-config-mgmt = { path = "../routecodex-v3-config-mgmt" }
 routecodex-v3-lifecycle = { path = "../routecodex-v3-lifecycle" }
 routecodex-v3-server = { path = "../routecodex-v3-server" }
 serde_json.workspace = true

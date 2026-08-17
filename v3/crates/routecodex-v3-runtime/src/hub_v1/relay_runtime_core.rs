@@ -36,6 +36,7 @@ async fn guard_relay_sse_first_frame(
     request_id: &str,
     provider_id: &str,
     mut stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+    sse_first_frame_timeout_ms: Option<u64>,
 ) -> Result<routecodex_v3_provider_responses::V3ProviderSseStream, V3ProviderError> {
     use futures_util::StreamExt;
     let first = tokio::time::timeout(V3_RELAY_SSE_FIRST_FRAME_TIMEOUT, stream.next())
@@ -720,10 +721,15 @@ where
                 push_sse_response_chain_trace(&mut trace);
                 // 首帧守卫：provider SSE 首帧错误/空流/挂起在响应头前被捕获，
                 // 走 provider 失败策略切 provider（客户端无感，对话不断流）。
+                let sse_first_frame_timeout_ms = manifest
+                    .providers
+                    .get(&selected_target_provider_id)
+                    .and_then(|provider| provider.sse_first_frame_timeout_ms);
                 let guarded_stream = match guard_relay_sse_first_frame(
                     request_id,
                     &selected_target_provider_id,
                     stream,
+                    sse_first_frame_timeout_ms,
                 )
                 .await
                 {
@@ -828,7 +834,7 @@ mod tests {
                 Ok(b"data: ping\n\n".to_vec()),
                 Ok(b"data: pong\n\n".to_vec()),
             ]));
-        let mut guarded = guard_relay_sse_first_frame("req-ok", "provider-1", stream)
+        let mut guarded = guard_relay_sse_first_frame("req-ok", "provider-1", stream, None)
             .await
             .expect("non-empty stream must pass the guard");
         let first = guarded

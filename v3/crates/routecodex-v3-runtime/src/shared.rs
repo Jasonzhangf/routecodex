@@ -188,6 +188,7 @@ pub(crate) async fn project_provider_raw_to_client_payload(
     // 响应侧能力回射按 target 声明并编译出的 compatibility profile 门控，
     // 不按 provider_id 部署身份分支（与请求侧 wire 层同一契约）。
     let compatibility_profile = raw.compatibility_profile().map(ToOwned::to_owned);
+    let sse_first_frame_timeout_ms = raw.sse_first_frame_timeout_ms();
     let content_type = raw
         .header_text("content-type")
         .map_err(provider_body_source)?
@@ -213,7 +214,9 @@ pub(crate) async fn project_provider_raw_to_client_payload(
         .starts_with("text/event-stream")
     {
         match provider_body {
-            V3ProviderResponseBody::Sse(stream) => project_sse_stream(&provider_id, stream).await?,
+            V3ProviderResponseBody::Sse(stream) => {
+                project_sse_stream(&provider_id, stream, sse_first_frame_timeout_ms).await?
+            }
             V3ProviderResponseBody::Json(body_bytes) => {
                 let observation = observe_sse_remote_continuation_bytes(&provider_id, &body_bytes)?;
                 (V3ClientBody::Bytes(body_bytes), observation, None)
@@ -297,6 +300,7 @@ pub(crate) async fn project_provider_raw_to_client_payload(
 async fn project_sse_stream(
     provider_id: &str,
     stream: V3ProviderSseStream,
+    sse_first_frame_timeout_ms: Option<u64>,
 ) -> Result<
     (
         V3ClientBody,
@@ -305,7 +309,12 @@ async fn project_sse_stream(
     ),
     V3Error01SourceRaised,
 > {
-    let stream = guard_initial_direct_sse_provider_failure(provider_id, stream).await?;
+    let stream = guard_initial_direct_sse_provider_failure(
+        provider_id,
+        stream,
+        sse_first_frame_timeout_ms,
+    )
+    .await?;
     let observation_state = V3SseRemoteContinuationObservationState::default();
     let usage_observation = V3RuntimeStreamObservation::default();
     let client_stream = observed_sse_client_stream(
@@ -326,11 +335,15 @@ async fn project_sse_stream(
 async fn guard_initial_direct_sse_provider_failure(
     provider_id: &str,
     stream: V3ProviderSseStream,
+    sse_first_frame_timeout_ms: Option<u64>,
 ) -> Result<V3ProviderSseStream, V3Error01SourceRaised> {
+    let first_event_timeout = sse_first_frame_timeout_ms
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT);
     guard_initial_direct_sse_provider_failure_with_timeout(
         provider_id,
         stream,
-        V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT,
+        first_event_timeout,
     )
     .await
 }

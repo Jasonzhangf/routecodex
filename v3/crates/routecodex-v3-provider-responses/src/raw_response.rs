@@ -42,6 +42,8 @@ pub struct V3ProviderResp14Raw {
     /// `responses:deepseek-console-go`）；响应侧能力回射按契约门控，
     /// 不得按 provider_id 部署身份分支。
     compatibility_profile: Option<String>,
+    /// provider SSE 首帧/帧间隔超时（毫秒）；None = 默认 30s。
+    sse_first_frame_timeout_ms: Option<u64>,
     status: u16,
     headers: Vec<V3ProviderResponseHeader>,
     body: V3ProviderResponseBody,
@@ -59,6 +61,7 @@ impl V3ProviderResp14Raw {
             request_id: request_id.into(),
             provider_id: provider_id.into(),
             compatibility_profile: None,
+            sse_first_frame_timeout_ms: None,
             status,
             headers,
             body: V3ProviderResponseBody::Json(body),
@@ -76,6 +79,7 @@ impl V3ProviderResp14Raw {
             request_id,
             provider_id,
             compatibility_profile: None,
+            sse_first_frame_timeout_ms: None,
             status,
             headers,
             body: V3ProviderResponseBody::Sse(body),
@@ -87,12 +91,21 @@ impl V3ProviderResp14Raw {
         self
     }
 
+    pub fn with_sse_first_frame_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
+        self.sse_first_frame_timeout_ms = timeout_ms;
+        self
+    }
+
     pub fn request_id(&self) -> &str {
         &self.request_id
     }
 
     pub fn provider_id(&self) -> &str {
         &self.provider_id
+    }
+
+    pub fn sse_first_frame_timeout_ms(&self) -> Option<u64> {
+        self.sse_first_frame_timeout_ms
     }
 
     pub fn compatibility_profile(&self) -> Option<&str> {

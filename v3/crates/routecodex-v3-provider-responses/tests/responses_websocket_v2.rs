@@ -255,6 +255,7 @@ fn target_with_env(url: &str, env: &str) -> V3ResponsesProviderTarget {
         websocket_v2_url: Some(url.into()),
         provider_request_cleanup: Default::default(),
         request_timeout_ms: 300_000,
+        sse_first_frame_timeout_ms: None,
         initial_concurrency_budget: 8,
     }
 }

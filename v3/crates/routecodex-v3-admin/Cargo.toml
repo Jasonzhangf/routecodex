@@ -1,0 +1,28 @@
+[package]
+name = "routecodex-v3-admin"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "rccv3-admin"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+axum.workspace = true
+routecodex-v3-config = { path = "../routecodex-v3-config" }
+routecodex-v3-config-mgmt = { path = "../routecodex-v3-config-mgmt" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+serde_json.workspace = true

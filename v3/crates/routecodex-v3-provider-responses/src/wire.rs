@@ -43,6 +43,8 @@ pub struct V3ResponsesProviderTarget {
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
     /// per-request 总超时（毫秒）；用于覆盖连接、响应头等待与 body 读取
     pub request_timeout_ms: u64,
+    /// provider SSE 首帧/帧间隔超时（毫秒）；None = 默认 30s。
+    pub sse_first_frame_timeout_ms: Option<u64>,
     pub initial_concurrency_budget: u32,
 }
 

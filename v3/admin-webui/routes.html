@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RouteCodex — Routes</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header>
+  <div class="brand">Route<span class="accent">Codex</span></div>
+  <nav>
+    <a href="/">Dashboard</a>
+    <a href="/routes.html" class="active">Routes</a>
+    <a href="/providers.html">Providers</a>
+  </nav>
+  <div class="spacer"></div>
+  <button class="btn" id="validate-btn">Validate</button>
+  <button class="btn primary" id="save-btn">Save</button>
+  <button class="btn primary" id="reload-btn">Reload</button>
+</header>
+<main>
+  <h1>Routes</h1>
+  <div class="sub">Port → Route Pool → Route Tier → Provider Member</div>
+  <div id="status-bar" class="status-bar" style="display:none"></div>
+  <div class="panel">
+    <div class="tree" id="route-tree"><div class="loading">loading…</div></div>
+  </div>
+</main>
+
+<div class="drawer" id="drawer">
+  <button class="btn close" id="drawer-close">✕</button>
+  <h2 id="drawer-title">Edit</h2>
+  <div id="drawer-body"></div>
+  <div class="actions">
+    <button class="btn" id="drawer-delete" style="display:none">Delete</button>
+    <div style="flex:1"></div>
+    <button class="btn" id="drawer-cancel">Cancel</button>
+    <button class="btn primary" id="drawer-save">Save</button>
+  </div>
+</div>
+
+<script src="/app.embedded.txt"></script>
+<script>
+let groups = [];
+
+async function load() {
+  try {
+    const data = await api("/api/routes");
+    groups = data.groups;
+    render();
+  } catch (error) {
+    showStatus("err", `load routes failed: ${error.message}`);
+  }
+}
+
+function render() {
+  const tree = document.getElementById("route-tree");
+  tree.innerHTML = "";
+  if (!groups.length) {
+    tree.appendChild(el("div", "loading", "no route groups configured"));
+    return;
+  }
+  for (const group of groups) {
+    const groupNode = el("div", "tree-node collapsed");
+    const head = el("div", "head");
+    head.appendChild(el("span", "caret", "▾"));
+    head.appendChild(el("span", "tag", group.group_id));
+    head.appendChild(el("span", "meta", `${group.ports.length} port${group.ports.length === 1 ? "" : "s"}`));
+    head.addEventListener("click", () => groupNode.classList.toggle("collapsed"));
+    groupNode.appendChild(head);
+    const children = el("div", "tree-children");
+    for (const port of group.ports) {
+      const portNode = el("div", "tree-node collapsed");
+      const portHead = el("div", "head");
+      portHead.appendChild(el("span", "caret", "▾"));
+      portHead.appendChild(el("span", "tag", `Port ${port.port}`));
+      portHead.appendChild(el("span", "meta", `${port.server_id} · ${port.pools.length} pools`));
+      const actions = el("div", "actions");
+      const addPool = el("button", "btn", "+ Pool");
+      addPool.addEventListener("click", (event) => { event.stopPropagation(); openPoolDrawer(group, port, null); });
+      actions.appendChild(addPool);
+      portHead.appendChild(actions);
+      portHead.addEventListener("click", () => portNode.classList.toggle("collapsed"));
+      portNode.appendChild(portHead);
+      const portChildren = el("div", "tree-children");
+      for (const pool of port.pools) {
+        portChildren.appendChild(renderPool(group, port, pool));
+      }
+      portNode.appendChild(portChildren);
+      children.appendChild(portNode);
+    }
+    groupNode.appendChild(children);
+    tree.appendChild(groupNode);
+  }
+}
+
+function renderPool(group, port, pool) {
+  const node = el("div", "tree-node collapsed");
+  const head = el("div", "head");
+  head.appendChild(el("span", "caret", "▾"));
+  head.appendChild(el("span", "tag", pool.name));
+  head.appendChild(el("span", "meta", `strategy ${pool.selection_strategy} · ${pool.tiers.length} tier${pool.tiers.length === 1 ? "" : "s"}`));
+  const actions = el("div", "actions");
+  const addTier = el("button", "btn", "+ Tier");
+  addTier.addEventListener("click", (event) => { event.stopPropagation(); openTierDrawer(group, port, pool, null); });
+  actions.appendChild(addTier);
+  head.appendChild(actions);
+  head.addEventListener("click", () => node.classList.toggle("collapsed"));
+  head.addEventListener("dblclick", (event) => { event.stopPropagation(); openPoolDrawer(group, port, pool); });
+  node.appendChild(head);
+  const children = el("div", "tree-children");
+  for (const tier of pool.tiers) {
+    const tierNode = el("div", "tree-node collapsed");
+    const tierHead = el("div", "head");
+    tierHead.appendChild(el("span", "caret", "▾"));
+    tierHead.appendChild(el("span", "tag", `Tier ${tier.priority}`));
+    tierHead.appendChild(el("span", "meta", `${tier.members.length} member${tier.members.length === 1 ? "" : "s"}`));
+    const tierActions = el("div", "actions");
+    const addMember = el("button", "btn", "+ Member");
+    addMember.addEventListener("click", (event) => { event.stopPropagation(); openMemberDrawer(group, port, pool, tier, null); });
+    tierActions.appendChild(addMember);
+    tierHead.appendChild(tierActions);
+    tierHead.addEventListener("click", () => tierNode.classList.toggle("collapsed"));
+    tierHead.addEventListener("dblclick", (event) => { event.stopPropagation(); openTierDrawer(group, port, pool, tier); });
+    tierNode.appendChild(tierHead);
+    const memberChildren = el("div", "tree-children");
+    for (const member of tier.members) {
+      const row = el("div", "member-row");
+      row.appendChild(el("span", "provider", member.provider || member.kind));
+      row.appendChild(el("span", "model", member.model || ""));
+      if (member.key) row.appendChild(el("span", "meta", `[${member.key}]`));
+      if (member.weight !== undefined && member.weight !== null) row.appendChild(el("span", "weight", `w=${member.weight}`));
+      const rowActions = el("div", "actions");
+      const editBtn = el("button", "btn", "Edit");
+      editBtn.addEventListener("click", (event) => { event.stopPropagation(); openMemberDrawer(group, port, pool, tier, member); });
+      rowActions.appendChild(editBtn);
+      row.appendChild(rowActions);
+      memberChildren.appendChild(row);
+    }
+    tierNode.appendChild(memberChildren);
+    children.appendChild(tierNode);
+  }
+  node.appendChild(children);
+  return node;
+}
+
+function openPoolDrawer(group, port, pool) {
+  const isNew = !pool;
+  const draft = pool ? { ...pool, tiers: pool.tiers.map((tier) => ({ ...tier, members: tier.members.map((m) => ({ ...m })) })) } : { name: "", selection_strategy: "priority", match_rule: null, tiers: [] };
+  const title = isNew ? "New Pool" : `Pool ${draft.name}`;
+  openDrawer(title, () => {
+    const body = document.getElementById("drawer-body");
+    body.innerHTML = "";
+    body.appendChild(field("name", "Name", draft.name, (value) => { draft.name = value; }));
+    body.appendChild(selectField("selection_strategy", "Strategy", ["priority", "weighted", "round_robin"], draft.selection_strategy, (value) => { draft.selection_strategy = value; }));
+    setDrawerSave(async () => {
+      if (!draft.name.trim()) { showStatus("err", "pool name is required"); return; }
+      if (isNew) {
+        port.pools.push(draft);
+      } else {
+        const index = port.pools.findIndex((candidate) => candidate.name === pool.name);
+        if (index >= 0) port.pools[index] = draft;
+      }
+      render();
+      closeDrawer();
+      showStatus("info", "edits staged — Save to commit");
+    });
+    setDrawerDelete(isNew ? null : () => {
+      port.pools = port.pools.filter((candidate) => candidate.name !== pool.name);
+      render();
+      closeDrawer();
+      showStatus("info", "edits staged — Save to commit");
+    });
+  });
+}
+
+function openTierDrawer(group, port, pool, tier) {
+  const isNew = !tier;
+  const draft = tier ? { ...tier, members: tier.members.map((m) => ({ ...m })) } : { priority: 1, members: [] };
+  const title = isNew ? "New Tier" : `Tier ${draft.priority}`;
+  openDrawer(title, () => {
+    const body = document.getElementById("drawer-body");
+    body.innerHTML = "";
+    body.appendChild(field("priority", "Priority", String(draft.priority), (value) => { draft.priority = parseInt(value, 10) || 0; }));
+    setDrawerSave(async () => {
+      if (isNew) {
+        pool.tiers.push(draft);
+        pool.tiers.sort((a, b) => a.priority - b.priority);
+      } else {
+        const index = pool.tiers.findIndex((candidate) => candidate.priority === tier.priority);
+        if (index >= 0) pool.tiers[index] = draft;
+        pool.tiers.sort((a, b) => a.priority - b.priority);
+      }
+      render();
+      closeDrawer();
+      showStatus("info", "edits staged — Save to commit");
+    });
+    setDrawerDelete(isNew ? null : () => {
+      pool.tiers = pool.tiers.filter((candidate) => candidate.priority !== tier.priority);
+      render();
+      closeDrawer();
+      showStatus("info", "edits staged — Save to commit");
+    });
+  });
+}
+
+function openMemberDrawer(group, port, pool, tier, member) {
+  const isNew = !member;
+  const draft = member ? { ...member } : { kind: "provider_model", provider: "", model: "", key: "", priority: tier.priority, weight: null };
+  const title = isNew ? "New Member" : `Member ${member.provider || member.kind}`;
+  openDrawer(title, () => {
+    const body = document.getElementById("drawer-body");
+    body.innerHTML = "";
+    body.appendChild(field("provider", "Provider", draft.provider || "", (value) => { draft.provider = value; }));
+    body.appendChild(field("model", "Model", draft.model || "", (value) => { draft.model = value; }));
+    body.appendChild(field("key", "Key alias", draft.key || "", (value) => { draft.key = value; }));
+    body.appendChild(field("priority", "Priority (tier)", String(draft.priority), (value) => { draft.priority = parseInt(value, 10) || 0; }));
+    body.appendChild(field("weight", "Weight (weighted strategy)", draft.weight === null || draft.weight === undefined ? "" : String(draft.weight), (value) => { draft.weight = value === "" ? null : (parseInt(value, 10) || 0); }));
+    setDrawerSave(async () => {
+      if (!draft.provider.trim()) { showStatus("err", "provider is required"); return; }
+      const memberData = {
+        kind: draft.kind || "provider_model",
+        provider: draft.provider,
+        model: draft.model || undefined,
+        key: draft.key || undefined,
+        priority: draft.priority,
+        weight: draft.weight,
+      };
+      if (isNew) {
+        tier.members.push(memberData);
+      } else {
+        const index = tier.members.findIndex((candidate) => candidate === member);
+        if (index >= 0) tier.members[index] = memberData;
+      }
+      render();
+      closeDrawer();
+      showStatus("info", "edits staged — Save to commit");
+    });
+    setDrawerDelete(isNew ? null : () => {
+      tier.members = tier.members.filter((candidate) => candidate !== member);
+      render();
+      closeDrawer();
+      showStatus("info", "edits staged — Save to commit");
+    });
+  });
+}
+
+function field(id, label, value, onChange) {
+  const wrapper = el("div", "field");
+  wrapper.appendChild(el("label", null, label));
+  const input = el("input");
+  input.id = id;
+  input.value = value;
+  input.addEventListener("input", (event) => onChange(event.target.value));
+  wrapper.appendChild(input);
+  return wrapper;
+}
+
+function selectField(id, label, options, value, onChange) {
+  const wrapper = el("div", "field");
+  wrapper.appendChild(el("label", null, label));
+  const select = el("select");
+  select.id = id;
+  for (const option of options) {
+    const optionNode = el("option", null, option);
+    if (option === value) optionNode.selected = true;
+    select.appendChild(optionNode);
+  }
+  select.addEventListener("change", (event) => onChange(event.target.value));
+  wrapper.appendChild(select);
+  return wrapper;
+}
+
+let drawerSave = null;
+let drawerDelete = null;
+
+function openDrawer(title, build) {
+  document.getElementById("drawer-title").textContent = title;
+  document.getElementById("drawer").classList.add("open");
+  build();
+  document.getElementById("drawer-delete").style.display = drawerDelete ? "inline-block" : "none";
+}
+
+function closeDrawer() {
+  document.getElementById("drawer").classList.remove("open");
+  drawerSave = null;
+  drawerDelete = null;
+}
+
+function setDrawerSave(handler) { drawerSave = handler; }
+function setDrawerDelete(handler) { drawerDelete = handler; }
+
+document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+document.getElementById("drawer-cancel").addEventListener("click", closeDrawer);
+document.getElementById("drawer-save").addEventListener("click", () => { if (drawerSave) drawerSave(); });
+document.getElementById("drawer-delete").addEventListener("click", () => { if (drawerDelete) drawerDelete(); });
+
+document.getElementById("validate-btn").addEventListener("click", async () => {
+  try {
+    const result = await api("/api/routes/validate", { method: "POST", body: JSON.stringify({ groups, reason: "validate" }) });
+    showStatus(result.ok ? "ok" : "err", result.ok ? "configuration valid" : `invalid: ${result.error}`);
+  } catch (error) {
+    showStatus("err", `validate failed: ${error.message}`);
+  }
+});
+
+document.getElementById("save-btn").addEventListener("click", async () => {
+  const button = document.getElementById("save-btn");
+  button.disabled = true;
+  try {
+    const result = await api("/api/routes", { method: "PUT", body: JSON.stringify({ groups, reason: "webui routes update" }) });
+    groups = result.groups;
+    render();
+    showStatus("ok", `saved — revision #${result.revision_seq}${result.backup ? ` · backup ${result.backup.split("/").pop()}` : ""}. Press Reload to apply.`);
+  } catch (error) {
+    showStatus("err", `save failed: ${error.message}`);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+load();
+</script>
+</body>
+</html>

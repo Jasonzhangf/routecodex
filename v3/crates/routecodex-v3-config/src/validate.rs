@@ -666,6 +666,7 @@ fn compile_providers(
                 compatibility_profile,
                 features: provider.features,
                 request_timeout_ms: provider.request_timeout_ms,
+                sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
             },
         );
     }

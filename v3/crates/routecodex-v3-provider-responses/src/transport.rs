@@ -71,6 +71,7 @@ enum V3Transport13ResponsesRequestKind {
         body: Value,
         provider_headers: Vec<V3ProviderRequestHeader>,
         timeout: Option<Duration>,
+        sse_first_frame_timeout_ms: Option<u64>,
         initial_concurrency_budget: u32,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
@@ -379,6 +380,7 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
     let (request_id, target, stream_intent, body) = wire.into_parts();
     let provider_id = target.provider_id;
     let request_timeout_ms = target.request_timeout_ms;
+    let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
     let initial_concurrency_budget = target.initial_concurrency_budget;
     let compatibility_profile = target.compatibility_profile.clone();
     match target.responses_transport {
@@ -406,11 +408,13 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
             if let V3Transport13ResponsesRequestKind::Http {
                 initial_concurrency_budget: budget,
                 compatibility_profile: request_compatibility_profile,
+                sse_first_frame_timeout_ms: sse_timeout,
                 ..
             } = &mut request.kind
             {
                 *budget = initial_concurrency_budget;
                 *request_compatibility_profile = compatibility_profile;
+                *sse_timeout = sse_first_frame_timeout_ms;
             }
             Ok(request)
         }
@@ -570,6 +574,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
             provider_headers,
             timeout,
             initial_concurrency_budget: 8,
+            sse_first_frame_timeout_ms: None,
             cancellation: None,
             compatibility_profile: None,
         },
@@ -678,6 +683,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 body,
                 provider_headers,
                 timeout,
+                sse_first_frame_timeout_ms,
                 initial_concurrency_budget: _,
                 cancellation,
                 compatibility_profile,
@@ -691,6 +697,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     body,
                     provider_headers,
                     timeout,
+                    sse_first_frame_timeout_ms,
                     cancellation,
                     compatibility_profile,
                 )
@@ -797,6 +804,7 @@ fn hold_sse_lease(
     permit: V3AdaptiveConcurrencyPermit,
 ) -> V3ProviderResp14Raw {
     let compatibility_profile = raw.compatibility_profile().map(ToOwned::to_owned);
+    let sse_first_frame_timeout_ms = raw.sse_first_frame_timeout_ms();
     let (request_id, provider_id, status, headers, body) = raw.into_parts();
     let V3ProviderResponseBody::Sse(stream) = body else {
         unreachable!("SSE lease must only wrap an SSE response");
@@ -808,6 +816,7 @@ fn hold_sse_lease(
     ));
     V3ProviderResp14Raw::from_sse(request_id, provider_id, status, headers, stream)
         .with_compatibility_profile(compatibility_profile)
+        .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms)
 }
 
 impl ProviderResponsesTransport {
@@ -822,6 +831,7 @@ impl ProviderResponsesTransport {
         body: Value,
         provider_headers: Vec<V3ProviderRequestHeader>,
         timeout: Option<Duration>,
+        sse_first_frame_timeout_ms: Option<u64>,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
@@ -926,7 +936,8 @@ impl ProviderResponsesTransport {
                 headers,
                 body,
             )
-            .with_compatibility_profile(compatibility_profile));
+            .with_compatibility_profile(compatibility_profile)
+            .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms));
         }
 
         match stream_intent {
@@ -954,7 +965,8 @@ impl ProviderResponsesTransport {
                     headers,
                     stream,
                 )
-                .with_compatibility_profile(compatibility_profile))
+                .with_compatibility_profile(compatibility_profile)
+                .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms))
             }
             V3ResponsesStreamIntent::Sse => Err(V3ProviderError::UnexpectedContentType {
                 request_id,

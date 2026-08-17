@@ -1125,6 +1125,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v3-admin"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "reqwest",
+ "routecodex-v3-config",
+ "routecodex-v3-config-mgmt",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "routecodex-v3-cli"
 version = "0.1.0"
 dependencies = [
@@ -1133,6 +1148,7 @@ dependencies = [
  "libc",
  "reqwest",
  "routecodex-v3-config",
+ "routecodex-v3-config-mgmt",
  "routecodex-v3-lifecycle",
  "routecodex-v3-server",
  "serde_json",
@@ -1145,6 +1161,18 @@ dependencies = [
 name = "routecodex-v3-config"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "toml",
+]
+
+[[package]]
+name = "routecodex-v3-config-mgmt"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v3-config",
  "serde",
  "serde_json",
  "sha2",

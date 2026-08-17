@@ -196,6 +196,12 @@ struct V3ProviderCooldown {
     reason: String,
     original_cooldown_until_ms: Option<u64>,
     until_ms: Option<u64>,
+    /// provider 级冷却专属：冷却到期后下一次后台 probe 的时点。冷却期间
+    /// 与待探期间 provider 都不可用；probe 通过才清除冷却（业务成功请求
+    /// 不再复活 provider 级冷却）。session 级冷却保持 None。
+    next_probe_at_ms: Option<u64>,
+    /// provider 级冷却专属：后台 probe 正在执行时置 true，防止重复探测。
+    probe_in_flight: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -374,6 +380,11 @@ impl V3ProviderHealthStore {
                     .unwrap_or_else(|| "provider_consecutive_failures".to_string()),
                 original_cooldown_until_ms: cooldown_until_ms,
                 until_ms: cooldown_until_ms,
+                // provider 级冷却到期后由后台 probe 复活；until_restart 冷却
+                // 不设探针（保持"直到重启"语义）。
+                next_probe_at_ms: (!policy.until_restart)
+                    .then(|| now_ms.saturating_add(V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS)),
+                probe_in_flight: false,
             };
             state.cooldowns.insert(key.clone(), cooldown);
             if let Some(until_ms) = cooldown_until_ms {
@@ -451,6 +462,8 @@ impl V3ProviderHealthStore {
                     .unwrap_or_else(|| "provider_transient_exhausted".to_string()),
                 original_cooldown_until_ms: Some(until_ms),
                 until_ms: Some(until_ms),
+                next_probe_at_ms: None,
+                probe_in_flight: false,
             },
         );
         Ok(V3ProviderFailureRecord {
@@ -649,6 +662,29 @@ impl V3ProviderHealthStore {
         probe_state.probe_in_flight = false;
         probe_state.next_probe_at_ms =
             Some(now_ms.saturating_add(V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS.max(1)));
+        Ok(())
+    }
+
+    /// probe 失败：保持冷却，推后下一次探针。
+    pub fn complete_provider_cooldown_probe_failure(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<(), V3ProviderHealthError> {
+        let provider_identity = provider_key_label(provider_id, auth_alias, model_id);
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        let Some(cooldown) = state.provider_cooldowns.get_mut(&provider_identity) else {
+            return Ok(());
+        };
+        cooldown.probe_in_flight = false;
+        cooldown.next_probe_at_ms = Some(
+            now_ms.saturating_add(V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS),
+        );
         Ok(())
     }
 
