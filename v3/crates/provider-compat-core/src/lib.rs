@@ -2041,6 +2041,45 @@ mod tests {
     }
 
     #[test]
+    fn response_compat_preserves_top_level_payload_fields_on_passthrough_branches() {
+        for (compatibility_profile, provider_protocol) in [
+            (None, Some("openai-responses".to_string())),
+            (
+                Some("responses:cc".to_string()),
+                Some("anthropic-messages".to_string()),
+            ),
+        ] {
+            let result = run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
+                payload: json!({
+                    "object": "response",
+                    "id": "resp_passthrough_fields_1",
+                    "output": [],
+                    "semantics": {"internal": true},
+                    "processed": {"marker": "must-preserve"},
+                    "processingMetadata": {"marker": "must-preserve"}
+                }),
+                adapter_context: AdapterContext {
+                    compatibility_profile,
+                    provider_protocol,
+                    ..Default::default()
+                },
+                explicit_profile: None,
+            })
+            .expect("response compatibility must preserve passthrough payload");
+            assert_eq!(result.applied_profile, None);
+            assert_eq!(result.payload["semantics"], json!({"internal": true}));
+            assert_eq!(
+                result.payload["processed"],
+                json!({"marker": "must-preserve"})
+            );
+            assert_eq!(
+                result.payload["processingMetadata"],
+                json!({"marker": "must-preserve"})
+            );
+        }
+    }
+
+    #[test]
     fn request_compat_preserves_top_level_payload_fields() {
         for compatibility_profile in [Some("chat:minimax".to_string()), None] {
             let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
