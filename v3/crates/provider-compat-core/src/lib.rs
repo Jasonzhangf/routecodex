@@ -2046,12 +2046,27 @@ mod tests {
         let check = |compatibility_profile, provider_protocol| {
             run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
                 payload: payload.clone(),
-                adapter_context: AdapterContext { compatibility_profile, provider_protocol, ..Default::default() },
+                adapter_context: AdapterContext {
+                    compatibility_profile,
+                    provider_protocol,
+                    ..Default::default()
+                },
                 explicit_profile: None,
-            }).unwrap()
+            })
+            .unwrap()
         };
-        assert_eq!(check(None, Some("openai-responses".into())).payload, payload);
-        assert_eq!(check(Some("responses:cc".into()), Some("anthropic-messages".into())).payload, payload);
+        assert_eq!(
+            check(None, Some("openai-responses".into())).payload,
+            payload
+        );
+        assert_eq!(
+            check(
+                Some("responses:cc".into()),
+                Some("anthropic-messages".into())
+            )
+            .payload,
+            payload
+        );
     }
 
     #[test]
