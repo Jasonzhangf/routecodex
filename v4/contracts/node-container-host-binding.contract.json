@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-node-container-host-binding",
+  "status": "active",
+  "owner_feature_id": "v4.node_container.host_binding",
+  "host_module": "routecodex-v4-cordis-host",
+  "container_module": "routecodex-v4-node-container",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-cordis-node-plugin-architecture.md"
+  ],
+  "lifecycle": [
+    "CordisBoundNodeHost.mount -> NodeContainer.declare -> context_created -> plugins_mounted -> publish",
+    "CordisBoundNodeHost.beginExecution -> NodeContainer.enter_execution",
+    "execution release -> NodeExecutionGuard drop",
+    "CordisBoundNodeHost.drain -> NodeContainer.drain when measured in_flight is zero",
+    "CordisBoundNodeHost.dispose -> reverse Cordis Fiber disposal -> NodeContainer.dispose",
+    "mount failure -> NodeContainer.fail -> reverse Cordis Fiber disposal -> NodeContainer.dispose"
+  ],
+  "graph_binding_rule": "the actual mounted Cordis plugin plan entries must equal the immutable NodePluginPlan entries; graph_hash, manifest_hash, loaded_plan_hash and plan.hash must be the same verified hash before Rust declaration",
+  "in_flight_rule": "Rust NodeContainer owns the atomic in-flight count; the JS host mirrors and cross-checks it after each enter/exit; drain rejects when the measured count is non-zero",
+  "transport_rule": "the lifecycle port is a persistent line-delimited typed operation channel; each message is a declared lifecycle operation, never a business payload or metadata carrier",
+  "forbidden": [
+    "hard-coded inFlight=0",
+    "binding pending edge",
+    "Cordis-like Rust container",
+    "control/debug/error fields in provider or client business payload"
+  ],
+  "required_tests": [
+    "real Cordis mount drives Rust state to accepting",
+    "in-flight execution rejects drain and leaves state accepting",
+    "release makes drain succeed",
+    "Cordis graph/plan drift rejects before Rust declaration",
+    "Cordis mount failure drives Rust candidate through failed to disposed"
+  ]
+}

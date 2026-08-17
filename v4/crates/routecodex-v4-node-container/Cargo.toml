@@ -8,7 +8,13 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[[bin]]
+name = "routecodex-v4-node-container-host"
+path = "src/bin/host_binding.rs"
+
 [dependencies]
 routecodex-v4-cordis-bridge = { path = "../routecodex-v4-cordis-bridge" }
 routecodex-v4-plugin-plan = { path = "../routecodex-v4-plugin-plan" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.10"

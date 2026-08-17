@@ -941,6 +941,7 @@
         "declare",
         "publish",
         "fail",
+        "enter_execution",
         "execute",
         "drain",
         "dispose"

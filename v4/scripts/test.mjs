@@ -5,7 +5,8 @@
  */
 import { run } from './_common.mjs';
 
+run('cargo build --manifest-path Cargo.toml -p routecodex-v4-node-container --bin routecodex-v4-node-container-host --locked');
 run('cargo test --workspace --manifest-path Cargo.toml --locked');
-run('node --test cordis/routecodex-v4-cordis-host/tests/host.test.mjs');
+run('node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs');
 console.log('[v4 test] OK cargo workspace tests (locked)');
-console.log('[v4 test] OK real Cordis host tests');
+console.log('[v4 test] OK real Cordis host + Rust NodeContainer binding tests');

@@ -1,6 +1,6 @@
 # V4 Cordis Skeleton、Node Container 与插件架构
 
-状态：`design_reviewed`（目标架构已完成设计审查；合同、实现、机器 gate 与运行时接线尚未落地）
+状态：`phase2_host_binding_active`（M0-M4/M6 基线与真实 Cordis Host -> Rust NodeContainer 生命周期绑定已落地；M5 标准插件库、M7 WebUI 和逐节点 Pipeline 迁移继续执行）
 
 ## 决策
 
@@ -168,6 +168,38 @@ declared
 ```
 
 发布必须事务化。任一插件导入、依赖、排序、权限或初始化失败时，候选容器整体拒绝，已安装 Effect 逆序释放，旧 active 容器保持不变；禁止部分发布。
+
+### Host -> NodeContainer 生命周期绑定
+
+`routecodex-v4-cordis-host` 通过长驻 typed lifecycle port 驱动
+`routecodex-v4-node-container`，当前 active 映射为：
+
+```text
+CordisBoundNodeHost.mount
+  -> NodeContainer::declare
+  -> NodeContainer::context_created
+  -> real Cordis plugin/Fiber mount
+  -> NodeContainer::plugins_mounted
+  -> NodeContainer::publish
+
+CordisBoundNodeHost.beginExecution
+  -> NodeContainer::enter_execution
+  -> NodeExecutionGuard drop on release
+
+CordisBoundNodeHost.drain
+  -> NodeContainer::drain (measured in_flight must be 0)
+
+CordisBoundNodeHost.dispose
+  -> reverse Cordis Fiber disposal
+  -> NodeContainer::dispose
+```
+
+Rust `NodeContainer` 是生命周期状态与 in-flight 计数 owner；JS host 只镜像并逐次
+核对该计数。`drain()` 禁止生成固定 `inFlight: 0` 投影。实际 Cordis 插件条目必须
+与 immutable `NodePluginPlan.entries` 全等，随后由 `graph_hash == manifest_hash ==
+loaded_plan_hash == plan.hash` 四值绑定；任一漂移在 Rust declaration 前失败。
+生命周期 port 只承载声明过的 lifecycle op/status，不承载业务 payload、metadata、
+control/debug/error 内容。
 
 ## NodePlugin 统一合同
 
@@ -429,8 +461,8 @@ GET  /v4/admin/audit
 ## 当前缺口
 
 - `contracts/node-graph.contract.json` 仍表达“每节点唯一 active operator”和 hook 独立队列；它属于冻结 BaseNode 的 contract inputs，不能直接原地修改。
-- 尚无实际 Cordis Host、NodeContainer、typed native bridge、NodePluginContract、PluginCatalog、PluginManager、Skeleton Runtime 或 Admin/WebUI 模块。
+- 实际 Cordis Host、typed bridge、NodeContainer、NodePluginContract、PluginCatalog、PluginManager、Skeleton Runtime 和 Admin API 基线已存在；标准插件库、WebUI 与真实 Pipeline 逐节点迁移仍未完成。
 - 当前 Config Compiler 正在独立开发；NodePluginPlan schema 必须作为后续版本/扩展接入，不能与在途 `v4.config.manifest` owner 并行改同一真源。
-- 当前 V4 只有基础 crate 和合同，没有真实 request/response runtime，因此本设计只能标为 `design_reviewed`。
+- 当前 V4 仍没有完成真实 request/response/provider 产品 runtime；host/container 绑定已 active，不等于完整 Pipeline 已迁移。
 
 实施和验证顺序见 [`v4-cordis-plugin-framework-and-webui-plan.md`](../goals/v4-cordis-plugin-framework-and-webui-plan.md)。

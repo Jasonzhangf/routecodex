@@ -409,10 +409,11 @@
     },
     {
       "gate_id": "v4_cordis_host_l3_regression",
-      "command": "node --test cordis/routecodex-v4-cordis-host/tests/host.test.mjs",
+      "command": "node --test cordis/routecodex-v4-cordis-host/tests/*.test.mjs",
       "required_for": [
         "routecodex-v4-cordis-host:architecture_stable",
-        "routecodex-v4-cordis-host:active_link"
+        "routecodex-v4-cordis-host:active_link",
+        "routecodex-v4-node-container:architecture_stable"
       ]
     },
     {

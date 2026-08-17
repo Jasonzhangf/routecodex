@@ -243,6 +243,7 @@ function checkMainlineEdges(mainlinePath = path.join(v4Root, '.appsdk/maps/mainl
   allowedOwners.add('routecodex-v4-admin::execute');
   allowedOwners.add('routecodex-v4-admin::query');
   allowedOwners.add('routecodex-v4-cordis-host::CordisNodeHost');
+  allowedOwners.add('routecodex-v4-cordis-host::CordisBoundNodeHost');
   allowedOwners.add('routecodex-v4-node-container::NodeContainer');
   const pathExists = (candidate) => {
     const trimmed = candidate.trim();

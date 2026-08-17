@@ -1829,6 +1829,7 @@ resources:
   axis: control
   verification_gate:
   - v4_node_container_l2_regression
+  - v4_cordis_host_l3_regression
   - v4_parity_gate_node_container
   resource_kind: state_machine
   lifecycle: v4.plugin_management
@@ -1837,6 +1838,7 @@ resources:
   owner_symbols:
   - NodeContainer
   - NodeContainerState
+  - NodeExecutionGuard
   identity:
   - nodeId
   allowed_writers:
