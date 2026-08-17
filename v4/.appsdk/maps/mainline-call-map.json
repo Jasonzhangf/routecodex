@@ -779,6 +779,80 @@
       ],
       "path": "crates/routecodex-v4-node-container/src/lib.rs",
       "status": "active"
+    },
+    {
+      "from": "routecodex-v4-standard-plugins",
+      "to": "routecodex-v4-plugin-contract",
+      "owner": "routecodex-v4-standard-plugins::standard_descriptors",
+      "edge_type": "active_node_descriptor_binding",
+      "symbols": [
+        "NodePluginDescriptor",
+        "PluginKind",
+        "PluginEffect",
+        "PluginPhase",
+        "NodeSelector",
+        "ResourceRegistry",
+        "validate_descriptor"
+      ],
+      "path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-standard-plugins",
+      "to": "routecodex-v4-plugin-catalog",
+      "owner": "routecodex-v4-standard-plugins::register_standard_library",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "CatalogEntry",
+        "PluginCatalog::register",
+        "PluginCatalog::snapshot"
+      ],
+      "path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-standard-plugins",
+      "to": "routecodex-v4-plugin-plan",
+      "owner": "routecodex-v4-standard-plugins::compile_standard_plan",
+      "edge_type": "node_scoped_plan_compilation",
+      "symbols": [
+        "AuthoringPlugin",
+        "compile_node_plan",
+        "NodePluginPlan",
+        "PlanError",
+        "standard_node_allowed_reads",
+        "standard_node_allowed_writes"
+      ],
+      "path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-standard-plugins",
+      "to": "routecodex-v4-cordis-bridge",
+      "owner": "routecodex-v4-standard-plugins::StandardHandleRegistry",
+      "edge_type": "typed_handle_execution",
+      "symbols": [
+        "PluginHandle",
+        "HandleRegistry",
+        "ExecCtx"
+      ],
+      "path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-standard-plugins",
+      "to": "routecodex-v4-node-container",
+      "owner": "routecodex-v4-standard-plugins",
+      "edge_type": "blackbox_execution",
+      "symbols": [
+        "NodeContainer",
+        "NodeContainer::declare",
+        "PlanBindings",
+        "NodeContainer::execute_with_plan_hash",
+        "NodeExecutionInput"
+      ],
+      "path": "crates/routecodex-v4-standard-plugins/tests/l2_node_container_blackbox.rs",
+      "status": "active"
     }
   ]
 }

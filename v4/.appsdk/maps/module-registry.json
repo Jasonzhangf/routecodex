@@ -230,6 +230,30 @@
       ]
     },
     {
+      "module_id": "routecodex-v4-standard-plugins",
+      "status": "active",
+      "owner": "routecodex-v4-standard-plugins",
+      "owned_paths": [
+        "crates/routecodex-v4-standard-plugins/**"
+      ],
+      "forbidden_paths": [
+        "active/lib/**",
+        "protected/**",
+        "generated/**",
+        "cordis/**",
+        "crates/routecodex-v4-base-node/**",
+        "crates/routecodex-v4-edge/**",
+        "crates/routecodex-v4-control/**",
+        "crates/routecodex-v4-error/**"
+      ],
+      "verification_gates": [
+        "v4_standard_plugins_l2_regression",
+        "v4_standard_plugins_test_consumer",
+        "v4_parity_gate_standard_plugins",
+        "v4_parity_gate_standard_plugins_red"
+      ]
+    },
+    {
       "module_id": "routecodex-v4-cordis-bridge",
       "status": "active",
       "owner": "routecodex-v4-cordis-bridge",

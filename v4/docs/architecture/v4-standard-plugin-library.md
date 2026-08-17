@@ -1,0 +1,91 @@
+# V4 标准插件库（M5）
+
+状态：`contract_bound`，源实现已落地，未接真实生产 NodeContainer 分发。
+Owner：`routecodex-v4-standard-plugins`。
+合同：`v4/contracts/plugin-library.contract.json`。
+
+## 范围
+
+M5 交付 V4 标准插件库的不可变描述符、确定性 artifact/contract 字节、
+`PluginCatalog` 注册、per-node `NodePluginPlan` 编译和 typed
+`StandardHandleRegistry`。标准插件全部是 keyless、行为最小化 mock/validator，
+不声称真实产品迁移、真实凭据、真实 provider/client 语义或真实 wire codec。
+
+## 类别与不可变 ID
+
+标准库按 8 个类别注册 19 个不可变插件 ID：
+
+| 类别 | 插件 ID |
+| --- | --- |
+| contracts | `v4.std.contract.input_validate`, `v4.std.contract.output_validate` |
+| diagnostic | `v4.std.diagnostic.debug_observe`, `v4.std.diagnostic.timing`, `v4.std.diagnostic.snapshot_record` |
+| control | `v4.std.control.scope_consume`, `v4.std.control.payload_cycle_record` |
+| error | `v4.std.error.typed_intake`, `v4.std.error.projection_adapter` |
+| protocol | `v4.std.protocol.mock_codec`, `v4.std.protocol.mock_codec_alt` |
+| chat_process | `v4.std.chat_process.request_governance`, `v4.std.chat_process.response_governance` |
+| routing | `v4.std.routing.route_facts_producer`, `v4.std.routing.route_facts_consumer` |
+| provider | `v4.std.provider.capability_mock`, `v4.std.provider.auth_handle_mock`, `v4.std.provider.wire_mock`, `v4.std.provider.transport_mock` |
+
+每个 `StandardPlugin` 都携带：
+
+- 固定 `plugin_id`、版本 `0.1.0`、owner `routecodex-v4-standard-plugins`；
+- 有效 node-graph role、resource axis、effect、phase、order；
+- canonical SHA256 artifact/contract bytes；
+- 确定性 keyless handle。
+
+同 identity 重复注册是幂等操作；artifact/contract/owner identity 漂移由
+`PluginCatalog` fail-fast 拒绝。
+
+## 注册与编译
+
+```text
+standard_plugins()
+  -> catalog_entry()
+  -> register_standard_library(catalog)
+  -> standard_authoring(ids)
+  -> compile_standard_plan(node, role, chain, position, ids)
+  -> NodePluginPlan
+```
+
+`compile_standard_plan` 复用唯一 `routecodex-v4-plugin-plan` owner，不建立第二套
+排序/依赖/权限逻辑。每个描述符必须绑定 active node 的 `node_id`、`role_id` 和
+`position`；编译器先按 `node-graph.contract.json` 验证 selector，再由
+`standard_node_allowed_reads()` / `standard_node_allowed_writes()` 从 `node_id`
+派生精确权限，调用方不能扩大读写面。请求 outbound 只允许
+`normal_payload -> provider_semantic -> provider_wire_payload` 相邻前向转换；
+control/error/diagnostic 资源不进入 normal/provider/client payload。
+
+## Side-channel 边界
+
+标准插件只通过 `ExecCtx` 的 typed data/control 通道执行：
+
+- control-only 插件只写 `v4.control.*` / `v4.lifecycle.payload_cycle`；
+- diagnostic-only 插件只 emit diagnostics，不写 data/control；
+- error 插件只写 `v4.control.error_chain`；
+- provider capability/auth/transport mock 只在 provider wire boundary 读取并校验
+  已登记资源，不写 normal data 或 control；
+- 任何控制、error、diagnostic 事实不得进入 `data`，payload 不得重建控制状态。
+
+标准库不实现 fallback、silent strip、第二 runtime/kernel、跨节点 dispatch、
+payload reconstruction 或 provider/client metadata 泄漏。
+
+## 验证
+
+M5 四个 gate 已接入 V4 verification map 与 `verify:ci`：
+
+- `v4_standard_plugins_l2_regression`：crate 单测 + L2 红测；
+- `v4_standard_plugins_test_consumer`：Active surface build-link consumer；
+- `v4_parity_gate_standard_plugins`：合同/注册表/函数 map/源码边界；
+- `v4_parity_gate_standard_plugins_red`：负类自检。
+
+## M8 非目标
+
+以下内容不是 M5 基线能力：
+
+- 真实 protocol codec、provider wire/transport、routing/decision 语义；
+- M6 PluginManager candidate pipeline、M7 WebUI 消费；
+- 将 `StandardHandleRegistry` 接入真实生产 NodeContainer 分发；
+- 真实凭据、真实请求/响应 payload 语义或产品迁移。
+
+这些能力必须先在后续 milestone 中建立 typed dispatch budget 与真实 provider
+contract 后再落地。

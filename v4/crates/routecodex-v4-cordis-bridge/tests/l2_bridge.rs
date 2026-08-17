@@ -81,6 +81,8 @@ fn authoring_plugin(
             selection_group: None,
             node_selector: NodeSelector {
                 role_id: "request_chat_process".to_string(),
+                node_id: "V4HubReqChatProcess04Governed".to_string(),
+                position: 4,
             },
             services_provided: vec![],
             inject: vec![],
@@ -139,7 +141,8 @@ impl PluginHandle for ControlHandle {
             "written_by".to_string(),
             Value::String("control".to_string()),
         );
-        ctx.write_control(control).map_err(|error| error.to_string())
+        ctx.write_control(control)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -181,8 +184,7 @@ impl MapRegistry {
     }
 
     fn register(mut self, plugin_id: &str, handle: impl PluginHandle + 'static) -> Self {
-        self.handles
-            .insert(plugin_id.to_string(), Box::new(handle));
+        self.handles.insert(plugin_id.to_string(), Box::new(handle));
         self
     }
 }
@@ -256,8 +258,8 @@ fn ordered_serial_execution_in_plan_order_with_read_only_observer() {
         .register("v4.request.b", StepHandle { id: "b" })
         .register("v4.request.observe", ObserveHandle);
 
-    let output = execute_plan(&plan, input(json!([]), json!({})), &registry)
-        .expect("node executes");
+    let output =
+        execute_plan(&plan, input(json!([]), json!({})), &registry).expect("node executes");
     assert_eq!(output.data, json!(["a", "b"]));
     assert_eq!(output.control, json!({}));
     assert_eq!(output.diagnostics.len(), 1);

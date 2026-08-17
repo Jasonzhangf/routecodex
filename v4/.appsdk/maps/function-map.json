@@ -193,6 +193,7 @@
       "entry_symbols": [
         "validate_descriptor",
         "NodePluginDescriptor",
+        "NodeSelector",
         "PluginEffect",
         "PluginKind",
         "PluginPhase",
@@ -236,6 +237,29 @@
       "required_gates": [
         "v4_plugin_catalog_l2_regression",
         "v4_parity_gate_plugin_plan"
+      ]
+    },
+    {
+      "function_id": "v4.plugin.standard_library",
+      "owner": "routecodex-v4-standard-plugins",
+      "entry_symbols": [
+        "PluginCategory",
+        "StandardPlugin",
+        "StandardHandleRegistry",
+        "StandardHandleRegistry::new",
+        "standard_plugins",
+        "standard_descriptors",
+        "standard_resource_registry",
+        "standard_node_allowed_reads",
+        "standard_node_allowed_writes",
+        "register_standard_library",
+        "compile_standard_plan"
+      ],
+      "required_gates": [
+        "v4_standard_plugins_l2_regression",
+        "v4_standard_plugins_test_consumer",
+        "v4_parity_gate_standard_plugins",
+        "v4_parity_gate_standard_plugins_red"
       ]
     },
     {

@@ -131,6 +131,34 @@ pub enum PlanError {
         service: String,
     },
     UnregisteredOperator(String),
+    UnknownNode {
+        node_id: String,
+    },
+    NodeChainMismatch {
+        node_id: String,
+        chain: String,
+    },
+    NodeRoleMismatch {
+        node_id: String,
+        role_id: String,
+    },
+    NodePositionMismatch {
+        node_id: String,
+        position: u32,
+    },
+    NodeSelectorMismatch {
+        plugin_id: String,
+        selector_node_id: String,
+        plan_node_id: String,
+    },
+    NodeSelectorPositionMismatch {
+        plugin_id: String,
+        selector_position: u32,
+        plan_position: u32,
+    },
+    NodeContractInvalid {
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for PlanError {
@@ -200,6 +228,35 @@ impl std::fmt::Display for PlanError {
             ),
             Self::UnregisteredOperator(plugin_id) => {
                 write!(formatter, "plugin {plugin_id} is not a registered operator")
+            }
+            Self::UnknownNode { node_id } => write!(formatter, "unknown active node {node_id}"),
+            Self::NodeChainMismatch { node_id, chain } => {
+                write!(formatter, "node {node_id} is not on chain {chain}")
+            }
+            Self::NodeRoleMismatch { node_id, role_id } => {
+                write!(formatter, "node {node_id} does not own role {role_id}")
+            }
+            Self::NodePositionMismatch { node_id, position } => {
+                write!(formatter, "node {node_id} is not at position {position}")
+            }
+            Self::NodeSelectorMismatch {
+                plugin_id,
+                selector_node_id,
+                plan_node_id,
+            } => write!(
+                formatter,
+                "plugin {plugin_id} selector binds {selector_node_id}, plan uses {plan_node_id}"
+            ),
+            Self::NodeSelectorPositionMismatch {
+                plugin_id,
+                selector_position,
+                plan_position,
+            } => write!(
+                formatter,
+                "plugin {plugin_id} selector binds position {selector_position}, plan uses {plan_position}"
+            ),
+            Self::NodeContractInvalid { reason } => {
+                write!(formatter, "active node graph contract is invalid: {reason}")
             }
         }
     }
@@ -277,7 +334,10 @@ fn compare_versions(left: &str, right: &str) -> VersionOrder {
 fn topological_order<'a>(
     plugins: &'a [&'a NodePluginDescriptor],
 ) -> Result<Vec<&'a NodePluginDescriptor>, PlanError> {
-    let ids: HashSet<&str> = plugins.iter().map(|plugin| plugin.plugin_id.as_str()).collect();
+    let ids: HashSet<&str> = plugins
+        .iter()
+        .map(|plugin| plugin.plugin_id.as_str())
+        .collect();
     let mut edges: HashMap<&str, Vec<&str>> = HashMap::new();
     let mut in_degree: HashMap<&str, usize> = HashMap::new();
     for plugin in plugins {
@@ -310,7 +370,9 @@ fn topological_order<'a>(
                 .get_mut(plugin.plugin_id.as_str())
                 .expect("edge entry exists")
                 .push(target.as_str());
-            *in_degree.get_mut(target.as_str()).expect("target entry exists") += 1;
+            *in_degree
+                .get_mut(target.as_str())
+                .expect("target entry exists") += 1;
         }
         for target in &plugin.after {
             if !ids.contains(target.as_str()) {
@@ -337,7 +399,9 @@ fn topological_order<'a>(
                 .get_mut(target.as_str())
                 .expect("target entry exists")
                 .push(plugin.plugin_id.as_str());
-            *in_degree.get_mut(plugin.plugin_id.as_str()).expect("plugin entry exists") += 1;
+            *in_degree
+                .get_mut(plugin.plugin_id.as_str())
+                .expect("plugin entry exists") += 1;
         }
     }
 
@@ -402,7 +466,10 @@ fn reachable<'a>(
     to: &'a NodePluginDescriptor,
     plugins: &'a [&'a NodePluginDescriptor],
 ) -> bool {
-    let ids: HashSet<&str> = plugins.iter().map(|plugin| plugin.plugin_id.as_str()).collect();
+    let ids: HashSet<&str> = plugins
+        .iter()
+        .map(|plugin| plugin.plugin_id.as_str())
+        .collect();
     let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
     for plugin in plugins {
         adjacency.insert(plugin.plugin_id.as_str(), Vec::new());
@@ -440,6 +507,159 @@ fn reachable<'a>(
     false
 }
 
+const NODE_GRAPH_CONTRACT: &str = include_str!("../../../contracts/node-graph.contract.json");
+
+#[derive(Debug, Deserialize)]
+struct NodeGraphContract {
+    v4_hub_request_chain: NodeGraphChain,
+    v4_hub_response_chain: NodeGraphChain,
+    v4_config_chain: NodeGraphChain,
+    v4_error_chain: NodeGraphChain,
+    registered_nodes: Vec<NodeGraphNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeGraphChain {
+    nodes: Vec<NodeGraphNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeGraphNode {
+    node_id: String,
+    role_id: String,
+    #[serde(default)]
+    position: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveNodeAnchor {
+    chain: String,
+    position: Option<u32>,
+    node_id: String,
+    role_id: String,
+}
+
+fn registered_role_chain(role_id: &str) -> Option<&'static str> {
+    match role_id {
+        "request_inbound"
+        | "request_continuation"
+        | "request_chat_process"
+        | "request_execution"
+        | "request_outbound"
+        | "mainline_kernel" => Some("request"),
+        "response_inbound"
+        | "response_chat_process"
+        | "response_continuation"
+        | "response_outbound"
+        | "server_frame" => Some("response"),
+        "error_source" | "error_classify" | "error_policy" | "error_decision"
+        | "error_projection" | "error_chain" => Some("error"),
+        "config_authoring" | "config_registry" | "config_manifest" => Some("config"),
+        "lifecycle_declare" | "lifecycle_lock" | "lifecycle_identity" | "lifecycle_control" => {
+            Some("lifecycle")
+        }
+        "control_center"
+        | "control_ledger"
+        | "node_statistics"
+        | "control_audit"
+        | "router_live_policy"
+        | "provider_availability"
+        | "control_carrier"
+        | "router"
+        | "opaque_target" => Some("control"),
+        role if role.starts_with("diagnostic_") || role == "runtime_identity_counter" => {
+            Some("diagnostic")
+        }
+        _ => None,
+    }
+}
+
+fn active_node_anchor(node_id: &str) -> Result<Option<ActiveNodeAnchor>, PlanError> {
+    let contract: NodeGraphContract =
+        serde_json::from_str(NODE_GRAPH_CONTRACT).map_err(|error| {
+            PlanError::NodeContractInvalid {
+                reason: error.to_string(),
+            }
+        })?;
+    for (chain, nodes) in [
+        ("request", &contract.v4_hub_request_chain.nodes),
+        ("response", &contract.v4_hub_response_chain.nodes),
+        ("config", &contract.v4_config_chain.nodes),
+        ("error", &contract.v4_error_chain.nodes),
+    ] {
+        if let Some(node) = nodes.iter().find(|node| node.node_id == node_id) {
+            return Ok(Some(ActiveNodeAnchor {
+                chain: chain.to_string(),
+                position: node.position,
+                node_id: node.node_id.clone(),
+                role_id: node.role_id.clone(),
+            }));
+        }
+    }
+    Ok(contract
+        .registered_nodes
+        .iter()
+        .find(|node| node.node_id == node_id)
+        .and_then(|node| {
+            registered_role_chain(&node.role_id).map(|chain| ActiveNodeAnchor {
+                chain: chain.to_string(),
+                position: node.position,
+                node_id: node.node_id.clone(),
+                role_id: node.role_id.clone(),
+            })
+        }))
+}
+
+fn validate_bound_node_selector(
+    descriptor: &NodePluginDescriptor,
+    node_id: &str,
+    role_id: &str,
+    chain: &str,
+    position: u32,
+) -> Result<(), PlanError> {
+    let selector = &descriptor.node_selector;
+    let selector_node_id = selector.node_id.as_str();
+    if selector_node_id != node_id {
+        return Err(PlanError::NodeSelectorMismatch {
+            plugin_id: descriptor.plugin_id.clone(),
+            selector_node_id: selector_node_id.to_string(),
+            plan_node_id: node_id.to_string(),
+        });
+    }
+    let anchor = active_node_anchor(selector_node_id)?.ok_or_else(|| PlanError::UnknownNode {
+        node_id: selector_node_id.to_string(),
+    })?;
+    if anchor.chain != chain {
+        return Err(PlanError::NodeChainMismatch {
+            node_id: selector_node_id.to_string(),
+            chain: chain.to_string(),
+        });
+    }
+    if anchor.role_id != role_id {
+        return Err(PlanError::NodeRoleMismatch {
+            node_id: selector_node_id.to_string(),
+            role_id: role_id.to_string(),
+        });
+    }
+    if selector.position != position {
+        return Err(PlanError::NodeSelectorPositionMismatch {
+            plugin_id: descriptor.plugin_id.clone(),
+            selector_position: selector.position,
+            plan_position: position,
+        });
+    }
+    if anchor
+        .position
+        .is_some_and(|anchor_position| anchor_position != position)
+    {
+        return Err(PlanError::NodePositionMismatch {
+            node_id: selector_node_id.to_string(),
+            position,
+        });
+    }
+    Ok(())
+}
+
 /// Compile one node's immutable plugin plan. `allowed_reads` / `allowed_writes`
 /// are the node-scoped resource permissions; `resources` is the global registry
 /// used for axis and effect validation. `container_services` are services
@@ -458,6 +678,9 @@ pub fn compile_node_plan(
     container_services: &[String],
 ) -> Result<NodePluginPlan, PlanError> {
     let node_roles = vec![role_id.to_string()];
+    for plugin in authoring {
+        validate_bound_node_selector(&plugin.descriptor, node_id, role_id, chain, position)?;
+    }
     for plugin in authoring {
         validate_descriptor(&plugin.descriptor, &node_roles, resources).map_err(|error| {
             PlanError::InvalidPlugin {
@@ -480,7 +703,10 @@ pub fn compile_node_plan(
                 .or_default()
                 .push(plugin.descriptor.plugin_id.clone());
             if plugin.enabled {
-                group_active.entry(group).or_default().push(&plugin.descriptor.plugin_id);
+                group_active
+                    .entry(group)
+                    .or_default()
+                    .push(&plugin.descriptor.plugin_id);
             }
         }
     }
@@ -604,9 +830,7 @@ pub fn compile_node_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use routecodex_v4_plugin_contract::{
-        NodeSelector, ResourceAxis, ResourceEntry,
-    };
+    use routecodex_v4_plugin_contract::{NodeSelector, ResourceAxis, ResourceEntry};
 
     fn registry() -> ResourceRegistry {
         ResourceRegistry {
@@ -654,6 +878,8 @@ mod tests {
                 selection_group: None,
                 node_selector: NodeSelector {
                     role_id: "request_chat_process".to_string(),
+                    node_id: "V4HubReqChatProcess04Governed".to_string(),
+                    position: 4,
                 },
                 services_provided: vec![],
                 inject: vec![],
@@ -698,25 +924,59 @@ mod tests {
             &[],
         )
         .expect("plan compiles");
-        let ids: Vec<&str> = plan.entries.iter().map(|entry| entry.plugin_id.as_str()).collect();
+        let ids: Vec<&str> = plan
+            .entries
+            .iter()
+            .map(|entry| entry.plugin_id.as_str())
+            .collect();
         assert_eq!(ids, vec!["v4.request.c", "v4.request.a", "v4.request.b"]);
         assert!(plan.verify());
     }
 
     #[test]
-    fn different_nodes_can_have_different_orders() {
-        let node_a = vec![
+    fn different_orders_on_the_same_node_have_different_hashes() {
+        let first = vec![
             authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true),
             authoring_plugin("v4.request.b", PluginPhase::Semantic, 400, true),
         ];
-        let node_b = vec![
+        let second = vec![
             authoring_plugin("v4.request.b", PluginPhase::Semantic, 300, true),
             authoring_plugin("v4.request.a", PluginPhase::Semantic, 400, true),
         ];
-        let plan_a = compile_node_plan("node_a", "request_chat_process", "request", 1, &node_a, &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap();
-        let plan_b = compile_node_plan("node_b", "request_chat_process", "request", 2, &node_b, &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap();
-        let ids_a: Vec<&str> = plan_a.entries.iter().map(|entry| entry.plugin_id.as_str()).collect();
-        let ids_b: Vec<&str> = plan_b.entries.iter().map(|entry| entry.plugin_id.as_str()).collect();
+        let plan_a = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &first,
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap();
+        let plan_b = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &second,
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap();
+        let ids_a: Vec<&str> = plan_a
+            .entries
+            .iter()
+            .map(|entry| entry.plugin_id.as_str())
+            .collect();
+        let ids_b: Vec<&str> = plan_b
+            .entries
+            .iter()
+            .map(|entry| entry.plugin_id.as_str())
+            .collect();
         assert_eq!(ids_a, vec!["v4.request.a", "v4.request.b"]);
         assert_eq!(ids_b, vec!["v4.request.b", "v4.request.a"]);
         assert_ne!(plan_a.hash, plan_b.hash);
@@ -731,8 +991,30 @@ mod tests {
         ];
         let mut second = first.clone();
         second.reverse();
-        let plan_a = compile_node_plan("node", "request_chat_process", "request", 1, &first, &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap();
-        let plan_b = compile_node_plan("node", "request_chat_process", "request", 1, &second, &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap();
+        let plan_a = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &first,
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap();
+        let plan_b = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &second,
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap();
         assert_eq!(plan_a.hash, plan_b.hash);
         first.clear();
         let _ = &mut first;
@@ -745,16 +1027,35 @@ mod tests {
         let mut codec_b = authoring_plugin("v4.codec.b", PluginPhase::Semantic, 200, true);
         codec_b.descriptor.selection_group = Some("provider_wire_codec".to_string());
         codec_b.enabled = false;
-        let mut validator = authoring_plugin("v4.request.validate", PluginPhase::Validation, 800, true);
+        let mut validator =
+            authoring_plugin("v4.request.validate", PluginPhase::Validation, 800, true);
         validator.descriptor.kind = PluginKind::Validator;
         validator.descriptor.effect = PluginEffect::ReadOnly;
         validator.descriptor.writes = vec![];
         let authoring = vec![codec_a, codec_b, validator];
-        let plan = compile_node_plan("node", "request_chat_process", "request", 6, &authoring, &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap();
+        let plan = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &authoring,
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap();
         assert_eq!(plan.selection_groups.len(), 1);
         assert_eq!(plan.selection_groups[0].active_plugin, "v4.codec.a");
-        assert_eq!(plan.selection_groups[0].variants, vec!["v4.codec.a", "v4.codec.b"]);
-        let ids: Vec<&str> = plan.entries.iter().map(|entry| entry.plugin_id.as_str()).collect();
+        assert_eq!(
+            plan.selection_groups[0].variants,
+            vec!["v4.codec.a", "v4.codec.b"]
+        );
+        let ids: Vec<&str> = plan
+            .entries
+            .iter()
+            .map(|entry| entry.plugin_id.as_str())
+            .collect();
         assert_eq!(ids, vec!["v4.codec.a", "v4.request.validate"]);
     }
 
@@ -762,7 +1063,18 @@ mod tests {
     fn selection_group_zero_active_rejected() {
         let mut codec_a = authoring_plugin("v4.codec.a", PluginPhase::Semantic, 200, false);
         codec_a.descriptor.selection_group = Some("provider_wire_codec".to_string());
-        let error = compile_node_plan("node", "request_chat_process", "request", 6, &[codec_a], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
+        let error = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &[codec_a],
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap_err();
         assert!(matches!(error, PlanError::ZeroSelection(_)));
     }
 
@@ -772,7 +1084,18 @@ mod tests {
         codec_a.descriptor.selection_group = Some("provider_wire_codec".to_string());
         let mut codec_b = authoring_plugin("v4.codec.b", PluginPhase::Semantic, 200, true);
         codec_b.descriptor.selection_group = Some("provider_wire_codec".to_string());
-        let error = compile_node_plan("node", "request_chat_process", "request", 6, &[codec_a, codec_b], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
+        let error = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &[codec_a, codec_b],
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap_err();
         assert!(matches!(error, PlanError::MultiSelection { .. }));
     }
 
@@ -782,7 +1105,18 @@ mod tests {
         a.descriptor.before = vec!["v4.request.b".to_string()];
         let mut b = authoring_plugin("v4.request.b", PluginPhase::Semantic, 300, true);
         b.descriptor.before = vec!["v4.request.a".to_string()];
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a, b], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
+        let error = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &[a, b],
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap_err();
         assert!(matches!(error, PlanError::OrderingCycle));
     }
 
@@ -790,7 +1124,18 @@ mod tests {
     fn same_phase_same_order_tie_rejected() {
         let a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
         let b = authoring_plugin("v4.request.b", PluginPhase::Semantic, 300, true);
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a, b], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
+        let error = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &[a, b],
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap_err();
         assert!(matches!(error, PlanError::Tie { .. }));
     }
 
@@ -798,21 +1143,42 @@ mod tests {
     fn missing_before_dependency_rejected() {
         let mut a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
         a.descriptor.before = vec!["v4.request.ghost".to_string()];
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
+        let error = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &[a],
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap_err();
         assert!(matches!(error, PlanError::MissingDependency { .. }));
     }
 
     #[test]
     fn version_conflict_rejected() {
-        let mut consumer = authoring_plugin("v4.request.consumer", PluginPhase::Semantic, 300, true);
-        consumer.descriptor.depends_on = vec![
-            routecodex_v4_plugin_contract::DependencySpec {
-                plugin_id: "v4.request.provider".to_string(),
-                version_req: ">=0.2.0".to_string(),
-            },
-        ];
+        let mut consumer =
+            authoring_plugin("v4.request.consumer", PluginPhase::Semantic, 300, true);
+        consumer.descriptor.depends_on = vec![routecodex_v4_plugin_contract::DependencySpec {
+            plugin_id: "v4.request.provider".to_string(),
+            version_req: ">=0.2.0".to_string(),
+        }];
         let provider = authoring_plugin("v4.request.provider", PluginPhase::Semantic, 200, true);
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[consumer, provider], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
+        let error = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &[consumer, provider],
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap_err();
         assert!(matches!(error, PlanError::VersionConflict { .. }));
     }
 
@@ -820,7 +1186,18 @@ mod tests {
     fn unauthorized_write_rejected() {
         let mut a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
         a.descriptor.writes = vec!["v4.response.normal_payload".to_string()];
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
+        let error = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &[a],
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap_err();
         assert!(matches!(error, PlanError::UnauthorizedWrite { .. }));
     }
 
@@ -828,7 +1205,18 @@ mod tests {
     fn cross_node_service_inject_rejected() {
         let mut a = authoring_plugin("v4.request.a", PluginPhase::Semantic, 300, true);
         a.descriptor.inject = vec!["nodeBPrivate".to_string()];
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
+        let error = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &[a],
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap_err();
         assert!(matches!(error, PlanError::CrossNodeService { .. }));
     }
 
@@ -854,7 +1242,7 @@ mod tests {
             "nodePlugins".to_string(),
         ];
         let plan = compile_node_plan(
-            "node",
+            "V4HubReqChatProcess04Governed",
             "request_chat_process",
             "request",
             4,
@@ -871,12 +1259,24 @@ mod tests {
 
     #[test]
     fn diagnostic_parallel_plugin_is_read_only_ok() {
-        let mut observer = authoring_plugin("v4.request.observe", PluginPhase::Observation, 900, true);
+        let mut observer =
+            authoring_plugin("v4.request.observe", PluginPhase::Observation, 900, true);
         observer.descriptor.kind = PluginKind::Observer;
         observer.descriptor.effect = PluginEffect::DiagnosticOnly;
         observer.descriptor.reads = vec!["v4.debug.event_ledger".to_string()];
         observer.descriptor.writes = vec![];
-        let plan = compile_node_plan("node", "request_chat_process", "request", 4, &[observer], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap();
+        let plan = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &[observer],
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap();
         assert_eq!(plan.entries.len(), 1);
         assert!(plan.verify());
     }
@@ -886,7 +1286,18 @@ mod tests {
         let mut a = authoring_plugin("v4.request.a", PluginPhase::Projection, 300, true);
         a.descriptor.before = vec!["v4.request.b".to_string()];
         let b = authoring_plugin("v4.request.b", PluginPhase::Semantic, 300, true);
-        let error = compile_node_plan("node", "request_chat_process", "request", 4, &[a, b], &allowed_reads(), &allowed_writes(), &registry(), &[]).unwrap_err();
+        let error = compile_node_plan(
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            "request",
+            4,
+            &[a, b],
+            &allowed_reads(),
+            &allowed_writes(),
+            &registry(),
+            &[],
+        )
+        .unwrap_err();
         assert!(matches!(error, PlanError::PhaseOrderConflict { .. }));
     }
 }

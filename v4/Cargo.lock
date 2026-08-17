@@ -226,6 +226,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v4-standard-plugins"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-cordis-bridge",
+ "routecodex-v4-node-container",
+ "routecodex-v4-plugin-catalog",
+ "routecodex-v4-plugin-contract",
+ "routecodex-v4-plugin-plan",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"

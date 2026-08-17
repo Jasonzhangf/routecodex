@@ -3,7 +3,7 @@
   "contract_id": "v4-node-graph",
   "status": "active",
   "owner_feature_id": "v4.node_graph",
-  "graph_hash": "sha256:e86ea52fc5f9acee7ca7c28ee2ea564c4d327a17262ea1d74482b6a9be6f378c",
+  "graph_hash": "sha256:9e301cc45fcc7255c9ec980db37a5c0c71a6ded656a3483c0bcd1382145d58f6",
   "canonical_docs": [
     "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
@@ -1292,6 +1292,7 @@
     },
     {
       "node_id": "V4Router05RequestClassified",
+      "position": 5,
       "family": "RequestChainNode",
       "role_id": "request_execution",
       "scope": "group_private: route facts classification",
@@ -1299,6 +1300,7 @@
     },
     {
       "node_id": "V4Router06SelectionPlan",
+      "position": 6,
       "family": "RequestChainNode",
       "role_id": "request_execution",
       "scope": "group_private: opaque target selection plan",
@@ -1334,6 +1336,7 @@
     },
     {
       "node_id": "V4PayloadCycleRegistry",
+      "position": 0,
       "family": "ControlCenterNode",
       "role_id": "control_center",
       "scope": "original payload cycle lifecycle control center",
@@ -1397,6 +1400,7 @@
     },
     {
       "node_id": "V4MetadataCenter01ScopeRegistry",
+      "position": 0,
       "family": "ControlCenterNode",
       "role_id": "control_center",
       "scope": "metadata center scope registry",

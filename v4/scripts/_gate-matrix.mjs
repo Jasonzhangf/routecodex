@@ -25,6 +25,7 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-admin.mjs',
   'verify-v4-cordis-host.mjs',
   'verify-v4-node-container.mjs',
+  'verify-v4-standard-plugins.mjs',
 ];
 
 export const RED_SUITES = [
@@ -41,6 +42,7 @@ export const RED_SUITES = [
   ['verify-v4-admin.mjs', '--red-self-test'],
   ['verify-v4-cordis-host.mjs', '--red-self-test'],
   ['verify-v4-node-container.mjs', '--red-self-test'],
+  ['verify-v4-standard-plugins.mjs', '--red-self-test'],
 ];
 
 export const CONSUMER_REGRESSIONS = [
@@ -57,4 +59,5 @@ export const CONSUMER_REGRESSIONS = [
   ['routecodex-v4-runtime-inspector', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-manager,routecodex-v4-plugin-contract,routecodex-v4-plugin-plan'],
   ['routecodex-v4-admin', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-manager,routecodex-v4-runtime-inspector,routecodex-v4-plugin-contract,routecodex-v4-plugin-plan'],
   ['routecodex-v4-node-container', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-cordis-bridge,routecodex-v4-plugin-plan'],
+  ['routecodex-v4-standard-plugins', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container'],
 ];

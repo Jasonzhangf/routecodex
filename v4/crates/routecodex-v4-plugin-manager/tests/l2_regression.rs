@@ -63,6 +63,8 @@ fn authoring(plugin_id: &str) -> AuthoringPlugin {
             selection_group: None,
             node_selector: NodeSelector {
                 role_id: "request_inbound".to_string(),
+                node_id: "V4HubReqInbound03Normalized".to_string(),
+                position: 3,
             },
             services_provided: vec![],
             inject: vec![],
@@ -75,10 +77,10 @@ fn authoring(plugin_id: &str) -> AuthoringPlugin {
 
 fn compile_plan(plugin_id: &str) -> Result<NodePluginPlan, PlanError> {
     compile_node_plan(
-        "v4.request.inbound.normalized",
+        "V4HubReqInbound03Normalized",
         "request_inbound",
         "request",
-        1,
+        3,
         &[authoring(plugin_id)],
         &allowed_reads(),
         &allowed_writes(),
@@ -91,7 +93,7 @@ fn compile_plan(plugin_id: &str) -> Result<NodePluginPlan, PlanError> {
 fn candidate_publish_updates_active_pointer_once() {
     let plan = compile_plan("plugin-a").expect("compile plan");
     let hash = plan.hash.clone();
-    let node_ids = vec!["v4.request.inbound.normalized".to_string()];
+    let node_ids = vec!["V4HubReqInbound03Normalized".to_string()];
     let candidate_hash = PluginCandidate::hash(&PluginCandidate {
         id: CandidateId("cand-a".to_string()),
         plan: plan.clone(),

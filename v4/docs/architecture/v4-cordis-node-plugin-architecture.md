@@ -235,7 +235,11 @@ plugin-handle 注册必须在 M5 标准插件库阶段补齐后再启用真实 p
   "version": "0.1.0",
   "kind": "operator",
   "effect": "semantic",
-  "node_selector": {"role_id": "request_chat_process"},
+  "node_selector": {
+    "node_id": "V4HubReqChatProcess04Governed",
+    "role_id": "request_chat_process",
+    "position": 4
+  },
   "phase": "semantic",
   "order": 300,
   "before": ["v4.request.output_validate"],
@@ -251,7 +255,8 @@ plugin-handle 注册必须在 M5 标准插件库阶段补齐后再启用真实 p
 必填语义：
 
 - `plugin_id`、`version`、owner 和 artifact identity 唯一。
-- `node_selector` 只能命中已声明 Node/role，不能运行时遍历未知节点。
+- `node_selector` 必须精确命中 active node 的 `node_id`、`role_id` 和 `position`，
+  不能运行时遍历未知节点。
 - `phase`、`order`、`before`、`after` 编译为确定顺序。
 - `inject` 是 Service 依赖，不是 payload 字段。
 - `reads/writes` 必须命中资源注册表和节点允许权限。

@@ -11,6 +11,7 @@ members = [
   "crates/routecodex-v4-runtime-inspector",
   "crates/routecodex-v4-admin",
   "crates/routecodex-v4-skeleton",
+  "crates/routecodex-v4-standard-plugins",
 ]
 resolver = "2"
 

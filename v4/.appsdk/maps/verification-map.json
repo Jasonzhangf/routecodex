@@ -460,6 +460,34 @@
       ]
     },
     {
+      "gate_id": "v4_standard_plugins_l2_regression",
+      "command": "cargo test -p routecodex-v4-standard-plugins --manifest-path Cargo.toml --locked",
+      "required_for": [
+        "routecodex-v4-standard-plugins:architecture_stable"
+      ]
+    },
+    {
+      "gate_id": "v4_standard_plugins_test_consumer",
+      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-standard-plugins --deps routecodex-v4-base-node --source-deps routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container",
+      "required_for": [
+        "routecodex-v4-standard-plugins:architecture_stable"
+      ]
+    },
+    {
+      "gate_id": "v4_parity_gate_standard_plugins",
+      "command": "node scripts/architecture/verify-v4-standard-plugins.mjs",
+      "required_for": [
+        "routecodex-v4-standard-plugins:architecture_stable"
+      ]
+    },
+    {
+      "gate_id": "v4_parity_gate_standard_plugins_red",
+      "command": "node scripts/architecture/verify-v4-standard-plugins.mjs --red-self-test",
+      "required_for": [
+        "routecodex-v4-standard-plugins:architecture_stable"
+      ]
+    },
+    {
       "gate_id": "v4_build_verify_positive",
       "command": "node scripts/verify.mjs",
       "required_for": [

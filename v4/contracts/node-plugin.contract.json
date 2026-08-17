@@ -37,7 +37,7 @@
     "projection",
     "observation"
   ],
-  "node_selector_rule": "selector must match a declared node role from node-graph.contract.json; unknown node or role is rejected; runtime never iterates unknown nodes",
+  "node_selector_rule": "selector must match the exact active node_id, role_id and position from node-graph.contract.json; unknown nodes and node/role/position mismatches are rejected before plan compilation; runtime never iterates unknown nodes",
   "effect_rule": {
     "read_only": "writes must be empty; plugin may only read current-node data and information",
     "control_only": "control_only: writes must be control or information axis resources; normal payload writes forbidden",

@@ -58,6 +58,8 @@ pub enum PluginPhase {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeSelector {
     pub role_id: String,
+    pub node_id: String,
+    pub position: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -188,13 +190,22 @@ impl std::fmt::Display for ContractError {
                 "control plugin {plugin_id} writes normal data resource {resource_id}"
             ),
             Self::EmptySelectionGroup(plugin_id) => {
-                write!(formatter, "plugin {plugin_id} declares an empty selection group")
+                write!(
+                    formatter,
+                    "plugin {plugin_id} declares an empty selection group"
+                )
             }
             Self::EmptyBefore(plugin_id) => {
-                write!(formatter, "plugin {plugin_id} declares an empty before entry")
+                write!(
+                    formatter,
+                    "plugin {plugin_id} declares an empty before entry"
+                )
             }
             Self::EmptyAfter(plugin_id) => {
-                write!(formatter, "plugin {plugin_id} declares an empty after entry")
+                write!(
+                    formatter,
+                    "plugin {plugin_id} declares an empty after entry"
+                )
             }
             Self::SelfReference {
                 plugin_id,
@@ -251,10 +262,16 @@ pub fn validate_descriptor(
             descriptor.plugin_id.clone(),
         ));
     }
-    if !node_roles.iter().any(|role| role == &descriptor.node_selector.role_id) {
+    if !node_roles
+        .iter()
+        .any(|role| role == &descriptor.node_selector.role_id)
+    {
         return Err(ContractError::UnknownRole(
             descriptor.node_selector.role_id.clone(),
         ));
+    }
+    if descriptor.node_selector.node_id.trim().is_empty() {
+        return Err(ContractError::MissingIdentity("node_id".to_string()));
     }
     for resource in descriptor.reads.iter().chain(descriptor.writes.iter()) {
         if resources.axis_of(resource).is_none() {
@@ -273,10 +290,7 @@ pub fn validate_descriptor(
                 });
             }
             PluginEffect::ControlOnly => {
-                if !matches!(
-                    axis,
-                    ResourceAxis::Control | ResourceAxis::Information
-                ) {
+                if !matches!(axis, ResourceAxis::Control | ResourceAxis::Information) {
                     return Err(ContractError::ControlWritesNormalData {
                         plugin_id: descriptor.plugin_id.clone(),
                         resource_id: resource.clone(),
@@ -322,9 +336,7 @@ pub fn validate_descriptor(
         .chain(descriptor.inject.iter())
     {
         if service.trim().is_empty() {
-            return Err(ContractError::EmptyService(
-                descriptor.plugin_id.clone(),
-            ));
+            return Err(ContractError::EmptyService(descriptor.plugin_id.clone()));
         }
         if services.iter().any(|existing| existing == &service) {
             return Err(ContractError::DuplicateService(
@@ -382,7 +394,10 @@ mod tests {
     use super::*;
 
     fn roles() -> Vec<String> {
-        vec!["request_chat_process".to_string(), "request_inbound".to_string()]
+        vec![
+            "request_chat_process".to_string(),
+            "request_inbound".to_string(),
+        ]
     }
 
     fn registry() -> ResourceRegistry {
@@ -425,6 +440,8 @@ mod tests {
             selection_group: None,
             node_selector: NodeSelector {
                 role_id: "request_chat_process".to_string(),
+                node_id: "V4HubReqChatProcess04Governed".to_string(),
+                position: 4,
             },
             services_provided: vec![],
             inject: vec![],
@@ -569,10 +586,7 @@ mod tests {
     #[test]
     fn duplicate_service_ids_are_rejected() {
         let mut descriptor = base_descriptor();
-        descriptor.services_provided = vec![
-            "nodeControl".to_string(),
-            "nodeControl".to_string(),
-        ];
+        descriptor.services_provided = vec!["nodeControl".to_string(), "nodeControl".to_string()];
         assert!(matches!(
             validate_descriptor(&descriptor, &roles(), &registry()),
             Err(ContractError::DuplicateService(_))

@@ -687,6 +687,17 @@
       "status": "contract_bound"
     },
     {
+      "resource_id": "v4.plugin.standard_library",
+      "owner": "contract:v4-plugin-library",
+      "truth_store": "contracts/plugin-library.contract.json",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "register"
+      ],
+      "status": "contract_bound"
+    },
+    {
       "resource_id": "v4.build.link_surface",
       "owner": "routecodex-v4-build-link",
       "truth_store": "active/lib/**",
