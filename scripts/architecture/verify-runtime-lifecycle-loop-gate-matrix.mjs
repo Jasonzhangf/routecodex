@@ -70,11 +70,10 @@ for (const rowId of rowIds) {
 }
 
 requireIncludes('release_install_sync row', sectionFor(matrix, 'release_install_sync'), [
-  'npm run verify:function-map-build-wiring',
+  'npm run verify:v3-build-admission-lockstep',
   'ROUTECODEX_INSTALL_VERIFY_PORT=<port>',
   'npm run install:release',
-  'routecodex --version',
-  'rcc --version',
+  'npm --prefix v3 run pack:npm',
   '/health.version === package.json.version',
   'no repo path leaks',
   'no symlinked `rcc-llmswitch-core`',
