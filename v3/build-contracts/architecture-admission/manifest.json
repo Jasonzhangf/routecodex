@@ -54,7 +54,7 @@
     {
       "output_path": "repo/docs/architecture/function-map.yml",
       "source_path": "docs/architecture/function-map.yml",
-      "source_commit": "13833b7e538e3079719f19480fca0c46c3ca57b5",
+      "source_commit": "aba54a19efc960da961e213e01aa6252de36da60",
       "sha256": "9a483c5ac550f94d2fc9e1cb291ef3a2c7873d6e5e04f375bf6251cd80c68bd8"
     },
     {
@@ -648,7 +648,7 @@
     {
       "output_path": "repo/docs/architecture/repository-filesystem-module-registry.yml",
       "source_path": "docs/architecture/repository-filesystem-module-registry.yml",
-      "source_commit": "9a2505e8f775ee27fad48a09b886fb5bb3effe3a",
+      "source_commit": "aba54a19efc960da961e213e01aa6252de36da60",
       "sha256": "b7e0a86096974d51d3d619e83530fb4bb46dc59e72b5a8583911e5308b08e678"
     },
     {
@@ -2632,5 +2632,5 @@
       "sha256": "2ada8d17e5cc0cb53ff0dfa9acfbeedf10eb4e35f7db239fb43ef88aa7478ea6"
     }
   ],
-  "manifest_digest": "98317e4db1edaf00002e2fd32f1dda713eef9cf006848d65bfd93749dad3e2fa"
+  "manifest_digest": "dcc63cd574787f35b0ff1f68da1f8b9f0ffad43e9479bd6a4cf15935bed307ab"
 }
