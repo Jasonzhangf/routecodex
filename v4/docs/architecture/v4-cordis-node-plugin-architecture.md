@@ -186,6 +186,12 @@ CordisBoundNodeHost.beginExecution
   -> NodeContainer::enter_execution
   -> NodeExecutionGuard drop on release
 
+CordisBoundNodeHost.executeNode
+  -> verify real Cordis plugin fibers are mounted and FiberState.ACTIVE
+  -> plan hash equals host frozen NodePluginPlan.hash
+  -> NodeContainer.execute_with_plan_hash(plan_hash, typed NodeExecutionInput, BuiltinHandleRegistry)
+  -> typed NodeExecutionOutput(data, control, diagnostics)
+
 CordisBoundNodeHost.drain
   -> NodeContainer::drain (measured in_flight must be 0)
 
@@ -205,6 +211,19 @@ loaded_plan_hash == plan.hash` 四值绑定；任一漂移在 Rust declaration �
 MetadataCenter 或 product Error01-06 状态。该管理通道没有 request/session/target scope，
 因此不得伪造 scope 接入 `v4.control.error_chain`。JS port 只暴露逐 operation 的封闭方法；
 Rust `HostRequest` 按 operation schema 拒绝未知字段，禁止把未声明字段静默丢弃后继续执行生命周期。
+
+ExecuteNode 是与 lifecycle 并列的 typed line op：仅 ExecuteNode 的 success 响应携带
+`data` / `control` / `diagnostics` 三个独立 typed field，lifecycle success 永远不投影
+`output`；对应失败走 `v4.node_container.execution_failure` typed fact，错误码集合为
+`plan_hash_mismatch` / `invalid_state` / `unregistered_handle` / `handle_error` /
+`effect_violation` / `bridge_error` / `protocol_error`。JS port `#settle` 按 request_id
+对应 pending op 选择 `decodeLifecycleResponse`（无 `output`）或 `decodeExecutionResponse`
+（带 typed output），两条 schema 互不耦合，防止 lifecycle success 误携带 execution output。
+
+M3 真实 Cordis -> Rust 执行桥阶段只搭载 keyless built-in typed handles
+（`v4.test.control` / `v4.test.echo` / `v4.test.observe`）作为 plan/hash 绑定与失败
+路径的最小切片；任何真实 plugin id 都将因 `unregistered_handle` 立刻失败。生产 Cordis
+plugin-handle 注册必须在 M5 标准插件库阶段补齐后再启用真实 plan 执行。
 
 ## NodePlugin 统一合同
 

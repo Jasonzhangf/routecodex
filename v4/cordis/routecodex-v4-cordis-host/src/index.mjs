@@ -116,11 +116,71 @@ function validateExecutionInput(value) {
   }
 }
 
+function decodeExecutionResponse(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CordisHostError('binding_protocol', 'execution response must be an object');
+  }
+  const failureKeys = new Set([
+    'ok',
+    'request_id',
+    'node_id',
+    'state',
+    'in_flight',
+    'failure',
+  ]);
+  const successKeys = new Set(['ok', 'request_id', 'state', 'in_flight', 'output']);
+  if (value.ok !== true && value.ok !== false) {
+    throw new CordisHostError('binding_protocol', 'execution response ok must be boolean');
+  }
+  const allowedKeys = value.ok === true ? successKeys : failureKeys;
+  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
+  if (unknown) {
+    throw new CordisHostError('binding_protocol', `unknown execution response field ${unknown}`);
+  }
+  if (typeof value.request_id !== 'string' || value.request_id.length === 0) {
+    throw new CordisHostError('binding_protocol', 'execution response request_id is required');
+  }
+  if (value.ok === true) {
+    if (value.output === undefined) {
+      throw new CordisHostError('binding_protocol', 'execution response requires typed output');
+    }
+    decodeExecutionOutput(value.output);
+  } else {
+    const failure = value.failure;
+    if (!failure || typeof failure !== 'object' || Array.isArray(failure)) {
+      throw new CordisHostError('binding_protocol', 'failed execution response requires failure fact');
+    }
+    if (failure.resource_id !== 'v4.node_container.execution_failure') {
+      throw new CordisHostError('binding_protocol', 'execution failure resource id is invalid');
+    }
+    if (
+      failure.operation !== EXECUTION_OPERATION
+      || !EXECUTION_FAILURE_CODES.has(failure.code)
+    ) {
+      throw new CordisHostError('binding_protocol', 'execution failure fact is invalid');
+    }
+    if (
+      failure.request_id !== value.request_id
+      || typeof failure.message !== 'string'
+      || failure.message.length === 0
+      || (failure.node_id !== undefined && (
+        typeof failure.node_id !== 'string' || failure.node_id.length === 0
+      ))
+    ) {
+      throw new CordisHostError('binding_protocol', 'execution failure fact is invalid');
+    }
+  }
+  return value;
+}
+
 function decodeLifecycleResponse(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new CordisHostError('binding_protocol', 'lifecycle response must be an object');
   }
-  const successKeys = new Set(['ok', 'request_id', 'state', 'in_flight', 'output']);
+  // Lifecycle success responses carry only typed lifecycle status; the typed
+  // NodeExecutionOutput is reserved for the execute_node port surface, which
+  // decodes the execution-specific schema in its own path.
+  const successKeys = new Set(['ok', 'request_id', 'state', 'in_flight']);
   const failureKeys = new Set([...successKeys, 'failure']);
   const allowedKeys = value.ok === true ? successKeys : failureKeys;
   if (value.ok !== true && value.ok !== false) {
@@ -373,12 +433,11 @@ export class RustNodeContainerPort {
       throw new CordisHostError('binding_protocol', 'execute_node requires a sha256 plan hash');
     }
     validateExecutionInput(input);
-    return this.#request({ op: 'execute_node', plan_hash: planHash, input }).then((response) => {
-      if (response.output === undefined) {
-        throw new CordisHostError('binding_protocol', 'execute_node response requires typed output');
-      }
-      return response;
-    });
+    // Response decoding happens per-op in #settle: lifecycle responses run
+    // through decodeLifecycleResponse (no `output`), execute_node runs
+    // through decodeExecutionResponse (typed output). Re-decode here would
+    // double-decode and risk schema drift.
+    return this.#request({ op: 'execute_node', plan_hash: planHash, input });
   }
 
   status(...fields) {
@@ -391,8 +450,9 @@ export class RustNodeContainerPort {
       throw new CordisHostError('binding_closed', 'Rust NodeContainer binding is closed');
     }
     const requestId = `host-${this.#nextRequestId++}`;
+    const op = typeof message?.op === 'string' ? message.op : 'unknown';
     const response = new Promise((resolve, reject) => {
-      this.#pending.set(requestId, { resolve, reject });
+      this.#pending.set(requestId, { resolve, reject, op });
     });
     this.#child.stdin.write(
       `${JSON.stringify({ ...message, request_id: requestId })}\n`,
@@ -433,17 +493,31 @@ export class RustNodeContainerPort {
   }
 
   #settle(line) {
-    let value;
+    let parsed;
+    let requestId = null;
+    let pending = null;
     try {
-      value = decodeLifecycleResponse(JSON.parse(line));
+      parsed = JSON.parse(line);
+      requestId = typeof parsed?.request_id === 'string' ? parsed.request_id : null;
+      pending = requestId ? this.#pending.get(requestId) : undefined;
+      if (!pending) {
+        this.#failProtocol('lifecycle response has no matching pending request_id');
+        return;
+      }
     } catch (error) {
       this.#failProtocol(error.message);
       return;
     }
-    const requestId = value?.request_id;
-    const pending = typeof requestId === 'string' ? this.#pending.get(requestId) : undefined;
-    if (!pending) {
-      this.#failProtocol('lifecycle response has no matching pending request_id');
+    if (!pending) return;
+    let value;
+    try {
+      if (pending.op === 'execute_node') {
+        value = decodeExecutionResponse(parsed);
+      } else {
+        value = decodeLifecycleResponse(parsed);
+      }
+    } catch (error) {
+      this.#failProtocol(error.message);
       return;
     }
     this.#pending.delete(requestId);

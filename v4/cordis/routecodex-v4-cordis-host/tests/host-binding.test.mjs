@@ -499,3 +499,15 @@ test('JS execution response decoder rejects missing output', async (t) => {
     (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
   );
 });
+
+test('lifecycle success response must not carry execution output', async (t) => {
+  const port = new RustNodeContainerPort({
+    binaryPath: process.execPath,
+    binaryArgs: [unsolicitedResponseBinary, 'lifecycle-with-output'],
+  });
+  t.after(() => port.close());
+  await assert.rejects(
+    withTimeout(port.status()),
+    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+  );
+});

@@ -318,7 +318,6 @@ struct HostBindingRuntime {
     container: Option<NodeContainer>,
     guards: Vec<NodeExecutionGuard>,
     registry: BuiltinHandleRegistry,
-    last_output: Option<NodeExecutionOutput>,
 }
 
 impl Default for HostBindingRuntime {
@@ -327,7 +326,6 @@ impl Default for HostBindingRuntime {
             container: None,
             guards: Vec::new(),
             registry: BuiltinHandleRegistry::new(),
-            last_output: None,
         }
     }
 }
@@ -341,7 +339,11 @@ impl HostBindingRuntime {
                 .as_ref()
                 .map(|container| container.node_id().to_string())
         });
-        let result: Result<(), NodeContainerError> = (|| match request {
+        // Execution and lifecycle are intentionally split: ExecuteNode is the
+        // only op whose success response carries a typed NodeExecutionOutput;
+        // every other lifecycle success must NOT project an output so the
+        // JS decoder's per-operation schema stays the only transport truth.
+        let result: Result<Option<NodeExecutionOutput>, NodeContainerError> = (|| match request {
             HostRequest::Declare {
                 node_id,
                 plan,
@@ -355,40 +357,59 @@ impl HostBindingRuntime {
                 } else {
                     NodeContainer::declare(node_id, plan, bindings.into()).map(|container| {
                         self.container = Some(container);
-                    })
+                    })?;
+                    Ok(None)
                 }
             }
-            HostRequest::ContextCreated { .. } => self.container_mut()?.context_created(),
-            HostRequest::PluginsMounted { .. } => self.container_mut()?.plugins_mounted(),
-            HostRequest::Publish { .. } => self.container_mut()?.publish(),
+            HostRequest::ContextCreated { .. } => {
+                self.container_mut()?.context_created()?;
+                Ok(None)
+            }
+            HostRequest::PluginsMounted { .. } => {
+                self.container_mut()?.plugins_mounted()?;
+                Ok(None)
+            }
+            HostRequest::Publish { .. } => {
+                self.container_mut()?.publish()?;
+                Ok(None)
+            }
             HostRequest::EnterExecution { .. } => {
                 let guard = self.container_ref()?.enter_execution()?;
                 self.guards.push(guard);
-                Ok(())
+                Ok(None)
             }
             HostRequest::ExitExecution { .. } => {
                 let guard = self.guards.pop().ok_or_else(|| {
                     NodeContainerError::HostLifecycle("no in-flight execution to exit".to_string())
                 })?;
                 drop(guard);
-                Ok(())
+                Ok(None)
             }
-            HostRequest::Drain { .. } => self.container_mut()?.drain(),
-            HostRequest::Fail { .. } => self.container_mut()?.fail(),
-            HostRequest::Dispose { .. } => self.container_mut()?.dispose(),
+            HostRequest::Drain { .. } => {
+                self.container_mut()?.drain()?;
+                Ok(None)
+            }
+            HostRequest::Fail { .. } => {
+                self.container_mut()?.fail()?;
+                Ok(None)
+            }
+            HostRequest::Dispose { .. } => {
+                self.container_mut()?.dispose()?;
+                Ok(None)
+            }
             HostRequest::ExecuteNode { plan_hash, input, .. } => {
                 let container = self.container_ref()?;
-                let output = container.execute_with_plan_hash(&plan_hash, input, &self.registry)?;
-                self.last_output = Some(output);
-                Ok(())
+                let output = container
+                    .execute_with_plan_hash(&plan_hash, input, &self.registry)
+                    .map(Some)?;
+                Ok(output)
             }
-            HostRequest::Status { .. } => self.container_ref().map(|_| ()),
+            HostRequest::Status { .. } => {
+                self.container_ref().map(|_| None)
+            }
         })();
         match result {
-            Ok(()) => {
-                let output = self.last_output.take();
-                success(request_id, output, self.container.as_ref())
-            }
+            Ok(output) => success(request_id, output, self.container.as_ref()),
             Err(error) => {
                 let failure = if matches!(operation, LifecycleOperation::ExecuteNode) {
                     HostFailureFact::Execution(ExecutionFailureFact::from_error(

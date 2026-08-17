@@ -28,6 +28,16 @@ lines.once('line', () => {
     })}\n`);
     return;
   }
+  if (failureMode === 'lifecycle-with-output') {
+    process.stdout.write(`${JSON.stringify({
+      ok: true,
+      request_id: 'host-1',
+      state: 'accepting',
+      in_flight: 0,
+      output: { data: {}, control: {}, diagnostics: [] },
+    })}\n`);
+    return;
+  }
   const failure = failureMode === 'malformed-failure'
     ? {
         resource_id: 'v4.node_container.lifecycle_failure',
