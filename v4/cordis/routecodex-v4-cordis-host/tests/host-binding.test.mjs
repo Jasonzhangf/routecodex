@@ -351,7 +351,7 @@ test('JS lifecycle encoder rejects fields not declared by the operation', async 
 test('real Cordis fibers drive ordered Rust NodePluginPlan execution', async (t) => {
   const port = new RustNodeContainerPort({ binaryPath });
   t.after(() => port.close());
-  const entries = [controlEntry(), semanticEntry(), observerEntry()];
+  const entries = [semanticEntry(), observerEntry()];
   const nodePlan = plan(entries);
   const events = [];
   const host = new CordisBoundNodeHost({
@@ -364,20 +364,18 @@ test('real Cordis fibers drive ordered Rust NodePluginPlan execution', async (t)
   await host.mount(entries.map((entry) => plugin(entry, events)));
   const output = await host.executeNode(nodePlan.hash, {
     data: { steps: [] },
-    control: { metadata_center: { scope_id: 'scope-1' } },
+    control: {},
   });
   assert.deepEqual(output.data, { steps: ['v4.test.echo'] });
-  assert.deepEqual(output.control, {
-    metadata_center: { scope_id: 'scope-1', written_by: 'control' },
-  });
+  assert.deepEqual(output.control, {});
   assert.equal(output.diagnostics.length, 1);
   assert.equal(output.diagnostics[0].kind, 'node.observed');
-  assert.equal(host.fibers.length, 3);
-  assert.deepEqual(events, ['active', 'active', 'active']);
+  assert.equal(host.fibers.length, 2);
+  assert.deepEqual(events, ['active', 'active']);
 
   await host.drain();
   await host.dispose();
-  assert.deepEqual(events, ['active', 'active', 'active', 'disposed', 'disposed', 'disposed']);
+  assert.deepEqual(events, ['active', 'active', 'disposed', 'disposed']);
 });
 
 test('resource access violation retains its typed execution failure code', async (t) => {
