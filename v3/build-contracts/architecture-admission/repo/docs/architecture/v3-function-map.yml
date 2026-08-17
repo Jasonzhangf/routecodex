@@ -4380,7 +4380,7 @@ features:
   - v3-install-01
   - v3-install-02
   - v3-install-03
-  runtime_status: direct_binary_install_live_verified_0_90_4127
+  runtime_status: direct_binary_install_live_verified_0_90_4574
 - feature_id: v3.route_classifier_local_owner
   status: source_controlled_runtime_boundary_verified
   change_risk: critical

@@ -3731,6 +3731,9 @@ features:
   completion_rule:
     source: V3-local isolation, admission, positive/red suites, architecture CI,
       workspace tests, clippy, and release build pass from the canonical V3 root.
-    runtime: Pending until global installation, exactly one aggregate restart,
-      all-listener health, Direct/Relay JSON/SSE old-sample replay, log audit, and
-      post-live DSH Review PASS.
+    runtime: global install live-verified at rccv3 0.90.4574; v3/dist/bin/rccv3
+      and ~/.local/bin/rccv3 SHA256 fd2de13f7fed0588c5aaa0ea96a461bee1f6f103ae22ba7f2e8a435da7df7788,
+      exactly one aggregate restart (instance v3-aed76aa41c519c15962a), all five
+      configured listeners HTTP 200 build_version=0.90.4574, Direct Responses
+      JSON/SSE and Chat JSON/Anthropic Relay JSON markers replay, log audit clean,
+      and post-live DSH Review PASS.
