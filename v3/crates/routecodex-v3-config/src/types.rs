@@ -477,7 +477,7 @@ pub struct V3ServerAuthoringConfig {
     pub bind: String,
     pub port: u16,
     pub routing_group: String,
-    #[serde(default = "default_responses_endpoint")]
+#[serde(default = "default_all_entry_protocols")]
     pub endpoints: Vec<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
@@ -1303,6 +1303,11 @@ fn default_hub_v1_skeleton() -> String {
     "hub_v1".to_string()
 }
 
-fn default_responses_endpoint() -> Vec<String> {
-    vec!["responses".to_string()]
+fn default_all_entry_protocols() -> Vec<String> {
+    vec![
+        "responses".to_string(),
+        "anthropic".to_string(),
+        "gemini".to_string(),
+        "openai_chat".to_string(),
+    ]
 }

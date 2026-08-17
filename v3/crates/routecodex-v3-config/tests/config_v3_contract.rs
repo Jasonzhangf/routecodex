@@ -337,6 +337,11 @@ targets = [
         .expect("explicit web-search execution modes must compile");
 
     assert_eq!(
+        manifest.servers["test"].endpoints,
+        ["responses", "anthropic", "gemini", "openai_chat"]
+    );
+
+    assert_eq!(
         manifest.providers["native"].models["gpt-native"]
             .web_search_execution_mode
             .as_str(),
