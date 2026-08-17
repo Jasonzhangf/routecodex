@@ -19,6 +19,97 @@ const nodeServiceLabels = (services) => [
   ...services,
 ];
 
+const NODE_CONTAINER_STATES = new Set([
+  'declared',
+  'context_created',
+  'plugins_mounted',
+  'accepting',
+  'draining',
+  'disposed',
+  'failed',
+]);
+
+const LIFECYCLE_OPERATIONS = new Set([
+  'protocol_decode',
+  'declare',
+  'context_created',
+  'plugins_mounted',
+  'publish',
+  'enter_execution',
+  'exit_execution',
+  'drain',
+  'fail',
+  'dispose',
+  'status',
+]);
+
+const LIFECYCLE_FAILURE_CODES = new Set([
+  'protocol_error',
+  'plan_hash_mismatch',
+  'binding_mismatch',
+  'in_flight',
+  'invalid_state',
+  'host_lifecycle',
+  'bridge_error',
+]);
+
+function decodeLifecycleResponse(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CordisHostError('binding_protocol', 'lifecycle response must be an object');
+  }
+  const successKeys = new Set(['ok', 'request_id', 'state', 'in_flight']);
+  const failureKeys = new Set([...successKeys, 'failure']);
+  const allowedKeys = value.ok === true ? successKeys : failureKeys;
+  if (value.ok !== true && value.ok !== false) {
+    throw new CordisHostError('binding_protocol', 'lifecycle response ok must be boolean');
+  }
+  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
+  if (unknown) {
+    throw new CordisHostError('binding_protocol', `unknown lifecycle response field ${unknown}`);
+  }
+  if (typeof value.request_id !== 'string' || value.request_id.length === 0) {
+    throw new CordisHostError('binding_protocol', 'lifecycle response request_id is required');
+  }
+  if (value.state !== undefined && !NODE_CONTAINER_STATES.has(value.state)) {
+    throw new CordisHostError('binding_protocol', 'lifecycle response state is invalid');
+  }
+  if (value.in_flight !== undefined && (!Number.isSafeInteger(value.in_flight) || value.in_flight < 0)) {
+    throw new CordisHostError('binding_protocol', 'lifecycle response in_flight is invalid');
+  }
+  if (value.ok === false) {
+    const failure = value.failure;
+    if (!failure || typeof failure !== 'object' || Array.isArray(failure)) {
+      throw new CordisHostError('binding_protocol', 'failed lifecycle response requires failure fact');
+    }
+    const allowedFailureKeys = new Set([
+      'resource_id',
+      'request_id',
+      'node_id',
+      'operation',
+      'code',
+      'message',
+    ]);
+    const unknownFailure = Object.keys(failure).find((key) => !allowedFailureKeys.has(key));
+    if (unknownFailure) {
+      throw new CordisHostError('binding_protocol', `unknown lifecycle failure field ${unknownFailure}`);
+    }
+    if (
+      failure.resource_id !== 'v4.node_container.lifecycle_failure'
+      || failure.request_id !== value.request_id
+      || !LIFECYCLE_OPERATIONS.has(failure.operation)
+      || !LIFECYCLE_FAILURE_CODES.has(failure.code)
+      || typeof failure.message !== 'string'
+      || failure.message.length === 0
+      || (failure.node_id !== undefined && (
+        typeof failure.node_id !== 'string' || failure.node_id.length === 0
+      ))
+    ) {
+      throw new CordisHostError('binding_protocol', 'lifecycle failure fact is invalid');
+    }
+  }
+  return value;
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) {
     return `[${value.map(canonicalJson).join(',')}]`;
@@ -39,10 +130,11 @@ export function computeNodePluginPlanHash(plan) {
 }
 
 export class CordisHostError extends Error {
-  constructor(code, message) {
+  constructor(code, message, failure = undefined) {
     super(message);
     this.name = 'CordisHostError';
     this.code = code;
+    this.failure = failure;
   }
 }
 
@@ -133,12 +225,16 @@ export class RustNodeContainerPort {
   #child;
   #pending = new Map();
   #nextRequestId = 1;
+  #protocolError;
 
-  constructor({ binaryPath }) {
+  constructor({ binaryPath, binaryArgs = [] }) {
     if (!binaryPath) {
       throw new CordisHostError('invalid_binding', 'binaryPath is required');
     }
-    this.#child = spawn(binaryPath, [], { stdio: ['pipe', 'pipe', 'pipe'] });
+    if (!Array.isArray(binaryArgs) || binaryArgs.some((value) => typeof value !== 'string')) {
+      throw new CordisHostError('invalid_binding', 'binaryArgs must be an array of strings');
+    }
+    this.#child = spawn(binaryPath, binaryArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
     const lines = readline.createInterface({ input: this.#child.stdout });
     lines.on('line', (line) => this.#settle(line));
     this.#child.once('error', (cause) => {
@@ -194,6 +290,7 @@ export class RustNodeContainerPort {
   }
 
   async #request(message) {
+    if (this.#protocolError) throw this.#protocolError;
     if (this.#child.exitCode !== null || !this.#child.stdin.writable) {
       throw new CordisHostError('binding_closed', 'Rust NodeContainer binding is closed');
     }
@@ -213,7 +310,7 @@ export class RustNodeContainerPort {
     );
     const value = await response;
     if (!value.ok) {
-      throw new CordisHostError(value.code ?? 'binding_error', value.error ?? 'binding failed');
+      throw new CordisHostError(value.failure.code, value.failure.message, value.failure);
     }
     return value;
   }
@@ -242,15 +339,27 @@ export class RustNodeContainerPort {
   #settle(line) {
     let value;
     try {
-      value = JSON.parse(line);
+      value = decodeLifecycleResponse(JSON.parse(line));
     } catch (error) {
-      this.#rejectAll(new CordisHostError('binding_protocol', error.message));
+      this.#failProtocol(error.message);
       return;
     }
-    const pending = this.#pending.get(value.request_id);
-    if (!pending) return;
-    this.#pending.delete(value.request_id);
+    const requestId = value?.request_id;
+    const pending = typeof requestId === 'string' ? this.#pending.get(requestId) : undefined;
+    if (!pending) {
+      this.#failProtocol('lifecycle response has no matching pending request_id');
+      return;
+    }
+    this.#pending.delete(requestId);
     pending.resolve(value);
+  }
+
+  #failProtocol(message) {
+    if (!this.#protocolError) {
+      this.#protocolError = new CordisHostError('binding_protocol', message);
+    }
+    this.#rejectAll(this.#protocolError);
+    if (this.#child.stdin.writable) this.#child.stdin.end();
   }
 
   #rejectAll(error) {

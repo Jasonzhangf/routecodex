@@ -698,6 +698,33 @@
     },
     {
       "from": "routecodex-v4-node-container",
+      "to": "routecodex-v4-cordis-host",
+      "owner": "routecodex-v4-node-container::HostBindingRuntime",
+      "edge_type": "lifecycle_failure_projection",
+      "caller_feature_id": "v4.node_container.lifecycle_dispatch",
+      "callee_feature_id": "v4.cordis.host_binding",
+      "caller_path": "crates/routecodex-v4-node-container/src/bin/host_binding.rs",
+      "callee_path": "cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "caller_symbols": [
+        "HostBindingRuntime::handle",
+        "LifecycleFailureFact"
+      ],
+      "callee_symbols": [
+        "RustNodeContainerPort",
+        "CordisHostError"
+      ],
+      "symbols": [
+        "HostBindingRuntime",
+        "LifecycleFailureFact",
+        "RustNodeContainerPort",
+        "CordisHostError"
+      ],
+      "resource_id": "v4.node_container.lifecycle_failure",
+      "path": "crates/routecodex-v4-node-container/src/bin/host_binding.rs,cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-node-container",
       "to": "routecodex-v4-cordis-bridge",
       "owner": "routecodex-v4-node-container::NodeContainer",
       "edge_type": "typed_plan_execution",

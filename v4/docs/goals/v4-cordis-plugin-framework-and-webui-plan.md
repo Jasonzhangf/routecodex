@@ -236,6 +236,9 @@ plugins-mounted/publish/enter-execution/drain/dispose 状态；Rust 原子计数
 in-flight、Accepting dispose 无副作用拒绝、mount 失败后的 failed->disposed 回收。
 业务插件执行 handle 仍在后续真实 Pipeline
 迁移中逐节点接入，不把生命周期 binding 扩张为通用 payload bridge。
+生命周期失败由 NodeContainer dispatch owner 记录为
+`v4.node_container.lifecycle_failure` typed fact，并经同一 lifecycle port 投影；该管理通道
+不具备 product request/session/target scope，因此不伪造 scope 接入 Error01-06。
 
 ### M4：Skeleton Runtime
 

@@ -15,6 +15,29 @@ import {
 
 const v4Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const binaryPath = path.join(v4Root, 'target/debug/routecodex-v4-node-container-host');
+const unsolicitedResponseBinary = path.join(
+  v4Root,
+  'cordis/routecodex-v4-cordis-host/tests/resources/unsolicited-response-host.mjs',
+);
+
+function withTimeout(promise, milliseconds = 200) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('lifecycle request did not settle')),
+      milliseconds,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 async function sendRawLifecycleRequest(request) {
   const child = spawn(binaryPath, [], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -83,7 +106,13 @@ test('real Cordis host drives the Rust NodeContainer lifecycle', async (t) => {
   assert.equal((await port.status()).in_flight, 1);
   await assert.rejects(
     host.drain(),
-    (error) => error instanceof CordisHostError && error.code === 'in_flight',
+    (error) => (
+      error instanceof CordisHostError
+      && error.code === 'in_flight'
+      && error.failure?.resource_id === 'v4.node_container.lifecycle_failure'
+      && error.failure?.operation === 'drain'
+      && error.failure?.node_id === nodePlan.node_id
+    ),
   );
   assert.equal((await port.status()).state, 'accepting');
 
@@ -183,6 +212,62 @@ test('Rust binding spawn failure rejects pending lifecycle requests', async () =
   await port.close();
 });
 
+test('unsolicited lifecycle response rejects pending requests and closes the port', async (t) => {
+  const port = new RustNodeContainerPort({
+    binaryPath: process.execPath,
+    binaryArgs: [unsolicitedResponseBinary],
+  });
+  t.after(() => port.close());
+  await assert.rejects(
+    withTimeout(port.status()),
+    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+  );
+  await assert.rejects(
+    port.status(),
+    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+  );
+});
+
+test('undeclared lifecycle response fields reject pending requests and close the port', async (t) => {
+  const port = new RustNodeContainerPort({
+    binaryPath: process.execPath,
+    binaryArgs: [unsolicitedResponseBinary, 'unknown-field'],
+  });
+  t.after(() => port.close());
+  await assert.rejects(
+    withTimeout(port.status()),
+    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+  );
+  await assert.rejects(
+    port.status(),
+    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+  );
+});
+
+test('JS lifecycle decoder rejects malformed lifecycle failure facts', async (t) => {
+  const port = new RustNodeContainerPort({
+    binaryPath: process.execPath,
+    binaryArgs: [unsolicitedResponseBinary, 'malformed-failure'],
+  });
+  t.after(() => port.close());
+  await assert.rejects(
+    withTimeout(port.status()),
+    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+  );
+});
+
+test('JS lifecycle decoder rejects failure facts outside the NodeContainer resource', async (t) => {
+  const port = new RustNodeContainerPort({
+    binaryPath: process.execPath,
+    binaryArgs: [unsolicitedResponseBinary, 'wrong-failure-resource'],
+  });
+  t.after(() => port.close());
+  await assert.rejects(
+    withTimeout(port.status()),
+    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+  );
+});
+
 test('Rust lifecycle decoder rejects undeclared metadata and business fields', async () => {
   const metadata = await sendRawLifecycleRequest({
     op: 'status',
@@ -191,7 +276,13 @@ test('Rust lifecycle decoder rejects undeclared metadata and business fields', a
   });
   assert.equal(metadata.ok, false);
   assert.equal(metadata.request_id, 'raw-metadata');
-  assert.equal(metadata.code, 'protocol_error');
+  assert.deepEqual(metadata.failure, {
+    resource_id: 'v4.node_container.lifecycle_failure',
+    request_id: 'raw-metadata',
+    operation: 'protocol_decode',
+    code: 'protocol_error',
+    message: metadata.failure.message,
+  });
 
   const businessPayload = await sendRawLifecycleRequest({
     op: 'status',
@@ -200,7 +291,8 @@ test('Rust lifecycle decoder rejects undeclared metadata and business fields', a
   });
   assert.equal(businessPayload.ok, false);
   assert.equal(businessPayload.request_id, 'raw-business-payload');
-  assert.equal(businessPayload.code, 'protocol_error');
+  assert.equal(businessPayload.failure.code, 'protocol_error');
+  assert.equal(businessPayload.failure.operation, 'protocol_decode');
 
   const nestedPlan = plan();
   nestedPlan.metadata = { route: 'forbidden' };
@@ -217,7 +309,8 @@ test('Rust lifecycle decoder rejects undeclared metadata and business fields', a
   });
   assert.equal(nestedMetadata.ok, false);
   assert.equal(nestedMetadata.request_id, 'raw-nested-metadata');
-  assert.equal(nestedMetadata.code, 'protocol_error');
+  assert.equal(nestedMetadata.failure.code, 'protocol_error');
+  assert.equal(nestedMetadata.failure.operation, 'protocol_decode');
 });
 
 test('JS lifecycle encoder rejects fields not declared by the operation', async (t) => {

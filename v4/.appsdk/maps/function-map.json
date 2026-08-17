@@ -608,6 +608,7 @@
       "entry_symbols": [
         "HostBindingRuntime::handle",
         "HostRequest",
+        "LifecycleFailureFact",
         "NodeContainer::declare",
         "NodeContainer::enter_execution",
         "NodeContainer::drain",
@@ -618,6 +619,7 @@
       ],
       "required_gates": [
         "v4_node_container_l2_regression",
+        "v4_cordis_host_l3_regression",
         "v4_parity_gate_node_container",
         "v4_parity_gate_node_container_red"
       ]

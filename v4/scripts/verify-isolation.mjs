@@ -245,6 +245,7 @@ function checkMainlineEdges(mainlinePath = path.join(v4Root, '.appsdk/maps/mainl
   allowedOwners.add('routecodex-v4-cordis-host::CordisNodeHost');
   allowedOwners.add('routecodex-v4-cordis-host::CordisBoundNodeHost');
   allowedOwners.add('routecodex-v4-node-container::NodeContainer');
+  allowedOwners.add('routecodex-v4-node-container::HostBindingRuntime');
   const pathExists = (candidate) => {
     const trimmed = candidate.trim();
     const concrete = trimmed.endsWith('/**') ? trimmed.slice(0, -3) : trimmed;
@@ -397,8 +398,9 @@ function checkDeclaredExecutedBinding(
     for (const match of command.matchAll(/test-consumer[^\n]*--consumer\s+([a-z0-9-]+)/g)) {
       declaredConsumers.add(match[1]);
     }
-    if (command.startsWith('node --test ')) {
-      declaredFunctionalTests.add(command);
+    const functionalTest = command.match(/(?:^|&&\s*)(node --test [^&]+)$/)?.[1]?.trim();
+    if (functionalTest) {
+      declaredFunctionalTests.add(functionalTest);
     }
     const consumer = command.match(/test-consumer[^\n]*--consumer\s+([a-z0-9-]+)/)?.[1];
     if (!consumer) continue;

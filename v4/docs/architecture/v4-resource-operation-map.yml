@@ -1852,6 +1852,39 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
+- resource_id: v4.node_container.lifecycle_failure
+  axis: control
+  verification_gate:
+  - v4_node_container_l2_regression
+  - v4_cordis_host_l3_regression
+  - v4_parity_gate_node_container
+  - v4_parity_gate_cordis_host
+  resource_kind: lifecycle_failure_fact
+  lifecycle: v4.plugin_management
+  owner_crate: routecodex-v4-node-container
+  owner_node: V4NodeContainer
+  owner_symbols:
+  - LifecycleFailureFact
+  identity:
+  - requestId
+  - nodeId
+  - operation
+  semantic_contract:
+    typed_fact_only: true
+    lifecycle_port_projection_only: true
+    product_error_chain_scope_fabrication: forbidden
+  allowed_writers:
+  - V4NodeContainer
+  allowed_readers:
+  - V4CordisNodeHost
+  forbidden_writers:
+  - V4AdminCommand
+  - V4ErrorChain
+  - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
 - resource_id: v4.node_container.plan_bindings
   axis: control
   verification_gate:
@@ -1977,6 +2010,12 @@ forbidden_direct_edges:
 - from: v4.control.error_chain
   to: v4.response.client_wire_payload
   reason: only V4Error06ClientProjected code/message may reach client
+- from: v4.node_container.lifecycle_failure
+  to: v4.request.provider_wire_payload
+  reason: lifecycle management failures are control-only facts
+- from: v4.node_container.lifecycle_failure
+  to: v4.response.client_wire_payload
+  reason: lifecycle management failures never enter product client payload
 - from: v4.control.record_ledger
   to: v4.request.provider_wire_payload
   reason: control records must never enter provider body

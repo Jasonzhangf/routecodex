@@ -48,6 +48,7 @@ enum HostRequest {
 #[derive(Debug, Deserialize)]
 struct HostRequestIdentity {
     request_id: Option<String>,
+    node_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,6 +92,28 @@ impl HostRequest {
             | Self::Status { request_id } => request_id,
         }
     }
+
+    fn operation(&self) -> LifecycleOperation {
+        match self {
+            Self::Declare { .. } => LifecycleOperation::Declare,
+            Self::ContextCreated { .. } => LifecycleOperation::ContextCreated,
+            Self::PluginsMounted { .. } => LifecycleOperation::PluginsMounted,
+            Self::Publish { .. } => LifecycleOperation::Publish,
+            Self::EnterExecution { .. } => LifecycleOperation::EnterExecution,
+            Self::ExitExecution { .. } => LifecycleOperation::ExitExecution,
+            Self::Drain { .. } => LifecycleOperation::Drain,
+            Self::Fail { .. } => LifecycleOperation::Fail,
+            Self::Dispose { .. } => LifecycleOperation::Dispose,
+            Self::Status { .. } => LifecycleOperation::Status,
+        }
+    }
+
+    fn node_id_hint(&self) -> Option<&str> {
+        match self {
+            Self::Declare { node_id, .. } => Some(node_id),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,9 +143,48 @@ struct HostResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     in_flight: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    code: Option<&'static str>,
+    failure: Option<LifecycleFailureFact>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum LifecycleOperation {
+    ProtocolDecode,
+    Declare,
+    ContextCreated,
+    PluginsMounted,
+    Publish,
+    EnterExecution,
+    ExitExecution,
+    Drain,
+    Fail,
+    Dispose,
+    Status,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum LifecycleFailureCode {
+    ProtocolError,
+    PlanHashMismatch,
+    BindingMismatch,
+    InFlight,
+    InvalidState,
+    HostLifecycle,
+    BridgeError,
+}
+
+/// Typed control-plane failure fact for the lifecycle port. This is distinct
+/// from the product request/response Error01-06 chain.
+#[derive(Debug, Clone, Serialize)]
+pub struct LifecycleFailureFact {
+    resource_id: &'static str,
+    request_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
+    node_id: Option<String>,
+    operation: LifecycleOperation,
+    code: LifecycleFailureCode,
+    message: String,
 }
 
 #[derive(Default)]
@@ -134,6 +196,12 @@ struct HostBindingRuntime {
 impl HostBindingRuntime {
     fn handle(&mut self, request: HostRequest) -> HostResponse {
         let request_id = request.request_id().to_string();
+        let operation = request.operation();
+        let node_id = request.node_id_hint().map(str::to_string).or_else(|| {
+            self.container
+                .as_ref()
+                .map(|container| container.node_id().to_string())
+        });
         let result: Result<(), NodeContainerError> = (|| match request {
             HostRequest::Declare {
                 node_id,
@@ -173,12 +241,11 @@ impl HostBindingRuntime {
         })();
         match result {
             Ok(()) => success(request_id, self.container.as_ref()),
-            Err(error) => failure(
-                request_id,
-                error_code(&error),
-                error.to_string(),
-                self.container.as_ref(),
-            ),
+            Err(error) => {
+                let failure =
+                    LifecycleFailureFact::from_error(request_id, node_id, operation, &error);
+                failure_response(failure, self.container.as_ref())
+            }
         }
     }
 
@@ -207,14 +274,40 @@ fn state_name(state: NodeContainerState) -> &'static str {
     }
 }
 
-fn error_code(error: &NodeContainerError) -> &'static str {
-    match error {
-        NodeContainerError::PlanHashMismatch => "plan_hash_mismatch",
-        NodeContainerError::BindingMismatch => "binding_mismatch",
-        NodeContainerError::InFlightExecutions(_) => "in_flight",
-        NodeContainerError::InvalidState { .. } => "invalid_state",
-        NodeContainerError::HostLifecycle(_) => "host_lifecycle",
-        NodeContainerError::Bridge(_) => "bridge_error",
+impl LifecycleFailureFact {
+    fn protocol(request_id: String, node_id: Option<String>, message: String) -> Self {
+        Self {
+            resource_id: "v4.node_container.lifecycle_failure",
+            request_id,
+            node_id,
+            operation: LifecycleOperation::ProtocolDecode,
+            code: LifecycleFailureCode::ProtocolError,
+            message,
+        }
+    }
+
+    fn from_error(
+        request_id: String,
+        node_id: Option<String>,
+        operation: LifecycleOperation,
+        error: &NodeContainerError,
+    ) -> Self {
+        let code = match error {
+            NodeContainerError::PlanHashMismatch => LifecycleFailureCode::PlanHashMismatch,
+            NodeContainerError::BindingMismatch => LifecycleFailureCode::BindingMismatch,
+            NodeContainerError::InFlightExecutions(_) => LifecycleFailureCode::InFlight,
+            NodeContainerError::InvalidState { .. } => LifecycleFailureCode::InvalidState,
+            NodeContainerError::HostLifecycle(_) => LifecycleFailureCode::HostLifecycle,
+            NodeContainerError::Bridge(_) => LifecycleFailureCode::BridgeError,
+        };
+        Self {
+            resource_id: "v4.node_container.lifecycle_failure",
+            request_id,
+            node_id,
+            operation,
+            code,
+            message: error.to_string(),
+        }
     }
 }
 
@@ -224,24 +317,20 @@ fn success(request_id: String, container: Option<&NodeContainer>) -> HostRespons
         request_id,
         state: container.map(|value| state_name(value.state())),
         in_flight: container.map(NodeContainer::in_flight),
-        code: None,
-        error: None,
+        failure: None,
     }
 }
 
-fn failure(
-    request_id: String,
-    code: &'static str,
-    error: String,
+fn failure_response(
+    failure: LifecycleFailureFact,
     container: Option<&NodeContainer>,
 ) -> HostResponse {
     HostResponse {
         ok: false,
-        request_id,
+        request_id: failure.request_id.clone(),
         state: container.map(|value| state_name(value.state())),
         in_flight: container.map(NodeContainer::in_flight),
-        code: Some(code),
-        error: Some(error),
+        failure: Some(failure),
     }
 }
 
@@ -260,18 +349,26 @@ fn main() -> io::Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-        let request_id = serde_json::from_str::<HostRequestIdentity>(&line)
-            .ok()
-            .and_then(|identity| identity.request_id)
+        let identity = serde_json::from_str::<HostRequestIdentity>(&line).ok();
+        let request_id = identity
+            .as_ref()
+            .and_then(|value| value.request_id.clone())
             .unwrap_or_else(|| "invalid-request".to_string());
+        let node_id = identity.and_then(|value| value.node_id);
         let response = match HostRequest::parse(&line) {
             Ok(request) => runtime.handle(request),
-            Err(error) => failure(
-                request_id,
-                "protocol_error",
-                error,
-                runtime.container.as_ref(),
-            ),
+            Err(error) => {
+                let failure = LifecycleFailureFact::protocol(
+                    request_id,
+                    runtime
+                        .container
+                        .as_ref()
+                        .map(|container| container.node_id().to_string())
+                        .or(node_id),
+                    error,
+                );
+                failure_response(failure, runtime.container.as_ref())
+            }
         };
         write_response(&mut stdout, &response)?;
     }

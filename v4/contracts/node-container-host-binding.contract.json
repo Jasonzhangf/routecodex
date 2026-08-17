@@ -21,7 +21,8 @@
   ],
   "graph_binding_rule": "the actual mounted Cordis plugin plan entries must equal the immutable NodePluginPlan entries; graph_hash, manifest_hash, loaded_plan_hash and plan.hash must be the same verified hash before Rust declaration",
   "in_flight_rule": "Rust NodeContainer exclusively owns the atomic in-flight count; the JS host consumes typed status without storing a second counter; drain rejects when the Rust count is non-zero",
-  "transport_rule": "the lifecycle port is a persistent line-delimited typed operation channel; the JS encoder exposes only declared lifecycle methods and the Rust decoder rejects every field outside that operation's schema; messages never carry business payload or metadata",
+  "transport_rule": "the lifecycle port is a persistent line-delimited typed operation channel; the JS encoder exposes only declared lifecycle methods and the Rust decoder rejects every field outside that operation's schema; messages carry only lifecycle status or v4.node_container.lifecycle_failure facts and never carry business payload, protocol metadata, MetadataCenter state or product Error01-06 state",
+  "failure_rule": "NodeContainer lifecycle failures are recorded by the lifecycle-dispatch owner as typed v4.node_container.lifecycle_failure facts and projected on the same lifecycle port; they do not enter v4.control.error_chain because this management channel has no product request/session/target scope and must not fabricate one",
   "forbidden": [
     "hard-coded inFlight=0",
     "binding pending edge",
@@ -38,6 +39,7 @@
     "Cordis graph/plan drift rejects before Rust declaration",
     "Cordis mount failure drives Rust candidate through failed to disposed",
     "Rust rejects metadata and business fields outside the selected lifecycle operation schema",
-    "JS rejects undeclared lifecycle fields before writing to the port"
+    "JS rejects undeclared lifecycle fields before writing to the port",
+    "lifecycle failure projection retains resource id, request id, node id, operation, typed code and message"
   ]
 }

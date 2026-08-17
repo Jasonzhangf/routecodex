@@ -1520,21 +1520,21 @@
         "allow_skipped": false,
         "command": {
           "args": [
-            "--test",
-            "cordis/routecodex-v4-cordis-host/tests/host.test.mjs",
-            "cordis/routecodex-v4-cordis-host/tests/host-binding.test.mjs"
+            "-c",
+            "cargo build --manifest-path Cargo.toml -p routecodex-v4-node-container --bin routecodex-v4-node-container-host --locked && node --test cordis/routecodex-v4-cordis-host/tests/host.test.mjs cordis/routecodex-v4-cordis-host/tests/host-binding.test.mjs"
           ],
-          "program": "node",
+          "program": "sh",
           "working_directory": "."
         },
         "input_paths": [
           "cordis/routecodex-v4-cordis-host/src/index.mjs",
           "cordis/routecodex-v4-cordis-host/tests/host.test.mjs",
           "cordis/routecodex-v4-cordis-host/tests/host-binding.test.mjs",
+          "cordis/routecodex-v4-cordis-host/tests/resources/**",
           "contracts/node-container.contract.json",
           "contracts/node-container-host-binding.contract.json"
         ],
-        "minimum_test_count": 8,
+        "minimum_test_count": 11,
         "ordinary_mode_after_freeze": "disabled",
         "reenable_on": [
           "source_change",

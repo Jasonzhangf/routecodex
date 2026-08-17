@@ -30,6 +30,8 @@ function validate(source, binding, tests) {
     || !binding.includes('#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]')
     || !binding.includes('serde_ignored::deserialize')
     || !binding.includes("use serde_json::value::RawValue;")
+    || !binding.includes('pub struct LifecycleFailureFact')
+    || !binding.includes('resource_id: "v4.node_container.lifecycle_failure"')
     || !binding.includes('EnterExecution')
     || !binding.includes('NodeContainer::declare')
     || !binding.includes('NodeContainerError::InFlightExecutions')
@@ -89,8 +91,19 @@ function runSelfTest() {
   } else {
     console.log(`[v4 node container red] nested unknown-field detector removed: FAIL as expected (${nestedProtocolFailures.length})`);
   }
+  const untypedFailureBinding = binding.replace(
+    'pub struct LifecycleFailureFact',
+    'struct StringFailureProjection',
+  );
+  const failureFactFailures = validate(baseline, untypedFailureBinding, tests);
+  if (failureFactFailures.length === 0) {
+    console.error('[v4 node container red] typed lifecycle failure removed: expected FAIL, got PASS');
+    missed += 1;
+  } else {
+    console.log(`[v4 node container red] typed lifecycle failure removed: FAIL as expected (${failureFactFailures.length})`);
+  }
   if (missed > 0) process.exit(1);
-  console.log('[v4 node container red] OK red self-test 6/6');
+  console.log('[v4 node container red] OK red self-test 7/7');
 }
 
 if (process.argv.includes('--red-self-test')) {

@@ -9,6 +9,7 @@ const bindingTestsPath = path.join(root, 'cordis/routecodex-v4-cordis-host/tests
 const bindingContractPath = path.join(root, 'contracts/node-container-host-binding.contract.json');
 const functionMapPath = path.join(root, '.appsdk/maps/function-map.json');
 const mainlinePath = path.join(root, '.appsdk/maps/mainline-call-map.json');
+const resourceMapPath = path.join(root, '.appsdk/maps/resource-map.json');
 const required = [
   'from \'cordis\'',
   'new Context()',
@@ -34,7 +35,7 @@ const forbidden = [
   'async request(op, fields = {})',
 ];
 
-function validate(source, tests, bindingTests, bindingContract, functionMap, mainline) {
+function validate(source, tests, bindingTests, bindingContract, functionMap, mainline, resourceMap) {
   const failures = required.filter((token) => !source.includes(token));
   if (forbidden.some((token) => source.includes(token))) {
     failures.push('Cordis host contains forbidden synthetic/control pattern');
@@ -52,8 +53,10 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     || !bindingTests.includes('Cordis mount failure fails and disposes the Rust candidate')
     || !bindingTests.includes('accepting-state disposal rejects before either lifecycle owner is mutated')
     || !bindingTests.includes('Rust binding spawn failure rejects pending lifecycle requests')
+    || !bindingTests.includes('unsolicited lifecycle response rejects pending requests and closes the port')
     || !bindingTests.includes('Rust lifecycle decoder rejects undeclared metadata and business fields')
     || !bindingTests.includes('JS lifecycle encoder rejects fields not declared by the operation')
+    || !bindingTests.includes("error.failure?.resource_id === 'v4.node_container.lifecycle_failure'")
     || !bindingTests.includes("error.code === 'in_flight'")
   ) {
     failures.push('joint Cordis/Rust lifecycle tests missing');
@@ -63,6 +66,7 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     || bindingContract.owner_feature_ids?.caller !== 'v4.cordis.host_binding'
     || bindingContract.owner_feature_ids?.callee !== 'v4.node_container.lifecycle_dispatch'
     || !bindingContract.required_tests?.includes('in-flight execution rejects drain and leaves state accepting')
+    || !bindingContract.failure_rule?.includes('v4.node_container.lifecycle_failure')
   ) {
     failures.push('host binding contract is missing or drifted');
   }
@@ -91,8 +95,25 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     || callee?.owner !== 'routecodex-v4-node-container'
     || callee.entry_paths?.length !== 1
     || callee.entry_paths[0] !== 'crates/routecodex-v4-node-container/src/bin/host_binding.rs'
+    || !callee.required_gates?.includes('v4_cordis_host_l3_regression')
   ) {
     failures.push('host binding caller/callee feature ownership is not split at the module edge');
+  }
+  const failureEdge = mainline.edges.find((entry) => (
+    entry.edge_type === 'lifecycle_failure_projection'
+    && entry.resource_id === 'v4.node_container.lifecycle_failure'
+  ));
+  const failureResource = resourceMap.resources.find(
+    (entry) => entry.resource_id === 'v4.node_container.lifecycle_failure',
+  );
+  if (
+    failureEdge?.from !== 'routecodex-v4-node-container'
+    || failureEdge?.to !== 'routecodex-v4-cordis-host'
+    || failureEdge?.owner !== 'routecodex-v4-node-container::HostBindingRuntime'
+    || failureResource?.owner !== 'routecodex-v4-node-container::LifecycleFailureFact'
+    || failureResource?.status !== 'active'
+  ) {
+    failures.push('typed lifecycle failure resource/edge is missing or owned outside NodeContainer');
   }
   return failures;
 }
@@ -104,6 +125,7 @@ function runSelfTest() {
   const bindingContract = JSON.parse(fs.readFileSync(bindingContractPath, 'utf8'));
   const functionMap = JSON.parse(fs.readFileSync(functionMapPath, 'utf8'));
   const mainline = JSON.parse(fs.readFileSync(mainlinePath, 'utf8'));
+  const resourceMap = JSON.parse(fs.readFileSync(resourceMapPath, 'utf8'));
   const cases = [
     ['real Cordis import removed', (candidate) => candidate.replace("from 'cordis'", "from 'fake-cordis'")],
     ['real Context removed', (candidate) => candidate.replace('new Context()', 'new FakeContext()')],
@@ -114,7 +136,9 @@ function runSelfTest() {
   ];
   let missed = 0;
   for (const [name, mutate] of cases) {
-    const failures = validate(mutate(source), tests, bindingTests, bindingContract, functionMap, mainline);
+    const failures = validate(
+      mutate(source), tests, bindingTests, bindingContract, functionMap, mainline, resourceMap,
+    );
     if (failures.length === 0) {
       console.error(`[v4 cordis host red] ${name}: expected FAIL, got PASS`);
       missed += 1;
@@ -129,7 +153,9 @@ function runSelfTest() {
     ['generic lifecycle field surface restored', source.replace('async #request(message)', 'async request(op, fields = {})')],
   ];
   for (const [name, candidate] of bindingCases) {
-    const failures = validate(candidate, tests, bindingTests, bindingContract, functionMap, mainline);
+    const failures = validate(
+      candidate, tests, bindingTests, bindingContract, functionMap, mainline, resourceMap,
+    );
     if (failures.length === 0) {
       console.error(`[v4 cordis host red] ${name}: expected FAIL, got PASS`);
       missed += 1;
@@ -153,6 +179,7 @@ const failures = validate(
   JSON.parse(fs.readFileSync(bindingContractPath, 'utf8')),
   JSON.parse(fs.readFileSync(functionMapPath, 'utf8')),
   JSON.parse(fs.readFileSync(mainlinePath, 'utf8')),
+  JSON.parse(fs.readFileSync(resourceMapPath, 'utf8')),
 );
 if (failures.length) {
   console.error(failures.join('\n'));
