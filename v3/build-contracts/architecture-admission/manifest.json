@@ -774,7 +774,7 @@
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "9c2c0046cc942beb7ceaf94849f3590ee5ce4825",
+      "source_commit": "ad77aa0afc9922455284e2a9e7a133f6b38dce92",
       "sha256": "72f248c96c30aac0be5566c991453b7ffd0bf0477a1a8dda5402ff7dce1e4f1a"
     },
     {
@@ -2626,5 +2626,5 @@
       "sha256": "077c84512cbdacb0ce9778d3a5487585a0a77d959c8882caa806ba717151b195"
     }
   ],
-  "manifest_digest": "0611567a303fde59b3a6af6c2e67e5dbf14e27ab678128ec6abb6aadafde864a"
+  "manifest_digest": "e2a3b028a2578120d7129f8b043c5cb199d243cdccd0a906f7799c627b885689"
 }
