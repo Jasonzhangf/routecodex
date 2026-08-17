@@ -54,8 +54,8 @@
     {
       "output_path": "repo/docs/architecture/function-map.yml",
       "source_path": "docs/architecture/function-map.yml",
-      "source_commit": "aba54a19efc960da961e213e01aa6252de36da60",
-      "sha256": "9a483c5ac550f94d2fc9e1cb291ef3a2c7873d6e5e04f375bf6251cd80c68bd8"
+      "source_commit": "05d0ab5949fb0aaf62093f9fc9ae01ec4063b610",
+      "sha256": "fa678888debf450dcf62a6d0f3e22f34a7bde229ea895a22232b0313328fdf37"
     },
     {
       "output_path": "repo/docs/architecture/mainline-binding-budget.yml",
@@ -2632,5 +2632,5 @@
       "sha256": "2ada8d17e5cc0cb53ff0dfa9acfbeedf10eb4e35f7db239fb43ef88aa7478ea6"
     }
   ],
-  "manifest_digest": "dcc63cd574787f35b0ff1f68da1f8b9f0ffad43e9479bd6a4cf15935bed307ab"
+  "manifest_digest": "485f37c54cec17b0acafea04f81ce16e661765bc2ac56ec1811f0b62cd325f70"
 }
