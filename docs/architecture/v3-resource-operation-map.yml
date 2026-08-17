@@ -222,7 +222,10 @@ resources:
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-target
     owner_node: V3Target09CandidateSetExpanded
-    identity: [requestId, targetId, candidateIds]
+    identity: [requestId, targetId, candidateIds, requestInputTokens]
+    semantic_contract:
+      context_admission: Target09 carries the typed request input token count as side-channel route evidence; Target10 compares it with each candidate max_context_tokens before availability or transport and records context_window_exceeded for candidates that cannot admit the request.
+      payload_boundary: requestInputTokens and max_context_tokens are control-side admission facts and must not enter provider wire payload or client response payload.
     allowed_writers: [V3Target09CandidateSetExpanded]
     allowed_readers: [V3Target10ConcreteProviderSelected, V3Error03TargetLocalAction]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, routecodex-v3-provider-responses]

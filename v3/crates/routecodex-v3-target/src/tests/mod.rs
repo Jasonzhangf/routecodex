@@ -1203,7 +1203,7 @@ targets = [
 }
 
 #[test]
-fn configured_priority_is_not_overridden_by_context_near_limit_heuristic() {
+fn context_admission_filters_over_limit_candidates() {
     let source = r#"
 version = 3
 [servers.s]
@@ -1304,6 +1304,42 @@ targets = [
     assert_eq!(
         selected_after_explicit_failure.candidate.provider_id,
         "long"
+    );
+
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::new(),
+                input_tokens: 1500,
+                route_classification: test_route("longcontext", &["longcontext", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    let selected_over_limit = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(selected_over_limit.candidate.provider_id, "long");
+    assert_eq!(
+        selected_over_limit.unavailable_candidates,
+        vec!["short:key:m:context_window_exceeded(input_tokens=1500,max_context_tokens=1000)"]
     );
 }
 

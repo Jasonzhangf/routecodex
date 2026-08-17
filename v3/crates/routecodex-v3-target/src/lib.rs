@@ -279,6 +279,21 @@ impl V3TargetInterpreter {
                 ));
                 continue;
             }
+            let context_exceeded = if let Some(reason) =
+                context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
+            {
+                unavailable.push(reason);
+                // Explicit provider.model pins and the default-pool floor keep
+                // their existing last-resort semantics. The overflow remains
+                // visible in the decision evidence, but ordinary candidates
+                // must be skipped before availability/transport.
+                if !direct_route && !(default_pool_route && candidate.default_pool_member) {
+                    continue;
+                }
+                true
+            } else {
+                false
+            };
             let projection = availability.availability(
                 &candidate.provider_id,
                 Some(&candidate.auth_alias),
@@ -286,6 +301,18 @@ impl V3TargetInterpreter {
                 now_ms,
             );
             if projection.available {
+                if context_exceeded {
+                    if direct_route && direct_fallback.is_none() {
+                        direct_fallback = Some((index, candidate.clone()));
+                    }
+                    if default_pool_route
+                        && candidate.default_pool_member
+                        && default_floor_fallback.is_none()
+                    {
+                        default_floor_fallback = Some((index, candidate.clone()));
+                    }
+                    continue;
+                }
                 return Ok(V3Target10ConcreteProviderSelected {
                     route: expanded.route,
                     candidate: candidate.clone(),
@@ -302,12 +329,6 @@ impl V3TargetInterpreter {
                     .any(|scope| scope == "request_local_provider_failure")
             {
                 direct_fallback = Some((index, candidate.clone()));
-            }
-            if default_pool_route
-                && candidate.default_pool_member
-                && default_floor_fallback.is_none()
-            {
-                default_floor_fallback = Some((index, candidate.clone()));
             }
             unavailable.push(format_candidate_availability_unavailable(
                 candidate,
@@ -779,6 +800,23 @@ fn candidate_satisfies_required_capabilities(candidate: &V3TargetCandidate) -> b
         .required_capabilities
         .iter()
         .all(|required| candidate_has_required_capability(&candidate.model_capabilities, required))
+}
+
+fn context_window_exceeded_reason(
+    request_input_tokens: u64,
+    candidate: &V3TargetCandidate,
+) -> Option<String> {
+    let max_context_tokens = candidate.max_context_tokens?;
+    (request_input_tokens > max_context_tokens).then(|| {
+        format!(
+            "{}:{}:{}:context_window_exceeded(input_tokens={},max_context_tokens={})",
+            candidate.provider_id,
+            candidate.auth_alias,
+            candidate.model_id,
+            request_input_tokens,
+            max_context_tokens
+        )
+    })
 }
 
 fn candidate_has_required_capability(capabilities: &[String], required: &str) -> bool {
