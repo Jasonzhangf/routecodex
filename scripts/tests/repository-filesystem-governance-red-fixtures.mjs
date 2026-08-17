@@ -19,7 +19,7 @@ const cases = [
   ['active V2 consistency directory', 'scripts/v2-consistency/README.md', 'active V2 directory must be archived'],
   ['active V2 source directory', 'src/v2/README.md', 'active V2 directory must be archived'],
   ['active V2 test directory', 'tests/v2/README.md', 'active V2 directory must be archived'],
-  ['unsupported deprecated root child', 'deprecated/v1/README.md', 'unsupported deprecated root child'],
+  ['retired V2 archive root', 'deprecated/v2/README.md', 'retired V2 archive must not exist'],
   [
     'retired V2 active resource binding',
     'docs/architecture/resource-operation-map.yml',

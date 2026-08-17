@@ -23,7 +23,7 @@ Scope: 全仓移除 TypeScript 生产代码，其余无用统一归档/移除，
 | `dist/` | 490 js（tsc 编译产物）+ `bin/rccv3`（Rust Mach-O） |
 | V3 Rust workspace | 12 crates / 163 .rs / 58 features / 100 resources |
 | `sharedmodule/llmswitch-core` | src 已 0 TS（全 Rust + assets + json） |
-| `deprecated/v2/` | 32 文件归档 |
+| `deprecated/v2/` | 历史归档，当前已物理移除 |
 | `configsamples/` `samples/` `webui/` | 已移除 + red-lock |
 | 生产 server | `dist/bin/rccv3 server start`（Rust），监听 10000/5520/5555，0.90.4116 |
 

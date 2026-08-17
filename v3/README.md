@@ -31,8 +31,8 @@ ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
 ## Boundary
 
 - `v3/` is active production source.
-- `deprecated/v2/` is historical reference only and is not an active runtime,
-  build, package, or default test surface.
+- V2 retired source is not present in this repository and must not be restored
+  as an active runtime, build, package, or default test surface.
 - V3-owned compatibility readers such as `v2_compat.rs` and support for
   `config.v2.toml` remain active inside V3. They translate legacy config input
   into V3 contracts and must not be moved into the archive.

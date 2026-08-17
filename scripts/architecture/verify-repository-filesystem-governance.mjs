@@ -56,7 +56,6 @@ function verifyRepositoryFilesystemGovernance() {
       'scripts/tests/repository-filesystem-governance-red-fixtures.mjs',
       'v3/README.md',
       'v3/fixtures',
-      'deprecated/v2',
       'docs/audits/repository-root-layout-v3-v2-audit.md',
       'docs/goals/repository-root-retirement-v4-v3-integration-plan.md',
     ];
@@ -92,14 +91,8 @@ function verifyRepositoryFilesystemGovernance() {
     }
   }
 
-  const deprecatedRoot = path.join(repoRoot, 'deprecated');
-  if (fs.existsSync(deprecatedRoot)) {
-    for (const entry of fs.readdirSync(deprecatedRoot)) {
-      if (entry !== 'v2') failures.push(`unsupported deprecated root child: deprecated/${entry}`);
-    }
-    if (!fs.existsSync(path.join(deprecatedRoot, 'v2/README.md'))) {
-      failures.push('deprecated V2 archive must have deprecated/v2/README.md');
-    }
+  if (fs.existsSync(path.join(repoRoot, 'deprecated/v2'))) {
+    failures.push('retired V2 archive must not exist: deprecated/v2');
   }
 
   const pendingDeletions = new Set(lines(git(['diff', '--name-only', '--diff-filter=D'])));

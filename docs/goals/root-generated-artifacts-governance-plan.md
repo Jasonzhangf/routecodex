@@ -50,7 +50,7 @@ Current root classification:
 | `samples/` | Tracked/evidence samples | package/test usage | Keep as sample/evidence truth |
 | `vendor/` | Retired dependency copy | `scripts/vendor-core.mjs` uses `sharedmodule/llmswitch-core` directly; no runtime/package consumer | Deleted on 2026-08-03; gate forbids reappearance |
 | `v3/` | Primary RouteCodex implementation | Rust workspace and `rccv3` distribution truth | Active source; new runtime work belongs here |
-| `deprecated/v2/` | Retired V2 authoring archive | explicit V2 docs, consistency scripts, source notes, and tests | Historical reference only; active V2 root directories are forbidden |
+| `deprecated/v2/` | Retired V2 authoring archive (historical) | none; archive removed | Must remain absent; active V2 root directories are forbidden |
 
 ## Root Layout Contract
 
@@ -59,7 +59,7 @@ Root is reserved for:
 - project entry documents: `AGENTS.md`, `README.md`, `MEMORY.md`, `note.md`;
 - package/toolchain manifests: `package.json`, `package-lock.json`, `tsconfig*.json`, `jest.config.js`, `eslint.config.js`, `.gitignore`, `.gitattributes`;
 - source/config/test/documentation roots: `v3/`, `src/`, `sharedmodule/`, `config/`, `configsamples/`, `docs/`, `scripts/`, `tests/`, `samples/`, `webui/`;
-- retired source archive root: `deprecated/`; only `deprecated/v2/` is approved, and it is never an active runtime/build/package surface;
+- retired source archive root: `deprecated/`; no retired V2 archive is approved in the current tree; the path must remain absent;
 - local-only state roots explicitly approved by policy: `.beads/`, `.agents/`, `memory/`, `CACHE.md`;
 - generated roots explicitly approved by policy: `dist/`, `node_modules/`, `tmp/`, `coverage/`, `test-results/`, `logs/`, and Rust workspace-local `target/` directories under their owning packages.
 - generated roots explicitly approved by policy for packaging: `artifacts/pack/`.

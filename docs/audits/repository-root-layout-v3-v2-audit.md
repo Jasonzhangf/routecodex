@@ -25,7 +25,7 @@ The repository must remain a multi-root repository. Moving every source director
 | `configsamples/` | Retired V2 init/config examples | Remove from source and build |
 | `samples/` | Retired V2 mock-provider recordings and golden fixtures | Remove from source and build |
 | `docs/` | Canonical human-readable architecture and design | Keep as formal documentation root |
-| `deprecated/v2/` | Retired V2 archive | Keep read-only; no runtime imports |
+| `deprecated/v2/` | Retired V2 archive | Removed; must not be restored as runtime, build, package, or test input |
 | `artifacts/` | Generated package/build output | Keep directory policy, remove stale outputs |
 | `dist/` | Build output | Generated; never source |
 | `node_modules/` | Dependency installation | Generated; never source |
@@ -75,7 +75,7 @@ The former `samples/mock-provider/openai-responses/unknown` subtree was retired 
 
 ### V2/V3 layout work
 
-1. Audit `src/` by function-map owner and import graph; migrate only proven retired V2 modules to `deprecated/v2/`.
+1. Audit `src/` by function-map owner and import graph; physically remove only proven retired V2 modules after replacement and build evidence.
 2. Audit `sharedmodule/` crate-by-crate; do not copy shared crates into `v3/`.
 3. Classify `scripts/` and `tests/` by active V3, shared runtime, compatibility, and retired V2 ownership.
 4. Promote durable conclusions from `memory/` into `MEMORY.md` or `docs/`; delete only proven duplicate/dead notes.
@@ -93,7 +93,7 @@ config/             configuration authoring and schemas
 configsamples/      retired; absent
 samples/            retired; absent
 docs/               reviewed canonical documentation
-deprecated/v2/      retired V2 archive
+deprecated/v2/      retired V2 path (must not exist)
 artifacts/pack/     temporary packaging output, ignored
 dist/               generated build output, ignored
 ```
