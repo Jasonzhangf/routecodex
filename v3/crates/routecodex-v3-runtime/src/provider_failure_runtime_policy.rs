@@ -1005,7 +1005,24 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             )
             .map_err(|error| error.to_string())?;
     }
-    let is_request_local_compat_failure = source_stage == "ProviderReqCompat06ProviderCompat"
+    if status == 400 {
+        context
+            .provider_health
+            .record_provider_transient_bypass_in_session(
+                &context.failure_session_scope,
+                &selected.candidate.provider_id,
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+                Some(&message),
+                v3_relay_provider_policy_now_epoch_ms()?,
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    let is_request_local_compat_failure = status == 400
+        // Provider HTTP 400 is request/protocol compatibility feedback for the
+        // current wire shape. It must select another candidate for this
+        // request, but must never poison provider/key health across requests.
+        || source_stage == "ProviderReqCompat06ProviderCompat"
         || error_type.as_deref() == Some("provider_request_compat_error")
         // 瞬态失败第 3 次尝试后：health-neutral 切 provider/terminal
         // （复用 request-local 的 synthetic health record + request-local
