@@ -34,6 +34,12 @@ function verifyRepositoryFilesystemGovernance() {
     'docs/architecture/mainline-call-map.yml',
     'docs/architecture/verification-map.yml',
     'docs/architecture/no-fallback-diff-rules.json',
+    'docs/architecture/v3-resource-operation-map.yml',
+    'docs/architecture/v3-function-map.yml',
+    'docs/architecture/v3-mainline-call-map.yml',
+    'docs/architecture/v3-verification-map.yml',
+    'docs/architecture/repository-filesystem-module-registry.yml',
+    'docs/architecture/v3-build-tool-module-registry.yml',
   ];
   let moduleOwner;
   const moduleRegistryPath = path.join(
@@ -91,8 +97,8 @@ function verifyRepositoryFilesystemGovernance() {
     }
   }
 
-  if (fs.existsSync(path.join(repoRoot, 'deprecated/v2'))) {
-    failures.push('retired V2 archive must not exist: deprecated/v2');
+  if (fs.existsSync(path.join(repoRoot, 'deprecated'))) {
+    failures.push('retired archive root must not exist: deprecated');
   }
 
   const pendingDeletions = new Set(lines(git(['diff', '--name-only', '--diff-filter=D'])));
