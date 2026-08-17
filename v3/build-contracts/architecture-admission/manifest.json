@@ -762,8 +762,8 @@
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "d9eeabb2d4e7dafec30694ccfd96da08e3bd48e9",
-      "sha256": "2af78ec9ae112957ea902338d9ed822df295758dcc2ad2aaa2e54d010e19c540"
+      "source_commit": "a78882f26b317118bbd689ff168290f19f5e6e3c",
+      "sha256": "80cf909f7e235426932aeaf476269b268d5660e201d225d7b1f7cb7dbebc2de8"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
@@ -2632,5 +2632,5 @@
       "sha256": "2ada8d17e5cc0cb53ff0dfa9acfbeedf10eb4e35f7db239fb43ef88aa7478ea6"
     }
   ],
-  "manifest_digest": "091b29186f734ced29e922fa29f3126cf98d566fd33d92245c7db5a851051df7"
+  "manifest_digest": "b27ce6e0668b7b2975a3bcf0c10d2a6cbd6b0dbaf2de4b0f52bf7088785e302e"
 }
