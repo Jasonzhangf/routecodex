@@ -991,6 +991,11 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     }
     let is_request_local_compat_failure = source_stage == "ProviderReqCompat06ProviderCompat"
         || error_type.as_deref() == Some("provider_request_compat_error")
+        // HTTP 400 is a request/provider-compatibility rejection (for example
+        // context-window or wire-shape limits), not an account-health signal.
+        // Keep it health-neutral so all keys do not enter cooldown for the
+        // same request-shaped failure.
+        || status == 400
         // 瞬态失败第 3 次尝试后：health-neutral 切 provider/terminal
         // （复用 request-local 的 synthetic health record + request-local
         // recovery witness，不写 provider health store）。

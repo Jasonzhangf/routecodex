@@ -1,7 +1,7 @@
 use serde_json::{json, Map, Value};
 
 /// Console Go 风格 responses 网关（opencode.ai/zen/go）custom tool 约束：
-/// 上游只接受 `apply_patch` 一个 `type=custom` 工具，其余 custom 工具
+/// 上游只接受 `apply_patch` 一个 `type=custom` 工具；`tool_search` 以及其余 custom 工具
 /// （exec_command / web_search / reasoningStop 等）必须以 `type=function`
 /// 形态声明才会被接受；直接透传 custom 会返回
 /// `Unsupported custom tool: '<name>'. Only 'apply_patch' is supported.`（400）。
@@ -24,7 +24,13 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
             let Some(tool_obj) = tool.as_object_mut() else {
                 continue;
             };
-            if tool_obj.get("type").and_then(Value::as_str) != Some("custom") {
+            let tool_type = tool_obj.get("type").and_then(Value::as_str);
+            if tool_type == Some("tool_search") {
+                tool_obj.insert("type".to_string(), Value::String("function".to_string()));
+                tool_obj.insert("name".to_string(), Value::String("tool_search".to_string()));
+                continue;
+            }
+            if tool_type != Some("custom") {
                 continue;
             }
             let name = tool_obj
@@ -70,6 +76,26 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
             let Some(item_obj) = item.as_object_mut() else {
                 continue;
             };
+            if item_obj.get("type").and_then(Value::as_str) == Some("tool_search_call") {
+                let arguments = item_obj
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                item_obj.insert(
+                    "type".to_string(),
+                    Value::String("function_call".to_string()),
+                );
+                item_obj.insert("name".to_string(), Value::String("tool_search".to_string()));
+                item_obj.insert(
+                    "arguments".to_string(),
+                    Value::String(serde_json::to_string(&arguments).map_err(|error| {
+                        format!(
+                            "MalformedPayload profile=responses:deepseek reason=tool_search_arguments_serialize error={error}"
+                        )
+                    })?),
+                );
+                continue;
+            }
             if item_obj.get("type").and_then(Value::as_str) != Some("custom_tool_call") {
                 continue;
             }
@@ -78,6 +104,20 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
                 .and_then(Value::as_str)
                 .map(str::trim)
                 .filter(|name| !name.is_empty());
+            if name == Some("tool_search") {
+                let arguments = item_obj
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                    .unwrap_or_else(|| json!({}));
+                item_obj.insert(
+                    "type".to_string(),
+                    Value::String("tool_search_call".to_string()),
+                );
+                item_obj.insert("arguments".to_string(), arguments);
+                item_obj.remove("name");
+                continue;
+            }
             if name == Some("apply_patch") {
                 continue;
             }
@@ -115,6 +155,23 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
             let Some(item_obj) = item.as_object_mut() else {
                 continue;
             };
+            if item_obj.get("type").and_then(Value::as_str) == Some("tool_search_output") {
+                let output = item_obj.get("tools").cloned().unwrap_or_else(|| json!([]));
+                item_obj.insert(
+                    "type".to_string(),
+                    Value::String("function_call_output".to_string()),
+                );
+                item_obj.insert(
+                    "output".to_string(),
+                    Value::String(serde_json::to_string(&output).map_err(|error| {
+                        format!(
+                            "MalformedPayload profile=responses:deepseek reason=tool_search_output_serialize error={error}"
+                        )
+                    })?),
+                );
+                item_obj.remove("tools");
+                continue;
+            }
             if item_obj.get("type").and_then(Value::as_str) != Some("custom_tool_call_output") {
                 continue;
             }
@@ -237,6 +294,25 @@ mod tests {
         assert_eq!(input[2]["type"], json!("function_call_output"));
         assert_eq!(input[2]["call_id"], json!("call_1"));
         assert_eq!(input[2]["output"], json!("file1"));
+    }
+
+    #[test]
+    fn maps_tool_search_history_to_console_go_function_shape() {
+        let body = json!({
+            "model": "m",
+            "input": [
+                {"type": "tool_search_call", "call_id": "search_1", "arguments": {"query": "dsh"}},
+                {"type": "tool_search_output", "call_id": "search_1", "tools": [{"name": "dsh_review_start"}]}
+            ],
+            "tools": [{"type": "tool_search", "name": "tool_search", "parameters": {"type": "object"}}]
+        });
+        let mapped = apply_request_compat(body).unwrap();
+        assert_eq!(mapped["tools"][0]["type"], json!("function"));
+        assert_eq!(mapped["input"][0]["type"], json!("function_call"));
+        assert_eq!(mapped["input"][0]["name"], json!("tool_search"));
+        assert_eq!(mapped["input"][0]["arguments"], json!("{\"query\":\"dsh\"}"));
+        assert_eq!(mapped["input"][1]["type"], json!("function_call_output"));
+        assert_eq!(mapped["input"][1]["output"], json!("[{\"name\":\"dsh_review_start\"}]"));
     }
 
     #[test]
