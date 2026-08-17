@@ -2957,9 +2957,9 @@ features:
   owner_modules:
   - docs/goals/v3-god-file-decomposition-plan.md
   - docs/architecture/wiki/v3-module-decomposition-sop.md
-  - config/v3-file-size-policy.json
-  - scripts/architecture/verify-v3-file-size.mjs
-  - scripts/tests/v3-file-size-red-fixtures.mjs
+  - v3/config/v3-file-size-policy.json
+  - v3/scripts/architecture/verify-v3-file-size.mjs
+  - v3/scripts/tests/v3-file-size-red-fixtures.mjs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs

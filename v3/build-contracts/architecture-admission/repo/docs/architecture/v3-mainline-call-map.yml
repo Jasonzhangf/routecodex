@@ -7077,6 +7077,42 @@ chains:
       - v3.build.version_truth
       side_channel_reads: []
       side_channel_writes: []
+  - step_id: v3-build-domain-01-global-install-wrapper
+    from_node: V3BuildDomain00RootDispatcher
+    to_node: V3BuildDomain04ReleaseSurfaceReady
+    caller_symbol: run_default_v3_install
+    caller_file: scripts/install-global.sh
+    callee_symbol: install
+    callee_file: v3/package.json
+    status: anchored
+    owner_feature_id: v3.build.independent_domain
+    semantic_contract:
+    - The root global-install wrapper is a thin dispatcher to the V3 package install command.
+    - Binary publication and aliases remain owned by v3/scripts/install-cli.mjs.
+    resource_flow:
+      consumes: []
+      produces:
+      - v3.global_binary_install
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-build-domain-01-release-install-wrapper
+    from_node: V3BuildDomain00RootDispatcher
+    to_node: V3BuildDomain04ReleaseSurfaceReady
+    caller_symbol: run_default_v3_release_install
+    caller_file: scripts/install-release.sh
+    callee_symbol: install
+    callee_file: v3/package.json
+    status: anchored
+    owner_feature_id: v3.build.independent_domain
+    semantic_contract:
+    - The root release-install wrapper is a thin dispatcher to the V3 package install command.
+    - Root shim and executable helpers do not publish the V3 command aliases.
+    resource_flow:
+      consumes: []
+      produces:
+      - v3.global_binary_install
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: v3-build-domain-02
     from_node: V3BuildDomain01LocalContractsLoaded
     to_node: V3BuildDomain02AdmissionVerified

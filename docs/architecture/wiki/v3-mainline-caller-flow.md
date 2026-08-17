@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 59 functional paths, 380 caller edges.
+Generated view: 59 functional paths, 382 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -41,6 +41,7 @@ flowchart TD
   module_routecodex_v3_sse -->|2 edges / 1 paths| module_routecodex_v3_sse
   module_scripts -->|2 edges / 1 paths| module_docs
   module_scripts -->|1 edges / 1 paths| module_docs__manifest
+  module_scripts -->|2 edges / 1 paths| module_v3_package_json
   module_v3_cli -->|1 edges / 1 paths| module_v3_lifecycle
   module_v3_config -->|1 edges / 1 paths| module_docs__manifest
   module_v3_config -->|12 edges / 4 paths| module_v3_config
@@ -81,6 +82,7 @@ flowchart TD
 | routecodex-v3-sse | routecodex-v3-sse | 2 | `v3.sse.transport_boundary` |
 | scripts | docs | 2 | `v3.live_provider_compat.parity` |
 | scripts | docs::manifest | 1 | `v3.live_provider_compat.parity` |
+| scripts | v3/package.json | 2 | `v3.build.independent_domain` |
 | v3-cli | v3-lifecycle | 1 | `v3.server.managed_lifecycle` |
 | v3-config | docs::manifest | 1 | `v3.entry_protocol_endpoint_binding.mainline` |
 | v3-config | v3-config | 12 | `v3.config.compact_hub_v1_defaults`<br/>`v3.config.compile`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.entry_protocol_registry_contract.mainline` |
@@ -2435,24 +2437,32 @@ flowchart TD
   subgraph c_58_v3_build_independent_domain_m_package_json["package.json"]
     c_58_v3_build_independent_domain_0["package.json<br/>verify:v3<br/><small>package.json</small>"]
   end
+  subgraph c_58_v3_build_independent_domain_m_scripts["scripts"]
+    c_58_v3_build_independent_domain_2["scripts<br/>run_default_v3_install<br/><small>scripts/install-global.sh</small>"]
+    c_58_v3_build_independent_domain_4["scripts<br/>run_default_v3_release_install<br/><small>scripts/install-release.sh</small>"]
+  end
   subgraph c_58_v3_build_independent_domain_m_v3_package_json["v3/package.json"]
     c_58_v3_build_independent_domain_1["v3/package.json<br/>verify:ci<br/><small>v3/package.json</small>"]
-    c_58_v3_build_independent_domain_4["v3/package.json<br/>install<br/><small>v3/package.json</small>"]
+    c_58_v3_build_independent_domain_3["v3/package.json<br/>install<br/><small>v3/package.json</small>"]
   end
   subgraph c_58_v3_build_independent_domain_m_v3_scripts["v3/scripts"]
-    c_58_v3_build_independent_domain_2["v3/scripts<br/>collectAdmissionFailures<br/><small>v3/scripts/architecture/verify-admission.mjs</small>"]
-    c_58_v3_build_independent_domain_3["v3/scripts<br/>run<br/><small>v3/scripts/build.mjs</small>"]
-    c_58_v3_build_independent_domain_5["v3/scripts<br/>main<br/><small>v3/scripts/install-cli.mjs</small>"]
+    c_58_v3_build_independent_domain_5["v3/scripts<br/>collectAdmissionFailures<br/><small>v3/scripts/architecture/verify-admission.mjs</small>"]
+    c_58_v3_build_independent_domain_6["v3/scripts<br/>run<br/><small>v3/scripts/build.mjs</small>"]
+    c_58_v3_build_independent_domain_7["v3/scripts<br/>main<br/><small>v3/scripts/install-cli.mjs</small>"]
   end
   c_58_v3_build_independent_domain_0 -->|v3-build-domain-01<br/>V3BuildDomain00RootDispatcher → V3BuildDomain01LocalContractsLoaded| c_58_v3_build_independent_domain_1
-  c_58_v3_build_independent_domain_1 -->|v3-build-domain-02<br/>V3BuildDomain01LocalContractsLoaded → V3BuildDomain02AdmissionVerified| c_58_v3_build_independent_domain_2
-  c_58_v3_build_independent_domain_1 -->|v3-build-domain-03<br/>V3BuildDomain02AdmissionVerified → V3BuildDomain03LocalArtifactsProduced| c_58_v3_build_independent_domain_3
-  c_58_v3_build_independent_domain_4 -->|v3-build-domain-04<br/>V3BuildDomain03LocalArtifactsProduced → V3BuildDomain04ReleaseSurfaceReady| c_58_v3_build_independent_domain_5
+  c_58_v3_build_independent_domain_2 -->|v3-build-domain-01-global-install-wrapper<br/>V3BuildDomain00RootDispatcher → V3BuildDomain04ReleaseSurfaceReady| c_58_v3_build_independent_domain_3
+  c_58_v3_build_independent_domain_4 -->|v3-build-domain-01-release-install-wrapper<br/>V3BuildDomain00RootDispatcher → V3BuildDomain04ReleaseSurfaceReady| c_58_v3_build_independent_domain_3
+  c_58_v3_build_independent_domain_1 -->|v3-build-domain-02<br/>V3BuildDomain01LocalContractsLoaded → V3BuildDomain02AdmissionVerified| c_58_v3_build_independent_domain_5
+  c_58_v3_build_independent_domain_1 -->|v3-build-domain-03<br/>V3BuildDomain02AdmissionVerified → V3BuildDomain03LocalArtifactsProduced| c_58_v3_build_independent_domain_6
+  c_58_v3_build_independent_domain_3 -->|v3-build-domain-04<br/>V3BuildDomain03LocalArtifactsProduced → V3BuildDomain04ReleaseSurfaceReady| c_58_v3_build_independent_domain_7
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-build-domain-01` | `V3BuildDomain00RootDispatcher` → `V3BuildDomain01LocalContractsLoaded` | anchored | verify:v3<br/><small>package.json</small> | verify:ci<br/><small>v3/package.json</small> | `v3.build.independent_domain` |
+| `v3-build-domain-01-global-install-wrapper` | `V3BuildDomain00RootDispatcher` → `V3BuildDomain04ReleaseSurfaceReady` | anchored | run_default_v3_install<br/><small>scripts/install-global.sh</small> | install<br/><small>v3/package.json</small> | `v3.build.independent_domain` |
+| `v3-build-domain-01-release-install-wrapper` | `V3BuildDomain00RootDispatcher` → `V3BuildDomain04ReleaseSurfaceReady` | anchored | run_default_v3_release_install<br/><small>scripts/install-release.sh</small> | install<br/><small>v3/package.json</small> | `v3.build.independent_domain` |
 | `v3-build-domain-02` | `V3BuildDomain01LocalContractsLoaded` → `V3BuildDomain02AdmissionVerified` | anchored | verify:ci<br/><small>v3/package.json</small> | collectAdmissionFailures<br/><small>v3/scripts/architecture/verify-admission.mjs</small> | `v3.build.independent_domain` |
 | `v3-build-domain-03` | `V3BuildDomain02AdmissionVerified` → `V3BuildDomain03LocalArtifactsProduced` | anchored | verify:ci<br/><small>v3/package.json</small> | run<br/><small>v3/scripts/build.mjs</small> | `v3.build.independent_domain` |
 | `v3-build-domain-04` | `V3BuildDomain03LocalArtifactsProduced` → `V3BuildDomain04ReleaseSurfaceReady` | anchored | install<br/><small>v3/package.json</small> | main<br/><small>v3/scripts/install-cli.mjs</small> | `v3.build.independent_domain` |

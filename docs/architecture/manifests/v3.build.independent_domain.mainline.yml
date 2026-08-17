@@ -29,6 +29,18 @@ edges:
     to: V3BuildDomain01LocalContractsLoaded
     binding_status: anchored
     guard: scripts/architecture/v3-root-thin-dispatch-contract.mjs
+  - edge_id: v3-build-domain-01-global-install-wrapper
+    from: V3BuildDomain00RootDispatcher
+    to: V3BuildDomain04ReleaseSurfaceReady
+    binding_status: anchored
+    caller_file: scripts/install-global.sh
+    callee_file: v3/package.json
+  - edge_id: v3-build-domain-01-release-install-wrapper
+    from: V3BuildDomain00RootDispatcher
+    to: V3BuildDomain04ReleaseSurfaceReady
+    binding_status: anchored
+    caller_file: scripts/install-release.sh
+    callee_file: v3/package.json
   - edge_id: v3-build-domain-02
     from: V3BuildDomain01LocalContractsLoaded
     to: V3BuildDomain02AdmissionVerified

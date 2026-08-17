@@ -397,7 +397,7 @@
       "output_path": "repo/docs/architecture/manifests/v3.build.independent_domain.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.build.independent_domain.mainline.yml",
       "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
-      "sha256": "2d4e67cea656db778e6d13dde926b43d2af97ab3495da4d50d61bbb16737c5aa"
+      "sha256": "1a7f29cceb3c4990f7a6916c12338193327324c2277286b76dfeba007191be76"
     },
     {
       "output_path": "repo/docs/architecture/manifests/v3.build_test_artifact_budget.mainline.yml",
@@ -733,7 +733,7 @@
       "output_path": "repo/docs/architecture/v3-build-tool-module-registry.yml",
       "source_path": "docs/architecture/v3-build-tool-module-registry.yml",
       "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
-      "sha256": "0cffa50b0d29c7880e9148e089a32e24f968d18bfcfbcc3e17b1798c27b0f9c7"
+      "sha256": "a65610a7d9c9eb59ac22bf8aab9381b6c56a8ec4505430ab2d0494b735013c62"
     },
     {
       "output_path": "repo/docs/architecture/v3-control-plane-data-plane-audit-2026-08-10.md",
@@ -745,7 +745,7 @@
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
       "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
-      "sha256": "0fd63101ea732671424a7c8940dde5e617abac21357411397eb39a3207744938"
+      "sha256": "c9b816cebd03b276724124bcc8fe9ce33117180cec3c91fccad4c08e3e8460f4"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -757,13 +757,13 @@
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
       "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
-      "sha256": "c0bc178ac7b95c836d55b9debe2e1f9719c5f9188c38818b3c5a6a8440d2c1c7"
+      "sha256": "7b9f35ea7d9f3d15ebff3d226baa747dffd16a1771730baab214912df96e245d"
     },
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "adeaf80c4be254ade006bb8fb0f52ce39eb356a8",
-      "sha256": "80cf909f7e235426932aeaf476269b268d5660e201d225d7b1f7cb7dbebc2de8"
+      "source_commit": "3419f5bafd47a287434d633ddc1e56d88f4d268f",
+      "sha256": "8af0bc60fc1bca29f89e1d6bba7eabab180298decdf3e038c7d9130c6cd5db2c"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
@@ -775,7 +775,7 @@
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
       "source_commit": "3ae593e81d4b41fbb5d69dfc74856056b0db844d",
-      "sha256": "b29e4ca4d02ad13aa5abc49d8deb194a65605f51fdfea4c6938abe26a79e3808"
+      "sha256": "48fbe4a14d4243f78c79804d2dfd494bfdf23a788c358771b88a588577722a7f"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -955,7 +955,7 @@
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_commit": "86cebaf9463c978dc2f3a37526a766d98262c878",
-      "sha256": "85ada545b9dbf0a418990a1c14e1eb68c30d83448ad7fea30c0eb50636e52d59"
+      "sha256": "0a4a98d206c8453ea8031712cad30ca32166668090e98d1a8a375620edd7e267"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-skeleton-sop.html",
@@ -1207,7 +1207,7 @@
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_commit": "86cebaf9463c978dc2f3a37526a766d98262c878",
-      "sha256": "a2c9c8382d83f25d43db4e5802c912dd6f520382ed247e14930b64b766aa9a33"
+      "sha256": "499106c68af16ad15897f8c6a86a01018c7f880ae917875668141964f30fe49e"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-skeleton-sop.md",
@@ -2626,11 +2626,23 @@
       "sha256": "47e9005100212e346be7c1413cf48715e981fdef76284aabb5e1c92191d6f55e"
     },
     {
+      "output_path": "repo/scripts/install-global.sh",
+      "source_path": "scripts/install-global.sh",
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "7d43bcd53696d6d4f994950dbb711551ab91fbcd835d558e163e71b32da86f10"
+    },
+    {
+      "output_path": "repo/scripts/install-release.sh",
+      "source_path": "scripts/install-release.sh",
+      "source_commit": "77241bb33e899b66a33228b37377ab3865b7ab2e",
+      "sha256": "cceb837b17d02c3d17aa6e1f6886df530c1c94992ef200674c33f399f0dafae3"
+    },
+    {
       "output_path": "repo/v3/config/v3-file-size-policy.json",
       "source_path": "v3/config/v3-file-size-policy.json",
       "source_commit": "feaf67b949689d661437cb71654e992d493911fa",
       "sha256": "077c84512cbdacb0ce9778d3a5487585a0a77d959c8882caa806ba717151b195"
     }
   ],
-  "manifest_digest": "5c4e6172c2d1d89cfc69550dbee0f9407eea110fe1e2da3ec9477c37d12c0a94"
+  "manifest_digest": "f22b2a2f93b60f1a377a4f7fca2d0027697d8a67e6edb98755bfb4202e15ecac"
 }

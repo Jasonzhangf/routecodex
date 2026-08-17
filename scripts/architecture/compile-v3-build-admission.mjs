@@ -42,6 +42,8 @@ const sourceRoots = [
   'scripts/architecture/mainline-call-map-lib.mjs',
   'scripts/architecture/v3-root-thin-dispatch-contract.mjs',
   'scripts/architecture/wiki-html-lib.mjs',
+  'scripts/install-global.sh',
+  'scripts/install-release.sh',
 ];
 
 function sourceFilesBelow(relativePath) {

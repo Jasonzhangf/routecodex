@@ -68,6 +68,12 @@ try {
       resolve(workspace, 'scripts', 'architecture', name),
     );
   }
+  for (const name of ['install-global.sh', 'install-release.sh']) {
+    copyFileSync(
+      resolve(admissionRepo, 'scripts', name),
+      resolve(workspace, 'scripts', name),
+    );
+  }
   cpSync(resolve(v3Root, 'tests'), resolve(workspace, 'v3', 'tests'), { recursive: true });
   symlinkSync(resolve(workspace, 'v3', 'tests'), resolve(workspace, 'tests'), 'dir');
   cpSync(resolve(v3Root, 'build-contracts'), resolve(workspace, 'v3', 'build-contracts'), {

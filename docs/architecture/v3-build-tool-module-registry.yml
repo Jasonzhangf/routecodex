@@ -59,6 +59,8 @@ modules:
       - docs/architecture/wiki/v3-independent-build-isolation.md
       - docs/architecture/wiki/v3-independent-build-isolation.html
       - scripts/architecture/compile-v3-build-admission.mjs
+      - scripts/install-global.sh
+      - scripts/install-release.sh
       - scripts/architecture/v3-root-thin-dispatch-contract.mjs
       - v3/package.json
       - v3/package-lock.json

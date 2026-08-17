@@ -283,7 +283,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>59 functional paths</span>
-        <span>380 caller edges</span>
+        <span>382 caller edges</span>
       </div>
     </header>
 
@@ -603,7 +603,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_sse_protocol_codec_projection_boundary"><code>v3.sse.protocol_codec_projection_boundary</code></a><br/>v 3.sse.protocol_codec_projection_boundary</td><td><span class="status audited_locked">locked by Jason</span></td><td>3</td><td>7</td><td><code>v3.sse_protocol_codec_projection_boundary</code></td><td><code>sha256:f9cef82020d2…</code></td></tr>
 <tr><td><a href="#chain-vr_current_turn_typed_route_facts"><code>vr.current_turn_typed_route_facts</code></a><br/>vr.current_turn_typed_route_facts</td><td><span class="status audited_locked">locked by Jason</span></td><td>2</td><td>3</td><td><code>vr.current_turn_typed_route_facts</code></td><td><code>sha256:572f913b7701…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_global_subscription_probe"><code>v3.provider_global_subscription_probe</code></a><br/>v 3.provider_global_subscription_probe</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>3</td><td><code>v3.provider_global_subscription_probe</code></td><td><code>sha256:645d2d8bcceb…</code></td></tr>
-<tr><td><a href="#chain-v3_build_independent_domain"><code>v3.build.independent_domain</code></a><br/>v 3.build.independent_domain</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>13</td><td><code>v3.build.independent_domain</code></td><td><code>sha256:67dd381c3c32…</code></td></tr>
+<tr><td><a href="#chain-v3_build_independent_domain"><code>v3.build.independent_domain</code></a><br/>v 3.build.independent_domain</td><td><span class="status pending_review">pending review</span></td><td>6</td><td>13</td><td><code>v3.build.independent_domain</code></td><td><code>sha256:6a6e2d96d793…</code></td></tr>
 </tbody>
 </table>
     </section>
@@ -743,7 +743,7 @@ flowchart TD
             <span class="chain-id">v 3.build.independent_domain</span>
             <span>V3BuildDomain00RootDispatcher → V3BuildDomain04ReleaseSurfaceReady</span>
             <span><code>v3.build.independent_domain</code></span>
-            <span>4 edges · 13 resources · package.json, v3/package.json, v3/scripts</span>
+            <span>6 edges · 13 resources · package.json, scripts, v3/package.json, v3/scripts</span>
             <span class="status pending_review">pending review</span>
           </a>
       </div>
@@ -4087,14 +4087,14 @@ flowchart TD
       <summary>
         <span class="summary-main">v 3.build.independent_domain</span>
         <span class="summary-sub">V3BuildDomain00RootDispatcher → V3BuildDomain04ReleaseSurfaceReady</span>
-        <span class="summary-sub">4 edges · <code>v3.build.independent_domain</code> · V3BuildDomain00RootDispatcher → V3BuildDomain04ReleaseSurfaceReady</span>
+        <span class="summary-sub">6 edges · <code>v3.build.independent_domain</code> · V3BuildDomain00RootDispatcher → V3BuildDomain04ReleaseSurfaceReady</span>
       </summary>
       <div class="branch-body">
         <p class="chain-summary">Root orchestration dispatches into one V3-local command surface; V3-local contracts and admission manifests authorize build/test/package writes only under declared V3 artifact roots before explicit global binary publication.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.build.independent_domain</code></span>
           <span>audit: <span class="status pending_review">pending review</span></span>
-          <span>modules: <code>package.json · v3/package.json · v3/scripts</code></span>
+          <span>modules: <code>package.json · scripts · v3/package.json · v3/scripts</code></span>
           <span>resources: <code>13</code></span>
           <span>manifest: <code>docs/architecture/manifests/v3.build.independent_domain.mainline.yml</code></span>
 
@@ -4104,13 +4104,15 @@ flowchart TD
 flowchart TD
   n_v3_build_independent_domain_0[&quot;&lt;b&gt;Build Domain 00 Root Dispatcher&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain00RootDispatcher&lt;/small&gt;&quot;]
   n_v3_build_independent_domain_1[&quot;&lt;b&gt;Build Domain 01 Local Contracts Loaded&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain01LocalContractsLoaded&lt;/small&gt;&quot;]
-  n_v3_build_independent_domain_2[&quot;&lt;b&gt;Build Domain 02 Admission Verified&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain02AdmissionVerified&lt;/small&gt;&quot;]
-  n_v3_build_independent_domain_3[&quot;&lt;b&gt;Build Domain 03 Local Artifacts Produced&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain03LocalArtifactsProduced&lt;/small&gt;&quot;]
-  n_v3_build_independent_domain_4[&quot;&lt;b&gt;Build Domain 04 Release Surface Ready&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain04ReleaseSurfaceReady&lt;/small&gt;&quot;]
+  n_v3_build_independent_domain_2[&quot;&lt;b&gt;Build Domain 04 Release Surface Ready&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain04ReleaseSurfaceReady&lt;/small&gt;&quot;]
+  n_v3_build_independent_domain_3[&quot;&lt;b&gt;Build Domain 02 Admission Verified&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain02AdmissionVerified&lt;/small&gt;&quot;]
+  n_v3_build_independent_domain_4[&quot;&lt;b&gt;Build Domain 03 Local Artifacts Produced&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3BuildDomain03LocalArtifactsProduced&lt;/small&gt;&quot;]
   n_v3_build_independent_domain_0 --&gt;|v3-build-domain-01&lt;br/&gt;package.json → v3/package.json| n_v3_build_independent_domain_1
-  n_v3_build_independent_domain_1 --&gt;|v3-build-domain-02&lt;br/&gt;v3/package.json → v3/scripts| n_v3_build_independent_domain_2
-  n_v3_build_independent_domain_2 --&gt;|v3-build-domain-03&lt;br/&gt;v3/package.json → v3/scripts| n_v3_build_independent_domain_3
-  n_v3_build_independent_domain_3 --&gt;|v3-build-domain-04&lt;br/&gt;v3/package.json → v3/scripts| n_v3_build_independent_domain_4
+  n_v3_build_independent_domain_0 --&gt;|v3-build-domain-01-global-install-wrapper&lt;br/&gt;scripts → v3/package.json| n_v3_build_independent_domain_2
+  n_v3_build_independent_domain_0 --&gt;|v3-build-domain-01-release-install-wrapper&lt;br/&gt;scripts → v3/package.json| n_v3_build_independent_domain_2
+  n_v3_build_independent_domain_1 --&gt;|v3-build-domain-02&lt;br/&gt;v3/package.json → v3/scripts| n_v3_build_independent_domain_3
+  n_v3_build_independent_domain_3 --&gt;|v3-build-domain-03&lt;br/&gt;v3/package.json → v3/scripts| n_v3_build_independent_domain_4
+  n_v3_build_independent_domain_4 --&gt;|v3-build-domain-04&lt;br/&gt;v3/package.json → v3/scripts| n_v3_build_independent_domain_2
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
   class n_v3_build_independent_domain_0,n_v3_build_independent_domain_1,n_v3_build_independent_domain_2,n_v3_build_independent_domain_3,n_v3_build_independent_domain_4 node;</pre>
@@ -4119,6 +4121,8 @@ flowchart TD
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
 <tbody>
 <tr><td><code>v3-build-domain-01</code></td><td><code>V3BuildDomain00RootDispatcher</code><br/>→ <code>V3BuildDomain01LocalContractsLoaded</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.build.node_dependency_lock</code> <code>v3.build.cargo_dependency_lock</code> <code>v3.build.rust_toolchain_contract</code> <code>v3.build.version_truth</code></div></td><td><code>verify:v3</code><br/><small>package.json</small></td><td><code>verify:ci</code><br/><small>v3/package.json</small></td></tr>
+<tr><td><code>v3-build-domain-01-global-install-wrapper</code></td><td><code>V3BuildDomain00RootDispatcher</code><br/>→ <code>V3BuildDomain04ReleaseSurfaceReady</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.global_binary_install</code></div></td><td><code>run_default_v3_install</code><br/><small>scripts/install-global.sh</small></td><td><code>install</code><br/><small>v3/package.json</small></td></tr>
+<tr><td><code>v3-build-domain-01-release-install-wrapper</code></td><td><code>V3BuildDomain00RootDispatcher</code><br/>→ <code>V3BuildDomain04ReleaseSurfaceReady</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.global_binary_install</code></div></td><td><code>run_default_v3_release_install</code><br/><small>scripts/install-release.sh</small></td><td><code>install</code><br/><small>v3/package.json</small></td></tr>
 <tr><td><code>v3-build-domain-02</code></td><td><code>V3BuildDomain01LocalContractsLoaded</code><br/>→ <code>V3BuildDomain02AdmissionVerified</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.build.node_dependency_lock</code> <code>v3.build.cargo_dependency_lock</code> <code>v3.build.rust_toolchain_contract</code> <code>v3.build.architecture_admission</code> <code>v3.build.version_truth</code></div></td><td><code>verify:ci</code><br/><small>v3/package.json</small></td><td><code>collectAdmissionFailures</code><br/><small>v3/scripts/architecture/verify-admission.mjs</small></td></tr>
 <tr><td><code>v3-build-domain-03</code></td><td><code>V3BuildDomain02AdmissionVerified</code><br/>→ <code>V3BuildDomain03LocalArtifactsProduced</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.build.node_dependency_lock</code> <code>v3.build.cargo_dependency_lock</code> <code>v3.build.rust_toolchain_contract</code> <code>v3.build.architecture_admission</code> <code>v3.build.version_truth</code> <code>v3.build.dependency_cache</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.build.ordinary_cargo_target</code> <code>v3.build.install_target</code> <code>v3.build.pack_staging</code> <code>v3.build.assembled_binary</code> <code>v3.build.test_artifact_store</code></div></td><td><code>verify:ci</code><br/><small>v3/package.json</small></td><td><code>run</code><br/><small>v3/scripts/build.mjs</small></td></tr>
 <tr><td><code>v3-build-domain-04</code></td><td><code>V3BuildDomain03LocalArtifactsProduced</code><br/>→ <code>V3BuildDomain04ReleaseSurfaceReady</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.build.assembled_binary</code> <code>v3.build.pack_staging</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.build.release_artifacts</code> <code>v3.global_binary_install</code></div></td><td><code>install</code><br/><small>v3/package.json</small></td><td><code>main</code><br/><small>v3/scripts/install-cli.mjs</small></td></tr>
