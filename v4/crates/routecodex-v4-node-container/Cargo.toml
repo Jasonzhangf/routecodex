@@ -16,5 +16,6 @@ path = "src/bin/host_binding.rs"
 routecodex-v4-cordis-bridge = { path = "../routecodex-v4-cordis-bridge" }
 routecodex-v4-plugin-plan = { path = "../routecodex-v4-plugin-plan" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_ignored = "0.1"
+serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"

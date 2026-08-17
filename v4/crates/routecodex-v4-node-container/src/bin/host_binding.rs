@@ -5,9 +5,10 @@ use routecodex_v4_node_container::{
 };
 use routecodex_v4_plugin_plan::NodePluginPlan;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum HostRequest {
     Declare {
         request_id: String,
@@ -44,7 +45,38 @@ enum HostRequest {
     },
 }
 
+#[derive(Debug, Deserialize)]
+struct HostRequestIdentity {
+    request_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HostRequestPlanProbe<'a> {
+    #[serde(borrow)]
+    plan: Option<&'a RawValue>,
+}
+
 impl HostRequest {
+    fn parse(input: &str) -> Result<Self, String> {
+        let probe: HostRequestPlanProbe<'_> =
+            serde_json::from_str(input).map_err(|error| error.to_string())?;
+        if let Some(raw_plan) = probe.plan {
+            let mut plan_deserializer = serde_json::Deserializer::from_str(raw_plan.get());
+            let mut unknown_plan_field = None;
+            let _: NodePluginPlan = serde_ignored::deserialize(&mut plan_deserializer, |path| {
+                if unknown_plan_field.is_none() {
+                    unknown_plan_field = Some(path.to_string());
+                }
+            })
+            .map_err(|error| error.to_string())?;
+            plan_deserializer.end().map_err(|error| error.to_string())?;
+            if let Some(path) = unknown_plan_field {
+                return Err(format!("unknown lifecycle plan field {path}"));
+            }
+        }
+        serde_json::from_str(input).map_err(|error| error.to_string())
+    }
+
     fn request_id(&self) -> &str {
         match self {
             Self::Declare { request_id, .. }
@@ -62,6 +94,7 @@ impl HostRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PlanBindingsWire {
     graph_hash: String,
     manifest_hash: String,
@@ -227,12 +260,16 @@ fn main() -> io::Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-        let response = match serde_json::from_str::<HostRequest>(&line) {
+        let request_id = serde_json::from_str::<HostRequestIdentity>(&line)
+            .ok()
+            .and_then(|identity| identity.request_id)
+            .unwrap_or_else(|| "invalid-request".to_string());
+        let response = match HostRequest::parse(&line) {
             Ok(request) => runtime.handle(request),
             Err(error) => failure(
-                "invalid-request".to_string(),
+                request_id,
                 "protocol_error",
-                error.to_string(),
+                error,
                 runtime.container.as_ref(),
             ),
         };

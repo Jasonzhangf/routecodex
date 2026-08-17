@@ -152,7 +152,48 @@ export class RustNodeContainerPort {
     });
   }
 
-  async request(op, fields = {}) {
+  declare(nodeId, plan, bindings, ...extra) {
+    if (extra.length > 0) this.#rejectFields('declare');
+    return this.#request({ op: 'declare', node_id: nodeId, plan, bindings });
+  }
+
+  contextCreated(...fields) {
+    return this.#requestWithoutFields('context_created', fields);
+  }
+
+  pluginsMounted(...fields) {
+    return this.#requestWithoutFields('plugins_mounted', fields);
+  }
+
+  publish(...fields) {
+    return this.#requestWithoutFields('publish', fields);
+  }
+
+  enterExecution(...fields) {
+    return this.#requestWithoutFields('enter_execution', fields);
+  }
+
+  exitExecution(...fields) {
+    return this.#requestWithoutFields('exit_execution', fields);
+  }
+
+  drain(...fields) {
+    return this.#requestWithoutFields('drain', fields);
+  }
+
+  fail(...fields) {
+    return this.#requestWithoutFields('fail', fields);
+  }
+
+  dispose(...fields) {
+    return this.#requestWithoutFields('dispose', fields);
+  }
+
+  status(...fields) {
+    return this.#requestWithoutFields('status', fields);
+  }
+
+  async #request(message) {
     if (this.#child.exitCode !== null || !this.#child.stdin.writable) {
       throw new CordisHostError('binding_closed', 'Rust NodeContainer binding is closed');
     }
@@ -161,7 +202,7 @@ export class RustNodeContainerPort {
       this.#pending.set(requestId, { resolve, reject });
     });
     this.#child.stdin.write(
-      `${JSON.stringify({ op, request_id: requestId, ...fields })}\n`,
+      `${JSON.stringify({ ...message, request_id: requestId })}\n`,
       (cause) => {
         if (!cause) return;
         const pending = this.#pending.get(requestId);
@@ -175,6 +216,18 @@ export class RustNodeContainerPort {
       throw new CordisHostError(value.code ?? 'binding_error', value.error ?? 'binding failed');
     }
     return value;
+  }
+
+  #requestWithoutFields(op, fields) {
+    if (fields.length > 0) this.#rejectFields(op);
+    return this.#request({ op });
+  }
+
+  #rejectFields(op) {
+    throw new CordisHostError(
+      'binding_protocol',
+      `${op} does not accept undeclared lifecycle fields`,
+    );
   }
 
   async close() {
@@ -227,26 +280,22 @@ export class CordisBoundNodeHost extends CordisNodeHost {
   async mount(plugins) {
     this.#verifyGraph(plugins);
     const hash = this.#plan.hash;
-    await this.#port.request('declare', {
-      node_id: this.nodeId,
-      plan: this.#plan,
-      bindings: {
-        graph_hash: hash,
-        manifest_hash: hash,
-        loaded_plan_hash: hash,
-      },
+    await this.#port.declare(this.nodeId, this.#plan, {
+      graph_hash: hash,
+      manifest_hash: hash,
+      loaded_plan_hash: hash,
     });
     try {
-      await this.#port.request('context_created');
+      await this.#port.contextCreated();
       await super.mount(plugins);
-      await this.#port.request('plugins_mounted');
-      await this.#port.request('publish');
+      await this.#port.pluginsMounted();
+      await this.#port.publish();
       this.#mounted = true;
       return this;
     } catch (error) {
-      await this.#port.request('fail');
+      await this.#port.fail();
       await super.dispose();
-      await this.#port.request('dispose');
+      await this.#port.dispose();
       throw error;
     }
   }
@@ -255,11 +304,11 @@ export class CordisBoundNodeHost extends CordisNodeHost {
     if (!this.#mounted || this.disposed) {
       throw new CordisHostError('invalid_state', 'host is not accepting executions');
     }
-    await this.#port.request('enter_execution');
+    await this.#port.enterExecution();
     let releaseRequest;
     return async () => {
       if (!releaseRequest) {
-        releaseRequest = this.#port.request('exit_execution').catch((error) => {
+        releaseRequest = this.#port.exitExecution().catch((error) => {
           releaseRequest = undefined;
           throw error;
         });
@@ -272,13 +321,13 @@ export class CordisBoundNodeHost extends CordisNodeHost {
     if (this.disposed) {
       throw new CordisHostError('host_disposed', `node ${this.nodeId} is disposed`);
     }
-    const status = await this.#port.request('drain');
+    const status = await this.#port.drain();
     return { nodeId: this.nodeId, state: status.state, inFlight: status.in_flight };
   }
 
   async dispose() {
     if (this.disposed) return;
-    const status = await this.#port.request('status');
+    const status = await this.#port.status();
     if (status.state !== 'draining' && status.state !== 'failed') {
       throw new CordisHostError(
         'invalid_state',
@@ -286,7 +335,7 @@ export class CordisBoundNodeHost extends CordisNodeHost {
       );
     }
     await super.dispose();
-    await this.#port.request('dispose');
+    await this.#port.dispose();
     this.#mounted = false;
   }
 

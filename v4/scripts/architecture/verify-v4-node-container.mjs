@@ -27,6 +27,9 @@ function validate(source, binding, tests) {
   }
   if (
     !binding.includes('enum HostRequest')
+    || !binding.includes('#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]')
+    || !binding.includes('serde_ignored::deserialize')
+    || !binding.includes("use serde_json::value::RawValue;")
     || !binding.includes('EnterExecution')
     || !binding.includes('NodeContainer::declare')
     || !binding.includes('NodeContainerError::InFlightExecutions')
@@ -70,8 +73,24 @@ function runSelfTest() {
   } else {
     console.log(`[v4 node container red] in-flight owner removed: FAIL as expected (${inFlightFailures.length})`);
   }
+  const permissiveBinding = binding.replace(', deny_unknown_fields)]', ')]');
+  const protocolFailures = validate(baseline, permissiveBinding, tests);
+  if (protocolFailures.length === 0) {
+    console.error('[v4 node container red] permissive lifecycle decoder: expected FAIL, got PASS');
+    missed += 1;
+  } else {
+    console.log(`[v4 node container red] permissive lifecycle decoder: FAIL as expected (${protocolFailures.length})`);
+  }
+  const nestedPermissiveBinding = binding.replace('serde_ignored::deserialize', 'serde_json::from_str');
+  const nestedProtocolFailures = validate(baseline, nestedPermissiveBinding, tests);
+  if (nestedProtocolFailures.length === 0) {
+    console.error('[v4 node container red] nested unknown-field detector removed: expected FAIL, got PASS');
+    missed += 1;
+  } else {
+    console.log(`[v4 node container red] nested unknown-field detector removed: FAIL as expected (${nestedProtocolFailures.length})`);
+  }
   if (missed > 0) process.exit(1);
-  console.log('[v4 node container red] OK red self-test 4/4');
+  console.log('[v4 node container red] OK red self-test 6/6');
 }
 
 if (process.argv.includes('--red-self-test')) {

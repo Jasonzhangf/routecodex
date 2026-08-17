@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
+import readline from 'node:readline';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -13,6 +15,17 @@ import {
 
 const v4Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const binaryPath = path.join(v4Root, 'target/debug/routecodex-v4-node-container-host');
+
+async function sendRawLifecycleRequest(request) {
+  const child = spawn(binaryPath, [], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const lines = readline.createInterface({ input: child.stdout });
+  const response = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    lines.once('line', (line) => resolve(JSON.parse(line)));
+  });
+  child.stdin.end(`${JSON.stringify(request)}\n`);
+  return response;
+}
 
 function observerEntry(order = 900) {
   return {
@@ -67,22 +80,22 @@ test('real Cordis host drives the Rust NodeContainer lifecycle', async (t) => {
 
   await host.mount([plugin(nodePlan.entries[0], events)]);
   const release = await host.beginExecution();
-  assert.equal((await port.request('status')).in_flight, 1);
+  assert.equal((await port.status()).in_flight, 1);
   await assert.rejects(
     host.drain(),
     (error) => error instanceof CordisHostError && error.code === 'in_flight',
   );
-  assert.equal((await port.request('status')).state, 'accepting');
+  assert.equal((await port.status()).state, 'accepting');
 
   await Promise.all([release(), release()]);
-  assert.equal((await port.request('status')).in_flight, 0);
+  assert.equal((await port.status()).in_flight, 0);
   assert.deepEqual(await host.drain(), {
     nodeId: nodePlan.node_id,
     state: 'draining',
     inFlight: 0,
   });
   await host.dispose();
-  assert.equal((await port.request('status')).state, 'disposed');
+  assert.equal((await port.status()).state, 'disposed');
   assert.deepEqual(events, ['active', 'disposed']);
 });
 
@@ -104,13 +117,13 @@ test('accepting-state disposal rejects before either lifecycle owner is mutated'
     (error) => error instanceof CordisHostError && error.code === 'invalid_state',
   );
   assert.equal(host.disposed, false);
-  assert.equal((await port.request('status')).state, 'accepting');
+  assert.equal((await port.status()).state, 'accepting');
   assert.deepEqual(events, ['active']);
 
   await host.drain();
   await host.dispose();
   assert.equal(host.disposed, true);
-  assert.equal((await port.request('status')).state, 'disposed');
+  assert.equal((await port.status()).state, 'disposed');
   assert.deepEqual(events, ['active', 'disposed']);
 });
 
@@ -130,7 +143,7 @@ test('Cordis graph/plan drift is rejected before Rust publish', async (t) => {
     (error) => error instanceof CordisHostError && error.code === 'graph_hash_mismatch',
   );
   await assert.rejects(
-    port.request('status'),
+    port.status(),
     (error) => error instanceof CordisHostError && error.code === 'host_lifecycle',
   );
 });
@@ -157,15 +170,61 @@ test('Cordis mount failure fails and disposes the Rust candidate', async (t) => 
     host.mount([failing]),
     (error) => error instanceof CordisHostError && error.code === 'plugin_not_active',
   );
-  assert.equal((await port.request('status')).state, 'disposed');
+  assert.equal((await port.status()).state, 'disposed');
   assert.equal(host.disposed, true);
 });
 
 test('Rust binding spawn failure rejects pending lifecycle requests', async () => {
   const port = new RustNodeContainerPort({ binaryPath: `${binaryPath}.missing` });
   await assert.rejects(
-    port.request('status'),
+    port.status(),
     (error) => error instanceof CordisHostError && error.code === 'binding_spawn',
   );
   await port.close();
+});
+
+test('Rust lifecycle decoder rejects undeclared metadata and business fields', async () => {
+  const metadata = await sendRawLifecycleRequest({
+    op: 'status',
+    request_id: 'raw-metadata',
+    metadata: { route: 'forbidden' },
+  });
+  assert.equal(metadata.ok, false);
+  assert.equal(metadata.request_id, 'raw-metadata');
+  assert.equal(metadata.code, 'protocol_error');
+
+  const businessPayload = await sendRawLifecycleRequest({
+    op: 'status',
+    request_id: 'raw-business-payload',
+    messages: [{ role: 'user', content: 'forbidden' }],
+  });
+  assert.equal(businessPayload.ok, false);
+  assert.equal(businessPayload.request_id, 'raw-business-payload');
+  assert.equal(businessPayload.code, 'protocol_error');
+
+  const nestedPlan = plan();
+  nestedPlan.metadata = { route: 'forbidden' };
+  const nestedMetadata = await sendRawLifecycleRequest({
+    op: 'declare',
+    request_id: 'raw-nested-metadata',
+    node_id: nestedPlan.node_id,
+    plan: nestedPlan,
+    bindings: {
+      graph_hash: nestedPlan.hash,
+      manifest_hash: nestedPlan.hash,
+      loaded_plan_hash: nestedPlan.hash,
+    },
+  });
+  assert.equal(nestedMetadata.ok, false);
+  assert.equal(nestedMetadata.request_id, 'raw-nested-metadata');
+  assert.equal(nestedMetadata.code, 'protocol_error');
+});
+
+test('JS lifecycle encoder rejects fields not declared by the operation', async (t) => {
+  const port = new RustNodeContainerPort({ binaryPath });
+  t.after(() => port.close());
+  assert.throws(
+    () => port.status({ metadata: { route: 'forbidden' } }),
+    (error) => error instanceof CordisHostError && error.code === 'binding_protocol',
+  );
 });

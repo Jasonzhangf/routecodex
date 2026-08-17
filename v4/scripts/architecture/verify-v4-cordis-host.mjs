@@ -20,10 +20,19 @@ const required = [
   'export class CordisBoundNodeHost',
   'export class RustNodeContainerPort',
   'computeNodePluginPlanHash',
-  "await this.#port.request('drain')",
-  "await this.#port.request('status')",
+  'declare(nodeId, plan, bindings, ...extra)',
+  'status(...fields)',
+  'await this.#port.drain()',
+  'await this.#port.status()',
 ];
-const forbidden = ['metadata', 'fallback', 'next_node', 'inFlight: 0', '#inFlight'];
+const forbidden = [
+  'metadata',
+  'fallback',
+  'next_node',
+  'inFlight: 0',
+  '#inFlight',
+  'async request(op, fields = {})',
+];
 
 function validate(source, tests, bindingTests, bindingContract, functionMap, mainline) {
   const failures = required.filter((token) => !source.includes(token));
@@ -43,6 +52,8 @@ function validate(source, tests, bindingTests, bindingContract, functionMap, mai
     || !bindingTests.includes('Cordis mount failure fails and disposes the Rust candidate')
     || !bindingTests.includes('accepting-state disposal rejects before either lifecycle owner is mutated')
     || !bindingTests.includes('Rust binding spawn failure rejects pending lifecycle requests')
+    || !bindingTests.includes('Rust lifecycle decoder rejects undeclared metadata and business fields')
+    || !bindingTests.includes('JS lifecycle encoder rejects fields not declared by the operation')
     || !bindingTests.includes("error.code === 'in_flight'")
   ) {
     failures.push('joint Cordis/Rust lifecycle tests missing');
@@ -115,6 +126,7 @@ function runSelfTest() {
   const bindingCases = [
     ['fabricated drain projection', source.replace("return { nodeId: this.nodeId, state: status.state, inFlight: status.in_flight };", "return { nodeId: this.nodeId, state: status.state, inFlight: 0 };")],
     ['second in-flight truth added', source.replace('#mounted = false;', '#inFlight = 0;\n  #mounted = false;')],
+    ['generic lifecycle field surface restored', source.replace('async #request(message)', 'async request(op, fields = {})')],
   ];
   for (const [name, candidate] of bindingCases) {
     const failures = validate(candidate, tests, bindingTests, bindingContract, functionMap, mainline);
@@ -126,7 +138,7 @@ function runSelfTest() {
     }
   }
   if (missed > 0) process.exit(1);
-  console.log('[v4 cordis host red] OK red self-test 5/5');
+  console.log('[v4 cordis host red] OK red self-test 6/6');
 }
 
 if (process.argv.includes('--red-self-test')) {

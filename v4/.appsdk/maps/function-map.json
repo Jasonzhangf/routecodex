@@ -590,7 +590,8 @@
         "CordisBoundNodeHost::beginExecution",
         "CordisBoundNodeHost::drain",
         "CordisBoundNodeHost::dispose",
-        "RustNodeContainerPort::request"
+        "RustNodeContainerPort::declare",
+        "RustNodeContainerPort::status"
       ],
       "entry_paths": [
         "cordis/routecodex-v4-cordis-host/src/index.mjs"

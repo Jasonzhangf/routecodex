@@ -201,7 +201,8 @@ status，不保存第二份计数。`drain()` 禁止生成固定 `inFlight: 0` �
 与 immutable `NodePluginPlan.entries` 全等，随后由 `graph_hash == manifest_hash ==
 loaded_plan_hash == plan.hash` 四值绑定；任一漂移在 Rust declaration 前失败。
 生命周期 port 只承载声明过的 lifecycle op/status，不承载业务 payload、metadata、
-control/debug/error 内容。
+control/debug/error 内容。JS port 只暴露逐 operation 的封闭方法；Rust `HostRequest`
+按 operation schema 拒绝未知字段，禁止把未声明字段静默丢弃后继续执行生命周期。
 
 ## NodePlugin 统一合同
 
