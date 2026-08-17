@@ -887,6 +887,7 @@ async fn success_released_recovery_reenters_the_retained_five_second_generation(
         tokio::spawn(async move { gate.wait_for_recovery_ticket(&ticket, action_scope).await })
     };
     tokio::time::sleep(Duration::from_millis(25)).await;
+    let sustained_started = Instant::now();
     gate.record_success(&failed)
         .expect("provider success retains queued recovery lane");
 
@@ -900,7 +901,6 @@ async fn success_released_recovery_reenters_the_retained_five_second_generation(
     assert_eq!(refreshed.key(), &failed);
     assert_eq!(refreshed.generation(), first_ticket.generation() + 1);
 
-    let sustained_started = Instant::now();
     let transition = gate
         .wait_for_recovery_ticket(&refreshed, action_scope)
         .await

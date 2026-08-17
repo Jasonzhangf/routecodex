@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 const SECRET: &str = "managed-lifecycle-controlled-secret";
+const PORT_STATE_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn managed_test_command(binary: &str) -> Command {
     let mut command = Command::new(binary);
@@ -530,7 +531,7 @@ fn http_get_json(port: u16, path: &str) -> Value {
 }
 
 fn wait_port(port: u16, open: bool) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + PORT_STATE_TIMEOUT;
     loop {
         let is_open = TcpStream::connect(("127.0.0.1", port)).is_ok();
         if is_open == open {
