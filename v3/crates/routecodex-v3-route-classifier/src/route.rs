@@ -18,10 +18,10 @@ pub const DEFAULT_ROUTE: &str = "default";
 
 pub const ROUTE_PRIORITY: [&str; 8] = [
     "multimodal",
-    "web_search",
     "longcontext",
     "thinking",
     "coding",
+    "web_search",
     "search",
     "tools",
     DEFAULT_ROUTE,
@@ -88,7 +88,9 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
         ),
         (
             "thinking",
-            (thinking_from_user || thinking_continuation) && !input.reached_long_context,
+            (thinking_from_user || thinking_continuation)
+                && !input.reached_long_context
+                && !web_search,
             if thinking_continuation {
                 "thinking:last-tool-thinking"
             } else {

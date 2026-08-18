@@ -219,6 +219,30 @@ fn metadata_attachment_wins_and_web_search_tool_evidence_is_route() {
 }
 
 #[test]
+fn explicit_web_search_does_not_get_shadowed_by_generic_user_thinking() {
+    let classified = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        has_current_turn_web_search: true,
+        ..Default::default()
+    });
+    assert_eq!(classified.route_name, "web_search");
+    assert_eq!(classified.candidates, vec!["web_search", "default"]);
+}
+
+#[test]
+fn longcontext_wins_when_longcontext_thinking_and_coding_conditions_hit() {
+    let classified = classify_route(&RouteClassifierInput {
+        reached_long_context: true,
+        latest_message_from_user: true,
+        has_current_turn_tool_output: true,
+        last_assistant_tool_category: Some("coding".into()),
+        ..Default::default()
+    });
+    assert_eq!(classified.route_name, "longcontext");
+    assert_eq!(classified.candidates, vec!["longcontext", "default"]);
+}
+
+#[test]
 fn explicit_web_search_part_in_current_user_turn_is_routed_to_web_search() {
     // 用户轮显式 web_search part（Responses input 数组 / chat content part）必须产生
     // web_search 能力。此前只在 continuation（websearch 工具延续）判定——用户轮
