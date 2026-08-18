@@ -635,6 +635,21 @@
       "required_for": [
         "routecodex-v4-governance:architecture_stable"
       ]
+    },
+    {
+      "gate_id": "v4_parity_gate_real_pipeline_mock_transport",
+      "command": "node scripts/architecture/verify-v4-real-pipeline-mock-transport.mjs",
+      "required_for": [
+        "routecodex-v4-runtime:real_pipeline_slice_architecture_stable",
+        "routecodex-v4-runtime:real_pipeline_slice_freeze"
+      ]
+    },
+    {
+      "gate_id": "v4_parity_gate_real_pipeline_mock_transport_red",
+      "command": "node scripts/architecture/verify-v4-real-pipeline-mock-transport.mjs --red-self-test",
+      "required_for": [
+        "routecodex-v4-runtime:real_pipeline_slice_architecture_stable"
+      ]
     }
   ]
 }
