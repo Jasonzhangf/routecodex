@@ -372,6 +372,32 @@ async fn provider_sse_eof_without_terminal_fails_before_client_projection() {
 }
 
 #[tokio::test]
+async fn provider_sse_empty_body_classifies_as_provider_response_empty() {
+    let provider = Box::pin(stream::empty::<
+        std::result::Result<Vec<u8>, routecodex_v3_provider_responses::V3ProviderError>,
+    >());
+    let error = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Responses,
+        provider,
+    )
+    .await
+    .unwrap_err();
+
+    match &error {
+        V3ResponsesRelayRuntimeError::ProviderResponseEmpty { .. } => {}
+        other => panic!("expected ProviderResponseEmpty, got {other:?}"),
+    }
+    assert!(is_v3_responses_provider_response_failure(&error));
+    let typed = provider_response_stream_failure(error, "req-empty", "glmrelay_anthropic");
+    match typed {
+        V3ProviderError::ResponseBody { reason, .. } => {
+            assert!(reason.contains("provider response body is empty"));
+        }
+        other => panic!("expected ResponseBody, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn provider_sse_failed_terminal_returns_provider_sse_error() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![Ok(

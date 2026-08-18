@@ -188,6 +188,13 @@ pub(crate) fn provider_response_stream_failure(
 ) -> V3ProviderError {
     match error {
         V3ResponsesRelayRuntimeError::Provider(error) => error,
+        V3ResponsesRelayRuntimeError::ProviderResponseEmpty { .. } => {
+            V3ProviderError::ResponseBody {
+                request_id: request_id.to_string(),
+                provider_id: provider_id.to_string(),
+                reason: "provider response body is empty: upstream declared SSE but emitted zero bytes".to_string(),
+            }
+        }
         V3ResponsesRelayRuntimeError::ProviderSseTransport(reason) => {
             V3ProviderError::MalformedSse {
                 request_id: request_id.to_string(),
@@ -212,6 +219,7 @@ pub(crate) fn is_v3_responses_provider_response_failure(
             | V3ResponsesRelayRuntimeError::ProviderJson(_)
             | V3ResponsesRelayRuntimeError::ProviderSseTransport(_)
             | V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(_)
+            | V3ResponsesRelayRuntimeError::ProviderResponseEmpty { .. }
             | V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure { .. }
             | V3ResponsesRelayRuntimeError::Response(
                 V3HubRelayResponseError::ProviderResponseNotObject
