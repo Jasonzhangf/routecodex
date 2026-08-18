@@ -23,7 +23,6 @@ fn apply_minimax_thinking_tag_compat(mut payload: Value) -> Value {
             if let Some(reasoning) = reasoning {
                 projected.push(json!({
                     "type": "reasoning",
-                    "summary": [{"type": "summary_text", "text": reasoning}],
                     "content": [{"type": "reasoning_text", "text": reasoning}]
                 }));
             }
@@ -229,7 +228,8 @@ mod tests {
             }]
         }));
         assert_eq!(output["output"][0]["type"], "reasoning");
-        assert_eq!(output["output"][0]["summary"][0]["text"], "private plan");
+        assert_eq!(output["output"][0]["content"][0]["text"], "private plan");
+        assert!(output["output"][0].get("summary").is_none());
         assert_eq!(output["output"][1]["content"][0]["text"], "before after");
         let encoded = serde_json::to_string(&output).unwrap();
         assert!(!encoded.contains("<thinking>"));
