@@ -29,7 +29,9 @@ Layout contract:
 
 - Historical completed transactions occupy the upper area and scroll with terminal height.
 - Live requests stay in a fixed bottom panel.
-- Resize redraws the whole frame and recalculates history rows.
-- Every simulated request appears in LIVE when admitted; response status/bytes update on the same row.
+- Resize redraws the whole frame and recalculates history rows from the exact current pane height; no minimum height is forced over the pane.
+- Wide panes use one compact row per request and include port, route, provider/model, session, status, response, reason, usage, and timing.
+- Narrow panes switch to two lines per request: the first line carries identity/status/timing/response, and the second carries session/model/reason/usage. Long fields are truncated to the pane width.
+- Every simulated request appears in LIVE when admitted; response status/bytes update on the same request entry.
 - Only terminal transactions enter history; intermediate route/provider changes update that same live row.
 - New terminal history does not move a frozen history viewport; `Esc` restores latest-follow mode.
