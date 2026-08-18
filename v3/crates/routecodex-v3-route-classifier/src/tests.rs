@@ -255,6 +255,10 @@ fn tool_call_category_matches_v2_command_semantics() {
         Some("other")
     );
     assert_eq!(
+        category("request_user_input", Some(&json!({"questions":[]}))).as_deref(),
+        Some("thinking")
+    );
+    assert_eq!(
         category("apply_patch", Some(&valid_patch)).as_deref(),
         Some("coding")
     );
@@ -262,6 +266,51 @@ fn tool_call_category_matches_v2_command_semantics() {
     assert_eq!(
         category("web_search", Some(&json!({"query":"x"}))).as_deref(),
         Some("websearch")
+    );
+}
+
+#[test]
+fn request_user_input_current_turn_routes_to_thinking_but_unknown_tool_stays_tools() {
+    let thinking_request = json!({
+        "input": [
+            {"type":"message","role":"user","content":"please clarify"},
+            {"type":"function_call","name":"request_user_input","call_id":"ask-1","arguments":"{\"questions\":[]}"}
+        ]
+    });
+    let thinking_signals = build_v3_current_turn_route_facts(&thinking_request);
+    assert_eq!(
+        thinking_signals.last_assistant_tool.as_ref().map(|tool| tool.category.as_str()),
+        Some("thinking")
+    );
+    assert_eq!(
+        classify_route(&RouteClassifierInput {
+            has_current_turn_tool_output: true,
+            last_assistant_tool_category: Some("thinking".into()),
+            ..Default::default()
+        })
+        .route_name,
+        "thinking"
+    );
+
+    let tools_request = json!({
+        "input": [
+            {"type":"message","role":"user","content":"run the requested operation"},
+            {"type":"function_call","name":"unknown_tool","call_id":"tool-1","arguments":"{}"}
+        ]
+    });
+    let tools_signals = build_v3_current_turn_route_facts(&tools_request);
+    assert_eq!(
+        tools_signals.last_assistant_tool.as_ref().map(|tool| tool.category.as_str()),
+        Some("other")
+    );
+    assert_eq!(
+        classify_route(&RouteClassifierInput {
+            has_current_turn_tool_output: true,
+            last_assistant_tool_category: Some("other".into()),
+            ..Default::default()
+        })
+        .route_name,
+        "tools"
     );
 }
 

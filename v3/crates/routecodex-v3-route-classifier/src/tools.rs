@@ -14,6 +14,7 @@ const THINKING_TOOL_EXACT: &[&str] = &[
     "get_file",
     "download_file",
     "describe_current_request",
+    "request_user_input",
 ];
 const WRITE_TOOL_EXACT: &[&str] = &[
     "edit",
