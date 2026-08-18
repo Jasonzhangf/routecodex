@@ -9,7 +9,10 @@ mod live_snapshot;
 mod scope_metadata;
 mod executors;
 mod frame_builders;
+mod webui_observability;
+mod webui_observability_endpoints;
 
+use webui_observability::V3WebuiObservability;
 use console::*;
 pub(crate) use live_snapshot::*;
 pub(crate) use scope_metadata::*;
@@ -161,6 +164,7 @@ struct V3ListenerState {
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeSet<String>>>,
     responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
+    webui_observability: V3WebuiObservability,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,6 +309,7 @@ pub async fn spawn_v3_server_aggregate(
     }
 
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
+    let webui_observability = V3WebuiObservability::new();
     let mut listeners = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
@@ -324,6 +329,7 @@ pub async fn spawn_v3_server_aggregate(
             provider_health: provider_health.clone(),
             realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
             responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
+            webui_observability: webui_observability.clone(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         tokio::spawn(async move {
@@ -468,6 +474,18 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         .route(
             "/_routecodex/diagnostics/virtual-router/dry-run",
             post(virtual_router_dry_run),
+        )
+        .route(
+            "/api/observability/snapshot",
+            get(webui_observability_endpoints::observability_snapshot),
+        )
+        .route(
+            "/api/observability/stats",
+            get(webui_observability_endpoints::observability_stats),
+        )
+        .route(
+            "/api/observability/events",
+            get(webui_observability_endpoints::observability_events),
         )
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(path_not_found)
