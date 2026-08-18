@@ -1,0 +1,17 @@
+{
+  "evidence_id": "evidence-routecodex-v3-global-provider-cooldown-baseline-red",
+  "issue_id": "routecodex-v3-global-provider-cooldown",
+  "experiment_id": "baseline-reproduction-20260817",
+  "phase": "baseline_reproduction",
+  "kind": "red_test",
+  "source_commit": "ac45995482a82f07778715e239a0525735506afc",
+  "scope": {"module_id": "routecodex-v3-global-provider-cooldown", "feature_id": "v3.provider_global_cooldown_persistence", "entrypoint": "provider_global_subscription_probe_contract"},
+  "producer": {"adapter": "cargo-test", "identity": "isolated-worktree-baseline"},
+  "result": "fail",
+  "confidence": 1,
+  "confidence_rationale": "The unchanged base worktree ran the existing contract test; 6 tests passed and 2 tests failed, proving the baseline divergence before implementation.",
+  "created_at": "2026-08-17T15:24:00Z",
+  "expires_at": "2026-08-24T15:24:00Z",
+  "input_hashes": ["sha256:provider_global_subscription_probe_contract@ac45995482a82f07778715e239a0525735506afc"],
+  "scope_hash": "sha256:93a18993836d2f8c1756c68a491538e870c4b691e3536d15116c7f36b13883fd"
+}

@@ -389,6 +389,25 @@ mod tests {
                     .exists(),
                 "error evidence must still be persisted when error_samples_only"
             );
+            store
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    "req-3",
+                    "error.json",
+                    &json!({"status": 400}),
+                    true,
+                    Some(400),
+                )
+                .unwrap();
+            assert!(
+                sample_dir(home_base)
+                    .join("req-3")
+                    .join("error.json")
+                    .exists(),
+                "provider 400 error evidence must be persisted"
+            );
         });
     }
 

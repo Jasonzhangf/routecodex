@@ -294,7 +294,7 @@ mod tests {
             ]
         });
 
-        apply_deepseek_console_go_request_compat(&mut body);
+        apply_deepseek_v4_request_compat(&mut body);
 
         assert!(body.get("tool_choice").is_none());
         assert_eq!(body["messages"][0]["content"], "");
@@ -310,7 +310,7 @@ mod tests {
             "messages": [{"role": "assistant", "content": null}]
         });
 
-        apply_deepseek_console_go_request_compat(&mut body);
+        apply_deepseek_v4_request_compat(&mut body);
 
         assert_eq!(body["tool_choice"], "required");
         assert!(body["messages"][0].get("reasoning_content").is_none());

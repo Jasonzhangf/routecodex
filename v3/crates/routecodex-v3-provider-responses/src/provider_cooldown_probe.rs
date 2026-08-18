@@ -17,6 +17,7 @@ pub struct V3ProviderCooldownProbeKey {
 pub struct V3ProviderCooldownProbeState {
     pub blocked_until_ms: Option<u64>,
     pub next_probe_at_ms: Option<u64>,
+    pub probe_interval_ms: u64,
     pub probe_in_flight: bool,
     pub probe_model_id: Option<String>,
 }

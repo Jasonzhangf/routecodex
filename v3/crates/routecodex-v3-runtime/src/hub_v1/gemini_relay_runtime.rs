@@ -8,6 +8,7 @@ use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
 };
+use super::{provider_compat_boundary_source, V3ProviderCompatErrorClassification};
 use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_parts_with_timeout,
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderError, V3ProviderRequestHeader,
@@ -417,6 +418,20 @@ pub fn project_v3_gemini_relay_runtime_failure(
             "direct_model_not_found",
             message,
         ),
+        V3GeminiRelayRuntimeError::ProviderCompat(error) => match error.classification() {
+            V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
+                super::provider_compat_boundary_source(
+                    "ProviderRespCompat02ProviderCompat",
+                    &error,
+                )
+            }
+            V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3HubRuntime",
+                "gemini_relay_runtime_error",
+                error.to_string(),
+            ),
+        },
         error => build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",

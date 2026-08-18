@@ -344,7 +344,6 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         429,
         Some("provider_transport_error".to_string()),
         "prior provider returned 429".to_string(),
-        None,
         &mut state,
     )
     .await

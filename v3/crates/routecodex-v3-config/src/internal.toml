@@ -75,3 +75,17 @@
 [debug_samples]
   error_samples_only = true
   error_sample_skip_statuses = [401, 402, 403, 429, 503]
+
+# 全局错误处理策略：只消费 provider mapping 产出的 typed error；不负责原始
+# provider error mapping。runtime 通过 internal.rs 查表，禁止在代码内硬编码。
+[error_handling]
+  transient_stages = ["provider.sse_decode", "provider.sse_stream", "provider.transport_transient", "V3ProviderResp14Raw", "V3ProviderRespInbound01Raw", "V3ProviderReqOutbound09TransportRequest", "V3Transport13ResponsesHttpRequest"]
+  transient_wait_ms = [1000, 3000, 5000]
+  recoverable_http_statuses = [500, 502]
+  recoverable_failure_threshold = 3
+  recoverable_cooldown_ms = 900000
+  recoverable_probe_interval_ms = 900000
+  unrecoverable_http_statuses = [401, 402, 403, 503]
+  unrecoverable_failure_threshold = 2
+  unrecoverable_cooldown_ms = 3600000
+  unrecoverable_probe_interval_ms = 3600000

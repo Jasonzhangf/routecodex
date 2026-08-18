@@ -108,7 +108,7 @@ test('installs, shims, and verifies rcc/rccv3 globally through the V3-only defau
   assert.ok(releaseInstall.includes('rccv3 --help'));
   assert.ok(globalInstall.includes('V3 command identity'));
   assert.ok(globalInstall.includes('.local/bin/rccv3'));
-  assert.ok(releaseInstall.includes('默认 V3 产物 $INSTALL_BUILD_ROOT/dist/bin/rccv3'));
+  assert.ok(releaseInstall.includes('install:release 默认入口走 V3-only: node scripts/install-v3-cli.mjs'));
   assert.ok(!globalInstall.includes('INSTALL_V2_MODE'));
   assert.ok(!releaseInstall.includes('INSTALL_V2_MODE'));
   assert.ok(releaseInstall.includes('.gitignore .github AGENTS.md'));

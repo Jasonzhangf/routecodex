@@ -223,21 +223,6 @@ prepare_dependencies() {
   fi
 }
 
-build_release_project() {
-  echo "🔨 构建 release dist（隔离源码）..."
-  prepare_isolated_build_root
-  prepare_dependencies
-  (
-    cd "$INSTALL_BUILD_ROOT"
-    node scripts/build-core.mjs
-    BUILD_MODE=release ROUTECODEX_SKIP_AUTO_BUMP="${ROUTECODEX_SKIP_AUTO_BUMP:-1}" npm run build:min
-    node scripts/ensure-cli-executable.mjs
-  )
-  if [ ! -f "$INSTALL_BUILD_ROOT/dist/bin/rccv3" ]; then
-    fail "构建失败：缺少默认 V3 产物 $INSTALL_BUILD_ROOT/dist/bin/rccv3"
-  fi
-  echo "✅ release 构建完成"
-}
 
 
 
@@ -374,4 +359,3 @@ main() {
 }
 
 main "$@"
-

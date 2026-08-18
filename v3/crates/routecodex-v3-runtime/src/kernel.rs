@@ -58,6 +58,7 @@ mod direct_sse_provider_outcome;
 use direct_sse_provider_outcome::{
     wrap_direct_sse_provider_outcome_stream, V3DirectSseProviderOutcome,
 };
+mod direct_runtime_helpers_stream;
 mod v3_direct_protocol_codec;
 pub use v3_direct_protocol_codec::{
     V3ChatDirectCodec, V3DirectProtocolCodec, V3ResponsesDirectCodec,

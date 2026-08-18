@@ -62,7 +62,7 @@ pub(crate) fn build_responses_direct_continuation_scope(
 ) -> Result<V3ResponsesDirectContinuationScope, String> {
     let (session_id, conversation_id) = request_local_continuation_scope(
         headers,
-        entry_facts.previous_response_id.is_some() || entry_facts.has_function_call_output,
+        entry_facts.previous_response_id.is_some() || entry_facts.has_unpaired_function_call_output,
         request_id,
     )?;
     Ok(V3ResponsesDirectContinuationScope::responses(
@@ -139,6 +139,10 @@ pub(crate) fn request_local_continuation_scope(
     match (session_id, conversation_id) {
         (Some(session_id), Some(conversation_id)) => Ok((session_id, conversation_id)),
         (None, None) if !requires_client_scope => {
+            let request_scope = format!("request:{request_id}");
+            Ok((request_scope.clone(), request_scope))
+        }
+        (Some(_), None) | (None, Some(_)) if !requires_client_scope => {
             let request_scope = format!("request:{request_id}");
             Ok((request_scope.clone(), request_scope))
         }

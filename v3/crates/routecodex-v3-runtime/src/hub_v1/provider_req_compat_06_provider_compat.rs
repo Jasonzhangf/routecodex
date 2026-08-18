@@ -7,7 +7,7 @@ use super::{
     build_v3_openai_responses_standard_request_from_chat_canonical,
     encode_v3_responses_semantic_as_anthropic_request, provider_protocol_compat_id,
     V3HubOpaquePayload, V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic,
-    V3ProviderCompatError, V3ProviderCompatProfileId,
+    classify_v3_provider_compat_error, V3ProviderCompatError, V3ProviderCompatProfileId,
 };
 use provider_compat_core::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
@@ -56,13 +56,8 @@ fn apply_v3_provider_req_compat(
 ) -> Result<Value, V3ProviderCompatError> {
     let reasoning_effort_explicit =
         provider_req_compat_reasoning_effort_explicit(input.provider_semantic_payload());
-    let payload =
-        build_v3_provider_standard_protocol_payload_from_req07(input).map_err(|reason| {
-            V3ProviderCompatError {
-                stage: "request_protocol",
-                profile: profile.as_str().to_string(),
-                reason,
-            }
+    let payload = build_v3_provider_standard_protocol_payload_from_req07(input).map_err(|reason| {
+            classify_v3_provider_compat_error("request_protocol", profile, reason)
         })?;
     apply_v3_provider_req_compat_to_provider_payload(
         payload,
@@ -103,11 +98,7 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
         explicit_profile: profile.as_optional_string(),
     })
     .map(|result| result.payload)
-    .map_err(|reason| V3ProviderCompatError {
-        stage: "request",
-        profile: profile.as_str().to_string(),
-        reason,
-    })?;
+    .map_err(|reason| classify_v3_provider_compat_error("request", profile, reason))?;
     let mut result = result;
     normalize_deepseek_thinking_stopless_tool_choice(&mut result, selected, provider_protocol);
     Ok(result)
@@ -354,6 +345,31 @@ mod tests {
             .provider_semantic_payload()
             .get("tool_choice")
             .is_none());
+    }
+
+    #[test]
+    fn deepseek_generic_compat_loads_without_provider_profile() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::OpenAiChat,
+            json!({
+                "model": "client-route-alias",
+                "reasoning_effort": "high",
+                "messages": [{"role":"assistant", "content": null, "tool_calls": [{"id":"call_1"}]}],
+                "tool_choice": "auto"
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_type = "openai_chat".to_string();
+        req07.previous.selected_target.model_id = "deepseek-v4-flash".to_string();
+        req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
+        req07.previous.selected_target.compatibility_profile = None;
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("model-family DeepSeek compat must not depend on provider profile");
+        let payload = req_compat.provider_semantic_payload();
+        assert!(payload.get("tool_choice").is_none());
+        assert_eq!(payload["messages"][0]["content"], "");
+        assert_eq!(payload["messages"][0]["reasoning_content"], "");
     }
 
     #[test]

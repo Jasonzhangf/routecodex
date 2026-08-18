@@ -13,7 +13,8 @@ pub mod wire;
 pub use error::{V3ProviderError, V3ProviderHttpFailure};
 pub use health::{
     V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
-    V3ProviderAvailabilityRegistry, V3ProviderFailurePolicy, V3ProviderFailureRecord,
+    V3ProviderAvailabilityRegistry, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
+    V3ProviderFailureRecord,
     V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
 };
 pub use probe::build_v3_provider_global_probe_request;

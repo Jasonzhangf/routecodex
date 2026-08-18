@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "resources": [
+    {"resource_id":"project_contract","owner":"appsdk::project_contract","truth_store":".appsdk/project.json","allowed_operations":["read","validate","write"]},
+    {"resource_id":"lifecycle_records","owner":"appsdk::record_graph","truth_store":".appsdk/records/**","allowed_operations":["read","validate","write"]},
+    {"resource_id":"compiled_artifact","owner":"appsdk::compiler","truth_store":"generated/project.compiled.json","allowed_operations":["read","write"]},
+    {"resource_id":"fix_worktree","owner":"appsdk::fix_lifecycle","truth_store":".appsdk/records/worktree-record-<module>.json","allowed_operations":["read","validate","write"]},
+    {"resource_id":"fix_evidence_set","owner":"appsdk::fix_lifecycle","truth_store":".appsdk/records/evidence/<module>/<evidence_id>.json","allowed_operations":["read","validate","write"]},
+    {"resource_id":"fix_candidate","owner":"appsdk::fix_lifecycle","truth_store":".appsdk/records/fix-candidate-record-<module>.json","allowed_operations":["read","validate","write"]},
+    {"resource_id":"architecture_review","owner":"appsdk::fix_lifecycle","truth_store":".appsdk/records/review-record-<module>.json","allowed_operations":["read","validate","write"]},
+    {"resource_id":"fix_effectiveness","owner":"appsdk::fix_lifecycle","truth_store":".appsdk/records/effectiveness-record-<module>.json","allowed_operations":["read","validate","write"]},
+    {"resource_id":"mainline_merge","owner":"appsdk::fix_lifecycle","truth_store":".appsdk/records/merge-record-<module>.json","allowed_operations":["read","validate","write"]},
+    {"resource_id":"v3.provider.global_cooldown_state","owner":"routecodex-v3-provider-responses::V3ProviderGlobalCooldownCoordinator","truth_store":"provider cooldown persistence artifact declared by coordinator","identity":["provider_id","auth_alias","model_scope","failure_class"],"allowed_operations":["load","record_failure","acquire_probe","apply_probe_result","persist","availability"],"direct_relations":["v3.config.provider_cooldown_policy","v3.error.typed_provider_failure","v3.server.listener_ready"],"forbidden_relations":["request.normal_payload","response.client_payload","metadata_center","virtual_router","error06_projection"],"payload_control_separation":"side-channel only"},
+    {"resource_id":"v3.config.provider_cooldown_policy","owner":"routecodex-v3-config::V3ProviderCooldownPolicyManifest","truth_store":"V3Config05ManifestPublished.provider cooldown policy","allowed_operations":["read","validate","publish"],"allowed_readers":["V3ProviderGlobalCooldownCoordinator"],"forbidden_relations":["request.normal_payload","response.client_payload"]},
+    {"resource_id":"v3.server.listener_ready","owner":"routecodex-v3-server::V3ServerAggregateLifecycle","truth_store":"aggregate listener readiness","allowed_operations":["publish","read"],"allowed_readers":["V3ProviderGlobalCooldownCoordinator"],"forbidden_relations":["provider_payload","client_payload"]}
+  ]
+}

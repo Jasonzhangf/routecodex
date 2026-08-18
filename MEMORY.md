@@ -5696,9 +5696,21 @@ Tags: #v4 #phase2 #cordis #node-container #host-binding #lifecycle-failure #dsh-
 - Evidence: node-container 13/13, cordis-bridge 7/7, Cordis host 22/22, V4 `verify:ci` complete admission matrix (gates=19, consumers=13, isolation=ok, red suites=13), AppSDK admission `contract_bound`. No install/restart/live V4 traffic, origin push, or worktree/branch cleanup claimed.
 Tags: #v4 #phase2 #m3 #cordis #node-container #execution-bridge #dsh-pass
 
+## 2026-08-17 V4 M5/M6 closeout boundary
+- M5 typed-resource guard landed in main as `02348cb4e` + merge `ac4599548`; M6 plugin-manager/runtime-inspector/admin is an ancestor of main (`889f4f3a8`).
+- M5 root fixes: standard control/error handles fail-fast when their declared typed resource is absent; `ResourceAccessViolation` retains its own typed execution-failure code; positive/negative gates cover both.
+- The first architecture review caught a P0 test-boundary violation: the Cordis host binding fixture sent `metadata_center` state through the host port, while the binding contract forbids MetadataCenter state on that channel. The fixture was corrected in `474b5a9c0` by keeping MetadataCenter out of the host-port integration case; standard-plugin typed-resource behavior remains covered in its owner-local black-box tests.
+- Verification after the fix: `cd v4 && npm run verify:ci` passed with `gates=20`, `consumers=14`, `red suites=14`; `appsdk verify --admission v4` returned `contract_bound`; `git diff --check` passed. Codex Review oauth r2 for `40982d7ff..474b5a9c0` completed with no P0/P1 findings. DSH for the earlier M5 range was explicitly `unavailable` because OpenCode Go returned weekly quota 429, so Codex Review was the allowed fallback.
+- Phase 2 work stops at M6 per Jason. M7 WebUI and M8 pipeline migration remain outside this closeout; V3 dirty worktree remains untouched.
+Tags: #v4 #phase2 #m5 #m6 #typed-resource #control-payload-isolation #review-pass
+
 ## 2026-08-17 V3 provider priority health policy contract
 - Unified policy is error-class/key based, never cc-sol/model/provider hard-coded. Priority only controls candidate selection: before threshold, failure reselects the next lower-priority candidate; the next request starts from the highest-priority available key.
 - HTTP 401/403 are non-recoverable account errors: same provider key requires 2 consecutive failures before a 1-hour cooldown; probe interval is 1 hour; only explicit probe success restores availability.
 - HTTP 429 and all 5xx, including 502, are recoverable errors: 3 consecutive failures before a 15-minute cooldown; probe interval is 15 minutes; only explicit probe success restores availability.
 - Success clears that key's consecutive-failure counter but cannot bypass an active provider cooldown. The health owner must classify typed error family and key; generic provider config must not collapse these categories into one threshold.
 Tags: #v3 #provider-health #priority-routing #cooldown #probe #account-error #recoverable-error
+
+## 2026-08-17 历史样本审计口径
+- provider/route 排障不能只用当前实测；必须同时扫描 canonical `~/.rcc/codex-samples/<endpoint>/ports/<port>/` 下全部历史 `error.json`、`provider-request.json`、`provider-response.json`，并把历史错误样本作为请求形状与根因判定证据。
+Tags: #v3 #historical-samples #error-samples #provider-debug

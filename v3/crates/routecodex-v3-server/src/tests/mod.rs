@@ -1508,6 +1508,42 @@ fn responses_continuation_scope_prefers_explicit_headers_over_codex_turn_metadat
 }
 
 #[test]
+fn responses_fresh_request_ignores_plugin_session_without_typed_conversation() {
+    let mut headers = HeaderMap::new();
+    headers.insert("session_id", HeaderValue::from_static("plugin-session"));
+    headers.insert(
+        "x-client-request-id",
+        HeaderValue::from_static("plugin-request"),
+    );
+
+    let scope = request_local_continuation_scope(&headers, false, "req-fresh")
+        .expect("fresh request must not require a conversation header");
+
+    assert_eq!(
+        scope,
+        (
+            "request:req-fresh".to_string(),
+            "request:req-fresh".to_string()
+        )
+    );
+}
+
+#[test]
+fn responses_paired_function_outputs_are_not_continuation_scope() {
+    let payload = json!({
+        "input": [
+            {"type": "function_call", "call_id": "call-1", "name": "tool", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call-1", "output": "ok"}
+        ]
+    });
+    let facts = V3ResponsesContinuationEntryFacts::project(&payload);
+
+    assert!(facts.has_function_call_output);
+    assert!(!facts.has_unpaired_function_call_output);
+    assert!(responses_entry_facts_allow_fresh_protocol_plan(&facts));
+}
+
+#[test]
 fn v3_console_v2_provider_target_uses_auth_alias_and_wire_model() {
     let observability = V3RuntimeObservability {
         provider_id: Some("test".to_string()),

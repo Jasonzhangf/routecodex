@@ -28,6 +28,54 @@ struct InternalConfig {
     hidden_models: HiddenModels,
     #[serde(default)]
     debug_samples: DebugSamples,
+    #[serde(default)]
+    error_handling: ErrorHandling,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3InternalErrorCategory {
+    Transient,
+    Recoverable,
+    Unrecoverable,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ErrorHandling {
+    #[serde(default)]
+    transient_stages: Vec<String>,
+    #[serde(default)]
+    transient_wait_ms: Vec<u64>,
+    #[serde(default)]
+    recoverable_http_statuses: Vec<u16>,
+    #[serde(default)]
+    recoverable_failure_threshold: u32,
+    #[serde(default)]
+    recoverable_cooldown_ms: u64,
+    #[serde(default)]
+    recoverable_probe_interval_ms: u64,
+    #[serde(default)]
+    unrecoverable_http_statuses: Vec<u16>,
+    #[serde(default)]
+    unrecoverable_failure_threshold: u32,
+    #[serde(default)]
+    unrecoverable_cooldown_ms: u64,
+    #[serde(default)]
+    unrecoverable_probe_interval_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3InternalErrorHandlingPolicy {
+    pub transient_stages: Vec<String>,
+    pub transient_wait_ms: Vec<u64>,
+    pub recoverable_http_statuses: Vec<u16>,
+    pub recoverable_failure_threshold: u32,
+    pub recoverable_cooldown_ms: u64,
+    pub recoverable_probe_interval_ms: u64,
+    pub unrecoverable_http_statuses: Vec<u16>,
+    pub unrecoverable_failure_threshold: u32,
+    pub unrecoverable_cooldown_ms: u64,
+    pub unrecoverable_probe_interval_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,6 +143,55 @@ static INTERNAL_CONFIG: LazyLock<InternalConfig> = LazyLock::new(|| {
     validate_internal_config(&config);
     config
 });
+
+pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
+    static POLICY: LazyLock<V3InternalErrorHandlingPolicy> = LazyLock::new(|| {
+        let config = &INTERNAL_CONFIG.error_handling;
+        assert!(!config.transient_stages.is_empty());
+        assert_eq!(config.transient_wait_ms.len(), 3);
+        assert!(config.transient_wait_ms.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(config.recoverable_failure_threshold > 0);
+        assert!(config.recoverable_cooldown_ms > 0);
+        assert_eq!(config.recoverable_probe_interval_ms, 15 * 60_000);
+        assert!(config.unrecoverable_failure_threshold > 0);
+        assert!(config.unrecoverable_cooldown_ms > 0);
+        assert_eq!(config.unrecoverable_probe_interval_ms, 60 * 60_000);
+        V3InternalErrorHandlingPolicy {
+            transient_stages: config.transient_stages.clone(),
+            transient_wait_ms: config.transient_wait_ms.clone(),
+            recoverable_http_statuses: config.recoverable_http_statuses.clone(),
+            recoverable_failure_threshold: config.recoverable_failure_threshold,
+            recoverable_cooldown_ms: config.recoverable_cooldown_ms,
+            recoverable_probe_interval_ms: config.recoverable_probe_interval_ms,
+            unrecoverable_http_statuses: config.unrecoverable_http_statuses.clone(),
+            unrecoverable_failure_threshold: config.unrecoverable_failure_threshold,
+            unrecoverable_cooldown_ms: config.unrecoverable_cooldown_ms,
+            unrecoverable_probe_interval_ms: config.unrecoverable_probe_interval_ms,
+        }
+    });
+    &POLICY
+}
+
+pub fn classify_v3_internal_provider_error(
+    stage: &str,
+    status: u16,
+    code: &str,
+) -> V3InternalErrorCategory {
+    let policy = v3_internal_error_handling();
+    let transient_stage = policy.transient_stages.iter().any(|value| value == stage)
+        && ((!code.starts_with("provider_http_"))
+            || (stage.contains("Transport")
+                && code == "provider_response_header_timeout"));
+    if transient_stage {
+        V3InternalErrorCategory::Transient
+    } else if policy.unrecoverable_http_statuses.contains(&status) {
+        V3InternalErrorCategory::Unrecoverable
+    } else if policy.recoverable_http_statuses.contains(&status) {
+        V3InternalErrorCategory::Recoverable
+    } else {
+        V3InternalErrorCategory::Recoverable
+    }
+}
 
 /// 内部配置资产语义校验：必选 section 缺失、空清单、未归一化（含空白/大写）
 /// 条目、重复条目、builtin id 无对应 defaults、defaults 缺关键元数据，一律

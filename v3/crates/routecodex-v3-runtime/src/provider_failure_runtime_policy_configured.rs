@@ -115,12 +115,29 @@ fn configured_health_policy_for_failure(
             }
         )
     });
+    let cooldown_scope = policy.path.iter().find_map(|step| match step {
+        V3ProviderDispositionStepManifest::Cooldown {
+            scope: V3ErrorActionScope::AuthKey { .. },
+            ..
+        } => Some(V3ProviderFailureCooldownScope::AuthKey),
+        V3ProviderDispositionStepManifest::Cooldown { .. } => {
+            Some(V3ProviderFailureCooldownScope::Session)
+        }
+        _ => None,
+    }).unwrap_or(V3ProviderFailureCooldownScope::Session);
     if cooldown_ms.is_none() && !until_restart {
         return None;
     }
+    let internal_policy = v3_internal_error_handling();
     Some(V3ProviderFailurePolicy {
         failure_threshold: threshold,
         cooldown_ms: cooldown_ms.unwrap_or(1),
+        probe_interval_ms: if cooldown_scope == V3ProviderFailureCooldownScope::AuthKey {
+            internal_policy.unrecoverable_probe_interval_ms
+        } else {
+            internal_policy.recoverable_probe_interval_ms
+        },
         until_restart,
+        cooldown_scope,
     })
 }

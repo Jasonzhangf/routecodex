@@ -1,3 +1,5 @@
+use super::*;
+
 struct V3DirectSseRemoteContinuationPolicy {
     state: V3ResponsesDirectContinuationState,
     scope_key: V3RemoteContinuationScopeKey,
@@ -457,6 +459,41 @@ pub(crate) fn runtime_source(
         "v3_route_target_runtime_failure",
         error.to_string(),
     )
+}
+
+pub(crate) fn compat_source(
+    stage: &'static str,
+    error: &crate::hub_v1::V3ProviderCompatError,
+) -> V3Error01SourceRaised {
+    use crate::hub_v1::V3ProviderCompatErrorClassification;
+    match error.classification() {
+        V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
+            let field = extract_v3_provider_compat_boundary_field(&error.reason)
+                .unwrap_or("control_like_top_level_field");
+            routecodex_v3_error::raise_v3_provider_compat_payload_boundary_violation(
+                stage, field, error.reason.as_str(),
+            )
+        }
+        V3ProviderCompatErrorClassification::Other => runtime_source(stage, error),
+    }
+}
+
+fn extract_v3_provider_compat_boundary_field(reason: &str) -> Option<&'static str> {
+    let marker = "ProviderCompatPayloadBoundaryViolation field=";
+    let start = reason.find(marker)? + marker.len();
+    let rest = &reason[start..];
+    let end = rest
+        .find(|c: char| c.is_whitespace() || c == '\0')
+        .unwrap_or(rest.len());
+    match &rest[..end] {
+        "metadata" => Some("metadata"),
+        "client_metadata" => Some("client_metadata"),
+        "context" => Some("context"),
+        "routing" => Some("routing"),
+        "continuation" => Some("continuation"),
+        "provider" => Some("provider"),
+        _ => Some("control_like_top_level_field"),
+    }
 }
 
 struct V3ExactPinAvailabilityExhaustion<'pin> {

@@ -8,7 +8,9 @@ pub(crate) use common::{
     v3_stopless_center_enabled_for_server, V3HubOpaquePayload, V3HubRelayCanonicalResponseContext,
     V3HubResponsePayload, V3HubResponseToolCall,
 };
-pub use common::{
+pub(crate) use common::{
+    classify_v3_provider_compat_error, provider_compat_boundary_source,
+    V3ProviderCompatErrorClassification,
     V3HubContinuationCommit, V3HubContinuationOwnership, V3HubEntryProtocol, V3HubExecutionMode,
     V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayToolKind,
     V3HubRequestSemanticProtocol, V3HubResponseNormalizedKind, V3HubResponseTerminality,

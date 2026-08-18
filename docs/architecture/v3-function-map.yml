@@ -662,7 +662,7 @@ features:
   - restart
   required_gates:
   - npm run test:v3-p5-router-target
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target configured_priority_is_not_overridden_by_context_near_limit_heuristic
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target context_admission_filters_over_limit_candidates
     -- --nocapture
   - npm run test:v3-p5-server-blackbox
   - 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests:': --
@@ -685,9 +685,12 @@ features:
   - 'Target hard capability_mismatch is allowed only for capabilities the selected
     model/provider may genuinely lack: web_search/search and multimodal/vision.'
   - After genuine web_search/search and multimodal/vision capability validation, Target10
-    preserves configured candidate order; max_context_tokens metadata cannot synthesize
-    context_near_limit unavailability or preempt priority, while Provider availability/health
-    and request-local provider-failure exclusion remain explicit switch inputs.
+    preserves configured candidate order among candidates within their declared context
+    window; a candidate whose max_context_tokens is below request_input_tokens is marked
+    context_window_exceeded and skipped before availability/transport. Explicit direct pins
+    and the default-pool floor remain last-resort eligible with the typed overflow reason,
+    while Provider availability/health and request-local provider-failure exclusion remain
+    explicit switch inputs.
   - Tools, tool_outputs, reasoning/thinking, coding, longcontext, remote_continuation,
     and local_materialization are route/protocol/continuation ownership signals; they
     may steer pool choice but must not mark a candidate as capability_mismatch.
@@ -697,8 +700,8 @@ features:
   - OpenAI Responses request.reasoning is also exposed as the thinking route fact
     so configs using either vocabulary route the same request.
   - Target candidate dedupe preserves pool provenance, required capabilities, and
-    default-pool membership; default's final compatible provider remains selectable
-    under health cooldown.
+    default-pool membership; the default floor is only a last-resort context-admission
+    fallback and never overrides health cooldown or request-local failure exclusion.
   - Target09-to-Target10 selection first reads the session-scoped availability projection
     and request-local Error03 candidate exclusions; global availability may revive
     a multi-candidate plan only after no nonfailed session alternative remains.

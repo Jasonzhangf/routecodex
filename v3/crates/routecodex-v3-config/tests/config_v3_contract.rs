@@ -190,6 +190,11 @@ fn parses_full_config_v3_without_interpreting_targets() {
     assert_eq!(manifest.servers["secondary"].port, 4445);
     assert_eq!(manifest.providers.len(), 2);
     assert_eq!(
+        manifest.providers["cc"].sse_first_frame_timeout_ms,
+        Some(30_000),
+        "omitted provider SSE timeout must compile to the documented 30s default"
+    );
+    assert_eq!(
         manifest.providers["cc"].models["gpt-5.5"].wire_name,
         "gpt-5.5"
     );
