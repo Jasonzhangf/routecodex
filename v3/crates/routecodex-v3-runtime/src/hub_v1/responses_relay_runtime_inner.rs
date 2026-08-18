@@ -689,8 +689,15 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
                         Some(manifest),
                         Some(&selected_target_provider_id),
-                        &hook_provider_value,
+                        &provider_value,
                     )
+                    .or_else(|| {
+                        responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
+                            Some(manifest),
+                            Some(&selected_target_provider_id),
+                            &hook_provider_value,
+                        )
+                    })
                 {
                     let global_probe_compatible = semantic_error.provider_global_failure
                         && provider_wire_protocol == V3HubProviderWireProtocol::Responses

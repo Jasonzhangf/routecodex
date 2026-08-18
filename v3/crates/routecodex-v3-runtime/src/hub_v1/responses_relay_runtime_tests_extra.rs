@@ -111,6 +111,7 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
             source_stage: "V3ProviderReqOutbound09TransportRequest",
             terminal_projection: Some(terminal_projection),
             observability: None,
+            matched_policy: None,
         },
         vec!["V3ProviderReqOutbound09TransportRequest"],
         0,

@@ -285,6 +285,7 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
         502,
         Some("provider_request_compat_error".to_string()),
         "arguments must be valid JSON".to_string(),
+        None,
         &mut state,
     )
     .await
@@ -344,6 +345,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         429,
         Some("provider_transport_error".to_string()),
         "prior provider returned 429".to_string(),
+        None,
         &mut state,
     )
     .await
@@ -601,6 +603,7 @@ async fn transport_error_excludes_only_the_failed_provider_key() {
         502,
         Some("provider_transport_error".to_string()),
         "error sending request for url".to_string(),
+        None,
         &mut state,
     )
     .await
@@ -701,6 +704,7 @@ message_mode = "code_only"
         429,
         Some("provider_http_429".to_string()),
         "quota exceeded".to_string(),
+        None,
         &mut state,
     )
     .await
@@ -717,4 +721,119 @@ message_mode = "code_only"
         projection.body["error"]["code"], "E_PATH_RATE_LIMIT",
         "project step public_code must override the projected client code"
     );
+}
+
+#[tokio::test]
+async fn matched_response_policy_identity_drives_retry_without_message_rematch() {
+    let scope = "response_policy_identity";
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "__SCOPE__"
+endpoints = ["responses"]
+[providers.first]
+type = "responses"
+base_url = "http://first.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "FIRST_KEY" }] }
+[[providers.first.response_error_policy]]
+policy_id = "exact_response_policy"
+[providers.first.response_error_policy.match]
+http_status = 200
+content_contains_any = ["original diagnostic payload"]
+[[providers.first.response_error_policy.path]]
+step = "wait_retry"
+retry_mode = "retry_same"
+max_attempts = 3
+backoff_ms = 7000
+backoff_multiplier = 2
+[[providers.first.response_error_policy.path]]
+step = "project"
+status = 503
+reason_code = "wrapped_provider_error"
+public_code = "E_WRAPPED_PROVIDER"
+message_mode = "code_only"
+[[providers.first.response_error_policy]]
+policy_id = "reselect_then_retry_policy"
+[providers.first.response_error_policy.match]
+http_status = 429
+[[providers.first.response_error_policy.path]]
+step = "wait_retry"
+retry_mode = "reselect_before_client_projection"
+max_attempts = 3
+backoff_ms = 5000
+[[providers.first.response_error_policy.path]]
+step = "project"
+status = 503
+reason_code = "reselect_exhausted"
+public_code = "E_RESELECT_EXHAUSTED"
+message_mode = "code_only"
+[providers.first.models.gpt-test]
+wire_name = "gpt-test"
+capabilities = ["text", "tools"]
+[route_groups.__SCOPE__.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 1 }
+]
+"#
+    .replace("__SCOPE__", scope);
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&source).expect("response-policy authoring"),
+    )
+    .expect("response-policy manifest");
+    let matched_policy = &manifest.error.provider_error_action_policy[0];
+    assert_eq!(configured_retry_backoff_ms(Some(matched_policy), 0), 7000);
+    assert_eq!(configured_retry_backoff_ms(Some(matched_policy), 1), 14000);
+    assert_eq!(configured_retry_backoff_ms(Some(matched_policy), 8), 60000);
+    let reselect_policy = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| policy.policy_id == "reselect_then_retry_policy")
+        .expect("reselect policy");
+    assert_eq!(
+        configured_retry_budget_for_failure(Some(reselect_policy), 0),
+        2
+    );
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select the provider"),
+    };
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: None,
+        failure_session_scope: test_provider_failure_scope(scope, scope, "session-policy-id")
+            .expect("test failure session scope"),
+        provider_health: &health,
+        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+    let result = run_v3_relay_provider_failure_policy(
+        &context,
+        selected,
+        "V3ProviderRespInbound01Raw",
+        200,
+        Some("wrapped_provider_error".to_string()),
+        "compressed message no longer contains configured keyword".to_string(),
+        Some(matched_policy),
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            trace: &mut trace,
+        },
+    )
+    .await
+    .expect("exact matched policy must drive Error05");
+
+    assert_eq!(result.event.action, "policy_retry_same");
+    assert_eq!(result.event.wait_ms, Some(7000));
+    assert!(result.retry_selected.is_some());
+    assert_eq!(same_candidate_retries.values().copied().next(), Some(1));
 }

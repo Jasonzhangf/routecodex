@@ -645,8 +645,8 @@ fn compile_providers(
                     routing_group: None,
                 },
                 matcher: policy.matcher,
-                path: None,
-                action: Some(policy.action),
+                path: policy.path,
+                action: policy.action,
             }
         }));
         providers.insert(

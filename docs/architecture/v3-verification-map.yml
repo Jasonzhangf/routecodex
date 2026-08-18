@@ -3675,3 +3675,47 @@ features:
     live_cutover: required
     global_install_restart: required
     forbidden_claim: Do not claim hourly probe or provider-global recovery from state-only tests; live runtime evidence is required.
+
+- feature_id: v3.provider_response_error_policy_closeout
+  status: implementation_in_progress
+  change_risk: critical
+  owner_kind: rust_v3_provider_terminal_response_error_policy
+  owner_scope: Provider terminal JSON/materialized SSE classification through the existing Error01-06 and provider-action-gate path before provider-success record and Resp04 continuation commit.
+  owner_modules:
+  - v3/crates/routecodex-v3-config
+  - v3/crates/routecodex-v3-runtime
+  test_design:
+  - docs/goals/v3-provider-response-error-policy-test-design.md
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/manifests/v3.provider_action_gate.mainline.yml
+  required_positive:
+  - Provider-local full path compiles into the unified provider error action manifest with injected provider scope while legacy action remains compatible.
+  - Bounded Chat Anthropic and Responses terminal facts match once and retain exact policy identity/path through retry backoff and final projection.
+  - Configured backoff is a minimum combined with provider-action-gate delay by max rather than addition.
+  - Only a non-matching successful response records provider success and reaches Resp04 continuation commit.
+  required_negative:
+  - Id model and metadata strings cannot trigger content matching.
+  - Error policy directive cannot enter normal provider/client payload MetadataCenter continuation or SSE/Server ownership.
+  - Error05 cannot re-match a response-content policy from compressed error message.
+  - Retry exhaustion cannot project before route/default exhaustion and cannot project more than once.
+  required_gates:
+  - npm run test:v3-provider-action-gate
+  - npm run verify:v3-provider-action-gate
+  - npm run test:v3-provider-action-gate-red-fixtures
+  - npm run test:v3-hub-relay-runtime-closeout
+  - npm run verify:v3-hub-relay-runtime-closeout
+  - npm run test:v3-hub-relay-runtime-closeout-red-fixtures
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-cargo-fmt
+  - npm run test:v3-workspace
+  - git diff --check
+  completion_boundary:
+    source_controlled: false
+    live_cutover: required
+    global_install_restart: required
+    forbidden_claim: Source tests alone do not prove GLM Replay live behavior; installed failing-shape and positive-control replay plus DSH Review are mandatory.

@@ -817,7 +817,11 @@ struct V2ProviderConfig {
 struct V2ProviderV3Config {
     #[serde(default)]
     health: Option<V3ProviderHealthAuthoringConfig>,
-    #[serde(default, alias = "semantic_error_policy")]
+    #[serde(
+        default,
+        rename = "response_error_policy",
+        alias = "semantic_error_policy"
+    )]
     semantic_error_policy: Vec<V3ProviderSemanticErrorPolicyAuthoringConfig>,
     #[serde(default, alias = "provider_request_cleanup")]
     provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,

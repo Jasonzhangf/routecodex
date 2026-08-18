@@ -327,7 +327,10 @@ pub struct V3ProviderSemanticErrorPolicyAuthoringConfig {
     pub policy_id: String,
     #[serde(rename = "match")]
     pub matcher: V3ProviderErrorMatcherAuthoringConfig,
-    pub action: V3ProviderErrorActionAuthoringConfig,
+    #[serde(default)]
+    pub path: Option<Vec<V3ProviderDispositionStepAuthoringConfig>>,
+    #[serde(default)]
+    pub action: Option<V3ProviderErrorActionAuthoringConfig>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -521,7 +524,11 @@ pub struct V3ProviderAuthoringConfig {
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     #[serde(default)]
     pub health: Option<V3ProviderHealthAuthoringConfig>,
-    #[serde(default)]
+    #[serde(
+        default,
+        rename = "response_error_policy",
+        alias = "semantic_error_policy"
+    )]
     pub semantic_error_policy: Vec<V3ProviderSemanticErrorPolicyAuthoringConfig>,
     #[serde(default)]
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,

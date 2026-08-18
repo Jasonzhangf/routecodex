@@ -2,7 +2,8 @@
 use routecodex_v3_config::{
     compile_v3_config_05_manifest, default_v3_config_path, parse_v3_config_02_authoring,
     resolve_v3_http_sse_keepalive_ms, V3ConfigStore, V3HubFixedNode, V3HubHookPhase,
-    V3HubHookProfile, V3HubHookRequirement, V3RouteTargetKind, V3SelectionStrategy,
+    V3HubHookProfile, V3HubHookRequirement, V3ProviderDispositionStepManifest,
+    V3ProviderErrorRetryMode, V3RouteTargetKind, V3SelectionStrategy,
     V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS,
 };
 use std::fs;
@@ -1187,6 +1188,48 @@ fn enforces_hook_resource_profile_and_optional_contracts() {
         .find(|hook| hook.requirement == V3HubHookRequirement::Optional)
         .expect("typed optional hook");
     assert!(!optional.enabled);
+}
+
+#[test]
+fn provider_response_error_policy_accepts_full_path_and_injects_provider_scope() {
+    let raw = FULL_CONFIG.replace(
+        "[[providers.cc.semantic_error_policy]]\npolicy_id = \"cc_200_diagnostic_zero_usage\"",
+        "[[providers.cc.response_error_policy]]\npolicy_id = \"cc_200_diagnostic_zero_usage\"",
+    )
+    .replace(
+        "[providers.cc.semantic_error_policy.match]",
+        "[providers.cc.response_error_policy.match]",
+    )
+    .replace(
+        "[providers.cc.semantic_error_policy.match.sse]",
+        "[providers.cc.response_error_policy.match.sse]",
+    )
+    .replace(
+        "[providers.cc.semantic_error_policy.action]\nkind = \"periodic_recovery\"\nreason_code = \"provider_diagnostic_zero_usage\"\nretry_mode = \"reselect_before_client_projection\"\ncooldown_ms = 300000\ndisable_scope = \"provider_model\"",
+        "[[providers.cc.response_error_policy.path]]\nstep = \"wait_retry\"\nretry_mode = \"retry_same\"\nmax_attempts = 3\nbackoff_ms = 1000\nbackoff_multiplier = 2\n\n[[providers.cc.response_error_policy.path]]\nstep = \"cooldown\"\nscope = \"provider_model\"\nduration_ms = 300000\n\n[[providers.cc.response_error_policy.path]]\nstep = \"project\"\nstatus = 503\nreason_code = \"provider_diagnostic_zero_usage\"\npublic_code = \"upstream_overloaded\"\nmessage_mode = \"code_only\"",
+    );
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap())
+        .expect("provider-local full path must compile");
+    let policy = &manifest.error.provider_error_action_policy[0];
+    assert_eq!(policy.scope.provider_id.as_deref(), Some("cc"));
+    assert_eq!(policy.scope.provider_type.as_deref(), Some("responses"));
+    assert!(matches!(
+        policy.path.first(),
+        Some(V3ProviderDispositionStepManifest::WaitRetry {
+            retry_mode: V3ProviderErrorRetryMode::RetrySame,
+            max_attempts: 3,
+            backoff_ms: 1000,
+            backoff_multiplier: Some(2),
+        })
+    ));
+    assert!(matches!(
+        policy.path.last(),
+        Some(V3ProviderDispositionStepManifest::Project {
+            status: 503,
+            public_code: Some(code),
+            ..
+        }) if code == "upstream_overloaded"
+    ));
 }
 
 #[test]

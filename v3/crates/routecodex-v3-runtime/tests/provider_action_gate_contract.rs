@@ -15,6 +15,15 @@ fn key(error_family: &str) -> V3ProviderActionGateKey {
     )
 }
 
+#[test]
+fn configured_backoff_is_a_minimum_for_provider_action_admission() {
+    let gate = V3ProviderActionGate::default();
+    let recorded = gate
+        .record_failure_with_minimum_delay(&key("configured_backoff"), 7_000)
+        .expect("record configured backoff");
+    assert_eq!(recorded.minimum_delay_ms, 7_000);
+}
+
 fn session_scope(server_id: &str, routing_group: &str) -> V3ProviderFailureSessionScope {
     V3ProviderFailureSessionScope::new(
         server_id,

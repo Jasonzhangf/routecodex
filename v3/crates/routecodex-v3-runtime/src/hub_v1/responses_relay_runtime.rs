@@ -534,6 +534,10 @@ async fn handle_v3_responses_relay_provider_failure(
         v3_responses_relay_provider_failure_reason(&failure)
             .unwrap_or("provider failure")
             .to_string(),
+        failure
+            .matched_policy
+            .as_ref()
+            .map(V3ProviderFailureDirective::policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: state.failed_candidates,
             same_candidate_retries: state.same_candidate_retries,
