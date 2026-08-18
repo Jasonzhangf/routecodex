@@ -1,6 +1,31 @@
 version: 1
 status: h1_typed_skeleton_and_static_registry_bound
 features:
+- feature_id: v3.provider_global_cooldown_persistence
+  owner_crate: routecodex-v3-provider-responses
+  owner_file: v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+  resource_bindings:
+  - v3.provider.global_cooldown_persistence
+  entry_symbols:
+  - V3ProviderCooldownCoordinator::load
+  - V3ProviderCooldownCoordinator::record_failure
+  - V3ProviderCooldownCoordinator::acquire_startup_probe
+  - V3ProviderCooldownCoordinator::acquire_due_probe
+  - V3ProviderCooldownCoordinator::apply_probe_success
+  - V3ProviderCooldownCoordinator::apply_probe_failure
+  - V3ProviderCooldownCoordinator::persist
+  allowed_paths:
+  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/.appsdk/**
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  required_gates:
+  - npm run test:v3-provider-global-cooldown-persistence
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
 - feature_id: v3.managed_server_lifecycle
   owner_crate: routecodex-v3-lifecycle
   owner_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
@@ -359,8 +384,8 @@ features:
   - V3ProviderGlobalSubscriptionHealthStore::complete_probe_failure
   - V3ProviderGlobalSubscriptionHealthStore::reset_after_restart
   - V3ProviderGlobalSubscriptionHealthStore::record_provider_success
-  - V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
-  - V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+  - V3ProviderFailureRuntimeHealth::record_provider_global_cooldown_failure
+  - V3ProviderFailureRuntimeHealth::run_due_persistent_cooldown_probes
   - configured_retry_budget_for_failure
   - configured_health_policy_for_failure
   - provider_error_policy_matches_failure
@@ -4596,8 +4621,8 @@ features:
   - v3.config.published_manifest
   entry_symbols:
   - V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
-  - V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
-  - V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+  - V3ProviderFailureRuntimeHealth::record_provider_global_cooldown_failure
+  - V3ProviderFailureRuntimeHealth::run_due_persistent_cooldown_probes
   - probe_v3_provider_global_target
   - spawn_v3_server_aggregate
   allowed_paths:

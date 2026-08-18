@@ -717,7 +717,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         )
                         .map_err(V3ResponsesRelayRuntimeError::Target)?;
                         provider_health
-                            .record_provider_global_subscription_failure(
+                            .record_provider_global_cooldown_failure(
                                 &input.failure_session_scope,
                                 &selected_target_provider_id,
                                 Some(&selected.candidate.auth_alias),
@@ -1039,7 +1039,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         )
                         .map_err(V3ResponsesRelayRuntimeError::Target)?;
                         provider_health
-                            .record_provider_global_subscription_failure(
+                            .record_provider_global_cooldown_failure(
                                 &input.failure_session_scope,
                                 &selected_target_provider_id,
                                 Some(&selected.candidate.auth_alias),

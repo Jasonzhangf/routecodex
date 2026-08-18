@@ -6983,7 +6983,7 @@ chains:
   - step_id: v3-provider-global-probe-01
     from_node: V3ProviderGlobalSubscriptionHealthStore
     to_node: V3ProviderGlobalProbePermit
-    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_persistent_cooldown_probes
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
     callee_file: v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
@@ -7013,7 +7013,7 @@ chains:
     to_node: V3ProviderGlobalSubscriptionHealthStore
     caller_symbol: execute_v3_responses_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_cooldown_failure
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
@@ -7025,7 +7025,7 @@ chains:
   - step_id: v3-provider-global-probe-04
     from_node: V3ProviderGlobalSubscriptionFailureObservation
     to_node: V3ProviderGlobalSubscriptionHealthStore
-    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_cooldown_failure
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response
     callee_file: v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
@@ -7036,3 +7036,49 @@ chains:
       produces: [v3.provider.global_subscription_health]
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
+- chain_id: v3.provider_global_cooldown_persistence
+  owner_feature_id: v3.provider_global_cooldown_persistence
+  summary: Persisted provider cooldown is loaded before serving, probed at startup and due deadlines, and removed only after a successful probe.
+  edges:
+  - step_id: v3-provider-cooldown-01
+    from_node: V3ProviderFailureRecord
+    to_node: V3ProviderCooldownCoordinator
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderCooldownCoordinator::record_failure
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+    status: active
+    owner_feature_id: v3.provider_global_cooldown_persistence
+    resource_flow:
+      consumes: [v3.error.source]
+      produces: [v3.provider.global_cooldown_persistence]
+      side_channel_reads: []
+      side_channel_writes: [v3.provider.global_cooldown_persistence]
+  - step_id: v3-provider-cooldown-02
+    from_node: V3ServerAggregateLifecycle
+    to_node: V3ProviderCooldownCoordinator
+    caller_symbol: spawn_v3_server_aggregate
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::run_startup_persistent_cooldown_probes
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    status: active
+    owner_feature_id: v3.provider_global_cooldown_persistence
+    resource_flow:
+      consumes: [v3.provider.global_cooldown_persistence, v3.server.listener_set]
+      produces: [v3.provider.global_cooldown_persistence]
+      side_channel_reads: [v3.provider.global_cooldown_persistence]
+      side_channel_writes: [v3.provider.global_cooldown_persistence]
+  - step_id: v3-provider-cooldown-03
+    from_node: V3ProviderCooldownCoordinator
+    to_node: V3ProviderCooldownCoordinator
+    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_persistent_cooldown_probes
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderCooldownCoordinator::acquire_due_probe
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+    status: active
+    owner_feature_id: v3.provider_global_cooldown_persistence
+    resource_flow:
+      consumes: [v3.provider.global_cooldown_persistence]
+      produces: [v3.provider.global_cooldown_persistence]
+      side_channel_reads: [v3.provider.global_cooldown_persistence]
+      side_channel_writes: [v3.provider.global_cooldown_persistence]

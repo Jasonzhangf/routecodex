@@ -1473,3 +1473,16 @@ resources:
     may_enter_metadata_center: false
     binding_status: anchored
     required_gates: [npm run test:v3-cli-distribution, npm run test:install-v3-target-cleanup, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]
+  - resource_id: v3.provider.global_cooldown_persistence
+    resource_kind: side_channel_persistence
+    lifecycle: v3.server.startup_and_provider_failure.mainline
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3ProviderCooldownCoordinator
+    identity: [providerId, authAlias, modelId, failureClass, cooldownUntilMs, nextProbeAtMs]
+    allowed_writers: [V3ProviderCooldownCoordinator::persist, V3ProviderCooldownCoordinator::load, V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy]
+    allowed_readers: [V3ProviderFailureRuntimeHealth::session_bound_availability, V3ServerAggregateLifecycle]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run test:v3-provider-global-cooldown-persistence, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]
+    binding_status: active

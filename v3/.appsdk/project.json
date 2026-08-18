@@ -1,0 +1,8 @@
+{
+  "project_id": "routecodex-v3-global-provider-cooldown",
+  "stage": "contract_bound",
+  "project_root": ".",
+  "modules": [{"module_id":"routecodex-v3-global-provider-cooldown","source_owner":"routecodex-v3-provider-responses","allowed_paths":["crates/routecodex-v3-provider-responses/src/global_cooldown.rs","crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs","crates/routecodex-v3-server/src/lib.rs"],"forbidden_paths":["../src","../sharedmodule","request.normal_payload","response.client_payload"]}],
+  "build": {"command":"cargo check --manifest-path Cargo.toml -p routecodex-v3-provider-responses -p routecodex-v3-runtime -p routecodex-v3-server --no-default-features"},
+  "regression": {"command":"npm run test:v3-provider-global-cooldown-persistence"}
+}

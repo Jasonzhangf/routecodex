@@ -2,6 +2,28 @@ version: 2
 status: p6_frozen_hub_v1_h1_typed_skeleton_implemented
 scope: routecodex-v3-p0-p6-plus-hub-v1-h1
 features:
+- feature_id: v3.provider_global_cooldown_persistence
+  status: source_active_live_verification_required
+  owner_kind: provider_health_persistence
+  owner_modules:
+  - routecodex-v3-provider-responses
+  - routecodex-v3-runtime
+  - routecodex-v3-server
+  contract:
+  - docs/goals/v3-global-provider-cooldown-persistence-plan.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  required_positive:
+  - persisted cooldown remains unavailable after restart until startup probe succeeds
+  - due probe failure preserves cooldown and success removes it
+  required_negative:
+  - cooldown state never enters provider or client payload
+  - lock and persistence failures are not converted into availability success
+  required_gates:
+  - npm run test:v3-provider-global-cooldown-persistence
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
 - feature_id: v3.global_binary_install
   status: source_active_live_verification_required
   change_risk: high

@@ -35,6 +35,7 @@
     "test": "npm run test:v3-workspace",
     "test:regressions": "npm run test:unified-hub-shadow && npm run verify:errorsamples",
     "v3:cargo:test": "node scripts/run-v3-cargo-test.mjs",
+    "test:v3-provider-global-cooldown-persistence": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-provider-responses --test provider_global_cooldown_persistence_contract -- --nocapture",
     "verify:v3-build-test-artifact-budget": "node scripts/architecture/verify-v3-build-test-artifact-budget.mjs",
     "test:v3-build-test-artifact-budget-red-fixtures": "node scripts/tests/v3-build-test-artifact-budget-red-fixtures.mjs",
     "verify:repo-sanity": "node scripts/ci/repo-sanity.mjs",
