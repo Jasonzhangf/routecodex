@@ -1469,4 +1469,92 @@ capabilities = ["text", "reasoning", "tools"]
             .to_string()
             .contains("cannot combine entries with secretFile"));
     }
+
+    #[test]
+    fn provider_auth_secret_file_auto_discovers_single_or_multiple_handles() {
+        let tmp = std::env::temp_dir().join(format!(
+            "rccv3-auth-key-file-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let key_file = tmp.join("opencode-go.conf");
+        std::fs::write(
+            &key_file,
+            "opencode-go.key1 = first-secret\nopencode-go.key2 = second-secret\n",
+        )
+        .expect("write key file");
+        let key_file = key_file.to_string_lossy().into_owned();
+        let compiled = compile_v2_auth(
+            &tmp,
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some(key_file.clone()),
+                entries: None,
+            },
+        )
+        .expect("auto discover key file");
+        assert_eq!(compiled.entries.len(), 2);
+        assert_eq!(compiled.entries[0].alias, "key1");
+        assert_eq!(
+            compiled.entries[0].secret_file.as_deref(),
+            Some(key_file.as_str())
+        );
+        assert_eq!(
+            compiled.entries[0].secret_key.as_deref(),
+            Some("opencode-go.key1")
+        );
+        assert_eq!(compiled.entries[1].alias, "key2");
+        assert_eq!(
+            compiled.entries[1].secret_key.as_deref(),
+            Some("opencode-go.key2")
+        );
+        assert!(compiled.entries.iter().all(|entry| entry.api_key.is_none()));
+
+        std::fs::write(&key_file, "opencode-go = single-secret\n").expect("write single key");
+        let single = compile_v2_auth(
+            &tmp,
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some(key_file.clone()),
+                entries: None,
+            },
+        )
+        .expect("auto discover single key");
+        assert_eq!(single.entries.len(), 1);
+        assert_eq!(single.entries[0].alias, "key1");
+        assert_eq!(single.entries[0].secret_key.as_deref(), Some("opencode-go"));
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn provider_auth_secret_file_auto_discovery_rejects_mixed_authoring() {
+        let error = compile_v2_auth(
+            Path::new("."),
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some("keys.conf".to_string()),
+                entries: Some(Vec::new()),
+            },
+        )
+        .expect_err("entries plus secretFile must fail");
+        assert!(error
+            .to_string()
+            .contains("cannot combine entries with secretFile"));
+    }
 }

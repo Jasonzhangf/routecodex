@@ -462,6 +462,7 @@ features:
   - wrap_v3_direct_sse_thinking_tag_compat_stream
   - kernel::tests::direct_protocol_plan_uses_session_bound_cooldown_before_initial_target
   - kernel::tests::provider_response_decode_failure_reselects_without_router_reentry
+  - kernel::tests::provider_sse_failure_event_reselects_before_client_stream
   - kernel::tests::direct_reselect_can_handoff_to_relay_target_after_provider_failure
   - kernel::tests::responses_provider_process_chat_forces_hub_relay
   - build_v3_server_16_http_frame_from_v3_resp_15
@@ -481,6 +482,7 @@ features:
   - docs/design/v3-system-definition.md
   - docs/goals/v3-responses-direct-mvp-implementation-plan.md
   - docs/goals/v3-responses-direct-mvp-test-design.md
+  - docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md
   - docs/goals/v3-vr-target-protocol-execution-decision-sop.md
   - docs/goals/v3-direct-thinking-tag-response-compat-test-design.md
   - docs/architecture/v3-resource-operation-map.yml
