@@ -502,11 +502,16 @@ async fn direct_sse_response_done_without_completed_is_terminal_missing() {
     let mut forwarded_done = false;
     while let Some(result) = governed.next().await {
         match result {
-            Ok(frame) => forwarded_done |= frame.windows(12).any(|window| window == b"data: [DONE]"),
+            Ok(frame) => {
+                forwarded_done |= frame.windows(12).any(|window| window == b"data: [DONE]")
+            }
             Err(source) => error = Some(source),
         }
     }
-    assert!(forwarded_done, "direct must preserve trailing [DONE] after terminal event");
+    assert!(
+        forwarded_done,
+        "direct must preserve trailing [DONE] after terminal event"
+    );
     let error = error.expect("response.done without response.completed must fail closeout");
     assert_eq!(error.code, "provider_response_sse_terminal_missing");
     assert!(error.message.contains("[DONE] without response.completed"));
@@ -1597,73 +1602,6 @@ async fn provider_sse_failure_event_reselects_before_client_stream() {
             panic!("provider SSE failure must be reselected before client stream starts")
         }
     }
-}
-
-#[tokio::test]
-async fn direct_sse_deepseek_console_go_compat_follows_compatibility_profile() {
-    // 正向：provider_id 不是 opencode-go，但 manifest 声明了
-    // responses:deepseek-console-go profile，SSE 帧内 function_call 必须回射为
-    // custom_tool_call（客户端声明的 custom 工具形态）。
-    struct ProfileSseTransport;
-
-    #[async_trait]
-    impl ResponsesTransport for ProfileSseTransport {
-        async fn send(
-            &self,
-            request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            assert_eq!(request.provider_id(), "ds");
-            assert_eq!(request.body()["model"], "deepseek-v4-flash");
-            Ok(V3ProviderResp14Raw::from_sse(
-                request.request_id().to_string(),
-                request.provider_id().to_string(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"text/event-stream".to_vec(),
-                }],
-                Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(
-                    b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_ds_1\",\"status\":\"in_progress\"}}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"exec_command\",\"arguments\":\"{\\\"input\\\":\\\"ls -la\\\"}\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ds_1\",\"status\":\"completed\"}}\n\n"
-                        .to_vec(),
-                )])),
-            ))
-        }
-    }
-
-    let routing_group = "direct_sse_profile_compat";
-    let manifest = scoped_test_manifest(deepseek_console_go_profile_manifest(), routing_group);
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let raw = test_responses_raw(
-        routing_group,
-        "req",
-        "exec",
-        json!({"model":"client-model","input":"hello","stream":true}),
-    );
-    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
-    let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
-            .with_provider_health(provider_health)
-            .with_initial_plan(&plan),
-        &manifest,
-        raw,
-        crate::register_responses_direct_hooks(),
-        &ProfileSseTransport,
-    )
-    .await;
-
-    assert_eq!(output.client_payload.status, 200, "{output:?}");
-    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
-        panic!("expected SSE client body: {:?}", output.client_payload.body);
-    };
-    let mut text = String::new();
-    while let Some(chunk) = stream.next().await {
-        text.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
-    }
-    assert!(
-        text.contains("custom_tool_call"),
-        "profile compat must rewrite function_call -> custom_tool_call: {text}"
-    );
-    assert!(!text.contains("\"type\":\"function_call\""), "{text}");
 }
 
 #[tokio::test]

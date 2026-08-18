@@ -1,8 +1,11 @@
+use crate::direct_response_hooks::V3DirectResponseCompatContext;
 use crate::nodes::{
     build_v3_responses_direct_11_policy_from_v3_target_10, V3ChatDirect11Policy,
     V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
 };
-use crate::shared::{project_provider_raw_to_client_payload, V3ProviderResponseProjection};
+use crate::shared::{
+    project_provider_raw_to_client_payload_with_plan, V3ProviderResponseProjection,
+};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
     build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3Error05ExecutionDecision,
@@ -50,7 +53,8 @@ type ProviderTransportHook = fn(
 type ResponseProjectionFuture = Pin<
     Box<dyn Future<Output = Result<V3ProviderResponseProjection, V3Error01SourceRaised>> + Send>,
 >;
-type ResponseProjectionHook = fn(V3ProviderResp14Raw) -> ResponseProjectionFuture;
+type ContextualResponseProjectionHook =
+    fn(V3ProviderResp14Raw, V3DirectResponseCompatContext) -> ResponseProjectionFuture;
 type ErrorHook = fn(
     V3Error01SourceRaised,
     V3ErrorActionScope,
@@ -66,7 +70,7 @@ pub struct V3HookRegistry {
     route: RouteHook,
     request_projection: RequestProjectionHook,
     provider_transport: ProviderTransportHook,
-    response_projection: ResponseProjectionHook,
+    contextual_response_projection: ContextualResponseProjectionHook,
     error: ErrorHook,
 }
 
@@ -110,11 +114,12 @@ impl V3HookRegistry {
         (self.provider_transport)(wire)
     }
 
-    pub async fn run_response_projection(
+    pub async fn run_response_projection_with_context(
         &self,
         raw: V3ProviderResp14Raw,
+        context: V3DirectResponseCompatContext,
     ) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
-        (self.response_projection)(raw).await
+        (self.contextual_response_projection)(raw, context).await
     }
 
     pub fn run_error(
@@ -175,7 +180,7 @@ pub fn register_responses_direct_hooks() -> V3HookRegistry {
         route: responses_direct_route_hook,
         request_projection: responses_direct_request_projection_hook,
         provider_transport: responses_direct_provider_transport_hook,
-        response_projection: responses_direct_response_projection_hook,
+        contextual_response_projection: responses_direct_response_projection_hook_with_context,
         error: responses_direct_error_hook,
     }
 }
@@ -373,8 +378,40 @@ pub(crate) fn responses_direct_provider_transport_hook(
         })
 }
 
-fn responses_direct_response_projection_hook(raw: V3ProviderResp14Raw) -> ResponseProjectionFuture {
-    Box::pin(project_provider_raw_to_client_payload(raw))
+pub(crate) fn responses_direct_response_projection_hook_with_context(
+    raw: V3ProviderResp14Raw,
+    context: V3DirectResponseCompatContext,
+) -> ResponseProjectionFuture {
+    Box::pin(async move {
+        let plan = context.compile_plan().map_err(|error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3DirectResp14ProviderCompat",
+                "direct_response_compat_plan_compile_failed",
+                error,
+                V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
+            )
+        })?;
+        project_provider_raw_to_client_payload_with_plan(raw, &plan).await
+    })
+}
+
+pub(crate) fn chat_direct_response_projection_hook(
+    raw: V3ProviderResp14Raw,
+    context: V3DirectResponseCompatContext,
+) -> ResponseProjectionFuture {
+    Box::pin(async move {
+        let plan = context.compile_plan().map_err(|error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3DirectResp14ProviderCompat",
+                "direct_response_compat_plan_compile_failed",
+                error,
+                V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
+            )
+        })?;
+        project_provider_raw_to_client_payload_with_plan(raw, &plan).await
+    })
 }
 
 fn provider_error_source(
@@ -782,7 +819,6 @@ mod tests {
                     model_capabilities: vec!["text".to_string()],
                     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
                     max_context_tokens: None,
-                    context_token_estimate_scale_bps: 10_000,
                     base_url: "https://provider.invalid/v1".to_string(),
                     responses_process: None,
                     responses_transport: V3ResponsesTransportKind::Http,
@@ -933,16 +969,24 @@ mod tests {
     async fn malformed_json_response_is_explicit_error() {
         let registry = register_responses_direct_hooks();
         let result = registry
-            .run_response_projection(V3ProviderResp14Raw::from_json(
-                "req",
-                "test",
-                200,
-                vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"application/json".to_vec(),
-                }],
-                b"not-json".to_vec(),
-            ))
+            .run_response_projection_with_context(
+                V3ProviderResp14Raw::from_json(
+                    "req",
+                    "test",
+                    200,
+                    vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"application/json".to_vec(),
+                    }],
+                    b"not-json".to_vec(),
+                ),
+                V3DirectResponseCompatContext {
+                    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol::Responses,
+                    canonical_model_id: "test-model".to_string(),
+                    model_capabilities: vec!["text".to_string()],
+                    compatibility_profile: None,
+                },
+            )
             .await;
         let source = result.expect_err("malformed provider JSON must be an explicit error");
         assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);

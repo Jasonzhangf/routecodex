@@ -435,6 +435,8 @@ features:
   - v3.target.concrete_provider
   - v3.execution.protocol_decision
   - v3.responses_direct.policy
+  - v3.direct_response.compat_context
+  - v3.direct_response.compat_plan
   - v3.error.chain
   - v3.provider.health_state
   - v3.provider.availability_projection
@@ -1848,6 +1850,8 @@ features:
   - v3.response.client_payload
   - v3.provider.responses_transport_capability
   - v3.provider.responses_websocket_connection
+  - v3.direct_response.compat_context
+  - v3.direct_response.compat_plan
   mainline_bindings:
   - v3-rci-01
   - v3-rci-02

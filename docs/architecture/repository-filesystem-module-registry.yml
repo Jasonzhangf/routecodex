@@ -113,3 +113,45 @@ modules:
   - provider.wire_payload
   - response.client_payload
   - metadata.runtime_control
+- module_id: v3.direct_response_hooks
+  owner_feature_id: v3.responses_direct_mvp_architecture
+  status: implementation_active
+  owned_paths:
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/shared.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/support/wire_unit.rs
+  - v3/crates/routecodex-v3-target/src/tests/mod.rs
+  - v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
+  - v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
+  allowed_paths:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+  - v3/.appsdk/**
+  - config/v3-file-size-policy.json
+  - docs/architecture/manifests/v3.stage_protocol_shape_contract.yml
+  - docs/architecture/v3-architecture-audit-locks.yml
+  - docs/architecture/wiki/v3-mainline-caller-flow.md
+  - docs/architecture/wiki/html/v3-mainline-caller-flow.html
+  forbidden_paths:
+  - src
+  - sharedmodule/llmswitch-core/rust-core
+  - v3/crates/routecodex-v3-server/src
+  - v3/crates/routecodex-v3-config/src
+  allowed_edges:
+  - from: V3ProviderResp14Raw
+    to: V3DirectResp14ProviderProjectionPrepared
+  forbidden_resources:
+  - request.normal_payload
+  - provider.wire_payload
+  - metadata.runtime_control

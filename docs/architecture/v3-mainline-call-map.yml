@@ -120,8 +120,8 @@ chains:
   - step_id: v3-rd-target-select-direct-kernel
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    caller_symbol: execute_v3_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
     callee_symbol: select_v3_target_with_session_then_global
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     status: anchored
@@ -973,9 +973,9 @@ chains:
   - step_id: v3-rd-13
     from_node: V3ProviderResp14Raw
     to_node: V3DirectResp14ProviderProjectionPrepared
-    caller_symbol: execute_v3_responses_direct_runtime_kernel
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: responses_direct_response_projection_hook
+    caller_symbol: execute_v3_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    callee_symbol: responses_direct_response_projection_hook_with_context
     callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
     status: anchored
     owner_feature_id: v3.responses_direct_mvp_architecture
@@ -983,9 +983,11 @@ chains:
       consumes:
       - v3.response.provider_raw
       - v3.responses_direct.policy
+      - v3.direct_response.compat_context
       produces: []
       side_channel_reads:
       - v3.responses_direct.policy
+      - v3.direct_response.compat_context
       side_channel_writes: []
   - step_id: v3-rd-14
     from_node: V3DirectResp14ProviderProjectionPrepared
@@ -1000,9 +1002,11 @@ chains:
       consumes:
       - v3.response.provider_raw
       - v3.responses_direct.policy
+      - v3.direct_response.compat_plan
       produces: []
       side_channel_reads:
       - v3.responses_direct.policy
+      - v3.direct_response.compat_plan
       side_channel_writes: []
   - step_id: v3-rd-15
     from_node: V3DirectResp15ClientPayloadReady
@@ -2539,8 +2543,8 @@ chains:
   - step_id: v3-rci-02
     from_node: V3HubReqContinuation03Classified
     to_node: V3HubReqTarget06Resolved
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    caller_symbol: execute_v3_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
     callee_symbol: V3TargetInterpreter::resolve_exact_provider_model_auth
     callee_file: v3/crates/routecodex-v3-target/src/lib.rs
     owner_feature_id: v3.responses_direct_remote_continuation_integration
@@ -2581,9 +2585,9 @@ chains:
   - step_id: v3-rci-03
     from_node: V3ProviderResp14Raw
     to_node: V3DirectResp14ProviderProjectionPrepared
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: responses_direct_response_projection_hook
+    caller_symbol: execute_v3_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    callee_symbol: responses_direct_response_projection_hook_with_context
     callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
     owner_feature_id: v3.responses_direct_remote_continuation_integration
     binding_kind: responses_direct_runtime_source
@@ -2591,10 +2595,13 @@ chains:
       consumes:
       - v3.response.provider_raw
       - v3.target.concrete_provider
-      produces: []
+      - v3.direct_response.compat_context
+      produces:
+      - v3.direct_response.compat_plan
       side_channel_reads:
       - v3.target.concrete_provider
-      side_channel_writes: []
+      side_channel_writes:
+      - v3.direct_response.compat_plan
     status: anchored
   - step_id: v3-rci-04
     from_node: V3DirectResp14ProviderProjectionPrepared

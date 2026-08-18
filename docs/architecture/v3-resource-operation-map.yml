@@ -375,6 +375,30 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: true
     binding_status: anchored
+  - resource_id: v3.direct_response.compat_context
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3DirectResp14ProviderCompat
+    identity: [providerProtocol, modelId, compatibilityProfile]
+    allowed_writers: [V3DirectResponseCompatContext]
+    allowed_readers: [V3DirectResponseCompatContext::compile_plan]
+    forbidden_writers: [V3ProviderResp14Raw, V3Resp15ClientPayload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.direct_response.compat_plan
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3DirectResp14ProviderCompat
+    identity: [requestId, providerId, modelId, compatibilityProfile]
+    allowed_writers: [V3DirectResponseCompatPlan]
+    allowed_readers: [V3DirectResponseCompatPlan::has_block, project_provider_raw_to_client_payload_with_plan]
+    forbidden_writers: [V3ProviderResp14Raw, V3Resp15ClientPayload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.error.chain
     resource_kind: side_channel
     lifecycle: v3.responses_direct.mainline

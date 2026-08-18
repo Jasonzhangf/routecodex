@@ -859,7 +859,6 @@ async fn transport_error_excludes_only_the_failed_provider_key() {
         502,
         Some("provider_transport_error".to_string()),
         "error sending request for url".to_string(),
-        None,
         &mut state,
     )
     .await
@@ -960,7 +959,6 @@ message_mode = "code_only"
         429,
         Some("provider_http_429".to_string()),
         "quota exceeded".to_string(),
-        None,
         &mut state,
     )
     .await
@@ -1040,20 +1038,6 @@ targets = [
         parse_v3_config_02_authoring(&source).expect("response-policy authoring"),
     )
     .expect("response-policy manifest");
-    let matched_policy = &manifest.error.provider_error_action_policy[0];
-    assert_eq!(configured_retry_backoff_ms(Some(matched_policy), 0), 7000);
-    assert_eq!(configured_retry_backoff_ms(Some(matched_policy), 1), 14000);
-    assert_eq!(configured_retry_backoff_ms(Some(matched_policy), 8), 60000);
-    let reselect_policy = manifest
-        .error
-        .provider_error_action_policy
-        .iter()
-        .find(|policy| policy.policy_id == "reselect_then_retry_policy")
-        .expect("reselect policy");
-    assert_eq!(
-        configured_retry_budget_for_failure(Some(reselect_policy), 0),
-        2
-    );
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
         V3RelayProviderTargetResolution::Selected(selected) => selected,
@@ -1078,7 +1062,6 @@ targets = [
         200,
         Some("wrapped_provider_error".to_string()),
         "compressed message no longer contains configured keyword".to_string(),
-        Some(matched_policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,

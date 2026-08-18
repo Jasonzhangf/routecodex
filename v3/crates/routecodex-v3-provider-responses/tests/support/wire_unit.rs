@@ -175,6 +175,7 @@ mod tests {
             sse_first_frame_timeout_ms: None,
             provider_request_cleanup: Default::default(),
             request_timeout_ms: 300_000,
+            sse_first_frame_timeout_ms: None,
             initial_concurrency_budget: 8,
         };
         assert!(matches!(
@@ -436,6 +437,7 @@ mod tests {
             sse_first_frame_timeout_ms: None,
             provider_request_cleanup: Default::default(),
             request_timeout_ms: 300_000,
+            sse_first_frame_timeout_ms: None,
             initial_concurrency_budget: 8,
         }
     }
