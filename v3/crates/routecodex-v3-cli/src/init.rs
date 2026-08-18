@@ -261,6 +261,7 @@ fn resolve_auth(options: &InitOptions) -> Result<V2ProviderAuthConfig, String> {
             api_key: Some(api_key.clone()),
             env: None,
             token_file: None,
+            secret_file: None,
             entries: None,
         });
     }
@@ -269,6 +270,7 @@ fn resolve_auth(options: &InitOptions) -> Result<V2ProviderAuthConfig, String> {
             api_key: None,
             env: Some(env.clone()),
             token_file: None,
+            secret_file: None,
             entries: None,
         });
     }
@@ -277,6 +279,7 @@ fn resolve_auth(options: &InitOptions) -> Result<V2ProviderAuthConfig, String> {
             api_key: None,
             env: None,
             token_file: Some(token_file.clone()),
+            secret_file: None,
             entries: None,
         });
     }
@@ -291,6 +294,7 @@ fn resolve_auth(options: &InitOptions) -> Result<V2ProviderAuthConfig, String> {
                 api_key: None,
                 env: Some(env),
                 token_file: None,
+                secret_file: None,
                 entries: None,
             })
         }
@@ -300,6 +304,7 @@ fn resolve_auth(options: &InitOptions) -> Result<V2ProviderAuthConfig, String> {
                 api_key: None,
                 env: None,
                 token_file: Some(token_file),
+                secret_file: None,
                 entries: None,
             })
         }
@@ -309,6 +314,7 @@ fn resolve_auth(options: &InitOptions) -> Result<V2ProviderAuthConfig, String> {
                 api_key: Some(api_key),
                 env: None,
                 token_file: None,
+                secret_file: None,
                 entries: None,
             })
         }

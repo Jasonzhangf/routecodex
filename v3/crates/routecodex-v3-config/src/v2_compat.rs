@@ -525,17 +525,72 @@ fn compile_v2_auth(
     _source_hash: String,
     auth: V2ProviderAuthConfig,
 ) -> Result<V3ProviderAuthAuthoringConfig, V3ConfigError> {
-    let entries = if let Some(entries) = auth.entries {
-        entries
-    } else {
-        vec![V2ProviderAuthEntry {
+    let V2ProviderAuthConfig {
+        api_key,
+        env,
+        token_file,
+        secret_file,
+        entries,
+    } = auth;
+    let inline_handle_count = usize::from(api_key.is_some())
+        + usize::from(env.is_some())
+        + usize::from(token_file.is_some());
+    let entries = match (entries, secret_file) {
+        (Some(_), Some(_)) => {
+            return Err(validation(format!(
+                "v2 provider {provider_id} auth cannot combine entries with secretFile auto discovery"
+            )));
+        }
+        (Some(entries), None) => {
+            if inline_handle_count != 0 {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth cannot combine entries with apiKey, env, or tokenFile"
+                )));
+            }
+            entries
+        }
+        (None, Some(secret_file)) => {
+            if inline_handle_count != 0 {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth secretFile cannot combine with apiKey, env, or tokenFile"
+                )));
+            }
+            let secret_file = secret_file.trim();
+            if secret_file.is_empty() {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth secretFile is empty"
+                )));
+            }
+            let content = fs::read_to_string(secret_file).map_err(|error| {
+                validation(format!(
+                    "v2 provider {provider_id} auth secretFile {secret_file} is unreadable: {error}"
+                ))
+            })?;
+            crate::discover_v3_secret_file_auth_handles(&content, provider_id)
+                .map_err(|error| {
+                    validation(format!(
+                        "v2 provider {provider_id} auth secretFile discovery failed: {error}"
+                    ))
+                })?
+                .into_iter()
+                .map(|(alias, secret_key)| V2ProviderAuthEntry {
+                    alias: Some(alias),
+                    api_key: None,
+                    env: None,
+                    token_file: None,
+                    secret_file: Some(secret_file.to_string()),
+                    secret_key: Some(secret_key),
+                })
+                .collect()
+        }
+        (None, None) => vec![V2ProviderAuthEntry {
             alias: Some("key1".to_string()),
-            api_key: auth.api_key,
-            env: auth.env,
-            token_file: auth.token_file,
+            api_key,
+            env,
+            token_file,
             secret_file: None,
             secret_key: None,
-        }]
+        }],
     };
     let mut v3_entries = Vec::new();
     for entry in entries {
@@ -837,6 +892,7 @@ pub struct V2ProviderAuthConfig {
     pub api_key: Option<String>,
     pub env: Option<String>,
     pub token_file: Option<String>,
+    pub secret_file: Option<String>,
     pub entries: Option<Vec<V2ProviderAuthEntry>>,
 }
 
@@ -1179,6 +1235,37 @@ apiKey = "test-key"
     }
 
     #[test]
+    fn provider_auth_root_secret_file_roundtrip_preserves_authoring() {
+        let parsed = parse_v2_provider_config_file(
+            r#"
+version = "2.0.0"
+providerId = "secret-provider"
+
+[provider]
+id = "secret-provider"
+type = "responses"
+baseURL = "https://example.com/v1"
+defaultModel = "model-a"
+
+[provider.auth]
+secretFile = "/tmp/secret-provider.conf"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            parsed.provider.auth.secret_file.as_deref(),
+            Some("/tmp/secret-provider.conf")
+        );
+
+        let generated = generate_v2_provider_config_file(&parsed).expect("generate");
+        let reparsed = parse_v2_provider_config_file(&generated).expect("reparse");
+        assert_eq!(
+            reparsed.provider.auth.secret_file.as_deref(),
+            Some("/tmp/secret-provider.conf")
+        );
+    }
+
+    #[test]
     fn provider_config_file_roundtrip_via_parse_and_generate() {
         let raw = r#"
 version = "2.0.0"
@@ -1251,6 +1338,7 @@ capabilities = ["text", "reasoning", "tools"]
                     api_key: None,
                     env: Some("GEN_PROVIDER_KEY".into()),
                     token_file: None,
+                    secret_file: None,
                     entries: None,
                 },
                 responses: None,

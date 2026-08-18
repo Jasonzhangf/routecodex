@@ -174,6 +174,7 @@ fn provider_file_write_then_read_roundtrip() {
                 api_key: None,
                 env: Some("TEST_PROVIDER_KEY".into()),
                 token_file: None,
+                secret_file: None,
                 entries: None,
             },
             responses: None,
