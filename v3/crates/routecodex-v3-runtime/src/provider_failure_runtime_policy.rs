@@ -19,6 +19,8 @@ use routecodex_v3_provider_responses::{
     V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
     V3ProviderGlobalSubscriptionHealthStore, V3ProviderGlobalSubscriptionPolicy,
     V3ProviderHealthStore, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
+    V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass,
+    V3ProviderCooldownObservation,
 };
 use routecodex_v3_target::{
     V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
@@ -28,6 +30,8 @@ use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use crate::provider_action_gate::{
     V3ProviderActionAdmission, V3ProviderActionFailureRecorded, V3ProviderActionGate,
@@ -412,14 +416,14 @@ impl<R: V3ProviderAvailabilityReader + ?Sized> V3ProviderAvailabilityReader
 #[derive(Debug, Clone)]
 pub struct V3ProviderFailureRuntimeHealth {
     store: V3ProviderHealthStore,
-    global_subscription_store: V3ProviderGlobalSubscriptionHealthStore,
+    global_cooldown: Arc<Mutex<V3ProviderCooldownCoordinator>>,
     action_gate: V3ProviderActionGate,
     default_same_provider_retries: usize,
 }
 
 pub(crate) struct V3SessionGlobalAvailabilityReader<'health> {
     session: V3ProviderSessionAvailabilityReader,
-    global: &'health V3ProviderGlobalSubscriptionHealthStore,
+    persistent: &'health Arc<Mutex<V3ProviderCooldownCoordinator>>,
 }
 
 impl V3ProviderAvailabilityReader for V3SessionGlobalAvailabilityReader<'_> {
@@ -433,17 +437,16 @@ impl V3ProviderAvailabilityReader for V3SessionGlobalAvailabilityReader<'_> {
         let mut projection = self
             .session
             .availability(provider_id, auth_alias, model_id, now_ms);
-        let global = self
-            .global
-            .availability(provider_id, auth_alias, model_id, now_ms);
-        if !global
-            .as_ref()
-            .is_ok_and(|availability| availability.available)
+        if !self
+            .persistent
+            .lock()
+            .map(|coordinator| coordinator.availability(provider_id, auth_alias, model_id, now_ms))
+            .unwrap_or_else(|error| panic!("provider cooldown lock poisoned: {error}"))
         {
             projection.available = false;
             projection
                 .blocked_scopes
-                .push("provider_global_subscription_failure".to_string());
+                .push("provider_global_cooldown_persistence".to_string());
         }
         projection
     }
@@ -452,8 +455,28 @@ impl V3ProviderAvailabilityReader for V3SessionGlobalAvailabilityReader<'_> {
 impl V3ProviderFailureRuntimeHealth {
     pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         let store = V3ProviderHealthStore::from_manifest(manifest);
+        let state_directory = std::env::var_os("ROUTECODEX_V3_STATE_DIR")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("XDG_STATE_HOME")
+                    .map(PathBuf::from)
+                    .map(|directory| directory.join("routecodex-v3"))
+            })
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .map(|directory| directory.join(".local/state/routecodex-v3"))
+            })
+            .unwrap_or_else(|| panic!("provider cooldown state directory is not configured"));
+        let path = state_directory.join("provider-cooldowns.json");
+        let global_cooldown = if path.exists() {
+            V3ProviderCooldownCoordinator::load(path, 5 * 60 * 60_000)
+                .unwrap_or_else(|error| panic!("provider cooldown persistence load failed: {error}"))
+        } else {
+            V3ProviderCooldownCoordinator::new(path, 5 * 60 * 60_000)
+        };
         Self {
-            global_subscription_store: store.global_subscription_store(),
+            global_cooldown: Arc::new(Mutex::new(global_cooldown)),
             store,
             action_gate: V3ProviderActionGate::process_shared(),
             default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
@@ -463,8 +486,8 @@ impl V3ProviderFailureRuntimeHealth {
         }
     }
 
-    pub(crate) fn default_same_provider_retries(&self) -> usize {
-        self.default_same_provider_retries
+    pub(crate) fn persistent_global_cooldown(&self) -> Arc<Mutex<V3ProviderCooldownCoordinator>> {
+        Arc::clone(&self.global_cooldown)
     }
 
     pub(crate) fn record_provider_global_subscription_failure(
@@ -516,37 +539,99 @@ impl V3ProviderFailureRuntimeHealth {
         F: Fn(String, Option<String>, Option<String>) -> Fut,
         Fut: Future<Output = Result<(), String>>,
     {
-        let provider_keys = self
-            .global_subscription_store
-            .provider_keys_with_probe_due(now_ms)?;
-        let mut probe_errors = Vec::new();
-        for (provider_id, auth_alias, model_id) in provider_keys {
-            let Some(permit) = self.global_subscription_store.try_acquire_probe(
-                &provider_id,
-                auth_alias.as_deref(),
-                model_id.as_deref(),
-                now_ms,
-            )?
-            else {
-                continue;
-            };
-            match probe(provider_id.clone(), auth_alias, model_id).await {
+        loop {
+            let permit = self
+                .global_cooldown
+                .lock()
+                .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
+                .acquire_startup_probe(now_ms)?;
+            let Some(permit) = permit else { return Ok(()) };
+            let provider_id = permit.provider_id().to_string();
+            let auth_alias = permit.auth_alias().map(str::to_string);
+            let model_id = permit.model_id().map(str::to_string);
+            match probe(provider_id.clone(), auth_alias.clone(), model_id.clone()).await {
                 Ok(()) => self
-                    .global_subscription_store
-                    .complete_probe_success(permit)?,
+                    .global_cooldown
+                    .lock()
+                    .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
+                    .apply_probe_success(permit, now_ms)?,
                 Err(error) => {
-                    self.global_subscription_store
-                        .complete_probe_failure(permit)?;
-                    probe_errors.push(format!(
-                        "provider global probe failed for {provider_id}: {error}"
-                    ));
+                    self.global_cooldown
+                        .lock()
+                        .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
+                        .apply_probe_failure(permit, now_ms)?;
+                    return Err(format!("startup provider cooldown probe failed for {provider_id}: {error}"));
                 }
             }
         }
-        if !probe_errors.is_empty() {
-            return Err(probe_errors.join("; "));
+    }
+
+    pub async fn run_due_persistent_cooldown_probes<F, Fut>(
+        &self,
+        now_ms: u64,
+        probe: F,
+    ) -> Result<(), String>
+    where
+        F: Fn(String, Option<String>, Option<String>) -> Fut,
+        Fut: Future<Output = Result<(), String>>,
+    {
+        let mut probe_errors = Vec::new();
+        loop {
+            let permit = self
+                .global_cooldown
+                .lock()
+                .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
+                .acquire_due_probe(now_ms)?;
+            let Some(permit) = permit else { break };
+            let provider_id = permit.provider_id().to_string();
+            let auth_alias = permit.auth_alias().map(str::to_string);
+            let model_id = permit.model_id().map(str::to_string);
+            match probe(provider_id.clone(), auth_alias.clone(), model_id.clone()).await {
+                Ok(()) => self
+                    .global_cooldown
+                    .lock()
+                    .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
+                    .apply_probe_success(permit, now_ms)?,
+                Err(error) => {
+                    self.global_cooldown
+                        .lock()
+                        .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
+                        .apply_probe_failure(permit, now_ms)?;
+                    probe_errors.push(format!("persistent provider probe failed for {provider_id}: {error}"));
+                }
+            }
         }
-        Ok(())
+        if probe_errors.is_empty() { Ok(()) } else { Err(probe_errors.join("; ")) }
+    }
+
+    pub(crate) fn default_same_provider_retries(&self) -> usize {
+        self.default_same_provider_retries
+    }
+
+    pub(crate) fn record_provider_global_cooldown_failure(
+        &self,
+        _failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        _fingerprint: routecodex_v3_error::V3ProviderErrorFingerprint,
+        cooldown_ms: Option<u64>,
+        now_ms: u64,
+    ) -> Result<(), String> {
+        self.global_cooldown
+            .lock()
+            .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
+            .record_failure(
+                provider_id,
+                auth_alias,
+                model_id,
+                V3ProviderCooldownFailureClass::Semantic,
+                now_ms,
+                V3ProviderCooldownObservation {
+                    retry_after_ms: cooldown_ms,
+                    ..Default::default()
+                },
+            )
     }
 
     pub(crate) fn record_provider_failure_record(
@@ -568,64 +653,6 @@ impl V3ProviderFailureRuntimeHealth {
                 now_ms,
             )
             .map_err(|error| error.to_string())
-    }
-
-    /// provider 级冷却的后台 probe：到期且 probe 到期的 provider 最小 ping，
-    /// 通过才恢复，失败保持冷却并推后探针。
-    pub async fn run_due_provider_cooldown_probes<F, Fut>(
-        &self,
-        now_ms: u64,
-        probe: F,
-    ) -> Result<(), String>
-    where
-        F: Fn(String, Option<String>, Option<String>) -> Fut,
-        Fut: Future<Output = Result<(), String>>,
-    {
-        let provider_keys = self
-            .store
-            .provider_cooldown_probe_keys_due(now_ms)
-            .map_err(|error| error.to_string())?;
-        let mut probe_errors = Vec::new();
-        for (provider_id, auth_alias, model_id) in provider_keys {
-            if !self
-                .store
-                .try_acquire_provider_cooldown_probe(
-                    &provider_id,
-                    auth_alias.as_deref(),
-                    model_id.as_deref(),
-                )
-                .map_err(|error| error.to_string())?
-            {
-                continue;
-            }
-            match probe(provider_id.clone(), auth_alias.clone(), model_id.clone()).await {
-                Ok(()) => self
-                    .store
-                    .complete_provider_cooldown_probe_success(
-                        &provider_id,
-                        auth_alias.as_deref(),
-                        model_id.as_deref(),
-                    )
-                    .map_err(|error| error.to_string())?,
-                Err(error) => {
-                    self.store
-                        .complete_provider_cooldown_probe_failure(
-                            &provider_id,
-                            auth_alias.as_deref(),
-                            model_id.as_deref(),
-                            now_ms,
-                        )
-                        .map_err(|error| error.to_string())?;
-                    probe_errors.push(format!(
-                        "provider cooldown probe failed for {provider_id}: {error}"
-                    ));
-                }
-            }
-        }
-        if !probe_errors.is_empty() {
-            return Err(probe_errors.join("; "));
-        }
-        Ok(())
     }
 
     pub(crate) fn record_provider_failure_record_with_policy(
@@ -688,6 +715,35 @@ impl V3ProviderFailureRuntimeHealth {
                 ),
             )
             .map_err(|error| error.to_string())
+            .and_then(|record| {
+                let class = match status {
+                    401 | 403 => V3ProviderCooldownFailureClass::Auth,
+                    429 => V3ProviderCooldownFailureClass::RateLimit,
+                    _ => V3ProviderCooldownFailureClass::Semantic,
+                };
+                let configured_retry_after_ms = manifest
+                    .providers
+                    .get(provider_id)
+                    .and_then(|provider| provider.health.as_ref())
+                    .map(|health| health.cooldown_ms);
+                if record.state == "cooldown" {
+                    self.global_cooldown
+                        .lock()
+                        .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
+                        .record_failure(
+                            provider_id,
+                            auth_alias,
+                            model_id,
+                            class,
+                            now_ms,
+                            V3ProviderCooldownObservation {
+                                retry_after_ms: configured_retry_after_ms,
+                                ..Default::default()
+                            },
+                        )?;
+                }
+                Ok(record)
+            })
     }
 
     pub(crate) fn record_provider_success_in_failure_scope(
@@ -707,12 +763,6 @@ impl V3ProviderFailureRuntimeHealth {
                 now_ms,
             )
             .map_err(|error| error.to_string())?;
-        self.global_subscription_store.record_provider_success(
-            provider_id,
-            auth_alias,
-            model_id,
-            failure_session_scope,
-        )?;
         self.action_gate
             .record_provider_success(&V3ProviderActionProviderScope::new(
                 failure_session_scope,
@@ -900,7 +950,7 @@ impl V3ProviderFailureRuntimeHealth {
                 self.store.clone(),
                 failure_session_scope.clone(),
             ),
-            global: &self.global_subscription_store,
+            persistent: &self.global_cooldown,
         }
     }
 }
@@ -908,7 +958,10 @@ impl V3ProviderFailureRuntimeHealth {
 impl From<V3ProviderHealthStore> for V3ProviderFailureRuntimeHealth {
     fn from(store: V3ProviderHealthStore) -> Self {
         Self {
-            global_subscription_store: store.global_subscription_store(),
+            global_cooldown: Arc::new(Mutex::new(V3ProviderCooldownCoordinator::new(
+                PathBuf::from(".routecodex-v3-provider-cooldowns.json"),
+                5 * 60 * 60_000,
+            ))),
             store,
             action_gate: V3ProviderActionGate::process_shared(),
             default_same_provider_retries: 0,
@@ -927,15 +980,16 @@ impl V3ProviderAvailabilityReader for V3ProviderFailureRuntimeHealth {
         let mut projection = self
             .store
             .availability(provider_id, auth_alias, model_id, now_ms);
-        let global_available = self
-            .global_subscription_store
-            .availability(provider_id, auth_alias, model_id, now_ms)
-            .is_ok_and(|availability| availability.available);
-        if !global_available {
+        let persistent_available = self
+            .global_cooldown
+            .lock()
+            .map(|coordinator| coordinator.availability(provider_id, auth_alias, model_id, now_ms))
+            .unwrap_or_else(|error| panic!("provider cooldown lock poisoned: {error}"));
+        if !persistent_available {
             projection.available = false;
             projection
                 .blocked_scopes
-                .push("provider_global_subscription_failure".to_string());
+                .push("provider_global_cooldown_persistence".to_string());
         }
         projection
     }

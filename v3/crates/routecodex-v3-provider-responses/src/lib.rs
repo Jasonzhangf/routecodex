@@ -1,5 +1,6 @@
 pub mod adaptive_concurrency;
 mod error;
+pub mod global_cooldown;
 #[cfg_attr(not(test), allow(dead_code))]
 mod health;
 pub mod probe;
@@ -11,6 +12,9 @@ pub mod transport;
 pub mod wire;
 
 pub use error::{V3ProviderError, V3ProviderHttpFailure};
+pub use global_cooldown::{
+    V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass, V3ProviderCooldownObservation,
+};
 pub use health::{
     V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
     V3ProviderAvailabilityRegistry, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,

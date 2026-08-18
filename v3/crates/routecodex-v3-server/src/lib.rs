@@ -364,6 +364,29 @@ pub async fn spawn_v3_server_aggregate(
     let probe_manifest = Arc::clone(&manifest);
     let probe_health = Arc::clone(&provider_health).runtime_health();
     tokio::spawn(async move {
+        let startup_manifest = Arc::clone(&probe_manifest);
+        let startup_now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_millis() as u64,
+            Err(error) => {
+                eprintln!("provider persistent startup probe clock failure: {error}");
+                return;
+            }
+        };
+        let startup_result = probe_health.run_startup_persistent_cooldown_probes(startup_now_ms, move |provider_id, auth_alias, model_id| {
+            let startup_manifest = Arc::clone(&startup_manifest);
+            async move {
+                let target = build_v3_provider_global_probe_target(
+                    &startup_manifest,
+                    &provider_id,
+                    auth_alias.as_deref(),
+                    model_id.as_deref(),
+                )?;
+                probe_v3_provider_global_target(target).await
+            }
+        }).await;
+        if let Err(error) = startup_result {
+            eprintln!("provider persistent startup probe cycle failed: {error}");
+        }
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             tokio::select! {
@@ -377,7 +400,7 @@ pub async fn spawn_v3_server_aggregate(
                         }
                     };
                     let manifest_for_probe = Arc::clone(&probe_manifest);
-                    let result = probe_health.run_due_global_subscription_probes(now_ms, move |provider_id, auth_alias, model_id| {
+                    let result = probe_health.run_due_persistent_cooldown_probes(now_ms, move |provider_id, auth_alias, model_id| {
                         let manifest_for_probe = Arc::clone(&manifest_for_probe);
                         async move {
                             let target = build_v3_provider_global_probe_target(
@@ -390,23 +413,7 @@ pub async fn spawn_v3_server_aggregate(
                         }
                     }).await;
                     if let Err(error) = result {
-                        eprintln!("provider global probe cycle failed: {error}");
-                    }
-                    let manifest_for_probe = Arc::clone(&probe_manifest);
-                    let result = probe_health.run_due_provider_cooldown_probes(now_ms, move |provider_id, auth_alias, model_id| {
-                        let manifest_for_probe = Arc::clone(&manifest_for_probe);
-                        async move {
-                            let target = build_v3_provider_global_probe_target(
-                                &manifest_for_probe,
-                                &provider_id,
-                                auth_alias.as_deref(),
-                                model_id.as_deref(),
-                            )?;
-                            probe_v3_provider_global_target(target).await
-                        }
-                    }).await;
-                    if let Err(error) = result {
-                        eprintln!("provider cooldown probe cycle failed: {error}");
+                        eprintln!("provider persistent cooldown probe cycle failed: {error}");
                     }
                 }
             }

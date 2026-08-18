@@ -1081,7 +1081,7 @@ async fn post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_requ
     // probe 通过 → provider 恢复 → fresh 成功。
     provider_health
         .runtime_health()
-        .run_due_provider_cooldown_probes(u64::MAX, |_, _, _| async { Ok(()) })
+            .run_due_persistent_cooldown_probes(u64::MAX, |_, _, _| async { Ok(()) })
         .await
         .expect("probe cycle must revive cooled provider");
     let second = execute_v3_openai_chat_relay_runtime_with_provider_health(
@@ -1170,7 +1170,7 @@ data: [DONE]
     let probed_for_probe = std::sync::Arc::clone(&probed);
     provider_health
         .runtime_health()
-        .run_due_provider_cooldown_probes(u64::MAX, move |provider_id, _, _| {
+        .run_due_persistent_cooldown_probes(u64::MAX, move |provider_id, _, _| {
             let probed_for_probe = std::sync::Arc::clone(&probed_for_probe);
             async move {
                 probed_for_probe.lock().unwrap().push(provider_id);
