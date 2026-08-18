@@ -121,6 +121,7 @@
    "stop",
    "stop_sequences",
    "metadata",
+   "store",
    "reasoning_effort",
    "reasoning_budget_tokens",
    "reasoning_summary_policy",

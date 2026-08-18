@@ -2,6 +2,25 @@ use serde_json::{json, Map, Value};
 
 use super::anthropic_codec::V3AnthropicCodecError;
 use super::client_metadata_projection::unsupported_client_metadata_paths;
+
+pub(super) fn project_chat_store_to_anthropic_wire(projected: &mut Value) -> Result<(), String> {
+    let Some(store) = projected
+        .as_object_mut()
+        .and_then(|object| object.remove("store"))
+    else {
+        return Ok(());
+    };
+    match store {
+        Value::Bool(false) => Ok(()),
+        Value::Bool(true) => Err(
+            "UnmappedOutboundFields target_protocol=anthropic paths=$.request.store".to_string(),
+        ),
+        _ => {
+            Err("MalformedOutboundField target_protocol=anthropic path=$.request.store".to_string())
+        }
+    }
+}
+
 pub(super) fn responses_metadata_as_anthropic_metadata(
     responses_request_extension: Option<&Map<String, Value>>,
 ) -> Result<Option<Value>, V3AnthropicCodecError> {

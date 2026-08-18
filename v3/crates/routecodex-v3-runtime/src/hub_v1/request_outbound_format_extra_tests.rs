@@ -774,6 +774,34 @@ fn openai_chat_wire_preserves_same_protocol_request_fields() {
 }
 
 #[test]
+fn anthropic_wire_consumes_chat_store_false_without_projecting_it() {
+    let payload = json!({
+        "model": "claude-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "store": false
+    });
+
+    let request =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Anthropic)
+            .expect("store=false has the same no-storage meaning on Anthropic");
+    assert!(request.get("store").is_none());
+}
+
+#[test]
+fn anthropic_wire_rejects_chat_store_true_without_silent_semantic_loss() {
+    let payload = json!({
+        "model": "claude-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "store": true
+    });
+
+    let error =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Anthropic)
+            .expect_err("store=true has no Anthropic equivalent");
+    assert!(error.contains("$.request.store"), "{error}");
+}
+
+#[test]
 fn tool_search_chat_extensions_round_trip_to_responses_fields() {
     let input = build_responses_input_from_chat_messages(&[
         json!({
