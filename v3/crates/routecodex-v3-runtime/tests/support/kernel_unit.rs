@@ -1,6 +1,7 @@
 use super::*;
 use async_trait::async_trait;
 use routecodex_v3_config::*;
+use routecodex_v3_error::V3Error01SourceRaised;
 use routecodex_v3_provider_responses::{
     V3ProviderError, V3ProviderHttpFailure, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
@@ -2027,3 +2028,97 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
 
 #[path = "../../src/kernel/tests/direct_websearch_mode_b.rs"]
 mod direct_websearch_mode_b;
+
+// V3 Direct Responses SSE 静默失败红测：provider 关闭响应时，若 SSE 流缺少
+// response.completed / response.incomplete / response.failed 这三个 Responses
+// terminal event 之一（即使收到 delta 并随后 clean EOF），direct runtime 必须
+// 在 client stream 上发出显式 `provider_response_sse_terminal_missing` 错误，
+// 绝不能以 HTTP 200 + 空 body 静默结束。terminal guard 在
+// V3ResponsesDirectRuntimeCoreState::no_continuation() 路径上必须无条件挂载
+// （不受 `if let (Some(continuation_state), Some(scope))` 条件控制）。
+#[tokio::test]
+async fn direct_sse_no_continuation_missing_terminal_is_explicit_error() {
+    use futures_util::stream;
+
+    struct NoTerminalSseTransport;
+
+    #[async_trait]
+    impl ResponsesTransport for NoTerminalSseTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            let body = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n".to_vec();
+            let sse_stream = stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(body)]);
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(sse_stream),
+            ))
+        }
+    }
+
+    let routing_group = "direct_sse_no_continuation_missing_terminal";
+    let manifest = scoped_test_manifest(test_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req",
+        "exec",
+        json!({"model": "client-model", "input": "hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &NoTerminalSseTransport,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    let mut client_stream = match output.client_payload.body {
+        V3ClientBody::Sse(stream) => stream,
+        other => panic!("direct SSE no-continuation path must produce SSE body, got {other:?}"),
+    };
+
+    use futures_util::StreamExt;
+    let mut saw_delta = false;
+    let mut saw_missing_terminal = false;
+    while let Some(item) = client_stream.next().await {
+        match item {
+            Ok(bytes) => {
+                if std::str::from_utf8(&bytes)
+                    .ok()
+                    .map(|s| s.contains("response.output_text.delta"))
+                    .unwrap_or(false)
+                {
+                    saw_delta = true;
+                }
+            }
+            Err(error) => {
+                if error.code == "provider_response_sse_terminal_missing" {
+                    saw_missing_terminal = true;
+                    break;
+                }
+            }
+        }
+    }
+    assert!(
+        saw_delta,
+        "delta frame must be forwarded before terminal guard fires"
+    );
+    assert!(
+        saw_missing_terminal,
+        "missing Responses terminal event must yield explicit provider_response_sse_terminal_missing error, \
+         not silent clean EOF (200 OK with empty body)"
+    );
+}

@@ -822,7 +822,7 @@ mod tests {
     async fn guard_rejects_empty_sse_stream() {
         let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
             Box::pin(futures_util::stream::empty());
-        let result = guard_relay_sse_first_frame("req-empty", "provider-1", stream).await;
+        let result = guard_relay_sse_first_frame("req-empty", "provider-1", stream, None).await;
         assert!(result.is_err(), "empty SSE stream must fail the guard");
     }
 
@@ -865,7 +865,7 @@ mod tests {
                 reason: "upstream reset".to_string(),
             })]),
         );
-        let result = guard_relay_sse_first_frame("req-err", "provider-1", stream).await;
+        let result = guard_relay_sse_first_frame("req-err", "provider-1", stream, None).await;
         assert!(result.is_err(), "first frame error must propagate");
     }
 
