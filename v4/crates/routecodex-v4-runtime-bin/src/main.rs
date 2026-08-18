@@ -240,9 +240,6 @@ impl ResponseStream for ResponsesSseStream {
                     .map_err(|fault| std::io::Error::new(std::io::ErrorKind::InvalidData, fault.to_string()))?;
                 self.terminal_seen |= terminal;
                 self.pending.extend_from_slice(&frame);
-                if !self.pending.is_empty() {
-                    break;
-                }
             }
         }
     }

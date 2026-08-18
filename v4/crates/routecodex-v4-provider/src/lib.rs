@@ -414,7 +414,15 @@ fn parse_provider_stream_header(stream: &mut ProviderResponseStream) -> Result<(
 }
 
 fn http_header_at(bytes: &[u8]) -> Option<(usize, u16, String)> {
-    let end = bytes.windows(4).position(|window| window == b"\r\n\r\n")? + 4;
+    // HTTP/1.1 uses CRLF CRLF. HTTP/2 over curl --include may emit simple LF
+    // terminators instead. Accept both forms so the header parser covers the
+    // real upstream shape that curl describes for HTTP/2 responses.
+    let end = if let Some(position) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+        position + 4
+    } else {
+        let position = bytes.windows(2).position(|window| window == b"\n\n")?;
+        position + 2
+    };
     let head = std::str::from_utf8(&bytes[..end]).ok()?;
     let first = head.lines().next()?;
     let status = first
@@ -424,7 +432,9 @@ fn http_header_at(bytes: &[u8]) -> Option<(usize, u16, String)> {
         .ok()?;
     let content_type = head
         .lines()
-        .find_map(|line| line.split_once(':').map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_string())))
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        .map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_string()))
         .filter(|(name, _)| name == "content-type")
         .map(|(_, value)| value)
         .unwrap_or_default();
