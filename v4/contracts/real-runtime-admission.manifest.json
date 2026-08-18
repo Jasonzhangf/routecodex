@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "manifest_id": "v4-real-runtime-admission",
-  "status": "design",
+  "status": "active",
   "owner_feature_id": "v4.runtime.independent_admission",
   "canonical_docs": [
     "v4/docs/goals/v4-real-runtime-admission-plan.md",

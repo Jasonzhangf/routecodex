@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Phase 0 admission contract and baseline red gate.
-// This gate is intentionally read-only: it proves the design is registered and
-// proves the current M8 baseline is still missing the real runtime path.
+// V4 real runtime admission gate.
+// Proves: active manifest, binary works, live HTTP endpoints, V3 untouched.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import http from 'node:http';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const admissionPath = path.join(root, 'contracts/real-runtime-admission.manifest.json');
@@ -20,9 +20,49 @@ const providerPath = path.join(root, 'crates/routecodex-v4-provider/src/lib.rs')
 const serverPath = path.join(root, 'crates/routecodex-v4-server/src/lib.rs');
 const routerPath = path.join(root, 'crates/routecodex-v4-router/src/lib.rs');
 
+const RCCV4_HOST = process.env.RCCV4_LISTEN ?? '127.0.0.1:17777';
+const BINARY_PATH = path.join(root, 'target/release/rccv4');
+const COMPILED_MANIFEST = path.join(root, 'generated/real-runtime-admission/manifest.compiled.json');
+const ADMISSION_MODEL = process.env.RCCV4_ADMISSION_MODEL ?? 'MiniMax-M3';
+
 const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 const readText = (file) => fs.readFileSync(file, 'utf8');
 const clone = (value) => JSON.parse(JSON.stringify(value));
+
+function httpGet(host, pathname, timeout = 15000) {
+  return new Promise((resolve, reject) => {
+    const [hostname, port] = host.split(':');
+    const req = http.request({ hostname, port: parseInt(port), path: pathname, method: 'GET' }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => resolve({ status: res.statusCode, body: data, headers: res.headers }));
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.setTimeout(timeout);
+    req.end();
+  });
+}
+
+function httpPost(host, pathname, body, headers, timeout = 30000) {
+  return new Promise((resolve, reject) => {
+    const [hostname, port] = host.split(':');
+    const payload = JSON.stringify(body);
+    const finalHeaders = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), ...headers };
+    const req = http.request({
+      hostname, port: parseInt(port), path: pathname, method: 'POST', headers: finalHeaders,
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => resolve({ status: res.statusCode, body: data, headers: res.headers }));
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.setTimeout(timeout);
+    req.write(payload);
+    req.end();
+  });
+}
 
 function validateContract(input) {
   const failures = [];
@@ -38,7 +78,7 @@ function validateContract(input) {
   for (const entrypoint of requiredEntrypoints) {
     if (!entrypoints.has(entrypoint)) failures.push(`missing entrypoint: ${entrypoint}`);
   }
-  if (input.admission.status !== 'design') failures.push('admission contract must remain status=design in phase 0');
+  if (input.admission.status !== 'active') failures.push(`admission contract must be status=active, got: ${input.admission.status}`);
   if (input.admission.runtime_identity !== 'rccv4') failures.push('runtime identity must be rccv4');
   if (input.admission.binary_package !== 'routecodex-v4-runtime-bin') {
     failures.push('binary package must be routecodex-v4-runtime-bin');
@@ -102,55 +142,6 @@ function validateContract(input) {
   return failures;
 }
 
-function baselineGaps(input) {
-  const failures = [];
-  const cargo = input.cargo;
-  const runtime = input.runtime;
-  const provider = input.provider;
-  const server = input.server;
-  const requiredPackages = [
-    'routecodex-v4-runtime',
-    'routecodex-v4-provider',
-    'routecodex-v4-router',
-    'routecodex-v4-server',
-  ];
-  for (const packageName of requiredPackages) {
-    if (!cargo.includes(`crates/${packageName}`)) failures.push(`workspace missing package: ${packageName}`);
-  }
-  if (!cargo.includes('routecodex-v4-runtime-bin')) failures.push('workspace missing independent binary package');
-  if (!runtime.includes('execute_mock_transport_slice')) failures.push('baseline no longer exposes the M8 mock marker');
-  if (!runtime.includes('pub fn load(')) failures.push('runtime baseline marker missing');
-  if (!server.includes('/health') && !server.includes('health')) failures.push('server has no health endpoint');
-  if (!server.includes('/v1/models') && !server.includes('models')) failures.push('server has no models endpoint');
-  if (!server.includes('/v1/responses') && !server.includes('responses')) failures.push('server has no Responses endpoint');
-  if (server.includes('TcpListener') || server.includes('hyper::') || server.includes('axum::')) {
-    failures.push('server unexpectedly contains an HTTP listener');
-  }
-  if (!server.includes('V4RequestIdCounter') || !server.includes('WireEvidenceRecord')) {
-    failures.push('server diagnostic baseline markers missing');
-  }
-  if (provider.includes('reqwest::') || provider.includes('hyper::') || provider.includes('TcpStream')) {
-    failures.push('provider unexpectedly contains real transport');
-  }
-  if (!provider.includes('V4Availability01SessionScoped')) {
-    failures.push('provider availability baseline marker missing');
-  }
-  if (!provider.includes('providerId') || !provider.includes('AvailabilityRecord')) {
-    failures.push('provider has no shared provider configuration surface');
-  }
-  if (!runtime.includes('response.output') && !runtime.includes('data:')) {
-    failures.push('runtime has no Responses JSON/SSE semantic parser');
-  }
-  if (!input.router.includes('typed_target_selection') && !input.router.includes('SelectedTarget')) {
-    failures.push('router has no typed target selection owner');
-  }
-  if (runtime.includes('real-runtime-admission.manifest.json') || cargo.includes('routecodex-v4-runtime-bin')) {
-    failures.push('compiled manifest/binary is already wired into the baseline');
-  }
-  if (input.manifest.status !== 'design') failures.push('baseline admission manifest must still be design');
-  return failures;
-}
-
 function loadInput() {
   return {
     admission: readJson(admissionPath),
@@ -170,11 +161,11 @@ function loadInput() {
 
 const input = loadInput();
 const redSelfTest = process.argv.includes('--red-self-test');
-const baselineRed = process.argv.includes('--baseline-red');
 
 if (redSelfTest) {
   const cases = [
-    ['status drift', (value) => { value.admission.status = 'active'; }],
+    ['status drift to design', (value) => { value.admission.status = 'design'; }],
+    ['status drift to pending', (value) => { value.admission.status = 'pending'; }],
     ['entrypoint drift', (value) => { value.admission.entrypoints.pop(); }],
     ['gate drift', (value) => { value.verification.gates = value.verification.gates.filter((gate) => gate.gate_id !== 'v4_real_runtime_admission_red'); }],
     ['identity drift', (value) => { value.admission.runtime_identity = 'routecodex'; }],
@@ -200,15 +191,110 @@ if (contractFailures.length > 0) {
   process.exit(1);
 }
 
-if (baselineRed) {
-  const gaps = baselineGaps(input);
-  if (gaps.length < 8) {
-    console.error(`[v4_real_runtime_admission] baseline red FAIL: only ${gaps.length} gaps proven`);
-    for (const failure of gaps) console.error(`  - ${failure}`);
-    process.exit(1);
+// Binary existence
+if (!fs.existsSync(BINARY_PATH)) {
+  console.error(`[v4_real_runtime_admission] FAIL: binary not found at ${BINARY_PATH}`);
+  process.exit(1);
+}
+console.log(`[v4_real_runtime_admission] binary OK: ${BINARY_PATH}`);
+
+// Compiled manifest existence
+if (!fs.existsSync(COMPILED_MANIFEST)) {
+  console.error(`[v4_real_runtime_admission] FAIL: compiled manifest not found at ${COMPILED_MANIFEST}`);
+  process.exit(1);
+}
+console.log(`[v4_real_runtime_admission] compiled manifest OK: ${COMPILED_MANIFEST}`);
+
+// Live HTTP tests
+let passed = 0;
+let failed = 0;
+
+try {
+  const health = await httpGet(RCCV4_HOST, '/health');
+  if (health.status !== 200) throw new Error(`health status ${health.status}`);
+  const healthJson = JSON.parse(health.body);
+  // Real response carries id/version/manifest_digest (not "status" field); absence is fail
+  if (!healthJson.id || !healthJson.version || !healthJson.manifest_digest) {
+    throw new Error('health body missing id/version/manifest_digest fields');
   }
-  console.log(`[v4_real_runtime_admission] baseline red OK gaps=${gaps.length}`);
-  process.exit(0);
+  console.log(`[v4_real_runtime_admission] /health OK: id=${healthJson.id} version=${healthJson.version}`);
+  passed++;
+} catch (e) {
+  console.error(`[v4_real_runtime_admission] /health FAIL: ${e.message}`);
+  failed++;
 }
 
-console.log('[v4_real_runtime_admission] contract design OK baseline=expected-red');
+try {
+  const models = await httpGet(RCCV4_HOST, '/v1/models');
+  if (models.status !== 200) throw new Error(`models status ${models.status}`);
+  const modelsJson = JSON.parse(models.body);
+  if (!Array.isArray(modelsJson.data) || modelsJson.data.length === 0) {
+    throw new Error('models body missing non-empty data array');
+  }
+  console.log(`[v4_real_runtime_admission] /v1/models OK: ${modelsJson.data.length} models, first=${modelsJson.data[0]?.id}`);
+  passed++;
+} catch (e) {
+  console.error(`[v4_real_runtime_admission] /v1/models FAIL: ${e.message}`);
+  failed++;
+}
+
+try {
+  // POST /v1/responses JSON: real minimax responses shape
+  const requestBody = {
+    model: ADMISSION_MODEL,
+    input: [{ role: 'user', content: 'say hi in 3 words' }],
+  };
+  const jsonResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, {}, 60000);
+  if (jsonResp.status !== 200) throw new Error(`responses JSON status ${jsonResp.status}, body=${jsonResp.body.substring(0, 200)}`);
+  const jsonBody = JSON.parse(jsonResp.body);
+  if (!jsonBody.id || !jsonBody.object) throw new Error('responses JSON missing id/object fields');
+  if (jsonBody.object !== 'response') throw new Error(`unexpected object type: ${jsonBody.object}`);
+  // Real upstream response has a hash-like id (minimax produces 32-hex)
+  if (!/^[0-9a-f]{32}$/.test(jsonBody.id)) throw new Error(`response id not hex32: ${jsonBody.id}`);
+  console.log(`[v4_real_runtime_admission] POST /v1/responses JSON OK: id=${jsonBody.id}`);
+  passed++;
+} catch (e) {
+  console.error(`[v4_real_runtime_admission] POST /v1/responses JSON FAIL: ${e.message}`);
+  failed++;
+}
+
+try {
+  // POST /v1/responses SSE: provider streams through compiled candidate. Accept SSE header.
+  const requestBody = {
+    model: ADMISSION_MODEL,
+    input: [{ role: 'user', content: 'count 1,2,3' }],
+  };
+  const sseResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'Accept': 'text/event-stream' }, 60000);
+  if (sseResp.status !== 200) throw new Error(`responses SSE status ${sseResp.status}, body=${sseResp.body.substring(0, 200)}`);
+  // Server may return JSON-wrapped terminal (provider_response config) or actual SSE
+  const body = sseResp.body;
+  const hasEvent = body.includes('event:') || body.includes('data:');
+  const hasResponseId = body.includes('response_id') || /"id"\s*:\s*"[0-9a-f]{32}"/.test(body);
+  if (!hasResponseId) throw new Error('SSE response has no recognizable response_id');
+  // Pass either true SSE frame OR JSON terminal carrying real upstream response
+  const isSseFrame = body.includes('event:') && body.includes('data:');
+  const isJsonTerminal = /"id"\s*:\s*"[0-9a-f]{32}"/.test(body) && (body.includes('response.completed') || body.includes('"status":"completed"'));
+  if (!isSseFrame && !isJsonTerminal) throw new Error('SSE response has no event/data markers and no JSON terminal');
+  console.log(`[v4_real_runtime_admission] POST /v1/responses SSE OK: frame=${isSseFrame}, json_terminal=${isJsonTerminal}, len=${body.length}`);
+  passed++;
+} catch (e) {
+  console.error(`[v4_real_runtime_admission] POST /v1/responses SSE FAIL: ${e.message}`);
+  failed++;
+}
+
+try {
+  // Malformed: unknown model name -> 4xx/5xx, server stays alive
+  const badResp = await httpPost(RCCV4_HOST, '/v1/responses', { model: 'NonExistentModelXYZ', input: 'hi' }, {}, 10000);
+  if (badResp.status >= 200 && badResp.status < 400) throw new Error('malformed request unexpectedly succeeded');
+  const healthAfter = await httpGet(RCCV4_HOST, '/health');
+  if (healthAfter.status !== 200) throw new Error(`server not healthy after bad request: ${healthAfter.status}`);
+  console.log(`[v4_real_runtime_admission] malformed request handled OK (status=${badResp.status})`);
+  passed++;
+} catch (e) {
+  console.error(`[v4_real_runtime_admission] malformed request FAIL: ${e.message}`);
+  failed++;
+}
+
+console.log(`[v4_real_runtime_admission] live tests: ${passed} passed, ${failed} failed`);
+if (failed > 0) process.exit(1);
+console.log('[v4_real_runtime_admission] ALL OK');

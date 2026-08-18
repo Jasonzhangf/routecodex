@@ -1942,128 +1942,6 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
-- resource_id: v4.pipeline.mock_transport_report
-  axis: diagnostic
-  verification_gate:
-  - v4_parity_gate_real_pipeline_mock_transport
-  resource_kind: mock_transport_report
-  lifecycle: v4.pipeline.mainline
-  owner_crate: routecodex-v4-runtime
-  owner_node: V4Runtime01MainlineKernel
-  owner_symbols:
-  - MockTransportReport
-  identity:
-  - requestId
-  - fixtureMethod
-  - fixturePath
-  - fixtureModel
-  - fixtureHeaders
-  semantic_contract:
-    may_enter_metadata_center: false
-  allowed_writers:
-  - V4Runtime01MainlineKernel
-  allowed_readers:
-  - V4RuntimeInspector
-  forbidden_writers:
-  - V4ControlMetadataCenter
-  - V4ErrorChain
-  - V4Control01ScopeBoundCarrier
-  - V4MetadataCenter01ScopeRegistry
-  - V4Router05RequestClassified
-  - V4Router06SelectionPlan
-  - V4Router07RouteDecisionExit
-  - V4Router08LivePolicyOverride
-  - V4Availability01SessionScoped
-  - V4Error01SourceRaised
-  - V4ErrorCenter02ClassifyAudit
-  - V4PayloadCycleRegistry
-  - V4Error04RouterPolicyApplied
-  - V4ScopeRegistry
-  - V4StoplessControlState
-  - V4Control02RecordLedger
-  - V4PluginManager
-  - V4CordisNodeHost
-  - V4NodeContainer
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  binding_status: anchored
-- resource_id: v4.pipeline.mock_transport_error
-  axis: control
-  verification_gate:
-  - v4_parity_gate_real_pipeline_mock_transport
-  resource_kind: mock_transport_error_projection
-  lifecycle: v4.error.mainline
-  owner_crate: routecodex-v4-runtime
-  owner_node: V4Error06ClientProjected
-  owner_symbols:
-  - MockTransportError
-  identity:
-  - requestId
-  - faultCode
-  - nodeId
-  - clientProjectionMessage
-  semantic_contract:
-    client_visible_fields:
-    - code
-    - message
-    internal_control_fields: forbidden
-  allowed_writers:
-  - V4Error06ClientProjected
-  allowed_readers:
-  - V4RuntimeInspector
-  forbidden_writers:
-  - V4ControlMetadataCenter
-  - V4ErrorChain
-  - V4Control01ScopeBoundCarrier
-  - V4MetadataCenter01ScopeRegistry
-  - V4Router05RequestClassified
-  - V4Router06SelectionPlan
-  - V4Router07RouteDecisionExit
-  - V4Router08LivePolicyOverride
-  - V4Availability01SessionScoped
-  - V4Error01SourceRaised
-  - V4ErrorCenter02ClassifyAudit
-  - V4PayloadCycleRegistry
-  - V4Error04RouterPolicyApplied
-  - V4ScopeRegistry
-  - V4StoplessControlState
-  - V4Control02RecordLedger
-  - V4PluginManager
-  - V4CordisNodeHost
-  - V4NodeContainer
-  - V4ProviderReqCompat06Compat
-  - V4HubRespOutbound04ClientSemantic
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  binding_status: anchored
-- resource_id: v4.pipeline.mock_transport_identity
-  axis: diagnostic
-  verification_gate:
-  - v4_parity_gate_real_pipeline_mock_transport
-  resource_kind: runtime_identity_counter
-  lifecycle: v4.pipeline.mock_transport_identity
-  owner_crate: routecodex-v4-runtime
-  owner_node: V4Runtime01MainlineKernel
-  owner_symbols:
-  - MockTransportIdentityCounter
-  - MockTransportIdentity
-  identity:
-  - serverId
-  - localDay
-  - sequence
-  - requestId
-  semantic_contract:
-    may_enter_metadata_center: false
-  allowed_writers:
-  - V4Runtime01MainlineKernel
-  allowed_readers:
-  - V4RuntimeInspector
-  forbidden_writers:
-  - V4ProviderReqCompat06Compat
-  - V4HubRespOutbound04ClientSemantic
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  binding_status: anchored
 - resource_id: v4.runtime.admission_manifest
   axis: information
   verification_gate:
@@ -2093,7 +1971,7 @@ resources:
   - V4ServerRespOutbound05ClientFrame
   may_enter_provider_body: false
   may_enter_client_body: false
-  binding_status: design
+  binding_status: active
 - resource_id: v4.runtime.compiled_manifest
   axis: information
   verification_gate:
@@ -2122,7 +2000,7 @@ resources:
   - V4ServerRespOutbound05ClientFrame
   may_enter_provider_body: false
   may_enter_client_body: false
-  binding_status: design
+  binding_status: active
 - resource_id: v4.runtime.binary_identity
   axis: diagnostic
   verification_gate:
@@ -2152,7 +2030,7 @@ resources:
   - routecodex-v4-provider
   may_enter_provider_body: false
   may_enter_client_body: false
-  binding_status: design
+  binding_status: active
 - resource_id: v4.provider.real_transport
   axis: data
   verification_gate:
@@ -2205,7 +2083,7 @@ resources:
   - V4ControlMetadataCenter
   may_enter_provider_body: true
   may_enter_client_body: false
-  binding_status: design
+  binding_status: active
 - resource_id: v4.server.http_listener
   axis: data
   verification_gate:
@@ -2256,7 +2134,7 @@ resources:
   - V4ControlMetadataCenter
   may_enter_provider_body: false
   may_enter_client_body: true
-  binding_status: design
+  binding_status: active
 forbidden_direct_edges:
 - from: v4.config.manifest
   to: v4.request.normal_payload
@@ -2388,9 +2266,3 @@ forbidden_direct_edges:
 - from: v4.node.statistics
   to: v4.response.client_wire_payload
   reason: statistics must never enter client body
-- from: v4.pipeline.mock_transport_error
-  to: v4.request.provider_wire_payload
-  reason: mock transport error projection is control-only and must never enter provider wire
-- from: v4.pipeline.mock_transport_identity
-  to: v4.request.provider_wire_payload
-  reason: mock transport request identity is diagnostic control state, not provider payload

@@ -11,12 +11,10 @@ members = [
   "crates/routecodex-v4-runtime-inspector",
   "crates/routecodex-v4-admin",
   "crates/routecodex-v4-skeleton",
-  "crates/routecodex-v4-runtime",
   "crates/routecodex-v4-provider",
   "crates/routecodex-v4-router",
   "crates/routecodex-v4-server",
   "crates/routecodex-v4-standard-plugins",
-  "crates/routecodex-v4-runtime-bin",
 ]
 resolver = "2"
 

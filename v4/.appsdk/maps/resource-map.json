@@ -994,40 +994,6 @@
       "status": "active"
     },
     {
-      "resource_id": "v4.pipeline.mock_transport_report",
-      "owner": "routecodex-v4-runtime::MockTransportReport",
-      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
-      "allowed_operations": [
-        "create",
-        "read",
-        "validate"
-      ],
-      "status": "active"
-    },
-    {
-      "resource_id": "v4.pipeline.mock_transport_error",
-      "owner": "routecodex-v4-runtime::MockTransportError",
-      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
-      "allowed_operations": [
-        "create",
-        "read",
-        "validate"
-      ],
-      "status": "active"
-    },
-    {
-      "resource_id": "v4.pipeline.mock_transport_identity",
-      "owner": "routecodex-v4-runtime::MockTransportIdentityCounter",
-      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
-      "allowed_operations": [
-        "create",
-        "read",
-        "write",
-        "validate"
-      ],
-      "status": "active"
-    },
-    {
       "resource_id": "v4.runtime.admission_manifest",
       "owner": "routecodex-v4-governance::real_runtime_admission",
       "truth_store": "contracts/real-runtime-admission.manifest.json",
@@ -1035,7 +1001,7 @@
         "read",
         "validate"
       ],
-      "status": "design"
+      "status": "active"
     },
     {
       "resource_id": "v4.runtime.compiled_manifest",
@@ -1046,7 +1012,7 @@
         "read",
         "validate"
       ],
-      "status": "design"
+      "status": "active"
     },
     {
       "resource_id": "v4.runtime.binary_identity",
@@ -1056,7 +1022,7 @@
         "read",
         "validate"
       ],
-      "status": "design"
+      "status": "active"
     },
     {
       "resource_id": "v4.provider.real_transport",
@@ -1067,7 +1033,7 @@
         "validate",
         "write"
       ],
-      "status": "design"
+      "status": "active"
     },
     {
       "resource_id": "v4.server.http_listener",
@@ -1078,7 +1044,7 @@
         "validate",
         "write"
       ],
-      "status": "design"
+      "status": "active"
     }
   ]
 }

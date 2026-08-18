@@ -32,11 +32,11 @@
         "mainline_merge_identity",
         "v4_build_verify_positive",
         "v4_build_verify_red",
-      "v4_build_verify_ci",
-      "v4_isolation_positive",
-      "v4_parity_gate_real_runtime_admission",
-      "v4_parity_gate_real_runtime_admission_red",
-      "v4_real_runtime_admission_red"
+        "v4_build_verify_ci",
+        "v4_isolation_positive",
+        "v4_parity_gate_real_runtime_admission",
+        "v4_parity_gate_real_runtime_admission_red",
+        "v4_real_runtime_admission_red"
       ]
     },
     {
@@ -294,9 +294,7 @@
         "v4_parity_gate_execution_binding_red",
         "v4_parity_gate_resource_binding",
         "v4_compat_gate_responses_direct",
-        "v4_compat_gate_relay_continuation",
-        "v4_parity_gate_real_pipeline_mock_transport",
-        "v4_parity_gate_real_pipeline_mock_transport_red"
+        "v4_compat_gate_relay_continuation"
       ]
     },
     {
@@ -492,7 +490,7 @@
     },
     {
       "module_id": "routecodex-v4-runtime-bin",
-      "status": "design",
+      "status": "active",
       "owner": "routecodex-v4-runtime-bin",
       "owned_paths": [
         "crates/routecodex-v4-runtime-bin/**"

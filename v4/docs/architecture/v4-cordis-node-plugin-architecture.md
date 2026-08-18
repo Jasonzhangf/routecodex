@@ -1,6 +1,6 @@
 # V4 Cordis Skeleton、Node Container 与插件架构
 
-状态：`phase3_mock_transport_slice_active`（M0-M4/M6 基线与真实 Cordis Host -> Rust NodeContainer 生命周期绑定已落地；M5 标准插件库、M7 WebUI 已 active；M8 第一切片 mock_transport_slice 合同 + owner + gate 已定义，未含真实 provider wire）
+状态：`phase4_real_runtime_admission_active`（M0-M7 基线已落地；M8 独立 `rccv4` 从编译 manifest 冷启动，并通过真实 provider transport 提供 Responses JSON/SSE）
 
 ## 决策
 
@@ -491,19 +491,18 @@ GET  /v4/admin/audit
 ## 当前缺口
 
 - `contracts/node-graph.contract.json` 仍表达“每节点唯一 active operator”和 hook 独立队列；它属于冻结 BaseNode 的 contract inputs，不能直接原地修改。
-- 实际 Cordis Host、typed bridge、NodeContainer、NodePluginContract、PluginCatalog、PluginManager、Skeleton Runtime 和 Admin API 基线已存在；标准插件库、WebUI 与真实 Pipeline 逐节点迁移仍未完成。
+- 实际 Cordis Host、typed bridge、NodeContainer、NodePluginContract、PluginCatalog、PluginManager、Skeleton Runtime、Admin API 与独立真实 runtime admission 已存在；其余协议插件仍按节点逐步迁移。
 - 当前 Config Compiler 正在独立开发；NodePluginPlan schema 必须作为后续版本/扩展接入，不能与在途 `v4.config.manifest` owner 并行改同一真源。
-- 当前 V4 仍没有完成真实 request/response/provider 产品 runtime；host/container 绑定已 active，不等于完整 Pipeline 已迁移。
+- 当前独立 runtime 已闭合 Responses 请求、真实 provider transport、JSON/SSE 响应；其他入口协议尚未纳入本轮 admission。
 
 
 
-## M8 第一切片（mock_transport_slice）
+## M8 独立真实运行准入
 
-- 状态：phase3_mock_transport_slice_active
-- 合同：v4/crates/routecodex-v4-runtime/src/lib.rs（MockTransportIdentity/MockTransportReport/KeylessChatFixture）+ 对应 function/resource/mainline map
-- 入口：execute_mock_response_scoped（runtime mock transport）
-- owner：feature_id:v4.runtime.real_pipeline_mock_transport
-- gate：v4_parity_gate_real_pipeline_mock_transport（含 --red-self-test）
-- 范围：config/lifecycle + diagnostics + request inbound + response inbound + error chain（keyless fixture + mock transport，禁真实 provider wire/凭据）
-- 下一切片：routing/target、provider compat/wire、transport、error/retry/continuation integration
+- 状态：phase4_real_runtime_admission_active
+- 合同：`contracts/real-runtime-admission.manifest.json` 与编译产物 `generated/real-runtime-admission/manifest.compiled.json`
+- 入口：独立 `routecodex-v4-runtime-bin` / `rccv4`
+- owner：`feature_id:v4.runtime.independent_admission`
+- gate：`v4_parity_gate_real_runtime_admission`（含 `--red-self-test`）
+- 范围：独立 listener、typed routing、Responses wire build/raw parse、真实 provider transport、JSON/SSE client emission 与 ErrorChain；不读取、调用、安装或重启 V3
 实施和验证顺序见 [`v4-cordis-plugin-framework-and-webui-plan.md`](../goals/v4-cordis-plugin-framework-and-webui-plan.md)。

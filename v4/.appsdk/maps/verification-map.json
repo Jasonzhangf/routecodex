@@ -637,23 +637,8 @@
       ]
     },
     {
-      "gate_id": "v4_parity_gate_real_pipeline_mock_transport",
-      "command": "node scripts/architecture/verify-v4-real-pipeline-mock-transport.mjs",
-      "required_for": [
-        "routecodex-v4-runtime:real_pipeline_slice_architecture_stable",
-        "routecodex-v4-runtime:real_pipeline_slice_freeze"
-      ]
-    },
-    {
-      "gate_id": "v4_parity_gate_real_pipeline_mock_transport_red",
-      "command": "node scripts/architecture/verify-v4-real-pipeline-mock-transport.mjs --red-self-test",
-      "required_for": [
-        "routecodex-v4-runtime:real_pipeline_slice_architecture_stable"
-      ]
-    },
-    {
       "gate_id": "v4_parity_gate_real_runtime_admission",
-      "status": "design",
+      "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
       "required_for": [
         "routecodex-v4-governance:real_runtime_admission_design"
@@ -661,7 +646,7 @@
     },
     {
       "gate_id": "v4_parity_gate_real_runtime_admission_red",
-      "status": "design",
+      "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs --red-self-test",
       "required_for": [
         "routecodex-v4-governance:real_runtime_admission_design"
@@ -669,10 +654,10 @@
     },
     {
       "gate_id": "v4_real_runtime_admission_red",
-      "status": "design",
-      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs --baseline-red",
+      "status": "active",
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs ",
       "required_for": [
-        "routecodex-v4-governance:real_runtime_admission_design"
+        "routecodex-v4-governance:real_runtime_admission"
       ]
     },
     {

@@ -297,7 +297,7 @@
       "entry_symbols": [
         "SkeletonRuntime::load",
         "SkeletonRuntime::execute_request",
-        "SkeletonRuntime::execute_mock_response",
+        "SkeletonRuntime::execute_provider_response",
         "SkeletonRuntime::execute_chain",
         "SkeletonRuntime::claim",
         "SkeletonRuntime::release",
@@ -311,32 +311,6 @@
       "required_gates": [
         "v4_runtime_l2_regression",
         "v4_parity_gate_semantic_parity"
-      ]
-    },
-    {
-      "function_id": "v4.runtime.real_pipeline_mock_transport",
-      "owner": "routecodex-v4-runtime",
-      "entry_symbols": [
-        "KeylessChatFixture",
-        "KeylessChatFixture::chat",
-        "MockTransportIdentityCounter",
-        "MockTransportError",
-        "MockTransportReport",
-        "execute_mock_transport_slice",
-        "is_known_mock_transport_fault_code"
-      ],
-      "required_gates": [
-        "v4_runtime_l2_regression",
-        "v4_server_l2_regression",
-        "v4_parity_gate_real_pipeline_mock_transport",
-        "v4_parity_gate_real_pipeline_mock_transport_red"
-      ],
-      "resource_bindings": [
-        "v4.pipeline.mock_transport_report",
-        "v4.pipeline.mock_transport_error",
-        "v4.pipeline.mock_transport_identity",
-        "v4.server.request_identity",
-        "v4.error.client_projection"
       ]
     },
     {
@@ -682,8 +656,8 @@
     {
       "function_id": "v4.runtime.independent_admission",
       "owner": "routecodex-v4-governance",
-      "status": "design",
-      "binding_status": "pending",
+      "status": "active",
+      "binding_status": "binding",
       "entry_symbols": [],
       "entry_paths": [
         "contracts/real-runtime-admission.manifest.json",
