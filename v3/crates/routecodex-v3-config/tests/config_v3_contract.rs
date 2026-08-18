@@ -2717,3 +2717,40 @@ targets = [{ kind = "provider_model", provider = "cc", model = "gpt-test", prior
         "v3-native provider cc must stay passthrough unless it declares a profile explicitly"
     );
 }
+
+fn compile_model_scale(scale: Option<u64>) -> Result<u64, String> {
+    let scale_line = scale
+        .map(|value| format!("context_token_estimate_scale_bps = {value}\n"))
+        .unwrap_or_default();
+    let source = format!(
+        r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://p.invalid/v1"
+default_model = "m"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "SCALE_KEY" }}] }}
+[providers.p.models.m]
+capabilities = ["text"]
+{scale_line}[route_groups.g.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "key", priority = 1 }}]
+"#
+    );
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap())
+        .map_err(|error| error.to_string())?;
+    Ok(manifest.providers["p"].models["m"].context_token_estimate_scale_bps)
+}
+
+#[test]
+fn context_token_estimate_scale_defaults_to_10000_and_rejects_out_of_range_values() {
+    assert_eq!(compile_model_scale(None).unwrap(), 10_000);
+    assert_eq!(compile_model_scale(Some(10_000)).unwrap(), 10_000);
+    assert_eq!(compile_model_scale(Some(100_000)).unwrap(), 100_000);
+    assert!(compile_model_scale(Some(9_999)).is_err());
+    assert!(compile_model_scale(Some(100_001)).is_err());
+}

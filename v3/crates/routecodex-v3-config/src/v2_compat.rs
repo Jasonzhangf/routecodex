@@ -961,6 +961,10 @@ fn default_context_token_estimate_scale_bps() -> u64 {
     10_000
 }
 
+fn default_context_token_estimate_scale_bps() -> u64 {
+    10_000
+}
+
 impl V2ProviderModelConfig {
     fn web_search_execution_mode(&self) -> V3WebSearchExecutionMode {
         self.web_search_execution_mode.unwrap_or_else(|| {

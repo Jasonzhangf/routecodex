@@ -121,6 +121,7 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-config/src/store.rs
   - v3/crates/routecodex-v3-config/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/types.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - v3/crates/routecodex-v3-config/src/defaults.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
@@ -648,10 +649,17 @@ features:
   - reselect_from_captured_target_plan
   allowed_paths:
   - v3/crates/routecodex-v3-target
+  - v3/crates/routecodex-v3-config/src/types.rs
+  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/validate.rs
+  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - v3/crates/routecodex-v3-runtime
   - v3/crates/routecodex-v3-server
+  - v3/crates/routecodex-v3-virtual-router/src/tests/mod.rs
+  - docs/architecture/repository-filesystem-module-registry.yml
   - docs/goals/v3-virtual-router-target-interpreter-plan.md
   - docs/goals/v3-target-priority-context-heuristic-test-design.md
+  - docs/goals/v3-v2-route-classifier-parity-test-design.md
   - docs/design/v3-system-definition.md
   - docs/design/v3-routecodex-rust-module-boundaries.md
   - docs/design/v3-routecodex-runtime-resource-contract.md
@@ -663,8 +671,6 @@ features:
   forbidden_paths:
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
   - v3/crates/routecodex-v3-provider-responses/src/wire.rs
-  - v3/crates/routecodex-v3-config/src
-  - src
   - sharedmodule
   - ~/.rcc
   - live config
@@ -4406,8 +4412,13 @@ features:
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/v3-build-tool-module-registry.yml
   - .github/workflows/test.yml
+  - package.json
+  - package-lock.json
+  - src/build-info.ts
   forbidden_paths:
-  - src
+  - src/modules
+  - src/providers
+  - src/server
   - sharedmodule
   - ~/.rcc/install
   required_gates:
