@@ -992,6 +992,40 @@
         "validate"
       ],
       "status": "active"
+    },
+    {
+      "resource_id": "v4.pipeline.mock_transport_report",
+      "owner": "routecodex-v4-runtime::MockTransportReport",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.pipeline.mock_transport_error",
+      "owner": "routecodex-v4-runtime::MockTransportError",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.pipeline.mock_transport_identity",
+      "owner": "routecodex-v4-runtime::MockTransportIdentityCounter",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "create",
+        "read",
+        "write",
+        "validate"
+      ],
+      "status": "active"
     }
   ]
 }

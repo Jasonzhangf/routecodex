@@ -1,6 +1,6 @@
 # V4 Cordis Skeleton、Node Container 与插件架构
 
-状态：`phase2_host_binding_active`（M0-M4/M6 基线与真实 Cordis Host -> Rust NodeContainer 生命周期绑定已落地；M5 标准插件库、M7 WebUI 和逐节点 Pipeline 迁移继续执行）
+状态：`phase3_mock_transport_slice_active`（M0-M4/M6 基线与真实 Cordis Host -> Rust NodeContainer 生命周期绑定已落地；M5 标准插件库、M7 WebUI 已 active；M8 第一切片 mock_transport_slice 合同 + owner + gate 已定义，未含真实 provider wire）
 
 ## 决策
 
@@ -495,4 +495,15 @@ GET  /v4/admin/audit
 - 当前 Config Compiler 正在独立开发；NodePluginPlan schema 必须作为后续版本/扩展接入，不能与在途 `v4.config.manifest` owner 并行改同一真源。
 - 当前 V4 仍没有完成真实 request/response/provider 产品 runtime；host/container 绑定已 active，不等于完整 Pipeline 已迁移。
 
+
+
+## M8 第一切片（mock_transport_slice）
+
+- 状态：phase3_mock_transport_slice_active
+- 合同：v4/docs/goals/v4-real-pipeline-migration-plan.md
+- 入口：execute_mock_response_scoped（runtime mock transport）
+- owner：feature_id:v4.pipeline.real_migration + feature_id:v4.pipeline.mock_transport_slice
+- gate：v4_parity_gate_real_pipeline_mock_transport（含 --red-self-test）
+- 范围：config/lifecycle + diagnostics + request inbound + response inbound + error chain（keyless fixture + mock transport，禁真实 provider wire/凭据）
+- 下一切片：routing/target、provider compat/wire、transport、error/retry/continuation integration
 实施和验证顺序见 [`v4-cordis-plugin-framework-and-webui-plan.md`](../goals/v4-cordis-plugin-framework-and-webui-plan.md)。

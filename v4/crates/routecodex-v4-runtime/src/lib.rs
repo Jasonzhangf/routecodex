@@ -487,6 +487,9 @@ impl PayloadCycleRegistry {
 #[derive(Debug, Clone, Default)]
 pub struct DataView {
     pub raw_entry: Option<String>,
+    pub request_method: Option<String>,
+    pub request_path: Option<String>,
+    pub request_headers: Option<Vec<(String, String)>>,
     pub normalized_request: Option<String>,
     pub provider_semantic: Option<String>,
     pub provider_wire: Option<String>,
@@ -1338,6 +1341,7 @@ impl NodePluginPlan {
 pub struct ExecutionReport {
     pub request_id: String,
     pub binding: ExecutionBinding,
+    pub scope: Scope,
     pub provider_wire: Option<String>,
     pub client_frame: Option<String>,
     pub continuation_scope: Option<String>,
@@ -1418,6 +1422,30 @@ impl SkeletonRuntime {
         let result = self.run_chain("request", request_id, port, session_scope, conversation_scope, |ctx| {
             ctx.data.raw_entry = Some(raw_entry.to_string());
             ctx.information.model = Some("mock-provider".to_string());
+        });
+        self.release(request_id);
+        result
+    }
+
+    /// Request inbound entry for a typed keyless fixture. Protocol fields stay
+    /// in the data/information views; only the fixture body enters the normal
+    /// request chain as its raw entry.
+    pub fn execute_request_fixture_scoped(
+        &self,
+        fixture: &KeylessChatFixture,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> Result<ExecutionReport, RuntimeFault> {
+        self.claim(request_id)?;
+        let result = self.run_chain("request", request_id, port, session_scope, conversation_scope, |ctx| {
+            ctx.data.raw_entry = Some(fixture.body.clone());
+            ctx.data.request_method = Some(fixture.method.clone());
+            ctx.data.request_path = Some(fixture.path.clone());
+            ctx.data.request_headers = Some(fixture.headers.clone());
+            ctx.information.endpoint = Some(fixture.path.clone());
+            ctx.information.model = Some(fixture.model.clone());
         });
         self.release(request_id);
         result
@@ -1567,6 +1595,7 @@ impl SkeletonRuntime {
         Ok(ExecutionReport {
             request_id: request_id.to_string(),
             binding: ctx.binding().clone(),
+            scope: ctx.scope().clone(),
             provider_wire: ctx.data.provider_wire.clone(),
             client_frame: ctx.data.client_frame.clone(),
             continuation_scope: ctx.control.continuation_scope.clone(),
@@ -1612,4 +1641,353 @@ pub fn project_runtime_fault(
         reason_code: fault.code.clone(),
     })?;
     chain.project(&fault.message)
+}
+
+// ---------------------------------------------------------------------------
+// M8 first-slice surface: keyless fixture + mock transport.
+// ---------------------------------------------------------------------------
+
+/// Lightweight request identity token produced by the mock transport slice.
+/// Mirrors the server crate's `V4RequestIdCounter` contract intentionally so
+/// the runtime slice stays free of frozen Active crate imports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MockTransportIdentity {
+    pub request_id: String,
+    pub server_id: String,
+    pub local_day: String,
+}
+
+/// In-memory request identity counter used by the mock transport slice.
+/// The counter is monotonically increasing per (server_id, local_day); both
+/// keys must be non-empty.
+#[derive(Debug, Default)]
+pub struct MockTransportIdentityCounter {
+    counters: std::collections::BTreeMap<(String, String), u64>,
+}
+
+impl MockTransportIdentityCounter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn next_identity(
+        &mut self,
+        server_id: &str,
+        local_day: &str,
+    ) -> Result<MockTransportIdentity, String> {
+        if server_id.is_empty() {
+            return Err("server_id is empty".to_string());
+        }
+        if local_day.is_empty() {
+            return Err("local_day is empty".to_string());
+        }
+        let key = (server_id.to_string(), local_day.to_string());
+        let next = self.counters.get(&key).copied().unwrap_or(0) + 1;
+        self.counters.insert(key, next);
+        Ok(MockTransportIdentity {
+            request_id: format!("{server_id}-{local_day}-{next:08}"),
+            server_id: server_id.to_string(),
+            local_day: local_day.to_string(),
+        })
+    }
+}
+
+/// Keyless chat fixture mirror. The runtime slice is intentionally keyless
+/// and mock-transport only; the runtime mirror keeps the runtime tests
+/// self-contained. The `routecodex-v4-server::KeylessChatFixture` type
+/// remains the field-level owner for the production path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeylessChatFixture {
+    pub method: String,
+    pub path: String,
+    pub headers: Vec<(String, String)>,
+    pub body: String,
+    pub model: String,
+}
+
+impl KeylessChatFixture {
+    pub fn new(
+        method: impl Into<String>,
+        path: impl Into<String>,
+        headers: Vec<(String, String)>,
+        body: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
+        Self {
+            method: method.into(),
+            path: path.into(),
+            headers,
+            body: body.into(),
+            model: model.into(),
+        }
+    }
+
+    /// Convenience constructor for chat completion requests. The body is the
+    /// raw text the request chain parses for the entry protocol prefix.
+    pub fn chat(body: impl Into<String>, model: impl Into<String>) -> Self {
+        Self::new("POST", "/v1/chat/completions", Vec::new(), body, model)
+    }
+}
+
+/// Fault codes the mock transport slice may emit. Anything else fails fast
+/// via `unknown_mock_transport_fault_code`.
+pub const MOCK_TRANSPORT_FAULT_CODES: &[&str] = &[
+    "keyless_fixture_invalid",
+    "duplicate_request_id",
+    "cross_request_reuse",
+    "raw_parse",
+    "unknown_mock_transport_fault_code",
+];
+
+/// True when the supplied fault code is one of the mock transport slice's
+/// recognised codes.
+pub fn is_known_mock_transport_fault_code(code: &str) -> bool {
+    MOCK_TRANSPORT_FAULT_CODES.iter().any(|known| *known == code)
+}
+
+/// Typed projection of a mock transport slice fault. The slice surfaces
+/// fault codes and node ids so the test consumer can assert fail-fast
+/// contract behaviour.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MockTransportError {
+    pub fault_code: String,
+    pub node_id: String,
+    pub message: String,
+    pub client_projection_message: String,
+}
+
+/// Result of a single M8 first-slice mock transport run: bound identity,
+/// typed request/response wire pair, continuation commit state, optional
+/// error projection, and the captured diagnostic trace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MockTransportReport {
+    pub request_id: String,
+    pub request_binding: ExecutionBinding,
+    pub provider_wire: String,
+    pub client_frame: String,
+    pub continuation_committed: bool,
+    pub continuation_owner: String,
+    pub fixture_method: String,
+    pub fixture_path: String,
+    pub fixture_model: String,
+    pub fixture_headers: Vec<(String, String)>,
+    pub relay_operator_accepted: bool,
+    pub error_projection_scope: Option<routecodex_v4_base_node::Scope>,
+    pub trace: Vec<String>,
+    pub error: Option<MockTransportError>,
+}
+
+/// One-shot run of the M8 first-slice mock transport. A server-side keyless
+/// chat fixture enters the request chain; a mock provider frame enters the
+/// response chain; the typed `MockTransportReport` collapses both halves.
+/// The three-key continuation scope is bound at the response commit step.
+/// The slice does NOT touch real provider wire, real credentials, or any
+/// outbound network.
+pub fn execute_mock_transport_slice(
+    runtime: &SkeletonRuntime,
+    identity_counter: &mut MockTransportIdentityCounter,
+    fixture: &KeylessChatFixture,
+    mock_provider_frame: &str,
+    server_id: &str,
+    local_day: &str,
+    port: u16,
+    session_scope: &str,
+    conversation_scope: &str,
+    entry_protocol: &str,
+    continuation_owner: &str,
+) -> Result<MockTransportReport, RuntimeFault> {
+    if server_id.is_empty()
+        || local_day.is_empty()
+        || fixture.method.is_empty()
+        || fixture.path.is_empty()
+        || fixture.body.is_empty()
+        || fixture.model.is_empty()
+        || session_scope.is_empty()
+        || conversation_scope.is_empty()
+        || entry_protocol.is_empty()
+        || continuation_owner.is_empty()
+    {
+        return Err(RuntimeFault::new(
+            "keyless_fixture_invalid",
+            "fixture, continuation, and protocol identity fields must be non-empty",
+        ));
+    }
+    if mock_provider_frame.trim().is_empty() {
+        return Err(RuntimeFault::new(
+            "keyless_fixture_invalid",
+            "mock_provider_frame must be non-empty",
+        ));
+    }
+    let operator = select_relay_operator(&ContinuationFacts::new(
+        entry_protocol,
+        entry_protocol,
+        continuation_owner,
+        if continuation_owner == "relay" {
+            "relay"
+        } else {
+            "direct"
+        },
+    ))
+    .map_err(|error| {
+        RuntimeFault::new(
+            "keyless_fixture_invalid",
+            format!(
+                "entry_protocol={entry_protocol} continuation_owner={continuation_owner} not accepted: {error}"
+            ),
+        )
+    })?;
+    let relay_operator_accepted = matches!(operator, RelayOperator::Relay | RelayOperator::Direct);
+    let expected_path_prefix = match entry_protocol {
+        "chat" => "/v1/chat/completions",
+        "responses" => "/v1/responses",
+        _ => {
+            return Err(RuntimeFault::new(
+                "keyless_fixture_invalid",
+                format!("entry_protocol {entry_protocol} is not a recognised mock slice entry"),
+            ))
+        }
+    };
+    if !fixture.path.starts_with(expected_path_prefix) {
+        return Err(RuntimeFault::new(
+            "keyless_fixture_invalid",
+            format!(
+                "fixture path {} does not match entry_protocol {entry_protocol} (expected prefix {expected_path_prefix})",
+                fixture.path
+            ),
+        ));
+    }
+    let expected_body_prefix = match entry_protocol {
+        "chat" => "chat:",
+        _ => "responses:",
+    };
+    if !fixture.body.starts_with(expected_body_prefix) {
+        return Err(RuntimeFault::new(
+            "keyless_fixture_invalid",
+            format!(
+                "fixture body does not match entry_protocol {entry_protocol} (expected body prefix {expected_body_prefix})"
+            ),
+        ));
+    }
+    let identity = identity_counter
+        .next_identity(server_id, local_day)
+        .map_err(|error| {
+            RuntimeFault::new(
+                "keyless_fixture_invalid",
+                format!("request identity counter failed: {error}"),
+            )
+        })?;
+    let bound = execution_binding(runtime.plan());
+    // Real fixture fields enter the request chain via the typed request
+    // inbound entry, not via a body-only path. This keeps the request
+    // outbound wire pinned to the exact (method, path, headers, model) the
+    // caller declared; the model field is no longer silently rewritten
+    // to "mock-provider".
+    let request_report = runtime.execute_request_fixture_scoped(
+        fixture,
+        &identity.request_id,
+        port,
+        session_scope,
+        conversation_scope,
+    )?;
+    if request_report.binding != bound {
+        return Err(RuntimeFault::new(
+            "unknown_mock_transport_fault_code",
+            "request execution binding drifted from skeleton plan",
+        ));
+    }
+    // The request chain is the single source of truth for the scope the
+    // error chain must consume. We never fabricate a synthetic scope; the
+    // error projection below uses the exact scope the request chain bound
+    // for this same request id.
+    let request_scope = request_report.scope.clone();
+    let response_result = runtime.execute_mock_response_scoped(
+        mock_provider_frame,
+        &identity.request_id,
+        port,
+        session_scope,
+        conversation_scope,
+        entry_protocol,
+        continuation_owner,
+    );
+    let mut trace = request_report.trace.clone();
+    let response_report = match response_result {
+        Ok(report) => report,
+        Err(fault) => {
+            trace.push(format!(
+                "fault:{}-at-{}",
+                fault.code,
+                fault.node_id.clone().unwrap_or_default()
+            ));
+            let projection = error_chain_client_projection_message(&fault, &request_scope)?;
+            return Ok(MockTransportReport {
+                request_id: identity.request_id,
+                request_binding: request_report.binding,
+                provider_wire: request_report.provider_wire.clone().unwrap_or_default(),
+                client_frame: String::new(),
+                continuation_committed: false,
+                continuation_owner: continuation_owner.to_string(),
+                fixture_method: fixture.method.clone(),
+                fixture_path: fixture.path.clone(),
+                fixture_model: fixture.model.clone(),
+                fixture_headers: fixture.headers.clone(),
+                relay_operator_accepted,
+                error_projection_scope: Some(request_scope),
+                trace,
+                error: Some(MockTransportError {
+                    fault_code: fault.code.clone(),
+                    node_id: fault.node_id.clone().unwrap_or_default(),
+                    message: fault.message.clone(),
+                    client_projection_message: projection,
+                }),
+            });
+        }
+    };
+    if response_report.binding != request_report.binding {
+        return Err(RuntimeFault::new(
+            "unknown_mock_transport_fault_code",
+            "response execution binding drifted from request binding",
+        ));
+    }
+    let provider_wire = request_report.provider_wire.clone().ok_or_else(|| {
+        RuntimeFault::new("unknown_mock_transport_fault_code", "missing provider wire")
+    })?;
+    let client_frame = response_report.client_frame.clone().ok_or_else(|| {
+        RuntimeFault::new("unknown_mock_transport_fault_code", "missing client frame")
+    })?;
+    trace.extend(response_report.trace.iter().cloned());
+    Ok(MockTransportReport {
+        request_id: identity.request_id,
+        request_binding: request_report.binding,
+        provider_wire,
+        client_frame,
+        continuation_committed: response_report.continuation_committed,
+        continuation_owner: continuation_owner.to_string(),
+        fixture_method: fixture.method.clone(),
+        fixture_path: fixture.path.clone(),
+        fixture_model: fixture.model.clone(),
+        fixture_headers: fixture.headers.clone(),
+        relay_operator_accepted,
+        error_projection_scope: None,
+        trace,
+        error: None,
+    })
+}
+
+fn error_chain_client_projection_message(
+    fault: &RuntimeFault,
+    request_scope: &routecodex_v4_base_node::Scope,
+) -> Result<String, RuntimeFault> {
+    // The error chain consumes the real scope produced by the request chain
+    // for the same request id. We never fabricate a scope from a static
+    // placeholder; the previous "mock-transport-slice/port=0" synthetic
+    // scope made the error chain indistinguishable from a fabricated one
+    // and is removed.
+    let mut chain = ErrorChain::new(request_scope.clone());
+    match project_runtime_fault(&mut chain, fault.clone()) {
+        Ok(projection) => Ok(projection.message),
+        Err(error) => Err(RuntimeFault::new(
+            "unknown_mock_transport_fault_code",
+            format!("error-chain projection failed: {error:?}"),
+        )),
+    }
 }

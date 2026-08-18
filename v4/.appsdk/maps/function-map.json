@@ -314,6 +314,32 @@
       ]
     },
     {
+      "function_id": "v4.runtime.real_pipeline_mock_transport",
+      "owner": "routecodex-v4-runtime",
+      "entry_symbols": [
+        "KeylessChatFixture",
+        "KeylessChatFixture::chat",
+        "MockTransportIdentityCounter",
+        "MockTransportError",
+        "MockTransportReport",
+        "execute_mock_transport_slice",
+        "is_known_mock_transport_fault_code"
+      ],
+      "required_gates": [
+        "v4_runtime_l2_regression",
+        "v4_server_l2_regression",
+        "v4_parity_gate_real_pipeline_mock_transport",
+        "v4_parity_gate_real_pipeline_mock_transport_red"
+      ],
+      "resource_bindings": [
+        "v4.pipeline.mock_transport_report",
+        "v4.pipeline.mock_transport_error",
+        "v4.pipeline.mock_transport_identity",
+        "v4.server.request_identity",
+        "v4.error.client_projection"
+      ]
+    },
+    {
       "function_id": "v4.debug_subscription",
       "owner": "routecodex-v4-base-node",
       "entry_symbols": [
