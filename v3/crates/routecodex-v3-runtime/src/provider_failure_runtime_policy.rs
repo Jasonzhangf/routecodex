@@ -657,6 +657,7 @@ impl V3ProviderFailureRuntimeHealth {
 
     pub(crate) fn record_provider_failure_record_with_policy(
         &self,
+        matched_policy_directive: Option<&V3ProviderErrorActionPolicyManifest>,
         manifest: &V3Config05ManifestPublished,
         failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
@@ -704,6 +705,7 @@ impl V3ProviderFailureRuntimeHealth {
                 reason,
                 now_ms,
                 configured_health_policy_for_failure(
+                    matched_policy_directive,
                     manifest,
                     provider_id,
                     provider_type,
@@ -802,12 +804,33 @@ impl V3ProviderFailureRuntimeHealth {
         model_id: Option<&str>,
         error_family: &str,
     ) -> Result<V3ProviderActionFailureRecorded, String> {
-        self.action_gate
-            .record_failure(&V3ProviderActionGateKey::new(
+        self.record_provider_action_failure_in_scope_with_minimum_delay(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            error_family,
+            0,
+        )
+    }
+
+    pub(crate) fn record_provider_action_failure_in_scope_with_minimum_delay(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        error_family: &str,
+        minimum_delay_ms: u64,
+    ) -> Result<V3ProviderActionFailureRecorded, String> {
+        self.action_gate.record_failure_with_minimum_delay(
+            &V3ProviderActionGateKey::new(
                 failure_session_scope,
                 v3_relay_provider_candidate_key_parts(provider_id, auth_alias, model_id),
                 error_family,
-            )?)
+            )?,
+            minimum_delay_ms,
+        )
     }
 
     pub(crate) async fn wait_for_terminal_provider_projection_in_scope(
@@ -1047,6 +1070,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     status: u16,
     error_type: Option<String>,
     message: String,
+    matched_policy_directive: Option<&V3ProviderErrorActionPolicyManifest>,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
 ) -> Result<V3RelayProviderFailurePolicyResult, String> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
@@ -1071,13 +1095,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         &message,
     );
     let configured_same_candidate_retries = configured_retry_budget_for_failure(
-        context.manifest,
-        &selected.candidate.provider_id,
-        Some(&selected.candidate.provider_type),
-        Some(&selected.candidate.model_id),
-        status,
-        error_type.as_deref(),
-        &message,
+        matched_policy,
         context.retry_policy.same_candidate_retries,
     );
     let transient_admission = if transient {
@@ -1121,6 +1139,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         context
             .provider_health
             .record_provider_failure_record_with_policy(
+                matched_policy,
                 context.manifest,
                 &context.failure_session_scope,
                 &selected.candidate.provider_id,
@@ -1137,6 +1156,54 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             )
             .map_err(|error| error.to_string())?
     };
+    if configured_retry_mode(matched_policy) == Some(V3ProviderErrorRetryMode::RetrySame)
+        && health_record.state != "cooldown"
+        && retries_done < configured_same_candidate_retries
+        && status != 400
+    {
+        state
+            .same_candidate_retries
+            .insert(candidate_key.clone(), retries_done.saturating_add(1));
+        state.trace.push("V3TargetPolicyRetriedSame");
+        let failure_record = context
+            .provider_health
+            .record_provider_action_failure_in_scope_with_minimum_delay(
+                &context.failure_session_scope,
+                &selected.candidate.provider_id,
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+                error_type.as_deref().unwrap_or("provider_failure"),
+                configured_retry_backoff_ms(matched_policy, retries_done),
+            )?;
+        let decision = build_v3_relay_provider_error_05_decision(
+            &selected,
+            source_stage,
+            status,
+            error_type.as_deref(),
+            &message,
+            0,
+            selected.candidate.default_pool_member,
+            true,
+            Some(failure_record.recovery_witness()?),
+        );
+        return Ok(V3RelayProviderFailurePolicyResult {
+            terminal_projection: terminal_projection_for(&decision, matched_policy),
+            decision,
+            retry_selected: Some(Box::new(selected.clone())),
+            event: build_v3_relay_provider_failure_policy_event(
+                V3RelayProviderFailurePolicyEventInput {
+                    candidate: selected.candidate,
+                    status,
+                    error_type,
+                    message,
+                    health_record,
+                    action: "policy_retry_same",
+                    next_provider_key: Some(candidate_key),
+                    wait_ms: Some(failure_record.minimum_delay_ms),
+                },
+            ),
+        });
+    }
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
     let resolution = reselect_from_captured_target_plan(
@@ -1162,7 +1229,9 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 let recovery = if is_request_local_compat_failure {
                     None
                 } else {
-                    Some(
+                    let configured_backoff_ms =
+                        configured_retry_backoff_ms(matched_policy, retries_done);
+                    Some(if configured_backoff_ms == 0 {
                         context
                             .provider_health
                             .record_provider_action_failure_in_scope(
@@ -1171,8 +1240,19 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                                 Some(&selected.candidate.auth_alias),
                                 Some(&selected.candidate.model_id),
                                 error_type.as_deref().unwrap_or("provider_failure"),
-                            )?,
-                    )
+                            )?
+                    } else {
+                        context
+                            .provider_health
+                            .record_provider_action_failure_in_scope_with_minimum_delay(
+                                &context.failure_session_scope,
+                                &selected.candidate.provider_id,
+                                Some(&selected.candidate.auth_alias),
+                                Some(&selected.candidate.model_id),
+                                error_type.as_deref().unwrap_or("provider_failure"),
+                                configured_backoff_ms,
+                            )?
+                    })
                 };
                 let decision = build_v3_relay_provider_error_05_decision(
                     &selected,
@@ -1335,12 +1415,13 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         state.trace.push("V3DefaultFloorBackoffWait");
         let failure_record = context
             .provider_health
-            .record_provider_action_failure_in_scope(
+            .record_provider_action_failure_in_scope_with_minimum_delay(
                 &context.failure_session_scope,
                 &selected.candidate.provider_id,
                 Some(&selected.candidate.auth_alias),
                 Some(&selected.candidate.model_id),
                 error_type.as_deref().unwrap_or("provider_failure"),
+                configured_retry_backoff_ms(matched_policy, retries_done.saturating_sub(1)),
             )?;
         let wait_ms = failure_record.minimum_delay_ms;
         let decision = build_v3_relay_provider_error_05_decision(
@@ -1386,12 +1467,13 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         state.trace.push("V3TargetLocalRetried");
         let failure_record = context
             .provider_health
-            .record_provider_action_failure_in_scope(
+            .record_provider_action_failure_in_scope_with_minimum_delay(
                 &context.failure_session_scope,
                 &selected.candidate.provider_id,
                 Some(&selected.candidate.auth_alias),
                 Some(&selected.candidate.model_id),
                 error_type.as_deref().unwrap_or("provider_failure"),
+                configured_retry_backoff_ms(matched_policy, retries_done.saturating_sub(1)),
             )?;
         let wait_ms = Some(failure_record.minimum_delay_ms);
         let decision = build_v3_relay_provider_error_05_decision(

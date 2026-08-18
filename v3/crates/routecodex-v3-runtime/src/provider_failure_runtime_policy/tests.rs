@@ -543,6 +543,7 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
         502,
         Some("provider_request_compat_error".to_string()),
         "arguments must be valid JSON".to_string(),
+        None,
         &mut state,
     )
     .await
@@ -602,6 +603,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         429,
         Some("provider_transport_error".to_string()),
         "prior provider returned 429".to_string(),
+        None,
         &mut state,
     )
     .await
@@ -859,6 +861,7 @@ async fn transport_error_excludes_only_the_failed_provider_key() {
         502,
         Some("provider_transport_error".to_string()),
         "error sending request for url".to_string(),
+        None,
         &mut state,
     )
     .await
@@ -959,6 +962,7 @@ message_mode = "code_only"
         429,
         Some("provider_http_429".to_string()),
         "quota exceeded".to_string(),
+        None,
         &mut state,
     )
     .await
