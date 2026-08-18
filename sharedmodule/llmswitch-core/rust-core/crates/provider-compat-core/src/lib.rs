@@ -1609,57 +1609,11 @@ fn harvest_text_tool_calls(payload: Value) -> Result<Value, String> {
     Ok(payload)
 }
 
-const CC_DIAGNOSTIC_ROUTING_MARKER: &str = "检测到请求较复杂已自动路由到硬推理模型";
-const CC_DIAGNOSTIC_TEMPLATE_MARKERS: [&str; 3] = [
-    "Noticing frequent 'deadlock detected' messages in the logs",
-    "Following the state machine, an order transitions CREATED then PAID then SHIPPED then",
-    "Verifying config.v3.toml provider configurationPlanning removal of inline provider",
-];
-
 fn apply_cc_response_compat(payload: Value) -> Value {
-    if !cc_payload_contains_diagnostic_text(&payload) {
-        return payload;
-    }
-    let id = payload
-        .as_object()
-        .and_then(|root| root.get("id"))
-        .cloned()
-        .unwrap_or_else(|| Value::String("resp_cc_reasoning_stop_noop".to_string()));
-    json!({
-        "id": id,
-        "status": "completed",
-        "finish_reason": "stop",
-        "output": []
-    })
-}
-
-fn cc_payload_contains_diagnostic_text(value: &Value) -> bool {
-    let mut text = String::new();
-    collect_cc_response_text(value, &mut text);
-    text.contains(CC_DIAGNOSTIC_ROUTING_MARKER)
-        || CC_DIAGNOSTIC_TEMPLATE_MARKERS
-            .iter()
-            .all(|marker| text.contains(marker))
-}
-
-fn collect_cc_response_text(value: &Value, text: &mut String) {
-    match value {
-        Value::String(value) => {
-            text.push_str(value);
-            text.push('\n');
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_cc_response_text(item, text);
-            }
-        }
-        Value::Object(object) => {
-            for value in object.values() {
-                collect_cc_response_text(value, text);
-            }
-        }
-        _ => {}
-    }
+    // Provider diagnostics are response data, not a successful empty response.
+    // The old implementation replaced matching text with `completed + output=[]`,
+    // silently fabricating success and destroying the provider's semantic payload.
+    payload
 }
 
 fn apply_glm_response_compat(payload: Value) -> Value {
@@ -1925,7 +1879,7 @@ mod tests {
     }
 
     #[test]
-    fn cc_response_profile_projects_known_diagnostic_text_to_empty_natural_stop() {
+    fn cc_response_profile_preserves_provider_diagnostic_text() {
         let diagnostic = "检测到请求较复杂已自动路由到硬推理模型\nNoticing frequent 'deadlock detected' messages in the logs\nVerifying config.v3.toml provider configurationPlanning removal of inline provider";
         let input = ReqOutboundCompatInput {
             payload: json!({
@@ -1946,12 +1900,11 @@ mod tests {
         };
         let result = run_resp_inbound_stage3_compat(input).unwrap();
         assert_eq!(result.applied_profile.as_deref(), Some("responses:cc"));
-        assert_eq!(result.payload["status"], "completed");
-        assert_eq!(result.payload["finish_reason"], "stop");
-        assert!(result.payload["output"].as_array().unwrap().is_empty());
+        assert_eq!(result.payload["output"][0]["type"], "message");
+        assert_eq!(result.payload["output"][0]["content"][0]["text"], diagnostic);
         let serialized = serde_json::to_string(&result.payload).unwrap();
-        assert!(!serialized.contains("deadlock detected"));
-        assert!(!serialized.contains("Verifying config.v3.toml"));
+        assert!(serialized.contains("deadlock detected"));
+        assert!(serialized.contains("Verifying config.v3.toml"));
     }
 
     #[test]
