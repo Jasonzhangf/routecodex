@@ -1,4 +1,5 @@
 use crate::*;
+use crate::webui_observability::V3ObsEventType;
 use axum::body::Body;
 use axum::http::Response;
 use futures_util::StreamExt;
@@ -801,6 +802,21 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             started_at,
             output.stream_observation.is_none(),
         );
+        // Typed WebUI projection: relay terminal (Completed/Failed).
+        let terminal = if output.status >= 400
+            || !observability.provider_failure_events.is_empty()
+        {
+            V3ObsEventType::Failed
+        } else {
+            V3ObsEventType::Completed
+        };
+        if let Err(error) = crate::console::record_v3_webui_event_for_context(
+            console_context,
+            terminal,
+            observability,
+        ) {
+            crate::console::emit_v3_webui_projection_failure(console_context, &error);
+        }
     }
     responses_relay_output_response(
         output,
