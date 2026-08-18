@@ -577,22 +577,24 @@ fn different_fingerprints_do_not_combine_and_probe_failure_reschedules_after_int
 }
 
 #[test]
-fn stream_failure_cools_provider_immediately_and_probe_failure_keeps_excluded() {
+fn stream_failures_follow_three_error_threshold_and_probe_failure_keeps_excluded() {
     let store = V3ProviderHealthStore::default();
     let session_a = scope("session-a");
 
-    // post-commit SSE 流失败直接写 provider 级冷却（不等 session 计数）。
-    store
-        .record_provider_stream_failure_in_provider_scope(
+    // post-commit SSE 流失败只算一次普通 provider error，不能绕过三错阈值。
+    let first = store
+        .record_provider_failure_in_session(
+            &session_a,
             "provider-a",
             Some("key-a"),
             Some("model-a"),
-            "provider_response_sse_event_invalid",
+            Some("provider_response_sse_event_invalid"),
             100,
         )
         .unwrap();
+    assert_eq!(first.failure_count, 1);
     assert!(
-        !store
+        store
             .availability_for_session(
                 &session_a,
                 "provider-a",
@@ -601,8 +603,43 @@ fn stream_failure_cools_provider_immediately_and_probe_failure_keeps_excluded() 
                 101,
             )
             .available,
-        "single post-commit stream failure must cool provider immediately"
+        "single post-commit stream failure must not cool provider"
     );
+    let second = store
+        .record_provider_failure_in_session(
+            &session_a,
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            Some("provider_response_sse_event_invalid"),
+            101,
+        )
+        .unwrap();
+    assert_eq!(second.failure_count, 2);
+    assert!(
+        store
+            .availability_for_session(
+                &session_a,
+                "provider-a",
+                Some("key-a"),
+                Some("model-a"),
+                102,
+            )
+            .available,
+        "two ordinary stream failures must not cool provider"
+    );
+    let third = store
+        .record_provider_failure_in_session(
+            &session_a,
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            Some("provider_response_sse_event_invalid"),
+            102,
+        )
+        .unwrap();
+    assert_eq!(third.failure_count, 3);
+    assert_eq!(third.state, "cooldown");
 
     // 冷却到期后仍不可用，恢复唯一路径是 probe 通过。
     assert!(
@@ -612,14 +649,14 @@ fn stream_failure_cools_provider_immediately_and_probe_failure_keeps_excluded() 
                 "provider-a",
                 Some("key-a"),
                 Some("model-a"),
-                100 + 900_000 + 1,
+                102 + 900_000 + 1,
             )
             .available,
         "expired cooldown must stay excluded until probe passes"
     );
     assert_eq!(
         store
-            .provider_cooldown_probe_keys_due(100 + 900_000 + 1)
+            .provider_cooldown_probe_keys_due(102 + 900_000 + 1)
             .unwrap()
             .len(),
         1,
@@ -628,7 +665,7 @@ fn stream_failure_cools_provider_immediately_and_probe_failure_keeps_excluded() 
 
     // 首次 probe → 失败 → 保持冷却并推后下一次探针。
     let due = store
-        .provider_cooldown_probe_keys_due(100 + 900_000 + 1)
+        .provider_cooldown_probe_keys_due(102 + 900_000 + 1)
         .unwrap();
     assert_eq!(
         due.len(),
@@ -643,12 +680,12 @@ fn stream_failure_cools_provider_immediately_and_probe_failure_keeps_excluded() 
             "provider-a",
             Some("key-a"),
             Some("model-a"),
-            100 + 900_000 + 1,
+            102 + 900_000 + 1,
         )
         .unwrap();
     assert!(
         store
-            .provider_cooldown_probe_keys_due(100 + 900_000 + 1)
+            .provider_cooldown_probe_keys_due(102 + 900_000 + 1)
             .unwrap()
             .is_empty(),
         "failed probe must push next probe forward"
@@ -660,7 +697,7 @@ fn stream_failure_cools_provider_immediately_and_probe_failure_keeps_excluded() 
                 "provider-a",
                 Some("key-a"),
                 Some("model-a"),
-                100 + 900_000 + 15 * 60_000 + 2,
+                102 + 900_000 + 15 * 60_000 + 2,
             )
             .available,
         "provider must stay excluded after failed probe"

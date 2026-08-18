@@ -352,7 +352,6 @@ features:
   - V3ProviderHealthStore::record_provider_success_in_session
   - V3ProviderHealthStore::availability
   - V3ProviderHealthStore::availability_for_session
-  - V3ProviderHealthStore::try_acquire_cross_session_revive
   - V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response
   - V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
   - V3ProviderGlobalSubscriptionHealthStore::complete_probe_success

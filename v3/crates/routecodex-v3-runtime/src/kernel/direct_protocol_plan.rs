@@ -334,7 +334,8 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         Some(plan) => V3ResponsesDirectRuntimeCoreState::no_continuation().with_initial_plan(plan),
         None => V3ResponsesDirectRuntimeCoreState::no_continuation(),
     }
-    .with_provider_health_neutral();
+    .with_provider_health_neutral()
+    .with_exhaustion_rescue_probe_disabled();
     let mut output = execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         core_state,
         manifest,

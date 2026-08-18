@@ -94,6 +94,13 @@ const files = {
   health: "v3/crates/routecodex-v3-provider-responses/src/health.rs",
   actionGate: "v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs",
   policy: "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs",
+  cooldownRescue: "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
+  webSearchHop: "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs",
+  relayCore: "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs",
+  directState: "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
+  directProtocolPlan: "v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs",
+  v3DirectCore: "v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs",
+  serverExecutors: "v3/crates/routecodex-v3-server/src/executors.rs",
   nodes: "v3/crates/routecodex-v3-runtime/src/nodes.rs",
   kernel: "v3/crates/routecodex-v3-runtime/src/kernel.rs",
   directRuntimeHelpers:
@@ -163,13 +170,13 @@ requireMatch(
 );
 requireMatch(
   source.health,
-  /try_acquire_cross_session_revive/u,
-  "Provider Health must own atomic cross-session revive admission",
+  /try_acquire_provider_cooldown_rescue_probe[\s\S]*wait_for_provider_cooldown_probe_completion/u,
+  "Provider Health must own single-flight cooldown rescue admission and waiting",
 );
-requireMatch(
+forbidMatch(
   source.health,
-  /original_cooldown_until_ms/u,
-  "Revive state must retain the original cooldown deadline",
+  /try_acquire_cross_session_revive/u,
+  "Provider Health must not revive cooldown from state-only cross-session admission",
 );
 requireMatch(
   source.health,
@@ -183,12 +190,12 @@ requireMatch(
 );
 requireMatch(
   source.resourceMap,
-  /resource_id:\s*v3\.provider\.health_state[\s\S]*allowed_writers:\s*\[[^\]]*V3ProviderHealthStore::record_provider_failure_in_session[^\]]*V3ProviderHealthStore::record_provider_success_in_session[^\]]*V3ProviderHealthStore::try_acquire_cross_session_revive[^\]]*\]/u,
+  /resource_id:\s*v3\.provider\.health_state[\s\S]*allowed_writers:\s*\[[^\]]*V3ProviderHealthStore::record_provider_failure_in_session[^\]]*V3ProviderHealthStore::record_provider_success_in_session[^\]]*V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe[^\]]*\]/u,
   "Resource map provider health writers must name only session-scoped health mutation owners",
 );
 requireMatch(
   source.resourceMap,
-  /resource_id:\s*v3\.provider\.health_state[\s\S]*allowed_readers:\s*\[[^\]]*V3ProviderHealthStore::availability_for_session[^\]]*V3ProviderSessionAvailabilityReader::availability[^\]]*V3ProviderHealthStore::try_acquire_cross_session_revive[^\]]*\]/u,
+  /resource_id:\s*v3\.provider\.health_state[\s\S]*allowed_readers:\s*\[[^\]]*V3ProviderHealthStore::availability_for_session[^\]]*V3ProviderSessionAvailabilityReader::availability[^\]]*V3ProviderHealthStore::wait_for_provider_cooldown_probe_completion[^\]]*\]/u,
   "Resource map provider health readers must name the session-bound availability projection owner",
 );
 forbidMatch(
@@ -265,7 +272,7 @@ requireBlockLine(
 );
 forbidBlockLine(
   failureSessionScopeResource,
-  /allowed_writers:\s*\[[^\]]*(routecodex-v3-server|V3ProviderHealthStore::record_provider_failure_in_session|V3ProviderHealthStore::record_provider_success_in_session|V3ProviderHealthStore::try_acquire_cross_session_revive)[^\]]*\]/u,
+  /allowed_writers:\s*\[[^\]]*(routecodex-v3-server|V3ProviderHealthStore::record_provider_failure_in_session|V3ProviderHealthStore::record_provider_success_in_session|V3ProviderHealthStore::try_acquire_provider_cooldown_rescue_probe)[^\]]*\]/u,
   "Resource map failure session scope must not be written by Server or Provider Health",
 );
 requireBlockLine(
@@ -286,8 +293,8 @@ requireBlockLine(
 );
 requireMatch(
   source.functionMap,
-  /feature_id:\s*v3\.debug_error_foundation[\s\S]*V3ProviderFailureRuntimeHealth::record_provider_failure_record[\s\S]*V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope[\s\S]*V3ProviderFailureRuntimeHealth::session_bound_availability[\s\S]*V3ProviderSessionAvailabilityReader::availability[\s\S]*V3ProviderHealthStore::record_provider_failure_in_session[\s\S]*V3ProviderHealthStore::record_provider_success_in_session[\s\S]*V3ProviderHealthStore::availability_for_session[\s\S]*V3ProviderHealthStore::try_acquire_cross_session_revive[\s\S]*build_v3_provider_failure_session_scope_for_request/u,
-  "Function map must bind the session health owner, scoped availability, revive admission, and request scope builder",
+  /feature_id:\s*v3\.debug_error_foundation[\s\S]*V3ProviderFailureRuntimeHealth::record_provider_failure_record[\s\S]*V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope[\s\S]*V3ProviderFailureRuntimeHealth::session_bound_availability[\s\S]*V3ProviderSessionAvailabilityReader::availability[\s\S]*V3ProviderHealthStore::record_provider_failure_in_session[\s\S]*V3ProviderHealthStore::record_provider_success_in_session[\s\S]*V3ProviderHealthStore::availability_for_session[\s\S]*build_v3_provider_failure_session_scope_for_request/u,
+  "Function map must bind the session health owner, scoped availability, and request scope builder",
 );
 forbidMatch(
   source.functionMap,
@@ -498,19 +505,64 @@ requireMatch(
   "Runtime recovery must re-expand and reselect only from selected.route's captured Target07 plan",
 );
 requireMatch(
-  source.policy,
-  /try_acquire_cross_session_revive/u,
-  "Runtime policy must consume Health-owned atomic revive admission",
+  source.cooldownRescue,
+  /try_acquire_provider_cooldown_rescue_probe[\s\S]*probe_v3_provider_global_target[\s\S]*complete_provider_cooldown_probe_success/u,
+  "Runtime rescue owner must require a successful provider probe before revival",
+);
+requireMatch(
+  source.cooldownRescue,
+  /allow_exhaustion_rescue_probe:\s*bool[\s\S]*if !allow_exhaustion_rescue_probe[\s\S]*V3TargetSelectionAfterRescue::Exhausted[\s\S]*run_exhaustion_rescue_probes/u,
+  "Shared rescue owner must terminate dry-run exhaustion before provider probe I/O",
+);
+requireMatch(
+  source.webSearchHop,
+  /allow_exhaustion_rescue_probe:\s*bool[\s\S]*if allow_exhaustion_rescue_probe[\s\S]*resolve_v3_relay_target_outcome_with_rescue[\s\S]*else[\s\S]*resolve_v3_relay_target_outcome/u,
+  "Web-search hop must preserve the dry-run prohibition on provider rescue probes",
+);
+requireMatch(
+  source.anthropic,
+  /execute_v3_anthropic_relay_runtime_inner\([\s\S]*V3RelayProviderFailureRetryPolicy::from_manifest\(manifest\),[\s\S]*false,[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*if allow_exhaustion_rescue_probe[\s\S]*resolve_v3_relay_target_outcome_with_rescue[\s\S]*else[\s\S]*resolve_v3_relay_target_outcome/u,
+  "Anthropic dry-run must disable provider rescue probes before target resolution",
+);
+requireMatch(
+  source.relayCore,
+  /provider_header_overrides:\s*Vec<V3ProviderRequestHeader>,[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*if allow_exhaustion_rescue_probe[\s\S]*resolve_v3_relay_target_outcome_with_rescue[\s\S]*else[\s\S]*resolve_v3_relay_target_outcome/u,
+  "Generic relay core must require an explicit provider rescue-probe mode",
+);
+requireMatch(
+  source.directState,
+  /allow_exhaustion_rescue_probe:\s*bool[\s\S]*allow_exhaustion_rescue_probe:\s*true[\s\S]*with_exhaustion_rescue_probe_disabled[\s\S]*self\.allow_exhaustion_rescue_probe\s*=\s*false/u,
+  "Direct runtime state must carry an explicit no-network rescue-probe gate",
+);
+requireMatch(
+  source.directProtocolPlan,
+  /with_provider_health_neutral\(\)[\s\S]*with_exhaustion_rescue_probe_disabled\(\)/u,
+  "Direct provider-request dry-run must disable rescue probes",
+);
+requireMatch(
+  `${source.kernel}\n${source.v3DirectCore}`,
+  /select_v3_expanded_target_with_exhaustion_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
+  "Every direct kernel must pass the explicit rescue-probe gate to the shared owner",
+);
+requireMatch(
+  source.serverExecutors,
+  /execute_v3_direct_runtime_kernel_core::<V3ChatDirectCodec, _>\([\s\S]*now_epoch_ms,\s*true,\s*Some\(&provider_failure_event_sink\)/u,
+  "Live Chat Direct must explicitly enable exhaustion rescue probes",
 );
 const directFailurePolicyBody = extractBracedBlock(
   source.directRuntimeHelpers,
   "async fn run_v3_direct_provider_failure_policy",
   "Direct provider failure policy",
 );
-requireMatch(
+forbidMatch(
   directFailurePolicyBody,
   /try_acquire_cross_session_revive/u,
-  "Direct provider failure policy must consume Health-owned atomic revive admission",
+  "Direct provider failure policy must not revive cooldown without provider I/O",
+);
+requireMatch(
+  source.kernel,
+  /select_v3_expanded_target_with_exhaustion_rescue/u,
+  "Direct provider selection must consume the shared exhaustion rescue owner",
 );
 const directSseOutcomeStruct = extractBracedBlock(
   source.directSse,

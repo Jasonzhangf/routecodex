@@ -199,7 +199,6 @@ struct V3ProviderFailureSessionKey {
 #[derive(Debug, Clone)]
 struct V3ProviderCooldown {
     reason: String,
-    original_cooldown_until_ms: Option<u64>,
     until_ms: Option<u64>,
     next_probe_at_ms: Option<u64>,
     probe_in_flight: bool,
@@ -457,7 +456,6 @@ impl V3ProviderHealthStore {
                 reason: record_reason
                     .clone()
                     .unwrap_or_else(|| "provider_consecutive_failures".to_string()),
-                original_cooldown_until_ms: cooldown_until_ms,
                 until_ms: cooldown_until_ms,
                 // provider 级冷却到期后由后台 probe 复活；until_restart 冷却
                 // 不设探针（保持"直到重启"语义）。
@@ -536,7 +534,6 @@ impl V3ProviderHealthStore {
                 reason: reason
                     .map(str::to_string)
                     .unwrap_or_else(|| "provider_transient_exhausted".to_string()),
-                original_cooldown_until_ms: Some(until_ms),
                 until_ms: Some(until_ms),
                 next_probe_at_ms: None,
                 probe_in_flight: false,
@@ -552,12 +549,8 @@ impl V3ProviderHealthStore {
         })
     }
 
-    /// 任意 session 成功响应清除该 provider 的 session 级冷却，其他 session
-    /// 一同恢复。provider 级冷却（跨 session 共享）只在冷却**已到期**后被
-    /// 真实业务成功清除：到期后仍 pending probe 时，成功响应是比后台 probe
-    /// 更强的恢复证据，立即复活，不等下一个 15 分钟探针窗口；冷却未到期
-    /// 时业务成功不清 provider 级冷却（复活前必须先 probe，见
-    /// `complete_provider_cooldown_probe_success`）。
+    /// 成功响应清零该 key 的连续失败与 session cooldown。已经形成的
+    /// provider cooldown/probe block 只能由注册 probe 的 2xx 完成事件清除。
     pub fn record_provider_success_in_session(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
@@ -706,7 +699,67 @@ impl V3ProviderHealthStore {
             return Ok(false);
         }
         probe_state.probe_in_flight = true;
+        probe_state.completion.send_replace(false);
         Ok(true)
+    }
+
+    /// 完整候选集耗尽时，每个 cooldown generation 只允许一次强制自救 probe。
+    pub fn try_acquire_provider_cooldown_rescue_probe(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+    ) -> Result<bool, V3ProviderHealthError> {
+        let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
+            return Ok(false);
+        };
+        if probe_state.probe_in_flight || probe_state.rescue_probe_attempted {
+            return Ok(false);
+        }
+        probe_state.probe_in_flight = true;
+        probe_state.rescue_probe_attempted = true;
+        probe_state.completion.send_replace(false);
+        Ok(true)
+    }
+
+    /// 并发耗尽请求等待同一 key 的单飞 probe 收口，不重复发送 probe。
+    pub async fn wait_for_provider_cooldown_probe_completion(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+    ) -> Result<(), V3ProviderHealthError> {
+        loop {
+            let mut completion = {
+                let state = self
+                    .state
+                    .read()
+                    .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+                state
+                    .provider_cooldown_probes
+                    .get(&provider_cooldown_probe_key(
+                        provider_id,
+                        auth_alias,
+                        model_id,
+                    ))
+                    .filter(|probe_state| probe_state.probe_in_flight)
+                    .map(|probe_state| probe_state.completion.subscribe())
+            };
+            let Some(mut completion) = completion.take() else {
+                return Ok(());
+            };
+            if !*completion.borrow_and_update() {
+                completion
+                    .changed()
+                    .await
+                    .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+            }
+        }
     }
 
     /// probe 通过：清除 provider 级冷却，provider 复活（业务路由恢复可达）。
@@ -1028,6 +1081,22 @@ fn global_availability_projection(
     {
         blocked_scopes.push(format!("concurrency:provider_instance:{provider_id}"));
     }
+    let cooldown_probe = state
+        .provider_cooldown_probes
+        .get(&provider_cooldown_probe_key(
+            provider_id,
+            auth_alias,
+            model_id,
+        ));
+    if cooldown_probe.is_some_and(|probe_state| {
+        probe_state.probe_in_flight
+            || probe_state.next_probe_at_ms.is_some()
+            || probe_state
+                .blocked_until_ms
+                .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms)
+    }) {
+        blocked_scopes.push("provider_cooldown_probe_pending".to_string());
+    }
     V3ProviderAvailabilityProjection {
         provider_id: provider_id.to_string(),
         auth_alias: auth_alias.map(ToOwned::to_owned),
@@ -1153,7 +1222,7 @@ fn upsert_provider_cooldown_probe_with_interval(
 ) {
     // 已有 probe 在途时保留 in-flight 标记：并发失败 re-upsert 不得清掉
     // 单飞锁，否则会并发启动第二个 probe。
-    let probe_in_flight = state
+    let existing = state
         .provider_cooldown_probes
         .get(&provider_cooldown_probe_key(
             provider_id,
@@ -1169,6 +1238,8 @@ fn upsert_provider_cooldown_probe_with_interval(
             probe_interval_ms: probe_interval_ms.max(1),
             probe_in_flight,
             probe_model_id: model_id.map(str::to_string),
+            rescue_probe_attempted,
+            completion,
         },
     );
 }
@@ -1504,7 +1575,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
     }
 
     #[test]
-    fn success_after_provider_cooldown_expires_revives_before_next_probe() {
+    fn success_after_provider_cooldown_expires_still_requires_probe() {
         let store = V3ProviderHealthStore::default();
         store
             .record_provider_cooldown_failure(
@@ -1538,7 +1609,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                 .available,
             "unexpired provider cooldown must still require probe before revival"
         );
-        // 冷却已到期（110）且 probe 尚未跑：真实业务成功是强恢复证据，立即复活。
+        // 冷却已到期（110）但 probe 尚未跑：业务成功只清失败计数，不能复活。
         store
             .record_provider_success_in_session(
                 &session("session-a"),
@@ -1549,7 +1620,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
             )
             .unwrap();
         assert!(
-            store
+            !store
                 .availability_for_session(
                     &session("session-a"),
                     "provider-a",
@@ -1558,7 +1629,21 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                     111,
                 )
                 .available,
-            "expired provider cooldown must be revived by a real business success"
+            "expired provider cooldown must remain blocked until a provider probe succeeds"
+        );
+        store
+            .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("gpt-5.5"))
+            .unwrap();
+        assert!(
+            store
+                .availability_for_session(
+                    &session("session-a"),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("gpt-5.5"),
+                    112,
+                )
+                .available
         );
     }
 

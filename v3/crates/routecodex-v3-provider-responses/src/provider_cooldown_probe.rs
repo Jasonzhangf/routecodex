@@ -20,6 +20,8 @@ pub struct V3ProviderCooldownProbeState {
     pub probe_interval_ms: u64,
     pub probe_in_flight: bool,
     pub probe_model_id: Option<String>,
+    pub rescue_probe_attempted: bool,
+    pub completion: tokio::sync::watch::Sender<bool>,
 }
 
 pub fn provider_cooldown_probe_key(
