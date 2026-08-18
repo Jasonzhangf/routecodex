@@ -1622,6 +1622,8 @@ features:
   required_unit:
   - JSON and SSE function-call turns commit at Resp04 and terminal tool-output turns
     release
+  - when responses continuation is disabled JSON and SSE bypass remote observation
+    commit and release; repeated upstream response IDs cannot poison unrelated requests
   - continuation turns load only at Req03 and consume the exact provider model auth
     pin at Req06
   - continuation turns never enter Virtual Router or target-local provider reselection
@@ -1651,6 +1653,8 @@ features:
   - current 5555 same-entry real two-turn replay after all offline gates pass
   required_gates:
   - npm run test:v3-responses-direct-remote-continuation
+  - npm run verify:v3-responses-continuation-disabled
+  - npm run test:v3-responses-continuation-disabled-red-fixtures
   - npm run verify:v3-responses-direct-remote-continuation
   - npm run test:v3-responses-direct-remote-continuation-red-fixtures
   - npm run test:v3-h4-remote-continuation

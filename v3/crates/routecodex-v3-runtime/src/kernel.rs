@@ -1332,16 +1332,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             if let (Some(continuation_state), Some(scope)) =
                 (continuation_state, continuation_scope.as_ref())
             {
-                wrap_v3_direct_sse_remote_stream_for_outcome(
-                    &mut response_projection.client_payload.body,
-                    continuation_state.clone(),
-                    scope,
-                    previous_response_id.clone(),
-                    selected_pin.clone(),
-                    selected_capability_revision.clone(),
-                    now_epoch_ms,
-                    state.clone(),
-                );
+                if !continuation_disabled {
+                    wrap_v3_direct_sse_remote_stream_for_outcome(
+                        &mut response_projection.client_payload.body,
+                        continuation_state.clone(),
+                        scope,
+                        previous_response_id.clone(),
+                        selected_pin.clone(),
+                        selected_capability_revision.clone(),
+                        now_epoch_ms,
+                        state.clone(),
+                    );
+                }
                 wrap_v3_direct_sse_provider_stream_for_outcome(
                     &mut response_projection.client_payload.body,
                     provider_health.clone(),
@@ -1365,24 +1367,23 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 &mut trace,
             );
         }
-        if let (Some(_state), Some(scope)) = (continuation_state, continuation_scope.as_ref()) {
-            if !crate::shared::v3_responses_continuation_disabled_for_server(
-                manifest,
-                &standardized.protocol_context.server_id,
+        if let (false, Some(_state), Some(scope)) = (
+            continuation_disabled,
+            continuation_state,
+            continuation_scope.as_ref(),
+        ) {
+            if let Err(projected) = commit_or_release_v3_direct_continuation(
+                continuation_state,
+                scope,
+                &response_projection.remote_continuation,
+                previous_response_id.as_deref(),
+                &selected_pin,
+                &selected_capability_revision,
+                now_epoch_ms,
+                &mut trace,
+                &hook_registry,
             ) {
-                if let Err(projected) = commit_or_release_v3_direct_continuation(
-                    continuation_state,
-                    scope,
-                    &response_projection.remote_continuation,
-                    previous_response_id.as_deref(),
-                    &selected_pin,
-                    &selected_capability_revision,
-                    now_epoch_ms,
-                    &mut trace,
-                    &hook_registry,
-                ) {
-                    return projected;
-                }
+                return projected;
             }
         }
         if !provider_health_neutral {
