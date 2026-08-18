@@ -34,13 +34,13 @@ pub async fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(
     mut input: V3ProviderRespInbound01Raw,
 ) -> Result<ProviderRespCompat02ProviderCompat, V3ProviderCompatError> {
     let provider_protocol = input.provider_protocol;
-    let chunks = input
-        .take_raw_sse_chunks()
-        .ok_or_else(|| V3ProviderCompatError {
-            stage: "response",
-            profile: input.compatibility_profile.as_str().to_string(),
-            reason: "ProviderRespInbound01Raw missing SSE chunks".to_string(),
-        })?;
+    let chunks = input.take_raw_sse_chunks().ok_or_else(|| {
+        super::classify_v3_provider_compat_error(
+            "response",
+            &input.compatibility_profile,
+            "ProviderRespInbound01Raw missing SSE chunks".to_string(),
+        )
+    })?;
     let provider = Box::pin(futures_util::stream::iter(chunks.into_iter().map(Ok)));
     let payload =
         super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
@@ -48,10 +48,12 @@ pub async fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(
             provider,
         )
         .await
-        .map_err(|error| V3ProviderCompatError {
-            stage: "response",
-            profile: input.compatibility_profile.as_str().to_string(),
-            reason: error.to_string(),
+        .map_err(|error| {
+            super::classify_v3_provider_compat_error(
+                "response",
+                &input.compatibility_profile,
+                error.to_string(),
+            )
         })?;
     input.payload = V3HubResponsePayload(Arc::new(payload));
     build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(input)
@@ -85,9 +87,5 @@ fn apply_v3_provider_resp_compat(
         explicit_profile: profile.as_optional_string(),
     })
     .map(|result| result.payload)
-    .map_err(|reason| V3ProviderCompatError {
-        stage: "response",
-        profile: profile.as_str().to_string(),
-        reason,
-    })
+    .map_err(|reason| super::classify_v3_provider_compat_error("response", profile, reason))
 }

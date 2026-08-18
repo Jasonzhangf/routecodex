@@ -101,6 +101,7 @@ pub mod req_outbound_stage3_compat {
 pub fn run_req_outbound_stage3_compat(
     input: ReqOutboundCompatInput,
 ) -> Result<CompatResult, String> {
+    validate_provider_payload_boundary(&input.payload)?;
     let profile = pick_compat_profile(&input);
     let ReqOutboundCompatInput {
         payload: input_payload,
@@ -241,6 +242,7 @@ pub fn run_req_outbound_stage3_compat(
 pub fn run_resp_inbound_stage3_compat(
     input: ReqOutboundCompatInput,
 ) -> Result<CompatResult, String> {
+    validate_provider_payload_boundary(&input.payload)?;
     let profile = pick_compat_profile(&input);
     let Some(profile_id) = profile.as_deref() else {
         return Ok(build_compat_result(input.payload, None));
@@ -359,6 +361,20 @@ fn build_compat_result(payload: Value, profile: Option<String>) -> CompatResult 
         applied_profile: profile,
         native_applied: true,
     }
+}
+
+fn validate_provider_payload_boundary(payload: &Value) -> Result<(), String> {
+    let Some(root) = payload.as_object() else {
+        return Ok(());
+    };
+    for field in ["semantics", "processed", "processingMetadata"] {
+        if root.contains_key(field) {
+            return Err(format!(
+                "ProviderCompatPayloadBoundaryViolation field={field} reason=control_like_top_level_field"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn profile_matches(profile: &str, expected: &str) -> bool {
@@ -2018,46 +2034,62 @@ mod tests {
     }
 
     #[test]
-    fn passthrough_profile_does_not_harvest_minimax_text() {
-        let payload = json!({"object":"response","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"<function_calls>{\"tool_calls\":[{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}]}</function_calls>"}]}],"semantics":{"internal":true},"processed":{"marker":"must-preserve"},"processingMetadata":{"marker":"must-preserve"}});
-        for (profile, protocol) in [
-            (None, "openai-responses"),
-            (Some("responses:cc"), "anthropic-messages"),
-        ] {
-            let result = run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
-                payload: payload.clone(),
+    fn provider_compat_rejects_control_like_response_fields() {
+        for field in ["semantics", "processed", "processingMetadata"] {
+            let mut payload = json!({
+                "object": "response",
+                "output": [{"type": "message", "role": "assistant", "content": []}]
+            });
+            payload[field] = json!({"internal": true});
+            let error = run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
+                payload,
                 adapter_context: AdapterContext {
-                    compatibility_profile: profile.map(str::to_string),
-                    provider_protocol: Some(protocol.to_string()),
+                    provider_protocol: Some("openai-responses".to_string()),
                     ..Default::default()
                 },
                 explicit_profile: None,
             })
-            .unwrap();
-            assert_eq!(result.applied_profile, None);
-            assert_eq!(result.payload, payload);
+            .expect_err("control-like top-level fields must fail at compat boundary");
+            assert!(error.contains("ProviderCompatPayloadBoundaryViolation"));
+            assert!(error.contains(field));
         }
     }
 
     #[test]
-    fn request_compat_preserves_top_level_payload_fields() {
-        for compatibility_profile in [Some("chat:minimax".to_string()), None] {
-            let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
-                payload: json!({"messages":[{"role":"user","content":"hi"}],"semantics":{"internal":true},"processed":{"marker":"must-preserve"},"processingMetadata":{"marker":"must-preserve"}}),
-                adapter_context: AdapterContext { compatibility_profile, provider_protocol: Some("openai-responses".to_string()), ..Default::default() },
+    fn provider_compat_rejects_control_like_request_fields() {
+        for field in ["semantics", "processed", "processingMetadata"] {
+            let mut payload = json!({"messages": [{"role": "user", "content": "hi"}]});
+            payload[field] = json!({"internal": true});
+            let error = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+                payload,
+                adapter_context: AdapterContext {
+                    provider_protocol: Some("openai-responses".to_string()),
+                    ..Default::default()
+                },
                 explicit_profile: None,
             })
-            .expect("compatibility must preserve the input payload");
-            assert_eq!(result.payload["semantics"], json!({"internal": true}));
-            assert_eq!(
-                result.payload["processed"],
-                json!({"marker": "must-preserve"})
-            );
-            assert_eq!(
-                result.payload["processingMetadata"],
-                json!({"marker": "must-preserve"})
-            );
+            .expect_err("control-like top-level fields must fail at compat boundary");
+            assert!(error.contains("ProviderCompatPayloadBoundaryViolation"));
+            assert!(error.contains(field));
         }
+    }
+
+    #[test]
+    fn provider_compat_preserves_registered_business_fields() {
+        let payload = json!({
+            "messages": [{"role": "user", "content": "hi"}],
+            "business": {"processed": "literal business value"}
+        });
+        let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+            payload: payload.clone(),
+            adapter_context: AdapterContext {
+                provider_protocol: Some("openai-responses".to_string()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        })
+        .expect("ordinary business payload must pass");
+        assert_eq!(result.payload, payload);
     }
 
     #[test]

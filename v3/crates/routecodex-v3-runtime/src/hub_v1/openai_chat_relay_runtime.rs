@@ -209,7 +209,6 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
 pub fn project_v3_openai_chat_relay_runtime_failure(
     error: V3OpenAiChatRelayRuntimeError,
 ) -> V3OpenAiChatRelayRuntimeOutput {
-    let display = error.to_string();
     let source = match error {
         V3OpenAiChatRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
             V3ErrorSourceKind::ModelNotFound,
@@ -217,6 +216,17 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
             "direct_model_not_found",
             message,
         ),
+        V3OpenAiChatRelayRuntimeError::ProviderCompat(error) => match error.classification() {
+            V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
+                super::provider_compat_boundary_source("ProviderRespCompat02ProviderCompat", &error)
+            }
+            V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3HubRuntime",
+                "openai_chat_relay_runtime_error",
+                error.to_string(),
+            ),
+        },
         error => build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",

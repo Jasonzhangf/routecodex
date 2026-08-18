@@ -268,6 +268,7 @@ pub enum V3ErrorSourceKind {
     ModelNotFound,
     PendingEndpoint,
     ProviderFailure,
+    ProviderCompatPayloadBoundaryViolation,
     TargetPoolExhausted,
     RuntimeFailure,
     ClientDisconnect,
@@ -610,6 +611,7 @@ fn validate_internal_error_source_kind(source_kind: &V3ErrorSourceKind) {
         | V3ErrorSourceKind::PathNotFound
         | V3ErrorSourceKind::ModelNotFound
         | V3ErrorSourceKind::PendingEndpoint
+        | V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation
         | V3ErrorSourceKind::TargetPoolExhausted
         | V3ErrorSourceKind::ClientDisconnect => {
             panic!("client/route terminal errors cannot carry a RouteCodex internal error code")
@@ -647,6 +649,10 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
         V3ErrorSourceKind::ProviderFailure => {
             ("provider_failure", "non_terminal_if_candidates_remain")
         }
+        V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => (
+            "provider_compat_payload_boundary_violation",
+            "already_terminal",
+        ),
         V3ErrorSourceKind::TargetPoolExhausted => ("target_pool_exhausted", "already_terminal"),
         V3ErrorSourceKind::RuntimeFailure => ("runtime_failure", "already_terminal"),
         V3ErrorSourceKind::ClientDisconnect => ("client_disconnect", "already_terminal"),
@@ -832,6 +838,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
             .and_then(|external| external.status)
             .filter(|status| *status >= 400)
             .unwrap_or(502),
+        V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => 400,
         V3ErrorSourceKind::TargetPoolExhausted => 503,
         V3ErrorSourceKind::RuntimeFailure => 500,
         V3ErrorSourceKind::ClientDisconnect => 499,
@@ -1265,3 +1272,30 @@ mod tests {
 mod subscription;
 
 pub use subscription::V3ProviderErrorFingerprint;
+
+/// Provider compat payload boundary violation: provider request or response
+/// payload carried a top-level RouteCodex control-like field (`semantics`,
+/// `processed`, `processingMetadata`). This is the typed source classification
+/// registered at the unique V3 error owner; the compat edge is the unique
+/// source, and the typed Error01-06 chain is the unique projection.
+pub const V3_PROVIDER_COMPAT_PAYLOAD_BOUNDARY_VIOLATION_CODE: &str =
+    "provider_compat_payload_boundary_violation";
+
+pub fn raise_v3_provider_compat_payload_boundary_violation(
+    source_stage: &'static str,
+    field: impl AsRef<str>,
+    reason: impl Into<String>,
+) -> V3Error01SourceRaised {
+    let message = format!(
+        "{} field={} detail={}",
+        V3_PROVIDER_COMPAT_PAYLOAD_BOUNDARY_VIOLATION_CODE,
+        field.as_ref(),
+        reason.into()
+    );
+    build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation,
+        source_stage,
+        V3_PROVIDER_COMPAT_PAYLOAD_BOUNDARY_VIOLATION_CODE,
+        message,
+    )
+}

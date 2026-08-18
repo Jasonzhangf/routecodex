@@ -152,21 +152,49 @@ pub(crate) fn provider_request_relay_failure(
     provider_id: &str,
     observability: Option<V3RuntimeObservability>,
 ) -> Result<V3ResponsesRelayProviderFailure, V3ResponsesRelayRuntimeError> {
-    let (source_stage, error_type, message) = match error {
-        V3ResponsesRelayRuntimeError::ProviderCompat(error) => (
-            "ProviderReqCompat06ProviderCompat",
-            "provider_request_compat_error",
-            format!("V3 Responses Relay provider compat failed: {error}"),
-        ),
+    let (source_stage, error_type, message, terminal_projection) = match error {
+        V3ResponsesRelayRuntimeError::ProviderCompat(error) => {
+            let boundary = match error.classification() {
+                V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
+                    Some(V3ErrorHandlingCenter::project_terminal(
+                        V3ErrorHandlingCenter::decide_provider(
+                            V3ErrorHandlingCenterInput {
+                                source: super::provider_compat_boundary_source(
+                                    "ProviderReqCompat06ProviderCompat",
+                                    &error,
+                                ),
+                                action_scope: V3ErrorActionScope::ProviderInstance {
+                                    provider_id: provider_id.to_string(),
+                                },
+                                candidates_remaining: 0,
+                                source_status: Some(400),
+                            },
+                            false,
+                            false,
+                            None,
+                        ),
+                    ))
+                }
+                V3ProviderCompatErrorClassification::Other => None,
+            };
+            (
+                "ProviderReqCompat06ProviderCompat",
+                "provider_request_compat_error",
+                format!("V3 Responses Relay provider compat failed: {error}"),
+                boundary,
+            )
+        }
         V3ResponsesRelayRuntimeError::ProviderWireEncoding(message) => (
             "V3ProviderReqOutbound08WirePayload",
             "provider_request_wire_error",
             format!("V3 Responses Relay provider wire encoding failed: {message}"),
+            None,
         ),
         V3ResponsesRelayRuntimeError::Provider(error) => (
             "V3ProviderReqOutbound08WirePayload",
             "provider_request_wire_error",
             error.to_string(),
+            None,
         ),
         other => return Err(other),
     };
@@ -177,7 +205,7 @@ pub(crate) fn provider_request_relay_failure(
         provider_id: provider_id.to_string(),
         source_stage,
         observability,
-        terminal_projection: None,
+        terminal_projection,
     })
 }
 

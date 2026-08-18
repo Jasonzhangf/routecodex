@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 
-const root = process.cwd();
+const root = fs.existsSync(path.join(process.cwd(), 'docs/architecture/v3-function-map.yml'))
+  ? process.cwd()
+  : path.resolve(process.cwd(), '..');
 const failures = [];
 
 const ROOT_FILE = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
@@ -44,6 +46,7 @@ const SHARED_HELPERS = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/side_channel.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
 ];
@@ -272,7 +275,9 @@ for (const [scriptName, expected] of [
   ['verify:v3-hub-v1-node-file-topology', `node ${VERIFY_SCRIPT}`],
   ['test:v3-hub-v1-node-file-topology-red-fixtures', `node ${RED_SCRIPT}`],
 ]) {
-  if (packageJson.scripts?.[scriptName] !== expected) {
+  const actual = packageJson.scripts?.[scriptName];
+  const accepted = new Set([expected, `npm --prefix v3 run ${scriptName}`]);
+  if (!accepted.has(actual)) {
     fail(`package.json: script ${scriptName} must be ${expected}`);
   }
 }

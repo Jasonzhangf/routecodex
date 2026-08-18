@@ -459,6 +459,27 @@ pub(crate) fn runtime_source(
     )
 }
 
+pub(crate) fn compat_source(
+    stage: &'static str,
+    error: &crate::hub_v1::V3ProviderCompatError,
+) -> V3Error01SourceRaised {
+    use crate::hub_v1::V3ProviderCompatErrorClassification;
+    match error.classification() {
+        V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
+            let field = crate::hub_v1::extract_v3_provider_compat_boundary_field(
+                &error.reason,
+            )
+            .unwrap_or_else(|| "control_like_top_level_field".to_string());
+            routecodex_v3_error::raise_v3_provider_compat_payload_boundary_violation(
+                stage,
+                field,
+                error.reason.as_str(),
+            )
+        }
+        V3ProviderCompatErrorClassification::Other => runtime_source(stage, error),
+    }
+}
+
 struct V3ExactPinAvailabilityExhaustion<'pin> {
     pin: &'pin V3RemoteContinuationPin,
     reason: String,

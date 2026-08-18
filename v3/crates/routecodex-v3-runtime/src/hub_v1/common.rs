@@ -133,14 +133,6 @@ impl V3ProviderCompatProfileId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("provider compat profile {profile} failed at {stage}: {reason}")]
-pub struct V3ProviderCompatError {
-    pub(crate) stage: &'static str,
-    pub(crate) profile: String,
-    pub(crate) reason: String,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3HubResponseNormalizedKind {
     Json,

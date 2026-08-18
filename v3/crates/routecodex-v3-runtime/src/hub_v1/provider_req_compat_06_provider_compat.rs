@@ -58,11 +58,7 @@ fn apply_v3_provider_req_compat(
         provider_req_compat_reasoning_effort_explicit(input.provider_semantic_payload());
     let payload =
         build_v3_provider_standard_protocol_payload_from_req07(input).map_err(|reason| {
-            V3ProviderCompatError {
-                stage: "request_protocol",
-                profile: profile.as_str().to_string(),
-                reason,
-            }
+            super::classify_v3_provider_compat_error("request_protocol", profile, reason)
         })?;
     apply_v3_provider_req_compat_to_provider_payload(
         payload,
@@ -103,11 +99,7 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
         explicit_profile: profile.as_optional_string(),
     })
     .map(|result| result.payload)
-    .map_err(|reason| V3ProviderCompatError {
-        stage: "request",
-        profile: profile.as_str().to_string(),
-        reason,
-    })?;
+    .map_err(|reason| super::classify_v3_provider_compat_error("request", profile, reason))?;
     let mut result = result;
     normalize_deepseek_thinking_stopless_tool_choice(&mut result, selected, provider_protocol);
     Ok(result)

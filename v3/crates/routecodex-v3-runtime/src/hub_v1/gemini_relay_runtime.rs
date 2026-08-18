@@ -1,4 +1,5 @@
 use super::*;
+use super::{provider_compat_boundary_source, V3ProviderCompatErrorClassification};
 use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
     v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
@@ -409,7 +410,6 @@ fn build_v3_gemini_transport_09(
 pub fn project_v3_gemini_relay_runtime_failure(
     error: V3GeminiRelayRuntimeError,
 ) -> V3GeminiRelayRuntimeOutput {
-    let display = error.to_string();
     let source = match error {
         V3GeminiRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
             V3ErrorSourceKind::ModelNotFound,
@@ -417,6 +417,17 @@ pub fn project_v3_gemini_relay_runtime_failure(
             "direct_model_not_found",
             message,
         ),
+        V3GeminiRelayRuntimeError::ProviderCompat(error) => match error.classification() {
+            V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
+                super::provider_compat_boundary_source("ProviderRespCompat02ProviderCompat", &error)
+            }
+            V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3HubRuntime",
+                "gemini_relay_runtime_error",
+                error.to_string(),
+            ),
+        },
         error => build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",

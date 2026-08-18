@@ -1,11 +1,16 @@
 #!/usr/bin/env node
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, unlinkSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const repoRoot = process.cwd();
-const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-hub-v1-node-file-topology.mjs');
+const repoRoot = existsSync(resolve(process.cwd(), 'docs/architecture'))
+  ? process.cwd()
+  : resolve(process.cwd(), '..');
+const verifierRoot = existsSync(resolve(repoRoot, 'scripts/architecture/verify-v3-hub-v1-node-file-topology.mjs'))
+  ? repoRoot
+  : resolve(repoRoot, 'v3');
+const verifier = resolve(verifierRoot, 'scripts/architecture/verify-v3-hub-v1-node-file-topology.mjs');
 
 const fixtures = [
   {
@@ -41,8 +46,8 @@ const fixtures = [
   {
     name: 'provider compat branch numbering made ambiguous',
     relative: 'docs/architecture/v3-mainline-call-map.yml',
-    from: '    from_node: V3HubReqOutbound07ProviderSemantic\n    to_node: ProviderReqCompat06ProviderCompat',
-    to: '    from_node: V3HubReqOutbound07ProviderSemantic\n    to_node: ProviderReqCompat07ProviderCompat',
+    from: '  - step_id: v3-hub-req-07\n    from_node: V3HubReqOutbound07ProviderSemantic\n    to_node: ProviderReqCompat06ProviderCompat',
+    to: '  - step_id: v3-hub-req-07\n    from_node: V3HubReqOutbound07ProviderSemantic\n    to_node: ProviderReqCompat07ProviderCompat',
     diagnostic: /v3-hub-req-07 must remain adjacent|ProviderReqCompat06ProviderCompat/,
   },
   {

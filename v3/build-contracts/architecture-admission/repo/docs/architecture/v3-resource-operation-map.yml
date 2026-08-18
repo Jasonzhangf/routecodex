@@ -588,6 +588,24 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.provider_compat.payload_boundary_contract
+    resource_kind: protocol_contract
+    lifecycle: v3.hub_pipeline.v1.provider_compat
+    owner_feature_id: v3.provider_compat_profile_loading
+    owner_crate: provider-compat-core
+    owner_node: ProviderReqCompat06ProviderCompat / ProviderRespCompat02ProviderCompat
+    identity: [requestId, providerProtocol, direction, topLevelField]
+    semantic_contract:
+      normal_payload: Provider compatibility preserves registered protocol/business fields.
+      forbidden_payload: [semantics, processed, processingMetadata]
+      control_isolation: RouteCodex control state remains in typed side-channel resources and is never reconstructed from these fields.
+      violation: Provider compatibility fails before provider/client payload projection when a forbidden top-level field is present.
+    allowed_writers: [ProviderReqCompat06ProviderCompat, ProviderRespCompat02ProviderCompat]
+    allowed_readers: [V3ProviderReqOutbound08WirePayload, V3HubRespInbound02Normalized]
+    forbidden_writers: [V3HubReqChatProcess04Governed, V3HubRespChatProcess03Governed, routecodex-v3-server, MetadataCenter, SSE transport]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.request.response_projection_context
     resource_kind: projection_resource
     lifecycle: v3.hub_pipeline.v1

@@ -295,6 +295,29 @@ features:
   - npm run verify:v3-stage-protocol-shapes
   - npm run test:v3-stage-protocol-shapes-red-fixtures
   - npm run verify:v3-architecture-ci
+- feature_id: v3.provider_compat_profile_loading
+  change_risk: high
+  owner_scope: Provider compatibility profiles and fail-fast normal-payload boundary validation between Hub provider semantic/raw nodes and the provider wire/client semantic nodes.
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - Ordinary protocol and business fields remain unchanged through request and response compatibility.
+  - Provider compatibility remains limited to registered provider-family wire projections.
+  required_negative:
+  - Top-level semantics, processed, and processingMetadata fail at both request and response compat entrypoints.
+  - Compat does not strip, reconstruct, or route control state and does not own Chat Process or SSE semantics.
+  required_gates:
+  - npm run test:v3-provider-compat-profile-loading
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run test:v3-workspace
+  completion_rule:
+    source: Rust provider-compat tests and all linked V3 architecture maps pass.
+    runtime: Runtime/install/live replay remains governed by the enclosing build-isolation completion contract.
+    forbidden_claim: Do not claim provider compatibility production cutover from this feature gate alone.
 - feature_id: v3.hub_pipeline_static_skeleton
   status: h1_typed_skeleton_and_static_registry_implemented
   change_risk: critical

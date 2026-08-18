@@ -237,10 +237,16 @@ verification:
   - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
   - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
   - v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
   integration:
   - npm run test:v3-workspace
   smoke:
   - npm run test:v3-provider-compat-profile-loading
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
   - npm run verify:function-map-compile-gate
   - npm run verify:architecture-mainline-call-map
   build:
@@ -254,6 +260,9 @@ verification:
   - Negative coverage must reject missing, duplicate, orphan, and malformed hosted
     web-search identities/fields and prove provider compat does not own routing, stopless/tool
     governance, fallback, continuation, or SSE semantics.
+  - Paired request/response negative coverage rejects top-level semantics, processed,
+    and processingMetadata before provider/client payload projection; positive coverage
+    preserves ordinary protocol and business fields.
 - feature_id: v3.v2_config_toml_compat_5555
   change_risk: high
   unit:

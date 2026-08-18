@@ -324,6 +324,12 @@ owners:
     boundary; they must not own routing, tool governance, protocol conversion, fallback,
     or request/response lifecycle state
   owner_module: v3/crates/provider-compat-core
+  resource_bindings:
+  - v3.provider_compat.payload_boundary_contract
+  - v3.request.provider_semantic
+  - v3.hub.provider_wire_payload
+  - v3.response.provider_raw
+  - v3.hub.response_semantic
   canonical_types:
   - AdapterContext
   - ReqOutboundCompatInput
@@ -337,6 +343,8 @@ owners:
   mainline_bindings:
   - v3-model-bind-04
   - v3-provider-compat-minimax-anthropic-01
+  - v3-provider-compat-profile-request-01
+  - v3-provider-compat-profile-response-01
   allowed_paths:
   - v3/crates/provider-compat-core
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
@@ -369,6 +377,8 @@ owners:
   - npm run test:v3-provider-compat-profile-loading
   - npm run test:v3-workspace
   - npm run verify:v3-resource-map
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-module-boundaries
   migration_target: rust
   notes:
   - This entry registers the real Rust source anchor already present in provider-compat-core;
@@ -382,6 +392,9 @@ owners:
     under run_req_outbound_stage3_compat, not as a new Hub/VR transition.
   - Tool governance, stopless, continuation, routing, retry/failure policy, and protocol
     lifecycle conversion remain owned by their existing Hub/VR/Error nodes.
+  - Top-level semantics, processed, and processingMetadata are unregistered control-like
+    fields and must fail at both provider compat entrypoints; they are never silently
+    removed or preserved into provider/client payload.
 - feature_id: v3.v2_config_toml_compat_5555
   status: active
   summary: V3 config store can compile a V2 root TOML plus provider config.v2.toml

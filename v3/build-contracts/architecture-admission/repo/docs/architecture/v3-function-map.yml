@@ -882,6 +882,43 @@ features:
   - npm run verify:v3-stage-protocol-shapes
   - npm run test:v3-stage-protocol-shapes-red-fixtures
   - npm run verify:v3-architecture-ci
+- feature_id: v3.provider_compat_profile_loading
+  status: active
+  owner_kind: rust_ssot
+  owner_scope: Provider compatibility profile loading and payload-boundary validation at the adjacent request and response compat nodes only.
+  owner_module: v3.provider_compat_core
+  resource_bindings:
+  - v3.provider_compat.payload_boundary_contract
+  - v3.request.provider_semantic
+  - v3.hub.provider_wire_payload
+  - v3.response.provider_raw
+  - v3.hub.response_semantic
+  mainline_bindings:
+  - v3-provider-compat-profile-request-01
+  - v3-provider-compat-profile-response-01
+  entry_symbols:
+  - run_req_outbound_stage3_compat
+  - run_resp_inbound_stage3_compat
+  - validate_provider_payload_boundary
+  allowed_paths:
+  - v3/crates/provider-compat-core
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/tests
+  - docs/architecture
+  forbidden_paths:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-server
+  - MetadataCenter
+  - SSE transport
+  - fallback
+  required_gates:
+  - npm run test:v3-provider-compat-profile-loading
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run test:v3-workspace
 - feature_id: v3.hub_pipeline_static_skeleton
   owner_crate: routecodex-v3-runtime
   owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs
@@ -950,6 +987,9 @@ features:
       construction
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
     owner_boundary: provider-compat shared protocol helpers; no Hub node builder ownership
+  - file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs
+    owner_boundary: provider-compat typed error classification and Error01 projection
+      helpers; no Hub node builder ownership
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
     owner_boundary: Responses/OpenAI shared codec helpers; called by node files, not
       a node owner
@@ -1022,6 +1062,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/side_channel.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs

@@ -57,6 +57,44 @@ chains:
       produces: [v3.global_binary_install]
       side_channel_reads: []
       side_channel_writes: []
+- chain_id: v3.provider_compat_profile.request
+  owner_feature_id: v3.provider_compat_profile_loading
+  summary: The request provider-compat node consumes only the adjacent provider-semantic payload, validates the normal-payload boundary, and applies the selected provider-family wire profile without routing or control reconstruction.
+  edges:
+  - step_id: v3-provider-compat-profile-request-01
+    from_node: V3HubReqOutbound07ProviderSemantic
+    to_node: ProviderReqCompat06ProviderCompat
+    caller_symbol: apply_v3_provider_req_compat_to_provider_payload
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+    callee_symbol: run_req_outbound_stage3_compat
+    callee_file: v3/crates/provider-compat-core/src/lib.rs
+    status: anchored
+    binding_kind: adjacent_provider_compat_block
+    owner_feature_id: v3.provider_compat_profile_loading
+    resource_flow:
+      consumes: [v3.request.provider_semantic, v3.provider_compat.payload_boundary_contract]
+      produces: [v3.hub.provider_wire_payload]
+      side_channel_reads: [v3.hub.resolved_target, v3.hub.provider_protocol]
+      side_channel_writes: []
+- chain_id: v3.provider_compat_profile.response
+  owner_feature_id: v3.provider_compat_profile_loading
+  summary: The response provider-compat node consumes only the adjacent provider-raw payload, validates the normal-payload boundary, and applies the selected provider-family response profile before Hub response normalization.
+  edges:
+  - step_id: v3-provider-compat-profile-response-01
+    from_node: V3ProviderRespInbound01Raw
+    to_node: ProviderRespCompat02ProviderCompat
+    caller_symbol: apply_v3_provider_resp_compat
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
+    callee_symbol: run_resp_inbound_stage3_compat
+    callee_file: v3/crates/provider-compat-core/src/lib.rs
+    status: anchored
+    binding_kind: adjacent_provider_compat_block
+    owner_feature_id: v3.provider_compat_profile_loading
+    resource_flow:
+      consumes: [v3.response.provider_raw, v3.provider_compat.payload_boundary_contract]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: [v3.hub.provider_protocol]
+      side_channel_writes: []
 - chain_id: v3.target.session_global_selection
   owner_feature_id: v3.virtual_router_target_interpreter
   summary: Target09 candidate sets become Target10 concrete providers through one session-first selection owner shared by Direct planning, Direct pre-send revalidation, initial Relay resolution, and Relay failure reselection.
