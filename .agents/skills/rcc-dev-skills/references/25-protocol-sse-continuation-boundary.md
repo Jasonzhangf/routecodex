@@ -202,3 +202,14 @@ Debug/sample persistence must record both surfaces for SSE responses:
 - `materializedResponse`: Resp04-finalized JSON semantic truth used for client projection and auditing.
 
 Do not make server/SSE transport re-parse `rawSse` to prove semantic state. If a provider emits a `response.*` SSE event that the codec does not understand, fail fast in the provider event codec rather than silently discarding it or patching it in snapshot/server code.
+
+## Direct Current-Response Compatibility Rule
+
+Provider-profile response compatibility for Direct belongs on the adjacent
+`ProviderResp14Raw -> Direct provider projection` edge, never in request/history,
+Relay, continuation, handler, or SSE transport. If the compatibility depends on
+content split across SSE deltas, the owning projection must keep emitted lifecycle
+events and the terminal response aggregate semantically identical. Validate only
+the current response output surface: upstream may legitimately echo request fields
+such as `instructions` inside response envelopes, and those request-data fields must
+not be cleaned or rewritten.

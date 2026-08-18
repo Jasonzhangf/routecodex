@@ -897,6 +897,7 @@ features:
   - docs/goals/v3-vr-target-protocol-execution-decision-sop.md
   test_design:
   - docs/goals/v3-responses-direct-mvp-test-design.md
+  - docs/goals/v3-direct-thinking-tag-response-compat-test-design.md
   required_contract:
   - P6 owns only adjacent transitions V3Target10ConcreteProviderSelected through V3Server16HttpFrame, with V3Execution11ProtocolDecision between Target10 and Direct policy
   - Runtime remains the only complete lifecycle executor

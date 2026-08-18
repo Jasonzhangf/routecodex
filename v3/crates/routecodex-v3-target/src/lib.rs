@@ -28,6 +28,7 @@ pub struct V3TargetCandidate {
     pub model_capabilities: Vec<String>,
     pub web_search_execution_mode: V3WebSearchExecutionMode,
     pub max_context_tokens: Option<u64>,
+    pub context_token_estimate_scale_bps: u64,
     pub base_url: String,
     pub responses_process: Option<String>,
     pub responses_transport: V3ResponsesTransportKind,
@@ -113,6 +114,16 @@ struct V3TargetExpansionScope {
     required_capabilities: Vec<String>,
     requested_model_filter: Option<String>,
     visible_model_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V3TargetContextAdmission {
+    Normal,
+    NearLimit,
+    Exceeded {
+        input_tokens: u64,
+        max_context_tokens: u64,
+    },
 }
 
 impl V3TargetInterpreter {
@@ -277,7 +288,6 @@ impl V3TargetInterpreter {
                     "{}:{}:{}:capability_mismatch",
                     candidate.provider_id, candidate.auth_alias, candidate.model_id
                 ));
-                continue;
             }
             let context_exceeded = if let Some(reason) =
                 context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
@@ -529,6 +539,7 @@ impl V3TargetInterpreter {
                 model_capabilities: model.capabilities.clone(),
                 web_search_execution_mode: model.web_search_execution_mode,
                 max_context_tokens: model.max_context_tokens,
+                context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                 base_url: provider.base_url.clone(),
                 responses_process: provider
                     .responses
@@ -610,6 +621,30 @@ impl V3TargetInterpreter {
         }
         order
     }
+}
+
+fn candidate_context_admission(
+    candidate: &V3TargetCandidate,
+    request_input_tokens: u64,
+) -> V3TargetContextAdmission {
+    let Some(max_context_tokens) = candidate.max_context_tokens else {
+        return V3TargetContextAdmission::Normal;
+    };
+    let scaled_input_tokens = ((u128::from(request_input_tokens)
+        * u128::from(candidate.context_token_estimate_scale_bps)
+        + 9_999)
+        / 10_000)
+        .min(u128::from(u64::MAX)) as u64;
+    if scaled_input_tokens > max_context_tokens {
+        return V3TargetContextAdmission::Exceeded {
+            input_tokens: scaled_input_tokens,
+            max_context_tokens,
+        };
+    }
+    if u128::from(scaled_input_tokens) * 100 >= u128::from(max_context_tokens) * 90 {
+        return V3TargetContextAdmission::NearLimit;
+    }
+    V3TargetContextAdmission::Normal
 }
 
 fn selected_route_required_capabilities(

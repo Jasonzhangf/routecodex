@@ -1226,6 +1226,7 @@ auth = { type = "api_key", entries = [{ alias = "key", env = "LONG_KEY" }] }
 [providers.long.models.m]
 capabilities = ["text"]
 max_context_tokens = 4000
+context_token_estimate_scale_bps = 17000
 [route_groups.g.pools.default]
 selection = { strategy = "priority" }
 targets = [
@@ -1245,7 +1246,7 @@ targets = [
                 entry_protocol: "responses".into(),
                 client_model: None,
                 capabilities: BTreeSet::new(),
-                input_tokens: 950,
+                input_tokens: 899,
                 route_classification: test_route("longcontext", &["longcontext", "default"]),
             },
         )
@@ -1292,11 +1293,11 @@ targets = [
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected_after_explicit_failure = target
+    let selected_near_limit = target
         .select_available(
             expanded,
             &Availability {
-                blocked: BTreeSet::from(["short:key:m".into()]),
+                blocked: BTreeSet::new(),
             },
             0,
         )
