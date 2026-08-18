@@ -35714,3 +35714,6 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - node-graph gate 增源码绑定（runtime/skeleton 符号 + skeleton plan 每个 plugin_id 必须在 runtime 静态注册表实现）+ 5 个新 red self-test（30/30）。
 - 验证：`npm run verify:ci` 全绿（red suites=8，admission matrix OK）；`appsdk verify --admission v4` => {ok:true, stage:contract_bound}（AppSDK 0.1.3）；runtime build-consumer 带 plugin-contract source dep 构建 OK；runtime l2 test-consumer 21/21。
 - 未做：真实 Cordis host/NodeContainer（Phase 2 M3+），plugin-catalog 消费方（PluginManager，contract_bound 登记例外）；这些是下一部分目标。
+
+# 2026-08-17 V3 provider priority/global health closeout
+- Fixed default all V3 entry protocols, generic 401/403 two-hit 1h cooldown + 1h probe, 429/5xx three-hit 15m cooldown + 15m probe, and priority reselection without provider hardcode. Config owner compiles omitted SSE timeout to 30000ms; maps retain only real adjacent Error01→Error02→health calls. Installed/restarted 0.90.4584; listeners 10000/5520/7777/4444 health 200; final Codex review 20260818T034500Z-codex-final PASS; commit 5d92c12ad.

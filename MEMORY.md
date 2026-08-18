@@ -5574,3 +5574,10 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
   参数：`inject` 对 host 容器服务 + 节点内插件 `services_provided` 联合校验
   （15 tests）；`playground/**` 归 routecodex-v4-governance 模块。
 Tags: #v4 #cordis #node-container #plugin #isolation #experiment
+
+## 2026-08-17 V3 provider priority/global health closeout
+- Provider health is generic priority selection plus typed error-class/key policy: 401/403 require 2 consecutive same-key failures before 1h cooldown with 1h probe; 429/5xx including 502 require 3 consecutive failures before 15m cooldown with 15m probe; only explicit probe success restores cooldown. No provider/model hardcode.
+- Config owner must compile the documented omitted SSE first-frame timeout default (30,000ms) into the published manifest before the runtime fail-fast guard; otherwise omitted config becomes a false provider failure.
+- Architecture maps must not claim a caller invokes an Error01 builder when the caller receives an already-created Error01. Keep only real adjacent Error01→Error02→health edges; review caught this as P1.
+- Verified install/restart `0.90.4584`, listeners 10000/5520/7777/4444 health 200, final Codex review `20260818T034500Z-codex-final` PASS, commit `5d92c12ad`.
+Tags: #v3 #provider-health #priority-routing #config-ssot #map-lockstep
