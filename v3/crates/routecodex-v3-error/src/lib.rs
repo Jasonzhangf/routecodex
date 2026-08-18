@@ -268,6 +268,7 @@ pub enum V3ErrorSourceKind {
     ModelNotFound,
     PendingEndpoint,
     ProviderFailure,
+    ProviderCompatPayloadBoundaryViolation,
     TargetPoolExhausted,
     RuntimeFailure,
     ClientDisconnect,
@@ -499,6 +500,7 @@ pub struct V3Error05ExecutionDecision {
 }
 
 impl V3Error05ExecutionDecision {
+    #[allow(clippy::result_large_err)]
     pub fn try_into_terminal(self) -> Result<V3Error05TerminalDecision, Self> {
         let source_kind = &self.exhaustion.local_action.classified.source.source_kind;
         let valid_terminal = match source_kind {
@@ -613,6 +615,7 @@ fn validate_internal_error_source_kind(source_kind: &V3ErrorSourceKind) {
         | V3ErrorSourceKind::PathNotFound
         | V3ErrorSourceKind::ModelNotFound
         | V3ErrorSourceKind::PendingEndpoint
+        | V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation
         | V3ErrorSourceKind::TargetPoolExhausted
         | V3ErrorSourceKind::ClientDisconnect => {
             panic!("client/route terminal errors cannot carry a RouteCodex internal error code")
@@ -650,6 +653,10 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
         V3ErrorSourceKind::ProviderFailure => {
             ("provider_failure", "non_terminal_if_candidates_remain")
         }
+        V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => (
+            "provider_compat_payload_boundary_violation",
+            "already_terminal",
+        ),
         V3ErrorSourceKind::TargetPoolExhausted => ("target_pool_exhausted", "already_terminal"),
         V3ErrorSourceKind::RuntimeFailure => ("runtime_failure", "already_terminal"),
         V3ErrorSourceKind::ClientDisconnect => ("client_disconnect", "already_terminal"),
@@ -689,7 +696,7 @@ pub fn is_v3_retryable_transient_source(source: &V3Error01SourceRaised) -> bool 
     if source.source_kind != V3ErrorSourceKind::ProviderFailure {
         return false;
     }
-    is_v3_retryable_transient_stage_code(&source.source_stage, &source.code)
+    is_v3_retryable_transient_stage_code(source.source_stage, &source.code)
 }
 
 /// Returns whether a provider failure is health-neutral and eligible for the
@@ -848,6 +855,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
             .and_then(|external| external.status)
             .filter(|status| *status >= 400)
             .unwrap_or(502),
+        V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => 400,
         V3ErrorSourceKind::TargetPoolExhausted => 503,
         V3ErrorSourceKind::RuntimeFailure => 500,
         V3ErrorSourceKind::ClientDisconnect => 499,
@@ -859,12 +867,12 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         .action
         .health_affecting
         .then(|| execution.exhaustion.local_action.action.clone());
-    let mut error = serde_json::json!({
+    let error = serde_json::json!({
         "code": source.code,
         "message": source.message,
     });
     let body = routecodex_v3_debug::project_debug_value_verbatim(
-        &routecodex_v3_debug::V3RedactionPolicy::default(),
+        &routecodex_v3_debug::V3RedactionPolicy,
         serde_json::json!({ "error": error }),
     );
     V3Error06ClientProjected {

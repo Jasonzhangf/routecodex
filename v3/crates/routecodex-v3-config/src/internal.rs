@@ -331,9 +331,7 @@ pub fn v3_builtin_catalog_model_ids() -> &'static [String] {
 /// 内置 Codex 目录模型判定（`internal.toml` `[builtin_catalog_models]` 成员判定）。
 pub fn is_v3_builtin_catalog_model(model_id: &str) -> bool {
     let normalized = normalized_model_id(model_id);
-    v3_builtin_catalog_model_ids()
-        .iter()
-        .any(|id| *id == normalized)
+    v3_builtin_catalog_model_ids().contains(&normalized)
 }
 
 /// 内置目录模型的默认元数据查询（按 model_id 精确匹配，命中即内置预设）。
@@ -381,7 +379,7 @@ pub fn is_v3_gpt_family_model(model_id: &str) -> bool {
     let Some(family) = INTERNAL_CONFIG.model_families.get(GPT_FAMILY_KEY) else {
         return false;
     };
-    family.exact.iter().any(|id| *id == normalized)
+    family.exact.contains(&normalized)
         || family
             .prefix
             .as_deref()

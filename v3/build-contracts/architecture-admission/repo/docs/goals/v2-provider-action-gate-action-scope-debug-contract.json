@@ -1,0 +1,48 @@
+{
+  "scope_status": "SCOPE_INVALIDATED",
+  "supersedes": "docs/goals/v2-provider-action-gate-explicit-abandon-debug-contract.json",
+  "reason": "The Rust owner needs a request-chain action scope to distinguish the admitted recovery action's next failure from an unrelated concurrent request failure. The original contract omitted the existing ErrorErr05 caller that supplies logicalRequestChainKey.",
+  "sop_model_flow": {
+    "status": "known",
+    "flow_id": "error.provider_action_gate.mainline",
+    "owner_graph_confirmed": true
+  },
+  "confirmed_hypothesis": "H3",
+  "first_divergence_node": "ProviderActionGateFailureRecorded",
+  "root_cause_module": "V2 Rust provider action gate admission ownership identity",
+  "unique_owner": "record_failure with a Rust-compared actionScopeKey",
+  "allowed_paths": [
+    "sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs",
+    "sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs",
+    "src/modules/llmswitch/bridge/provider-action-gate-host.ts",
+    "src/modules/llmswitch/bridge/native-exports.ts",
+    "src/server/runtime/http-server/executor/request-executor-error-action-queue.ts",
+    "src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts",
+    "tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts",
+    "tests/server/runtime/http-server/executor/request-executor-error-action-queue.native.spec.ts",
+    "tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts",
+    "docs/goals/v2-provider-action-gate-explicit-abandon-debug-contract.json",
+    "docs/goals/v2-provider-action-gate-action-scope-debug-contract.json",
+    "docs/architecture/**",
+    "scripts/architecture/verify-v3-provider-action-gate.mjs",
+    "scripts/tests/v3-provider-action-gate-red-fixtures.mjs",
+    "note.md",
+    "MEMORY.md",
+    ".agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md"
+  ],
+  "forbidden_paths": [
+    "src/providers/profile/**",
+    "src/server/handlers/**",
+    "sharedmodule/llmswitch-core/src/servertool/**",
+    "v3/crates/routecodex-v3-runtime/**"
+  ],
+  "required_verification": [
+    "same actionScopeKey failure releases the owned admission and starts a sustained generation",
+    "different actionScopeKey failure preserves the active admission",
+    "explicit abort abandons by lane plus generation without mutating failure count",
+    "FIFO waiter and middle-ticket cancellation tests",
+    "V2 NAPI and RequestExecutor focused regressions",
+    "mapped architecture, review, build, install, and live replay gates"
+  ],
+  "confidence": 100
+}

@@ -23,10 +23,10 @@ features:
   - Installation state never enters request, response, provider wire, MetadataCenter, or Error payloads.
   - Direct binary installation is not blocked by unrelated in-progress provider/runtime feature gates; full architecture CI remains required by the build chain.
   required_gates:
-  - npm run test:v3-cli-distribution
-  - npm run test:install-v3-target-cleanup
-  - npm run verify:v3-resource-map
-  - npm run verify:v3-module-boundaries
+  - npm --prefix v3 run test:distribution
+  - npm --prefix v3 run test:install-cleanup
+  - npm --prefix v3 run verify:v3-resource-map
+  - npm --prefix v3 run verify:v3-module-boundaries
   completion_rule:
     source: Distribution and owned-target tests plus architecture gates pass.
     runtime: Direct global install, aggregate restart, all-listener health, command path, version, and absence of ~/.rcc/install are verified.
@@ -279,6 +279,29 @@ features:
   - npm run verify:v3-stage-protocol-shapes
   - npm run test:v3-stage-protocol-shapes-red-fixtures
   - npm run verify:v3-architecture-ci
+- feature_id: v3.provider_compat_profile_loading
+  change_risk: high
+  owner_scope: Provider compatibility profiles and fail-fast normal-payload boundary validation between Hub provider semantic/raw nodes and the provider wire/client semantic nodes.
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - Ordinary protocol and business fields remain unchanged through request and response compatibility.
+  - Provider compatibility remains limited to registered provider-family wire projections.
+  required_negative:
+  - Top-level semantics, processed, and processingMetadata fail at both request and response compat entrypoints.
+  - Compat does not strip, reconstruct, or route control state and does not own Chat Process or SSE semantics.
+  required_gates:
+  - npm run test:v3-provider-compat-profile-loading
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run test:v3-workspace
+  completion_rule:
+    source: Rust provider-compat tests and all linked V3 architecture maps pass.
+    runtime: Runtime/install/live replay remains governed by the enclosing build-isolation completion contract.
+    forbidden_claim: Do not claim provider compatibility production cutover from this feature gate alone.
 - feature_id: v3.hub_pipeline_static_skeleton
   status: h1_typed_skeleton_and_static_registry_implemented
   change_risk: critical
@@ -1367,6 +1390,7 @@ features:
   owner_scope: Provider-owned WebSocket v2 connection/session guard, incremental event framing, cancellation, terminal reuse, and fail-closed discard lifecycle
   owner_modules:
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+  - v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
   - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
   design:
   - docs/goals/v3-responses-websocket-v2-transport-hardening-plan.md
@@ -2343,9 +2367,9 @@ features:
   owner_modules:
   - docs/goals/v3-god-file-decomposition-plan.md
   - docs/architecture/wiki/v3-module-decomposition-sop.md
-  - config/v3-file-size-policy.json
-  - scripts/architecture/verify-v3-file-size.mjs
-  - scripts/tests/v3-file-size-red-fixtures.mjs
+  - v3/config/v3-file-size-policy.json
+  - v3/scripts/architecture/verify-v3-file-size.mjs
+  - v3/scripts/tests/v3-file-size-red-fixtures.mjs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
@@ -2519,7 +2543,7 @@ features:
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server direct_frame_console_emits_provider_switch_complete_and_usage --lib -- --nocapture
   smoke:
   - CARGO_NET_OFFLINE=true cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli
-  - node scripts/install-v3-cli.mjs
+  - npm --prefix v3 run install
   - rccv3 restart -c /Users/fanzhang/.rcc/config.v3.toml --timeout-ms 30000
   - live 5520 MiniMax invalid-image replay with route/provider-error/provider-switch before terminal and no post-terminal route duplicate
   mainline_bindings:

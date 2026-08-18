@@ -1,3 +1,5 @@
+#![allow(clippy::bool_comparison)]
+
 use routecodex_v3_runtime::{
     characterize_v3_anthropic_client_input_to_hub_semantic,
     characterize_v3_anthropic_hub_response_semantic_to_client_projection,

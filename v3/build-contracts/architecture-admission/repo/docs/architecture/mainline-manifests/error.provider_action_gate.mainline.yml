@@ -1,0 +1,41 @@
+lifecycle_id: error.provider_action_gate.mainline
+summary: Typed ErrorErr05 provider actions enter the Rust process-shared isolated-1s/sustained-5s gate; this lifecycle ends at the atomic terminal generation commit. ErrorErr05 -> ErrorErr06 remains the separate error.mainline#err-05 projection edge.
+owner_feature_id: error.provider_action_gate
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs
+entrypoint:
+  node_id: ErrorErr05ExecutionDecision
+  wiki_page: docs/goals/direct-relay-cross-request-error-storm-control-plan.md
+  call_map_chain_id: error.provider_action_gate.mainline
+node_ids:
+  - ErrorErr05ExecutionDecision
+  - ProviderActionGateAbandonRequested
+  - ProviderActionGateAbandoned
+  - ProviderActionGateAdmission
+  - ProviderActionGateFailureRecorded
+  - ProviderActionGateSuccessCommitted
+  - ProviderActionGateSuccessRequested
+  - ProviderActionGateTerminalCommitRequested
+  - ProviderActionGateTerminalCommitted
+step_ids:
+  - error-provider-action-gate-01
+  - error-provider-action-gate-02
+  - error-provider-action-gate-03
+  - error-provider-action-gate-04
+  - error-provider-action-gate-05
+  - error-provider-action-gate-06
+  - error-provider-action-gate-07
+  - error-provider-action-gate-08
+edge_status_counts:
+  anchored: 8
+  partial: 0
+  binding_pending: 0
+  total: 8
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: error.provider_action_gate.mainline
+  min_function_feature: error.provider_action_gate
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

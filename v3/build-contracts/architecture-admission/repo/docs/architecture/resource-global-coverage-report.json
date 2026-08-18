@@ -1,0 +1,16 @@
+{
+  "status": "audit",
+  "scope": "project-wide-resource-convergence",
+  "resources": 143,
+  "mainline_resource_flows": 100,
+  "active_features": 12,
+  "active_features_with_resource_bindings": 11,
+  "active_features_missing_resource_bindings": 1,
+  "mainline_edges": 87,
+  "mainline_edges_with_resource_flow": 87,
+  "mainline_edges_missing_resource_flow": 0,
+  "missing_resource_bindings": [
+    "v3.provider_compat_profile_loading"
+  ],
+  "missing_resource_flow_edges": []
+}

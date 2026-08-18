@@ -900,6 +900,43 @@ features:
   - npm run verify:v3-stage-protocol-shapes
   - npm run test:v3-stage-protocol-shapes-red-fixtures
   - npm run verify:v3-architecture-ci
+- feature_id: v3.provider_compat_profile_loading
+  status: active
+  owner_kind: rust_ssot
+  owner_scope: Provider compatibility profile loading and payload-boundary validation at the adjacent request and response compat nodes only.
+  owner_module: v3.provider_compat_core
+  resource_bindings:
+  - v3.provider_compat.payload_boundary_contract
+  - v3.request.provider_semantic
+  - v3.hub.provider_wire_payload
+  - v3.response.provider_raw
+  - v3.hub.response_semantic
+  mainline_bindings:
+  - v3-provider-compat-profile-request-01
+  - v3-provider-compat-profile-response-01
+  entry_symbols:
+  - run_req_outbound_stage3_compat
+  - run_resp_inbound_stage3_compat
+  - validate_provider_payload_boundary
+  allowed_paths:
+  - v3/crates/provider-compat-core
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/tests
+  - docs/architecture
+  forbidden_paths:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-server
+  - MetadataCenter
+  - SSE transport
+  - fallback
+  required_gates:
+  - npm run test:v3-provider-compat-profile-loading
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run test:v3-workspace
 - feature_id: v3.hub_pipeline_static_skeleton
   owner_crate: routecodex-v3-runtime
   owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs
@@ -968,6 +1005,9 @@ features:
       construction
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
     owner_boundary: provider-compat shared protocol helpers; no Hub node builder ownership
+  - file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs
+    owner_boundary: provider-compat typed error classification and Error01 projection
+      helpers; no Hub node builder ownership
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
     owner_boundary: Responses/OpenAI shared codec helpers; called by node files, not
       a node owner
@@ -1040,6 +1080,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/side_channel.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
@@ -1980,6 +2021,7 @@ features:
     terminal reuse, and fail-closed discard lifecycle.
   owner_files:
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+  - v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
   - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
   resource_bindings:
   - v3.provider.responses_transport_capability
@@ -1997,15 +2039,16 @@ features:
   - next_websocket_message
   allowed_paths:
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+  - v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
   - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
   - docs/goals/v3-responses-websocket-v2-transport-hardening-plan.md
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
-  - scripts/architecture/verify-v3-responses-websocket-v2-transport-hardening.mjs
-  - scripts/tests/v3-responses-websocket-v2-transport-hardening-red-fixtures.mjs
-  - package.json
+  - v3/scripts/architecture/verify-v3-responses-websocket-v2-transport-hardening.mjs
+  - v3/scripts/tests/v3-responses-websocket-v2-transport-hardening-red-fixtures.mjs
+  - v3/package.json
   forbidden_paths:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1
@@ -3744,9 +3787,9 @@ features:
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
-  - scripts/architecture/verify-v3-file-size.mjs
-  - scripts/tests/v3-file-size-red-fixtures.mjs
-  - config/v3-file-size-policy.json
+  - v3/scripts/architecture/verify-v3-file-size.mjs
+  - v3/scripts/tests/v3-file-size-red-fixtures.mjs
+  - v3/config/v3-file-size-policy.json
   resource_bindings: []
   entry_symbols:
   - execute_v3_responses_relay_runtime
@@ -3775,9 +3818,9 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-architecture-audit-locks.yml
-  - scripts/architecture/verify-v3-file-size.mjs
-  - scripts/tests/v3-file-size-red-fixtures.mjs
-  - config/v3-file-size-policy.json
+  - v3/scripts/architecture/verify-v3-file-size.mjs
+  - v3/scripts/tests/v3-file-size-red-fixtures.mjs
+  - v3/config/v3-file-size-policy.json
   - scripts/architecture/verify-v3-module-boundaries.mjs
   forbidden_paths:
   - src
@@ -3991,9 +4034,9 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
-  - sharedmodule/llmswitch-core/rust-core/crates/servertool-core
+  - v3/crates/servertool-core
   - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
-  - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src
+  - v3/crates/provider-compat-core/src
   - v3/crates/routecodex-v3-config
   - v3/crates/routecodex-v3-runtime
   - v3/crates/routecodex-v3-virtual-router
@@ -4340,7 +4383,7 @@ features:
 - feature_id: v3.build_test_artifact_budget
   status: active
   owner_module: v3-build-test-artifact-budget
-  owner_file: scripts/run-v3-cargo-test.mjs
+  owner_file: v3/scripts/run-v3-cargo-test.mjs
   resource_bindings:
   - v3.build.test_artifact_store
   - v3.build.dependency_cache
@@ -4349,13 +4392,13 @@ features:
   - releaseOwnedTestArtifacts
   - verifyV3DebugBudget
   allowed_paths:
-  - .cargo/config.toml
+  - v3/.cargo/config.toml
   - v3/Cargo.toml
-  - scripts/run-v3-cargo-test.mjs
-  - scripts/cargo-test-artifact-runner.mjs
-  - scripts/architecture/verify-v3-build-test-artifact-budget.mjs
-  - scripts/architecture/verify-v3-architecture-ci.mjs
-  - scripts/tests/v3-build-test-artifact-budget-red-fixtures.mjs
+  - v3/scripts/run-v3-cargo-test.mjs
+  - v3/scripts/cargo-test-artifact-runner.mjs
+  - v3/scripts/architecture/verify-v3-build-test-artifact-budget.mjs
+  - v3/scripts/architecture/verify-v3-architecture-ci.mjs
+  - v3/tests/scripts/v3-build-test-artifact-budget-red-fixtures.mjs
   - docs/goals/v3-build-test-artifact-budget-test-design.md
   - docs/architecture/v3-build-tool-module-registry.yml
   - docs/architecture/manifests/v3.build_test_artifact_budget.mainline.yml
@@ -4366,9 +4409,9 @@ features:
   - sharedmodule
   - ~/.rcc
   required_gates:
-  - npm run verify:v3-build-test-artifact-budget
-  - npm run test:v3-build-test-artifact-budget-red-fixtures
-  - npm run verify:v3-resource-map
+  - npm --prefix v3 run verify:v3-build-test-artifact-budget
+  - npm --prefix v3 run test:v3-build-test-artifact-budget-red-fixtures
+  - npm --prefix v3 run verify:v3-resource-map
   mainline_bindings:
   - v3-build-test-budget-01
   - v3-build-test-budget-02
@@ -4376,7 +4419,6 @@ features:
 - feature_id: v3.global_binary_install
   status: source_active_live_verification_required
   owner_crates:
-  - routecodex-v3-config
   - routecodex-v3-cli
   owner_files:
   - scripts/install-v3-cli.mjs
@@ -4392,8 +4434,8 @@ features:
   - v3.global_binary_install
   entry_symbols:
   - buildV3CargoEnv
-  - resolve_routecodex_package_version_from_executable
-  - installDirectNativeCommand
+  - withOwnedV3CargoTarget
+  - installAliasAtomic
   allowed_paths:
   - scripts/install-v3-cli.mjs
   - scripts/ensure-cli-command-shim.mjs
@@ -4422,15 +4464,15 @@ features:
   - sharedmodule
   - ~/.rcc/install
   required_gates:
-  - npm run test:v3-cli-distribution
-  - npm run test:install-v3-target-cleanup
+  - npm --prefix v3 run test:distribution
+  - npm --prefix v3 run test:install-cleanup
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   mainline_bindings:
   - v3-install-01
   - v3-install-02
   - v3-install-03
-  runtime_status: direct_binary_install_live_verified_0_90_4127
+  runtime_status: direct_binary_install_live_verified_0_90_4574
 - feature_id: v3.route_classifier_local_owner
   status: source_controlled_runtime_boundary_verified
   change_risk: critical

@@ -1,0 +1,132 @@
+{
+  "debug_id": "v3-responses-session-overlap-20260729",
+  "state": "diagnosis_locked",
+  "symptom": {
+    "observed": "A second /v1/responses request entered the same 5555 listener/session before the first SSE response completed, then provider projections failed with malformed function_call_output or an empty message role.",
+    "expected": "A listener must admit at most one active Responses request for the same explicit session or conversation scope until its response body reaches EOF, errors, or is dropped.",
+    "entry": "POST /v1/responses on port 5555",
+    "ids": {
+      "session_id": "019fad8b-d278-7613-a152-cda6ef5131ca",
+      "first_request_id": "openai-responses-router-gpt-5.5-20260729T233449000-678411-16048",
+      "overlap_request_id": "openai-responses-router-gpt-5.5-20260729T233557582-678426-16063"
+    },
+    "raw_evidence": [
+      "~/.rcc/codex-samples/openai-responses/ports/5555/openai-responses-router-gpt-5.5-20260729T233557582-678426-16063/",
+      "~/.codex/sessions/2026/07/29/rollout-2026-07-29T19-04-09-019fad8b-d278-7613-a152-cda6ef5131ca.jsonl",
+      "~/.rcc/logs/server-5555.log"
+    ]
+  },
+  "sop_model_flow": {
+    "status": "known",
+    "flow_id": "v3.server.http_boundary + v3.sse_transport_core_independent",
+    "source_docs": [
+      "docs/architecture/v3-resource-operation-map.yml",
+      "docs/architecture/v3-function-map.yml",
+      "docs/architecture/v3-mainline-call-map.yml",
+      "docs/architecture/v3-verification-map.yml",
+      ".agents/skills/rcc-dev-skills/references/25-protocol-sse-continuation-boundary.md"
+    ],
+    "lifecycle_nodes": [
+      "V3 listener-scoped HTTP ingress",
+      "V3Server03HttpRequestRaw admission block",
+      "Runtime/Provider request pipeline",
+      "V3ServerRespOutbound06ClientFrame response body",
+      "SSE EOF/error/client drop release"
+    ],
+    "resource_edges": [
+      "listener state -> explicit Responses session/conversation scope -> in-flight permit",
+      "finalized client SSE stream -> transport keepalive comments -> HTTP response body"
+    ],
+    "forbidden_edges": [
+      "provider action gate -> global request admission",
+      "Virtual Router -> session admission",
+      "Anthropic/OpenAI codec -> overlap repair",
+      "SSE transport -> payload/history/tool semantic repair"
+    ],
+    "owner_graph": [
+      "routecodex-v3-server owns listener-scoped HTTP admission and response-body lifetime",
+      "routecodex-v3-sse owns protocol-neutral keepalive comment encoding",
+      "routecodex-v3-error owns typed HTTP boundary conflict projection"
+    ],
+    "gap_if_new": null
+  },
+  "hypotheses": [
+    {
+      "id": "H1",
+      "cause": "The V3 listener has no same-session in-flight admission lock, allowing a Codex retry carrying partial stream history to enter Runtime/provider wire concurrently.",
+      "modules": [
+        "routecodex-v3-server"
+      ],
+      "supporting_evidence": "Requests 16048 and 16063 share port/session and overlap by about 78 seconds; the Codex rollout writes partial reasoning before retry construction.",
+      "counter_evidence_or_gap": "A controlled overlap test must prove the second request reaches provider before the fix.",
+      "verification_action": "Run two controlled same-listener/same-session Requests while the first upstream response body is held open and observe provider captures.",
+      "confidence": 98
+    },
+    {
+      "id": "H2",
+      "cause": "V3 HTTP SSE lacks V2-equivalent keepalive comments, leaving an idle transport interval that can trigger client retry behavior.",
+      "modules": [
+        "routecodex-v3-server",
+        "routecodex-v3-sse"
+      ],
+      "supporting_evidence": "V2 writes an immediate keepalive and repeats every 3000ms; V3 Direct and Relay use Body::from_stream without the existing keepalive builder.",
+      "counter_evidence_or_gap": "Keepalive alone does not explain every observed retry timeout and cannot replace admission control.",
+      "verification_action": "Hold a controlled provider SSE body idle and assert immediate plus periodic comment frames without semantic event mutation.",
+      "confidence": 95
+    }
+  ],
+  "active_hypothesis": "H1",
+  "confirmed_hypothesis": "H1",
+  "confidence": 98,
+  "confirmed_hypotheses": [
+    "H1",
+    "H2"
+  ],
+  "first_divergence_node": "V3Server03HttpRequestRaw listener-scoped admission block",
+  "root_cause_module": "routecodex-v3-server",
+  "unique_owner": "V3 listener-scoped Responses session admission gate plus Server SSE body transport wrapper",
+  "allowed_paths": [
+    "v3/crates/routecodex-v3-server/src/lib.rs",
+    "v3/crates/routecodex-v3-server/src/session_admission.rs",
+    "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
+    "v3/crates/routecodex-v3-error/src/lib.rs",
+    "v3/crates/routecodex-v3-error/tests/error_chain_contract.rs",
+    "docs/goals/v3-responses-session-admission-and-sse-keepalive-test-design.md",
+    "docs/architecture/v3-resource-operation-map.yml",
+    "docs/architecture/v3-function-map.yml",
+    "docs/architecture/v3-mainline-call-map.yml",
+    "docs/architecture/v3-verification-map.yml",
+    "docs/architecture/manifests/v3.responses_session_admission.mainline.yml",
+    "docs/architecture/manifests/v3.sse.http_keepalive.mainline.yml",
+    "docs/architecture/manifests/v3.sse.transport_boundary.mainline.yml",
+    "docs/architecture/wiki/v3-responses-session-admission.md",
+    "docs/architecture/wiki/v3-sse-http-keepalive.md",
+    "scripts/architecture/verify-v3-responses-session-admission.mjs",
+    "scripts/tests/v3-responses-session-admission-red-fixtures.mjs",
+    "package.json",
+    ".github/workflows/test.yml",
+    "note.md",
+    "MEMORY.md",
+    ".agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md"
+  ],
+  "forbidden_paths": [
+    "v3/crates/routecodex-v3-runtime/**",
+    "v3/crates/routecodex-v3-virtual-router/**",
+    "v3/crates/routecodex-v3-target/**",
+    "v3/crates/routecodex-v3-provider-responses/**",
+    "sharedmodule/**",
+    "src/**",
+    "~/.rcc/config*.toml"
+  ],
+  "required_verification": [
+    "same listener and same explicit session overlap rejects second request before provider send",
+    "same listener different session permits concurrent requests",
+    "different listener same session permits concurrent requests",
+    "response success/error/SSE EOF/client drop release permits",
+    "Direct and Relay SSE emit immediate and periodic comments without mutating provider event bytes",
+    "terminal/error stream emits no keepalive after close",
+    "global V3 build/install/restart and same-entry online overlap replay",
+    "codex review PASS"
+  ],
+  "exact_replay": "Same-entry managed 5555 concurrent /v1/responses replay using one explicit client_metadata session/thread pair, plus a different-session control."
+}

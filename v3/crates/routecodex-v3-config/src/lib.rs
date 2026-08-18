@@ -505,10 +505,11 @@ pub fn discover_v3_secret_file_auth_handles(
     let parsed = parse_v3_secret_file_entries(content)?;
     let prefix = format!("{provider_id}.");
     let has_scoped_entries = parsed.iter().any(|(name, _)| name.starts_with(&prefix));
+    let has_exact_provider_entry = parsed.iter().any(|(name, _)| name == provider_id);
     let has_other_scoped_entries = parsed
         .iter()
         .any(|(name, _)| name.contains('.') && !name.starts_with(&prefix));
-    if !has_scoped_entries && has_other_scoped_entries {
+    if !has_scoped_entries && !has_exact_provider_entry && has_other_scoped_entries {
         return Err(format!(
             "secret file has no scoped auth keys for provider {provider_id}"
         ));
@@ -522,6 +523,8 @@ pub fn discover_v3_secret_file_auth_handles(
             continue;
         } else if name == provider_id {
             "key1".to_string()
+        } else if has_exact_provider_entry {
+            continue;
         } else {
             name.clone()
         };
@@ -638,6 +641,14 @@ mod tests {
     fn secret_file_auth_handle_discovery_supports_single_and_list_forms() {
         assert_eq!(
             discover_v3_secret_file_auth_handles("opencode-go = one\n", "opencode-go").unwrap(),
+            vec![("key1".to_string(), "opencode-go".to_string())]
+        );
+        assert_eq!(
+            discover_v3_secret_file_auth_handles(
+                "opencode-go = one\nother.key1 = ignored\n",
+                "opencode-go",
+            )
+            .unwrap(),
             vec![("key1".to_string(), "opencode-go".to_string())]
         );
         assert_eq!(

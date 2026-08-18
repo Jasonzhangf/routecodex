@@ -16,8 +16,9 @@ Review rule: a provider/runtime response must not jump directly to client/server
 flowchart TD
   module_docs["docs"]
   module_docs__manifest["docs::manifest"]
-  module_llmswitch_core["llmswitch-core"]
+  module_package_json["package.json"]
   module_pending["pending"]
+  module_provider_compat_core["provider-compat-core"]
   module_routecodex_v3_route_classifier["routecodex-v3-route-classifier"]
   module_routecodex_v3_sse["routecodex-v3-sse"]
   module_scripts["scripts"]
@@ -32,12 +33,15 @@ flowchart TD
   module_v3_server["v3-server"]
   module_v3_target["v3-target"]
   module_v3_virtual_router["v3-virtual-router"]
+  module_v3_package_json["v3/package.json"]
+  module_v3_scripts["v3/scripts"]
+  module_package_json -->|1 edges / 1 paths| module_v3_package_json
   module_pending -->|8 edges / 1 paths| module_pending
   module_routecodex_v3_route_classifier -->|1 edges / 1 paths| module_routecodex_v3_route_classifier
   module_routecodex_v3_sse -->|2 edges / 1 paths| module_routecodex_v3_sse
   module_scripts -->|2 edges / 1 paths| module_docs
   module_scripts -->|1 edges / 1 paths| module_docs__manifest
-  module_scripts -->|6 edges / 2 paths| module_scripts
+  module_scripts -->|2 edges / 1 paths| module_v3_package_json
   module_v3_cli -->|1 edges / 1 paths| module_v3_lifecycle
   module_v3_config -->|1 edges / 1 paths| module_docs__manifest
   module_v3_config -->|14 edges / 6 paths| module_v3_config
@@ -46,7 +50,7 @@ flowchart TD
   module_v3_lifecycle -->|1 edges / 1 paths| module_v3_server
   module_v3_provider_responses -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_provider_responses -->|4 edges / 3 paths| module_v3_provider_responses
-  module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_llmswitch_core
+  module_v3_runtime__hub_v1 -->|3 edges / 3 paths| module_provider_compat_core
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime__hub_v1 -->|2 edges / 1 paths| module_v3_error
   module_v3_runtime__hub_v1 -->|5 edges / 5 paths| module_v3_provider_responses
@@ -67,16 +71,19 @@ flowchart TD
   module_v3_server -->|4 edges / 4 paths| module_v3_runtime
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
   module_v3_server -->|25 edges / 14 paths| module_v3_server
+  module_v3_package_json -->|3 edges / 1 paths| module_v3_scripts
+  module_v3_scripts -->|6 edges / 2 paths| module_v3_scripts
 ```
 
 | From module | To module | Edges | Functional paths |
 | --- | --- | ---: | --- |
+| package.json | v3/package.json | 1 | `v3.build.independent_domain` |
 | pending | pending | 8 | `v3.web_search_servertool_state_machine` |
 | routecodex-v3-route-classifier | routecodex-v3-route-classifier | 1 | `vr.current_turn_typed_route_facts` |
 | routecodex-v3-sse | routecodex-v3-sse | 2 | `v3.sse.transport_boundary` |
 | scripts | docs | 2 | `v3.live_provider_compat.parity` |
 | scripts | docs::manifest | 1 | `v3.live_provider_compat.parity` |
-| scripts | scripts | 6 | `v3.build_test_artifact_budget`<br/>`v3.global_binary_install` |
+| scripts | v3/package.json | 2 | `v3.build.independent_domain` |
 | v3-cli | v3-lifecycle | 1 | `v3.server.managed_lifecycle` |
 | v3-config | docs::manifest | 1 | `v3.entry_protocol_endpoint_binding.mainline` |
 | v3-config | v3-config | 14 | `v3.config.compact_hub_v1_defaults`<br/>`v3.config.compile`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.config.server_manifest_compile.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.entry_protocol_registry_contract.mainline` |
@@ -85,7 +92,7 @@ flowchart TD
 | v3-lifecycle | v3-server | 1 | `v3.server.managed_lifecycle` |
 | v3-provider-responses | routecodex-v3-sse | 1 | `v3.sse.transport_boundary` |
 | v3-provider-responses | v3-provider-responses | 4 | `v3.debug_error_foundation.mainline`<br/>`v3.responses.websocket_v2.transport_hardening`<br/>`v3.responses_direct.required_mainline` |
-| v3-runtime::hub_v1 | llmswitch-core | 1 | `v3.selected_provider_model_binding` |
+| v3-runtime::hub_v1 | provider-compat-core | 3 | `v3.provider_compat_profile.request`<br/>`v3.provider_compat_profile.response`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | routecodex-v3-sse | 1 | `v3.sse.protocol_codec_projection_boundary` |
 | v3-runtime::hub_v1 | v3-error | 2 | `v3.provider_global_subscription_probe` |
 | v3-runtime::hub_v1 | v3-provider-responses | 5 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
@@ -106,6 +113,8 @@ flowchart TD
 | v3-server | v3-runtime | 4 | `v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
 | v3-server | v3-server | 25 | `v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3/package.json | v3/scripts | 3 | `v3.build.independent_domain` |
+| v3/scripts | v3/scripts | 6 | `v3.build_test_artifact_budget`<br/>`v3.global_binary_install` |
 
 ## Auto audit /补救清单
 
@@ -144,24 +153,65 @@ Owner feature: `v3.global_binary_install`
 
 ```mermaid
 flowchart TD
-  subgraph c_0_v3_global_binary_install_m_scripts["scripts"]
-    c_0_v3_global_binary_install_0["scripts<br/>buildV3Cli<br/><small>scripts/install-v3-cli.mjs</small>"]
-    c_0_v3_global_binary_install_1["scripts<br/>runInterruptibleCommand<br/><small>scripts/install-v3-cli.mjs</small>"]
-    c_0_v3_global_binary_install_2["scripts<br/>main<br/><small>scripts/install-v3-cli.mjs</small>"]
-    c_0_v3_global_binary_install_3["scripts<br/>copyExecutableAtomic<br/><small>scripts/install-v3-cli.mjs</small>"]
-    c_0_v3_global_binary_install_4["scripts<br/>main<br/><small>scripts/ensure-cli-command-shim.mjs</small>"]
-    c_0_v3_global_binary_install_5["scripts<br/>installDirectNativeCommand<br/><small>scripts/ensure-cli-command-shim.mjs</small>"]
+  subgraph c_0_v3_global_binary_install_m_v3_scripts["v3/scripts"]
+    c_0_v3_global_binary_install_0["v3/scripts<br/>buildV3Cli<br/><small>v3/scripts/install-cli.mjs</small>"]
+    c_0_v3_global_binary_install_1["v3/scripts<br/>runInterruptibleCommand<br/><small>v3/scripts/install-cli.mjs</small>"]
+    c_0_v3_global_binary_install_2["v3/scripts<br/>main<br/><small>v3/scripts/install-cli.mjs</small>"]
+    c_0_v3_global_binary_install_3["v3/scripts<br/>copyExecutableAtomic<br/><small>v3/scripts/install-cli.mjs</small>"]
+    c_0_v3_global_binary_install_4["v3/scripts<br/>installAliasAtomic<br/><small>v3/scripts/install-cli.mjs</small>"]
   end
   c_0_v3_global_binary_install_0 -->|v3-install-01<br/>V3Install01SourceVersionResolved → V3Install02RustBinaryBuilt| c_0_v3_global_binary_install_1
   c_0_v3_global_binary_install_2 -->|v3-install-02<br/>V3Install02RustBinaryBuilt → V3Install03DirectBinaryPublished| c_0_v3_global_binary_install_3
-  c_0_v3_global_binary_install_4 -->|v3-install-03<br/>V3Install03DirectBinaryPublished → V3Install04CommandAliasesPublished| c_0_v3_global_binary_install_5
+  c_0_v3_global_binary_install_2 -->|v3-install-03<br/>V3Install03DirectBinaryPublished → V3Install04CommandAliasesPublished| c_0_v3_global_binary_install_4
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-install-01` | `V3Install01SourceVersionResolved` → `V3Install02RustBinaryBuilt` | anchored | buildV3Cli<br/><small>scripts/install-v3-cli.mjs</small> | runInterruptibleCommand<br/><small>scripts/install-v3-cli.mjs</small> | `v3.global_binary_install` |
-| `v3-install-02` | `V3Install02RustBinaryBuilt` → `V3Install03DirectBinaryPublished` | anchored | main<br/><small>scripts/install-v3-cli.mjs</small> | copyExecutableAtomic<br/><small>scripts/install-v3-cli.mjs</small> | `v3.global_binary_install` |
-| `v3-install-03` | `V3Install03DirectBinaryPublished` → `V3Install04CommandAliasesPublished` | anchored | main<br/><small>scripts/ensure-cli-command-shim.mjs</small> | installDirectNativeCommand<br/><small>scripts/ensure-cli-command-shim.mjs</small> | `v3.global_binary_install` |
+| `v3-install-01` | `V3Install01SourceVersionResolved` → `V3Install02RustBinaryBuilt` | anchored | buildV3Cli<br/><small>v3/scripts/install-cli.mjs</small> | runInterruptibleCommand<br/><small>v3/scripts/install-cli.mjs</small> | `v3.global_binary_install` |
+| `v3-install-02` | `V3Install02RustBinaryBuilt` → `V3Install03DirectBinaryPublished` | anchored | main<br/><small>v3/scripts/install-cli.mjs</small> | copyExecutableAtomic<br/><small>v3/scripts/install-cli.mjs</small> | `v3.global_binary_install` |
+| `v3-install-03` | `V3Install03DirectBinaryPublished` → `V3Install04CommandAliasesPublished` | anchored | main<br/><small>v3/scripts/install-cli.mjs</small> | installAliasAtomic<br/><small>v3/scripts/install-cli.mjs</small> | `v3.global_binary_install` |
+
+## v3.provider_compat_profile.request
+
+The request provider-compat node consumes only the adjacent provider-semantic payload, validates the normal-payload boundary, and applies the selected provider-family wire profile without routing or control reconstruction.
+
+Owner feature: `v3.provider_compat_profile_loading`
+
+```mermaid
+flowchart TD
+  subgraph c_1_v3_provider_compat_profile_request_m_provider_compat_core["provider-compat-core"]
+    c_1_v3_provider_compat_profile_request_1["provider-compat-core<br/>run_req_outbound_stage3_compat<br/><small>provider-compat-core/src/lib.rs</small>"]
+  end
+  subgraph c_1_v3_provider_compat_profile_request_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
+    c_1_v3_provider_compat_profile_request_0["v3-runtime::hub_v1<br/>apply_v3_provider_req_compat_to_provider_payload<br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small>"]
+  end
+  c_1_v3_provider_compat_profile_request_0 -->|v3-provider-compat-profile-request-01<br/>V3HubReqOutbound07ProviderSemantic → ProviderReqCompat06ProviderCompat| c_1_v3_provider_compat_profile_request_1
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-provider-compat-profile-request-01` | `V3HubReqOutbound07ProviderSemantic` → `ProviderReqCompat06ProviderCompat` | anchored | apply_v3_provider_req_compat_to_provider_payload<br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small> | run_req_outbound_stage3_compat<br/><small>provider-compat-core/src/lib.rs</small> | `v3.provider_compat_profile_loading` |
+
+## v3.provider_compat_profile.response
+
+The response provider-compat node consumes only the adjacent provider-raw payload, validates the normal-payload boundary, and applies the selected provider-family response profile before Hub response normalization.
+
+Owner feature: `v3.provider_compat_profile_loading`
+
+```mermaid
+flowchart TD
+  subgraph c_2_v3_provider_compat_profile_response_m_provider_compat_core["provider-compat-core"]
+    c_2_v3_provider_compat_profile_response_1["provider-compat-core<br/>run_resp_inbound_stage3_compat<br/><small>provider-compat-core/src/lib.rs</small>"]
+  end
+  subgraph c_2_v3_provider_compat_profile_response_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
+    c_2_v3_provider_compat_profile_response_0["v3-runtime::hub_v1<br/>apply_v3_provider_resp_compat<br/><small>routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs</small>"]
+  end
+  c_2_v3_provider_compat_profile_response_0 -->|v3-provider-compat-profile-response-01<br/>V3ProviderRespInbound01Raw → ProviderRespCompat02ProviderCompat| c_2_v3_provider_compat_profile_response_1
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-provider-compat-profile-response-01` | `V3ProviderRespInbound01Raw` → `ProviderRespCompat02ProviderCompat` | anchored | apply_v3_provider_resp_compat<br/><small>routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs</small> | run_resp_inbound_stage3_compat<br/><small>provider-compat-core/src/lib.rs</small> | `v3.provider_compat_profile_loading` |
 
 ## v3.target.session_global_selection
 
@@ -171,17 +221,17 @@ Owner feature: `v3.virtual_router_target_interpreter`
 
 ```mermaid
 flowchart TD
-  subgraph c_1_v3_target_session_global_selection_m_v3_runtime["v3-runtime"]
-    c_1_v3_target_session_global_selection_0["v3-runtime<br/>plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
-    c_1_v3_target_session_global_selection_1["v3-runtime<br/>select_v3_target_with_session_then_global<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_1_v3_target_session_global_selection_2["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
-    c_1_v3_target_session_global_selection_3["v3-runtime<br/>resolve_v3_relay_target_outcome<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_1_v3_target_session_global_selection_4["v3-runtime<br/>reselect_from_captured_target_plan<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+  subgraph c_3_v3_target_session_global_selection_m_v3_runtime["v3-runtime"]
+    c_3_v3_target_session_global_selection_0["v3-runtime<br/>plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
+    c_3_v3_target_session_global_selection_1["v3-runtime<br/>select_v3_target_with_session_then_global<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_3_v3_target_session_global_selection_2["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
+    c_3_v3_target_session_global_selection_3["v3-runtime<br/>resolve_v3_relay_target_outcome<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_3_v3_target_session_global_selection_4["v3-runtime<br/>reselect_from_captured_target_plan<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
   end
-  c_1_v3_target_session_global_selection_0 -->|v3-rd-target-select-direct-plan<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_1_v3_target_session_global_selection_1
-  c_1_v3_target_session_global_selection_2 -->|v3-rd-target-select-direct-kernel<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_1_v3_target_session_global_selection_1
-  c_1_v3_target_session_global_selection_3 -->|v3-rd-target-select-relay-initial<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_1_v3_target_session_global_selection_1
-  c_1_v3_target_session_global_selection_4 -->|v3-rd-target-select-relay-reselection<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_1_v3_target_session_global_selection_1
+  c_3_v3_target_session_global_selection_0 -->|v3-rd-target-select-direct-plan<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_3_v3_target_session_global_selection_1
+  c_3_v3_target_session_global_selection_2 -->|v3-rd-target-select-direct-kernel<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_3_v3_target_session_global_selection_1
+  c_3_v3_target_session_global_selection_3 -->|v3-rd-target-select-relay-initial<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_3_v3_target_session_global_selection_1
+  c_3_v3_target_session_global_selection_4 -->|v3-rd-target-select-relay-reselection<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_3_v3_target_session_global_selection_1
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -199,15 +249,15 @@ Owner feature: `v3.codex_sample_retention_snap_scope`
 
 ```mermaid
 flowchart TD
-  subgraph c_2_v3_codex_sample_retention_snap_scope_m_v3_debug["v3-debug"]
-    c_2_v3_codex_sample_retention_snap_scope_1["v3-debug<br/>V3DebugRuntime::project_payload_verbatim<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
-    c_2_v3_codex_sample_retention_snap_scope_2["v3-debug<br/>V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+  subgraph c_4_v3_codex_sample_retention_snap_scope_m_v3_debug["v3-debug"]
+    c_4_v3_codex_sample_retention_snap_scope_1["v3-debug<br/>V3DebugRuntime::project_payload_verbatim<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
+    c_4_v3_codex_sample_retention_snap_scope_2["v3-debug<br/>V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
   end
-  subgraph c_2_v3_codex_sample_retention_snap_scope_m_v3_server["v3-server"]
-    c_2_v3_codex_sample_retention_snap_scope_0["v3-server<br/>capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
+  subgraph c_4_v3_codex_sample_retention_snap_scope_m_v3_server["v3-server"]
+    c_4_v3_codex_sample_retention_snap_scope_0["v3-server<br/>capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
   end
-  c_2_v3_codex_sample_retention_snap_scope_0 -->|v3-codex-sample-01<br/>V3CodexSample02ManifestAuthorizationPublished → V3DebugPayloadBudgetApplied| c_2_v3_codex_sample_retention_snap_scope_1
-  c_2_v3_codex_sample_retention_snap_scope_0 -->|v3-codex-sample-02<br/>V3DebugPayloadBudgetApplied → V3CodexSample06RetentionEnforced| c_2_v3_codex_sample_retention_snap_scope_2
+  c_4_v3_codex_sample_retention_snap_scope_0 -->|v3-codex-sample-01<br/>V3CodexSample02ManifestAuthorizationPublished → V3DebugPayloadBudgetApplied| c_4_v3_codex_sample_retention_snap_scope_1
+  c_4_v3_codex_sample_retention_snap_scope_0 -->|v3-codex-sample-02<br/>V3DebugPayloadBudgetApplied → V3CodexSample06RetentionEnforced| c_4_v3_codex_sample_retention_snap_scope_2
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -224,34 +274,34 @@ Manifest: `docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml`
 
 ```mermaid
 flowchart TD
-  subgraph c_3_v3_server_managed_lifecycle_m_v3_cli["v3-cli"]
-    c_3_v3_server_managed_lifecycle_10["v3-cli<br/>run_cli<br/><small>routecodex-v3-cli/src/main.rs</small>"]
+  subgraph c_5_v3_server_managed_lifecycle_m_v3_cli["v3-cli"]
+    c_5_v3_server_managed_lifecycle_10["v3-cli<br/>run_cli<br/><small>routecodex-v3-cli/src/main.rs</small>"]
   end
-  subgraph c_3_v3_server_managed_lifecycle_m_v3_lifecycle["v3-lifecycle"]
-    c_3_v3_server_managed_lifecycle_0["v3-lifecycle<br/>V3ManagedLifecycle::start<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
-    c_3_v3_server_managed_lifecycle_1["v3-lifecycle<br/>V3ManagedLifecycle::declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
-    c_3_v3_server_managed_lifecycle_2["v3-lifecycle<br/>acquire_operation_lock<br/><small>routecodex-v3-lifecycle/src/fs_locks.rs</small>"]
-    c_3_v3_server_managed_lifecycle_3["v3-lifecycle<br/>Command::spawn<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
-    c_3_v3_server_managed_lifecycle_4["v3-lifecycle<br/>V3ManagedLifecycle::run_managed_child<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
-    c_3_v3_server_managed_lifecycle_5["v3-lifecycle<br/>write_json_atomic<br/><small>routecodex-v3-lifecycle/src/fs_locks.rs</small>"]
-    c_3_v3_server_managed_lifecycle_6["v3-lifecycle<br/>V3ManagedLifecycle::status<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
-    c_3_v3_server_managed_lifecycle_7["v3-lifecycle<br/>send_control<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
-    c_3_v3_server_managed_lifecycle_8["v3-lifecycle<br/>V3ManagedLifecycle::restart<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
-    c_3_v3_server_managed_lifecycle_9["v3-lifecycle<br/>send_restart_control<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
-    c_3_v3_server_managed_lifecycle_11["v3-lifecycle<br/>V3ManagedLifecycle::with_console_enabled<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
-    c_3_v3_server_managed_lifecycle_12["v3-lifecycle<br/>V3ManagedLifecycle::stop<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+  subgraph c_5_v3_server_managed_lifecycle_m_v3_lifecycle["v3-lifecycle"]
+    c_5_v3_server_managed_lifecycle_0["v3-lifecycle<br/>V3ManagedLifecycle::start<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+    c_5_v3_server_managed_lifecycle_1["v3-lifecycle<br/>V3ManagedLifecycle::declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+    c_5_v3_server_managed_lifecycle_2["v3-lifecycle<br/>acquire_operation_lock<br/><small>routecodex-v3-lifecycle/src/fs_locks.rs</small>"]
+    c_5_v3_server_managed_lifecycle_3["v3-lifecycle<br/>Command::spawn<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+    c_5_v3_server_managed_lifecycle_4["v3-lifecycle<br/>V3ManagedLifecycle::run_managed_child<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+    c_5_v3_server_managed_lifecycle_5["v3-lifecycle<br/>write_json_atomic<br/><small>routecodex-v3-lifecycle/src/fs_locks.rs</small>"]
+    c_5_v3_server_managed_lifecycle_6["v3-lifecycle<br/>V3ManagedLifecycle::status<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+    c_5_v3_server_managed_lifecycle_7["v3-lifecycle<br/>send_control<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
+    c_5_v3_server_managed_lifecycle_8["v3-lifecycle<br/>V3ManagedLifecycle::restart<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+    c_5_v3_server_managed_lifecycle_9["v3-lifecycle<br/>send_restart_control<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
+    c_5_v3_server_managed_lifecycle_11["v3-lifecycle<br/>V3ManagedLifecycle::with_console_enabled<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+    c_5_v3_server_managed_lifecycle_12["v3-lifecycle<br/>V3ManagedLifecycle::stop<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
   end
-  subgraph c_3_v3_server_managed_lifecycle_m_v3_server["v3-server"]
-    c_3_v3_server_managed_lifecycle_13["v3-server<br/>V3ServerAggregateHandle::shutdown<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+  subgraph c_5_v3_server_managed_lifecycle_m_v3_server["v3-server"]
+    c_5_v3_server_managed_lifecycle_13["v3-server<br/>V3ServerAggregateHandle::shutdown<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
-  c_3_v3_server_managed_lifecycle_0 -->|v3-life-01<br/>V3Lifecycle01ValidatedConfig → V3Lifecycle02InstanceDeclared| c_3_v3_server_managed_lifecycle_1
-  c_3_v3_server_managed_lifecycle_0 -->|v3-life-02<br/>V3Lifecycle02InstanceDeclared → V3Lifecycle03OperationLocked| c_3_v3_server_managed_lifecycle_2
-  c_3_v3_server_managed_lifecycle_0 -->|v3-life-03<br/>V3Lifecycle03OperationLocked → V3Lifecycle04ChildSpawned| c_3_v3_server_managed_lifecycle_3
-  c_3_v3_server_managed_lifecycle_4 -->|v3-life-04<br/>V3Lifecycle04ChildSpawned → V3Lifecycle05IdentityPublished| c_3_v3_server_managed_lifecycle_5
-  c_3_v3_server_managed_lifecycle_6 -->|v3-life-05<br/>V3Lifecycle05IdentityPublished → V3Lifecycle06LiveControlled| c_3_v3_server_managed_lifecycle_7
-  c_3_v3_server_managed_lifecycle_8 -->|v3-life-05r<br/>V3Lifecycle06LiveControlled → V3Lifecycle05IdentityPublished| c_3_v3_server_managed_lifecycle_9
-  c_3_v3_server_managed_lifecycle_10 -->|v3-life-cli-debug-01<br/>V3Cli01ResolvedDebugIntent → V3Lifecycle06LiveControlled| c_3_v3_server_managed_lifecycle_11
-  c_3_v3_server_managed_lifecycle_12 -->|v3-life-06<br/>V3Lifecycle06LiveControlled → V3Lifecycle07GracefullyStopped| c_3_v3_server_managed_lifecycle_13
+  c_5_v3_server_managed_lifecycle_0 -->|v3-life-01<br/>V3Lifecycle01ValidatedConfig → V3Lifecycle02InstanceDeclared| c_5_v3_server_managed_lifecycle_1
+  c_5_v3_server_managed_lifecycle_0 -->|v3-life-02<br/>V3Lifecycle02InstanceDeclared → V3Lifecycle03OperationLocked| c_5_v3_server_managed_lifecycle_2
+  c_5_v3_server_managed_lifecycle_0 -->|v3-life-03<br/>V3Lifecycle03OperationLocked → V3Lifecycle04ChildSpawned| c_5_v3_server_managed_lifecycle_3
+  c_5_v3_server_managed_lifecycle_4 -->|v3-life-04<br/>V3Lifecycle04ChildSpawned → V3Lifecycle05IdentityPublished| c_5_v3_server_managed_lifecycle_5
+  c_5_v3_server_managed_lifecycle_6 -->|v3-life-05<br/>V3Lifecycle05IdentityPublished → V3Lifecycle06LiveControlled| c_5_v3_server_managed_lifecycle_7
+  c_5_v3_server_managed_lifecycle_8 -->|v3-life-05r<br/>V3Lifecycle06LiveControlled → V3Lifecycle05IdentityPublished| c_5_v3_server_managed_lifecycle_9
+  c_5_v3_server_managed_lifecycle_10 -->|v3-life-cli-debug-01<br/>V3Cli01ResolvedDebugIntent → V3Lifecycle06LiveControlled| c_5_v3_server_managed_lifecycle_11
+  c_5_v3_server_managed_lifecycle_12 -->|v3-life-06<br/>V3Lifecycle06LiveControlled → V3Lifecycle07GracefullyStopped| c_5_v3_server_managed_lifecycle_13
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -273,18 +323,18 @@ Owner feature: `v3.config_interpreter_contract`
 
 ```mermaid
 flowchart TD
-  subgraph c_4_v3_config_compile_m_v3_config["v3-config"]
-    c_4_v3_config_compile_0["v3-config<br/>V3ConfigStore::read_authoring<br/><small>routecodex-v3-config/src/store.rs</small>"]
-    c_4_v3_config_compile_1["v3-config<br/>parse_v3_config_02_authoring<br/><small>routecodex-v3-config/src/lib.rs</small>"]
-    c_4_v3_config_compile_2["v3-config<br/>V3ConfigStore::load_snapshot<br/><small>routecodex-v3-config/src/store.rs</small>"]
-    c_4_v3_config_compile_3["v3-config<br/>validate_v3_config_03_schema_from_v3_config_02<br/><small>routecodex-v3-config/src/lib.rs</small>"]
-    c_4_v3_config_compile_4["v3-config<br/>build_v3_config_04_resource_registry_from_v3_config_03<br/><small>routecodex-v3-config/src/lib.rs</small>"]
-    c_4_v3_config_compile_5["v3-config<br/>publish_v3_config_05_manifest_from_v3_config_04<br/><small>routecodex-v3-config/src/lib.rs</small>"]
+  subgraph c_6_v3_config_compile_m_v3_config["v3-config"]
+    c_6_v3_config_compile_0["v3-config<br/>V3ConfigStore::read_authoring<br/><small>routecodex-v3-config/src/store.rs</small>"]
+    c_6_v3_config_compile_1["v3-config<br/>parse_v3_config_02_authoring<br/><small>routecodex-v3-config/src/lib.rs</small>"]
+    c_6_v3_config_compile_2["v3-config<br/>V3ConfigStore::load_snapshot<br/><small>routecodex-v3-config/src/store.rs</small>"]
+    c_6_v3_config_compile_3["v3-config<br/>validate_v3_config_03_schema_from_v3_config_02<br/><small>routecodex-v3-config/src/lib.rs</small>"]
+    c_6_v3_config_compile_4["v3-config<br/>build_v3_config_04_resource_registry_from_v3_config_03<br/><small>routecodex-v3-config/src/lib.rs</small>"]
+    c_6_v3_config_compile_5["v3-config<br/>publish_v3_config_05_manifest_from_v3_config_04<br/><small>routecodex-v3-config/src/lib.rs</small>"]
   end
-  c_4_v3_config_compile_0 -->|v3-cfg-01<br/>V3Config01FileSource → V3Config02AuthoringParsed| c_4_v3_config_compile_1
-  c_4_v3_config_compile_2 -->|v3-cfg-02<br/>V3Config02AuthoringParsed → V3Config03SchemaValidated| c_4_v3_config_compile_3
-  c_4_v3_config_compile_2 -->|v3-cfg-03<br/>V3Config03SchemaValidated → V3Config04ResourceRegistryBuilt| c_4_v3_config_compile_4
-  c_4_v3_config_compile_2 -->|v3-cfg-04<br/>V3Config04ResourceRegistryBuilt → V3Config05ManifestPublished| c_4_v3_config_compile_5
+  c_6_v3_config_compile_0 -->|v3-cfg-01<br/>V3Config01FileSource → V3Config02AuthoringParsed| c_6_v3_config_compile_1
+  c_6_v3_config_compile_2 -->|v3-cfg-02<br/>V3Config02AuthoringParsed → V3Config03SchemaValidated| c_6_v3_config_compile_3
+  c_6_v3_config_compile_2 -->|v3-cfg-03<br/>V3Config03SchemaValidated → V3Config04ResourceRegistryBuilt| c_6_v3_config_compile_4
+  c_6_v3_config_compile_2 -->|v3-cfg-04<br/>V3Config04ResourceRegistryBuilt → V3Config05ManifestPublished| c_6_v3_config_compile_5
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -1154,7 +1204,7 @@ flowchart TD
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-ws2-01` | `V3Transport13ResponsesRequest` → `V3ProviderResponsesWebSocketSession` | anchored | ResponsesTransport::send<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | ProviderResponsesTransport::send_websocket_v2<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.responses_websocket_v2_transport_hardening` |
-| `v3-ws2-02` | `V3ProviderResponsesWebSocketSession` → `V3ProviderResp14Raw` | anchored | ProviderResponsesTransport::send_websocket_v2<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | websocket_sse_stream<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.responses_websocket_v2_transport_hardening` |
+| `v3-ws2-02` | `V3ProviderResponsesWebSocketSession` → `V3ProviderResp14Raw` | anchored | ProviderResponsesTransport::send_websocket_v2<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | websocket_sse_stream<br/><small>routecodex-v3-provider-responses/src/transport/websocket.rs</small> | `v3.responses_websocket_v2_transport_hardening` |
 
 ## v3.anthropic_relay.local_continuation
 
@@ -1948,7 +1998,7 @@ flowchart TD
 | `v3-model-bind-01` | `V3Target10ConcreteProviderSelected` → `V3SelectedProviderModelBindingBlock` | anchored | responses_direct_request_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | bind_v3_selected_provider_model<br/><small>routecodex-v3-runtime/src/selected_provider_model_binding.rs</small> | `v3.route_selected_provider_model_binding` |
 | `v3-model-bind-02` | `V3SelectedProviderModelBindingBlock` → `V3Provider12ResponsesWirePayload` | anchored | responses_direct_request_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | build_v3_provider_12_responses_wire_payload<br/><small>routecodex-v3-provider-responses/src/wire.rs</small> | `v3.route_selected_provider_model_binding` |
 | `v3-model-bind-03` | `V3HubReqOutbound07ProviderSemantic` → `V3SelectedProviderModelBindingBlock` | anchored | build_v3_provider_standard_protocol_payload_from_req07<br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small> | bind_v3_selected_provider_model<br/><small>routecodex-v3-runtime/src/selected_provider_model_binding.rs</small> | `v3.route_selected_provider_model_binding` |
-| `v3-model-bind-04` | `V3SelectedProviderModelBindingBlock` → `ProviderReqCompat06ProviderCompat` | anchored | apply_v3_provider_req_compat<br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small> | run_req_outbound_stage3_compat<br/><small>llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs</small> | `v3.route_selected_provider_model_binding` |
+| `v3-model-bind-04` | `V3SelectedProviderModelBindingBlock` → `ProviderReqCompat06ProviderCompat` | anchored | apply_v3_provider_req_compat<br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small> | run_req_outbound_stage3_compat<br/><small>provider-compat-core/src/lib.rs</small> | `v3.route_selected_provider_model_binding` |
 
 ## v3.web_search_servertool_state_machine
 
@@ -2348,9 +2398,9 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-build-test-budget-01` | `V3BuildTest01CommandAccepted` → `V3BuildTest02ArtifactsProduced` | anchored | runV3CargoTest<br/><small>scripts/run-v3-cargo-test.mjs</small> | executeCargo<br/><small>scripts/run-v3-cargo-test.mjs</small> | `v3.build_test_artifact_budget` |
-| `v3-build-test-budget-02` | `V3BuildTest02ArtifactsProduced` → `V3BuildTest03OwnedArtifactsReleased` | anchored | runV3CargoTest<br/><small>scripts/run-v3-cargo-test.mjs</small> | releaseOwnedTestArtifacts<br/><small>scripts/run-v3-cargo-test.mjs</small> | `v3.build_test_artifact_budget` |
-| `v3-build-test-budget-03` | `V3BuildTest03OwnedArtifactsReleased` → `V3BuildTest04BudgetVerified` | anchored | runV3CargoTest<br/><small>scripts/run-v3-cargo-test.mjs</small> | verifyV3DebugBudget<br/><small>scripts/run-v3-cargo-test.mjs</small> | `v3.build_test_artifact_budget` |
+| `v3-build-test-budget-01` | `V3BuildTest01CommandAccepted` → `V3BuildTest02ArtifactsProduced` | anchored | runV3CargoTest<br/><small>v3/scripts/run-v3-cargo-test.mjs</small> | executeCargo<br/><small>v3/scripts/run-v3-cargo-test.mjs</small> | `v3.build_test_artifact_budget` |
+| `v3-build-test-budget-02` | `V3BuildTest02ArtifactsProduced` → `V3BuildTest03OwnedArtifactsReleased` | anchored | runV3CargoTest<br/><small>v3/scripts/run-v3-cargo-test.mjs</small> | releaseOwnedTestArtifacts<br/><small>v3/scripts/run-v3-cargo-test.mjs</small> | `v3.build_test_artifact_budget` |
+| `v3-build-test-budget-03` | `V3BuildTest03OwnedArtifactsReleased` → `V3BuildTest04BudgetVerified` | anchored | runV3CargoTest<br/><small>v3/scripts/run-v3-cargo-test.mjs</small> | verifyV3DebugBudget<br/><small>v3/scripts/run-v3-cargo-test.mjs</small> | `v3.build_test_artifact_budget` |
 
 ## v3.route_classifier.facts_classification
 

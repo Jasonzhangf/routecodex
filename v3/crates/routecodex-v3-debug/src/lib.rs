@@ -83,7 +83,7 @@ impl Default for V3DebugRuntimeConfig {
             raw_request_retention: 16,
             raw_response_retention: 16,
             event_retention: 512,
-            redaction: V3RedactionPolicy::default(),
+            redaction: V3RedactionPolicy,
         }
     }
 }

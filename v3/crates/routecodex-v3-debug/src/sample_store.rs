@@ -34,6 +34,7 @@ impl V3CodexSampleStore {
         self.retention
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn persist(
         &self,
         port: u16,

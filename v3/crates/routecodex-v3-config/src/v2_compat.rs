@@ -505,10 +505,8 @@ pub(crate) fn resolve_v2_provider_default_compatibility_profile(
     provider_id: &str,
 ) -> Option<String> {
     static PROVIDER_RESOLUTION_CONFIG: LazyLock<V2ProviderResolutionConfig> = LazyLock::new(|| {
-        serde_json::from_str(include_str!(
-            "../../../../sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json"
-        ))
-        .expect("V2 provider resolution compatibility profile config must parse")
+        serde_json::from_str(include_str!("v2_provider_compatibility_defaults.json"))
+            .expect("V3-local V2 provider compatibility defaults must parse")
     });
 
     PROVIDER_RESOLUTION_CONFIG
@@ -704,7 +702,7 @@ fn compile_v2_provider_models(
             (
                 id.clone(),
                 V3ProviderModelAuthoringConfig {
-                    wire_name: model.wire_name.or_else(|| Some(id)),
+                    wire_name: model.wire_name.or(Some(id)),
                     aliases: model.aliases,
                     capabilities: normalize_v2_capabilities(model.capabilities),
                     web_search_execution_mode,

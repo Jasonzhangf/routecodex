@@ -127,6 +127,10 @@ sharedmodule/llmswitch-core/router_hotpath_napi.node
 .mempalace/
 # Rust build artifacts (cargo target/)
 target/
+v3/build-control/
+v3/generated/
+v3/dist/
+v3/artifacts/
 sharedmodule/llmswitch-core/rust-core/target/
 sharedmodule/llmswitch-core-migrated/
 # Custom cargo target dirs and side-band rustc artifacts (e.g. .target-rcc-*, .target-*)

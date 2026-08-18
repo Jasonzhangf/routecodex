@@ -1376,7 +1376,6 @@ mod server_tool_center_tests {
         let center = V3ServerToolCenter::default();
         let web_key = key(V3ServerToolName::WebSearch, "session-a");
         let stopless_key = key(V3ServerToolName::Stopless, "session-a");
-        // register: key=websearch, instance=stopless -> reject
         let cross_register = center.register(
             web_key.clone(),
             V3ServerToolInstanceState::Stopless(stopless_instance()),
@@ -1575,7 +1574,6 @@ mod server_tool_center_tests {
             trail.iter().all(|record| record.at_unix_ms > 0),
             "every record must carry a write timestamp"
         );
-        // 键信息必须可追溯
         assert!(
             trail[0].key.scope_key.contains("session-audit"),
             "record must carry full scope key: {}",

@@ -1,0 +1,727 @@
+schema_version: 1
+source_map: docs/architecture/v3-mainline-call-map.yml
+review_surface:
+  html: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+  renderer: scripts/architecture/v3-mainline-caller-flow-lib.mjs
+policy:
+  resources_and_edges_are_required: true
+  main_skeleton_sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+  gate_audit_status: determined_locked
+  unaudited_items_can_change_with_normal_architecture_gates: true
+  audited_locked_items_require_jason_manual_authorization: true
+  debug_first_checks_locked_sop: true
+  after_debug_create_or_update_sop: true
+  required_locked_chains:
+    - v3.config.compile
+    - v3.config.compact_hub_v1_defaults
+    - v3.entry_protocol_endpoint_binding.mainline
+    - v3.server.startup
+    - v3.responses_direct.required_mainline
+    - v3.hub_pipeline.v1.request
+    - v3.hub_pipeline.v1.response
+    - v3.servertool_hook_skeleton_lifecycle
+    - v3.debug_error_foundation.mainline
+    - v3.sse.transport_boundary
+manual_review_instruction:
+  - Open the HTML review surface.
+  - Review the main skeleton, then the relevant standalone branch graph.
+  - Provide feedback with chain_id and step_id when an edge/resource/owner is wrong.
+  - When Jason explicitly approves a chain, add it to locked_items with the current chain fingerprint.
+  - Changing a locked item requires a manual_authorizations record approved_by Jason.
+locked_items:
+  - item_id: chain:v3.config.compile
+    chain_id: v3.config.compile
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d
+    last_manual_authorization_id: auth-20260724-provider-error-policy-manifest
+  - item_id: chain:v3.config.compact_hub_v1_defaults
+    chain_id: v3.config.compact_hub_v1_defaults
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-24T14:50:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-config-compact-hub-v1-defaults-sop.html
+    sop: docs/architecture/wiki/v3-config-compact-hub-v1-defaults-sop.md
+    fingerprint: sha256:2bb01d432d2a3acf3ebdfed0debf9ec3e91f2a3cbd006da0897126160a165fe6
+  - item_id: chain:v3.entry_protocol_endpoint_binding.mainline
+    chain_id: v3.entry_protocol_endpoint_binding.mainline
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:00:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:15ecb6de58935a4c1d3bf37386bebcc306968c65398aaf0d284f1549c099d2d6
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance-bind01
+  - item_id: chain:v3.server.startup
+    chain_id: v3.server.startup
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:6723629cdf05ebc91d9a951f9e255cf89b6c4ee326544fc451b11a222f68d4ca
+    last_manual_authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-server-startup
+  - item_id: chain:v3.responses_direct.required_mainline
+    chain_id: v3.responses_direct.required_mainline
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
+    last_manual_authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-responses-direct
+  - item_id: chain:v3.hub_pipeline.v1.request
+    chain_id: v3.hub_pipeline.v1.request
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:66d3f5549e48833950458b764034374874942d7da96e8e7bdff939feb8310b90
+    last_manual_authorization_id: auth-20260802-v3-hub-request-codec-boundary-lock-refresh
+  - item_id: chain:v3.hub_pipeline.v1.response
+    chain_id: v3.hub_pipeline.v1.response
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:6c9652ec050d62e5c23e4f5b776ea2d531a720e2725064c1cad8daaf148857cb
+  - item_id: chain:v3.servertool_hook_skeleton_lifecycle
+    chain_id: v3.servertool_hook_skeleton_lifecycle
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:e96820574fa6d0c2a9f5a635397c754566241991108e54b6018dc16e8e031089
+    last_manual_authorization_id: auth-20260811-v3-god-file-decomposition
+  - item_id: chain:v3.debug_error_foundation.mainline
+    chain_id: v3.debug_error_foundation.mainline
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:3a62cd4e24df96130d7a9892f027608a4c10bd32e404481e18aa5896330849f2
+    last_manual_authorization_id: auth-20260731-v3-de18-failure-session-scope-lock-refresh
+  - item_id: chain:v3.sse.transport_boundary
+    chain_id: v3.sse.transport_boundary
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-24T12:00:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md#sse-edge-sop
+    fingerprint: sha256:911b8d1042b6d4d3c813308446d32b869d82eff6eaaac7dbdc5d8af3a22843b6
+    last_manual_authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-sse
+  - item_id: chain:v3.global_binary_install
+    chain_id: v3.global_binary_install
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:5fa65d7b26e33870aedcd01fa6f12fa252659c4e7b4c1b104ae9bdc6765a24c1
+    last_manual_authorization_id: auth-20260816-v3-build-domain-path-migration-global-install
+  - item_id: chain:v3.target.session_global_selection
+    chain_id: v3.target.session_global_selection
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:d3464c14e382058281cb6a37af01503f828e48d27a49b101181672e2f3532e74
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.codex_sample_retention_snap_scope
+    chain_id: v3.codex_sample_retention_snap_scope
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:cbd2d5a36500918033f01824b210de96de0ab4a54ed25dabb4693795188446ae
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.server.managed_lifecycle
+    chain_id: v3.server.managed_lifecycle
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:b887fb4f320897dd8999417abeffb3575dd16cb0d4fcdcadf68f4035e85af1fd
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.models.capability_catalog
+    chain_id: v3.models.capability_catalog
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:2bb3d535c444ccb71734625fa057a84c00e6f74931d20e82a7883fe3e5d36c4c
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.hub_pipeline.v1.hook_registry_compile
+    chain_id: v3.hub_pipeline.v1.hook_registry_compile
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:9abc7fa2cae793a1b65c397ebdbd751c9293c8e2a86238b402cce0ff4f68ce19
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.protocol_conversion_field_parity.outbound_helper_bindings
+    chain_id: v3.protocol_conversion_field_parity.outbound_helper_bindings
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:3971fd260ce4a0fb26db7dacb98d6f3508ea704a65914651eb09e3c154693bca
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.hub_pipeline.v1.relay_request_source_slice
+    chain_id: v3.hub_pipeline.v1.relay_request_source_slice
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:58f6791db7d4d70a78dddc22a71bedf70a68f8a8b67339ff676c84a181550866
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.hub_pipeline.v1.relay_response_source_slice
+    chain_id: v3.hub_pipeline.v1.relay_response_source_slice
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:b0a19bb8282dff4ee8cb82e683a26e2487713dfe2a656ce3995cc06d86cdbdd3
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.protocol.anthropic.characterization
+    chain_id: v3.protocol.anthropic.characterization
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:feb4e3e6caac4b87862f497a19b0474a479fd63af912e0dcd010133cc18701e6
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.protocol.openai_chat.characterization
+    chain_id: v3.protocol.openai_chat.characterization
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:09e2d27ad992b4cdb4a6aadfc18d7f6eaf5d38342f1ac0da0814893f51653151
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.protocol.gemini.characterization
+    chain_id: v3.protocol.gemini.characterization
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:9541ae7753f515f2afdf4a3d9302185aa43ae28523a3b44563d1e87e7a075986
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.hub_pipeline.v1.relay_payload_copy_runtime_probes
+    chain_id: v3.hub_pipeline.v1.relay_payload_copy_runtime_probes
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:251a25d50d6b7329ee66b7c51c96c193fde1cb63c042db3468322a01221f0e64
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.responses_continuation.remote_contract_store
+    chain_id: v3.responses_continuation.remote_contract_store
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:267d883470cf0169e30fd80fe8ad2c45ab223032476586dc8af9777d94024b50
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.responses_continuation.remote_locator_codec
+    chain_id: v3.responses_continuation.remote_locator_codec
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:6138365d55bade93a2b131af8bd977573a29bac668e88bd395e5e0c265bf4b62
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.responses_direct.remote_continuation.integration
+    chain_id: v3.responses_direct.remote_continuation.integration
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:fc8d13f6b054e6e4f9c3a6cbf7e18f05238adf493c10831b04f672c8b5f84a7e
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.anthropic_relay.controlled_runtime
+    chain_id: v3.anthropic_relay.controlled_runtime
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:72983e8dc1ea80c42da468ae7500329c6876429633d4314169fdd6052efae3b0
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.responses.websocket_v2.transport_hardening
+    chain_id: v3.responses.websocket_v2.transport_hardening
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:ab4f1ac4877642539f2d68dbafea87e276fee712cb76107514398687760a337a
+    last_manual_authorization_id: auth-20260816-v3-websocket-owner-path-isolation
+  - item_id: chain:v3.anthropic_relay.local_continuation
+    chain_id: v3.anthropic_relay.local_continuation
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:2197cd67d5acc175722500946144b4411d23868256e53099326cb9a7dc80a20f
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.openai_chat_relay.controlled_runtime
+    chain_id: v3.openai_chat_relay.controlled_runtime
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:7e310de964d84354f29532a96c00b23073b32c12e1b338ff72d224cfb5b13268
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.gemini_relay.controlled_runtime
+    chain_id: v3.gemini_relay.controlled_runtime
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:ae1365e9430f60935cd01a5b77fcf083efeb1673fe85eeba4308c3f14d52d2f2
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.entry_protocol_registry_contract.mainline
+    chain_id: v3.entry_protocol_registry_contract.mainline
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:dc6300953dc1d43cd3ba336aafcbe0df753abb9a2b3ad093c959e0e59f8fdace
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.hub_relay.runtime_closeout
+    chain_id: v3.hub_relay.runtime_closeout
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:78e6260717130ee093f77dbf95c62d216bfa13cae7120c4565d4704c52df028c
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.hub_relay.response_failure_entry
+    chain_id: v3.hub_relay.response_failure_entry
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:a19e427d0ac7643bb355d4949f77d61b689def1db0aa77c37f39c748b25027cf
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.responses_provider_event.terminal_merge
+    chain_id: v3.responses_provider_event.terminal_merge
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:54da53b0e0cccf67d1ee5631bd31c7e4fc8edfaad5b49938f28cbadf72205aac
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.protocol_conversion_field_parity
+    chain_id: v3.protocol_conversion_field_parity
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:4b11a30250c6d8db95ff839c0f06225cf2a30d9420c6d20d10e4847b56ceea9e
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.responses_relay.source_server_entry
+    chain_id: v3.responses_relay.source_server_entry
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:9ba25aeebed701e6506727eab6a2cf015acf79e2b4e4ee88f4bd62f2f7dc83da
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.error.raw_wire_evidence
+    chain_id: v3.error.raw_wire_evidence
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:b82df6355f3804b38d1cd062d21aae7b8c9125b126f278d0a89fd485208b17b1
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.servertool_center.skeleton
+    chain_id: v3.servertool_center.skeleton
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:90ad91a819018db9e6374da1791b2beeaf4c7471526c421e6ac4718b0789eacf
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.direct_stopless_metadata_center
+    chain_id: v3.direct_stopless_metadata_center
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:cede693589218325fd9aaaba9668b85ac57e6ffe5fa6d1892079df4ced2ca7f2
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.hub_relay.tool_servertool_multiturn_parity
+    chain_id: v3.hub_relay.tool_servertool_multiturn_parity
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:21b3ad19b2b7ff42370ffba6eefd304b9ab880bc4def6a0282d6f68ff507ddaa
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.resp03_tool_governance_gap_closeout
+    chain_id: v3.resp03_tool_governance_gap_closeout
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:757a47abbe39513dc4acdaaee2648769bafb708e29ac36e0b52488bb3f23b170
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.live_provider_compat.parity
+    chain_id: v3.live_provider_compat.parity
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:0fd1c6b97be5b3ca20552b1f981df12488d76f01c8c2747757ab7fab42e1647f
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.responses.inbound_websocket_proxy
+    chain_id: v3.responses.inbound_websocket_proxy
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:fd1e2158fce7aa23b604329036dd776b97d6077bf7710ae52f6db72f4fc27e26
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.protocol_normalization_tool_governance_boundary
+    chain_id: v3.protocol_normalization_tool_governance_boundary
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:4537268f94a2d9e8f4e6f0e8d674f1b667da005d2038e5b0d9d0809df9d14c48
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.selected_provider_model_binding
+    chain_id: v3.selected_provider_model_binding
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:be1802c1c54fef4cf837d72bafa154901b318dc6b44f03152cd4f59335bb833e
+    last_manual_authorization_id: auth-20260816-v3-build-domain-path-migration-provider-compat
+  - item_id: chain:v3.console_request_count_visibility.mainline
+    chain_id: v3.console_request_count_visibility.mainline
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:77ca1fb4f529bba3cdc6485a29e8785cffe43d1fcef1d2885b2ad3c46e109f4d
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.console_human_readable_layering.mainline
+    chain_id: v3.console_human_readable_layering.mainline
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:b0969cb8869745217f6f8247c9fa37bd8e2962cb23bb2040eddd108e3a5fbce1
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.runtime_timing_observability.mainline
+    chain_id: v3.runtime_timing_observability.mainline
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:968849c3f1b4306c9c70f93f5547411ca8a28bd80f75895dc479c87d0673ddb1
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.responses_session_admission
+    chain_id: v3.responses_session_admission
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:3b53f2fc2ecbf364c634c6189346d1362257557d9ee030091000526ebbf08555
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.sse.http_keepalive_boundary
+    chain_id: v3.sse.http_keepalive_boundary
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:efbfef1b5d98f2ce94f47a4755099d59e249f72b85644fd8f094dda4b7dd583d
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.provider_action_gate.mainline
+    chain_id: v3.provider_action_gate.mainline
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:f8acb52362dce07c7a21db10822caf5d7249b8c21eb655ab71d5512be4587dba
+    last_manual_authorization_id: auth-20260815-v3-provider-action-gate-51-semantic-frame
+  - item_id: chain:v3.build_test_artifact_budget
+    chain_id: v3.build_test_artifact_budget
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:d0074891924aa83d4c4d5e8d75615af66bf4a0293cbbde7def9981d106786a46
+    last_manual_authorization_id: auth-20260816-v3-independent-build-isolation
+  - item_id: chain:v3.route_classifier.facts_classification
+    chain_id: v3.route_classifier.facts_classification
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:36f4b1ffde37b154b6cf64710ce508a300a21eea2427be8d9a49afeb603f60c4
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.sse.protocol_codec_projection_boundary
+    chain_id: v3.sse.protocol_codec_projection_boundary
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:f9cef82020d255ad1ca85add8fe970fcacdc2624de21ca2499215285f34df710
+    last_manual_authorization_id: auth-20260815-v3-sse-codec-file-decomposition-lock-refresh
+  - item_id: chain:vr.current_turn_typed_route_facts
+    chain_id: vr.current_turn_typed_route_facts
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:572f913b7701fc86559ad1b61ecc09bd849aed7a3eca2bb8ef2dc980cb79bd5a
+    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+  - item_id: chain:v3.provider_global_subscription_probe
+    chain_id: v3.provider_global_subscription_probe
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-08-12T20:30:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    fingerprint: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    last_manual_authorization_id: auth-20260813-v3-provider-global-subscription-probe-fingerprint-refresh
+manual_authorizations:
+  - authorization_id: auth-20260816-v3-independent-build-isolation
+    item_id: chain:v3.build_test_artifact_budget
+    approved_by: Jason
+    approved_at: '2026-08-16T05:17:32-07:00'
+    reason: "Jason explicitly authorized the V3 independent build-domain migration. This refresh changes only the three Cargo test owner file paths from root scripts/ to v3/scripts/ after the owners were physically migrated; chain nodes, symbols, edges, resources, cleanup semantics, and the 2 GiB budget remain unchanged."
+    fingerprint_before: sha256:243be5703ebf7daaef25f91dff36a08baf40a4114bfd75d72efe8a14887e6f87
+    fingerprint_after: sha256:d0074891924aa83d4c4d5e8d75615af66bf4a0293cbbde7def9981d106786a46
+  - authorization_id: auth-20260816-v3-build-domain-path-migration-global-install
+    item_id: chain:v3.global_binary_install
+    approved_by: Jason
+    approved_at: '2026-08-16T08:10:15Z'
+    reason: "Jason approved the V3 independent build-domain migration. This refresh records the verified physical move of the install owner from root scripts/tests into v3/scripts and v3/tests without changing install lifecycle semantics."
+    fingerprint_before: sha256:79d09d5fde29de35d828d43f85cc45db381696c72f7a3753553195a17cea8888
+    fingerprint_after: sha256:5fa65d7b26e33870aedcd01fa6f12fa252659c4e7b4c1b104ae9bdc6765a24c1
+  - authorization_id: auth-20260816-v3-build-domain-path-migration-provider-compat
+    item_id: chain:v3.selected_provider_model_binding
+    approved_by: Jason
+    approved_at: '2026-08-16T08:10:15Z'
+    reason: "Jason approved the V3 independent build-domain migration. This refresh records the verified physical move of provider-compat-core into v3/crates without changing selected-provider model binding semantics."
+    fingerprint_before: sha256:2b0c63f3d1be0320409f1cece209e0f0fb489f80716510b98a41c48a36528782
+    fingerprint_after: sha256:be1802c1c54fef4cf837d72bafa154901b318dc6b44f03152cd4f59335bb833e
+  - authorization_id: auth-20260815-v3-sse-codec-file-decomposition-lock-refresh
+    item_id: chain:v3.sse.protocol_codec_projection_boundary
+    approved_by: Jason
+    approved_at: '2026-08-15T18:00:00+08:00'
+    reason: "Jason approved the V3 SSE delivery fix loop (DSH round-1 FAIL remediation + file-size ratchet compliance). project_sse_event_payload and project_anthropic_sse_as_openai_chat_stream moved from openai_chat_relay_runtime.rs into the new include file openai_chat_relay_runtime_sse.rs to satisfy the <=1500-line file-size gate; the locked chain's only change is v3-sse-codec-02 caller_file path. Caller/callee symbols, node/edge semantics, owner, and resource flow are unchanged."
+    fingerprint_before: sha256:073179b302055968e07d99040d0488cbea36a548ee89cb8cf747e64c3afa1b1e
+    fingerprint_after: sha256:f9cef82020d255ad1ca85add8fe970fcacdc2624de21ca2499215285f34df710
+  - authorization_id: auth-20260815-v3-provider-action-gate-51-semantic-frame
+    item_id: chain:v3.provider_action_gate.mainline
+    approved_by: Jason
+    approved_at: '2026-08-15T06:30:00+08:00'
+    reason: "Jason approved refreshing the audit-lock fingerprint after the Responses SSE codec refactor converged semantic consumption into observe_v3_runtime_responses_sse_semantic_frame. v3-provider-action-gate-51 caller_symbol changed from observe_v3_runtime_responses_sse_transport_chunk to observe_v3_runtime_responses_sse_semantic_frame; nodes, owner, resources and all other edges are unchanged. This is the single semantic frame consumer shared by the chunk loop and EOF trailing frame path."
+    fingerprint_before: sha256:97539300996555e8bcdf5fc24e60a76812f586adccee18319fbfdf37edbb2032
+    fingerprint_after: sha256:f8acb52362dce07c7a21db10822caf5d7249b8c21eb655ab71d5512be4587dba
+  - authorization_id: auth-20260813-v3-provider-global-subscription-probe-fingerprint-refresh
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-13T01:00:00+08:00'
+    reason: "Jason authorized refreshing the audit-lock fingerprint after re-rendering docs/architecture/wiki/v3-mainline-caller-flow.md so the chain re-binds to the post-render mainline caller/callee signatures for v3.provider_global_subscription_probe (v3-runtime::hub_v1 → v3-runtime → v3-provider-responses). No caller/callee/owner/resource semantics changed; only the rendered caller-flow surface was regenerated."
+    fingerprint_before: sha256:9982761ea9e57b3656a362f13352810cb2cb850484067892d1f81ba77986189b
+    fingerprint_after: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+  - authorization_id: auth-20260812-v3-binding-pending-clearance-bind01
+    item_id: chain:v3.entry_protocol_endpoint_binding.mainline
+    approved_by: Jason
+    approved_at: '2026-08-12T20:40:00+08:00'
+    reason: "bind-01 callee_symbol corrected from manifest path to manifest lifecycle_id so the anchored review-gate edge passes the symbol-presence check."
+    fingerprint_before: sha256:0dede5f24ffddbdddf50f09d922acccec3ed323f8d3dffeb69aa76cb79490a54
+    fingerprint_after: sha256:15ecb6de58935a4c1d3bf37386bebcc306968c65398aaf0d284f1549c099d2d6
+  - authorization_id: auth-20260812-v3-binding-pending-clearance
+    item_id: chain:v3.entry_protocol_endpoint_binding.mainline
+    approved_by: Jason
+    approved_at: '2026-08-12T20:10:00+08:00'
+    reason: "Jason authorized binding_pending clearance: v3-entry-bind-01/02/03 edges anchored after verifying compile_entry_protocol_bindings (validate.rs:279), V3HubV1Manifest::entry_protocol_binding_for_endpoint (types.rs:863) and pending_endpoint (lib.rs:647) caller/callee symbols and real call edges; bind-03 caller_file corrected from endpoint_handlers.rs to lib.rs."
+    fingerprint_before: sha256:0dede5f24ffddbdddf50f09d922acccec3ed323f8d3dffeb69aa76cb79490a54
+    fingerprint_after: sha256:4885c03ad4731fa7cfba468a9e268121886c489d13c44ff3e98094d488f27647
+  - authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths
+    item_id: chain:v3.entry_protocol_endpoint_binding.mainline
+    approved_by: Jason
+    approved_at: '2026-08-11T15:45:00+08:00'
+    reason: "Same Jason authorization as auth-20260811-v3-god-file-decomposition: mainline-call-map edge caller/callee file paths moved to the decomposed server submodules (console/impl_bulk.rs, frame_builders.rs, request_id.rs, websocket.rs, executors.rs, endpoint_handlers.rs). No symbol, edge, owner or resource semantics changed."
+    fingerprint_before: sha256:ec52486bae2f975f5d074093398d63f474861552068a3144acd24e2dcf1e4ef4
+    fingerprint_after: sha256:0dede5f24ffddbdddf50f09d922acccec3ed323f8d3dffeb69aa76cb79490a54
+  - authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-server-startup
+    item_id: chain:v3.server.startup
+    approved_by: Jason
+    approved_at: '2026-08-11T15:45:00+08:00'
+    reason: "Same Jason authorization as auth-20260811-v3-god-file-decomposition: edge caller/callee file paths moved to decomposed server submodules."
+    fingerprint_before: sha256:18ce0b024407c0b13e63b595954ecaf24fa19b2fe8c42a2789503cd6181f13dc
+    fingerprint_after: sha256:6723629cdf05ebc91d9a951f9e255cf89b6c4ee326544fc451b11a222f68d4ca
+  - authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-responses-direct
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-11T15:45:00+08:00'
+    reason: "Same Jason authorization as auth-20260811-v3-god-file-decomposition: edge caller/callee file paths moved to decomposed server submodules."
+    fingerprint_before: sha256:0cd7c8563436a51a61a51b6aa2c5730a9f9427b3f13d206cab242675ced62c63
+    fingerprint_after: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
+  - authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-sse
+    item_id: chain:v3.sse.transport_boundary
+    approved_by: Jason
+    approved_at: '2026-08-11T15:45:00+08:00'
+    reason: "Same Jason authorization as auth-20260811-v3-god-file-decomposition: edge caller/callee file paths moved to decomposed server submodules (v3-sse-server-frame-04 callee Body::from_stream moved to executors.rs)."
+    fingerprint_before: sha256:ee58da7eca3b82d7e16b0cff456968919d023c8c8bb5fcf8766b9465d2b275ed
+    fingerprint_after: sha256:911b8d1042b6d4d3c813308446d32b869d82eff6eaaac7dbdc5d8af3a22843b6
+  - authorization_id: auth-20260811-v3-god-file-decomposition
+    item_id: chain:v3.servertool_hook_skeleton_lifecycle
+    approved_by: Jason
+    approved_at: '2026-08-11T15:30:00+08:00'
+    reason: "Jason explicitly approved the audit-lock refresh after the god-file decomposition work (server lib.rs split into console/endpoint_handlers/websocket/live_snapshot/scope_metadata/executors/frame_builders submodules; responses relay split into tests/conversion/failures/dry-run/json-hooks/stopless submodules). Chain structure, owners, edges and resources are unchanged; only caller/callee file paths moved."
+    fingerprint_before: sha256:4aea8acecaffbc6347c4b169d54554a1462783161667c3a83616cccfc4071d14
+    fingerprint_after: sha256:e96820574fa6d0c2a9f5a635397c754566241991108e54b6018dc16e8e031089
+  - authorization_id: auth-20260806-v3-responses-direct-history-immutability
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-06T22:01:34+08:00'
+    reason: "Jason authorized only the corrective Responses Direct lock refresh after auditing the complete chain delta. The sole change removes v3.provider.responses_history_tool_image_placeholder from v3-rd-10 because provider wire must preserve client-generated history byte-for-byte and must not replace historical tool-output images or recursively delete configured historical fields. No caller, callee, edge, owner, or other resource changes are authorized."
+    fingerprint_before: sha256:2a5ca1c00c3fc8b3296236a8810d425f38b01c499113490de879e99f65659933
+    fingerprint_after: sha256:748b132377095dbcb9c2740867cf099296d207c54ae6cac37ff3237572b70e00
+  - authorization_id: auth-20260806-v3-history-payload-control-audit
+    item_id: chain:v3.servertool_hook_skeleton_lifecycle
+    approved_by: Jason
+    approved_at: '2026-08-06T18:53:09+08:00'
+    reason: "Jason explicitly requested a whole-pipeline audit and repair of historical-record mutation and control-plane payload leakage. This refresh removes dead history-wide Stopless cleanup bindings, limits Req04 observation to the current suffix, preserves the business response at Resp03, and keeps StoplessCenter state on the typed side-channel."
+    fingerprint_before: sha256:24b682e409307794a85561e66efa8e32e401a516f9c9de8416deed58ab0d74a2
+    fingerprint_after: sha256:99d045db07dc7885fbfdfa29127d968fddd293fd8a34f7f3ad71d6d2f3a90689
+  - authorization_id: auth-20260803-v3-stopless-response-control-payload-isolation
+    item_id: chain:v3.servertool_hook_skeleton_lifecycle
+    approved_by: Jason
+    approved_at: '2026-08-03T10:45:00+08:00'
+    reason: "Jason explicitly authorized the full lifecycle repair and verification. The post-install live replay proved Resp03 still appended call_stopless_reasoning and routecodex hook run reasoningStop to a correct business response. This refresh locks the corrected response edge where natural-stop and reasoningStop continuation decisions remain typed runtime_control transitions, historical control artifacts are stripped at the Chat Process owner, and no new CLI/tool/control payload is projected to the client."
+    fingerprint_before: sha256:7e820a4b9abf338c874911d7b599c10c79803079b186ca4dfb3b437b30a100e4
+    fingerprint_after: sha256:24b682e409307794a85561e66efa8e32e401a516f9c9de8416deed58ab0d74a2
+  - authorization_id: auth-20260803-v3-stopless-control-payload-isolation
+    item_id: chain:v3.servertool_hook_skeleton_lifecycle
+    approved_by: Jason
+    approved_at: '2026-08-03T10:30:00+08:00'
+    reason: "Jason explicitly requested executing the full request-lifecycle repair and verification with control state physically separated from business payload. Live replay proved the old Req04 edge injected RouteCodex stopless guidance, reasoningStop tooling, and continuation prompts into provider/client payload. This refresh locks the corrected edge where Req04 only advances V3StoplessCenterState through the typed control side-channel and produces no business payload mutation."
+    fingerprint_before: sha256:7e820a4b9abf338c874911d7b599c10c79803079b186ca4dfb3b437b30a100e4
+    fingerprint_after: sha256:4d6cdf7a7a1a943cfd8cc211cddc2e5e330825c0412fade13a95af6b908a080a
+  - authorization_id: auth-20260802-v3-hub-request-codec-boundary-lock-refresh
+    item_id: chain:v3.hub_pipeline.v1.request
+    approved_by: Jason
+    approved_at: '2026-08-02T17:42:00+08:00'
+    reason: "Jason instructed continuing and committing the reviewed uncommitted protocol-codec work. This refresh locks the verified request-chain description after adding adjacent outbound helper bindings and making the pre-dispatch protocol decision immutable across Direct/Relay execution; no Hub node was inserted, reordered, or bypassed."
+    fingerprint_before: sha256:66d3f5549e48833950458b764034374874942d7da96e8e7bdff939feb8310b90
+    fingerprint_after: sha256:66d3f5549e48833950458b764034374874942d7da96e8e7bdff939feb8310b90
+  - authorization_id: auth-20260801-v3-responses-direct-protocol-context-lock-refresh
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-01T21:44:49+08:00'
+    reason: "Jason instructed continuing the real-server closeout after the locked Direct mainline gate exposed the already source-verified control/data split. This refresh records v3-rd-09 consuming typed v3.request.protocol_context for the standard previous_response_id continuation locator while v3.request.normal_payload remains business payload; the Direct lifecycle, target ownership, and adjacent request nodes are unchanged."
+    fingerprint_before: sha256:9c8e7f1e93a0ba4b1ffffc68bad3af881fe5216b822ee45c9a260a5b461f1b56
+    fingerprint_after: sha256:2a5ca1c00c3fc8b3296236a8810d425f38b01c499113490de879e99f65659933
+  - authorization_id: auth-20260731-v3-de18-failure-session-scope-lock-refresh
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-31T17:05:00+08:00'
+    reason: "Jason instructed continuing the Codex-review closeout after P0-MAP-DRIFT showed v3-de-18 falsely claimed Server writes Provider Health. This refresh locks the corrected edge: build_v3_provider_failure_session_scope_for_request now maps V3Server03HttpRequestRaw -> V3ProviderFailureSessionScope, produces v3.provider.failure_session_scope, and the verifier/red fixtures reject Provider Health mutation or v3.provider.health_state on v3-de-18. Runtime Error01-06 and Provider Health mutation topology are unchanged."
+    fingerprint_before: sha256:2e262da748708b41269ed46bc9452d73367b142e452ae24b2b67db68f4bb8657
+    fingerprint_after: sha256:3a62cd4e24df96130d7a9892f027608a4c10bd32e404481e18aa5896330849f2
+  - authorization_id: auth-20260731-v3-debug-error-session-health-map-drift-lock-refresh
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-31T16:45:00+08:00'
+    reason: "Jason instructed continuing execution after Codex review found P0-MAP-DRIFT in the session health identity/owner bindings; this refresh locks the corrected debug/error foundation map where Provider Health identity is session-scoped, direct health edges bind to V3ProviderFailureRuntimeHealth -> V3ProviderHealthStore session APIs, and the verifier now rejects stale provider-global map entries. Runtime Error01-06 topology is unchanged."
+    fingerprint_before: sha256:7c61139166bb06245658f7cc62cf366690ad8159adc6b1e900893a7ecdf90107
+    fingerprint_after: sha256:2e262da748708b41269ed46bc9452d73367b142e452ae24b2b67db68f4bb8657
+  - authorization_id: auth-20260731-v3-responses-direct-owner-split-lock-refresh
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-07-31T14:50:12+08:00'
+    reason: "Jason authorized refreshing the audited Direct mainline lock after the verified file-size decomposition moved the existing v3-rd-09 caller owner from kernel.rs to kernel/direct_protocol_plan.rs without changing the Direct lifecycle or runtime semantics."
+    fingerprint_before: sha256:c4640c59c879afb9d39249c9d4c0ea5c999022a701a9f65b79e061fbb4293018
+    fingerprint_after: sha256:9c8e7f1e93a0ba4b1ffffc68bad3af881fe5216b822ee45c9a260a5b461f1b56
+  - authorization_id: auth-20260731-v3-debug-error-current-owner-lock-refresh
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-31T14:50:12+08:00'
+    reason: "Jason authorized refreshing the audited debug/error foundation lock after source verification consolidated the previously authorized caller-flow sync and bound Error03-05 to V3ErrorHandlingCenter, Error04 to the availability-aware builder, provider failure recording to V3ProviderFailureRuntimeHealth and the session-scoped health store, and Direct planning edges to the decomposed direct_protocol_plan owner; the Error01-06 topology remains unchanged."
+    fingerprint_before: sha256:5e3f4fc296d20586517136147dce146569f94b34616ef5d49fff01c01b4bf011
+    fingerprint_after: sha256:7c61139166bb06245658f7cc62cf366690ad8159adc6b1e900893a7ecdf90107
+  - authorization_id: auth-20260729-v3-debug-payload-budget
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-29T20:30:00+08:00'
+    reason: "Jason requested fixing live V3 sessions that appeared stuck while debug snapshots were enabled. This authorizes adding the debug payload-budget resource to the existing debug foundation edge so side-channel request snapshots redact media, aggregate arrays, object entries, keys, strings, and total artifact size without mutating business payloads."
+    fingerprint_before: sha256:4858bdc8079206ee2083299206845b43f4e4643055c2405df1f46b0d4ad7e1fe
+    fingerprint_after: sha256:5e3f4fc296d20586517136147dce146569f94b34616ef5d49fff01c01b4bf011
+  - authorization_id: auth-20260726-vr-target-protocol-decision
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-07-26T14:54:00+08:00'
+    reason: "Jason requested locking the VR-selected provider protocol SOP: after V3Target10ConcreteProviderSelected, V3Execution11ProtocolDecision must compare entry protocol, selected provider protocol, and allowed modes; same protocol enters Direct, mismatch enters Relay or explicit Error06 before provider send. This replaces the old Target10 -> Direct policy shortcut."
+    fingerprint_before: sha256:052f1c31fde767bacda0d3b0a48a0cc0fdf06e93ced21d9ed5ca9cd564002a57
+    fingerprint_after: sha256:c4640c59c879afb9d39249c9d4c0ea5c999022a701a9f65b79e061fbb4293018
+  - authorization_id: auth-20260726-v3-internal-external-error-identity
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-26T11:12:00+08:00'
+    reason: "Jason requested separating V3 internal RouteCodex errors from external provider/client errors; this adds internal 500-* identity and external_error side-channel edges to the locked debug/error foundation chain while preserving Error01-06 policy ownership."
+    fingerprint_before: sha256:ba5dd08feae0703033651f1199f1ab191d3dca70d6883e2143468be86bb81f9f
+    fingerprint_after: sha256:4858bdc8079206ee2083299206845b43f4e4643055c2405df1f46b0d4ad7e1fe
+  - authorization_id: auth-20260729-v3-terminal-error05-availability-proof
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-29T09:40:00+08:00'
+    reason: "Jason approved fixing, reviewing, and committing the overlapping V3 error, console, and provider-action work. Error04 now requires caller-owned route-pool, default-pool, and same-provider availability proof; the builder that inferred exhaustion from candidate count alone was physically removed, and Error06 now consumes only typed terminal Error05. The Error01-06 topology and edge count remain unchanged; only the owning builder contract and symbol changed."
+    fingerprint_before: sha256:4858bdc8079206ee2083299206845b43f4e4643055c2405df1f46b0d4ad7e1fe
+    fingerprint_after: sha256:38b56257ab7b4ec2d6b79e3a46132f759434b438b9fedbff7953ec6d0a9af7ce
+  - authorization_id: auth-20260731-v3-servertool-hook-skeleton-lock-refresh
+    item_id: chain:v3.servertool_hook_skeleton_lifecycle
+    approved_by: Jason
+    approved_at: '2026-07-31T13:58:14+08:00'
+    reason: "Jason authorized refreshing the audited lock after the verified mainline caller flow and render sync changed the chain fingerprint without changing runtime semantics."
+    fingerprint_before: sha256:e47bae6a4f5f8530cc2005a6ccfed3d24f1d3719c11ad0061912e17b6bb4003f
+    fingerprint_after: sha256:7e820a4b9abf338c874911d7b599c10c79803079b186ca4dfb3b437b30a100e4
+  - authorization_id: auth-20260731-v3-debug-error-foundation-lock-refresh
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-31T13:58:14+08:00'
+    reason: "Jason authorized refreshing the audited lock after the verified mainline caller flow and render sync changed the chain fingerprint without changing runtime semantics."
+    fingerprint_before: sha256:5e3f4fc296d20586517136147dce146569f94b34616ef5d49fff01c01b4bf011
+    fingerprint_after: sha256:c29480973dbd035b5799ff5098cae9e7853c5ccfb39eaad8ab5848de9e330896
+  - authorization_id: auth-20260726-direct-history-tool-image-placeholder
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-07-26T00:37:00+08:00'
+    reason: "Jason requested fixing V3 Direct `/v1/responses` historical `view_image`/`function_call_output` data-image history pollution with provider-request dry-run confirmation from the original payload; this adds the declared provider-wire placeholder resource to the locked Direct mainline edge."
+    fingerprint_before: sha256:3e2f2cf011320ca21e093f093bae2fec3b5debc9f06cc4f0af05b7e95af28fbf
+    fingerprint_after: sha256:052f1c31fde767bacda0d3b0a48a0cc0fdf06e93ced21d9ed5ca9cd564002a57
+  - authorization_id: auth-20260724-resp03-tool-governance-split
+    item_id: chain:v3.servertool_hook_skeleton_lifecycle
+    approved_by: Jason
+    approved_at: '2026-07-24T09:00:00+08:00'
+    reason: "Active goal requires splitting the old merged response stopless hook into tool_call and stop servertool hooks while preserving the audited lifecycle."
+    fingerprint_before: sha256:b586e01c3670a85fd25df2379802d01a766a402ce49b6349b912c641759d0f6f
+    fingerprint_after: sha256:e47bae6a4f5f8530cc2005a6ccfed3d24f1d3719c11ad0061912e17b6bb4003f
+  - authorization_id: auth-20260724-provider-error-policy-manifest
+    item_id: chain:v3.config.compile
+    approved_by: Jason
+    approved_at: '2026-07-24T15:16:00+08:00'
+    reason: "Jason asked to inspect production/current/existing V3 config after locking the unified provider error contract and fill missing config support; adding provider error policy manifest resource changes the locked config.compile resource flow only."
+    fingerprint_before: sha256:7a2f68829c5b4f2a6eb33ac605f1f27b79cdf0e1c0e54ea27f26662fa859a193
+    fingerprint_after: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d
+  - authorization_id: auth-20260816-v3-websocket-owner-path-isolation
+    item_id: chain:v3.responses.websocket_v2.transport_hardening
+    approved_by: Jason
+    approved_at: '2026-08-16T05:46:58-07:00'
+    reason: "Jason approved continuing the phased V3 independent-domain migration. This refresh records the already verified WebSocket response stream owner moving from the former transport.rs monolith to transport/websocket.rs; the two adjacent chain nodes, resources, runtime behavior, and owning feature remain unchanged."
+    fingerprint_before: sha256:80d855f496970333ab1628b009685523bb9d15bb9143e86b5f806df0423dab92
+    fingerprint_after: sha256:ab4f1ac4877642539f2d68dbafea87e276fee712cb76107514398687760a337a
