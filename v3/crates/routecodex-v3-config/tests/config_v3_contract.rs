@@ -140,6 +140,39 @@ targets = [
 "#;
 
 #[test]
+fn omitted_server_endpoints_enable_all_hub_v1_entry_protocols() {
+    let parsed = parse_v3_config_02_authoring(
+        r#"
+version = 3
+[servers.default]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[route_groups.default.pools.default]
+targets = []
+"#,
+    )
+    .expect("minimal config with omitted endpoints must parse");
+    assert_eq!(
+        parsed.servers["default"].endpoints,
+        ["responses", "anthropic", "gemini", "openai_chat"]
+    );
+}
+
+#[test]
+fn zero_sse_first_frame_timeout_is_rejected_at_config_owner() {
+    let invalid = FULL_CONFIG.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\" }\nsse_first_frame_timeout_ms = 0",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("sse_first_frame_timeout_ms must be non-zero"));
+}
+
+#[test]
 fn http_sse_keepalive_config_defaults_when_canonical_environment_input_is_absent() {
     assert_eq!(
         resolve_v3_http_sse_keepalive_ms(None, None).unwrap(),
@@ -188,6 +221,11 @@ fn parses_full_config_v3_without_interpreting_targets() {
     assert_eq!(manifest.servers["primary"].port, 4444);
     assert_eq!(manifest.servers["secondary"].port, 4445);
     assert_eq!(manifest.providers.len(), 2);
+    assert_eq!(
+        manifest.providers["cc"].sse_first_frame_timeout_ms,
+        Some(30_000),
+        "omitted provider SSE timeout must compile to the documented 30s default"
+    );
     assert_eq!(
         manifest.providers["cc"].models["gpt-5.5"].wire_name,
         "gpt-5.5"
@@ -392,7 +430,9 @@ targets = [
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
         .expect_err("metadata_center_local_search without backend binding must fail");
     assert!(
-        error.to_string().contains("requires exactly one web_search_backend binding"),
+        error
+            .to_string()
+            .contains("requires exactly one web_search_backend binding"),
         "unexpected error: {error}"
     );
 
@@ -400,10 +440,9 @@ targets = [
         "web_search_execution_mode = \"metadata_center_local_search\"",
         "web_search_execution_mode = \"metadata_center_local_search\"\nweb_search_backend = \"local.search\"",
     );
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&source_with_backend).unwrap(),
-    )
-    .expect("metadata_center_local_search with backend binding must compile");
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source_with_backend).unwrap())
+            .expect("metadata_center_local_search with backend binding must compile");
     assert_eq!(
         manifest.providers["local"].models["local-model"]
             .web_search_backend_binding
@@ -455,7 +494,9 @@ targets = [
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
         .expect_err("same model name with conflicting web_search_execution_mode must fail");
     assert!(
-        error.to_string().contains("conflicting web_search_execution_mode"),
+        error
+            .to_string()
+            .contains("conflicting web_search_execution_mode"),
         "unexpected error: {error}"
     );
 }
@@ -736,10 +777,8 @@ reason_code = "subscription_invalid_without_token"
 message_mode = "code_only"
 "#
     );
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&path_config).unwrap(),
-    )
-    .unwrap();
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&path_config).unwrap()).unwrap();
     let policy = manifest
         .error
         .provider_error_action_policy
@@ -756,15 +795,21 @@ message_mode = "code_only"
     );
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&ambiguous).unwrap())
         .unwrap_err();
-    assert!(error.to_string().contains("both action and path"), "{error}");
+    assert!(
+        error.to_string().contains("both action and path"),
+        "{error}"
+    );
 
     let invalid = path_config.replace(
         "step = \"cooldown\"\nscope = \"provider_instance\"\nduration_ms = 3600000\nprovider_global_failure = true",
         "step = \"project\"\nstatus = 502\nreason_code = \"early_project\"\nmessage_mode = \"code_only\"",
     );
-    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap())
-        .unwrap_err();
-    assert!(error.to_string().contains("project must be the final step"), "{error}");
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(
+        error.to_string().contains("project must be the final step"),
+        "{error}"
+    );
 }
 
 #[test]

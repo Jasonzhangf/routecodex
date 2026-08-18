@@ -4,10 +4,12 @@ use routecodex_v3_config::{
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    is_v3_retryable_transient_stage_code, V3Error05ExecutionDecision,
-    V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
-    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind,
-    V3ExternalErrorLink, V3ProviderFailureSessionScope,
+    build_v3_error_02_classified_from_v3_error_01, build_v3_provider_global_failure_policy,
+    is_v3_retryable_transient_stage_code,
+    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3Error01SourceRaised, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_global_probe_request, ReqwestResponsesTransport, ResponsesTransport,
@@ -31,7 +33,8 @@ use crate::provider_action_gate::{
     V3ProviderActionGateKey, V3ProviderActionProviderScope, V3ProviderActionRecoveryTransition,
 };
 use crate::provider_error_policy_matching::provider_error_policy_matches_source_failure;
-include!("provider_failure_global_probe.rs");
+pub use crate::provider_failure_global_probe::build_v3_provider_global_probe_target;
+pub(crate) use crate::provider_failure_global_probe::probe_v3_provider_global_target_impl;
 
 pub async fn probe_v3_provider_global_target(
     target: V3ResponsesProviderTarget,
@@ -425,11 +428,24 @@ impl V3ProviderFailureRuntimeHealth {
         cooldown_ms: Option<u64>,
         now_ms: u64,
     ) -> Result<V3ProviderGlobalSubscriptionDecision, String> {
-        let mut policy = V3ProviderGlobalSubscriptionPolicy::default();
-        if let Some(cooldown_ms) = cooldown_ms {
-            policy.cooldown_ms = cooldown_ms;
-            policy.probe_interval_ms = cooldown_ms;
-        }
+        let policy = if let Some(cooldown_ms) = cooldown_ms {
+            if cooldown_ms == 0 {
+                return Err("provider global subscription cooldown must be non-zero".to_string());
+            }
+            V3ProviderGlobalSubscriptionPolicy {
+                cooldown_ms,
+                probe_interval_ms: cooldown_ms,
+                ..V3ProviderGlobalSubscriptionPolicy::default()
+            }
+        } else {
+            build_v3_provider_global_failure_policy(fingerprint.http_status)
+                .map(|policy| V3ProviderGlobalSubscriptionPolicy {
+                    failure_threshold: policy.failure_threshold,
+                    cooldown_ms: policy.cooldown_ms,
+                    probe_interval_ms: policy.probe_interval_ms,
+                })
+                .ok_or_else(|| "unsupported provider global health error class".to_string())?
+        };
         self.global_subscription_store
             .record_invalid_subscription_response(
                 failure_session_scope,
@@ -572,11 +588,36 @@ impl V3ProviderFailureRuntimeHealth {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         reason: Option<&str>,
+        source_stage: &'static str,
         status: u16,
         error_type: Option<&str>,
         message: &str,
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, String> {
+        let code = error_type.unwrap_or("provider_failure").to_string();
+        let source = build_v3_error_01_source_raised_external(
+            V3ErrorSourceKind::ProviderFailure,
+            source_stage,
+            code.clone(),
+            message,
+            V3ExternalErrorLink {
+                kind: V3ExternalErrorKind::Provider,
+                status: Some(status),
+                code: Some(code),
+                provider_id: Some(provider_id.to_string()),
+                upstream_request_id: None,
+                message: Some(message.to_string()),
+            },
+        );
+        let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
+        self.record_provider_global_health_for_classified_error(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            &classified,
+            now_ms,
+        )?;
         self.store
             .record_provider_failure_in_session_with_policy(
                 failure_session_scope,
@@ -585,7 +626,15 @@ impl V3ProviderFailureRuntimeHealth {
                 model_id,
                 reason,
                 now_ms,
-                configured_health_policy_for_failure(manifest, provider_id, provider_type, model_id, status, error_type, message),
+                configured_health_policy_for_failure(
+                    manifest,
+                    provider_id,
+                    provider_type,
+                    model_id,
+                    status,
+                    error_type,
+                    message,
+                ),
             )
             .map_err(|error| error.to_string())
     }
@@ -752,6 +801,33 @@ impl V3ProviderFailureRuntimeHealth {
         Ok(())
     }
 
+    pub(crate) fn record_post_commit_provider_stream_failure_from_source(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        source: &V3Error01SourceRaised,
+    ) -> Result<(), String> {
+        let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
+        self.record_provider_global_health_for_classified_error(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            &classified,
+            v3_relay_provider_policy_now_epoch_ms()?,
+        )?;
+        self.record_post_commit_provider_stream_failure(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            &source.code,
+            &source.message,
+        )
+    }
+
     pub(crate) async fn wait_for_error05_recovery(
         &self,
         witness: &V3Error05RecoveryAdmissionWitness,
@@ -762,7 +838,11 @@ impl V3ProviderFailureRuntimeHealth {
                 witness,
                 V3ProviderActionProviderScope::new(
                     witness.failure_session_scope(),
-                    v3_relay_provider_candidate_key_parts(&selected.candidate.provider_id, Some(&selected.candidate.auth_alias), Some(&selected.candidate.model_id)),
+                    v3_relay_provider_candidate_key_parts(
+                        &selected.candidate.provider_id,
+                        Some(&selected.candidate.auth_alias),
+                        Some(&selected.candidate.model_id),
+                    ),
                 )?,
             )
             .await
@@ -776,7 +856,11 @@ impl V3ProviderFailureRuntimeHealth {
         self.action_gate
             .wait_for_exact_provider_action(&V3ProviderActionProviderScope::new(
                 failure_session_scope,
-                v3_relay_provider_candidate_key_parts(&selected.candidate.provider_id, Some(&selected.candidate.auth_alias), Some(&selected.candidate.model_id)),
+                v3_relay_provider_candidate_key_parts(
+                    &selected.candidate.provider_id,
+                    Some(&selected.candidate.auth_alias),
+                    Some(&selected.candidate.model_id),
+                ),
             )?)
             .await
     }
@@ -1020,6 +1104,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 Some(&selected.candidate.auth_alias),
                 Some(&selected.candidate.model_id),
                 reason,
+                source_stage,
                 status,
                 error_type.as_deref(),
                 &message,
@@ -1619,7 +1704,11 @@ pub(crate) fn v3_relay_provider_target_selection_sample(request_id: &str) -> u64
 }
 
 pub(crate) fn v3_relay_provider_candidate_key(candidate: &V3TargetCandidate) -> String {
-    v3_relay_provider_candidate_key_parts(&candidate.provider_id, Some(&candidate.auth_alias), Some(&candidate.model_id))
+    v3_relay_provider_candidate_key_parts(
+        &candidate.provider_id,
+        Some(&candidate.auth_alias),
+        Some(&candidate.model_id),
+    )
 }
 
 pub(crate) fn v3_relay_provider_candidate_key_parts(

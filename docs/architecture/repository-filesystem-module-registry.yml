@@ -44,3 +44,182 @@ modules:
       - provider.wire_payload
       - response.client_payload
       - metadata.runtime_control
+  - module_id: v3.provider_global_health_runtime
+    owner_feature_id: v3.provider_global_subscription_probe
+    owned_paths:
+      - v3/crates/routecodex-v3-error/src/lib.rs
+      - v3/crates/routecodex-v3-error/src/subscription.rs
+      - v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+      - v3/crates/routecodex-v3-provider-responses/src/health.rs
+      - v3/crates/routecodex-v3-provider-responses/tests/provider_global_subscription_probe_contract.rs
+      - v3/crates/routecodex-v3-provider-responses/tests/support/wire_unit.rs
+      - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      - v3/crates/routecodex-v3-runtime/src/lib.rs
+      - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/v3-architecture-audit-locks.yml
+      - docs/architecture/wiki/v3-mainline-caller-flow.md
+      - docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    allowed_paths:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - docs/architecture/manifests/v3.provider_global_subscription_probe.mainline.yml
+    forbidden_paths:
+      - src
+      - sharedmodule/llmswitch-core/rust-core
+    allowed_edges:
+      - from: V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy
+        to: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+      - from: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+        to: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
+      - from: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
+        to: V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response
+      - from: execute_v3_responses_relay_runtime_inner
+        to: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+      - from: record_v3_direct_provider_failure_record
+        to: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+      - from: V3DirectSseProviderOutcome::record_failure
+        to: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+      - from: record_v3_direct_provider_failure_record
+        to: build_v3_error_02_classified_from_v3_error_01
+      - from: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+        to: build_v3_error_02_classified_from_v3_error_01
+    forbidden_resources:
+      - request.normal_payload
+      - provider.wire_payload
+      - response.client_payload
+      - metadata.runtime_control
+  - module_id: v3.hub_relay_runtime_closeout
+    owner_feature_id: v3.hub_relay_runtime_closeout
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    allowed_paths:
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-verification-map.yml
+    forbidden_paths:
+      - src
+      - sharedmodule/llmswitch-core/rust-core
+    allowed_edges:
+      - from: execute_v3_responses_relay_runtime_inner
+        to: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+      - from: execute_v3_responses_relay_runtime_inner
+        to: build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy
+      - from: execute_v3_responses_relay_runtime_inner
+        to: build_v3_error_01_source_raised_external
+    forbidden_resources:
+      - request.normal_payload
+      - provider.wire_payload
+      - response.client_payload
+      - metadata.runtime_control
+  - module_id: v3.entry_protocol_registry_contract
+    owner_feature_id: v3.entry_protocol_registry_contract
+    owned_paths:
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+    allowed_paths:
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+    forbidden_paths:
+      - src
+      - sharedmodule/llmswitch-core/rust-core
+      - ~/.rcc
+    allowed_edges:
+      - from: V3ServerAuthoringConfig
+        to: V3ServerManifest
+    forbidden_resources:
+      - request.normal_payload
+      - provider.wire_payload
+      - response.client_payload
+      - metadata.runtime_control
+  - module_id: v3.config_interpreter_contract
+    owner_feature_id: v3.config_interpreter_contract
+    owned_paths:
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-config/src/validate/provider_error_policy.rs
+    allowed_paths:
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-verification-map.yml
+    forbidden_paths:
+      - src
+      - sharedmodule/llmswitch-core/rust-core
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+    allowed_edges:
+      - from: V3ProviderAuthoringConfig
+        to: V3ProviderManifest
+      - from: V3Config05ManifestPublished
+        to: V3RelaySseFirstFrameGuard
+    forbidden_resources:
+      - request.normal_payload
+      - provider.wire_payload
+      - response.client_payload
+      - metadata.runtime_control
+  - module_id: v3.relay_runtime_core
+    owner_feature_id: v3.relay_runtime_core
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    allowed_paths:
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+    forbidden_paths:
+      - src
+      - sharedmodule/llmswitch-core/rust-core
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    allowed_edges:
+      - from: execute_v3_relay_runtime_core
+        to: guard_relay_sse_first_frame
+      - from: execute_v3_relay_runtime_core
+        to: V3Config05ManifestPublished
+      - from: V3Config05ManifestPublished
+        to: guard_relay_sse_first_frame
+      - from: guard_relay_sse_first_frame
+        to: V3ProviderError
+      - from: execute_v3_relay_runtime_core
+        to: provider_runtime_failure
+      - from: handle_provider_failure
+        to: run_v3_relay_provider_failure_policy
+    forbidden_resources:
+      - request.normal_payload
+      - provider.wire_payload
+      - response.client_payload
+      - metadata.runtime_control
+  - module_id: v3.provider_action_gate
+    owner_feature_id: v3.provider_action_gate
+    owned_paths:
+      - scripts/architecture/v3-provider-action-gate-lib.mjs
+    allowed_paths:
+      - scripts/architecture/verify-v3-provider-action-gate.mjs
+      - scripts/tests/v3-provider-action-gate-red-fixtures.mjs
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/manifests/v3.provider_action_gate.mainline.yml
+      - docs/architecture/v3-architecture-audit-locks.yml
+      - docs/architecture/wiki/v3-mainline-caller-flow.md
+      - docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    forbidden_paths:
+      - src
+      - sharedmodule/llmswitch-core/rust-core
+    allowed_edges:
+      - from: V3DirectSseProviderOutcome::record_failure
+        to: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+    forbidden_resources:
+      - request.normal_payload
+      - provider.wire_payload
+      - response.client_payload
+      - metadata.runtime_control

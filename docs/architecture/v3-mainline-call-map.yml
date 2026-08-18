@@ -363,6 +363,7 @@ chains:
       - v3.config.schema_validated
       produces:
       - v3.config.resource_registry
+      - v3.config.server_manifests
       - v3.config.hub_pipeline_declarations
       - v3.hub.runtime_resource_declarations
       - v3.config.route_pool_match_declarations
@@ -381,6 +382,7 @@ chains:
     resource_flow:
       consumes:
       - v3.config.resource_registry
+      - v3.config.server_manifests
       produces:
       - v3.config.published_manifest
       - v3.secret.provider_auth_handle
@@ -388,6 +390,58 @@ chains:
       side_channel_reads: []
       side_channel_writes:
       - v3.secret.provider_auth_handle
+    status: anchored
+- chain_id: v3.config.server_manifest_compile.mainline
+  owner_feature_id: v3.config_interpreter_contract
+  summary: Config compiles each server authoring entry into the server manifest consumed by publication and startup.
+  edges:
+  - step_id: v3-config-server-manifest-01
+    from_node: V3ServerAuthoringConfig
+    to_node: V3ServerManifest
+    caller_symbol: compile_servers
+    caller_file: v3/crates/routecodex-v3-config/src/validate.rs
+    callee_symbol: V3ServerManifest
+    callee_file: v3/crates/routecodex-v3-config/src/types.rs
+    owner_feature_id: v3.config_interpreter_contract
+    resource_flow:
+      consumes:
+      - v3.config.authoring_parsed
+      produces:
+      - v3.config.server_manifests
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+- chain_id: v3.config.provider_sse_timeout_projection.mainline
+  owner_feature_id: v3.config_interpreter_contract
+  summary: Config compiles and publishes the validated per-provider SSE first-frame timeout consumed by the shared Relay guard.
+  edges:
+  - step_id: v3-config-provider-sse-timeout-01
+    from_node: V3ProviderAuthoringConfig
+    to_node: V3ProviderManifest
+    caller_symbol: compile_providers
+    caller_file: v3/crates/routecodex-v3-config/src/validate.rs
+    callee_symbol: V3ProviderManifest
+    callee_file: v3/crates/routecodex-v3-config/src/types.rs
+    owner_feature_id: v3.config_interpreter_contract
+    resource_flow:
+      consumes: [v3.config.authoring_parsed]
+      produces: [v3.config.provider_sse_first_frame_timeout]
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-config-provider-sse-timeout-02
+    from_node: V3Config05ManifestPublished
+    to_node: V3RelaySseFirstFrameGuard
+    caller_symbol: execute_v3_relay_runtime_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    callee_symbol: guard_relay_sse_first_frame
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    owner_feature_id: v3.relay_runtime_core
+    resource_flow:
+      consumes: [v3.config.provider_sse_first_frame_timeout]
+      produces: [v3.error.source]
+      side_channel_reads: [v3.config.provider_sse_first_frame_timeout]
+      side_channel_writes: [v3.error.source]
     status: anchored
 - chain_id: v3.config.compact_hub_v1_defaults
   owner_feature_id: v3.config_interpreter_contract
@@ -6504,7 +6558,7 @@ chains:
       to_node: V3ProviderActionFailureRecorded
       caller_symbol: V3DirectSseProviderOutcome::record_failure
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -7006,19 +7060,47 @@ chains:
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
   - step_id: v3-provider-global-probe-03
-    from_node: V3ProviderGlobalSubscriptionFailureObservation
+    from_node: V3Error02Classified
     to_node: V3ProviderGlobalSubscriptionHealthStore
     caller_symbol: execute_v3_responses_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
-      consumes: [v3.provider.global_subscription_health, v3.error.source]
+      consumes: [v3.provider.global_subscription_health, v3.error.classified]
       produces: [v3.provider.global_subscription_health]
-      side_channel_reads: [v3.provider.global_subscription_health, v3.error.source]
+      side_channel_reads: [v3.provider.global_subscription_health, v3.error.classified]
       side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-error-classification
+    from_node: V3Error01SourceRaised
+    to_node: V3Error02Classified
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    callee_symbol: build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.source]
+      produces: [v3.error.classified]
+      side_channel_reads: [v3.error.source]
+      side_channel_writes: [v3.error.classified]
+  - step_id: v3-provider-global-probe-relay-error-source
+    from_node: V3HubRespChatProcess03Governed
+    to_node: V3Error01SourceRaised
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    callee_symbol: build_v3_error_01_source_raised_external
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.source]
+      produces: [v3.error.source]
+      side_channel_reads: [v3.error.source]
+      side_channel_writes: [v3.error.source]
   - step_id: v3-provider-global-probe-04
     from_node: V3ProviderGlobalSubscriptionFailureObservation
     to_node: V3ProviderGlobalSubscriptionHealthStore
@@ -7029,7 +7111,105 @@ chains:
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
-      consumes: [v3.provider.global_subscription_health, v3.error.source]
+      consumes: [v3.provider.global_subscription_health, v3.error.classified]
       produces: [v3.provider.global_subscription_health]
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-05
+    from_node: V3ProviderFailureRuntimeHealth
+    to_node: V3ProviderGlobalSubscriptionFailureObservation
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.classified]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.error.classified]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-06
+    from_node: V3ProviderGlobalSubscriptionFailureObservation
+    to_node: V3ProviderGlobalSubscriptionHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.classified]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.error.classified]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-07
+    from_node: V3ProviderFailureRuntimeHealth
+    to_node: V3ProviderGlobalSubscriptionHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderGlobalSubscriptionHealthStore::record_provider_success
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-08
+    from_node: V3ProviderFailureRuntimeHealth
+    to_node: V3ProviderGlobalSubscriptionFailureObservation
+    caller_symbol: record_v3_direct_provider_failure_record
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.classified]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.error.classified]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-direct-error-classification
+    from_node: V3Error01SourceRaised
+    to_node: V3Error02Classified
+    caller_symbol: record_v3_direct_provider_failure_record
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+    callee_symbol: build_v3_error_02_classified_from_v3_error_01
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.source]
+      produces: [v3.error.classified]
+      side_channel_reads: [v3.error.source]
+      side_channel_writes: [v3.error.classified]
+  - step_id: v3-provider-global-probe-09
+    from_node: V3ProviderGlobalSubscriptionFailureObservation
+    to_node: V3ProviderGlobalSubscriptionHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.classified]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.error.classified]
+      side_channel_writes: [v3.provider.global_subscription_health]
+  - step_id: v3-provider-global-probe-post-commit-error-classification
+    from_node: V3Error01SourceRaised
+    to_node: V3Error02Classified
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: build_v3_error_02_classified_from_v3_error_01
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.error.source]
+      produces: [v3.error.classified]
+      side_channel_reads: [v3.error.source]
+      side_channel_writes: [v3.error.classified]

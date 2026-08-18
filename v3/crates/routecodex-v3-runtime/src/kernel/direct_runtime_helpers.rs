@@ -89,6 +89,19 @@ fn record_v3_direct_provider_failure_record(
     source: &V3Error01SourceRaised,
     now_epoch_ms: u64,
 ) -> Result<V3ProviderFailureRecord, V3Error01SourceRaised> {
+    let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(
+        source.clone(),
+    );
+    provider_health
+        .record_provider_global_health_for_classified_error(
+            failure_session_scope,
+            &selected.candidate.provider_id,
+            Some(&selected.candidate.auth_alias),
+            Some(&selected.candidate.model_id),
+            &classified,
+            now_epoch_ms,
+        )
+        .map_err(|error| runtime_source("V3ProviderGlobalHealthStateMutated", error))?;
     provider_health
         .record_provider_failure_record(
             failure_session_scope,

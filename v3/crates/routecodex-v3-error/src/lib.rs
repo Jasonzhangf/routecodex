@@ -291,6 +291,10 @@ pub struct V3Error02Classified {
     pub source: V3Error01SourceRaised,
     pub class: &'static str,
     pub terminal_state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_global_cooldown_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_global_semantic_signature: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -655,7 +659,20 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
         source,
         class,
         terminal_state,
+        provider_global_cooldown_ms: None,
+        provider_global_semantic_signature: None,
     }
+}
+
+pub fn build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy(
+    source: V3Error01SourceRaised,
+    cooldown_ms: Option<u64>,
+    semantic_signature: String,
+) -> V3Error02Classified {
+    let mut classified = build_v3_error_02_classified_from_v3_error_01(source);
+    classified.provider_global_cooldown_ms = cooldown_ms;
+    classified.provider_global_semantic_signature = Some(semantic_signature);
+    classified
 }
 
 /// 瞬态失败（SSE 流内协议失败 / transport 响应头挂起）判定，由错误处理中心
@@ -684,9 +701,7 @@ pub fn is_v3_retryable_transient_stage_code(source_stage: &str, code: &str) -> b
         // - 2xx 响应内容/流内失败（裸 error 事件、response.failed/incomplete、
         //   空包、首事件超时、malformed SSE、body/JSON 解码失败、SSE 事件内
         //   动态错误码等）：provider 内部瞬态问题，health-neutral 重试。
-        "V3ProviderResp14Raw" | "V3ProviderRespInbound01Raw" => {
-            !code.starts_with("provider_http_")
-        }
+        "V3ProviderResp14Raw" | "V3ProviderRespInbound01Raw" => !code.starts_with("provider_http_"),
         // transport 阶段仅挂起（响应头等待超时，专属 code）为瞬态。
         "V3Transport13ResponsesHttpRequest" | "V3ProviderReqOutbound09TransportRequest" => {
             code == V3_TRANSIENT_TRANSPORT_HANG_CODE
@@ -1265,4 +1280,8 @@ mod tests {
 }
 mod subscription;
 
-pub use subscription::V3ProviderErrorFingerprint;
+pub use subscription::{
+    build_v3_provider_global_error_fingerprint,
+    build_v3_provider_global_error_fingerprint_from_classified, V3ProviderErrorFingerprint,
+    build_v3_provider_global_failure_policy, V3ProviderGlobalFailurePolicy,
+};

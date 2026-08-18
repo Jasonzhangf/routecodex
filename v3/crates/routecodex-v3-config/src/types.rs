@@ -544,6 +544,11 @@ pub fn default_provider_request_timeout_ms() -> u64 {
     300_000
 }
 
+/// provider SSE 首帧/帧间隔超时默认值（毫秒）：30s。
+pub fn default_provider_sse_first_frame_timeout_ms() -> u64 {
+    30_000
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct V3ProviderRequestCleanupAuthoringConfig {
@@ -956,9 +961,7 @@ impl V3Config05ManifestPublished {
     /// provider model declarations. The Virtual Router consumes this index to
     /// construct implicit capability pools without interpreting provider
     /// internals itself.
-    pub fn capability_model_candidates(
-        &self,
-    ) -> BTreeMap<String, Vec<V3CapabilityModelCandidate>> {
+    pub fn capability_model_candidates(&self) -> BTreeMap<String, Vec<V3CapabilityModelCandidate>> {
         let mut index: BTreeMap<String, Vec<V3CapabilityModelCandidate>> = BTreeMap::new();
         for provider in self.providers.values() {
             if !provider.enabled {
@@ -1304,5 +1307,10 @@ fn default_hub_v1_skeleton() -> String {
 }
 
 fn default_responses_endpoint() -> Vec<String> {
-    vec!["responses".to_string()]
+    vec![
+        "responses".to_string(),
+        "anthropic".to_string(),
+        "gemini".to_string(),
+        "openai_chat".to_string(),
+    ]
 }

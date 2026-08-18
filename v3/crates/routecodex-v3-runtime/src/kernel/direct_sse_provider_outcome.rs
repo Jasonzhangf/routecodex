@@ -86,13 +86,12 @@ impl V3DirectSseProviderOutcome {
         }
         drop(self._provider_action_permit.take());
         self.provider_health
-            .record_post_commit_provider_stream_failure(
+            .record_post_commit_provider_stream_failure_from_source(
                 &self.failure_session_scope,
                 &self.provider_id,
                 Some(&self.auth_alias),
                 Some(&self.model_id),
-                &source.code,
-                &source.message,
+                source,
             )?;
         self.recorded = true;
         Ok(())

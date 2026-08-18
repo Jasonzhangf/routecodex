@@ -352,7 +352,7 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: V3DirectSseProviderOutcome::record_failure
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-37
     from: V3ProviderActionPermitInFlight

@@ -838,6 +838,7 @@ features:
   required_gates:
   - npm run verify:v3-entry-protocol-endpoint-binding
   - npm run test:v3-entry-protocol-endpoint-binding-red-fixtures
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract omitted_server_endpoints_enable_all_hub_v1_entry_protocols -- --nocapture
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
@@ -2574,6 +2575,7 @@ features:
   - v3-entry-protocol-registry-02
   - v3-entry-protocol-registry-03
   entry_symbols:
+  - default_responses_endpoint
   - V3EntryProtocolBindingAuthoringConfig
   - V3EntryProtocolBindingManifest
   - V3EntryProtocolExecutionMode
@@ -2638,6 +2640,7 @@ features:
   - routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
@@ -4240,6 +4243,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
   - v3/crates/routecodex-v3-error/src/lib.rs
+  - scripts/architecture/v3-provider-action-gate-lib.mjs
   required_gates:
   - npm run test:v3-provider-action-gate
   - npm run verify:v3-provider-action-gate
@@ -4358,6 +4362,9 @@ features:
   - v3/crates/routecodex-v3-config/Cargo.toml
   - v3/crates/routecodex-v3-config/build.rs
   - v3/crates/routecodex-v3-config/src/lib.rs
+  - package.json
+  - package-lock.json
+  - src/build-info.ts
   resource_bindings:
   - v3.global_binary_install
   entry_symbols:
@@ -4373,6 +4380,9 @@ features:
   - v3/crates/routecodex-v3-config/Cargo.toml
   - v3/crates/routecodex-v3-config/build.rs
   - v3/crates/routecodex-v3-config/src/lib.rs
+  - package.json
+  - package-lock.json
+  - src/build-info.ts
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
@@ -4442,6 +4452,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  resource_bindings:
+  - v3.config.provider_sse_first_frame_timeout
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
@@ -4450,7 +4462,10 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   required_gates:
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime guard_honors_configured_first_frame_timeout -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime guard_rejects_zero_first_frame_timeout -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract zero_sse_first_frame_timeout_is_rejected_at_config_owner -- --nocapture
   - npm run verify:v3-architecture-ci
   - npm run verify:v3-provider-action-gate
   mainline_bindings:
@@ -4578,30 +4593,50 @@ features:
   change_risk: critical
   owner_kind: rust_v3_provider_global_health_lifecycle
   owner_crates:
+  - routecodex-v3-error
   - routecodex-v3-provider-responses
   - routecodex-v3-runtime
   - routecodex-v3-server
   owner_files:
+  - v3/crates/routecodex-v3-error/src/lib.rs
+  - v3/crates/routecodex-v3-error/src/subscription.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+  - v3/crates/routecodex-v3-runtime/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
   - v3.provider.global_subscription_health
   - v3.config.published_manifest
   entry_symbols:
+  - build_v3_provider_global_error_fingerprint
+  - build_v3_provider_global_error_fingerprint_from_classified
+  - build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy
+  - build_v3_error_01_source_raised_external
+  - build_v3_provider_global_failure_policy
+  - V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
+  - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+  - V3ProviderGlobalSubscriptionHealthStore::record_provider_success
   - V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
   - V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure
   - V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
   - probe_v3_provider_global_target
   - spawn_v3_server_aggregate
   allowed_paths:
+  - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_global_health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_global_subscription_probe_contract.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-error/src/subscription.rs
   - v3/crates/routecodex-v3-config/src
@@ -4611,7 +4646,11 @@ features:
   - src
   - sharedmodule/llmswitch-core
   required_gates:
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime configured_semantic_global_failure_keeps_manifest_cooldown_policy -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
   - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
