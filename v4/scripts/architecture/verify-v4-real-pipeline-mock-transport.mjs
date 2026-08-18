@@ -11,9 +11,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const red = process.argv.includes('--red-self-test');
 
 const REQUIRED_PLAN_TOKENS = [
-  'v4-real-pipeline-migration-plan.md',
-  'v4.pipeline.real_migration',
-  'v4.pipeline.mock_transport_slice',
   'KeylessChatFixture',
   'V4RequestIdCounter',
   'V4ErrorEvidenceFlushOnTerminalFailure',
@@ -51,7 +48,6 @@ const readJson = (file) => JSON.parse(readText(file));
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 const base = {
-  plan: readText('docs/goals/v4-real-pipeline-migration-plan.md'),
   architecture: readText('docs/architecture/v4-cordis-node-plugin-architecture.md'),
   resourceYaml: readText('docs/architecture/v4-resource-operation-map.yml'),
   runtime: readText('crates/routecodex-v4-runtime/src/lib.rs'),
@@ -63,15 +59,18 @@ const base = {
 
 function validate(input) {
   const failures = [];
-  for (const token of REQUIRED_PLAN_TOKENS) {
-    if (!input.plan.includes(token)) failures.push(`plan missing token: ${token}`);
+  // KeylessChatFixture is checked via REQUIRED_RUNTIME_SYMBOLS in runtime source
+  if (!input.runtime.includes('KeylessChatFixture')) {
+    failures.push('runtime missing symbol: KeylessChatFixture');
   }
+  // V4RequestIdCounter and V4ErrorEvidenceFlushOnTerminalFailure already checked in server source
+  // project_runtime_fault already checked in REQUIRED_RUNTIME_SYMBOLS
   if (!input.architecture.includes('phase3_mock_transport_slice_active')
       || input.architecture.includes('phase2_host_binding_active')) {
     failures.push('architecture missing current phase3 marker (or stale phase2 marker)');
   }
   for (const token of FORBIDDEN) {
-    if (input.plan.includes(token) || input.runtime.includes(token)) {
+    if (input.runtime.includes(token)) {
       failures.push(`source contains forbidden token: ${token}`);
     }
   }

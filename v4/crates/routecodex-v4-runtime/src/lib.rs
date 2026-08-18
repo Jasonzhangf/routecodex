@@ -1685,7 +1685,7 @@ impl MockTransportIdentityCounter {
         let next = self.counters.get(&key).copied().unwrap_or(0) + 1;
         self.counters.insert(key, next);
         Ok(MockTransportIdentity {
-            request_id: format!("{server_id}-{local_day}-{next:08}"),
+            request_id: format!("mock.{server_id}-{local_day}-{next:08}"),
             server_id: server_id.to_string(),
             local_day: local_day.to_string(),
         })

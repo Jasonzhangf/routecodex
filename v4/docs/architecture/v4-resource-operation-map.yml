@@ -2041,7 +2041,7 @@ resources:
   verification_gate:
   - v4_parity_gate_real_pipeline_mock_transport
   resource_kind: runtime_identity_counter
-  lifecycle: v4.server.request_identity
+  lifecycle: v4.pipeline.mock_transport_identity
   owner_crate: routecodex-v4-runtime
   owner_node: V4Runtime01MainlineKernel
   owner_symbols:

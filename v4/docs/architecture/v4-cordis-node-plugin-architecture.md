@@ -500,9 +500,9 @@ GET  /v4/admin/audit
 ## M8 第一切片（mock_transport_slice）
 
 - 状态：phase3_mock_transport_slice_active
-- 合同：v4/docs/goals/v4-real-pipeline-migration-plan.md
+- 合同：v4/crates/routecodex-v4-runtime/src/lib.rs（MockTransportIdentity/MockTransportReport/KeylessChatFixture）+ 对应 function/resource/mainline map
 - 入口：execute_mock_response_scoped（runtime mock transport）
-- owner：feature_id:v4.pipeline.real_migration + feature_id:v4.pipeline.mock_transport_slice
+- owner：feature_id:v4.runtime.real_pipeline_mock_transport
 - gate：v4_parity_gate_real_pipeline_mock_transport（含 --red-self-test）
 - 范围：config/lifecycle + diagnostics + request inbound + response inbound + error chain（keyless fixture + mock transport，禁真实 provider wire/凭据）
 - 下一切片：routing/target、provider compat/wire、transport、error/retry/continuation integration

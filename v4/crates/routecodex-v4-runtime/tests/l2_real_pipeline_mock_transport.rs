@@ -59,7 +59,7 @@ fn positive_keyless_fixture_carries_fixture_identity_through_request_chain() {
         "relay",
     )
     .expect("mock transport slice must succeed");
-    assert_eq!(first.request_id, "srv-m8-2026-08-17-00000001");
+    assert_eq!(first.request_id, "mock.srv-m8-2026-08-17-00000001");
     assert_eq!(first.request_binding, bound);
     assert!(first.client_frame.starts_with("frame:client:"));
     assert!(first.provider_wire.starts_with("wire:semantic:mock-model:"));
@@ -86,7 +86,7 @@ fn positive_keyless_fixture_carries_fixture_identity_through_request_chain() {
         "relay",
     )
     .expect("second mock transport slice must succeed");
-    assert_eq!(second.request_id, "srv-m8-2026-08-17-00000002");
+    assert_eq!(second.request_id, "mock.srv-m8-2026-08-17-00000002");
     assert_eq!(second.request_binding, bound);
     assert_ne!(first.request_id, second.request_id);
     assert_eq!(second.fixture_method, "POST");
