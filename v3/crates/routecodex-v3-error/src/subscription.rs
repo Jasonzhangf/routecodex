@@ -1,11 +1,20 @@
 use serde::Serialize;
 
+use crate::V3Error02Classified;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct V3ProviderErrorFingerprint {
     pub reason_code: String,
     pub provider_code: String,
     pub http_status: u16,
     pub semantic_signature: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct V3ProviderGlobalFailurePolicy {
+    pub failure_threshold: u32,
+    pub cooldown_ms: u64,
+    pub probe_interval_ms: u64,
 }
 
 impl V3ProviderErrorFingerprint {

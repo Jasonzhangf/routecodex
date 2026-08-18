@@ -291,6 +291,10 @@ pub struct V3Error02Classified {
     pub source: V3Error01SourceRaised,
     pub class: &'static str,
     pub terminal_state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_global_cooldown_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_global_semantic_signature: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -655,7 +659,20 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
         source,
         class,
         terminal_state,
+        provider_global_cooldown_ms: None,
+        provider_global_semantic_signature: None,
     }
+}
+
+pub fn build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy(
+    source: V3Error01SourceRaised,
+    cooldown_ms: Option<u64>,
+    semantic_signature: String,
+) -> V3Error02Classified {
+    let mut classified = build_v3_error_02_classified_from_v3_error_01(source);
+    classified.provider_global_cooldown_ms = cooldown_ms;
+    classified.provider_global_semantic_signature = Some(semantic_signature);
+    classified
 }
 
 /// 瞬态失败（SSE 流内协议失败 / transport 响应头挂起）判定，由错误处理中心

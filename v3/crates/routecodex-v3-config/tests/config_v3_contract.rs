@@ -141,6 +141,39 @@ targets = [
 "#;
 
 #[test]
+fn omitted_server_endpoints_enable_all_hub_v1_entry_protocols() {
+    let parsed = parse_v3_config_02_authoring(
+        r#"
+version = 3
+[servers.default]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[route_groups.default.pools.default]
+targets = []
+"#,
+    )
+    .expect("minimal config with omitted endpoints must parse");
+    assert_eq!(
+        parsed.servers["default"].endpoints,
+        ["responses", "anthropic", "gemini", "openai_chat"]
+    );
+}
+
+#[test]
+fn zero_sse_first_frame_timeout_is_rejected_at_config_owner() {
+    let invalid = FULL_CONFIG.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\" }\nsse_first_frame_timeout_ms = 0",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("sse_first_frame_timeout_ms must be non-zero"));
+}
+
+#[test]
 fn http_sse_keepalive_config_defaults_when_canonical_environment_input_is_absent() {
     assert_eq!(
         resolve_v3_http_sse_keepalive_ms(None, None).unwrap(),

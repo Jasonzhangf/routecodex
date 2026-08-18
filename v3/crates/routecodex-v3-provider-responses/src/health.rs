@@ -59,13 +59,8 @@ impl Default for V3ProviderFailurePolicy {
     }
 }
 
-/// 瞬态失败（SSE 流内/挂起）耗尽 3 次尝试后的 session 级短期绕行时长：
-/// 不触发 15 分钟 cooldown（health-neutral），但同一 session 的后续请求
-/// 在该窗口内绕开该 provider，避免反复命中同一失败 provider；超时自动恢复。
 pub const V3_PROVIDER_TRANSIENT_BYPASS_MS: u64 = 30_000;
 
-/// provider 级冷却的复活探针间隔：冷却到期后，后台每 15 分钟对冷却中的
-/// provider 发一次最小 ping，通过才恢复（业务请求在冷却期间永不命中）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct V3ProviderFailureRecord {
     pub scope_label: String,
@@ -206,11 +201,7 @@ struct V3ProviderCooldown {
     reason: String,
     original_cooldown_until_ms: Option<u64>,
     until_ms: Option<u64>,
-    /// provider 级冷却专属：冷却到期后下一次后台 probe 的时点。冷却期间
-    /// 与待探期间 provider 都不可用；probe 通过才清除冷却（业务成功请求
-    /// 不再复活 provider 级冷却）。session 级冷却保持 None。
     next_probe_at_ms: Option<u64>,
-    /// provider 级冷却专属：后台 probe 正在执行时置 true，防止重复探测。
     probe_in_flight: bool,
 }
 
@@ -880,9 +871,6 @@ impl V3ProviderHealthStore {
         }
         // provider 级冷却探针（跨 session 共享）：冷却期/待探期/探针执行中，
         // 该 provider 对全部 session 的常规选择不可用，恢复唯一路径是后台
-        // probe 通过。全局/default-floor 视图不包含该状态，保留 default
-        // floor 兜底可达（provider_global_subscription_failure 仍单独阻断
-        // 全局视图）。
         let cooldown_probe = state
             .provider_cooldown_probes
             .get(&provider_cooldown_probe_key(
@@ -902,10 +890,6 @@ impl V3ProviderHealthStore {
                 .blocked_scopes
                 .push("provider_cooldown_probe_pending".to_string());
         }
-        // 全局订阅不可用由 runtime 的
-        // `V3SessionGlobalAvailabilityReader`/`V3ProviderFailureRuntimeHealth`
-        // 单点投影（一次 push）；这里不重复 push，避免日志出现
-        // `provider_global_subscription_failure|provider_global_subscription_failure`。
         projection
     }
 }

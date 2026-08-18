@@ -1,3 +1,15 @@
+use crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth;
+use routecodex_v3_config::V3Config05ManifestPublished;
+use routecodex_v3_error::{
+    build_v3_provider_global_error_fingerprint_from_classified, V3Error02Classified,
+    V3ProviderFailureSessionScope,
+};
+use routecodex_v3_provider_responses::{
+    build_v3_provider_global_probe_request, ReqwestResponsesTransport, ResponsesTransport,
+    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
+    V3ProviderGlobalSubscriptionPolicy, V3ResponsesProviderTarget,
+};
+
 pub fn build_v3_provider_global_probe_target(
     manifest: &V3Config05ManifestPublished,
     provider_id: &str,
@@ -63,7 +75,35 @@ pub fn build_v3_provider_global_probe_target(
     })
 }
 
-async fn probe_v3_provider_global_target_impl(
+impl V3ProviderFailureRuntimeHealth {
+    pub(crate) fn record_provider_global_health_for_classified_error(
+        &self,
+        scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        classified: &V3Error02Classified,
+        now_ms: u64,
+    ) -> Result<(), String> {
+        let Some(fingerprint) =
+            build_v3_provider_global_error_fingerprint_from_classified(classified)?
+        else {
+            return Ok(());
+        };
+        self.record_provider_global_subscription_failure(
+            scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            fingerprint,
+            classified.provider_global_cooldown_ms,
+            now_ms,
+        )
+        .map(|_| ())
+    }
+}
+
+pub(crate) async fn probe_v3_provider_global_target_impl(
     target: V3ResponsesProviderTarget,
 ) -> Result<(), String> {
     let provider_id = target.provider_id.clone();

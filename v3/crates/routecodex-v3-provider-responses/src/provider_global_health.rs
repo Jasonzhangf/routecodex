@@ -55,9 +55,6 @@ struct V3ProviderGlobalKey {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct V3ProviderSessionFingerprintKey {
     provider: V3ProviderGlobalKey,
-    server_id: String,
-    routing_group: String,
-    session_id: String,
     fingerprint: V3ProviderErrorFingerprint,
 }
 
@@ -85,7 +82,7 @@ pub struct V3ProviderGlobalSubscriptionHealthStore {
 impl V3ProviderGlobalSubscriptionHealthStore {
     pub fn record_invalid_subscription_response(
         &self,
-        session_scope: &V3ProviderFailureSessionScope,
+        _session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
@@ -100,9 +97,6 @@ impl V3ProviderGlobalSubscriptionHealthStore {
         let provider = global_key(provider_id, auth_alias, model_id);
         let key = V3ProviderSessionFingerprintKey {
             provider: provider.clone(),
-            server_id: session_scope.server_id().to_string(),
-            routing_group: session_scope.routing_group().to_string(),
-            session_id: session_scope.session_id().to_string(),
             fingerprint,
         };
         let mut state = self
@@ -296,12 +290,8 @@ impl V3ProviderGlobalSubscriptionHealthStore {
             .state
             .write()
             .map_err(|error| format!("provider global health lock poisoned: {error}"))?;
-        state.failures.retain(|key, _| {
-            !(key.provider == provider
-                && key.server_id == session_scope.server_id()
-                && key.routing_group == session_scope.routing_group()
-                && key.session_id == session_scope.session_id())
-        });
+        let _ = session_scope;
+        state.failures.retain(|key, _| key.provider != provider);
         Ok(())
     }
 }

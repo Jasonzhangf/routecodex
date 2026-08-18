@@ -28,12 +28,14 @@ modules:
       - tests/scripts/v3-cli-distribution.spec.mjs
       - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
       - v3/crates/routecodex-v3-config/src/lib.rs
+      - package.json
+      - package-lock.json
+      - src/build-info.ts
     allowed_dependencies:
       - v3/crates/routecodex-v3-cli
       - dist/bin/rccv3
       - ~/.local/bin/rccv3
     forbidden_paths:
-      - src
       - sharedmodule
       - ~/.rcc/install
     required_gates:

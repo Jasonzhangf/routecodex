@@ -36,8 +36,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d
-    last_manual_authorization_id: auth-20260724-provider-error-policy-manifest
+    fingerprint: sha256:59948789e48ff5c7cdb3e1a7040f4d2b3a06f1525eca1f3b79afdbce73559e90
+    last_manual_authorization_id: auth-20260817-v3-config-server-manifest-edge
   - item_id: chain:v3.config.compact_hub_v1_defaults
     chain_id: v3.config.compact_hub_v1_defaults
     status: audited_locked
@@ -300,7 +300,7 @@ locked_items:
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     fingerprint: sha256:78e6260717130ee093f77dbf95c62d216bfa13cae7120c4565d4704c52df028c
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    last_manual_authorization_id: auth-20260817-v3-relay-remove-unowned-failure-edge
   - item_id: chain:v3.hub_relay.response_failure_entry
     chain_id: v3.hub_relay.response_failure_entry
     status: audited_locked
@@ -451,8 +451,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:f8acb52362dce07c7a21db10822caf5d7249b8c21eb655ab71d5512be4587dba
-    last_manual_authorization_id: auth-20260815-v3-provider-action-gate-51-semantic-frame
+    fingerprint: sha256:c02a3c5b90ef525cb0c28281a88b5b464e0f8b0d63f5fcb990b5c128025961dd
+    last_manual_authorization_id: auth-20260817-v3-provider-action-gate-direct-global-health
   - item_id: chain:v3.build_test_artifact_budget
     chain_id: v3.build_test_artifact_budget
     status: audited_locked
@@ -491,9 +491,114 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
-    last_manual_authorization_id: auth-20260813-v3-provider-global-subscription-probe-fingerprint-refresh
+    fingerprint: sha256:a6e4c276af7e2e93168d51158b5e72a414fc0acb8683f87229a733721ab7d21b
+    last_manual_authorization_id: auth-20260818-v3-provider-global-timeout-and-edge-correction
 manual_authorizations:
+  - authorization_id: auth-20260818-v3-provider-global-timeout-and-edge-correction
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T18:20:00-07:00'
+    reason: "Jason authorized compiling the documented 30s omitted SSE timeout default at the config owner and removing invented Direct/post-commit Error01 builder edges from the canonical maps."
+    fingerprint_before: sha256:f88d56c0fdd4bd2479559ff923671c1babcd56a1c70ba4f3e1f049f4f0d38cb8
+    fingerprint_after: sha256:a6e4c276af7e2e93168d51158b5e72a414fc0acb8683f87229a733721ab7d21b
+  - authorization_id: auth-20260818-v3-provider-global-source-edges-final
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T18:00:00-07:00'
+    reason: "Jason authorized registering all provider-global Error01 source writers and their Direct/post-commit classified edges in the canonical lifecycle maps."
+    fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    fingerprint_after: sha256:f88d56c0fdd4bd2479559ff923671c1babcd56a1c70ba4f3e1f049f4f0d38cb8
+  - authorization_id: auth-20260818-v3-provider-global-direct-postcommit-edges
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T17:45:00-07:00'
+    reason: "Jason authorized registering Direct and post-commit SSE Error01-to-Error02 edges and removing the Relay timeout fallback."
+    fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    fingerprint_after: sha256:1ea3446b443841cac52296dd5e9254d86f707a70313ad67fb454dfdcdf717b27
+  - authorization_id: auth-20260818-v3-provider-global-edge-final
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T17:30:00-07:00'
+    reason: "Jason authorized the final stable provider-global lifecycle edge identifier and canonical V3 cargo runner gate synchronization."
+    fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    fingerprint_after: sha256:cbedc976972e15cf99e2a2efdd57fd953ea4f285fe5b65c2582abc7d1e3ecbee
+  - authorization_id: auth-20260818-v3-provider-global-error02-writer-edge
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T17:15:00-07:00'
+    reason: "Jason authorized registering the typed semantic Error01-to-Error02 provider-global policy writer and its resource-flow edge in the canonical maps."
+    fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    fingerprint_after: sha256:b4545bcfbcc8745be256bb4265973e58859b90a7779173674f2c18d66308c4a3
+  - authorization_id: auth-20260817-v3-provider-global-callee-owner-refresh
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T13:15:00-07:00'
+    reason: "Jason authorized refreshing the audited provider-global fingerprint after correcting the anchored relay callee file to the actual provider_failure_global_probe owner."
+    fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    fingerprint_after: sha256:45f5b6e8756615f7da5d39e55982e578200632b1bf6ab5adbc795b5f47a2f36f
+  - authorization_id: auth-20260817-v3-provider-global-relay-classified-edge-refresh
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T13:00:00-07:00'
+    reason: "Jason authorized synchronizing the anchored provider-global relay edge with the actual Error02 classified-health helper after the relay runtime stopped calling the obsolete direct subscription-failure entry."
+    fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    fingerprint_after: sha256:12b1b2ea453b0d0964d4ef9c1a4aed0132fe3383196e9b08481236a3a358e7d5
+  - authorization_id: auth-20260817-v3-provider-action-gate-direct-global-health
+    item_id: chain:v3.provider_action_gate.mainline
+    approved_by: Jason
+    approved_at: '2026-08-17T12:30:00-07:00'
+    reason: "Jason authorized updating the Direct SSE failure gate to the source-preserving post-commit health observer so Direct and Relay share the canonical Error02-to-global-health path."
+    fingerprint_before: sha256:f8acb52362dce07c7a21db10822caf5d7249b8c21eb655ab71d5512be4587dba
+    fingerprint_after: sha256:c02a3c5b90ef525cb0c28281a88b5b464e0f8b0d63f5fcb990b5c128025961dd
+  - authorization_id: auth-20260817-v3-provider-global-direct-parity
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T12:00:00-07:00'
+    reason: "Jason authorized routing Direct provider failures and post-commit SSE failures through the same Error02-to-global-health owner as Relay, and consolidating semantic cooldown policy at the typed error owner."
+    fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    fingerprint_after: sha256:0272128cd80837404ac8286010f1fcf3ff2b8a1ae7fd1e66410a63f97d3bf8f1
+  - authorization_id: auth-20260817-v3-relay-remove-unowned-failure-edge
+    item_id: chain:v3.hub_relay.runtime_closeout
+    approved_by: Jason
+    approved_at: '2026-08-17T09:00:00-07:00'
+    reason: "Jason authorized removing the unowned raw-response-to-provider-runtime-failure closeout edge; relay failures remain governed by the canonical Error01-Error06 entry owner."
+    fingerprint_before: sha256:f33000b40b0b8c1132040aa2dc95fda78824f3cbdf6235c5a20e4106bfb547c2
+    fingerprint_after: sha256:78e6260717130ee093f77dbf95c62d216bfa13cae7120c4565d4704c52df028c
+  - authorization_id: auth-20260817-v3-provider-global-success-edge
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T09:00:00-07:00'
+    reason: "Jason authorized registering the existing provider-key global-success counter reset as an explicit health-resource writer and adjacent mainline edge, with the provider-key identity preserved."
+    fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    fingerprint_after: sha256:bab26744d065f7630af4e090c51af22373217bd9abc09622e57694607474a794
+  - authorization_id: auth-20260817-v3-provider-global-classified-edge
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T08:30:00-07:00'
+    reason: "Jason authorized correcting provider-global health to consume the canonical Error02 classified carrier. This removes the raw Error01-to-health shortcut and registers the adjacent Error01-to-Error02 classification edge before health policy observation."
+    fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    fingerprint_after: sha256:dacf59ad880e6ebc7b0f2244d16b158eb59ea5461544adf63a9675dc0add50a8
+  - authorization_id: auth-20260817-v3-config-server-manifest-edge
+    item_id: chain:v3.config.compile
+    approved_by: Jason
+    approved_at: '2026-08-17T08:00:00-07:00'
+    reason: "Jason authorized correcting the entry default wiring at the unique config owner. This refresh registers compile_servers' adjacent V3ServerAuthoringConfig-to-V3ServerManifest edge and its typed server-manifest resource flow; the existing Hub entry-protocol binding chain remains owned by compile_entry_protocol_bindings."
+    fingerprint_before: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d
+    fingerprint_after: sha256:59948789e48ff5c7cdb3e1a7040f4d2b3a06f1525eca1f3b79afdbce73559e90
+  - authorization_id: auth-20260817-v3-provider-global-health-call-edge-refresh
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T07:00:00-07:00'
+    reason: "Jason authorized the final mainline registration of the typed provider-global status classifier and its adjacent helper-to-global-policy edge, including lifecycle manifest and generated wiki synchronization."
+    fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    fingerprint_after: sha256:a416e72e9bcd100c1cc3d179447f1c5958f13be542eb095761a183ed9a120107
+  - authorization_id: auth-20260817-v3-provider-global-health-policy-edge-refresh
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T06:45:00-07:00'
+    reason: "Jason authorized the provider-global health policy change: generic 401/403 account-key aggregation and 429/5xx recoverable aggregation, with the runtime-to-typed-error classification edge registered in the mainline map."
+    fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    fingerprint_after: sha256:d229b2cad22041955e3510802bc447d90fb0c18553203d2d2d315f080a16d58f
   - authorization_id: auth-20260815-v3-sse-codec-file-decomposition-lock-refresh
     item_id: chain:v3.sse.protocol_codec_projection_boundary
     approved_by: Jason
@@ -697,3 +802,31 @@ manual_authorizations:
     reason: "Jason asked to inspect production/current/existing V3 config after locking the unified provider error contract and fill missing config support; adding provider error policy manifest resource changes the locked config.compile resource flow only."
     fingerprint_before: sha256:7a2f68829c5b4f2a6eb33ac605f1f27b79cdf0e1c0e54ea27f26662fa859a193
     fingerprint_after: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d
+  - authorization_id: auth-20260817-v3-relay-first-frame-timeout-resource-edge
+    item_id: chain:v3.hub_relay.runtime_closeout
+    approved_by: Jason
+    approved_at: '2026-08-17T07:15:00-07:00'
+    reason: "Jason requested correcting the V3 provider error and entry-protocol behavior through implementation, rebuild, aggregate restart, architecture verification, and review. This refresh records the typed published-manifest timeout read and relay SSE first-frame guard error edge required by that correction; the guard remains side-channel/error-chain only and does not enter normal payloads."
+    fingerprint_before: sha256:78e6260717130ee093f77dbf95c62d216bfa13cae7120c4565d4704c52df028c
+    fingerprint_after: sha256:406d4708d90c38c9f6a2ef19cdf58f1a1bbe77594144a1da6b65ed21766da225
+  - authorization_id: auth-20260817-v3-relay-failure-carrier-edge
+    item_id: chain:v3.hub_relay.runtime_closeout
+    approved_by: Jason
+    approved_at: '2026-08-17T07:20:00-07:00'
+    reason: "Jason requested the review findings be fixed rather than bypassed. This refresh replaces the inaccurate guard-to-Error01 edge with the actual guard-error -> provider_runtime_failure -> handle_provider_failure -> run_v3_relay_provider_failure_policy carrier/policy edges, preserving the canonical typed Error chain."
+    fingerprint_before: sha256:78e6260717130ee093f77dbf95c62d216bfa13cae7120c4565d4704c52df028c
+    fingerprint_after: sha256:8b386b1c42f8924ea44e9ddbb9d562d88b8c36efcbe7e414f5a91022be0a34b3
+  - authorization_id: auth-20260817-v3-relay-error-chain-adjacency
+    item_id: chain:v3.hub_relay.runtime_closeout
+    approved_by: Jason
+    approved_at: '2026-08-17T07:30:00-07:00'
+    reason: "Jason required the review finding to be fixed at the unique owner. This refresh removes the non-adjacent RuntimeFailure-to-Error05 closeout edge and leaves the canonical Error01-Error05 chain owner unchanged; the closeout records only the actual provider failure carrier conversion."
+    fingerprint_before: sha256:78e6260717130ee093f77dbf95c62d216bfa13cae7120c4565d4704c52df028c
+    fingerprint_after: sha256:f33000b40b0b8c1132040aa2dc95fda78824f3cbdf6235c5a20e4106bfb547c2
+  - authorization_id: auth-20260817-v3-provider-global-error-source-edge
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-17T07:45:00-07:00'
+    reason: "Jason required provider-global health to consume the typed Error01 source rather than reconstruct control state from a bare HTTP status in runtime. This refresh registers the error-source fingerprint builder in the error owner and the runtime helper-to-health edge with the typed source carrier."
+    fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
+    fingerprint_after: sha256:c21fb3bbd20f75c488a0d7feb3632334be3e1a39e1e9ba0ee54c1774635e9b53

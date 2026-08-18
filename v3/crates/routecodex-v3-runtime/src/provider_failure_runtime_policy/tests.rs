@@ -1,5 +1,6 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+use routecodex_v3_error::V3ProviderErrorFingerprint;
 use serde_json::json;
 
 fn test_provider_failure_scope(
@@ -131,6 +132,131 @@ fn resolve_target_for_scope(
         now_ms,
         deterministic_sample: 0,
     })
+}
+
+#[test]
+fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
+    let manifest = global_pool_alive_manifest("global_status_policy");
+    let cases = [(401, 2), (403, 2), (429, 3), (500, 3), (502, 3), (599, 3)];
+    for (status, threshold) in cases {
+        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+        let scope = test_provider_failure_scope(
+            "global_status_policy",
+            "global_status_policy",
+            "runtime-policy-status",
+        )
+        .expect("failure session scope");
+        for attempt in 0..threshold {
+            health
+                .record_provider_failure_record_with_policy(
+                    &manifest,
+                    &scope,
+                    "first",
+                    Some("responses"),
+                    Some("key1"),
+                    Some("gpt-test"),
+                    Some("provider status failure"),
+                    "V3ProviderRespInbound01Raw",
+                    status,
+                    Some("provider_http_error"),
+                    "upstream status",
+                    10_000 + attempt as u64,
+                )
+                .expect("runtime provider failure policy should record");
+        }
+        assert!(
+            !health
+                .global_subscription_store
+                .availability("first", Some("key1"), Some("gpt-test"), 10_000)
+                .expect("global availability")
+                .available,
+            "status {status} must block only after its declared threshold"
+        );
+    }
+
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let scope = test_provider_failure_scope(
+        "global_status_policy",
+        "global_status_policy",
+        "runtime-policy-negative",
+    )
+    .expect("failure session scope");
+    health
+        .record_provider_failure_record_with_policy(
+            &manifest,
+            &scope,
+            "first",
+            Some("responses"),
+            Some("key1"),
+            Some("gpt-test"),
+            Some("request-shaped failure"),
+            "V3ProviderReqOutbound09TransportRequest",
+            400,
+            Some("provider_http_error"),
+            "request rejected",
+            20_000,
+        )
+        .expect("request-shaped failure should remain session-scoped");
+    assert!(
+        health
+            .global_subscription_store
+            .availability("first", Some("key1"), Some("gpt-test"), 20_000)
+            .expect("global availability")
+            .available
+    );
+}
+
+#[test]
+fn configured_semantic_global_failure_keeps_manifest_cooldown_policy() {
+    let manifest = global_pool_alive_manifest("semantic_global_policy");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let scope = test_provider_failure_scope(
+        "semantic_global_policy",
+        "semantic_global_policy",
+        "semantic-session",
+    )
+    .expect("failure session scope");
+    let fingerprint = V3ProviderErrorFingerprint::new(
+        "provider_diagnostic_zero_usage",
+        "semantic_error",
+        200,
+        "diagnostic_zero_usage",
+    )
+    .expect("semantic fingerprint");
+    for attempt in 0..3 {
+        health
+            .record_provider_global_subscription_failure(
+                &scope,
+                "first",
+                Some("key1"),
+                Some("gpt-test"),
+                fingerprint.clone(),
+                Some(1234),
+                30_000 + attempt,
+            )
+            .expect("configured semantic global failure should be accepted");
+    }
+    assert_eq!(
+        health
+            .global_subscription_store
+            .availability("first", Some("key1"), Some("gpt-test"), 30_000)
+            .expect("global availability")
+            .blocked_until_ms,
+        Some(31_236)
+    );
+    let no_duration = health.record_provider_global_subscription_failure(
+        &scope,
+        "first",
+        Some("key1"),
+        Some("gpt-test"),
+        fingerprint,
+        None,
+        40_000,
+    );
+    assert_eq!(
+        no_duration,
+        Err("unsupported provider global health error class".to_string())
+    );
 }
 
 #[test]

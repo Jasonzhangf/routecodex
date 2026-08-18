@@ -34,7 +34,8 @@ use crate::provider_action_gate::{
     V3ProviderActionGateKey, V3ProviderActionProviderScope, V3ProviderActionRecoveryTransition,
 };
 use crate::provider_error_policy_matching::provider_error_policy_matches_source_failure;
-include!("provider_failure_global_probe.rs");
+pub use crate::provider_failure_global_probe::build_v3_provider_global_probe_target;
+pub(crate) use crate::provider_failure_global_probe::probe_v3_provider_global_target_impl;
 
 pub async fn probe_v3_provider_global_target(
     target: V3ResponsesProviderTarget,
@@ -476,11 +477,24 @@ impl V3ProviderFailureRuntimeHealth {
         cooldown_ms: Option<u64>,
         now_ms: u64,
     ) -> Result<V3ProviderGlobalSubscriptionDecision, String> {
-        let mut policy = V3ProviderGlobalSubscriptionPolicy::default();
-        if let Some(cooldown_ms) = cooldown_ms {
-            policy.cooldown_ms = cooldown_ms;
-            policy.probe_interval_ms = cooldown_ms;
-        }
+        let policy = if let Some(cooldown_ms) = cooldown_ms {
+            if cooldown_ms == 0 {
+                return Err("provider global subscription cooldown must be non-zero".to_string());
+            }
+            V3ProviderGlobalSubscriptionPolicy {
+                cooldown_ms,
+                probe_interval_ms: cooldown_ms,
+                ..V3ProviderGlobalSubscriptionPolicy::default()
+            }
+        } else {
+            build_v3_provider_global_failure_policy(fingerprint.http_status)
+                .map(|policy| V3ProviderGlobalSubscriptionPolicy {
+                    failure_threshold: policy.failure_threshold,
+                    cooldown_ms: policy.cooldown_ms,
+                    probe_interval_ms: policy.probe_interval_ms,
+                })
+                .ok_or_else(|| "unsupported provider global health error class".to_string())?
+        };
         self.global_subscription_store
             .record_invalid_subscription_response(
                 failure_session_scope,
@@ -624,11 +638,36 @@ impl V3ProviderFailureRuntimeHealth {
         model_id: Option<&str>,
         source_stage: &str,
         reason: Option<&str>,
+        source_stage: &'static str,
         status: u16,
         error_type: Option<&str>,
         message: &str,
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, String> {
+        let code = error_type.unwrap_or("provider_failure").to_string();
+        let source = build_v3_error_01_source_raised_external(
+            V3ErrorSourceKind::ProviderFailure,
+            source_stage,
+            code.clone(),
+            message,
+            V3ExternalErrorLink {
+                kind: V3ExternalErrorKind::Provider,
+                status: Some(status),
+                code: Some(code),
+                provider_id: Some(provider_id.to_string()),
+                upstream_request_id: None,
+                message: Some(message.to_string()),
+            },
+        );
+        let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
+        self.record_provider_global_health_for_classified_error(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            &classified,
+            now_ms,
+        )?;
         self.store
             .record_provider_failure_in_session_with_policy(
                 failure_session_scope,
@@ -801,6 +840,33 @@ impl V3ProviderFailureRuntimeHealth {
             _error_family,
         )?;
         Ok(())
+    }
+
+    pub(crate) fn record_post_commit_provider_stream_failure_from_source(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        source: &V3Error01SourceRaised,
+    ) -> Result<(), String> {
+        let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
+        self.record_provider_global_health_for_classified_error(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            &classified,
+            v3_relay_provider_policy_now_epoch_ms()?,
+        )?;
+        self.record_post_commit_provider_stream_failure(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            &source.code,
+            &source.message,
+        )
     }
 
     pub(crate) async fn wait_for_error05_recovery(
@@ -1035,6 +1101,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 Some(&selected.candidate.model_id),
                 source_stage,
                 reason,
+                source_stage,
                 status,
                 error_type.as_deref(),
                 &message,

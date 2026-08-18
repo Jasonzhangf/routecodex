@@ -39,7 +39,14 @@ async fn guard_relay_sse_first_frame(
     sse_first_frame_timeout_ms: Option<u64>,
 ) -> Result<routecodex_v3_provider_responses::V3ProviderSseStream, V3ProviderError> {
     use futures_util::StreamExt;
-    let first = tokio::time::timeout(V3_RELAY_SSE_FIRST_FRAME_TIMEOUT, stream.next())
+    let first_frame_timeout = sse_first_frame_timeout_ms
+        .map(std::time::Duration::from_millis)
+        .ok_or_else(|| V3ProviderError::Transport {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: "published provider SSE first-frame timeout is missing".to_string(),
+        })?;
+    let first = tokio::time::timeout(first_frame_timeout, stream.next())
         .await
         .map_err(|_| V3ProviderError::Transport {
             request_id: request_id.to_string(),
@@ -108,9 +115,6 @@ pub(crate) fn guard_v3_provider_sse_idle(
         },
     ))
 }
-
-/// Relay SSE 首帧超时（与 Direct SSE 首帧守卫一致，30s）。
-const V3_RELAY_SSE_FIRST_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Relay transport 响应头等待上限：provider 在窗口内未返回响应头（上游挂起/无响应）
 /// 时归一化为 Transport 错误进入错误链——记录 provider failure（health）+ reselect 切
@@ -840,7 +844,7 @@ mod tests {
                 Ok(b"data: ping\n\n".to_vec()),
                 Ok(b"data: pong\n\n".to_vec()),
             ]));
-        let mut guarded = guard_relay_sse_first_frame("req-ok", "provider-1", stream, None)
+        let mut guarded = guard_relay_sse_first_frame("req-ok", "provider-1", stream, Some(30_000))
             .await
             .expect("non-empty stream must pass the guard");
         let first = guarded
@@ -879,6 +883,27 @@ mod tests {
         )
         .await;
         assert!(result.is_err(), "first frame error must propagate");
+    }
+
+    #[tokio::test]
+    async fn guard_honors_configured_first_frame_timeout() {
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
+            Box::pin(futures_util::stream::pending());
+        let result =
+            guard_relay_sse_first_frame("req-timeout", "provider-1", stream, Some(1)).await;
+        assert!(
+            result.is_err(),
+            "configured first-frame timeout must fail pending SSE"
+        );
+    }
+
+    #[tokio::test]
+    async fn guard_rejects_zero_first_frame_timeout() {
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
+            Box::pin(futures_util::stream::pending());
+        let result =
+            guard_relay_sse_first_frame("req-zero-timeout", "provider-1", stream, Some(0)).await;
+        assert!(result.is_err(), "zero first-frame timeout must fail fast");
     }
 
     /// 空闲守卫：正常 provider 流逐帧透传、EOF 原样结束（不改变语义）。

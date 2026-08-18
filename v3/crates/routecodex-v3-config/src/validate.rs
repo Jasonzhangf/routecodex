@@ -628,6 +628,11 @@ fn compile_providers(
                 provider.default_model
             )));
         }
+        if provider.sse_first_frame_timeout_ms == Some(0) {
+            return Err(validation(format!(
+                "provider {id} sse_first_frame_timeout_ms must be non-zero"
+            )));
+        }
         let auth = compile_auth(&id, provider.auth)?;
         let provider_type = provider.provider_type;
         let mut models = compile_models(&id, provider.models)?;
@@ -677,7 +682,11 @@ fn compile_providers(
                 compatibility_profile,
                 features: provider.features,
                 request_timeout_ms: provider.request_timeout_ms,
-                sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
+                sse_first_frame_timeout_ms: Some(
+                    provider
+                        .sse_first_frame_timeout_ms
+                        .unwrap_or(default_provider_sse_first_frame_timeout_ms()),
+                ),
             },
         );
     }

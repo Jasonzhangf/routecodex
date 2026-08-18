@@ -551,6 +551,11 @@ pub fn default_provider_request_timeout_ms() -> u64 {
     300_000
 }
 
+/// provider SSE 首帧/帧间隔超时默认值（毫秒）：30s。
+pub fn default_provider_sse_first_frame_timeout_ms() -> u64 {
+    30_000
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct V3ProviderRequestCleanupAuthoringConfig {
