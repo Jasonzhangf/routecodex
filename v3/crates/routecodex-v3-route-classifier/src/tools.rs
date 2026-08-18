@@ -3,6 +3,7 @@ use serde_json::Value;
 use crate::shell::classify_shell_command;
 
 const THINKING_TOOL_EXACT: &[&str] = &[
+    "request_user_input",
     "update_plan",
     "read",
     "read_file",

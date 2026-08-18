@@ -290,6 +290,10 @@ fn tool_call_category_matches_v2_command_semantics() {
         category("web_search", Some(&json!({"query":"x"}))).as_deref(),
         Some("websearch")
     );
+    assert_eq!(
+        category("request_user_input", Some(&json!({"questions":[]}))).as_deref(),
+        Some("thinking")
+    );
 }
 
 #[test]
