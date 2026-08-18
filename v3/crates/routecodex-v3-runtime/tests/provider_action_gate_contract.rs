@@ -2,7 +2,8 @@ use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_runtime::{
     V3ProviderActionGate, V3ProviderActionGateKey, V3ProviderActionGateMode,
     V3ProviderActionProviderScope, V3ProviderActionRecoveryTransition,
-    V3_PROVIDER_ACTION_ISOLATED_DELAY_MS, V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS,
+    V3_PROVIDER_ACTION_ISOLATED_DELAY_MS, V3_PROVIDER_ACTION_MEDIUM_DELAY_MS,
+    V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS,
 };
 use std::time::{Duration, Instant};
 
@@ -381,6 +382,36 @@ async fn second_failure_before_success_promotes_and_extends_the_sustained_deadli
     assert!(
         final_failure_at.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
         "provider action was admitted before five seconds from the latest failure"
+    );
+}
+
+#[test]
+fn consecutive_failures_follow_one_three_five_and_success_resets() {
+    let gate = V3ProviderActionGate::default();
+    let scope = key("provider_http_500");
+
+    let first = gate.record_failure(&scope).expect("first failure");
+    assert_eq!(first.mode, V3ProviderActionGateMode::Isolated);
+    assert_eq!(first.minimum_delay_ms, V3_PROVIDER_ACTION_ISOLATED_DELAY_MS);
+
+    let second = gate.record_failure(&scope).expect("second failure");
+    assert_eq!(second.mode, V3ProviderActionGateMode::Medium);
+    assert_eq!(second.minimum_delay_ms, V3_PROVIDER_ACTION_MEDIUM_DELAY_MS);
+
+    let third = gate.record_failure(&scope).expect("third failure");
+    assert_eq!(third.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(third.minimum_delay_ms, V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS);
+
+    let fourth = gate.record_failure(&scope).expect("fourth failure");
+    assert_eq!(fourth.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(fourth.minimum_delay_ms, V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS);
+
+    gate.record_success(&scope).expect("success resets failure sequence");
+    let after_success = gate.record_failure(&scope).expect("failure after success");
+    assert_eq!(after_success.mode, V3ProviderActionGateMode::Isolated);
+    assert_eq!(
+        after_success.minimum_delay_ms,
+        V3_PROVIDER_ACTION_ISOLATED_DELAY_MS
     );
 }
 
