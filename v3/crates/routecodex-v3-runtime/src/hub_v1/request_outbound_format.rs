@@ -4,6 +4,7 @@ use crate::protocol_tables::{
 };
 use serde_json::{json, Map, Value};
 
+use super::anthropic_request_field_projection::project_chat_store_to_anthropic_wire;
 use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode;
 use super::request_outbound_metadata::{
     project_openai_chat_reasoning_summary_policy, project_openai_client_metadata_to_metadata,
@@ -348,6 +349,7 @@ fn apply_outbound_projection_transforms(
             project_openai_chat_reasoning_summary_policy(projected)?;
         }
         V3OutboundTargetProtocol::Anthropic => {
+            project_chat_store_to_anthropic_wire(projected)?;
             project_chat_canonical_web_search_tools_to_anthropic_wire(projected)?;
         }
         V3OutboundTargetProtocol::Gemini => {
