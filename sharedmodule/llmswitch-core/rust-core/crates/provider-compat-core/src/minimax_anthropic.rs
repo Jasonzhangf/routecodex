@@ -23,8 +23,8 @@ fn apply_minimax_thinking_tag_compat(mut payload: Value) -> Value {
             if let Some(reasoning) = reasoning {
                 projected.push(json!({
                     "type": "reasoning",
-                    "status": "completed",
-                    "summary": [{"type": "summary_text", "text": reasoning}]
+                    "summary": [{"type": "summary_text", "text": reasoning}],
+                    "content": [{"type": "reasoning_text", "text": reasoning}]
                 }));
             }
             projected.push(item);
@@ -57,11 +57,7 @@ fn project_responses_message_thinking(item: &mut Value) -> Option<String> {
         if block.get("type").and_then(Value::as_str) != Some("output_text") {
             continue;
         }
-        if let Some(text) = block
-            .get("text")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-        {
+        if let Some(text) = block.get("text").and_then(Value::as_str).map(str::to_owned) {
             let (visible, hidden) = split_thinking_tags(&text);
             if !hidden.is_empty() {
                 block["text"] = Value::String(visible);
@@ -90,7 +86,11 @@ fn project_anthropic_content_thinking(content: &mut Vec<Value>) {
 }
 
 fn project_openai_chat_message_thinking(message: &mut Value) {
-    let Some(content) = message.get("content").and_then(Value::as_str).map(str::to_owned) else {
+    let Some(content) = message
+        .get("content")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    else {
         return;
     };
     let (visible, hidden) = split_thinking_tags(&content);
@@ -107,7 +107,7 @@ fn split_thinking_tags(text: &str) -> (String, String) {
     let mut cursor = 0;
     while cursor < text.len() {
         let Some(open_rel) = text[cursor..].find("<thinking>") else {
-            visible.push_str(&text[cursor..].replace("</thinking>", ""));
+            visible.push_str(&text[cursor..]);
             break;
         };
         let open = cursor + open_rel;
@@ -118,7 +118,9 @@ fn split_thinking_tags(text: &str) -> (String, String) {
             reasoning.push_str(text[body_start..close].trim());
             cursor = close + "</thinking>".len();
         } else {
-            reasoning.push_str(text[body_start..].trim());
+            // Only paired tags are an unambiguous provider reasoning contract.
+            // Preserve unmatched bytes rather than silently mutating visible text.
+            visible.push_str(&text[open..]);
             break;
         }
         if cursor < text.len() && !reasoning.ends_with('\n') {
@@ -235,15 +237,17 @@ mod tests {
     }
 
     #[test]
-    fn projects_unmatched_thinking_tags_without_leaking_delimiters() {
+    fn preserves_unmatched_thinking_tags_without_silent_visible_mutation() {
         let output = apply_response_compat(json!({
             "content": [{
                 "type": "text",
                 "text": "visible <thinking>unfinished plan"
             }]
         }));
-        assert_eq!(output["content"][0]["type"], "thinking");
-        assert_eq!(output["content"][0]["thinking"], "unfinished plan");
-        assert_eq!(output["content"][1]["text"], "visible ");
+        assert_eq!(output["content"][0]["type"], "text");
+        assert_eq!(
+            output["content"][0]["text"],
+            "visible <thinking>unfinished plan"
+        );
     }
 }
