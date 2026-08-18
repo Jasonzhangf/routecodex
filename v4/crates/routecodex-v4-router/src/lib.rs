@@ -1,4 +1,4 @@
-//! routecodex-v4-router — contract-bound route policy live override owner
+//! routecodex-v4-router — compiled target selection and live policy owner
 //! (`v4.control.route_policy_live`, V4Router08LivePolicyOverride).
 //!
 //! Hard boundaries:
@@ -7,6 +7,62 @@
 //! - session-scoped and immutable-history: every override set is appended,
 //!   never rewritten;
 //! - control fields never enter provider/client normal payload.
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderCandidate {
+    pub provider_id: String,
+    pub config_path: String,
+    pub protocol: String,
+    pub model: String,
+    pub priority: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectedTarget {
+    pub provider_id: String,
+    pub config_path: String,
+    pub protocol: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TargetSelectionError {
+    EmptyCandidates,
+    ModelUnavailable(String),
+}
+
+impl std::fmt::Display for TargetSelectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyCandidates => write!(f, "compiled provider candidate set is empty"),
+            Self::ModelUnavailable(model) => write!(f, "no compiled provider candidate supports model {model}"),
+        }
+    }
+}
+
+impl std::error::Error for TargetSelectionError {}
+
+pub fn select_target(
+    candidates: &[ProviderCandidate],
+    requested_model: &str,
+) -> Result<SelectedTarget, TargetSelectionError> {
+    if candidates.is_empty() {
+        return Err(TargetSelectionError::EmptyCandidates);
+    }
+    candidates
+        .iter()
+        .filter(|candidate| candidate.model == requested_model)
+        .min_by_key(|candidate| candidate.priority)
+        .map(|candidate| SelectedTarget {
+            provider_id: candidate.provider_id.clone(),
+            config_path: candidate.config_path.clone(),
+            protocol: candidate.protocol.clone(),
+            model: candidate.model.clone(),
+        })
+        .ok_or_else(|| TargetSelectionError::ModelUnavailable(requested_model.to_string()))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyVersion {

@@ -9,7 +9,20 @@
     "compile",
     "active",
     "protected",
-    "verify"
+    "verify",
+    "V4RuntimeAdmission00CompiledManifest",
+    "V4ServerReqInbound01ClientRaw",
+    "V4HubReqInbound02Standardized",
+    "V4HubReqChatProcess03Governed",
+    "V4Router04SelectedTarget",
+    "V4HubReqOutbound05ProviderSemantic",
+    "V4ProviderReqOutbound06WirePayload",
+    "V4ProviderReqOutbound07TransportRequest",
+    "V4ProviderRespInbound01Raw",
+    "V4HubRespInbound02Parsed",
+    "V4HubRespChatProcess03Governed",
+    "V4HubRespOutbound04ClientSemantic",
+    "V4ServerRespOutbound05ClientFrame"
   ],
   "edges": [
     {
@@ -884,6 +897,76 @@
       "resource_id": "v4.pipeline.mock_transport_error",
       "path": "crates/routecodex-v4-runtime/src/lib.rs,crates/routecodex-v4-error/src/lib.rs",
       "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-server",
+      "owner": "routecodex-v4-runtime-bin::main",
+      "edge_type": "runtime_admission",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "binding pending"
+    },
+    {
+      "from": "routecodex-v4-server",
+      "to": "routecodex-v4-runtime",
+      "owner": "routecodex-v4-server::http_listener",
+      "edge_type": "server_runtime_dispatch",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-server/src/lib.rs",
+      "status": "binding pending"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-router",
+      "owner": "routecodex-v4-router::typed_target_selection",
+      "edge_type": "typed_target_selection",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-router/src/lib.rs",
+      "status": "binding pending"
+    },
+    {
+      "from": "routecodex-v4-router",
+      "to": "routecodex-v4-runtime",
+      "owner": "routecodex-v4-router::typed_target_selection",
+      "edge_type": "typed_target_return",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-router/src/lib.rs",
+      "status": "binding pending"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-provider",
+      "owner": "routecodex-v4-provider::real_transport",
+      "edge_type": "provider_transport",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-provider/src/lib.rs",
+      "status": "binding pending"
+    },
+    {
+      "from": "routecodex-v4-provider",
+      "to": "routecodex-v4-runtime",
+      "owner": "routecodex-v4-runtime::provider_raw_parse",
+      "edge_type": "provider_response_return",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-provider/src/lib.rs",
+      "status": "binding pending"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-server",
+      "owner": "routecodex-v4-server::http_listener",
+      "edge_type": "client_frame_projection",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-server/src/lib.rs",
+      "status": "binding pending"
     }
   ]
 }

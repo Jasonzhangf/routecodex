@@ -32,8 +32,11 @@
         "mainline_merge_identity",
         "v4_build_verify_positive",
         "v4_build_verify_red",
-        "v4_build_verify_ci",
-        "v4_isolation_positive"
+      "v4_build_verify_ci",
+      "v4_isolation_positive",
+      "v4_parity_gate_real_runtime_admission",
+      "v4_parity_gate_real_runtime_admission_red",
+      "v4_real_runtime_admission_red"
       ]
     },
     {
@@ -485,6 +488,27 @@
         "v4_node_container_test_consumer",
         "v4_parity_gate_node_container",
         "v4_parity_gate_node_container_red"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-runtime-bin",
+      "status": "design",
+      "owner": "routecodex-v4-runtime-bin",
+      "owned_paths": [
+        "crates/routecodex-v4-runtime-bin/**"
+      ],
+      "forbidden_paths": [
+        "active/lib/**",
+        "protected/**",
+        "generated/**",
+        "v3/**",
+        "~/.rcc/**",
+        "~/.local/bin/**"
+      ],
+      "verification_gates": [
+        "v4_real_runtime_admission_red",
+        "v4_real_runtime_compiled_manifest",
+        "v4_real_runtime_v3_isolation"
       ]
     }
   ]

@@ -2064,6 +2064,199 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
+- resource_id: v4.runtime.admission_manifest
+  axis: information
+  verification_gate:
+  - v4_parity_gate_real_runtime_admission
+  - v4_parity_gate_real_runtime_admission_red
+  resource_kind: admission_contract
+  lifecycle: v4.runtime.admission
+  owner_crate: routecodex-v4-governance
+  owner_node: V4RuntimeAdmission00CompiledManifest
+  owner_symbols:
+  - real-runtime-admission.manifest.json
+  identity:
+  - manifestId
+  - schemaVersion
+  - runtimeIdentity
+  semantic_contract:
+    status_design_until_live_evidence: true
+    secret_in_manifest: forbidden
+    v3_runtime_dependency: forbidden
+  allowed_writers:
+  - routecodex-v4-governance
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - V4HubReqInbound02Standardized
+  - V4ProviderReqOutbound06WirePayload
+  - V4ServerRespOutbound05ClientFrame
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: design
+- resource_id: v4.runtime.compiled_manifest
+  axis: information
+  verification_gate:
+  - v4_real_runtime_compiled_manifest
+  resource_kind: compiled_manifest
+  lifecycle: v4.runtime.admission
+  owner_crate: routecodex-v4-runtime-bin
+  owner_node: V4RuntimeAdmission00CompiledManifest
+  owner_symbols:
+  - CompiledAdmissionManifest
+  - manifest_digest
+  identity:
+  - manifestId
+  - manifestDigest
+  semantic_contract:
+    deterministic: true
+    drift: fail_fast
+    secret_in_manifest: forbidden
+  allowed_writers:
+  - routecodex-v4-governance
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - V4HubReqInbound02Standardized
+  - V4ProviderReqOutbound06WirePayload
+  - V4ServerRespOutbound05ClientFrame
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: design
+- resource_id: v4.runtime.binary_identity
+  axis: diagnostic
+  verification_gate:
+  - v4_real_runtime_compiled_manifest
+  - v4_real_runtime_v3_isolation
+  resource_kind: runtime_identity
+  lifecycle: v4.runtime.admission
+  owner_crate: routecodex-v4-runtime-bin
+  owner_node: V4RuntimeAdmission00CompiledManifest
+  owner_symbols:
+  - rccv4
+  - routecodex_v4_runtime_bin
+  identity:
+  - runtimeIdentity
+  - binaryDigest
+  semantic_contract:
+    independent_from_v3: true
+    v3_install_mutation: forbidden
+    may_enter_metadata_center: false
+  allowed_writers:
+  - routecodex-v4-runtime-bin
+  allowed_readers:
+  - developer_diagnostics
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: design
+- resource_id: v4.provider.real_transport
+  axis: data
+  verification_gate:
+  - v4_real_runtime_provider_transport
+  resource_kind: provider_transport
+  lifecycle: v4.provider.mainline
+  owner_crate: routecodex-v4-provider
+  owner_node: V4ProviderReqOutbound07TransportRequest
+  owner_symbols:
+  - ProviderTransport
+  - ProviderResponseRaw
+  identity:
+  - requestId
+  - providerId
+  - endpoint
+  - statusCode
+  semantic_contract:
+    auth_materialization_transport_only: true
+    request_response_bytes_preserved: true
+    internal_control_fields_forbidden: true
+  allowed_writers:
+  - V4ProviderReqOutbound07TransportRequest
+  - V4ProviderRespInbound01Raw
+  allowed_readers:
+  - V4ProviderRespInbound01Raw
+  - V4Error01SourceRaised
+  forbidden_writers:
+  - V4HubReqChatProcess03Governed
+  - V4Router04SelectedTarget
+  - V4ServerRespOutbound05ClientFrame
+  - V4Control01ScopeBoundCarrier
+  - V4MetadataCenter01ScopeRegistry
+  - V4Router05RequestClassified
+  - V4Router06SelectionPlan
+  - V4Router07RouteDecisionExit
+  - V4Router08LivePolicyOverride
+  - V4Availability01SessionScoped
+  - V4Error01SourceRaised
+  - V4ErrorCenter02ClassifyAudit
+  - V4PayloadCycleRegistry
+  - V4Runtime01MainlineKernel
+  - V4Error06ClientProjected
+  - V4Error04RouterPolicyApplied
+  - V4ScopeRegistry
+  - V4StoplessControlState
+  - V4Control02RecordLedger
+  - V4PluginManager
+  - V4CordisNodeHost
+  - V4NodeContainer
+  - V4ControlMetadataCenter
+  may_enter_provider_body: true
+  may_enter_client_body: false
+  binding_status: design
+- resource_id: v4.server.http_listener
+  axis: data
+  verification_gate:
+  - v4_real_runtime_server_http
+  resource_kind: http_listener
+  lifecycle: v4.server.mainline
+  owner_crate: routecodex-v4-server
+  owner_node: V4ServerReqInbound01ClientRaw
+  owner_symbols:
+  - V4HttpListener
+  - V4ServerReqInbound01ClientRaw
+  - V4ServerRespOutbound05ClientFrame
+  identity:
+  - listenerAddress
+  - requestId
+  - endpoint
+  semantic_contract:
+    owns_client_framing: true
+    owns_provider_auth: false
+    control_payload_leak: forbidden
+  allowed_writers:
+  - V4ServerReqInbound01ClientRaw
+  - V4ServerRespOutbound05ClientFrame
+  allowed_readers:
+  - V4RuntimeAdmission00CompiledManifest
+  forbidden_writers:
+  - V4Router04SelectedTarget
+  - V4ProviderReqOutbound07TransportRequest
+  - V4Control01ScopeBoundCarrier
+  - V4MetadataCenter01ScopeRegistry
+  - V4Router05RequestClassified
+  - V4Router06SelectionPlan
+  - V4Router07RouteDecisionExit
+  - V4Router08LivePolicyOverride
+  - V4Availability01SessionScoped
+  - V4Error01SourceRaised
+  - V4ErrorCenter02ClassifyAudit
+  - V4PayloadCycleRegistry
+  - V4Runtime01MainlineKernel
+  - V4Error06ClientProjected
+  - V4Error04RouterPolicyApplied
+  - V4ScopeRegistry
+  - V4StoplessControlState
+  - V4Control02RecordLedger
+  - V4PluginManager
+  - V4CordisNodeHost
+  - V4NodeContainer
+  - V4ControlMetadataCenter
+  may_enter_provider_body: false
+  may_enter_client_body: true
+  binding_status: design
 forbidden_direct_edges:
 - from: v4.config.manifest
   to: v4.request.normal_payload

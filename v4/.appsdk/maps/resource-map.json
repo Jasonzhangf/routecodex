@@ -1026,6 +1026,59 @@
         "validate"
       ],
       "status": "active"
+    },
+    {
+      "resource_id": "v4.runtime.admission_manifest",
+      "owner": "routecodex-v4-governance::real_runtime_admission",
+      "truth_store": "contracts/real-runtime-admission.manifest.json",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "design"
+    },
+    {
+      "resource_id": "v4.runtime.compiled_manifest",
+      "owner": "routecodex-v4-runtime-bin::compiled_manifest_loader",
+      "truth_store": "generated/real-runtime-admission/manifest.compiled.json",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "design"
+    },
+    {
+      "resource_id": "v4.runtime.binary_identity",
+      "owner": "routecodex-v4-runtime-bin::runtime_identity",
+      "truth_store": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "design"
+    },
+    {
+      "resource_id": "v4.provider.real_transport",
+      "owner": "routecodex-v4-provider::real_transport",
+      "truth_store": "crates/routecodex-v4-provider/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "design"
+    },
+    {
+      "resource_id": "v4.server.http_listener",
+      "owner": "routecodex-v4-server::http_listener",
+      "truth_store": "crates/routecodex-v4-server/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "design"
     }
   ]
 }

@@ -650,6 +650,78 @@
       "required_for": [
         "routecodex-v4-runtime:real_pipeline_slice_architecture_stable"
       ]
+    },
+    {
+      "gate_id": "v4_parity_gate_real_runtime_admission",
+      "status": "design",
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "required_for": [
+        "routecodex-v4-governance:real_runtime_admission_design"
+      ]
+    },
+    {
+      "gate_id": "v4_parity_gate_real_runtime_admission_red",
+      "status": "design",
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs --red-self-test",
+      "required_for": [
+        "routecodex-v4-governance:real_runtime_admission_design"
+      ]
+    },
+    {
+      "gate_id": "v4_real_runtime_admission_red",
+      "status": "design",
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs --baseline-red",
+      "required_for": [
+        "routecodex-v4-governance:real_runtime_admission_design"
+      ]
+    },
+    {
+      "gate_id": "v4_real_runtime_compiled_manifest",
+      "status": "design",
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "required_for": [
+        "routecodex-v4-runtime-bin:design"
+      ]
+    },
+    {
+      "gate_id": "v4_real_runtime_provider_transport",
+      "status": "design",
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "required_for": [
+        "routecodex-v4-provider:real_runtime_design"
+      ]
+    },
+    {
+      "gate_id": "v4_real_runtime_server_http",
+      "status": "design",
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "required_for": [
+        "routecodex-v4-server:real_runtime_design"
+      ]
+    },
+    {
+      "gate_id": "v4_real_runtime_responses_json",
+      "status": "design",
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "required_for": [
+        "routecodex-v4-runtime:real_runtime_design"
+      ]
+    },
+    {
+      "gate_id": "v4_real_runtime_responses_sse",
+      "status": "design",
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "required_for": [
+        "routecodex-v4-runtime:real_runtime_design"
+      ]
+    },
+    {
+      "gate_id": "v4_real_runtime_v3_isolation",
+      "status": "design",
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "required_for": [
+        "routecodex-v4-runtime-bin:design"
+      ]
     }
   ]
 }

@@ -17,8 +17,12 @@ use routecodex_v4_skeleton::{
 use std::fs;
 
 fn contract_json() -> String {
-    let path = std::env::var("RUNTIME_CONTRACT_PATH")
-        .unwrap_or_else(|_| "contracts/skeleton-plan.contract.json".to_string());
+    let path = std::env::var("RUNTIME_CONTRACT_PATH").unwrap_or_else(|_| {
+        format!(
+            "{}/../../contracts/skeleton-plan.contract.json",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    });
     fs::read_to_string(&path).expect("skeleton plan contract must be readable from v4 root")
 }
 

@@ -24,6 +24,7 @@ use routecodex_v4_error::{
     RetryPolicy,
 };
 use routecodex_v4_skeleton::SkeletonPlan;
+use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -37,6 +38,183 @@ pub use control_resources::*;
 // second plugin-kind taxonomy; it only re-exports the contract type.
 pub use routecodex_v4_plugin_contract::PluginKind;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResponsesWireRequest {
+    pub body: Vec<u8>,
+    pub model: String,
+    pub stream: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResponsesProviderPayload {
+    Json(Value),
+    Sse(Vec<u8>),
+}
+
+/// Validate one complete Responses SSE frame. Returns true only for a
+/// terminal `response.completed` or `response.failed` event.
+pub fn validate_responses_sse_frame(frame: &[u8]) -> Result<bool, RuntimeFault> {
+    let text = std::str::from_utf8(frame)
+        .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?;
+    let mut data = Vec::new();
+    let mut terminal = false;
+    for line in text.lines() {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if let Some(value) = line.strip_prefix("data:") {
+            let value = value.trim();
+            if value == "[DONE]" {
+                continue;
+            }
+            let event: Value = serde_json::from_str(value).map_err(|error| {
+                RuntimeFault::new("provider_sse_malformed", error.to_string())
+            })?;
+            let event_type = event
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if matches!(event_type, "response.completed" | "response.failed") {
+                terminal = true;
+            }
+            data.push(value);
+        }
+    }
+    if data.is_empty() {
+        return Err(RuntimeFault::new(
+            "provider_sse_missing_data",
+            "Responses SSE frame has no data field",
+        ));
+    }
+    Ok(terminal)
+}
+
+/// Build the only provider-bound Responses request shape. The input is the
+/// client data-plane object; runtime writes only the selected upstream model
+/// and stream flag. Control carriers are never serialized here.
+pub fn build_responses_wire_request(
+    client_body: &Value,
+    wire_model: &str,
+    stream: bool,
+) -> Result<ResponsesWireRequest, RuntimeFault> {
+    let mut body = client_body.clone();
+    let object = body.as_object_mut().ok_or_else(|| {
+        RuntimeFault::new("responses_request_invalid", "Responses request must be a JSON object")
+    })?;
+    if wire_model.trim().is_empty() {
+        return Err(RuntimeFault::new(
+            "provider_wire_model_missing",
+            "selected provider wire model is empty",
+        ));
+    }
+    for key in [
+        "routing",
+        "retry",
+        "health",
+        "scope",
+        "debug",
+        "secret",
+        "manifest_digest",
+    ] {
+        if object.contains_key(key) {
+            return Err(RuntimeFault::new(
+                "control_payload_leak",
+                format!("control field {key} cannot enter provider payload"),
+            ));
+        }
+    }
+    object.insert("model".to_string(), Value::String(wire_model.to_string()));
+    object.insert("stream".to_string(), Value::Bool(stream));
+    let body = serde_json::to_vec(&body).map_err(|error| {
+        RuntimeFault::new("provider_wire_encode", error.to_string())
+    })?;
+    Ok(ResponsesWireRequest {
+        body,
+        model: wire_model.to_string(),
+        stream,
+    })
+}
+
+/// Parse and validate the provider response at the response-inbound owner.
+/// The returned bytes/JSON remain data-plane content; transport and error
+/// facts stay outside the payload.
+pub fn parse_responses_provider_payload(
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+    stream: bool,
+) -> Result<ResponsesProviderPayload, RuntimeFault> {
+    if status >= 400 {
+        return Err(RuntimeFault::new(
+            "provider_http_error",
+            format!("upstream Responses returned HTTP {status}"),
+        )
+        .with_status(status));
+    }
+    if stream || content_type.to_ascii_lowercase().contains("text/event-stream") {
+        validate_responses_sse(body)?;
+        return Ok(ResponsesProviderPayload::Sse(body.to_vec()));
+    }
+    let value: Value = serde_json::from_slice(body).map_err(|error| {
+        RuntimeFault::new("provider_json_parse", error.to_string())
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        RuntimeFault::new(
+            "provider_json_shape",
+            "Responses provider JSON must be an object",
+        )
+    })?;
+    let response_status = object
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if response_status != "completed" {
+        return Err(RuntimeFault::new(
+            "provider_json_not_terminal",
+            format!("Responses provider JSON terminal status must be completed, got {response_status:?}"),
+        ));
+    }
+    let response_error = object
+        .get("error")
+        .filter(|value| !value.is_null());
+    if let Some(error) = response_error {
+        return Err(RuntimeFault::new(
+            "provider_response_failed",
+            format!("Responses provider JSON returned a failed response: {error}"),
+        ));
+    }
+    if !value.is_object() {
+        return Err(RuntimeFault::new(
+            "provider_json_shape",
+            "Responses provider JSON must be an object",
+        ));
+    }
+    Ok(ResponsesProviderPayload::Json(value))
+}
+
+fn validate_responses_sse(body: &[u8]) -> Result<(), RuntimeFault> {
+    let text = std::str::from_utf8(body)
+        .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?;
+    let mut data_lines = 0usize;
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(data) = line.strip_prefix("data:") {
+            let data = data.trim();
+            if data != "[DONE]" {
+                serde_json::from_str::<Value>(data).map_err(|error| {
+                    RuntimeFault::new("provider_sse_malformed", error.to_string())
+                })?;
+            }
+            data_lines += 1;
+        }
+    }
+    if data_lines == 0 {
+        return Err(RuntimeFault::new(
+            "provider_sse_empty",
+            "provider SSE contained no data frames",
+        ));
+    }
+    Ok(())
+}
+
 /// Typed runtime fault. Never contains business payload content; carries only
 /// stage/code/node identity (error-chain contract).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +222,7 @@ pub struct RuntimeFault {
     pub code: String,
     pub message: String,
     pub node_id: Option<String>,
+    pub status: Option<u16>,
 }
 
 impl RuntimeFault {
@@ -52,11 +231,17 @@ impl RuntimeFault {
             code: code.to_string(),
             message: message.into(),
             node_id: None,
+            status: None,
         }
     }
 
     pub fn with_node(mut self, node_id: &str) -> Self {
         self.node_id = Some(node_id.to_string());
+        self
+    }
+
+    pub fn with_status(mut self, status: u16) -> Self {
+        self.status = Some(status);
         self
     }
 }
@@ -1989,5 +2174,42 @@ fn error_chain_client_projection_message(
             "unknown_mock_transport_fault_code",
             format!("error-chain projection failed: {error:?}"),
         )),
+    }
+}
+
+#[cfg(test)]
+mod admission_sse_tests {
+    use super::validate_responses_sse_frame;
+
+    #[test]
+    fn completed_frame_is_terminal() {
+        let frame = "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n";
+        assert!(validate_responses_sse_frame(frame.as_bytes()).expect("completed frame is valid"));
+    }
+
+    #[test]
+    fn failed_frame_is_terminal() {
+        let frame = "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"upstream\"}}}\n\n";
+        assert!(validate_responses_sse_frame(frame.as_bytes()).expect("failed frame is valid"));
+    }
+
+    #[test]
+    fn intermediate_frame_is_not_terminal() {
+        let frame = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n";
+        assert!(!validate_responses_sse_frame(frame.as_bytes()).expect("delta frame is valid"));
+    }
+
+    #[test]
+    fn malformed_data_fails_fast() {
+        let frame = "data: {not-json}\n\n";
+        let error = validate_responses_sse_frame(frame.as_bytes()).expect_err("malformed JSON must fail");
+        assert_eq!(error.code, "provider_sse_malformed");
+    }
+
+    #[test]
+    fn frame_without_data_fails_fast() {
+        let frame = "event: ping\n\n";
+        let error = validate_responses_sse_frame(frame.as_bytes()).expect_err("frame without data must fail");
+        assert_eq!(error.code, "provider_sse_missing_data");
     }
 }
