@@ -270,7 +270,10 @@ pub(crate) fn classify_v3_provider_responses_json_event(
     if event_type == "response.completed" {
         return Ok(V3ProviderResponsesJsonFrameOutcome::Terminal);
     }
-    if matches!(event_type, "response.created" | "response.in_progress") {
+    if matches!(
+        event_type,
+        "response.created" | "response.in_progress" | "response.output_item.added"
+    ) {
         return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
     }
     Ok(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
