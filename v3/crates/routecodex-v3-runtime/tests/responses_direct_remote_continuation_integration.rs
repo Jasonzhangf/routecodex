@@ -1953,6 +1953,55 @@ async fn http_only_sse_function_call_uses_v2_direct_http_continuation_without_re
     assert_control_truth_isolated(&requests[1]);
 }
 
+#[tokio::test]
+async fn continuation_disabled_keeps_repeated_sse_response_ids_out_of_remote_store() {
+    let manifest = http_only_manifest_with_continuation_disabled();
+    let state = V3ResponsesDirectContinuationState::default();
+
+    for (request_id, transport) in [
+        (
+            "req-http-sse-disabled-first",
+            PendingSseWithoutRemoteContinuationTransport::default(),
+        ),
+        (
+            "req-http-sse-disabled-second",
+            PendingSseWithoutRemoteContinuationTransport::default(),
+        ),
+    ] {
+        let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
+            &state,
+            &manifest,
+            request(
+                request_id,
+                json!({"model":"gpt-5.5","stream":true,"input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
+            ),
+            scope(),
+            register_responses_direct_hooks(),
+            &transport,
+            1_000,
+        )
+        .await;
+        assert_eq!(output.client_payload.status, 200, "{output:?}");
+        let stream_observation = output
+            .stream_observation
+            .clone()
+            .expect("disabled continuation SSE must retain runtime observation");
+        let body = collect_sse_body_text(output.client_payload.body).await;
+        assert!(body.contains("resp_http_sse_pending"));
+        assert!(body.contains("call_http_sse_pending"));
+        assert!(body.contains("[DONE]"));
+        assert_eq!(
+            state.len().unwrap(),
+            0,
+            "disabled continuation must not observe or commit provider response IDs"
+        );
+        assert!(
+            stream_observation.snapshot().unwrap().timing.is_some(),
+            "disabled continuation must not disable provider SSE timing closeout"
+        );
+    }
+}
+
 async fn collect_sse_body_text(body: V3ClientBody) -> String {
     let V3ClientBody::Sse(stream) = body else {
         panic!("SSE response must remain stream")
@@ -2709,6 +2758,41 @@ fn manifest_with_direct_stopless_server_stopless_disabled(
 fn http_only_manifest_without_remote_continuation(
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
     http_only_manifest_without_remote_continuation_for_group("g")
+}
+
+fn http_only_manifest_with_continuation_disabled(
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[features]
+stopless_center = false
+responses_continuation_disabled = true
+[servers.s]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "g"
+endpoints = ["responses"]
+[providers.p]
+enabled = true
+type = "responses"
+base_url = "http://controlled.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "a", env = "TEST_KEY" }] }
+responses = { process = "direct", streaming = "always", transport = "http" }
+[providers.p.models.m]
+wire_name = "wire-m"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
 }
 
 fn http_only_manifest_without_remote_continuation_for_group(

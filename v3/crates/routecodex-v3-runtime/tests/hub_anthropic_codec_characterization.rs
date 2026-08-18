@@ -2292,6 +2292,28 @@ fn anthropic_reasoning_effort_preserves_high_effort_intersection_values() {
 }
 
 #[test]
+fn anthropic_reasoning_effort_maps_non_intersection_values_to_closest_legal_level() {
+    for (source, expected) in [
+        ("none", "low"),
+        ("minimal", "low"),
+        ("definitely_invalid", "medium"),
+    ] {
+        let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+            "model":"claude-fable-5",
+            "stream": false,
+            "reasoning_effort": source,
+            "messages":[{"role":"user","content":"map effort"}]
+        }))
+        .expect("Anthropic effort must map into its official qualitative domain");
+
+        assert_eq!(
+            provider_request["output_config"]["effort"], expected,
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn anthropic_rejects_unmapped_responses_text_format_nested_fields() {
     let mut json_schema_name = base_chat_for_field_projection();
     json_schema_name["routecodex_chat_extension"] = json!({"responses_request":{"text":{"format":{

@@ -2393,7 +2393,9 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
@@ -2451,7 +2453,14 @@ features:
   - project_v3_anthropic_message_as_responses_response_with_context
   - responses_openai_chat_field_parity_request_matrix
   - responses_openai_chat_field_parity_response_matrix
-  - responses_relay_reasoning_effort_projects_anthropic_output_config_effort
+  - responses_reasoning_effort_preserves_unknown_non_empty_value_for_forward_compatibility
+  - openai_responses_wire_preserves_unknown_non_empty_reasoning_effort
+  - project_reasoning_effort_for_selected_target
+  - direct_kernel_maps_unknown_responses_reasoning_effort_to_protocol_neutral_medium
+  - deepseek_responses_maps_unknown_effort_to_official_high_domain
+  - minimax_anthropic_maps_effort_to_adaptive_thinking_without_unsupported_output_effort
+  - anthropic_reasoning_effort_maps_non_intersection_values_to_closest_legal_level
+  - responses_relay_reasoning_effort_projects_minimax_adaptive_thinking
   - responses_relay_reasoning_summary_policy_is_consumed_before_anthropic_wire
   - anthropic_wire_consumes_reasoning_summary_policy_as_local_response_hint
   - anthropic_projection_context_consumes_reasoning_summary_policy_for_response_shape
@@ -2468,8 +2477,10 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
@@ -2493,6 +2504,7 @@ features:
   - docs/goals/v3-protocol-conversion-field-parity-test-design.md
   - docs/goals/v3-responses-malformed-input-error-origin-test-design.md
   - docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md
+  - docs/goals/v3-responses-invalid-input-error-projection-test-design.md
   - docs/design/v3-protocol-request-field-projection.md
   - docs/architecture/manifests/v3.protocol_request_field_projection.yml
   - docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml

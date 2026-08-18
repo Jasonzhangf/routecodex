@@ -200,8 +200,8 @@ The matrix is required as one mixed request, not only one test per field. This l
 | Responses field | Anthropic provider wire | Required test |
 | --- | --- | --- |
 | `metadata` arbitrary string map | retained as Responses data-plane response context and restored on the Responses response before `RespChatProcess`; only exact `user_id` may also project to Anthropic `metadata.user_id`; arbitrary keys never enter Anthropic wire, MetadataCenter, headers, or provider failure policy | request-wire absence plus response metadata equality and malformed metadata negatives |
-| `reasoning.effort=low/medium/high/xhigh/max` | `output_config.effort` with identical value | positive effort intersection matrix |
-| `reasoning.effort=none/minimal` | `UnmappedOutboundFields` at Anthropic outbound codec | negative effort value-domain matrix |
+| `reasoning.effort=low/medium/high/xhigh/max` | standard Anthropic `output_config.effort` with identical value | positive effort intersection matrix |
+| `reasoning.effort=none/minimal/unknown` | standard Anthropic nearest legal qualitative level (`low/low/medium`); MiniMax Anthropic uses `thinking.type=adaptive` and omits unsupported `output_config.effort` | target-protocol compatibility matrix plus provider-wire absence test |
 | `reasoning.summary` | registered Chat extension; Anthropic uses a registered many-to-one static compatibility mapping that preserves complete native thinking as Responses reasoning summary for `auto`/`concise`/`detailed` without truncation | source-roundtrip, provider-wire absence, full-thinking response projection, and invalid-value rejection tests |
 | `reasoning.context/mode` | registered Chat extensions, then `UnmappedOutboundFields`; never system text | paired source-roundtrip and Anthropic rejection tests |
 | `reasoning.budget_tokens` / `reasoning.thinking` | not declared by the audited OpenAI Responses `Reasoning` schema; Responses inbound rejects them rather than treating Anthropic fields as OpenAI extensions | malformed source-schema negative tests |
@@ -286,7 +286,7 @@ Required closeout after source green: V3 fmt, protocol characterization gates, r
 
 | Positive lock | Negative lock |
 | --- | --- |
-| OpenAI `medium` -> Chat effort -> Anthropic `output_config.effort=medium` | OpenAI `minimal` -> Anthropic fails; no invented `thinking` budget |
+| OpenAI `medium` -> Chat effort -> Anthropic `output_config.effort=medium`; unknown -> standard Anthropic `medium`; MiniMax active -> `thinking.type=adaptive` | No qualitative effort invents a numeric `thinking` budget; MiniMax wire never carries unsupported `output_config.effort` |
 | Anthropic `output_config.effort=xhigh` -> Chat effort -> Responses `reasoning.effort=xhigh` | Unsupported target-model effort fails before transport |
 | Anthropic numeric budget -> Chat budget -> valid Gemini `thinkingBudget` | Numeric budget never becomes OpenAI qualitative effort |
 | Exact `client_metadata.user_id` -> Anthropic `metadata.user_id`; registered Codex client-local keys are consumed before provider wire | Unknown client metadata keys fail without MetadataCenter copy or silent consumption |

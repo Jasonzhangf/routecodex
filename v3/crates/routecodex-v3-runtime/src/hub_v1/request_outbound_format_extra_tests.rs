@@ -891,6 +891,36 @@ fn openai_responses_wire_preserves_client_metadata_and_projects_reasoning_effort
 }
 
 #[test]
+fn openai_responses_wire_preserves_unknown_non_empty_reasoning_effort() {
+    let payload = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [{"role": "user", "content": "hello"}],
+        "reasoning_effort": "definitely_invalid"
+    });
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("same-protocol Responses wire must preserve an unknown effort value");
+
+    assert_eq!(request["reasoning"], json!({"effort":"definitely_invalid"}));
+    assert!(request.get("reasoning_effort").is_none(), "{request}");
+}
+
+#[test]
+fn openai_responses_wire_rejects_empty_reasoning_effort() {
+    let payload = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [{"role": "user", "content": "hello"}],
+        "reasoning_effort": "   "
+    });
+    let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect_err("empty effort must not reach provider wire");
+
+    assert_eq!(
+        error,
+        "MalformedOutboundField target_protocol=responses path=$.request.reasoning_effort"
+    );
+}
+
+#[test]
 fn openai_responses_wire_rebuilds_registered_reasoning_fields_only() {
     let payload = json!({
         "model": "gpt-test",

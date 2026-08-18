@@ -16,6 +16,35 @@ fn responses_reasoning_effort_normalizes_whitespace_and_case_like_chat_side() {
     .expect("whitespace/case-variant effort must be normalized, not rejected");
     assert_eq!(request["reasoning_effort"], "xhigh");
 }
+
+#[test]
+fn responses_reasoning_effort_preserves_unknown_non_empty_value_for_forward_compatibility() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "deepseek-v4-flash",
+        "input": "hi",
+        "reasoning": {"effort": " FutureLevel "}
+    }))
+    .expect("an unknown non-empty effort must survive inbound canonicalization");
+
+    assert_eq!(request["reasoning_effort"], " FutureLevel ");
+}
+
+#[test]
+fn responses_reasoning_effort_still_rejects_invalid_json_types_and_empty_strings() {
+    for effort in [json!(false), json!(42), json!({}), json!([]), json!("   ")] {
+        let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "deepseek-v4-flash",
+            "input": "hi",
+            "reasoning": {"effort": effort}
+        }))
+        .expect_err("non-string or empty effort must remain malformed protocol data");
+
+        assert_eq!(
+            error,
+            "Responses reasoning.effort must be a non-empty string"
+        );
+    }
+}
 #[test]
 fn responses_input_image_url_maps_to_openai_chat_image_url_url() {
     let request = build_v3_chat_canonical_request_from_responses_payload(&json!({

@@ -1394,6 +1394,8 @@ features:
   - current 5555 same-entry real two-turn replay after all offline gates pass
   required_gates:
   - npm run test:v3-responses-direct-remote-continuation
+  - npm run verify:v3-responses-continuation-disabled
+  - npm run test:v3-responses-continuation-disabled-red-fixtures
   - npm run verify:v3-responses-direct-remote-continuation
   - npm run test:v3-responses-direct-remote-continuation-red-fixtures
   - npm run test:v3-h4-remote-continuation
@@ -1639,6 +1641,7 @@ features:
   - docs/goals/v3-protocol-conversion-field-parity-test-design.md
   - docs/goals/v3-responses-malformed-input-error-origin-test-design.md
   - docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md
+  - docs/goals/v3-responses-invalid-input-error-projection-test-design.md
   - docs/architecture/reviews/v3-protocol-semantic-matrix-review.md
   - docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml
   - docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html

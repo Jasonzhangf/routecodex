@@ -52,6 +52,10 @@ provider binding for the same opaque ID, Req03 fails explicitly as ambiguous ins
 
 - JSON and SSE controlled upstream: function_call -> Resp04 commit -> function_call_output with
   previous_response_id -> Req03 load -> Req06 exact pin -> terminal success.
+- With `features.responses_continuation_disabled=true`, JSON and SSE both bypass remote
+  continuation observation/commit/release at the Runtime Resp04 owner. Two unrelated SSE requests
+  may receive the same provider response ID and both remain successful while the continuation store
+  stays empty.
 - SSE first-frame streaming: `response.created` / `status=in_progress` is only a response ID
   candidate; Resp04 commits only after an actual function/custom tool call or explicit
   `requires_action` payload. Terminal SSE with no tool call leaves no locator.

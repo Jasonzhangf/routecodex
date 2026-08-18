@@ -672,12 +672,7 @@ fn project_openai_responses_reasoning_extensions_to_reasoning(
     ] {
         if let Some(value) = row.remove(source) {
             let valid = match source {
-                "reasoning_effort" => value.as_str().is_some_and(|value| {
-                    matches!(
-                        value,
-                        "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-                    )
-                }),
+                "reasoning_effort" => value.as_str().is_some_and(|value| !value.trim().is_empty()),
                 "reasoning_summary_policy" => value
                     .as_str()
                     .is_some_and(|value| matches!(value, "auto" | "concise" | "detailed")),
