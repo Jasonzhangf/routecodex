@@ -71,8 +71,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
-    last_manual_authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-responses-direct
+    fingerprint: sha256:d4ea98cd469dd2c75d4ddf8b33a90ef158afe2dbb7663ff710e04f949bbeeb78
+    last_manual_authorization_id: auth-20260818-v3-direct-response-hook-generic-core-owner
   - item_id: chain:v3.hub_pipeline.v1.request
     chain_id: v3.hub_pipeline.v1.request
     status: audited_locked
@@ -243,8 +243,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:fc8d13f6b054e6e4f9c3a6cbf7e18f05238adf493c10831b04f672c8b5f84a7e
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:d9133efd6bbed105c3bc7f2b3a55f96376460dfdef54267fb706e5a3f0baa87e
+    last_manual_authorization_id: auth-20260817-v3-direct-response-hook-context-plan-owner-final
   - item_id: chain:v3.anthropic_relay.controlled_runtime
     chain_id: v3.anthropic_relay.controlled_runtime
     status: audited_locked
@@ -494,6 +494,69 @@ locked_items:
     fingerprint: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
     last_manual_authorization_id: auth-20260813-v3-provider-global-subscription-probe-fingerprint-refresh
 manual_authorizations:
+  - authorization_id: auth-20260817-v3-direct-response-hook-plan-edge-final
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-17T20:15:00-07:00'
+    reason: "Jason approved the final Direct response hook contract: the compat plan is written on rd-13, read by rd-14 SSE projection, and invalid profiles fail through the sole context compiler for both Responses and Chat Direct."
+    fingerprint_before: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
+    fingerprint_after: sha256:4b31a470d8e15d48d5840252e6505b39c7c9315a164b26c6bc414491f25224fe
+  - authorization_id: auth-20260818-v3-direct-response-hook-generic-core-owner
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-18T01:30:00-07:00'
+    reason: "Jason approved continuing the Direct hook refactor; the generic Direct kernel now supplies the typed target compatibility context to both active Direct codecs, while the Responses kernel remains the production Responses continuation owner."
+    fingerprint_before: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
+    fingerprint_after: sha256:d4ea98cd469dd2c75d4ddf8b33a90ef158afe2dbb7663ff710e04f949bbeeb78
+  - authorization_id: auth-20260817-v3-direct-response-hook-remote-resource-binding
+    item_id: chain:v3.responses_direct.remote_continuation.integration
+    approved_by: Jason
+    approved_at: '2026-08-17T19:45:00-07:00'
+    reason: "Jason approved binding the Direct compatibility context and plan to the remote-continuation Resp14 projection edge; continuation transport/save/restore remains unchanged and compatibility state stays request/provider side-channel only."
+    fingerprint_before: sha256:fc8d13f6b054e6e4f9c3a6cbf7e18f05238adf493c10831b04f672c8b5f84a7e
+    fingerprint_after: sha256:82d3dd4b3ed38eb21828ea1c8ece7e840047302d871f7a5d63026b25234c572c
+  - authorization_id: auth-20260817-v3-direct-response-hook-context-plan-owner-final
+    item_id: chain:v3.responses_direct.remote_continuation.integration
+    approved_by: Jason
+    approved_at: '2026-08-17T22:30:00-07:00'
+    reason: "Jason approved continuing the Direct response hook refactor; the remote continuation edge now records compat_plan as produced by the context-aware projection owner, and every Direct protocol supplies an explicit typed compatibility context with no silent passthrough branch."
+    fingerprint_before: sha256:fc8d13f6b054e6e4f9c3a6cbf7e18f05238adf493c10831b04f672c8b5f84a7e
+    fingerprint_after: sha256:d9133efd6bbed105c3bc7f2b3a55f96376460dfdef54267fb706e5a3f0baa87e
+  - authorization_id: auth-20260817-v3-direct-response-hook-canonical-owner-final
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-17T19:30:00-07:00'
+    reason: "Jason approved continuing the Direct response hook refactor. Unregistered AppSDK artifacts and duplicate maps were removed; the canonical builder owns compat context creation, response-only resources are bound to the response edge, and the compiled plan remains the sole Direct JSON/SSE compatibility input."
+    fingerprint_before: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
+    fingerprint_after: sha256:bb23843524b211be74c08de17ac014ae01d2bf418002428fa6a93054ca31f498
+  - authorization_id: auth-20260817-v3-direct-response-hook-final-owner-and-sse
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-17T18:40:00-07:00'
+    reason: "Jason approved continuing the Direct response hook refactor. The registry and side-channel bindings now use canonical adjacent Direct nodes and the compiled compatibility plan is carried through the Direct SSE projection so configured DeepSeek response semantics stay equivalent across JSON and SSE."
+    fingerprint_before: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
+    fingerprint_after: sha256:c1c052c4e2f1f2a4c43a25919f9651468cdb3f571b19730c03c7183ce9c13834
+  - authorization_id: auth-20260817-v3-direct-response-hook-active-registry-refresh
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-17T18:30:00-07:00'
+    reason: "Jason approved continuing the Direct response hook refactor. The active repository registry, resource map, function map, mainline call map, and verification map now bind the ordered Direct response compat lifecycle and its unique typed side-channel owner; the rendered review surface was regenerated."
+    fingerprint_before: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
+    fingerprint_after: sha256:bb23843524b211be74c08de17ac014ae01d2bf418002428fa6a93054ca31f498
+  - authorization_id: auth-20260817-v3-direct-response-hook-context-owner-refresh
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-17T18:00:00-07:00'
+    reason: "Jason approved continuing the Direct response hook refactor. The response projection owner now consumes the selected-target typed compatibility context and the duplicate context-free projection hook was physically removed; the Direct lifecycle and protocol shape remain unchanged."
+    fingerprint_before: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
+    fingerprint_after: sha256:5a6c0745f4a8b990595ca03d46482c74690b27f86c1056ccd38cb4ccdd8d2c19
+  - authorization_id: auth-20260817-v3-direct-response-hook-context-owner-refresh-remote
+    item_id: chain:v3.responses_direct.remote_continuation.integration
+    approved_by: Jason
+    approved_at: '2026-08-17T18:00:00-07:00'
+    reason: "Jason approved continuing the Direct response hook refactor; the remote continuation chain now binds the context-aware Direct projection owner while preserving continuation save/restore boundaries."
+    fingerprint_before: sha256:fc8d13f6b054e6e4f9c3a6cbf7e18f05238adf493c10831b04f672c8b5f84a7e
+    fingerprint_after: sha256:e875cfbda743d78a67517c9913b19d0c6cd8a3ca39f248116c09544ce62860a7
   - authorization_id: auth-20260815-v3-sse-codec-file-decomposition-lock-refresh
     item_id: chain:v3.sse.protocol_codec_projection_boundary
     approved_by: Jason

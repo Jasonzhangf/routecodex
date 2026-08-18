@@ -290,7 +290,7 @@ compatibility_profile = "responses:deepseek-console-go"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
 [providers.ds.models.deepseek-v4-flash]
 supports_streaming = true
-capabilities = ["text", "vision"]
+capabilities = ["text", "vision", "reasoning"]
 
 [forwarders.responses]
 model = "client-model"

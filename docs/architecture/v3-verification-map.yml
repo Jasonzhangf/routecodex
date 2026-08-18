@@ -932,6 +932,7 @@ features:
   - npm run test:v3-responses-process-execution-decision
   - npm run test:v3-responses-direct-unit
   - npm run test:v3-responses-direct-blackbox
+  - npm run test:v3-direct-sse-compile
   - npm run test:v3-direct-response-observability
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
