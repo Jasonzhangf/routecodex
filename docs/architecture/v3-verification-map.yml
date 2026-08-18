@@ -897,6 +897,8 @@ features:
   - routecodex-v3-cli config check and server status tests
   - routecodex-v3-debug pending endpoint event construction tests by server integration
   - routecodex-v3-error six-node pending endpoint projection tests by server integration
+  - post-commit Responses SSE failure traverses Error01-06 and projects one standard
+    error event before clean EOF; it never becomes a Hyper body decode error
   required_contract:
   - no TypeScript in V3 source scan
   - no config file IO outside routecodex-v3-config
@@ -1261,7 +1263,9 @@ features:
   - provider model or auth pin mismatch is rejected
   - expired locator is rejected
   - provider unavailable fails explicitly without cross-provider reselection
-  - duplicate remote response ID cannot overwrite an immutable binding
+  - duplicate response ID in another typed session or provider binding coexists;
+    duplicate response ID in the same scope and provider binding cannot overwrite
+    immutable truth
   - invalid expiry is rejected at commit
   - codec rejects local Chat Process context history and tool-state fields
   - release removes only the requested remote locator

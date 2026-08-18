@@ -999,7 +999,10 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
                         index,
                         &projected_item,
                     ) {
-                        frames.push(Err(error));
+                        frames.push(Err(routecodex_v3_error::raise_v3_sse_provider_failure(
+                            "provider_response_sse_stream",
+                            error,
+                        )));
                         return Box::pin(stream::iter(frames));
                     }
                     frames.push(Ok(build_v3_runtime_sse_json_frame(
@@ -1050,7 +1053,7 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
 }
 
 fn append_v3_responses_client_function_call_progress_frames(
-    frames: &mut Vec<Result<Vec<u8>, String>>,
+    frames: &mut Vec<Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>>,
     response_id: &str,
     output_index: usize,
     item: &Value,

@@ -26,6 +26,12 @@ Every locator binds endpoint, direct owner, session, conversation, listener port
 provider, canonical model, auth alias, capability revision, commit time, and expiry. Missing or
 conflicting truth is an Error01-06 failure. Provider/auth/control truth is side-channel only.
 
+The provider response ID is opaque and only unique inside that binding. `resp_0` from two sessions,
+providers, models, or auth handles is therefore two independent locators, not a duplicate. Req03
+resolves the client-supplied opaque ID inside the typed session/conversation/port/group scope; Req06
+consumes the locator's exact provider/model/auth pin. If one typed scope contains more than one
+provider binding for the same opaque ID, Req03 fails explicitly as ambiguous instead of guessing.
+
 ## State matrix
 
 | State | Expected action |
@@ -37,7 +43,8 @@ conflicting truth is an Error01-06 failure. Provider/auth/control truth is side-
 | already terminal continuation | reject before provider send |
 | missing/expired/scope mismatch/owner mismatch | reject at Req03 |
 | pin/capability/provider availability mismatch | reject at Req06 |
-| duplicate commit | fail at Resp04; never overwrite |
+| duplicate ID in another scope/provider binding | coexist; load/release only the exact binding |
+| duplicate ID in the same scope/provider binding | fail at Resp04; never overwrite |
 | streaming \`response.created\` only | forward as client SSE; do not commit a locator |
 | streaming function/custom tool call on HTTP-only provider | follow V2 direct HTTP parity: commit the direct locator and allow the next exact-pin `previous_response_id` + tool-output turn without requiring `remote_continuation` capability |
 
@@ -64,6 +71,27 @@ conflicting truth is an Error01-06 failure. Provider/auth/control truth is side-
   selected provider lacks a WebSocket/`remote_continuation` capability when the V2 HTTP direct data
   path is otherwise valid;
 - Error01-06 polarity and provider/client normal-payload isolation.
+
+## SSE client boundary correction (2026-08-16)
+
+- Before any semantic provider frame is released, provider/SSE/continuation failure remains inside
+  the provider attempt and Error01-05 retry/reselect policy. No client SSE response is committed.
+- After semantic bytes are released, retry/reselect is forbidden because it would mix attempts. A
+  typed Error06 Responses `event: error` closeout is emitted with HTTP status remaining 200, then the
+  stream ends cleanly. A Rust/Hyper body `Err` must never escape as a client transport decode error.
+- SSE transport/decoder/continuation errors are health-neutral and cannot increment provider failure,
+  cooldown, subscription-probe, or session-storm state.
+- A standard error closeout is an Error06 projection, not a successful terminal response and not an
+  SSE handler/provider-runtime payload repair.
+
+Positive/negative pair:
+
+- two different session/provider bindings both receive provider ID `resp_0`; both client streams
+  complete without `AlreadyCommitted` or body decode failure;
+- a genuine same-binding overwrite remains rejected before client stream commitment;
+- a post-commit controlled body error yields exactly one standard `event: error` and clean EOF, not
+  `response.completed`, not `response.failed`, and not a body transport error;
+- a pre-commit controlled body error produces no client SSE bytes and remains retryable.
 
 ## V2 HTTP direct parity correction（2026-07-25）
 

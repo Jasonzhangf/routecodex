@@ -3914,7 +3914,7 @@ flowchart TD
         <span class="summary-sub">49 edges · <code>v3.provider_action_gate.mainline</code> · ProviderReqCompat06ProviderCompat → V3ProviderResponsesTerminalOrFailureObserved</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">V3 provider action gate serializes provider failure recovery, terminal projection, permit ownership, post-commit SSE success/failure observation, and provider response event-codec terminal evidence without Server/SSE owning Error06 semantics.</p>
+        <p class="chain-summary">V3 provider action gate serializes provider failure recovery, permit ownership, post-commit SSE success/failure observation, and provider response event-codec terminal evidence; the Server frame owner consumes typed Error01 and performs the sole Error06 client-protocol projection.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.provider_action_gate</code></span>
           <span>audit: <span class="status audited_locked">locked by Jason</span></span>

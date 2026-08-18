@@ -191,8 +191,8 @@ impl V3LiveSnapClientResponseSseRecorder {
             inner: stream,
             recorder: self.core.clone(),
             terminal_persisted: false,
-            error_message: |error: &String| error.clone(),
-            map_error: |message: String| message,
+            error_message: |error: &V3Error01SourceRaised| error.message.clone(),
+            map_error: v3_codex_sample_stream_error,
             _phantom: std::marker::PhantomData,
         })
     }

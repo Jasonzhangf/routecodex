@@ -2224,7 +2224,7 @@ flowchart TD
 
 ## v3.provider_action_gate.mainline
 
-V3 provider action gate serializes provider failure recovery, terminal projection, permit ownership, post-commit SSE success/failure observation, and provider response event-codec terminal evidence without Server/SSE owning Error06 semantics.
+V3 provider action gate serializes provider failure recovery, permit ownership, post-commit SSE success/failure observation, and provider response event-codec terminal evidence; the Server frame owner consumes typed Error01 and performs the sole Error06 client-protocol projection.
 
 Owner feature: `v3.provider_action_gate`
 Manifest: `docs/architecture/manifests/v3.provider_action_gate.mainline.yml`

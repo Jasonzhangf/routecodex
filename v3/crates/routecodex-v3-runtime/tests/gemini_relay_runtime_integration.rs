@@ -721,7 +721,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
 }
 
 #[tokio::test]
-async fn post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_request() {
+async fn post_commit_sse_failure_closes_action_lane_without_blocking_a_fresh_request() {
     use futures_util::StreamExt;
     let server_id = "gemini_gate_failure";
     let manifest = manifest_for_action_gate_scope(server_id);
@@ -794,13 +794,13 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             "{case} must fail explicitly"
         );
 
-        // post-commit SSE 流失败是强故障信号：直接写 provider 级冷却，
-        // fresh 请求被冷却阻断（不再每请求都试），恢复唯一路径是后台 probe。
+        // post-commit SSE 中断只关闭当前 action-gate lane；它是瞬态流错误，
+        // 不得写 provider cooldown 或阻断 fresh session。
         let succeeding = JsonTransport {
             captured_url: Mutex::new(None),
             captured_body: Mutex::new(None),
         };
-        let blocked = execute_v3_gemini_relay_runtime_with_provider_health(
+        let fresh = execute_v3_gemini_relay_runtime_with_provider_health(
             &manifest,
             V3GeminiRelayRuntimeInput {
                 server_id: server_id.into(),
@@ -810,7 +810,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
                     concat!(module_path!(), ":", line!()),
                 )
                 .expect("test provider failure session scope"),
-                request_id: format!("req-gemini-blocked-after-post-commit-{case}"),
+                request_id: format!("req-gemini-fresh-after-post-commit-{case}"),
                 endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
                 payload: json!({
                     "contents":[{"role":"user","parts":[{"text":"blocked"}]}],
@@ -853,8 +853,8 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             provider_health.runtime_health(),
         )
         .await
-        .expect("second provider action after probe pass");
-        assert_eq!(second.status, 200);
+        .expect("fresh request must not require provider revival after SSE transient failure");
+        assert_eq!(fresh.status, 200);
     }
 }
 

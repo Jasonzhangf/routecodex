@@ -3,14 +3,23 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const runtimePath = 'v3/crates/routecodex-v3-runtime/src/kernel.rs';
+const runtimeEntrypointsPath = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs';
+const runtimeCommitPath = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_continuation_commit.rs';
 const runtimeHelpersPath = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs';
+const continuationOwnerPath = 'v3/crates/routecodex-v3-runtime/src/responses_continuation_owner.rs';
 const storePath = 'v3/crates/routecodex-v3-runtime/src/remote_continuation.rs';
 const responsePath = 'v3/crates/routecodex-v3-runtime/src/shared.rs';
 const targetPath = 'v3/crates/routecodex-v3-target/src/lib.rs';
 const configTypesPath = 'v3/crates/routecodex-v3-config/src/types.rs';
 const configValidatePath = 'v3/crates/routecodex-v3-config/src/validate.rs';
 const providerTransportPath = 'v3/crates/routecodex-v3-provider-responses/src/transport.rs';
+const providerWebsocketPath = 'v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs';
 const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
+const serverScopePath = 'v3/crates/routecodex-v3-server/src/scope_metadata.rs';
+const serverOutcomePath = 'v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs';
+const relayTypesPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs';
+const serverFramesPath = 'v3/crates/routecodex-v3-server/src/frame_builders.rs';
+const serverWebsocketPath = 'v3/crates/routecodex-v3-server/src/websocket.rs';
 const testPath = 'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs';
 const configTestPath = 'v3/crates/routecodex-v3-config/tests/config_v3_contract.rs';
 const websocketTestPath = 'v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs';
@@ -19,6 +28,7 @@ const designPath = 'docs/goals/v3-responses-direct-remote-continuation-integrati
 const planPath = 'docs/goals/v3-responses-direct-remote-continuation-integration-plan.md';
 const runtime = readSurface(runtimePath);
 const runtimeHelpers = readFileSync(runtimeHelpersPath, 'utf8');
+const continuationOwner = readFileSync(continuationOwnerPath, 'utf8');
 const store = readFileSync(storePath, 'utf8');
 const response = readFileSync(responsePath, 'utf8');
 const target = readFileSync(targetPath, 'utf8');
@@ -45,7 +55,7 @@ const failures = [];
 
 for (const [owner, text, phrases] of [
   [runtimePath, runtime, [
-    'execute_v3_responses_direct_runtime_kernel_core(',
+    'execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(',
     'static DEFAULT_RESPONSES_TRANSPORT',
     'fn default_responses_transport()',
     'execute_v3_responses_direct_runtime_kernel_with_continuation<T: ResponsesTransport>(',
@@ -58,6 +68,13 @@ for (const [owner, text, phrases] of [
     'let input = V3RemoteContinuationCommitInput::locator_only(locator);',
     'store.rebind_for_resp04(previous_response_id, input)',
     'None => store.commit(input)',
+  ]],
+  [runtimeHelpersPath, runtimeHelpers, [
+    'store.release_bound(response_id, &scope.key, selected_pin)',
+  ]],
+  [continuationOwnerPath, continuationOwner, [
+    'AmbiguousProviderBinding { .. } =>',
+    'ambiguous_provider_binding_is_request_classified_not_internal_state_failure',
   ]],
   [runtimeHelpersPath, runtimeHelpers, [
     'fn release_terminal_failure_locator(',
@@ -118,6 +135,16 @@ for (const [owner, text, phrases] of [
     'request payload and client metadata cannot construct continuation control identity',
     'entry_facts.previous_response_id.is_some() || entry_facts.has_function_call_output',
     'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(',
+  ]],
+  [relayTypesPath, relayTypes, [
+    'Stream<Item = Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>>',
+  ]],
+  [serverFramesPath, serverFrames, [
+    'Some(Err(source)) if is_v3_client_disconnect_source(&source)',
+    'Ok(v3_post_commit_sse_error_event_chunk(source))',
+  ]],
+  [`${serverWebsocketPath}#send_responses_relay_websocket_sse_stream`, relayWebsocketFunction, [
+    'Err(error) if is_v3_client_disconnect_source(&error) => return Err(())',
   ]],
   [testPath, tests, [
     'json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry',
@@ -208,6 +235,19 @@ forbid(response, responsePath, [
   /fallback/i,
   /restore_history|materiali[sz]e_context/i,
   /into_body_bytes\s*\(/,
+]);
+forbid(relayTypes, relayTypesPath, [
+  /V3ResponsesRelayClientStream\s*=\s*[\s\S]{0,160}Result<Vec<u8>, String>/,
+]);
+forbid(runtimeHelpers, runtimeHelpersPath, [
+  /release_for_req03/,
+]);
+forbid(serverFrames, serverFramesPath, [
+  /\.code\s*==\s*"client_disconnect"/,
+  /v3_sse_error_event_chunk\(projected\.status/,
+]);
+forbid(relayWebsocketFunction, `${serverWebsocketPath}#send_responses_relay_websocket_sse_stream`, [
+  /\.code\s*==\s*"client_disconnect"/,
 ]);
 forbid(providerTransportControlSource, providerTransportPath, [
   /fallback/i,

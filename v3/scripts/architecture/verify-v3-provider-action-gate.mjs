@@ -566,7 +566,7 @@ for (const testName of requiredGateTests) {
   assertRustTest(text.gateTests, files.gateTests, testName);
 }
 for (const token of [
-  'post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_request',
+  'post_commit_sse_failure_closes_action_lane_without_blocking_a_fresh_request',
   'terminal_sse_recovery_does_not_block_a_fresh_request',
   'active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds',
 ]) {
@@ -641,7 +641,7 @@ requireText(
 );
 for (const token of [
   'direct_sse_console_closeout_abruptly_closes_without_fabricating_error06',
-  'relay_sse_body_abruptly_closes_without_fabricating_error_event',
+  'relay_sse_body_abrupt_failure_projects_standard_error_event',
 ]) {
   requireText(text.serverTests, files.serverTests, token);
 }
