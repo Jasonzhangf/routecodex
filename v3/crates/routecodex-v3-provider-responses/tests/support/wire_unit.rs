@@ -399,7 +399,7 @@ mod tests {
     fn opencode_go_deepseek_responses_wire_omits_thinking_stopless_tool_choice() {
         let mut selected = target();
         selected.provider_id = "opencode-go".into();
-        selected.provider_type = "openai_chat".into();
+        selected.provider_type = "responses".into();
         selected.canonical_model_id = "deepseek-v4-flash".into();
         selected.wire_model = "deepseek-v4-flash".into();
         let wire = build_v3_provider_12_responses_wire_payload("req-deepseek-stopless", selected, json!({
@@ -411,7 +411,7 @@ mod tests {
         assert!(wire.body().get("tool_choice").is_none());
         assert!(wire.body()["tools"].as_array().is_some_and(|tools| {
             tools.iter().any(|tool| {
-                tool.pointer("/function/name").and_then(Value::as_str) == Some("reasoningStop")
+                tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
             })
         }));
     }

@@ -445,7 +445,7 @@ fn normalize_deepseek_thinking_stopless_tool_choice(
     body: &mut Value,
     target: &V3ResponsesProviderTarget,
 ) {
-    if target.provider_type == "openai_chat"
+    if matches!(target.provider_type.as_str(), "responses" | "openai_chat")
         && (target.canonical_model_id == "deepseek-v4-flash"
             || target.wire_model == "deepseek-v4-flash")
         && v3_wire_payload_is_thinking_mode(body)
