@@ -1675,6 +1675,17 @@ fn project_responses_event_to_chat(value: &Value) -> Value {
                 })]),
             );
         }
+        "response.function_call_arguments.delta" => {
+            delta.insert(
+                "tool_calls".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "index": value.get("output_index").cloned().unwrap_or_else(|| Value::Number(0.into())),
+                    "function": {
+                        "arguments": value.get("delta").cloned().unwrap_or_else(|| Value::String(String::new()))
+                    }
+                })]),
+            );
+        }
         "response.completed" => {
             finish_reason = Value::String(
                 if responses_tool_calls(response).is_empty() {
