@@ -1503,7 +1503,7 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
 }
 
 #[tokio::test]
-async fn provider_sse_failure_event_reselects_before_client_stream() {
+async fn direct_sse_precommit_failures_reselect_before_client_stream() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct FirstSseFailureSecondSucceeds {
@@ -1516,15 +1516,34 @@ async fn provider_sse_failure_event_reselects_before_client_stream() {
             &self,
             request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            if self.sends.fetch_add(1, Ordering::SeqCst) < 3 {
-                // 前 3 次尝试：同一 provider first 每次都在 HTTP 200 SSE 流内
-                // 报失败事件（瞬态流内失败 → health-neutral 同 provider 重试）。
+            let attempt = self.sends.fetch_add(1, Ordering::SeqCst);
+            if attempt < 3 {
+                // 前 3 次尝试覆盖显式 failure、empty completed.output=[]、
+                // empty completed.output 缺失；都必须在 Resp15 前进入 Error01，
+                // 由既有瞬态策略同 provider 重试并最终 reselect。
                 assert_eq!(
                     request.provider_id(),
                     "first",
                     "attempt {} must hit first",
                     self.sends.load(Ordering::SeqCst)
                 );
+                let frames = match attempt {
+                    0 => vec![
+                        Ok::<Vec<u8>, V3ProviderError>(
+                            b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
+                        ),
+                        Ok::<Vec<u8>, V3ProviderError>(
+                            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"first quota exhausted\"}}}\n\n".to_vec(),
+                        ),
+                    ],
+                    1 => vec![Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_empty_array\",\"output\":[]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty_array\",\"status\":\"completed\",\"output\":[]}}\n\n".to_vec(),
+                    )],
+                    2 => vec![Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_empty_absent\",\"output\":[]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty_absent\",\"status\":\"completed\"}}\n\n".to_vec(),
+                    )],
+                    _ => unreachable!("attempt is bounded above"),
+                };
                 return Ok(V3ProviderResp14Raw::from_sse(
                     request.request_id().to_string(),
                     request.provider_id().to_string(),
@@ -1533,14 +1552,7 @@ async fn provider_sse_failure_event_reselects_before_client_stream() {
                         name: "content-type".to_string(),
                         value: b"text/event-stream".to_vec(),
                     }],
-                    Box::pin(stream::iter(vec![
-                        Ok::<Vec<u8>, V3ProviderError>(
-                            b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
-                        ),
-                        Ok::<Vec<u8>, V3ProviderError>(
-                            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"first quota exhausted\"}}}\n\n".to_vec(),
-                        ),
-                    ])),
+                    Box::pin(stream::iter(frames)),
                 ));
             }
             assert_eq!(
@@ -1591,26 +1603,32 @@ async fn provider_sse_failure_event_reselects_before_client_stream() {
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
         4,
-        "transient SSE failure must retry same provider 3 times then switch: {output:?}"
+        "precommit SSE failures must retry same provider 3 times then switch: {output:?}"
     );
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
     assert!(
         output.node_trace.contains(&"V3DirectTransientRetrySame"),
-        "transient failures must retry same provider: {:?}",
+        "precommit failures must retry same provider: {:?}",
         output.node_trace
     );
     let observability = output
         .observability
         .as_ref()
-        .expect("provider SSE failure switch must be observable");
+        .expect("provider SSE precommit failure switch must be observable");
     assert_eq!(
         observability.provider_failure_events.len(),
         1,
         "only the 3rd transient failure reports once to the error center: {output:?}"
     );
     assert_eq!(
+        observability.provider_failure_events[0]
+            .error_type
+            .as_deref(),
+        Some("provider_response_sse_empty")
+    );
+    assert_eq!(
         observability.provider_failure_events[0].message,
-        "first quota exhausted"
+        "provider SSE completed before content or tool output"
     );
     assert_eq!(
         observability.provider_failure_events[0]

@@ -1560,17 +1560,23 @@ features:
   owner_scope: Provider/client SSE semantics in adjacent protocol codecs; opaque SSE transport and server lifecycle only for framing/outcomes.
   design:
   - docs/goals/v3-openai-chat-anthropic-sse-terminal-closeout-fix-design.md
+  - docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md
   contract:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_unit:
   - OpenAI Chat finish_reason=stop is the semantic terminal.
-  - '[DONE] and EOF do not create semantic terminality or success.'
-  - provider event parsing stays in the selected provider codec.
-  - provider SSE data parsing and Responses typed outcome are owned by v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs.
+  - "[DONE] and EOF do not create semantic terminality or success."
+  - provider event parsing stays in the selected provider codec selected before
+    classification; event shape never selects a second protocol.
+  - provider SSE data parsing and protocol-aware typed outcome are owned by
+    v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs.
+  - Responses, Anthropic, and OpenAI Chat lifecycle-only/empty terminal frames
+    cannot authorize Direct client commit.
   - runtime and SSE transport do not parse business/control semantics.
   required_reverse:
+  - A foreign-protocol event fails instead of being shape-reclassified.
   - EOF without semantic terminal fails explicitly at the codec/lifecycle owner.
   - '[DONE] before semantic terminal fails without being treated as success.'
   - malformed provider event fails at provider codec, not transport/server.
