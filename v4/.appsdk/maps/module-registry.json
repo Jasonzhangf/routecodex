@@ -510,7 +510,69 @@
       "verification_gates": [
         "v4_real_runtime_admission_red",
         "v4_real_runtime_compiled_manifest",
-        "v4_real_runtime_v3_isolation"
+        "v4_real_runtime_v3_isolation",
+        "v4_runtime_bin_l2_regression",
+        "v4_infrastructure_contract"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-cli",
+      "status": "active",
+      "owner": "routecodex-v4-cli",
+      "owned_paths": [
+        "crates/routecodex-v4-cli/**"
+      ],
+      "forbidden_paths": [
+        "crates/routecodex-v4-config/**",
+        "crates/routecodex-v4-lifecycle/**",
+        "crates/routecodex-v4-server/**",
+        "crates/routecodex-v4-provider/**",
+        "v3/**",
+        "~/.rcc/**"
+      ],
+      "verification_gates": [
+        "v4_cli_l2_regression",
+        "v4_infrastructure_contract",
+        "v4_infrastructure_contract_red"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-lifecycle",
+      "status": "active",
+      "owner": "routecodex-v4-lifecycle",
+      "owned_paths": [
+        "crates/routecodex-v4-lifecycle/**"
+      ],
+      "forbidden_paths": [
+        "crates/routecodex-v4-cli/**",
+        "crates/routecodex-v4-config/**",
+        "crates/routecodex-v4-server/**",
+        "crates/routecodex-v4-provider/**",
+        "v3/**",
+        "~/.rcc/config.v3.toml"
+      ],
+      "verification_gates": [
+        "v4_lifecycle_l2_regression",
+        "v4_infrastructure_contract",
+        "v4_infrastructure_contract_red"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-servertool",
+      "status": "active",
+      "owner": "routecodex-v4-servertool",
+      "owned_paths": [
+        "crates/routecodex-v4-servertool/**"
+      ],
+      "forbidden_paths": [
+        "crates/routecodex-v4-cli/**",
+        "crates/routecodex-v4-runtime-bin/**",
+        "crates/routecodex-v4-provider/**",
+        "v3/**"
+      ],
+      "verification_gates": [
+        "v4_servertool_l2_regression",
+        "v4_infrastructure_contract"
       ]
     }
   ]

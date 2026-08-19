@@ -24,13 +24,11 @@ function restoreHermeticActive() {
   fs.cpSync(fixture, target, { recursive: true });
 }
 
-run('node scripts/compile-real-runtime-manifest.mjs');
 run('cargo run --quiet --manifest-path Cargo.toml -p routecodex-v4-skeleton --bin routecodex-v4-plan-hash -- contracts/skeleton-plan.contract.json --check');
 run('cargo build --release --manifest-path Cargo.toml --locked');
 restoreHermeticActive();
-run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-cordis-bridge,routecodex-v4-skeleton,routecodex-v4-plugin-contract --out build-control/routecodex-v4-runtime/libroutecodex_v4_runtime.rlib');
-run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-binary --root . --consumer routecodex-v4-runtime-bin --deps routecodex-v4-base-node,routecodex-v4-error,routecodex-v4-control --source-deps routecodex-v4-provider,routecodex-v4-router,routecodex-v4-server --rlib-deps routecodex-v4-runtime=build-control/routecodex-v4-runtime/libroutecodex_v4_runtime.rlib --out build-control/routecodex-v4-runtime-bin/tests');
-run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- build-binary --root . --consumer routecodex-v4-runtime-bin --deps routecodex-v4-base-node,routecodex-v4-error,routecodex-v4-control --source-deps routecodex-v4-provider,routecodex-v4-router,routecodex-v4-server --rlib-deps routecodex-v4-runtime=build-control/routecodex-v4-runtime/libroutecodex_v4_runtime.rlib --out target/release/rccv4');
+run('node scripts/build.mjs');
+run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-binary --root . --consumer routecodex-v4-runtime-bin --deps routecodex-v4-base-node,routecodex-v4-edge,routecodex-v4-control,routecodex-v4-error --source-deps routecodex-v4-cli,routecodex-v4-lifecycle,routecodex-v4-servertool --rlib-deps routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib,routecodex_v4_provider=build-control/routecodex-v4-provider/libroutecodex_v4_provider.rlib,routecodex_v4_router=build-control/routecodex-v4-router/libroutecodex_v4_router.rlib,routecodex_v4_runtime=build-control/routecodex-v4-runtime/libroutecodex_v4_runtime.rlib,routecodex_v4_server=build-control/routecodex-v4-server/libroutecodex_v4_server.rlib --out build-control/routecodex-v4-runtime-bin/tests');
 
 for (const gate of ARCHITECTURE_GATES) {
   run(`node scripts/architecture/${gate}`);

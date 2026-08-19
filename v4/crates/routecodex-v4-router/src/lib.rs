@@ -8,28 +8,21 @@
 //!   never rewritten;
 //! - control fields never enter provider/client normal payload.
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProviderCandidate {
-    pub provider_id: String,
-    pub config_path: String,
-    pub protocol: String,
-    pub model: String,
-    pub priority: u32,
-}
+use routecodex_v4_config::{RuntimeProviderCandidate, RuntimeRoute};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedTarget {
     pub provider_id: String,
     pub config_path: String,
     pub protocol: String,
-    pub model: String,
+    pub wire_model: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetSelectionError {
     EmptyCandidates,
+    EmptyRoutes,
+    RouteTargetMissing(String),
     ModelUnavailable(String),
 }
 
@@ -40,6 +33,10 @@ impl std::fmt::Display for TargetSelectionError {
             Self::ModelUnavailable(model) => {
                 write!(f, "no compiled provider candidate supports model {model}")
             }
+            Self::EmptyRoutes => write!(f, "compiled route set is empty"),
+            Self::RouteTargetMissing(provider) => {
+                write!(f, "compiled route references missing provider {provider}")
+            }
         }
     }
 }
@@ -47,21 +44,44 @@ impl std::fmt::Display for TargetSelectionError {
 impl std::error::Error for TargetSelectionError {}
 
 pub fn select_target(
-    candidates: &[ProviderCandidate],
+    candidates: &[RuntimeProviderCandidate],
+    routes: &[RuntimeRoute],
     requested_model: &str,
 ) -> Result<SelectedTarget, TargetSelectionError> {
     if candidates.is_empty() {
         return Err(TargetSelectionError::EmptyCandidates);
     }
-    candidates
+    if routes.is_empty() {
+        return Err(TargetSelectionError::EmptyRoutes);
+    }
+    let route = routes
         .iter()
-        .filter(|candidate| candidate.model == requested_model)
-        .min_by_key(|candidate| candidate.priority)
+        .find(|route| route.models.iter().any(|model| model == requested_model))
+        .ok_or_else(|| TargetSelectionError::ModelUnavailable(requested_model.to_string()))?;
+    let mut eligible = route
+        .targets
+        .iter()
+        .map(|provider_id| {
+            candidates
+                .iter()
+                .find(|candidate| &candidate.provider_id == provider_id)
+                .ok_or_else(|| TargetSelectionError::RouteTargetMissing(provider_id.clone()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    eligible.sort_by_key(|candidate| candidate.priority);
+    eligible
+        .into_iter()
+        .find(|candidate| {
+            candidate
+                .entry_models
+                .iter()
+                .any(|model| model == requested_model)
+        })
         .map(|candidate| SelectedTarget {
             provider_id: candidate.provider_id.clone(),
             config_path: candidate.config_path.clone(),
             protocol: candidate.protocol.clone(),
-            model: candidate.model.clone(),
+            wire_model: candidate.wire_model.clone(),
         })
         .ok_or_else(|| TargetSelectionError::ModelUnavailable(requested_model.to_string()))
 }

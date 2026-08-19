@@ -3,7 +3,7 @@
   "contract_id": "v4-node-graph",
   "status": "active",
   "owner_feature_id": "v4.node_graph",
-  "graph_hash": "sha256:47cf69670b7fde3b628f220f35127dc6b4f4cea858f7386e446b2f7515fd79b9",
+  "graph_hash": "sha256:65f29df44db937200cd36e350cc2524562696fe3c4f41697549aedc8d3f4d735",
   "canonical_docs": [
     "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
@@ -1666,6 +1666,41 @@
       "role_id": "control_ledger",
       "scope": "real Cordis Context/Fiber/Effect host lifecycle",
       "owner": "routecodex-v4-cordis-host"
+    },
+    {
+      "node_id": "V4RuntimeBinary01Identity",
+      "family": "LifecycleChainNode",
+      "role_id": "lifecycle_identity",
+      "scope": "installed V4 runtime binary identity",
+      "owner": "routecodex-v4-runtime-bin"
+    },
+    {
+      "node_id": "V4Cli01CommandIntent",
+      "family": "LifecycleChainNode",
+      "role_id": "lifecycle_declare",
+      "scope": "typed CLI parse and dispatch intent",
+      "owner": "routecodex-v4-cli"
+    },
+    {
+      "node_id": "V4Lifecycle02ManagedInstance",
+      "family": "LifecycleChainNode",
+      "role_id": "lifecycle_identity",
+      "scope": "V4 managed instance state",
+      "owner": "routecodex-v4-lifecycle"
+    },
+    {
+      "node_id": "V4Lifecycle03ControlSocket",
+      "family": "LifecycleChainNode",
+      "role_id": "lifecycle_control",
+      "scope": "exact V4 managed instance control socket",
+      "owner": "routecodex-v4-lifecycle"
+    },
+    {
+      "node_id": "V4Servertool01CliProjection",
+      "family": "ResponseChainNode",
+      "role_id": "response_outbound",
+      "scope": "local servertool CLI result projection",
+      "owner": "routecodex-v4-servertool"
     }
   ],
   "registered_nodes_rule": "registered_nodes is the single machine node catalog: fixed chain nodes, group-private nodes, and control/diagnostic/lifecycle side nodes all resolve here; every entry needs unique family/role/scope/owner; skeleton checkpoints and resource relations may only reference catalog nodes",

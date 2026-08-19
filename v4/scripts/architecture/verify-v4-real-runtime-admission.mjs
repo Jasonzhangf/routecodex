@@ -20,10 +20,11 @@ const providerPath = path.join(root, 'crates/routecodex-v4-provider/src/lib.rs')
 const serverPath = path.join(root, 'crates/routecodex-v4-server/src/lib.rs');
 const routerPath = path.join(root, 'crates/routecodex-v4-router/src/lib.rs');
 
-const RCCV4_HOST = process.env.RCCV4_LISTEN ?? '127.0.0.1:17777';
 const BINARY_PATH = path.join(root, 'target/release/rccv4');
-const COMPILED_MANIFEST = path.join(root, 'generated/real-runtime-admission/manifest.compiled.json');
-const ADMISSION_MODEL = process.env.RCCV4_ADMISSION_MODEL ?? 'MiniMax-M3';
+const COMPILED_MANIFEST = process.env.RCCV4_MANIFEST
+  ?? path.join(process.env.HOME ?? '', '.rcc/v4/manifest.compiled.json');
+let RCCV4_HOST = process.env.RCCV4_LISTEN;
+let ADMISSION_MODEL = process.env.RCCV4_ADMISSION_MODEL;
 
 const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 const readText = (file) => fs.readFileSync(file, 'utf8');
@@ -124,9 +125,9 @@ function validateContract(input) {
     .map((edge) => `${edge.from}->${edge.to}`));
   for (const edge of [
     'routecodex-v4-runtime-bin->routecodex-v4-server',
-    'routecodex-v4-runtime->routecodex-v4-provider',
-    'routecodex-v4-provider->routecodex-v4-runtime',
-    'routecodex-v4-runtime->routecodex-v4-server',
+    'routecodex-v4-runtime-bin->routecodex-v4-runtime',
+    'routecodex-v4-runtime-bin->routecodex-v4-router',
+    'routecodex-v4-runtime-bin->routecodex-v4-provider',
   ]) {
     if (!pendingEdges.has(edge)) failures.push(`mainline map missing admission edge: ${edge}`);
   }
@@ -206,6 +207,19 @@ if (!fs.existsSync(COMPILED_MANIFEST)) {
   process.exit(1);
 }
 console.log(`[v4_real_runtime_admission] compiled manifest OK: ${COMPILED_MANIFEST}`);
+const compiledManifest = readJson(COMPILED_MANIFEST);
+if (compiledManifest.runtime_identity !== 'rccv4'
+    || typeof compiledManifest.manifest_digest !== 'string'
+    || !compiledManifest.manifest_digest.startsWith('sha256:')) {
+  console.error('[v4_real_runtime_admission] FAIL: compiled manifest identity/digest invalid');
+  process.exit(1);
+}
+RCCV4_HOST ??= compiledManifest.listeners?.[0]?.address;
+ADMISSION_MODEL ??= compiledManifest.routes?.[0]?.models?.[0];
+if (!RCCV4_HOST || !ADMISSION_MODEL) {
+  console.error('[v4_real_runtime_admission] FAIL: listener/model missing from compiled manifest');
+  process.exit(1);
+}
 
 // Live HTTP tests
 let passed = 0;

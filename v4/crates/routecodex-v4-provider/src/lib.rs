@@ -8,20 +8,20 @@
 //!   recorded by the provider runtime owner only;
 //! - availability never enters provider/client payload.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ProviderFile {
     #[serde(rename = "providerId")]
     provider_id: String,
     provider: ProviderSection,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ProviderSection {
     #[serde(rename = "baseURL")]
     base_url: String,
@@ -34,27 +34,30 @@ struct ProviderSection {
     auth: AuthSection,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ModelSection {
     #[serde(rename = "wireName")]
     wire_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct AuthSection {
     #[serde(rename = "apiKey")]
     api_key: Option<String>,
+    env: Option<String>,
     #[serde(default)]
     entries: Vec<AuthEntry>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct AuthEntry {
     alias: Option<String>,
     #[serde(rename = "tokenFile")]
     token_file: Option<String>,
     #[serde(rename = "secretFile")]
     secret_file: Option<String>,
+    #[serde(rename = "secretKey")]
+    secret_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +79,12 @@ pub struct ProviderProfile {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ProviderAuthHandle {
     TokenFile { path: String, alias: Option<String> },
+    Env { name: String },
+    SecretFile {
+        path: String,
+        key: String,
+        alias: Option<String>,
+    },
     ConfigInline { config_path: String },
 }
 
@@ -181,18 +190,30 @@ pub fn load_profile(path: &str) -> Result<ProviderProfile, ProviderTransportErro
         status: None,
     })?;
     let auth = if let Some(entry) = file.provider.auth.entries.first() {
-        let path = entry
-            .token_file
-            .clone()
-            .or_else(|| entry.secret_file.clone())
-            .ok_or_else(|| ProviderTransportError {
-                code: "provider_auth_handle_missing".to_string(),
-                message: "provider auth entry has no tokenFile or secretFile".to_string(),
-                status: None,
-            })?;
-        ProviderAuthHandle::TokenFile {
-            path,
-            alias: entry.alias.clone(),
+        match (&entry.token_file, &entry.secret_file, &entry.secret_key) {
+            (Some(path), None, None) => ProviderAuthHandle::TokenFile {
+                path: path.clone(),
+                alias: entry.alias.clone(),
+            },
+            (None, Some(path), Some(key)) if !key.trim().is_empty() => {
+                ProviderAuthHandle::SecretFile {
+                    path: path.clone(),
+                    key: key.clone(),
+                    alias: entry.alias.clone(),
+                }
+            }
+            _ => {
+                return Err(ProviderTransportError {
+                    code: "provider_auth_handle_invalid".to_string(),
+                    message: "auth entry requires exactly tokenFile, or secretFile plus secretKey"
+                        .to_string(),
+                    status: None,
+                })
+            }
+        }
+    } else if !file.provider.auth.env.as_deref().unwrap_or_default().is_empty() {
+        ProviderAuthHandle::Env {
+            name: file.provider.auth.env.clone().expect("checked non-empty"),
         }
     } else if !file
         .provider
@@ -486,6 +507,44 @@ fn materialize_auth(handle: &ProviderAuthHandle) -> Result<String, ProviderTrans
             }
             Ok(key)
         }
+        ProviderAuthHandle::Env { name } => {
+            let key = std::env::var(name).map_err(|error| ProviderTransportError {
+                code: "provider_auth_env".to_string(),
+                message: format!("auth environment {name}: {error}"),
+                status: None,
+            })?;
+            if key.trim().is_empty() {
+                return Err(ProviderTransportError {
+                    code: "provider_auth_empty".to_string(),
+                    message: format!("auth environment {name} is empty"),
+                    status: None,
+                });
+            }
+            Ok(key)
+        }
+        ProviderAuthHandle::SecretFile { path, key, alias } => {
+            let raw = std::fs::read_to_string(path).map_err(|error| ProviderTransportError {
+                code: "provider_auth_read".to_string(),
+                message: format!("auth handle {}: {error}", alias.as_deref().unwrap_or("default")),
+                status: None,
+            })?;
+            let document: toml::Value = toml::from_str(&raw).map_err(|error| ProviderTransportError {
+                code: "provider_auth_parse".to_string(),
+                message: format!("auth handle {}: {error}", alias.as_deref().unwrap_or("default")),
+                status: None,
+            })?;
+            let secret = key.split('.').try_fold(&document, |value, segment| value.get(segment));
+            let secret = secret
+                .and_then(toml::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| ProviderTransportError {
+                    code: "provider_auth_key_missing".to_string(),
+                    message: format!("auth handle {} key is missing", alias.as_deref().unwrap_or("default")),
+                    status: None,
+                })?;
+            Ok(secret.to_string())
+        }
         ProviderAuthHandle::ConfigInline { config_path } => {
             let raw =
                 std::fs::read_to_string(config_path).map_err(|error| ProviderTransportError {
@@ -509,6 +568,113 @@ fn materialize_auth(handle: &ProviderAuthHandle) -> Result<String, ProviderTrans
                 })
         }
     }
+}
+
+pub fn verify_profile_auth(profile: &ProviderProfile) -> Result<(), ProviderTransportError> {
+    materialize_auth(&profile.auth).map(|_| ())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderInitAuth {
+    Inline(String),
+    Env(String),
+    TokenFile(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderInitOptions {
+    pub provider_id: String,
+    pub base_url: String,
+    pub model: String,
+    pub auth: ProviderInitAuth,
+}
+
+pub fn write_provider_profile(
+    config_directory: &std::path::Path,
+    options: &ProviderInitOptions,
+    force: bool,
+) -> Result<std::path::PathBuf, ProviderTransportError> {
+    if options.provider_id.trim().is_empty()
+        || !options
+            .provider_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        || options.base_url.trim().is_empty()
+        || options.model.trim().is_empty()
+    {
+        return Err(ProviderTransportError {
+            code: "provider_init_invalid".to_string(),
+            message: "provider id, base URL, and model must be valid and non-empty".to_string(),
+            status: None,
+        });
+    }
+    let directory = config_directory.join("provider").join(&options.provider_id);
+    std::fs::create_dir_all(&directory).map_err(|error| ProviderTransportError {
+        code: "provider_init_write".to_string(),
+        message: error.to_string(),
+        status: None,
+    })?;
+    let path = directory.join("config.v2.toml");
+    if path.exists() && !force {
+        return Err(ProviderTransportError {
+            code: "provider_init_exists".to_string(),
+            message: path.display().to_string(),
+            status: None,
+        });
+    }
+    let (api_key, env, entries) = match &options.auth {
+        ProviderInitAuth::Inline(value) => (Some(value.clone()), None, Vec::new()),
+        ProviderInitAuth::Env(name) => (None, Some(name.clone()), Vec::new()),
+        ProviderInitAuth::TokenFile(path) => (
+            None,
+            None,
+            vec![AuthEntry {
+                alias: Some("primary".to_string()),
+                token_file: Some(path.clone()),
+                secret_file: None,
+                secret_key: None,
+            }],
+        ),
+    };
+    let file = ProviderFile {
+        provider_id: options.provider_id.clone(),
+        provider: ProviderSection {
+            base_url: options.base_url.clone(),
+            default_model: options.model.clone(),
+            protocol: "responses".to_string(),
+            models: BTreeMap::from([(
+                options.model.clone(),
+                ModelSection {
+                    wire_name: Some(options.model.clone()),
+                },
+            )]),
+            auth: AuthSection {
+                api_key,
+                env,
+                entries,
+            },
+        },
+    };
+    let mut bytes = toml::to_string_pretty(&file)
+        .map_err(|error| ProviderTransportError {
+            code: "provider_init_encode".to_string(),
+            message: error.to_string(),
+            status: None,
+        })?
+        .into_bytes();
+    bytes.push(b'\n');
+    let temporary = directory.join(format!(".config.v2.{}.tmp", std::process::id()));
+    std::fs::write(&temporary, bytes).map_err(|error| ProviderTransportError {
+        code: "provider_init_write".to_string(),
+        message: error.to_string(),
+        status: None,
+    })?;
+    std::fs::rename(&temporary, &path).map_err(|error| ProviderTransportError {
+        code: "provider_init_write".to_string(),
+        message: error.to_string(),
+        status: None,
+    })?;
+    Ok(path)
 }
 
 fn parse_curl_response(output: &[u8]) -> Result<ProviderRawResponse, ProviderTransportError> {

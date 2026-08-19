@@ -1992,10 +1992,11 @@ resources:
   - v4_parity_gate_real_runtime_admission_red
   resource_kind: admission_contract
   lifecycle: v4.runtime.admission
-  owner_crate: routecodex-v4-governance
-  owner_node: V4RuntimeAdmission00CompiledManifest
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config05ManifestPublished
   owner_symbols:
-  - real-runtime-admission.manifest.json
+  - RuntimeConfigManifest
+  - compile_runtime_config
   identity:
   - manifestId
   - schemaVersion
@@ -2009,23 +2010,23 @@ resources:
   allowed_readers:
   - routecodex-v4-runtime-bin
   forbidden_writers:
-  - V4HubReqInbound02Standardized
-  - V4ProviderReqOutbound06WirePayload
-  - V4ServerRespOutbound05ClientFrame
+  - V4HubReqInbound03Normalized
+  - V4ProviderSseOut07WireBoundary
+  - V4ServerRespOutbound06ClientFrame
   may_enter_provider_body: false
   may_enter_client_body: false
-  binding_status: active
+  binding_status: anchored
 - resource_id: v4.runtime.compiled_manifest
   axis: information
   verification_gate:
   - v4_real_runtime_compiled_manifest
   resource_kind: compiled_manifest
-  lifecycle: v4.runtime.admission
-  owner_crate: routecodex-v4-runtime-bin
-  owner_node: V4RuntimeAdmission00CompiledManifest
+  lifecycle: v4.config.compile
+  owner_crate: routecodex-v4-config
+  owner_node: V4Config05ManifestPublished
   owner_symbols:
-  - CompiledAdmissionManifest
-  - manifest_digest
+  - RuntimeConfigManifest
+  - compile_runtime_config
   identity:
   - manifestId
   - manifestDigest
@@ -2034,16 +2035,16 @@ resources:
     drift: fail_fast
     secret_in_manifest: forbidden
   allowed_writers:
-  - routecodex-v4-governance
+  - routecodex-v4-config
   allowed_readers:
   - routecodex-v4-runtime-bin
   forbidden_writers:
-  - V4HubReqInbound02Standardized
-  - V4ProviderReqOutbound06WirePayload
-  - V4ServerRespOutbound05ClientFrame
+  - V4HubReqInbound03Normalized
+  - V4ProviderSseOut07WireBoundary
+  - V4ServerRespOutbound06ClientFrame
   may_enter_provider_body: false
   may_enter_client_body: false
-  binding_status: active
+  binding_status: anchored
 - resource_id: v4.runtime.binary_identity
   axis: diagnostic
   verification_gate:
@@ -2052,10 +2053,9 @@ resources:
   resource_kind: runtime_identity
   lifecycle: v4.runtime.admission
   owner_crate: routecodex-v4-runtime-bin
-  owner_node: V4RuntimeAdmission00CompiledManifest
+  owner_node: V4RuntimeBinary01Identity
   owner_symbols:
-  - rccv4
-  - routecodex_v4_runtime_bin
+  - RCCV4_BINARY_IDENTITY
   identity:
   - runtimeIdentity
   - binaryDigest
@@ -2073,7 +2073,7 @@ resources:
   - routecodex-v4-provider
   may_enter_provider_body: false
   may_enter_client_body: false
-  binding_status: active
+  binding_status: anchored
 - resource_id: v4.provider.real_transport
   axis: data
   verification_gate:
@@ -2081,10 +2081,12 @@ resources:
   resource_kind: provider_transport
   lifecycle: v4.provider.mainline
   owner_crate: routecodex-v4-provider
-  owner_node: V4ProviderReqOutbound07TransportRequest
+  owner_node: V4ProviderSseOut07WireBoundary
   owner_symbols:
-  - ProviderTransport
-  - ProviderResponseRaw
+  - ProviderResponseStream
+  - ProviderRawResponse
+  - send_responses
+  - send_responses_streaming
   identity:
   - requestId
   - providerId
@@ -2095,15 +2097,14 @@ resources:
     request_response_bytes_preserved: true
     internal_control_fields_forbidden: true
   allowed_writers:
-  - V4ProviderReqOutbound07TransportRequest
-  - V4ProviderRespInbound01Raw
+  - V4ProviderSseOut07WireBoundary
+  - V4ProviderSseIn01FrameBoundary
   allowed_readers:
-  - V4ProviderRespInbound01Raw
+  - V4ProviderSseIn01FrameBoundary
   - V4Error01SourceRaised
   forbidden_writers:
-  - V4HubReqChatProcess03Governed
-  - V4Router04SelectedTarget
-  - V4ServerRespOutbound05ClientFrame
+  - V4HubReqChatProcess04Governed
+  - V4ServerRespOutbound06ClientFrame
   - V4Control01ScopeBoundCarrier
   - V4MetadataCenter01ScopeRegistry
   - V4Router05RequestClassified
@@ -2126,7 +2127,7 @@ resources:
   - V4ControlMetadataCenter
   may_enter_provider_body: true
   may_enter_client_body: false
-  binding_status: active
+  binding_status: anchored
 - resource_id: v4.server.http_listener
   axis: data
   verification_gate:
@@ -2136,9 +2137,9 @@ resources:
   owner_crate: routecodex-v4-server
   owner_node: V4ServerReqInbound01ClientRaw
   owner_symbols:
-  - V4HttpListener
-  - V4ServerReqInbound01ClientRaw
-  - V4ServerRespOutbound05ClientFrame
+  - V4HttpServer
+  - HttpRequest
+  - HttpResponse
   identity:
   - listenerAddress
   - requestId
@@ -2149,12 +2150,11 @@ resources:
     control_payload_leak: forbidden
   allowed_writers:
   - V4ServerReqInbound01ClientRaw
-  - V4ServerRespOutbound05ClientFrame
+  - V4ServerRespOutbound06ClientFrame
   allowed_readers:
-  - V4RuntimeAdmission00CompiledManifest
+  - routecodex-v4-config
   forbidden_writers:
-  - V4Router04SelectedTarget
-  - V4ProviderReqOutbound07TransportRequest
+  - V4ProviderSseOut07WireBoundary
   - V4Control01ScopeBoundCarrier
   - V4MetadataCenter01ScopeRegistry
   - V4Router05RequestClassified
@@ -2177,7 +2177,155 @@ resources:
   - V4ControlMetadataCenter
   may_enter_provider_body: false
   may_enter_client_body: true
-  binding_status: active
+  binding_status: anchored
+- resource_id: v4.cli.command_intent
+  axis: control
+  verification_gate:
+  - v4_cli_l2_regression
+  - v4_infrastructure_contract
+  - v4_infrastructure_contract_red
+  resource_kind: typed_command_intent
+  lifecycle: v4.cli.dispatch
+  owner_crate: routecodex-v4-cli
+  owner_node: V4Cli01CommandIntent
+  owner_symbols:
+  - Cli
+  - V4CommandIntent
+  identity:
+  - commandKind
+  semantic_contract:
+    parse_and_dispatch_only: true
+    runtime_semantics: forbidden
+    payload_projection: forbidden
+  allowed_writers:
+  - routecodex-v4-cli
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-config
+  - routecodex-v4-lifecycle
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.lifecycle.instance_state
+  axis: control
+  verification_gate:
+  - v4_lifecycle_l2_regression
+  - v4_infrastructure_contract
+  resource_kind: managed_instance_state
+  lifecycle: v4.lifecycle.managed_instance
+  owner_crate: routecodex-v4-lifecycle
+  owner_node: V4Lifecycle02ManagedInstance
+  owner_symbols:
+  - V4LifecyclePaths
+  - ManagedInstanceRecord
+  identity:
+  - runtimeIdentity
+  - pid
+  - manifestDigest
+  semantic_contract:
+    v4_state_root_only: true
+    v3_state_access: forbidden
+    payload_projection: forbidden
+  allowed_writers:
+  - routecodex-v4-lifecycle
+  allowed_readers:
+  - routecodex-v4-lifecycle
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.lifecycle.control_socket
+  axis: control
+  verification_gate:
+  - v4_lifecycle_l2_regression
+  - v4_infrastructure_contract
+  resource_kind: managed_control_socket
+  lifecycle: v4.lifecycle.managed_instance
+  owner_crate: routecodex-v4-lifecycle
+  owner_node: V4Lifecycle03ControlSocket
+  owner_symbols:
+  - ManagedControlPlane
+  - exec_managed_restart
+  identity:
+  - runtimeIdentity
+  - socketPath
+  semantic_contract:
+    exact_instance_only: true
+    graceful_stop: true
+    exec_restart: true
+    broad_kill: forbidden
+  allowed_writers:
+  - routecodex-v4-lifecycle
+  allowed_readers:
+  - routecodex-v4-lifecycle
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-server
+  - routecodex-v4-provider
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.servertool.cli_projection
+  axis: data
+  verification_gate:
+  - v4_servertool_l2_regression
+  - v4_infrastructure_contract
+  resource_kind: local_cli_projection
+  lifecycle: v4.servertool.cli_projection
+  owner_crate: routecodex-v4-servertool
+  owner_node: V4Servertool01CliProjection
+  owner_symbols:
+  - ServertoolRunInput
+  - ServertoolRunOutput
+  - build_run_output
+  identity:
+  - toolName
+  - requestId
+  semantic_contract:
+    input_object_required: true
+    provider_transport: forbidden
+    control_payload_projection: forbidden
+  allowed_writers:
+  - routecodex-v4-servertool
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-provider
+  - routecodex-v4-server
+  - V4Control01ScopeBoundCarrier
+  - V4MetadataCenter01ScopeRegistry
+  - V4Router05RequestClassified
+  - V4Router06SelectionPlan
+  - V4Router07RouteDecisionExit
+  - V4Router08LivePolicyOverride
+  - V4Availability01SessionScoped
+  - V4Error01SourceRaised
+  - V4ErrorCenter02ClassifyAudit
+  - V4PayloadCycleRegistry
+  - V4Runtime01MainlineKernel
+  - V4Error06ClientProjected
+  - V4Error04RouterPolicyApplied
+  - V4ScopeRegistry
+  - V4StoplessControlState
+  - V4Control02RecordLedger
+  - V4PluginManager
+  - V4CordisNodeHost
+  - V4NodeContainer
+  - V4Cli01CommandIntent
+  - V4Lifecycle02ManagedInstance
+  - V4Lifecycle03ControlSocket
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
 forbidden_direct_edges:
 - from: v4.config.manifest
   to: v4.request.normal_payload
@@ -2309,3 +2457,21 @@ forbidden_direct_edges:
 - from: v4.node.statistics
   to: v4.response.client_wire_payload
   reason: statistics must never enter client body
+- from: v4.cli.command_intent
+  to: v4.request.provider_wire_payload
+  reason: CLI command intent is control-only and must never enter provider payload
+- from: v4.cli.command_intent
+  to: v4.response.client_wire_payload
+  reason: CLI command intent is control-only and must never enter client payload
+- from: v4.lifecycle.instance_state
+  to: v4.request.provider_wire_payload
+  reason: managed instance state is control-only and V4-local
+- from: v4.lifecycle.instance_state
+  to: v4.response.client_wire_payload
+  reason: managed instance state must never enter client payload
+- from: v4.lifecycle.control_socket
+  to: v4.request.provider_wire_payload
+  reason: lifecycle control transport must never enter provider payload
+- from: v4.lifecycle.control_socket
+  to: v4.response.client_wire_payload
+  reason: lifecycle control transport must never enter client payload
