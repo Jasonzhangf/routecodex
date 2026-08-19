@@ -1113,7 +1113,7 @@ resources:
     identity: [requestId, providerProtocol, entryProtocol, frameSequence]
     payload_contract: standard_protocol_codec_owned
     allowed_writers: [build_v3_hub_resp_inbound_02_from_provider_resp_compat_02, build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload]
-    canonical_codecs: [parse_v3_provider_sse_json_data, classify_v3_provider_responses_json_data, classify_v3_provider_responses_json_event, record_v3_provider_sse_json_frame]
+    canonical_codecs: [parse_v3_provider_sse_json_data, classify_v3_provider_sse_json_data, classify_v3_provider_responses_json_event, record_v3_provider_sse_json_frame]
     allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespOutbound05ClientSemantic]
     forbidden_writers: [routecodex-v3-sse, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter]
     forbidden_readers: [routecodex-v3-sse, routecodex-v3-server]

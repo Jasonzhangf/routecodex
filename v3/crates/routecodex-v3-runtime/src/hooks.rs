@@ -389,7 +389,10 @@ pub(crate) fn responses_direct_provider_transport_hook(
 }
 
 fn responses_direct_response_projection_hook(raw: V3ProviderResp14Raw) -> ResponseProjectionFuture {
-    Box::pin(project_provider_raw_to_client_payload(raw))
+    Box::pin(project_provider_raw_to_client_payload(
+        crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        raw,
+    ))
 }
 
 fn provider_error_source(

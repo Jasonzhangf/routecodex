@@ -2185,7 +2185,7 @@ features:
   - build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload
   canonical_codecs:
   - parse_v3_provider_sse_json_data
-  - classify_v3_provider_responses_json_data
+  - classify_v3_provider_sse_json_data
   - classify_v3_provider_responses_json_event
   - record_v3_provider_sse_json_frame
   allowed_paths:
@@ -2198,8 +2198,13 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
+  - v3/crates/routecodex-v3-runtime/src/shared.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-runtime/tests
   - docs/goals/v3-openai-chat-anthropic-sse-terminal-closeout-fix-design.md
+  - docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md
   forbidden_paths:
   - v3/crates/routecodex-v3-sse
   - v3/crates/routecodex-v3-server
@@ -2208,6 +2213,8 @@ features:
   - MetadataCenter
   required_tests:
   - v3/crates/routecodex-v3-sse/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/shared.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/tests.rs
   - v3/crates/routecodex-v3-server/src/websocket.rs
   - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs

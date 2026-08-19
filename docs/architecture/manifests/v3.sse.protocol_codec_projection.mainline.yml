@@ -22,8 +22,8 @@ edges:
     to_node: V3ProviderJsonSemanticOutcome02Typed
     owner_feature_id: v3.sse_protocol_codec_projection_boundary
     owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
-    owner_symbol: classify_v3_provider_responses_json_data
-    status: binding_pending
+    owner_symbol: classify_v3_provider_sse_json_data
+    status: anchored
   - step_id: v3-sse-json-codec-03
     from_node: V3ProviderJsonSemanticOutcome02Typed
     to_node: V3HubRespInbound02Normalized

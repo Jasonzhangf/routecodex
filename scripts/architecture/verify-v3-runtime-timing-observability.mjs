@@ -345,7 +345,7 @@ forbidMatch(
 );
 requireMatch(
   directSseOutcome,
-  /classify_v3_provider_generic_sse_json_data\(&data\)[\s\S]*provider_response_sse_event_invalid/,
+  /classify_v3_provider_sse_json_data\(\s*V3HubProviderWireProtocol::Responses,\s*&data\s*\)[\s\S]*provider_response_sse_event_invalid/,
   "Direct SSE provider outcome must consume the typed JSON codec result",
 );
 forbidMatch(

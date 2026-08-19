@@ -243,7 +243,10 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
     }
 
     fn run_response_projection(raw: V3ProviderResp14Raw) -> V3DirectResponseProjectionFuture {
-        Box::pin(project_provider_raw_to_client_payload(raw))
+        Box::pin(project_provider_raw_to_client_payload(
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+            raw,
+        ))
     }
 
     fn run_error(
@@ -336,7 +339,10 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
     }
 
     fn run_response_projection(raw: V3ProviderResp14Raw) -> V3DirectResponseProjectionFuture {
-        Box::pin(project_provider_raw_to_client_payload(raw))
+        Box::pin(project_provider_raw_to_client_payload(
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            raw,
+        ))
     }
 
     fn run_error(
