@@ -2701,10 +2701,10 @@ async fn direct_sse_body_error_closes_after_partial_stream_without_remapping() {
         Duration::from_millis(3_000),
     );
     let result = to_bytes(response.into_body(), usize::MAX).await;
-    assert!(
-        result.is_err(),
-        "direct SSE provider failure must close the committed passthrough body"
-    );
+    let body = result.expect("direct SSE provider failure must remain an explicit SSE event");
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("event: error"), "{body}");
+    assert!(body.contains("provider_stream_error"), "{body}");
 
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap_or_default());
     assert!(log.contains("event=failed"), "{log}");
@@ -2720,7 +2720,7 @@ async fn direct_sse_body_propagates_client_disconnect_as_transport_error() {
     let result = to_bytes(v3_client_sse_body(stream, None), usize::MAX).await;
     assert!(
         result.is_err(),
-        "opaque SSE transport must propagate source errors"
+        "client disconnect must remain a transport close, not a server error event"
     );
 }
 
@@ -2742,10 +2742,8 @@ async fn direct_sse_body_does_not_parse_crlf_terminal_frame() {
         Err(source),
     ]));
     let result = to_bytes(v3_client_sse_body(stream, None), usize::MAX).await;
-    assert!(
-        result.is_err(),
-        "opaque SSE transport must propagate source errors"
-    );
+    let body = result.expect("provider SSE errors must be projected as an SSE error event");
+    assert!(String::from_utf8_lossy(&body).contains("event: error"));
 }
 
 #[tokio::test]
@@ -2765,10 +2763,8 @@ async fn direct_sse_body_does_not_parse_terminal_frame() {
         Err(source),
     ]));
     let result = to_bytes(v3_client_sse_body(stream, None), usize::MAX).await;
-    assert!(
-        result.is_err(),
-        "opaque SSE transport must propagate source errors"
-    );
+    let body = result.expect("provider SSE errors must be projected as an SSE error event");
+    assert!(String::from_utf8_lossy(&body).contains("event: error"));
 }
 
 #[tokio::test]
@@ -2787,10 +2783,8 @@ async fn direct_sse_body_does_not_parse_failed_terminal_across_chunks() {
         Err(source),
     ]));
     let result = to_bytes(v3_client_sse_body(stream, None), usize::MAX).await;
-    assert!(
-        result.is_err(),
-        "opaque SSE transport must propagate source errors"
-    );
+    let body = result.expect("provider SSE errors must be projected as an SSE error event");
+    assert!(String::from_utf8_lossy(&body).contains("event: error"));
 }
 
 #[tokio::test]
@@ -2808,10 +2802,8 @@ async fn direct_sse_body_does_not_treat_terminal_text_as_terminal_event() {
         Err(source),
     ]));
     let body = to_bytes(v3_client_sse_body(stream, None), usize::MAX).await;
-    assert!(
-        body.is_err(),
-        "provider failure after ordinary text must close the direct passthrough body"
-    );
+    let body = body.expect("provider failure after ordinary text must remain visible in SSE");
+    assert!(String::from_utf8_lossy(&body).contains("event: error"));
 }
 
 #[test]
@@ -3440,8 +3432,10 @@ async fn responses_sse_relay_provider_stream_error_propagates_without_fabricated
         client.next().await.unwrap().unwrap().as_ref(),
         b": keepalive\n\n"
     );
-    let error = client.next().await.unwrap().unwrap_err();
-    assert_eq!(error.to_string(), "controlled error");
+    let error = client.next().await.unwrap().unwrap();
+    let error = String::from_utf8_lossy(&error);
+    assert!(error.contains("event: error"), "{error}");
+    assert!(error.contains("controlled error"), "{error}");
     assert!(
         tokio::time::timeout(Duration::from_millis(50), client.next())
             .await
