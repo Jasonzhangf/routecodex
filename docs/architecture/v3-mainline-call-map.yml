@@ -7053,7 +7053,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
     callee_symbol: classify_v3_request_purpose
     callee_file: v3/crates/routecodex-v3-server/src/compaction_request.rs
-    status: bound
+    status: anchored
     owner_feature_id: v3.compaction_request_routing
     resource_flow:
       consumes: [v3.request.protocol_context]
@@ -7067,7 +7067,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
     callee_symbol: classify_route
     callee_file: v3/crates/routecodex-v3-route-classifier/src/route.rs
-    status: bound
+    status: anchored
     owner_feature_id: v3.compaction_request_routing
     resource_flow:
       consumes: [v3.request.compaction_purpose]
@@ -7081,7 +7081,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3VirtualRouter::resolve_route_pool_plan
     callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
-    status: bound
+    status: anchored
     owner_feature_id: v3.compaction_request_routing
     resource_flow:
       consumes: [v3.route.request_facts]
