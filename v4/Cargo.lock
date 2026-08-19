@@ -206,6 +206,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v4-provider"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
+name = "routecodex-v4-router"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "routecodex-v4-runtime-inspector"
 version = "0.1.0"
 dependencies = [
@@ -213,6 +229,13 @@ dependencies = [
  "routecodex-v4-plugin-manager",
  "routecodex-v4-plugin-plan",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "routecodex-v4-server"
+version = "0.1.0"
+dependencies = [
  "serde_json",
 ]
 
