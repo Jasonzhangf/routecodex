@@ -417,6 +417,7 @@ async fn responses_relay_consumes_registered_codex_client_metadata_before_provid
                 "model":"MiniMax-M3",
                 "input":"hello",
                 "client_metadata": {
+                    "root_turn_id":"01a01a18-7c4b-7411-8d6b-07edd690529a",
                     "session_id":"session-1",
                     "thread_id":"thread-1",
                     "turn_id":"turn-1",
@@ -443,6 +444,10 @@ async fn responses_relay_consumes_registered_codex_client_metadata_before_provid
     assert!(
         captured["body"].get("client_metadata").is_none(),
         "client_metadata must remain local request context, not Anthropic wire: {captured}"
+    );
+    assert!(
+        captured["body"].get("metadata").is_none(),
+        "root_turn_id has no Anthropic metadata projection and must remain absent from wire: {captured}"
     );
 }
 
