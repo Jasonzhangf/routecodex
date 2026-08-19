@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -61,16 +61,16 @@ const fixtures = [
     name: 'execution decision ignores responses process chat',
     file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
     transform: (source) => source.replace(/\.responses_process/g, '.provider_type'),
-    diagnostic: /V3Execution11ProtocolDecision must route selected responses provider process=chat to HubRelay/,
+    diagnostic: /V3Execution11ProtocolDecision must decide protocol mismatch before same-protocol process policy/,
   },
   {
-    name: 'execution decision forces responses process chat to direct',
+    name: 'execution decision checks same-protocol process policy before protocol mismatch',
     file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
     transform: (source) => source.replace(
-      '        V3Execution11ProtocolDecisionMode::HubRelay\n    } else if entry_protocol == selected_provider_protocol {',
-      '        V3Execution11ProtocolDecisionMode::SameProtocolDirect\n    } else if entry_protocol == selected_provider_protocol {',
+      '    let mode = if entry_protocol != selected_provider_protocol {',
+      '    let mode = if responses_process_requires_relay {',
     ),
-    diagnostic: /V3Execution11ProtocolDecision must route selected responses provider process=chat to HubRelay/,
+    diagnostic: /V3Execution11ProtocolDecision must decide protocol mismatch before same-protocol process policy/,
   },
   {
     name: 'runtime reconstructs control from client payload metadata',
@@ -190,6 +190,20 @@ for (const fixture of fixtures) {
       recursive: true,
       filter: (source) => !source.includes('/target/'),
     });
+    cpSync(resolve(repoRoot, 'docs'), join(root, 'docs'), { recursive: true });
+    cpSync(resolve(repoRoot, 'scripts'), join(root, 'scripts'), { recursive: true });
+    cpSync(resolve(repoRoot, 'tests'), join(root, 'tests'), { recursive: true });
+    cpSync(resolve(repoRoot, 'package.json'), join(root, 'package.json'));
+    const providerCompatTarget = join(
+      root,
+      'sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core',
+    );
+    mkdirSync(providerCompatTarget, { recursive: true });
+    cpSync(
+      resolve(repoRoot, 'sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core'),
+      providerCompatTarget,
+      { recursive: true, filter: (source) => !source.includes('/target/') },
+    );
     const target = join(root, fixture.file);
     const source = readFileSync(target, 'utf8');
     const testModule = source.indexOf('#[cfg(test)]');
