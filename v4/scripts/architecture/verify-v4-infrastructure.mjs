@@ -86,8 +86,8 @@ function validate(input) {
       failures.push(`${gateId} does not execute through Active build-link`);
     }
   }
-  if (gateById.get('v4_runtime_bin_l2_regression')?.command !== 'node scripts/architecture/verify-v4-infrastructure.mjs') {
-    failures.push('runtime-bin blackbox gate is not bound to the infrastructure verifier');
+  if (!gateById.get('v4_runtime_bin_l2_regression')?.command.includes('routecodex-v4-build-link -- test-binary')) {
+    failures.push('runtime-bin blackbox gate does not execute through Active build-link');
   }
 
   const production = [input.cli, input.config, input.lifecycle, input.runtimeBin, input.server].join('\n');
@@ -215,6 +215,14 @@ if (process.argv.includes('--red-self-test')) {
   );
   if (!validate(versionLeak).includes('Active binary build does not bind the consumer package version')) {
     console.error('[v4_infrastructure] red self-test failed to detect inherited binary version');
+    process.exit(1);
+  }
+  const invalidRuntimeGate = structuredClone(input);
+  invalidRuntimeGate.verification.gates.find(
+    (gate) => gate.gate_id === 'v4_runtime_bin_l2_regression',
+  ).command = 'cargo test -p routecodex-v4-runtime-bin --test l2_cli_blackbox';
+  if (!validate(invalidRuntimeGate).includes('runtime-bin blackbox gate does not execute through Active build-link')) {
+    console.error('[v4_infrastructure] red self-test failed to detect bypassed runtime-bin gate');
     process.exit(1);
   }
   console.log('[v4_infrastructure] red self-test OK');
