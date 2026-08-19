@@ -3214,7 +3214,7 @@ async fn relay_sse_closeout_does_not_parse_response_failed_terminal_payload() {
 }
 
 #[tokio::test]
-async fn relay_sse_body_error_propagates_without_fabricated_error_event() {
+async fn relay_sse_body_error_projects_explicit_error_event() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Sse(Box::pin(futures_util::stream::iter(vec![
@@ -3231,15 +3231,20 @@ async fn relay_sse_body_error_propagates_without_fabricated_error_event() {
 
     let response = responses_relay_output_response(output, None, Duration::from_millis(3_000));
     assert_eq!(response.headers()["content-type"], "text/event-stream");
-    let result = to_bytes(response.into_body(), usize::MAX).await;
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("relay SSE provider failure must remain an explicit SSE error event");
+    let body = String::from_utf8_lossy(&body);
     assert!(
-        result.is_err(),
-        "relay SSE body failure must propagate as body error, not fabricated event:error bytes"
+        body.contains("event: error")
+            && body.contains("provider_response_sse_stream")
+            && body.contains("provider relay boom"),
+        "relay SSE provider failure must retain typed owner and message: {body}"
     );
 }
 
 #[tokio::test]
-async fn relay_sse_body_abruptly_closes_without_fabricating_error_event() {
+async fn relay_sse_body_abrupt_close_projects_explicit_error_event() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Sse(Box::pin(futures_util::stream::iter(vec![
@@ -3256,11 +3261,15 @@ async fn relay_sse_body_abruptly_closes_without_fabricating_error_event() {
 
     let response = responses_relay_output_response(output, None, Duration::from_millis(3_000));
     assert_eq!(response.headers()["content-type"], "text/event-stream");
-    let result = to_bytes(response.into_body(), usize::MAX).await;
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("relay SSE abrupt provider close must remain an explicit SSE error event");
+    let body = String::from_utf8_lossy(&body);
     assert!(
-        result.is_err(),
-        "relay SSE transport/body failure must propagate as abrupt body close, not fabricated event:error bytes: {:?}",
-        result.ok().and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+        body.contains("event: error")
+            && body.contains("provider_response_sse_stream")
+            && body.contains("abrupt relay stream close"),
+        "relay SSE abrupt provider close must retain typed owner and message: {body}"
     );
 }
 
