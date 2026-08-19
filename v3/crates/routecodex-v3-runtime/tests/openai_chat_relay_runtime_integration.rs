@@ -2681,14 +2681,11 @@ targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-mode
 }
 
 #[tokio::test]
-async fn openai_chat_mode_b_mismatch_with_non_mode_b_forwarder_model_fails_fast() {
-    // 复现生产：请求 model 是存在的 forwarder（gpt-5.5 -> cc-sol 非 Mode B），
-    // 但 VR 因 web_search 意图路由到 Mode B pool（minimax_anthropic）。
-    // 候选 Mode B + 请求侧未激活（forwarder 非 Mode B）→ provider 返回 hosted
-    // `web_search` server tool（anthropic wire）→ 按 2026-08-08 语义透传为
-    // chat tool_calls 由客户端执行（MEMORY 4241：Chat function calls named
-    // web_search project back to web_search_call）；仅本地 `websearch` function
-    // tool call 才 fail-fast。
+async fn openai_chat_declaration_only_forwarder_keeps_route_and_wire_mismatch_fails_fast() {
+    // 请求 model 是非 Mode B forwarder（gpt-5.5 -> text）；仅声明 websearch
+    // function 不构成当前轮 web_search 激活，因此必须保留 forwarder 路由。
+    // 若该 OpenAI Chat provider 返回 Anthropic hosted web_search wire shape，
+    // 必须经 typed Error01-06 fail-fast，不能把错误协议形状透传给客户端。
     let manifest = compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
             r#"
@@ -2787,18 +2784,17 @@ targets = [{ kind = "provider_model", provider = "text", model = "plain-model", 
         &WsWireTransport,
     )
     .await
-    .expect("hosted web_search tool_use must pass through as chat tool_calls");
-    assert_eq!(output.status, 200);
+    .expect("wire protocol mismatch must project a typed terminal");
+    assert_eq!(output.status, 502);
+    assert_eq!(output.error_chain.as_ref().map(Vec::len), Some(6));
+    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
     let client_response = match output.client_body {
         V3OpenAiChatRelayClientBody::Json(value) => value,
-        V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+        V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON error body"),
     };
-    let tool_calls = client_response["choices"][0]["message"]["tool_calls"]
-        .as_array()
-        .expect("hosted web_search must project to chat tool_calls");
-    assert_eq!(
-        tool_calls[0]["function"]["name"], "web_search",
-        "hosted web_search server tool must be transparent to the client: {client_response}"
+    assert!(
+        client_response.get("choices").is_none(),
+        "wire protocol mismatch must not be projected as successful chat payload: {client_response}"
     );
 }
 
