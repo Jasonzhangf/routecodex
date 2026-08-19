@@ -71,6 +71,12 @@ fn help_version_config_and_servertool_are_cwd_independent() {
             "web_search",
             "--input-json",
             "{\"query\":\"RouteCodex\"}",
+            "--flow",
+            "flow-1",
+            "--session-id",
+            "session-1",
+            "--request-id",
+            "request-1",
         ])
         .output()
         .expect("servertool");

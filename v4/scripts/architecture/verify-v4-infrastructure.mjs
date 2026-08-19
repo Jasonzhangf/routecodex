@@ -163,6 +163,7 @@ async function verifyRuntimeBinary() {
     runBinary(binary, ['config', 'check', '-c', config], { cwd: tempRoot, env });
     const tool = JSON.parse(runBinary(binary, [
       'servertool', 'run', 'web_search', '--input-json', '{"query":"RouteCodex"}',
+      '--flow', 'flow-1', '--session-id', 'session-1', '--request-id', 'request-1',
     ], { cwd: tempRoot, env }));
     for (const field of ['routeHint', 'flowId', 'sessionId', 'requestId']) {
       if (Object.hasOwn(tool, field)) throw new Error(`servertool output leaked ${field}`);
@@ -175,7 +176,17 @@ async function verifyRuntimeBinary() {
     runBinary(binary, ['stop', '-c', config], { cwd: tempRoot, env });
     started = false;
   } finally {
-    if (started) spawnSync(binary, ['stop', '-c', config], { cwd: tempRoot, env });
+    if (started) {
+      const stop = spawnSync(binary, ['stop', '-c', config], {
+        cwd: tempRoot,
+        env,
+        encoding: 'utf8',
+        timeout: 20000,
+      });
+      if (stop.error || stop.status !== 0) {
+        throw new Error(`cleanup stop failed: ${stop.error?.message ?? stop.stderr}`);
+      }
+    }
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 }
