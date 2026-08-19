@@ -1,0 +1,50 @@
+version = 3
+
+[servers.glm_test]
+bind = "127.0.0.1"
+port = 15555
+routing_group = "glm_test"
+endpoints = ["responses"]
+
+[servers.glm_test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[providers.glmrelay_anthropic]
+type = "anthropic"
+base_url = "https://glm-relayapi.top"
+default_model = "glm-5.2"
+compatibility_profile = "chat:glm"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
+
+[providers.glmrelay_anthropic.models."glm-5.2"]
+wire_name = "glm-5.2"
+supports_streaming = true
+web_search_execution_mode = "native_remote_search_tool_mix"
+capabilities = ["text", "tools", "web_search", "reasoning"]
+
+[providers.glmrelay_openai]
+type = "openai_chat"
+base_url = "https://glm-relayapi.top/v1"
+default_model = "glm-5.2"
+compatibility_profile = "chat:glm"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
+
+[providers.glmrelay_openai.models."glm-5.2"]
+wire_name = "glm-5.2"
+supports_streaming = true
+web_search_execution_mode = "native_remote_search_tool_mix"
+capabilities = ["text", "tools", "web_search", "reasoning"]
+
+[forwarders."fwd.v3.glm-5.2"]
+model = "glm-5.2"
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "glmrelay_anthropic", model = "glm-5.2", priority = 1 },
+]
+
+[route_groups.glm_test.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "fwd.v3.glm-5.2", priority = 1 }]

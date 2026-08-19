@@ -134,6 +134,24 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.target.auth_selection_policy
+    resource_kind: control_policy
+    lifecycle: v3.config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config05ManifestPublished
+    identity: [providerId, selectionStrategy, authAlias, priority, weight]
+    allowed_writers: [V3Config05ManifestPublished]
+    allowed_readers: [V3Target09CandidateSetExpanded]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, V3Resp15ClientPayload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    semantic_contract:
+      supported_strategies: [priority, weighted]
+      omitted_priority_default: 0
+      omitted_weight_default: 1
+      weighted_reorders_equal_priority_tier_only: true
+      round_robin: reject_at_config_compile
+    binding_status: anchored
   - resource_id: v3.server.listener_set
     resource_kind: runtime_handle
     lifecycle: v3.server.startup
@@ -256,7 +274,7 @@ resources:
     semantic_contract:
       availability_scope: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
       tier_progression: a higher numeric priority tier is selectable only when every lower-priority candidate is unavailable in the current session
-      protocol_decision_inputs: providerType and provider.responses.process from the selected Target10 truth; process=chat is a Relay execution requirement, not a provider id special case.
+      protocol_decision_inputs: First compare entry protocol with providerType-derived selected wire protocol; mismatch requires Relay. Only for equal protocols may provider.responses.process=chat require Relay instead of Direct; it is not a provider id special case.
     allowed_writers: [V3Target10ConcreteProviderSelected]
     allowed_readers: [V3Execution11ProtocolDecision, V3ResponsesDirect11Policy, V3Provider12ResponsesWirePayload]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, V3Resp15ClientPayload]
@@ -605,6 +623,25 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.provider_compat.profile_application
+    resource_kind: typed_side_channel
+    lifecycle: v3.provider_compat_profile_loading.request
+    owner_feature_id: v3.provider_compat_profile_loading
+    owner_crate: provider-compat-core
+    owner_node: ProviderReqCompat06ProviderCompat
+    identity: [requestId, providerId, modelId, compatibilityProfile]
+    semantic_contract:
+      applied_profile: exact normalized provider compatibility profile applied by run_req_outbound_stage3_compat
+      native_applied: typed execution evidence only; never serialized into provider or client payload
+      payload_rule: CompatResult carries the adjacent provider payload and typed evidence together, while ProviderReqCompat06 keeps evidence in private fields and exposes payload separately to Wire08
+    allowed_writers: [run_req_outbound_stage3_compat, build_provider_req_compat_06_from_v3_hub_req_outbound_07]
+    allowed_readers: [ProviderReqCompat06ProviderCompat, V3ProviderReqOutbound08WirePayload]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter, request.normal_payload, response.client_payload]
+    forbidden_readers: [provider.request.body, client.response.body]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    release_point: V3ProviderReqOutbound08WirePayload
+    binding_status: anchored
   - resource_id: v3.request.response_projection_context
     resource_kind: projection_resource
     lifecycle: v3.hub_pipeline.v1
@@ -776,7 +813,7 @@ resources:
     owner_crate: routecodex-v3-error
     owner_node: V3Error01SourceRaised
     identity: [sourceStage, code, sourceKind]
-    allowed_writers: [build_v3_error_01_source_raised]
+    allowed_writers: [build_v3_error_01_source_raised, build_v3_error_01_source_raised_external, build_v3_provider_sse_json_error]
     allowed_readers: [V3Error02Classified]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
     may_enter_provider_body: false
@@ -976,7 +1013,7 @@ resources:
     allowed_writers: [docs/design/v3-protocol-request-field-projection.md, docs/goals/v3-protocol-conversion-field-parity-test-design.md, docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md, docs/goals/v3-anthropic-protocol-matrix-projection-completion-plan.md, docs/architecture/manifests/v3.protocol_request_field_projection.yml, docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml, docs/architecture/reviews/v3-protocol-semantic-matrix-review.md, docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml, scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs]
     allowed_readers: [v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs, v3/crates/routecodex-v3-runtime/src/protocol_tables.rs, v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json, v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs, docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html, scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter, SSE transport, provider transport, src, sharedmodule]
-    data_plane_fields: [client_metadata, metadata, reasoning_effort, reasoning_budget_tokens, reasoning_summary_policy, reasoning_context_policy, reasoning_mode, reasoning_include_thoughts, reasoning_display_policy, stop, thinking, tool_choice, tool_result_status, tool_result_is_error, response_content_block_type, response_status, incomplete_details_reason, stop_reason, stop_sequence, stop_details, usage, model, created, response_format]
+    data_plane_fields: [client_metadata, metadata, reasoning_effort, reasoning_budget_tokens, reasoning_summary_policy, reasoning_context_policy, reasoning_mode, reasoning_include_thoughts, reasoning_display_policy, stop, thinking, tool_choice, tool_result_status, responses_tool_output_status, tool_result_is_error, response_content_block_type, response_status, incomplete_details_reason, stop_reason, stop_sequence, stop_details, usage, model, created, response_format]
     control_plane_fields: [metadata_center, routeHint, stoplessCenter, requestCapabilities]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1493,3 +1530,39 @@ resources:
     may_enter_metadata_center: false
     binding_status: anchored
     required_gates: [npm run test:v3-cli-distribution, npm run test:install-v3-target-cleanup, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]
+
+  - resource_id: v3.install.command_process_group
+    resource_kind: process_group_control
+    lifecycle: v3.global_binary_install.interruption
+    owner_feature_id: v3.global_binary_install
+    owner_crate: routecodex-v3-config
+    owner_module: v3-global-binary-install
+    owner_node: V3InstallOwnedCommandGroupActive
+    identity: [installerPid, processGroupId]
+    allowed_writers: [runInterruptibleCommand, signalOwnedProcessTree]
+    allowed_readers: [waitForOwnedProcessTreeExit, waitForOwnedTargetSafeToRemove]
+    allowed_operations: [spawn_isolated_group, signal_exact_group, observe_group_exit]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm run test:install-v3-target-cleanup, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]
+
+  - resource_id: v3.install.owned_cargo_target
+    resource_kind: owned_temporary_build_artifact
+    lifecycle: v3.global_binary_install.interruption
+    owner_feature_id: v3.global_binary_install
+    owner_crate: routecodex-v3-config
+    owner_module: v3-global-binary-install
+    owner_node: V3InstallOwnedCargoTargetCreated
+    identity: [absolutePath, installerPid]
+    allowed_writers: [buildV3CargoEnv, cargo_build, cleanupOwnedCargoTarget]
+    allowed_readers: [buildV3Cli, copyExecutableAtomic]
+    release_requires: [V3InstallOwnedCommandGroupExited]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm run test:install-v3-target-cleanup, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]

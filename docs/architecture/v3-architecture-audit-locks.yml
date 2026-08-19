@@ -36,8 +36,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d
-    last_manual_authorization_id: auth-20260724-provider-error-policy-manifest
+    fingerprint: sha256:bea0507631f451d4a168f9d6c564b9dd6310ebdff7551d2910f4a041444a0ff8
+    last_manual_authorization_id: auth-20260818-v3-auth-selection-side-channel
   - item_id: chain:v3.config.compact_hub_v1_defaults
     chain_id: v3.config.compact_hub_v1_defaults
     status: audited_locked
@@ -71,8 +71,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
-    last_manual_authorization_id: auth-20260811-v3-god-file-decomposition-edge-paths-responses-direct
+    fingerprint: sha256:07490a3fe54f82e1fbd2a62412b9738b316c5fa6f015c86e1bc82211b5510c0a
+    last_manual_authorization_id: auth-20260818-v3-auth-selection-side-channel-direct
   - item_id: chain:v3.hub_pipeline.v1.request
     chain_id: v3.hub_pipeline.v1.request
     status: audited_locked
@@ -323,8 +323,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:4b11a30250c6d8db95ff839c0f06225cf2a30d9420c6d20d10e4847b56ceea9e
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:56532f624173f73b0412b0bc2408ff97a1131325a66c9f73ce5b93035f150326
+    last_manual_authorization_id: auth-20260819-v3-anthropic-protocol-matrix-projection-completion
   - item_id: chain:v3.responses_relay.source_server_entry
     chain_id: v3.responses_relay.source_server_entry
     status: audited_locked
@@ -403,8 +403,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:2b0c63f3d1be0320409f1cece209e0f0fb489f80716510b98a41c48a36528782
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:b1e2f9b9efab17ea39ad0af5cb35765832d8c086f25eb0865e1992135dce307c
+    last_manual_authorization_id: auth-20260819-v3-provider-compat-profile-loading
   - item_id: chain:v3.console_request_count_visibility.mainline
     chain_id: v3.console_request_count_visibility.mainline
     status: audited_locked
@@ -435,8 +435,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-19T06:36:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:c5c8a71571158b98b2a0e58861ebf375f5936728ce41d79161943cafc4c28d00
-    last_manual_authorization_id: auth-20260819-v3-session-admission-wait-no-409
+    fingerprint: sha256:b83dce6d4afe43a3addc07602b86b3edeab5c295b359fe5d383703366d8ba43f
+    last_manual_authorization_id: auth-20260819-v3-session-admission-owner-binding
   - item_id: chain:v3.sse.http_keepalive_boundary
     chain_id: v3.sse.http_keepalive_boundary
     status: audited_locked
@@ -494,6 +494,13 @@ locked_items:
     fingerprint: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
     last_manual_authorization_id: auth-20260813-v3-provider-global-subscription-probe-fingerprint-refresh
 manual_authorizations:
+  - authorization_id: auth-20260819-v3-session-admission-owner-binding
+    item_id: chain:v3.responses_session_admission
+    approved_by: Jason
+    approved_at: '2026-08-19T06:36:00-07:00'
+    reason: "Jason required the session admission wait fix to use its real current owner. The release edge now binds pending_endpoint and hold_response_body_admission_permit in routecodex-v3-server/src/lib.rs, matching the implementation; admission remains a listener-local typed side-channel and never enters the request or response payload."
+    fingerprint_before: sha256:c5c8a71571158b98b2a0e58861ebf375f5936728ce41d79161943cafc4c28d00
+    fingerprint_after: sha256:b83dce6d4afe43a3addc07602b86b3edeab5c295b359fe5d383703366d8ba43f
   - authorization_id: auth-20260819-v3-session-admission-wait-no-409
     item_id: chain:v3.responses_session_admission
     approved_by: Jason
@@ -501,6 +508,13 @@ manual_authorizations:
     reason: "Jason explicitly required same-listener Responses requests sharing an explicit session or conversation to wait for the active response-body permit, resume after release, and return the normal 200 path instead of HTTP 409 request_in_flight. This refresh removes the retired admission-to-Error01 edge, binds the async admit owner after canonical JSON parsing, and preserves exact response-body release plus different-scope/listener concurrency."
     fingerprint_before: sha256:3b53f2fc2ecbf364c634c6189346d1362257557d9ee030091000526ebbf08555
     fingerprint_after: sha256:c5c8a71571158b98b2a0e58861ebf375f5936728ce41d79161943cafc4c28d00
+  - authorization_id: auth-20260819-v3-anthropic-protocol-matrix-projection-completion
+    item_id: chain:v3.protocol_conversion_field_parity
+    approved_by: Jason
+    approved_at: '2026-08-19T10:00:00Z'
+    reason: "Jason explicitly authorized the V3 Anthropic protocol matrix projection completion goal. The locked chain now records the adjacent Responses-to-Chat typed tool-result status carrier and Chat-to-Anthropic tool-result error projector required to preserve function_call_output.status as Anthropic tool_result.is_error. Direct same-protocol ownership, existing nodes, control-resource isolation, and all unrelated edges remain unchanged."
+    fingerprint_before: sha256:4b11a30250c6d8db95ff839c0f06225cf2a30d9420c6d20d10e4847b56ceea9e
+    fingerprint_after: sha256:56532f624173f73b0412b0bc2408ff97a1131325a66c9f73ce5b93035f150326
   - authorization_id: auth-20260815-v3-sse-codec-file-decomposition-lock-refresh
     item_id: chain:v3.sse.protocol_codec_projection_boundary
     approved_by: Jason
@@ -704,3 +718,38 @@ manual_authorizations:
     reason: "Jason asked to inspect production/current/existing V3 config after locking the unified provider error contract and fill missing config support; adding provider error policy manifest resource changes the locked config.compile resource flow only."
     fingerprint_before: sha256:7a2f68829c5b4f2a6eb33ac605f1f27b79cdf0e1c0e54ea27f26662fa859a193
     fingerprint_after: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d
+  - authorization_id: auth-20260818-v3-auth-selection-policy
+    item_id: chain:v3.config.compile
+    approved_by: Jason
+    approved_at: '2026-08-18T00:00:00-07:00'
+    reason: "Jason authorized continuing the auth-selection implementation: register the priority/weighted control policy at Config05→Target09, refresh the generated mainline review surface, and lock the resulting chain fingerprints."
+    fingerprint_before: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d
+    fingerprint_after: sha256:e745361a4f1db43bf410b14d16b92722de0581c1e0620ed6a5d49eb726f6a4a5
+  - authorization_id: auth-20260818-v3-auth-selection-policy-direct
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-18T00:00:00-07:00'
+    reason: "Jason authorized the adjacent Target09 resource-flow registration required to document auth-selection control semantics without entering provider or client payloads."
+    fingerprint_before: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
+    fingerprint_after: sha256:265359632bba7dfeb4dedfa795840fb99529b02c6bdcf08fc0b8fdb789a24c12
+  - authorization_id: auth-20260818-v3-auth-selection-side-channel
+    item_id: chain:v3.config.compile
+    approved_by: Jason
+    approved_at: '2026-08-18T00:00:00-07:00'
+    reason: "Jason authorized continuing the auth-selection review fix: classify v3.target.auth_selection_policy as a typed side-channel write from Config05 rather than ordinary resource flow and refresh the audited config chain fingerprint."
+    fingerprint_before: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d
+    fingerprint_after: sha256:bea0507631f451d4a168f9d6c564b9dd6310ebdff7551d2910f4a041444a0ff8
+  - authorization_id: auth-20260818-v3-auth-selection-side-channel-direct
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-18T00:00:00-07:00'
+    reason: "Jason authorized continuing the auth-selection review fix: classify the Target09 auth-selection read as a typed side-channel and refresh the audited Direct mainline fingerprint."
+    fingerprint_before: sha256:5d44e0f390908c007edab7a9ee1861cff8a9f2ad4ac5ce89412c977950419556
+    fingerprint_after: sha256:07490a3fe54f82e1fbd2a62412b9738b316c5fa6f015c86e1bc82211b5510c0a
+  - authorization_id: auth-20260819-v3-provider-compat-profile-loading
+    item_id: chain:v3.selected_provider_model_binding
+    approved_by: Jason
+    approved_at: '2026-08-19T02:30:27-07:00'
+    reason: "Jason explicitly fixed the outbound architecture as Responses to governed Chat, generic Anthropic outbound, then provider-specific chat:glm compatibility mapping. The selected-provider binding now calls the uniquely owned V3 provider-compat helper before that helper calls provider-compat-core; no GLM behavior enters the Responses bridge, generic Anthropic codec, Virtual Router, response path, handler, or SSE."
+    fingerprint_before: sha256:2b0c63f3d1be0320409f1cece209e0f0fb489f80716510b98a41c48a36528782
+    fingerprint_after: sha256:b1e2f9b9efab17ea39ad0af5cb35765832d8c086f25eb0865e1992135dce307c

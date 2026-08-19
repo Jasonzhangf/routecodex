@@ -165,7 +165,7 @@ does not authorize reuse of the source object or of another target's mapping.
 | `input[].input_audio` | Chat audio content extension | preserve data/format; no text fallback | exact audio input | Chat audio input if target capability | unmapped |
 | `input[].message.id/status/phase` | registered message lifecycle extension | validate enum/identity; never use for routing or terminal control | exact Responses item fields | source-roundtrip extension or explicit unmapped; never silently drop | source-roundtrip extension or explicit unmapped |
 | `input[].function_call` | Chat function tool-call semantic (`id`, name, exact argument string) | pair by call id; preserve malformed argument bytes; no `{}` repair | exact function call item | native function tool call | `tool_use` with JSON input only when parseable; malformed exact raw preservation path required |
-| `input[].function_call_output` | Chat tool-result semantic (`tool_call_id`, output, status) | require matching call or explicit unpaired policy; preserve output string and status | exact function output item | tool-role result with `tool_call_id` | `tool_result` with `tool_use_id`; status only if target has exact error slot |
+| `input[].function_call_output` | Chat tool-result semantic (`tool_call_id`, output, registered `routecodex_chat_extension.responses_tool_output_status`) | require matching call or explicit unpaired policy; preserve output string and validate status as absent/completed/incomplete before Chat canonical | exact function output item | tool-role result with `tool_call_id`; consume the extension before wire | `tool_result` with `tool_use_id`; incomplete alone maps to `is_error=true` through the shared Anthropic status projector |
 | `input[].custom_tool_call` | Chat native custom tool call (`id`, name, raw input) | preserve raw input as string and bind it to the governed custom-tool declaration | exact custom call item | native `type=custom` call | `mapped_compatible_registered`: declared custom call becomes `tool_use`; raw input becomes the exact wrapper `{"input": raw}` |
 | `input[].item_reference` | typed Responses item-reference extension | validate same Responses scope; never dereference by session alone | exact reference | unmapped | unmapped |
 | `input[].reasoning.summary/content/encrypted_content` | Chat reasoning semantic plus encrypted side-channel carrier | preserve order and identity; encrypted content never enters normal message payload | exact reasoning item | target capability/field-specific reasoning projection or unmapped | thinking blocks only for exact Anthropic shape; no summary-policy reconstruction |
@@ -264,6 +264,11 @@ own another stop-reason mapping.
 | null, non-string, or unknown | fail before Anthropic wire | `unsupported_fail_fast` |
 
 Only the typed `function_call_output.status` semantic authorizes this mapping.
+The Responses inbound codec validates and writes it to the registered
+`request.messages[].routecodex_chat_extension.responses_tool_output_status`
+data-plane carrier. The adjacent Anthropic outbound codec consumes that exact
+carrier and shares one status-to-`is_error` projector with the direct Responses
+semantic encoder. The carrier is never emitted on provider wire.
 Output text, tool name, HTTP status, provider identity, error-message text, and
 MetadataCenter are forbidden inference sources.
 

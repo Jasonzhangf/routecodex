@@ -233,6 +233,9 @@ verification:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   contract:
   - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
+  - docs/goals/v3-glm-request-outbound-compat-20260819.md
+  - v3/crates/routecodex-v3-runtime/tests/glm_anthropic_request_outbound_compat.rs
+  - v3/tests/resources/glm-anthropic-request-outbound-config.toml
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
   - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
   - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
@@ -241,6 +244,9 @@ verification:
   - npm run test:v3-workspace
   smoke:
   - npm run test:v3-provider-compat-profile-loading
+  - npm run test:v3-glm-anthropic-request-outbound-compat
+  - npm run verify:v3-provider-compat-module-boundary
+  - npm run test:v3-provider-compat-module-boundary-red-fixtures
   - npm run verify:function-map-compile-gate
   - npm run verify:architecture-mainline-call-map
   build:
@@ -254,6 +260,10 @@ verification:
   - Negative coverage must reject missing, duplicate, orphan, and malformed hosted
     web-search identities/fields and prove provider compat does not own routing, stopless/tool
     governance, fallback, continuation, or SSE semantics.
+  - GLM Anthropic coverage must prove the configured forwarder excludes the OpenAI
+    provider, generic Anthropic wire is preserved, typed profile evidence is present
+    outside payload, unprofiled requests do not claim GLM compat, and Anthropic responses
+    do not run the OpenAI GLM response transform.
 - feature_id: v3.v2_config_toml_compat_5555
   change_risk: high
   unit:

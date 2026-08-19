@@ -106,6 +106,10 @@ JSON 和 SSE materialized final truth 必须调用同一 owner。需要覆盖：
 - `v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs`
 - 如 Chat tool-result typed semantic 缺少错误状态，先在其 owning Hub node 中补字段和相邻
   builder，禁止读取 raw Responses payload 越级重建。
+- Responses inbound bridge 以已登记的数据面字段
+  `routecodex_chat_extension.responses_tool_output_status` 保留通过校验的 completed/incomplete；
+  Anthropic outbound codec 消费该字段并与直接 Responses semantic 共用唯一 status projector。
+  carrier 不得进入 provider wire，也不得进入 MetadataCenter。
 
 规则：
 

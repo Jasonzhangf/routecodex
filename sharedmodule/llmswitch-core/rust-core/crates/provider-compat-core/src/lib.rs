@@ -184,6 +184,16 @@ pub fn run_req_outbound_stage3_compat(
                 native_applied: true,
             });
         }
+        if provider_protocol_matches(
+            adapter_context.provider_protocol.as_ref(),
+            "anthropic-messages",
+        ) {
+            return Ok(CompatResult {
+                payload,
+                applied_profile: Some(profile_id.to_string()),
+                native_applied: true,
+            });
+        }
         return Ok(build_compat_result(payload, None));
     }
 
@@ -1203,7 +1213,12 @@ fn normalize_function_call_id(call_id: Option<&str>, fallback: &str) -> String {
     }
     let mut hasher = Sha256::new();
     hasher.update(raw.as_bytes());
-    let hash = hasher.finalize().iter().take(5).map(|byte| format!("{byte:02x}")).collect::<String>();
+    let hash = hasher
+        .finalize()
+        .iter()
+        .take(5)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let room = 64usize.saturating_sub("fc_".len() + 1 + hash.len()).max(1);
     let head = sanitize_id_token(&safe.chars().take(room).collect::<String>());
     format!("fc_{head}_{hash}")
@@ -1698,6 +1713,84 @@ mod tests {
         }
     }
 
+    fn glm_anthropic_input(payload: Value) -> ReqOutboundCompatInput {
+        ReqOutboundCompatInput {
+            payload,
+            adapter_context: AdapterContext {
+                compatibility_profile: Some("chat:glm".to_string()),
+                provider_protocol: Some("anthropic-messages".to_string()),
+                model_id: Some("glm-5.2".to_string()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        }
+    }
+
+    #[test]
+    fn glm_anthropic_request_profile_preserves_probed_standard_wire_semantics() {
+        let payload = json!({
+            "model":"glm-5.2",
+            "messages":[{"role":"user","content":"search before reasoning"}],
+            "thinking":{"type":"adaptive","display":"omitted"},
+            "output_config":{"effort":"high"},
+            "tools":[
+                {"type":"web_search_20250305","name":"web_search","max_uses":1},
+                {"name":"read_file","description":"Read one file","input_schema":{"type":"object","properties":{}}}
+            ],
+            "tool_choice":{"type":"any"},
+            "stream":true
+        });
+
+        let result = run_req_outbound_stage3_compat(glm_anthropic_input(payload.clone()))
+            .expect("probed GLM Anthropic standard wire must be accepted by provider compat");
+
+        assert_eq!(result.applied_profile.as_deref(), Some("chat:glm"));
+        assert!(result.native_applied);
+        assert_eq!(result.payload, payload);
+    }
+
+    #[test]
+    fn glm_anthropic_request_without_profile_does_not_claim_glm_compat() {
+        let payload = json!({
+            "model":"glm-5.2",
+            "messages":[{"role":"user","content":"reason carefully"}],
+            "thinking":{"type":"adaptive"},
+            "output_config":{"effort":"high"}
+        });
+        let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+            payload: payload.clone(),
+            adapter_context: AdapterContext {
+                provider_protocol: Some("anthropic-messages".to_string()),
+                model_id: Some("glm-5.2".to_string()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        })
+        .expect("unprofiled Anthropic payload remains protocol standard");
+
+        assert_eq!(result.applied_profile, None);
+        assert_eq!(result.payload, payload);
+    }
+
+    #[test]
+    fn glm_anthropic_response_does_not_run_openai_reasoning_tool_harvest() {
+        let payload = json!({
+            "id":"msg_glm_anthropic",
+            "type":"message",
+            "role":"assistant",
+            "content":[{
+                "type":"text",
+                "text":"<function_calls><invoke name=\"read_file\"></invoke></function_calls>"
+            }],
+            "stop_reason":"end_turn"
+        });
+        let result = run_resp_inbound_stage3_compat(glm_anthropic_input(payload.clone()))
+            .expect("GLM Anthropic response remains owned by the generic Anthropic decoder");
+
+        assert_eq!(result.applied_profile, None);
+        assert_eq!(result.payload, payload);
+    }
+
     #[test]
     fn deepseek_max_request_profile_defaults_missing_effort_to_max() {
         let result = run_req_outbound_stage3_compat(deepseek_max_input(
@@ -1906,7 +1999,10 @@ mod tests {
         let result = run_resp_inbound_stage3_compat(input).unwrap();
         assert_eq!(result.applied_profile.as_deref(), Some("responses:cc"));
         assert_eq!(result.payload["output"][0]["type"], "message");
-        assert_eq!(result.payload["output"][0]["content"][0]["text"], diagnostic);
+        assert_eq!(
+            result.payload["output"][0]["content"][0]["text"],
+            diagnostic
+        );
         let serialized = serde_json::to_string(&result.payload).unwrap();
         assert!(serialized.contains("deadlock detected"));
         assert!(serialized.contains("Verifying config.v3.toml"));
@@ -2069,8 +2165,7 @@ mod tests {
         );
         // #3: 请求侧不再无条件剥离 reasoning content——reasoning 明文原样透传。
         assert_eq!(
-            result.payload["input"][0]["content"][0]["text"],
-            "old",
+            result.payload["input"][0]["content"][0]["text"], "old",
             "reasoning content must pass through verbatim (no unconditional strip)"
         );
     }

@@ -147,6 +147,9 @@ anthropic_response_projection_contract:
   content_block_owner: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs
   typed_terminality_owner: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   tool_result_owner: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
+  tool_result_status_carrier: request.messages[].routecodex_chat_extension.responses_tool_output_status
+  tool_result_status_writer: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+  tool_result_status_reader: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   direct_same_protocol_policy: source_roundtrip_only
   forbidden_owners:
     - handler
@@ -259,6 +262,11 @@ anthropic_response_projection_contract:
     - anthropic_model_context_window_stop_is_explicitly_unsupported_for_responses
     - responses_tool_result_status_projects_only_registered_anthropic_is_error_semantic
     - responses_tool_result_status_rejects_nonterminal_or_unknown_values
+    - responses_tool_result_status_survives_chat_canonical_carrier
+    - responses_tool_result_status_rejects_unregistered_value_before_chat_canonical
+    - responses_relay_anthropic_wire_preserves_typed_tool_result_error_status
+    - responses_relay_anthropic_wire_omits_is_error_for_registered_success_statuses
+    - responses_relay_anthropic_rejects_unregistered_tool_result_status_before_transport
     - anthropic_response_content_block_enum_is_closed_and_diagnostic
     - anthropic_web_search_result_requires_exact_pairing
     - anthropic_json_and_sse_materialization_share_terminal_projection_owner
@@ -1718,7 +1726,7 @@ chat_semantic_translation_groups:
           - request.input[].function_call_output.status
         response_fields:
           - response.output[].function_call.status
-        transform: Responses status may map to error/success after explicit value contract; not yet exact.
+        transform: Absent/completed remain success, incomplete maps to Anthropic is_error=true, and every other value fails before provider transport.
       anthropic:
         request_fields:
           - request.messages[].content[].tool_result.is_error
@@ -1729,9 +1737,10 @@ chat_semantic_translation_groups:
           - request.contents[].parts[].toolResponse.response
         response_fields: []
         transform: Gemini may encode error in response shape; no explicit boolean in inventory.
-    chat_extension_fields: []
+    chat_extension_fields:
+      - request.messages[].routecodex_chat_extension.responses_tool_output_status
     current_impl: covered
-    gap: Closed by the typed Responses status to Anthropic is_error projection; absent/completed remain success, incomplete becomes is_error=true, and every other value fails before wire build
+    gap: Closed by the registered Responses-to-Chat carrier and the shared Anthropic status projector; absent/completed remain success, incomplete becomes is_error=true, and every other value fails before wire build
   - group_id: reasoning.request_effort
     standard_chat_field: request.reasoning_effort
     chat_fields:
@@ -10705,7 +10714,7 @@ outbound_projection_contract:
       target_protocol: openai_chat
       status: consumed_by_transform
       fields:
-        - request.client_metadata[root_turn_id|session_id|thread_id|turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
+        - request.client_metadata[session_id|thread_id|turn_id|root_turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
     - source_protocol: responses
       target_protocol: openai_chat
       status: target_unsupported
@@ -10751,7 +10760,7 @@ outbound_projection_contract:
       status: consumed_by_transform
       fields:
         - request.metadata[non_user_id] -> response.metadata before RespChatProcess
-        - request.client_metadata[root_turn_id|session_id|thread_id|turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
+        - request.client_metadata[session_id|thread_id|turn_id|root_turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
         - request.prompt_cache_key[non_empty_string] -> local cache hint only
         - request.reasoning.summary[auto|concise|detailed] -> local response-shaping policy only
         - request.reasoning.generate_summary[auto|concise|detailed] -> local response-shaping policy only

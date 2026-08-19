@@ -10,7 +10,7 @@ use super::{
     V3ProviderCompatError, V3ProviderCompatProfileId,
 };
 use provider_compat_core::req_outbound_stage3_compat::{
-    run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
+    run_req_outbound_stage3_compat, AdapterContext, CompatResult, ReqOutboundCompatInput,
 };
 use serde_json::Value;
 
@@ -23,6 +23,8 @@ pub struct ProviderReqCompat06ProviderCompat {
     pub(crate) previous: V3HubReqOutbound07ProviderSemantic,
     pub(crate) profile: V3ProviderCompatProfileId,
     pub(crate) payload: V3HubOpaquePayload,
+    applied_profile: Option<String>,
+    native_applied: bool,
 }
 
 pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
@@ -32,17 +34,27 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
         Some(profile) => V3ProviderCompatProfileId::from_config(Some(profile)),
         None => V3ProviderCompatProfileId::Passthrough,
     };
-    let payload = apply_v3_provider_req_compat(&input, &profile)?;
+    let compat = apply_v3_provider_req_compat(&input, &profile)?;
     Ok(ProviderReqCompat06ProviderCompat {
         previous: input,
         profile,
-        payload: V3HubOpaquePayload(std::sync::Arc::new(payload)),
+        payload: V3HubOpaquePayload(std::sync::Arc::new(compat.payload)),
+        applied_profile: compat.applied_profile,
+        native_applied: compat.native_applied,
     })
 }
 
 impl ProviderReqCompat06ProviderCompat {
     pub fn profile(&self) -> &V3ProviderCompatProfileId {
         &self.profile
+    }
+
+    pub fn applied_profile(&self) -> Option<&str> {
+        self.applied_profile.as_deref()
+    }
+
+    pub fn native_applied(&self) -> bool {
+        self.native_applied
     }
 
     pub(crate) fn provider_semantic_payload(&self) -> &Value {
@@ -53,7 +65,7 @@ impl ProviderReqCompat06ProviderCompat {
 fn apply_v3_provider_req_compat(
     input: &V3HubReqOutbound07ProviderSemantic,
     profile: &V3ProviderCompatProfileId,
-) -> Result<Value, V3ProviderCompatError> {
+) -> Result<CompatResult, V3ProviderCompatError> {
     let reasoning_effort_explicit =
         provider_req_compat_reasoning_effort_explicit(input.provider_semantic_payload());
     let payload =
@@ -64,13 +76,19 @@ fn apply_v3_provider_req_compat(
                 reason,
             }
         })?;
-    apply_v3_provider_req_compat_to_provider_payload(
+    let mut compat = apply_v3_provider_req_compat_profile(
         payload,
         input.selected_target(),
         input.provider_protocol,
         profile,
         reasoning_effort_explicit,
-    )
+    )?;
+    normalize_deepseek_thinking_stopless_tool_choice(
+        &mut compat.payload,
+        input.selected_target(),
+        input.provider_protocol,
+    );
+    Ok(compat)
 }
 
 pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
@@ -80,11 +98,33 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     profile: &V3ProviderCompatProfileId,
     reasoning_effort_explicit: bool,
 ) -> Result<Value, V3ProviderCompatError> {
+    let mut compat = apply_v3_provider_req_compat_profile(
+        payload,
+        selected,
+        provider_protocol,
+        profile,
+        reasoning_effort_explicit,
+    )?;
+    normalize_deepseek_thinking_stopless_tool_choice(
+        &mut compat.payload,
+        selected,
+        provider_protocol,
+    );
+    Ok(compat.payload)
+}
+
+fn apply_v3_provider_req_compat_profile(
+    payload: Value,
+    selected: &routecodex_v3_target::V3TargetCandidate,
+    provider_protocol: V3HubProviderWireProtocol,
+    profile: &V3ProviderCompatProfileId,
+    reasoning_effort_explicit: bool,
+) -> Result<CompatResult, V3ProviderCompatError> {
     let provider_key = format!(
         "{}:{}:{}",
         selected.provider_id, selected.auth_alias, selected.model_id
     );
-    let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+    run_req_outbound_stage3_compat(ReqOutboundCompatInput {
         payload,
         adapter_context: AdapterContext {
             compatibility_profile: profile.as_optional_string(),
@@ -102,15 +142,11 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
         },
         explicit_profile: profile.as_optional_string(),
     })
-    .map(|result| result.payload)
     .map_err(|reason| V3ProviderCompatError {
         stage: "request",
         profile: profile.as_str().to_string(),
         reason,
-    })?;
-    let mut result = result;
-    normalize_deepseek_thinking_stopless_tool_choice(&mut result, selected, provider_protocol);
-    Ok(result)
+    })
 }
 
 pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> bool {
@@ -569,7 +605,12 @@ mod tests {
             json!({
                 "model": "client-route-alias",
                 "input": "hello",
-                "client_metadata": {"session_id": "session-1"},
+                "client_metadata": {
+                    "session_id": "session-1",
+                    "thread_id": "thread-1",
+                    "turn_id": "turn-1",
+                    "root_turn_id": "root-turn-1"
+                },
                 "stream": false
             }),
             V3HubProviderWireProtocol::Anthropic,
@@ -812,6 +853,67 @@ mod tests {
             web_search["function"]["parameters"]["properties"]["search_content_types"]["default"],
             json!(["text", "image"])
         );
+    }
+
+    #[test]
+    fn glm_anthropic_request_outbound_runs_standard_codec_before_provider_compat() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "gpt-5.5",
+                "messages": [{"role":"user","content":"search before reasoning"}],
+                "reasoning_effort": "high",
+                "reasoning_summary_policy": "detailed",
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "read_file",
+                        "description": "Read one file",
+                        "parameters": {"type":"object","properties":{}}
+                    },
+                    {
+                        "type": "web_search",
+                        "external_web_access": true,
+                        "search_content_types": ["text", "image"],
+                        "search_context_size": "medium"
+                    }
+                ]
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+        req07.previous.selected_target.provider_id = "glmrelay_anthropic".to_string();
+        req07.previous.selected_target.provider_type = "anthropic".to_string();
+        req07.previous.selected_target.model_id = "glm-5.2".to_string();
+        req07.previous.selected_target.wire_model = "glm-5.2".to_string();
+        req07.previous.selected_target.model_capabilities = vec![
+            "text".to_string(),
+            "reasoning".to_string(),
+            "tools".to_string(),
+            "web_search".to_string(),
+        ];
+        req07.previous.selected_target.web_search_execution_mode =
+            V3WebSearchExecutionMode::NativeRemoteSearchToolMix;
+        req07.previous.selected_target.compatibility_profile = Some("chat:glm".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("GLM request outbound must encode standard Anthropic before provider compat");
+        let payload = req_compat.provider_semantic_payload();
+
+        assert_eq!(payload["model"], "glm-5.2");
+        assert_eq!(req_compat.applied_profile(), Some("chat:glm"));
+        assert!(req_compat.native_applied());
+        assert_eq!(payload["thinking"]["type"], "adaptive");
+        assert_eq!(payload["output_config"]["effort"], "high");
+        let tools = payload["tools"].as_array().expect("provider tools");
+        assert!(tools
+            .iter()
+            .any(|tool| { tool.get("name").and_then(Value::as_str) == Some("read_file") }));
+        assert!(tools.iter().any(|tool| {
+            tool.get("type").and_then(Value::as_str) == Some("web_search_20250305")
+                && tool.get("name").and_then(Value::as_str) == Some("web_search")
+        }));
+        assert!(payload.get("reasoning_effort").is_none());
+        assert!(payload.get("web_search_options").is_none());
     }
 
     #[test]

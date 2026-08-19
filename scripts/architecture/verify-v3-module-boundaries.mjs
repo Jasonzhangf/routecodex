@@ -1,8 +1,50 @@
 #!/usr/bin/env node
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import YAML from 'yaml';
 
 const failures = [];
+
+const moduleRegistryPath = 'docs/architecture/v3-build-tool-module-registry.yml';
+const moduleRegistry = YAML.parse(readFileSync(moduleRegistryPath, 'utf8'));
+if (moduleRegistry?.status !== 'active' || !Array.isArray(moduleRegistry?.modules)) {
+  failures.push('V3 build-tool module registry must be active and declare modules');
+}
+const ownedPaths = new Map();
+for (const module of moduleRegistry?.modules ?? []) {
+  if (!module?.module_id || !module?.owner_feature_id) {
+    failures.push('V3 build-tool module registry modules require module_id and owner_feature_id');
+    continue;
+  }
+  for (const ownedPath of module.owned_paths ?? []) {
+    const owners = ownedPaths.get(ownedPath) ?? [];
+    owners.push(module.module_id);
+    ownedPaths.set(ownedPath, owners);
+    try {
+      statSync(ownedPath);
+    } catch {
+      failures.push(`V3 build-tool module registry owned path does not exist: ${ownedPath}`);
+    }
+  }
+}
+for (const [ownedPath, owners] of ownedPaths) {
+  if (owners.length !== 1) failures.push(`V3 build-tool module registry path has multiple owners: ${ownedPath}`);
+}
+for (const module of moduleRegistry?.modules ?? []) {
+  if (module.module_id !== 'v3-module-boundary-verifier') continue;
+  const allowed = new Set(module.allowed_dependencies ?? []);
+  for (const ownedPath of module.owned_paths ?? []) {
+    if (!ownedPath.endsWith('.mjs')) continue;
+    const source = readFileSync(ownedPath, 'utf8');
+    const imports = [...source.matchAll(/(?:from|import\()\s*['"]([^'"]+)['"]/gu)].map((match) => match[1]);
+    for (const specifier of imports) {
+      const dependency = specifier.startsWith('node:') ? specifier : specifier.split('/')[0];
+      if (!allowed.has(specifier) && !allowed.has(dependency)) {
+        failures.push(`V3 build-tool module registry undeclared JavaScript dependency: ${ownedPath} -> ${specifier}`);
+      }
+    }
+  }
+}
 
 function files(dir, out = []) {
   for (const entry of readdirSync(dir)) {
@@ -25,7 +67,9 @@ function fail(message) {
   failures.push(message);
 }
 
-const all = files('v3');
+const providerCompatRoot =
+  'sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core';
+const all = [...files('v3'), ...files(providerCompatRoot)];
 const read = (path) => readFileSync(path, 'utf8');
 const isRustTestSource = (path) =>
   path.includes('/tests/')
@@ -44,6 +88,7 @@ for (const path of all) {
   const isTest = isRustTestSource(path);
   const isErrorOwner = path.includes('routecodex-v3-error/src/');
   const isProviderOwner = path.includes('routecodex-v3-provider-responses/src/');
+  const isProviderCompatOwner = path.startsWith(providerCompatRoot + '/');
   const isProviderHealthRuntimeBoundary =
     path.endsWith('routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs')
     || path.endsWith('routecodex-v3-runtime/src/provider_failure_runtime_policy.rs');
@@ -78,7 +123,8 @@ for (const path of all) {
   if (!path.includes('routecodex-v3-runtime') && /pub async fn execute_v3_responses_direct_runtime_kernel/.test(text)) {
     fail('full lifecycle executor outside runtime crate: ' + path);
   }
-  if (!isTest && /run_.*pipeline|dynamic.*hook|discover.*hook|fallback|sanitize|repair|raw replay|forced relay/i.test(semanticProductionText)) {
+  if (!isTest && !isProviderCompatOwner
+      && /run_.*pipeline|dynamic.*hook|discover.*hook|fallback|sanitize|repair|raw replay|forced relay/i.test(semanticProductionText)) {
     fail('forbidden V3 MVP lifecycle/fallback wording in source: ' + path);
   }
   if (!isTest && !isErrorOwner && /pub struct V3Error0[1-6]/.test(text)) {
@@ -163,18 +209,15 @@ if (!/\.method_not_allowed_fallback\(method_not_allowed\)/.test(serverSource)
     || !/\.fallback\(path_not_found\)/.test(serverSource)) {
   fail('Server must explicitly project unsupported method and path errors');
 }
-const bindPush = serverLibSource.indexOf('bound.push((server, listener, bound_addr))');
 const spawnAggregateStart = serverLibSource.indexOf('pub async fn spawn_v3_server_aggregate(');
 const spawnAggregateEnd = serverLibSource.indexOf('\npub async fn serve_v3_server_aggregate_until_shutdown(', spawnAggregateStart);
 const spawnAggregateBody =
   spawnAggregateStart >= 0 && spawnAggregateEnd > spawnAggregateStart
     ? serverLibSource.slice(spawnAggregateStart, spawnAggregateEnd)
     : '';
-const listenerSpawn =
-  bindPush >= 0
-    ? spawnAggregateBody.indexOf('tokio::spawn', bindPush - spawnAggregateStart)
-    : -1;
-if (bindPush === -1 || listenerSpawn === -1 || listenerSpawn < bindPush - spawnAggregateStart) {
+const bindPush = spawnAggregateBody.indexOf('bound.push((server, listener, bound_addr))');
+const listenerSpawn = spawnAggregateBody.indexOf('tokio::spawn');
+if (bindPush === -1 || listenerSpawn === -1 || listenerSpawn < bindPush) {
   fail('Server must bind the complete enabled listener set before spawning any listener task');
 }
 
@@ -232,11 +275,26 @@ const respContinuationSource = read('v3/crates/routecodex-v3-runtime/src/hub_v1/
 if (/continuation_response_id/.test(respContinuationSource)) {
   fail('Resp04 continuation control identity cannot be embedded in Chat canonical payload');
 }
-if (!/responses_process_requires_relay/.test(runtimeNodesSource)
-    || !/selected[\s\S]{0,120}\.candidate[\s\S]{0,120}\.responses_process/.test(runtimeNodesSource)
-    || !/responses provider process=chat requires relay mode but relay is not allowed/.test(runtimeNodesSource)
-    || !/let mode = if responses_process_requires_relay[\s\S]{0,400}V3Execution11ProtocolDecisionMode::HubRelay[\s\S]{0,120}else if entry_protocol == selected_provider_protocol/.test(runtimeNodesSource)) {
-  fail('V3Execution11ProtocolDecision must route selected responses provider process=chat to HubRelay before SameProtocolDirect');
+const protocolDecisionSource = runtimeNodesSource.slice(
+  runtimeNodesSource.indexOf('pub fn build_v3_execution_11_protocol_decision_from_v3_target_10'),
+  runtimeNodesSource.indexOf('fn entry_protocol_wire_protocol'),
+);
+const protocolMismatchIndex = protocolDecisionSource.indexOf(
+  'let mode = if entry_protocol != selected_provider_protocol',
+);
+const sameProtocolProcessIndex = protocolDecisionSource.indexOf(
+  '} else if responses_process_requires_relay',
+);
+const sameProtocolDirectIndex = protocolDecisionSource.indexOf(
+  'V3Execution11ProtocolDecisionMode::SameProtocolDirect',
+);
+if (!/responses_process_requires_relay/.test(protocolDecisionSource)
+    || !/selected[\s\S]{0,120}\.candidate[\s\S]{0,120}\.responses_process/.test(protocolDecisionSource)
+    || !/responses provider process=chat requires relay mode but relay is not allowed/.test(protocolDecisionSource)
+    || protocolMismatchIndex < 0
+    || sameProtocolProcessIndex <= protocolMismatchIndex
+    || sameProtocolDirectIndex <= sameProtocolProcessIndex) {
+  fail('V3Execution11ProtocolDecision must decide protocol mismatch before same-protocol process policy');
 }
 
 const foundationSource = read('v3/crates/routecodex-v3-runtime/src/foundation.rs');

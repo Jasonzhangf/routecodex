@@ -19,6 +19,7 @@ const paths = {
   hubTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs',
   reqInbound02: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
   responsesOpenaiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
+  responsesOpenaiCodecExtraTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs',
   clientMetadataProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs',
   requestOutboundFormat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
   requestOutboundToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
@@ -130,6 +131,9 @@ if (!anthropicResponseContract) {
     ['content_block_owner', paths.anthropicResponseProjection],
     ['typed_terminality_owner', paths.respChatProcess03],
     ['tool_result_owner', paths.responsesToAnthropicCodec],
+    ['tool_result_status_carrier', 'request.messages[].routecodex_chat_extension.responses_tool_output_status'],
+    ['tool_result_status_writer', paths.responsesOpenaiCodec],
+    ['tool_result_status_reader', paths.responsesToAnthropicCodec],
     ['direct_same_protocol_policy', 'source_roundtrip_only'],
     ['terminal_unknown_policy', 'missing, null final, non-string, and unknown stop_reason fail at terminal_owner'],
     ['response_content_unknown_policy', 'missing type and unknown type are distinct fail-fast diagnostics with response.content[index].type'],
@@ -200,6 +204,11 @@ const requiredAnthropicProjectionTests = [
   'anthropic_model_context_window_stop_is_explicitly_unsupported_for_responses',
   'responses_tool_result_status_projects_only_registered_anthropic_is_error_semantic',
   'responses_tool_result_status_rejects_nonterminal_or_unknown_values',
+  'responses_tool_result_status_survives_chat_canonical_carrier',
+  'responses_tool_result_status_rejects_unregistered_value_before_chat_canonical',
+  'responses_relay_anthropic_wire_preserves_typed_tool_result_error_status',
+  'responses_relay_anthropic_wire_omits_is_error_for_registered_success_statuses',
+  'responses_relay_anthropic_rejects_unregistered_tool_result_status_before_transport',
   'anthropic_response_content_block_enum_is_closed_and_diagnostic',
   'anthropic_web_search_result_requires_exact_pairing',
   'anthropic_json_and_sse_materialization_share_terminal_projection_owner',
@@ -211,7 +220,7 @@ requireExactRegisteredRows(
   [...(anthropicResponseContract?.required_tests ?? [])].sort(),
   [...requiredAnthropicProjectionTests].sort(),
 );
-const anthropicProjectionTestSources = `${text.anthropicCodecTests}\n${text.anthropicTests}\n${text.respChatProcess03Tests}`;
+const anthropicProjectionTestSources = `${text.responsesOpenaiCodecExtraTests}\n${text.responsesAnthropicProviderTests}\n${text.anthropicCodecTests}\n${text.anthropicTests}\n${text.respChatProcess03Tests}`;
 for (const testName of requiredAnthropicProjectionTests) {
   requireText(anthropicProjectionTestSources, 'Anthropic response projection Rust tests', testName);
 }
@@ -239,11 +248,21 @@ for (const [contentType, variant] of [
   ['container_upload', 'ContainerUpload'],
 ]) requireText(text.anthropicResponseProjection, paths.anthropicResponseProjection, `"${contentType}" => Ok(Self::${variant})`);
 for (const phrase of [
+  'fn chat_tool_result_status',
+  'extension.get("responses_tool_output_status")',
+  'fn responses_tool_result_is_error',
   'pub(super) fn responses_tool_output_as_anthropic_tool_result(',
   'Some(Value::String(status)) if status == "completed" => false',
   'Some(Value::String(status)) if status == "incomplete" => true',
   'result.insert("is_error".to_string(), Value::Bool(true))',
 ]) requireText(text.responsesToAnthropicCodec, paths.responsesToAnthropicCodec, phrase);
+if ((text.responsesToAnthropicCodec.match(/responses_tool_result_is_error\(/gu) ?? []).length < 3) {
+  failures.push(`${paths.responsesToAnthropicCodec}: shared status projector must serve both Chat-carrier and direct Responses semantic paths`);
+}
+for (const phrase of [
+  '"responses_tool_output_status".to_string()',
+  'Responses function_call_output.status must be completed or incomplete before OpenAI Chat encoding',
+]) requireText(text.responsesOpenaiCodec, paths.responsesOpenaiCodec, phrase);
 for (const phrase of [
   'matches!(reason, "max_output_tokens" | "content_filter")',
   'provider response incomplete_details.reason is invalid',
@@ -274,6 +293,12 @@ for (const groupId of ['tool.result.error_status', 'response.finish_reason']) {
   const group = (fieldMatrix?.chat_semantic_translation_groups ?? []).find((row) => row?.group_id === groupId);
   if (group?.current_impl !== 'covered') failures.push(`${paths.fieldMatrix}: ${groupId}.current_impl must be covered after paired runtime regressions`);
 }
+const toolResultErrorStatusGroup = (fieldMatrix?.chat_semantic_translation_groups ?? []).find((row) => row?.group_id === 'tool.result.error_status');
+requireExactRegisteredRows(
+  `${paths.fieldMatrix}: tool.result.error_status registered Chat carrier`,
+  toolResultErrorStatusGroup?.chat_extension_fields,
+  ['request.messages[].routecodex_chat_extension.responses_tool_output_status'],
+);
 if (fieldMatrix?.semantic_correspondence?.['terminal.finish_reason']?.current_impl !== 'covered') {
   failures.push(`${paths.fieldMatrix}: semantic_correspondence.terminal.finish_reason.current_impl must be covered`);
 }
@@ -932,10 +957,12 @@ forbid(unpairedMalformedOpenAiChatTest, `${paths.responsesTests}::unpaired_malfo
 for (const [owner, body, phrases] of [
   [paths.functionMap, text.functionMap, [
     'feature_id: v3.protocol_conversion_field_parity',
+    'v3-protocol-field-parity-responses-chat-tool-result-status-carrier-01',
     'v3-protocol-field-parity-responses-chat-req-01',
     'v3-protocol-field-parity-responses-chat-malformed-arguments-project-01',
     'v3-protocol-field-parity-responses-chat-resp-01',
     'v3-protocol-field-parity-responses-anthropic-req-01',
+    'v3-protocol-field-parity-chat-anthropic-tool-result-status-01',
     'v3-protocol-field-parity-anthropic-responses-req-01',
     'v3-protocol-field-parity-responses-anthropic-resp-01',
     'v3-protocol-field-parity-openai-chat-same-protocol-01',
@@ -948,6 +975,8 @@ for (const [owner, body, phrases] of [
     'scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
     'Text truth for the audit lives in docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
     'build_v3_chat_canonical_request_from_responses_payload',
+    'build_v3_openai_chat_tool_result_message',
+    'responses_tool_result_is_error',
     'project_v3_responses_arguments_to_openai_chat_wire',
     'All inbound protocols decode into Chat canonical plus registered payload extensions',
     'reasoning_policy_system_marker',
@@ -958,9 +987,11 @@ for (const [owner, body, phrases] of [
   [paths.mainlineMap, text.mainlineMap, [
     'chain_id: v3.protocol_conversion_field_parity',
     'binding_kind: protocol_field_parity_test_over_existing_relay_chain',
+    'v3-protocol-field-parity-responses-chat-tool-result-status-carrier-01',
     'v3-protocol-field-parity-responses-chat-req-01',
     'v3-protocol-field-parity-responses-chat-malformed-arguments-project-01',
     'v3-protocol-field-parity-responses-anthropic-req-01',
+    'v3-protocol-field-parity-chat-anthropic-tool-result-status-01',
     'v3-protocol-field-parity-openai-chat-same-protocol-01',
     'Source wire is decoded to Chat canonical plus registered payload extensions before Chat Process',
     'design_conformance: pending',
@@ -975,9 +1006,12 @@ for (const [owner, body, phrases] of [
     'Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions',
     'responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect',
     'responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect',
+    'responses_tool_result_status_survives_chat_canonical_carrier',
+    'responses_relay_anthropic_wire_preserves_typed_tool_result_error_status',
     'npm run render:v3-protocol-semantic-field-matrix',
     'npm run test:v3-protocol-conversion-field-parity',
     'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
+    'responses_tool_output_status',
   ]],
   [paths.resourceMap, text.resourceMap, [
     'resource_id: v3.protocol_conversion.field_parity_contract',
@@ -1416,6 +1450,17 @@ for (const command of [
 ]) {
   if (!parityCiScript.includes(command)) {
     failures.push(`${paths.packageJson}: verify:v3-protocol-conversion-field-parity-ci must include ${command}`);
+  }
+}
+const parityTestScript = String(pkg.scripts?.['test:v3-protocol-conversion-field-parity'] ?? '');
+for (const command of [
+  '--lib responses_tool_result_status -- --nocapture',
+  '--test hub_anthropic_codec_characterization -- --nocapture',
+  '--test anthropic_relay_runtime_integration -- --nocapture',
+  '--test responses_relay_anthropic_provider_wire_integration -- --nocapture',
+]) {
+  if (!parityTestScript.includes(command)) {
+    failures.push(`${paths.packageJson}: test:v3-protocol-conversion-field-parity must include ${command}`);
   }
 }
 if (!String(text.v3ArchitectureCi ?? '').includes("'verify:v3-protocol-conversion-field-parity'")) {

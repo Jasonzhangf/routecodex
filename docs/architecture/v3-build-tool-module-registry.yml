@@ -1,6 +1,83 @@
 version: 1
 status: active
 modules:
+  - module_id: v3-module-boundary-verifier
+    owner_feature_id: v3.module_boundary_verifier
+    owned_paths:
+      - scripts/architecture/verify-v3-module-boundaries.mjs
+    allowed_dependencies:
+      - node:fs
+      - node:path
+      - yaml
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src
+      - ~/.rcc
+    required_gates:
+      - npm run verify:v3-module-boundaries
+
+  - module_id: v3-auth-selection-config
+    owner_feature_id: v3.auth_selection_policy
+    owned_paths:
+      - v3/crates/routecodex-v3-cli/src/init.rs
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/src/v2_compat.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-config/src/validate_auth_tests.rs
+      - v3/crates/routecodex-v3-config/src/validate_debug_tests.rs
+    allowed_dependencies:
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-target
+      - docs/architecture
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - ~/.rcc
+    required_gates:
+      - cargo test -p routecodex-v3-config
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+
+  - module_id: v3-auth-selection-target
+    owner_feature_id: v3.auth_selection_policy
+    owned_paths:
+      - v3/crates/routecodex-v3-target/src/lib.rs
+      - v3/crates/routecodex-v3-target/src/tests/mod.rs
+    allowed_dependencies:
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-virtual-router
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src
+      - ~/.rcc
+    required_gates:
+      - cargo test -p routecodex-v3-target
+      - npm run verify:v3-module-boundaries
+
+  - module_id: v3-auth-selection-router-contract
+    owner_feature_id: v3.auth_selection_policy
+    owned_paths:
+      - v3/crates/routecodex-v3-virtual-router/src/tests/mod.rs
+      - docs/architecture/v3-architecture-audit-locks.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    allowed_dependencies:
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-virtual-router
+      - docs/architecture
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - ~/.rcc
+    required_gates:
+      - cargo test -p routecodex-v3-virtual-router --lib
+      - npm run verify:v3-mainline-caller-flow
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+
   - module_id: v3-global-binary-install
     owner_feature_id: v3.global_binary_install
     owned_paths:
@@ -10,14 +87,30 @@ modules:
       - tests/scripts/v3-cli-distribution.spec.mjs
       - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
       - v3/crates/routecodex-v3-config/src/lib.rs
+      - docs/goals/v3-install-interrupt-process-group-test-design.md
+      - docs/architecture/manifests/v3.global_binary_install.interruption.mainline.yml
     allowed_dependencies:
       - v3/crates/routecodex-v3-cli
       - dist/bin/rccv3
       - ~/.local/bin/rccv3
+      - node:child_process
+      - node:fs
     forbidden_paths:
       - src
       - sharedmodule
       - ~/.rcc/install
+      - request.normal_payload
+      - response.client_payload
+      - MetadataCenter
+    allowed_edges:
+      - V3InstallOwnedCargoTargetCreated -> V3InstallOwnedCommandGroupActive
+      - V3InstallOwnedCommandGroupActive -> V3InstallOwnedCommandGroupSignalled
+      - V3InstallOwnedCommandGroupSignalled -> V3InstallOwnedCommandGroupExited
+      - V3InstallOwnedCommandGroupExited -> V3InstallOwnedCargoTargetReleased
+    resources:
+      - v3.global_binary_install
+      - v3.install.command_process_group
+      - v3.install.owned_cargo_target
     required_gates:
       - npm run test:v3-cli-distribution
       - npm run test:install-v3-target-cleanup
@@ -27,7 +120,6 @@ modules:
   - module_id: v3-build-test-artifact-budget
     owner_feature_id: v3.build_test_artifact_budget
     owned_paths:
-      - .cargo/config.toml
       - v3/Cargo.toml
       - scripts/run-v3-cargo-test.mjs
       - scripts/cargo-test-artifact-runner.mjs
@@ -88,6 +180,106 @@ modules:
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
+
+  - module_id: v3-provider-compat-profile-loading
+    owner_feature_id: v3.provider_compat_profile_loading
+    owned_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
+      - v3/crates/routecodex-v3-runtime/tests/glm_anthropic_request_outbound_compat.rs
+      - v3/tests/resources/glm-anthropic-request-outbound-config.toml
+      - docs/goals/v3-glm-request-outbound-compat-20260819.md
+      - scripts/architecture/v3-provider-compat-module-boundary-lib.mjs
+      - scripts/architecture/verify-v3-provider-compat-module-boundary.mjs
+      - scripts/tests/v3-provider-compat-module-boundary-red-fixtures.mjs
+    allowed_dependencies:
+      - v3.request.selected_provider_model_bound
+      - v3.request.provider_semantic
+      - v3.hub.resolved_target
+      - v3.hub.provider_wire_payload
+      - provider-compat-core
+      - routecodex-v3-runtime
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-virtual-router
+      - v3/crates/routecodex-v3-server
+      - src
+    allowed_edges:
+      - V3HubReqOutbound07ProviderSemantic -> V3SelectedProviderModelBindingBlock
+      - V3SelectedProviderModelBindingBlock -> ProviderReqCompat06ProviderCompat
+      - ProviderReqCompat06ProviderCompat -> V3ProviderReqOutbound08WirePayload
+      - ProviderRespInbound01Raw -> ProviderRespCompat02ProviderCompat
+      - ProviderRespCompat02ProviderCompat -> V3HubRespInbound02Normalized
+    resources:
+      - v3.request.selected_provider_model_bound
+      - v3.request.provider_semantic
+      - v3.provider_compat.profile_application
+      - v3.hub.provider_wire_payload
+    required_gates:
+      - npm run verify:v3-provider-compat-module-boundary
+      - npm run test:v3-provider-compat-module-boundary-red-fixtures
+      - npm run test:v3-glm-anthropic-request-outbound-compat
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+
+  - module_id: v3-sse-protocol-codec-projection
+    owner_feature_id: v3.sse_protocol_codec_projection_boundary
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
+    allowed_dependencies:
+      - routecodex-v3-runtime
+      - routecodex-v3-provider-responses
+      - serde_json
+    forbidden_paths:
+      - v3/crates/routecodex-v3-server
+      - v3/crates/routecodex-v3-virtual-router
+      - MetadataCenter
+      - request.normal_payload.control_state
+    allowed_edges:
+      - V3SseTransportIn03ValidatedFrameStream -> V3ProviderResponsesJsonFrameOutcome
+    resources:
+      - v3.response.provider_raw
+    required_gates:
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_sse_json_codec_tests
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+
+  - module_id: v3-responses-direct-sse-precommit
+    owner_feature_id: v3.responses_direct_mvp_architecture
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/shared.rs
+      - v3/crates/routecodex-v3-runtime/src/shared_direct_sse_precommit_tests.rs
+      - v3/crates/routecodex-v3-runtime/src/shared_sse_semantic_idle_tests.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      - v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs
+    allowed_dependencies:
+      - routecodex-v3-runtime
+      - routecodex-v3-provider-responses
+      - routecodex-v3-sse
+      - routecodex-v3-error
+    forbidden_paths:
+      - v3/crates/routecodex-v3-server
+      - v3/crates/routecodex-v3-virtual-router
+      - MetadataCenter
+      - request.normal_payload
+    allowed_edges:
+      - V3ProviderResponsesJsonFrameOutcome -> V3Error01SourceRaised
+      - V3ProviderResponsesJsonFrameOutcome -> V3Resp15ClientPayload
+    resources:
+      - v3.response.provider_raw
+      - v3.error.source
+      - v3.error.chain
+      - v3.response.client_payload
+    required_gates:
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_sse_json_codec_tests
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime guard_initial_direct_sse_provider_failure
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-provider-action-gate
 
   - module_id: v3-compaction-request-routing
     owner_feature_id: v3.compaction_request_routing

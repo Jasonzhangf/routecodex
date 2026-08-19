@@ -29,6 +29,8 @@ const STEPS = [
   ['test:v3-p5-router-target', 'Priority-first and same-priority weighted Router/Target selection'],
   ['test:v3-compaction-request-routing', 'Whitelisted compact ingress selects the highest-priority compact route and preserves endpoint semantics'],
   ['verify:v3-module-boundaries', 'V3 module boundaries (Server cannot build/classify Error)'],
+  ['verify:v3-provider-compat-module-boundary', 'Provider compat module/resource/mainline ownership and GLM Anthropic outbound boundary'],
+  ['test:v3-provider-compat-module-boundary-red-fixtures', 'Provider compat ownership and GLM protocol-path regressions are rejected'],
   ['verify:sse-architecture-boundary', 'SSE runtime dispatch remains Rust-owned'],
   ['verify:error-pipeline-contract', 'Provider failures use the shared typed error pipeline'],
   [

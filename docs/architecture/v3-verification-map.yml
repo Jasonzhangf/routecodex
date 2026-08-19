@@ -2,6 +2,44 @@ version: 2
 status: p6_frozen_hub_v1_h1_typed_skeleton_implemented
 scope: routecodex-v3-p0-p6-plus-hub-v1-h1
 features:
+- feature_id: v3.auth_selection_policy
+  status: source_active
+  change_risk: medium
+  owner_kind: rust_config_target_contract
+  owner_scope: Auth entry selection policy compilation and keyless target expansion.
+  owner_modules:
+  - v3-auth-selection-config
+  - v3-auth-selection-target
+  - v3-auth-selection-router-contract
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-build-tool-module-registry.yml
+  required_unit:
+  - V2 auth selection values transfer into V3 authoring and published control policy
+  - V2 round_robin, negative priority, and zero weight fail through compile_auth
+  - keyless targets expand by priority tiers and weighted equal-tier rotation
+  required_gates:
+  - cargo test -p routecodex-v3-config
+  - cargo test -p routecodex-v3-target
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+- feature_id: v3.module_boundary_verifier
+  status: source_active
+  change_risk: high
+  owner_kind: repository_architecture_gate
+  owner_scope: Registry-backed module ownership and dependency-boundary verification.
+  owner_modules:
+  - v3-module-boundary-verifier
+  contract:
+  - docs/architecture/v3-build-tool-module-registry.yml
+  - docs/architecture/v3-function-map.yml
+  required_unit:
+  - every registry-owned path exists and has exactly one active owner
+  - JavaScript imports from the verifier match its declared allowed dependencies
+  required_gates:
+  - npm run verify:v3-module-boundaries
 - feature_id: v3.global_binary_install
   status: source_active_live_verification_required
   change_risk: high
@@ -28,6 +66,10 @@ features:
     or Error payloads.
   - Direct binary installation is not blocked by unrelated in-progress provider/runtime
     feature gates; full architecture CI remains required by the build chain.
+  - On Unix, SIGINT and SIGTERM cannot leave a confirmed same-process-group install
+    descendant running after the internally owned Cargo target is removed.
+  - On Windows, install commands reject before spawn until a Job Object owner is
+    implemented; no root-only termination claim is permitted.
   required_gates:
   - npm run test:v3-cli-distribution
   - npm run test:install-v3-target-cleanup
@@ -434,6 +476,8 @@ features:
     through V3HubRespContinuation04Committed only
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
   - scripts/architecture/verify-v3-relay-response-semantics.mjs
   - scripts/tests/v3-relay-response-semantics-red-fixtures.mjs
@@ -933,6 +977,10 @@ features:
     boilerplate and still deterministically derives the closed Hub V1 manifest
   - Hub V1 servers may omit internal execution declarations and still derive the closed
     direct/relay/json/sse/continuation policy
+  - Auth selection accepts only priority or weighted, rejects round_robin, validates
+    priority/weight values, and publishes the control policy without secret values
+  - compile_auth_rejects_invalid_priority_and_weight locks negative priority and zero
+    weight rejection
   - publish_v3_config_05_manifest_from_v3_config_04 emits the deterministic published
     manifest and auth handles
   - provider_error_action_policy and client_error_projection_policy compile into V3ErrorManifest
@@ -1064,9 +1112,10 @@ features:
     initial dispatch and recomputed only for the currently selected Target10 after
     provider failure reselection; continuation owner remains the only Direct/Relay
     lock
-  - V3Target10ConcreteProviderSelected carries provider.responses.process; selected
-    Responses providers with process=chat must choose Hub Relay before SameProtocolDirect
-    during protocol execution planning
+  - V3Target10ConcreteProviderSelected carries provider.responses.process; protocol
+    mismatch must require Hub Relay before any same-protocol process policy is read;
+    only an equal-protocol Responses target with process=chat chooses Hub Relay
+    instead of SameProtocolDirect during protocol execution planning
   - P6 Dry Run invokes the same Runtime kernel and replaces only the Provider transport
     with a no-network effect
   - Direct provider errors enter the shared Error01-06/provider-health policy; success
@@ -1075,8 +1124,13 @@ features:
   - Direct provider raw response decode/projection errors enter the same Error01-06
     provider failure policy and reselect before Error06 while alternatives remain
   - Direct provider SSE lifecycle frames without replay-unsafe business output do
-    not authorize Resp15 commit; failure or EOF in that precommit interval enters
-    Error01-05 and may retry or reselect before Error06
+    not authorize Resp15 commit; failure, EOF, or terminal completion without content
+    or tool output in that precommit interval enters Error01-05 and may retry or
+    reselect before Error06
+  - Standard empty output_item/content_part lifecycle events remain precommit, while
+    registered non-empty text and tool output grant client commit authority.
+  - Unknown or malformed Responses output item/content part types fail in the provider
+    SSE codec instead of being treated as successful output.
   - Direct target-local reselection uses the full captured Target09 candidate set;
     if the newly selected Target10 requires Hub Relay and no Direct-owned previous_response_id
     is active, Direct returns a typed relay handoff side-channel carrying the complete
@@ -1338,6 +1392,9 @@ features:
     pool matching
   - Target dedupe retains optional/default provenance and protects the default floor's
     final compatible provider
+  - Keyless provider auth expansion preserves omitted priority default 0, orders
+    weighted entries only within equal-priority tiers, and availability selection
+    advances to the next auth entry when a lower-tier entry is unavailable.
   required_gates:
   - npm run test:v3-p5-router-target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target configured_priority_is_not_overridden_by_context_near_limit_heuristic
@@ -1883,6 +1940,10 @@ features:
   - EOF without semantic terminal fails explicitly at the codec/lifecycle owner.
   - "[DONE] before semantic terminal fails without being treated as success."
   - malformed provider event fails at provider codec, not transport/server.
+  - Responses response.completed without content or tool output has no precommit
+    success authority and enters the provider Error chain.
+  - The codec output and Direct precommit decision are registered typed resources;
+    the empty-terminal branch reaches Error01 through the registered adjacent edge.
   required_gates:
   - npm run verify:sse-architecture-boundary
   - npm run verify:v3-provider-action-gate
@@ -1937,6 +1998,64 @@ features:
       current-turn carrier and no raw payload reaches classify_route.
     runtime: Requires exact current-turn live replay and negative historical/text
       replay after install and aggregate restart.
+- feature_id: v3.provider_compat_profile_loading
+  status: active
+  change_risk: high
+  owner_kind: rust_provider_compat_boundary
+  owner_scope: ProviderReqCompat06 and ProviderRespCompat02 apply selected provider profiles and return typed application evidence without owning generic codecs, routing, tool governance, continuation, error policy, handlers, or transport.
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-build-tool-module-registry.yml
+  required_positive:
+  - Every profile application is reachable through the registered ProviderReqCompat06 or ProviderRespCompat02 owner and the request edge writes typed profile evidence.
+  required_reverse:
+  - Profile application evidence never enters provider or client payload.
+  - Generic codecs, VR, server, and transport do not own provider-profile branches.
+  required_gates:
+  - npm run test:v3-provider-compat-profile-loading
+  - npm run verify:v3-provider-compat-module-boundary
+  - npm run test:v3-provider-compat-module-boundary-red-fixtures
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-resource-map
+  - git diff --check
+- feature_id: v3.glm_anthropic_request_outbound_compat
+  status: runtime_live_verified_7777_20260819
+  change_risk: high
+  owner_kind: rust_provider_request_outbound_compat
+  owner_scope: GLM profile application only after generic Anthropic request encoding at ProviderReqCompat06; no provider-specific codec, VR, response, handler, or SSE branch.
+  design:
+  - docs/goals/v3-glm-request-outbound-compat-20260819.md
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-build-tool-module-registry.yml
+  required_positive:
+  - chat:glm plus anthropic-messages records typed applied_profile=chat:glm and native_applied=true while preserving the probed-valid standard Anthropic payload.
+  - The compiled config selects glmrelay_anthropic, then the full Responses relay emits /v1/messages?beta=true with messages, thinking.type=adaptive, output_config.effort=high, web_search_20250305, and ordinary Anthropic tools.
+  required_reverse:
+  - A GLM Anthropic request without chat:glm does not claim GLM profile application.
+  - The GLM forwarder fixture contains glmrelay_openai but never selects it.
+  - Final Anthropic wire has no Responses/OpenAI fields or typed compat evidence.
+  - GLM Anthropic responses bypass the OpenAI reasoning/tool-harvest transform and remain owned by the generic Anthropic decoder.
+  - Generic Responses-to-Chat, Anthropic, and outbound codec sources contain no GLM branch.
+  required_gates:
+  - npm run test:v3-glm-anthropic-request-outbound-compat
+  - npm run verify:v3-provider-compat-module-boundary
+  - npm run test:v3-provider-compat-module-boundary-red-fixtures
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-resource-map
+  - git diff --check
+  completion_rule:
+    source: Complete only when profile positive/reverse tests, the config-to-wire black-box, module/resource/mainline gates, and build are green.
+    runtime: Verified with installed V3 0.90.4601, one aggregate restart, healthy 10000/7777/4444, a 7777 provider-request dry-run selecting glmrelay_anthropic at /v1/messages?beta=true, and canonical live sample openai-responses-router-glm-5.2-20260819T023703851-871975-826 completing with provider status 200 and non-zero usage.
+    forbidden_claim: Do not inherit the broad protocol field-parity status or claim completion from an identity payload test alone.
+  runtime_evidence:
+  - /Users/fanzhang/.rcc/codex-samples/openai-responses/ports/7777/openai-responses-router-glm-5.2-20260819T023703851-871975-826/provider-request.json
+  - /Users/fanzhang/.rcc/codex-samples/openai-responses/ports/7777/openai-responses-router-glm-5.2-20260819T023703851-871975-826/provider-response.json
+  - /Users/fanzhang/.rcc/codex-samples/openai-responses/ports/7777/openai-responses-router-glm-5.2-20260819T023703851-871975-826/error.json
 - feature_id: v3.protocol_conversion_field_parity
   status: runtime_active_live_verified_5520
   change_risk: high
@@ -2029,7 +2148,7 @@ features:
   - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content
     before Stopless governance.
   - Anthropic final stop_reason uses one closed terminal projector shared by JSON and SSE materialization. end_turn, tool_use, max_tokens, stop_sequence, pause_turn, and refusal retain their registered status/details; model_context_window_exceeded and malformed/unknown terminal values fail explicitly instead of becoming completed.
-  - Responses tool-result status is the only source for Anthropic tool_result.is_error. Absent/completed remain success, incomplete becomes is_error=true, and nonterminal/malformed/unknown values fail before provider wire without text, HTTP, provider, or MetadataCenter inference.
+  - Responses tool-result status is the only source for Anthropic tool_result.is_error. The Responses inbound codec validates and writes the registered routecodex_chat_extension.responses_tool_output_status data-plane carrier; the adjacent Anthropic codec consumes it through the shared status projector. Absent/completed remain success, incomplete becomes is_error=true, and nonterminal/malformed/unknown values fail before provider wire without text, HTTP, provider, or MetadataCenter inference or carrier wire leakage.
   - Anthropic response content blocks use the registered closed enum. Exact/compatible blocks preserve order and identity; source-roundtrip-only, unsupported, missing, and unknown blocks fail with the exact response.content[index].type diagnostic and are never silently dropped or textified.
   - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use,
     usage, stop_reason, and rejects malformed function arguments.
@@ -2067,6 +2186,11 @@ features:
   - anthropic_model_context_window_stop_is_explicitly_unsupported_for_responses
   - responses_tool_result_status_projects_only_registered_anthropic_is_error_semantic
   - responses_tool_result_status_rejects_nonterminal_or_unknown_values
+  - responses_tool_result_status_survives_chat_canonical_carrier
+  - responses_tool_result_status_rejects_unregistered_value_before_chat_canonical
+  - responses_relay_anthropic_wire_preserves_typed_tool_result_error_status
+  - responses_relay_anthropic_wire_omits_is_error_for_registered_success_statuses
+  - responses_relay_anthropic_rejects_unregistered_tool_result_status_before_transport
   - anthropic_response_content_block_enum_is_closed_and_diagnostic
   - anthropic_web_search_result_requires_exact_pairing
   - anthropic_json_and_sse_materialization_share_terminal_projection_owner

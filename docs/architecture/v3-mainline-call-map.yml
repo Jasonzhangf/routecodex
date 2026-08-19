@@ -18,6 +18,8 @@ chains:
     semantic_contract:
       - buildV3Cli passes ROUTECODEX_BUILD_VERSION into the Cargo invocation through runInterruptibleCommand.
       - The compiled Rust CLI resolves that embedded value at runtime without requiring adjacent package.json.
+      - On Unix, runInterruptibleCommand owns an isolated process group; interruption signals and waits for that exact group before the owned Cargo target can be removed.
+      - A signal observed before command spawn rejects the command instead of starting untracked work.
     resource_flow:
       consumes: []
       produces: [v3.global_binary_install]
@@ -388,6 +390,7 @@ chains:
       side_channel_reads: []
       side_channel_writes:
       - v3.secret.provider_auth_handle
+      - v3.target.auth_selection_policy
     status: anchored
 - chain_id: v3.config.compact_hub_v1_defaults
   owner_feature_id: v3.config_interpreter_contract
@@ -743,6 +746,7 @@ chains:
       - v3.target.candidate_set
       side_channel_reads:
       - v3.route.opaque_target
+      - v3.target.auth_selection_policy
       side_channel_writes:
       - v3.target.candidate_set
   - step_id: v3-rd-08
@@ -774,7 +778,8 @@ chains:
     owner_feature_id: v3.responses_direct_mvp_architecture
     semantic_contract:
       - reads selected provider_type and provider.responses.process from v3.target.concrete_provider
-      - responses provider with responses.process=chat chooses HubRelay before SameProtocolDirect
+      - compare entry protocol with selected provider protocol first; mismatch requires HubRelay and does not consult same-protocol process policy
+      - only after protocol equality, responses.process=chat selects HubRelay instead of SameProtocolDirect
       - writes the initial protocol decision before dispatch; after provider-failure reselection the execution owner recomputes the decision only for the newly selected Target10, while previous_response_id continuation owner remains the only Direct/Relay lock
     resource_flow:
       consumes:
@@ -4036,6 +4041,28 @@ chains:
       side_channel_reads:
       - v3.protocol_conversion.field_parity_contract
       side_channel_writes: []
+  - step_id: v3-protocol-field-parity-responses-chat-tool-result-status-carrier-01
+    from_node: V3HubReqInbound01ClientRaw
+    to_node: V3HubReqInbound02Normalized
+    caller_symbol: build_v3_chat_canonical_request_from_responses_payload_for_req_inbound
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+    callee_symbol: build_v3_openai_chat_tool_result_message
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+    status: anchored
+    binding_kind: adjacent_inbound_registered_payload_carrier
+    owner_feature_id: v3.protocol_conversion_field_parity
+    semantic_contract:
+      - Validate function_call_output.status as absent, completed, or incomplete before Chat canonicalization.
+      - Preserve a present registered value only in routecodex_chat_extension.responses_tool_output_status; it is payload data, not MetadataCenter or control state.
+    resource_flow:
+      consumes:
+      - v3.request.normal_payload
+      - v3.hub.entry_protocol
+      produces:
+      - v3.request.normal_payload
+      side_channel_reads:
+      - v3.protocol_conversion.field_parity_contract
+      side_channel_writes: []
   - step_id: v3-protocol-field-parity-responses-chat-req-01
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: V3ProviderReqOutbound08WirePayload
@@ -4118,6 +4145,28 @@ chains:
       - v3.hub.provider_wire_payload
       side_channel_reads:
       - v3.protocol_conversion.field_parity_contract
+      side_channel_writes: []
+  - step_id: v3-protocol-field-parity-chat-anthropic-tool-result-status-01
+    from_node: V3HubReqOutbound07ProviderSemantic
+    to_node: ProviderReqCompat06ProviderCompat
+    caller_symbol: chat_messages_as_anthropic_messages
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
+    callee_symbol: responses_tool_result_is_error
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
+    status: anchored
+    binding_kind: adjacent_outbound_registered_payload_carrier_consumer
+    owner_feature_id: v3.protocol_conversion_field_parity
+    semantic_contract:
+      - Consume only routecodex_chat_extension.responses_tool_output_status as the Responses-derived tool-result status.
+      - Absent/completed omit is_error, incomplete emits is_error=true, and every other value fails before provider transport.
+      - The Chat extension is consumed at this codec boundary and never enters Anthropic provider wire.
+    resource_flow:
+      consumes:
+      - v3.request.provider_semantic
+      - v3.protocol_conversion.field_parity_contract
+      produces:
+      - v3.hub.provider_wire_payload
+      side_channel_reads: []
       side_channel_writes: []
   - step_id: v3-protocol-field-parity-anthropic-responses-req-01
     from_node: V3HubReqInbound02Normalized
@@ -5149,8 +5198,8 @@ chains:
     to_node: ProviderReqCompat06ProviderCompat
     caller_symbol: apply_v3_provider_req_compat
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
-    callee_symbol: run_req_outbound_stage3_compat
-    callee_file: sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
+    callee_symbol: apply_v3_provider_req_compat_profile
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
     status: anchored
     owner_feature_id: v3.route_selected_provider_model_binding
     resource_flow:
@@ -5161,6 +5210,30 @@ chains:
       side_channel_reads:
       - v3.hub.resolved_target
       side_channel_writes: []
+- chain_id: v3.provider_compat_profile_loading.request
+  owner_feature_id: v3.provider_compat_profile_loading
+  summary: The already-standard provider payload enters the selected provider compatibility profile exactly once; CompatResult returns payload plus typed application evidence, and only the payload advances to Wire08.
+  edges:
+  - step_id: v3-provider-compat-request-01
+    from_node: V3SelectedProviderModelBindingBlock
+    to_node: ProviderReqCompat06ProviderCompat
+    caller_symbol: apply_v3_provider_req_compat_profile
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+    callee_symbol: run_req_outbound_stage3_compat
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
+    status: anchored
+    binding_kind: internal_provider_compat_block
+    owner_feature_id: v3.provider_compat_profile_loading
+    resource_flow:
+      consumes:
+      - v3.request.selected_provider_model_bound
+      - v3.request.provider_semantic
+      produces:
+      - v3.hub.provider_wire_payload
+      side_channel_reads:
+      - v3.hub.resolved_target
+      side_channel_writes:
+      - v3.provider_compat.profile_application
 - chain_id: v3.web_search_servertool_state_machine
   owner_feature_id: v3.web_search_servertool_state_machine
   status: design
@@ -5790,7 +5863,7 @@ chains:
     from_node: V3Server03ResponsesSessionAdmissionBlock
     to_node: V3ServerRespOutbound06ClientFrame
     caller_symbol: pending_endpoint
-    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
     callee_symbol: hold_response_body_admission_permit
     callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
     status: anchored
@@ -7042,7 +7115,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
     callee_symbol: classify_v3_request_purpose
     callee_file: v3/crates/routecodex-v3-server/src/compaction_request.rs
-    status: bound
+    status: anchored
     owner_feature_id: v3.compaction_request_routing
     resource_flow:
       consumes: [v3.request.protocol_context]
@@ -7056,7 +7129,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
     callee_symbol: classify_route
     callee_file: v3/crates/routecodex-v3-route-classifier/src/route.rs
-    status: bound
+    status: anchored
     owner_feature_id: v3.compaction_request_routing
     resource_flow:
       consumes: [v3.request.compaction_purpose]
@@ -7070,10 +7143,71 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3VirtualRouter::resolve_route_pool_plan
     callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
-    status: bound
+    status: anchored
     owner_feature_id: v3.compaction_request_routing
     resource_flow:
       consumes: [v3.route.request_facts]
       produces: [v3.route.selection_plan]
       side_channel_reads: [v3.route.request_facts]
       side_channel_writes: [v3.route.selection_plan]
+
+- chain_id: v3.global_binary_install.interruption
+  owner_feature_id: v3.global_binary_install
+  summary: Every Unix install command runs in one installer-owned process group; interruption signals and waits for that exact group before the installer-owned Cargo target can be released. Windows rejects before spawn until a Job Object owner exists.
+  edges:
+  - step_id: v3-install-interrupt-01
+    from_node: V3InstallOwnedCargoTargetCreated
+    to_node: V3InstallOwnedCommandGroupActive
+    caller_symbol: buildV3Cli
+    caller_file: scripts/install-v3-cli.mjs
+    callee_symbol: runInterruptibleCommand
+    callee_file: scripts/install-v3-cli.mjs
+    status: anchored
+    owner_feature_id: v3.global_binary_install
+    resource_flow:
+      consumes: [v3.install.owned_cargo_target]
+      produces: [v3.install.command_process_group]
+      side_channel_reads: []
+      side_channel_writes: [v3.install.command_process_group]
+  - step_id: v3-install-interrupt-02
+    from_node: V3InstallOwnedCommandGroupActive
+    to_node: V3InstallOwnedCommandGroupSignalled
+    caller_symbol: withOwnedV3CargoTarget
+    caller_file: scripts/install-v3-cli.mjs
+    callee_symbol: signalOwnedProcessTree
+    callee_file: scripts/install-v3-cli.mjs
+    status: anchored
+    owner_feature_id: v3.global_binary_install
+    resource_flow:
+      consumes: [v3.install.command_process_group]
+      produces: [v3.install.command_process_group]
+      side_channel_reads: [v3.install.command_process_group]
+      side_channel_writes: [v3.install.command_process_group]
+  - step_id: v3-install-interrupt-03
+    from_node: V3InstallOwnedCommandGroupSignalled
+    to_node: V3InstallOwnedCommandGroupExited
+    caller_symbol: runInterruptibleCommand
+    caller_file: scripts/install-v3-cli.mjs
+    callee_symbol: waitForOwnedProcessTreeExit
+    callee_file: scripts/install-v3-cli.mjs
+    status: anchored
+    owner_feature_id: v3.global_binary_install
+    resource_flow:
+      consumes: [v3.install.command_process_group]
+      produces: []
+      side_channel_reads: [v3.install.command_process_group]
+      side_channel_writes: []
+  - step_id: v3-install-interrupt-04
+    from_node: V3InstallOwnedCommandGroupExited
+    to_node: V3InstallOwnedCargoTargetReleased
+    caller_symbol: cleanupOwnedCargoTargetWhenSafe
+    caller_file: scripts/install-v3-cli.mjs
+    callee_symbol: cleanupOwnedCargoTarget
+    callee_file: scripts/install-v3-cli.mjs
+    status: anchored
+    owner_feature_id: v3.global_binary_install
+    resource_flow:
+      consumes: [v3.install.owned_cargo_target]
+      produces: []
+      side_channel_reads: [v3.install.command_process_group]
+      side_channel_writes: []
