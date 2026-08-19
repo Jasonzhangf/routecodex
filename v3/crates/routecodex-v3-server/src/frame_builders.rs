@@ -218,6 +218,20 @@ pub(crate) fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -
     format!("event: error\ndata: {event}\n\n").into_bytes()
 }
 
+fn v3_post_commit_sse_error_event_chunk(source: V3Error01SourceRaised) -> Vec<u8> {
+    let projected = project_v3_post_commit_sse_source(source, 502);
+    let (code, message) = v3_error_body_code_message(&projected.body);
+    v3_post_commit_sse_message_event_chunk(&code, &message)
+}
+
+fn v3_post_commit_sse_message_event_chunk(code: &str, message: &str) -> Vec<u8> {
+    let event = json!({
+        "type": "error",
+        "error": {"code": code, "message": message}
+    });
+    format!("event: error\ndata: {event}\n\n").into_bytes()
+}
+
 pub(crate) fn responses_direct_output_response_with_console(
     frame: V3Server16HttpFrame,
     stream_console_finalizer: Option<V3DirectSseConsoleFinalizer>,
@@ -274,8 +288,7 @@ pub(crate) fn v3_relay_client_sse_body(
         match stream.next().await {
             Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
             Some(Err(error)) => Some((
-                Ok::<Vec<u8>, io::Error>(v3_sse_error_event_chunk(
-                    502,
+                Ok::<Vec<u8>, io::Error>(v3_post_commit_sse_message_event_chunk(
                     "provider_response_sse_stream",
                     &error,
                 )),
@@ -307,11 +320,7 @@ pub(crate) fn v3_client_sse_body(
                 ))
             }
             Some(Err(source)) => Some((
-                Ok::<Vec<u8>, io::Error>(v3_sse_error_event_chunk(
-                    502,
-                    &source.code,
-                    &source.message,
-                )),
+                Ok::<Vec<u8>, io::Error>(v3_post_commit_sse_error_event_chunk(source)),
                 (stream, true),
             )),
             None => None,
