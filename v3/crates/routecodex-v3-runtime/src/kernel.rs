@@ -1333,22 +1333,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 }
             }
         }
-        wrap_v3_direct_sse_provider_stream_for_outcome(
-            &mut response_projection.client_payload.body,
-            provider_health.clone(),
-            &direct_failure_session_scope,
-            &policy,
-            provider_health_neutral,
-            &mut provider_action_permit,
-            runtime_timing.clone(),
-            response_projection
-                .stream_observation
-                .clone()
-                .unwrap_or_default(),
-        );
-        if let V3RemoteContinuationObservation::Streaming { state } =
-            &response_projection.remote_continuation
-        {
+        let remote_stream_state = match &response_projection.remote_continuation {
+            V3RemoteContinuationObservation::Streaming { state } => Some(state.clone()),
+            _ => None,
+        };
+        if matches!(
+            response_projection.client_payload.body,
+            V3ClientBody::Sse(_)
+        ) {
             // Resp14 projection now materializes the complete provider attempt
             // before commit, so retain its observation (including usage) instead
             // of replacing it with a fresh, empty state.
@@ -1380,10 +1372,30 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 }
                 other => other,
             };
+            wrap_v3_direct_sse_provider_stream_for_outcome(
+                &mut response_projection.client_payload.body,
+                provider_health.clone(),
+                &direct_failure_session_scope,
+                &policy,
+                provider_health_neutral,
+                &mut provider_action_permit,
+                runtime_timing.clone(),
+                stream_observation.clone(),
+            );
             if let (Some(continuation_state), Some(scope)) =
                 (continuation_state, continuation_scope.as_ref())
             {
                 if !continuation_disabled {
+                    let Some(state) = remote_stream_state.as_ref() else {
+                        return error_output(
+                            runtime_source(
+                                "V3ResponsesDirectContinuation",
+                                "SSE response is missing remote continuation observation state",
+                            ),
+                            trace,
+                            &hook_registry,
+                        );
+                    };
                     wrap_v3_direct_sse_remote_stream_for_outcome(
                         &mut response_projection.client_payload.body,
                         continuation_state.clone(),
