@@ -3515,7 +3515,8 @@ features:
     or unrelated dependency artifacts.
   - Active external V3 builders prevent cache eviction and produce an explicit failure.
   - A shell or npm parent that only mentions cargo in its arguments is not classified
-    as an active builder; an actual cargo or rustc executable targeting V3 remains active.
+    as an active builder; untruncated ps ucomm identity keeps an actual cargo or rustc
+    executable targeting V3 active even when macOS comm truncates its executable path.
   - PID reuse cannot preserve a stale canonical-test lock because ownership also requires
     the recorded process-start identity.
   - Post-eviction allocation above 2 GiB fails explicitly.

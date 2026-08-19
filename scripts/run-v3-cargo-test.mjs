@@ -162,7 +162,7 @@ export function verifyV3DebugBudget({
 }
 
 function activeV3BuilderCommands() {
-  const result = spawnSync('ps', ['-axo', 'pid=,comm=,command='], { encoding: 'utf8' });
+  const result = spawnSync('ps', ['-axo', 'pid=,ucomm=,command='], { encoding: 'utf8' });
   if (result.error || result.status !== 0) {
     throw new Error(`unable to inspect active V3 builders: ${result.error?.message ?? result.stderr ?? `exit ${result.status}`}`);
   }

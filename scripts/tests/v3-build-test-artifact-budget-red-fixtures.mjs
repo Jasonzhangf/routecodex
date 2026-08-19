@@ -43,13 +43,13 @@ assert.equal(
 );
 assert.deepEqual(
   parseV3BuilderProcessLine(
-    '25340 cargo cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli',
+    '25340 cargo /Users/example/.rustup/toolchains/stable/bin/cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli',
   ),
   {
     pid: 25340,
-    command: 'cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli',
+    command: '/Users/example/.rustup/toolchains/stable/bin/cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli',
   },
-  'the actual Cargo executable remains an active builder candidate',
+  'ucomm keeps the actual Cargo executable visible when macOS comm truncates its path',
 );
 const previousPath = process.env.PATH;
 try {
@@ -177,10 +177,10 @@ const mutations = [
     },
   },
   {
-    name: 'builder scan drops executable identity',
+    name: 'builder scan regresses to truncated macOS comm identity',
     sources: {
       ...sources,
-      wrapper: sources.wrapper.replace("'pid=,comm=,command='", "'pid=,command='"),
+      wrapper: sources.wrapper.replace("'pid=,ucomm=,command='", "'pid=,comm=,command='"),
     },
   },
   {
