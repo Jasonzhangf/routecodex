@@ -26,6 +26,11 @@ flowchart LR
 - Matching test dep-info and `rcgu.o` intermediates whose filenames match executables reported by this invocation.
 - The complete Cargo test profile inside the RouteCodex-owned target namespace only when the retained cache exceeds 2 GiB and no other V3 builder is active.
 
+Active-builder detection binds the untruncated `ps ucomm` executable identity (`cargo`
+or `rustc`) separately from its argument string. This prevents macOS `comm` path
+truncation from hiding a real builder, while a parent shell or npm command that merely
+names a later Cargo command cannot block the current wrapper's own terminal cleanup.
+
 ## Forbidden Cleanup
 
 - Reusable dependency `rlib`, `rmeta`, proc-macro, fingerprint, or build-script artifacts while the cache is within budget.

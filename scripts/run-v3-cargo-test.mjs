@@ -162,7 +162,7 @@ export function verifyV3DebugBudget({
 }
 
 function activeV3BuilderCommands() {
-  const result = spawnSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
+  const result = spawnSync('ps', ['-axo', 'pid=,ucomm=,command='], { encoding: 'utf8' });
   if (result.error || result.status !== 0) {
     throw new Error(`unable to inspect active V3 builders: ${result.error?.message ?? result.stderr ?? `exit ${result.status}`}`);
   }
@@ -172,12 +172,9 @@ function activeV3BuilderCommands() {
     .map((line) => line.trim())
     .filter(Boolean)
     .filter((line) => !line.startsWith(`${ownPid} `))
-    .filter((line) => {
-      const match = line.match(/^(\d+)\s+(.+)$/u);
-      if (!match) return false;
-      const pid = Number(match[1]);
-      const command = match[2];
-      if (!/(?:^|\s)(?:\S*\/)?(?:cargo|rustc)(?:\s|$)/u.test(command)) return false;
+    .map(parseV3BuilderProcessLine)
+    .filter((processLine) => processLine !== null)
+    .filter(({ pid, command }) => {
       if (
         command.includes('v3/Cargo.toml')
         || command.includes(`${sep}v3${sep}target${sep}`)
@@ -189,7 +186,19 @@ function activeV3BuilderCommands() {
       if (!isBareWorkspaceCargoBuildOrTest(command)) return false;
       const cwd = Number.isInteger(pid) ? currentProcessCwd(pid) : null;
       return cwd === null || resolve(cwd) === join(repoRoot, 'v3');
-    });
+    })
+    .map(({ pid, command }) => `${pid} ${command}`);
+}
+
+export function parseV3BuilderProcessLine(line) {
+  const match = line.match(/^(\d+)\s+(\S+)\s+(.+)$/u);
+  if (!match) return null;
+  const executable = basename(match[2]);
+  if (executable !== 'cargo' && executable !== 'rustc') return null;
+  return {
+    pid: Number(match[1]),
+    command: match[3],
+  };
 }
 
 function isBareWorkspaceCargoBuildOrTest(command) {
