@@ -1,6 +1,7 @@
 #[tokio::test]
 async fn direct_sse_projection_does_not_keep_alive_on_comments_only() {
     let mut stream = observed_sse_client_stream_with_timeout(
+        V3HubProviderWireProtocol::Responses,
         "provider".to_string(),
         Box::pin(stream::unfold(0u8, |index| async move {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
