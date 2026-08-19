@@ -293,7 +293,9 @@ impl SseIncrementalDecoder {
                         // 不平衡，转义感知），该空行是字符串值的一部分，不能
                         // 当作帧分隔，否则 JSON 被截断（serde 报 expected ':'/
                         // expected ',' or '}'）。JSON 闭合后才允许帧结束。
-                        if !sse_frame_json_is_closed(&self.buffer[self.frame_start..self.scan_index]) {
+                        if !sse_frame_json_is_closed(
+                            &self.buffer[self.frame_start..self.scan_index],
+                        ) {
                             self.scan_index += ending_len;
                             self.line_start = self.scan_index;
                             continue;
@@ -524,8 +526,7 @@ mod tests {
             })
             .expect("data field must be present");
         assert_eq!(
-            data,
-            "{\"type\":\"response.output_text.delta\",\"delta\":\"first\nsecond line\"}",
+            data, "{\"type\":\"response.output_text.delta\",\"delta\":\"first\nsecond line\"}",
             "colonless continuation must be appended to the previous data value"
         );
     }
@@ -536,7 +537,9 @@ mod tests {
         // 幽灵字段；帧其余部分正常解析。
         let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
         let frames = decoder
-            .push(build_sse_transport_in_01_raw_chunk(b"orphan line\ndata: {\"ok\":true}\n\n"))
+            .push(build_sse_transport_in_01_raw_chunk(
+                b"orphan line\ndata: {\"ok\":true}\n\n",
+            ))
             .unwrap();
         assert_eq!(frames.len(), 1);
         let frame = frames[0].frame();
@@ -562,7 +565,11 @@ mod tests {
                 b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"first\n\nsecond\"}\n\n",
             ))
             .unwrap();
-        assert_eq!(frames.len(), 1, "blank line inside open JSON must not split the frame");
+        assert_eq!(
+            frames.len(),
+            1,
+            "blank line inside open JSON must not split the frame"
+        );
         let frame = frames[0].frame();
         let data = frame
             .fields()
@@ -573,8 +580,7 @@ mod tests {
             })
             .expect("data field must be present");
         assert_eq!(
-            data,
-            "{\"type\":\"response.output_text.delta\",\"delta\":\"first\n\nsecond\"}",
+            data, "{\"type\":\"response.output_text.delta\",\"delta\":\"first\n\nsecond\"}",
             "JSON value with raw blank line must be preserved as one frame"
         );
     }
