@@ -110,7 +110,7 @@ requireMatch(
 );
 requireMatch(
   admission,
-  /pub\(crate\) async fn admit\([\s\S]*let notified = self\.notify\.notified\(\);[\s\S]*self\.try_admit\(scope\.clone\(\)\)[\s\S]*notified\.await/,
+  /pub\(crate\) async fn admit\([\s\S]*let notified = self\.notify\.notified\(\);[\s\S]*tokio::pin!\(notified\);[\s\S]*notified\.as_mut\(\)\.enable\(\);[\s\S]*self\.try_admit\(scope\.clone\(\)\)[\s\S]*notified\.await/,
   "The session admission gate must uniquely own an async predicate wait with lost-wakeup-safe notification ordering",
 );
 requireMatch(

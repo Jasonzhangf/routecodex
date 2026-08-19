@@ -101,6 +101,8 @@ impl V3ResponsesSessionAdmissionGate {
     ) -> Option<V3ResponsesSessionAdmissionPermit> {
         loop {
             let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             match self.try_admit(scope.clone()) {
                 Ok(permit) => return permit,
                 Err(()) => notified.await,

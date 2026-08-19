@@ -71,6 +71,13 @@ const cases = [
     diagnostic: /wake every predicate waiter/u,
   },
   {
+    name: "admission waiter is not registered before predicate check",
+    path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
+    mutate: (source) =>
+      source.replace("            notified.as_mut().enable();\n", ""),
+    diagnostic: /lost-wakeup-safe notification ordering/u,
+  },
+  {
     name: "error SSE receives success keepalive",
     path: "v3/crates/routecodex-v3-server/src/frame_builders.rs",
     mutate: (source) =>
