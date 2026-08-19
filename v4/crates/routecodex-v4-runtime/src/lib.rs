@@ -1766,7 +1766,44 @@ impl NodePlugin for SseFrame {
         let semantic = ctx.data.client_semantic.as_deref().ok_or_else(|| {
             RuntimeFault::new("sse_frame", "client semantic response missing")
         })?;
-        ctx.data.client_sse_frame = Some(semantic.to_string());
+        let provider_raw = ctx
+            .data
+            .provider_raw
+            .as_deref()
+            .ok_or_else(|| RuntimeFault::new("sse_frame", "provider raw missing"))?;
+        let is_sse = provider_raw.lines().any(|line| {
+            line.strip_suffix('\r')
+                .unwrap_or(line)
+                .starts_with("data:")
+        });
+        if !is_sse {
+            ctx.data.client_sse_frame = Some(semantic.to_string());
+            return Ok(());
+        }
+        let protocol = ctx.information.protocol.as_deref().unwrap_or("responses");
+        let mut frame = String::new();
+        if protocol == "responses" {
+            if let Some(event) = provider_raw.lines().find_map(|line| {
+                line.strip_suffix('\r')
+                    .unwrap_or(line)
+                    .strip_prefix("event:")
+                    .map(str::trim)
+                    .filter(|event| !event.is_empty())
+            }) {
+                frame.push_str("event: ");
+                frame.push_str(event);
+                frame.push('\n');
+            }
+        }
+        frame.push_str("data: ");
+        frame.push_str(semantic);
+        frame.push_str("\n\n");
+        if protocol == "chat"
+            && ctx.control.continuation_owner.as_deref() == Some("relay")
+        {
+            frame.push_str("data: [DONE]\n\n");
+        }
+        ctx.data.client_sse_frame = Some(frame);
         Ok(())
     }
 }

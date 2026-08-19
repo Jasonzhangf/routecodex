@@ -38,6 +38,14 @@ fn scope(request_id: &str) -> Scope {
     )
 }
 
+fn first_sse_data_json(frame: &str) -> serde_json::Value {
+    let payload = frame
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .expect("SSE data line must exist");
+    serde_json::from_str(payload).expect("SSE data must be JSON")
+}
+
 fn bridge_scope(operation: &str) -> serde_json::Value {
     json!({
         "scope_command": {
@@ -528,7 +536,9 @@ fn direct_sse_frame_runs_frame_parse_through_client_frame() {
         .expect("direct SSE frame must traverse response nodes");
     assert_eq!(
         report.client_frame.as_deref(),
-        Some("{\"delta\":\"hi\",\"type\":\"response.output_text.delta\"}")
+        Some(
+            "event: response.output_text.delta\ndata: {\"delta\":\"hi\",\"type\":\"response.output_text.delta\"}\n\n"
+        )
     );
     assert_eq!(report.trace.len(), 6);
 }
@@ -571,10 +581,7 @@ fn relay_sse_delta_projects_responses_event_to_chat_chunk() {
             "none",
         )
         .expect("relay SSE delta must traverse response nodes");
-    let frame: serde_json::Value = serde_json::from_str(
-        report.client_frame.as_deref().expect("chat chunk must exist"),
-    )
-    .expect("chat chunk must be JSON");
+    let frame = first_sse_data_json(report.client_frame.as_deref().expect("chat chunk must exist"));
     assert_eq!(frame["object"], "chat.completion.chunk");
     assert_eq!(frame["choices"][0]["delta"]["content"], "hi");
 }
@@ -593,10 +600,7 @@ fn relay_sse_function_arguments_delta_is_preserved() {
             "none",
         )
         .expect("relay SSE tool arguments must traverse response nodes");
-    let frame: serde_json::Value = serde_json::from_str(
-        report.client_frame.as_deref().expect("chat chunk must exist"),
-    )
-    .expect("chat chunk must be JSON");
+    let frame = first_sse_data_json(report.client_frame.as_deref().expect("chat chunk must exist"));
     assert_eq!(frame["choices"][0]["delta"]["tool_calls"][0]["index"], 1);
     assert_eq!(
         frame["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
@@ -618,10 +622,7 @@ fn relay_sse_tool_terminal_projects_tool_calls_finish_reason() {
             "relay",
         )
         .expect("relay SSE tool terminal must traverse response nodes");
-    let frame: serde_json::Value = serde_json::from_str(
-        report.client_frame.as_deref().expect("chat chunk must exist"),
-    )
-    .expect("chat chunk must be JSON");
+    let frame = first_sse_data_json(report.client_frame.as_deref().expect("chat chunk must exist"));
     assert_eq!(frame["choices"][0]["finish_reason"], "tool_calls");
 }
 

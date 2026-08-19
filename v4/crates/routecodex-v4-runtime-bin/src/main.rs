@@ -745,7 +745,6 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
     }
 
     fn project_frame(&mut self, frame: &[u8], terminal: bool) -> Result<(), RuntimeFault> {
-        let event = sse_event(frame)?;
         self.frame_sequence += 1;
         let owner = if terminal {
             self.continuation_owner.as_str()
@@ -774,19 +773,7 @@ impl<S: ProviderSseSource> ResponsesSseStream<S> {
                 "response chain produced no client frame",
             )
         })?;
-        if self.entry_protocol == "responses" {
-            if let Some(event) = event {
-                self.pending.extend_from_slice(b"event: ");
-                self.pending.extend_from_slice(event.as_bytes());
-                self.pending.push(b'\n');
-            }
-        }
-        self.pending.extend_from_slice(b"data: ");
         self.pending.extend_from_slice(client_frame.as_bytes());
-        self.pending.extend_from_slice(b"\n\n");
-        if terminal && self.entry_protocol == "chat" {
-            self.pending.extend_from_slice(b"data: [DONE]\n\n");
-        }
         Ok(())
     }
 }
@@ -847,16 +834,6 @@ impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
             }
         }
     }
-}
-
-fn sse_event(frame: &[u8]) -> Result<Option<&str>, RuntimeFault> {
-    let text = std::str::from_utf8(frame)
-        .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?;
-    Ok(text
-        .lines()
-        .find_map(|line| line.strip_prefix("event:"))
-        .map(str::trim_start)
-        .filter(|event| !event.is_empty()))
 }
 
 fn find_frame_end(bytes: &[u8]) -> Option<usize> {
@@ -960,10 +937,7 @@ mod tests {
         let mut chunk = Vec::new();
         assert!(stream.next_chunk(&mut chunk).expect("frame must project"));
         assert_ne!(chunk, frame, "client frame must be rebuilt, not piped");
-        assert_eq!(
-            sse_event(&chunk).expect("event must parse"),
-            Some("response.completed")
-        );
+        assert!(String::from_utf8_lossy(&chunk).contains("event: response.completed"));
         let projected: serde_json::Value = serde_json::from_str(
             chunk
                 .split(|byte| *byte == b'\n')
