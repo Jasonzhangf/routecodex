@@ -13,7 +13,7 @@ M5 交付 V4 标准插件库的不可变描述符、确定性 artifact/contract 
 
 ## 类别与不可变 ID
 
-标准库按 8 个类别注册 19 个不可变插件 ID：
+标准库按 8 个类别注册 21 个不可变插件 ID：
 
 | 类别 | 插件 ID |
 | --- | --- |
@@ -22,7 +22,7 @@ M5 交付 V4 标准插件库的不可变描述符、确定性 artifact/contract 
 | control | `v4.std.control.scope_consume`, `v4.std.control.payload_cycle_record` |
 | error | `v4.std.error.typed_intake`, `v4.std.error.projection_adapter` |
 | protocol | `v4.std.protocol.mock_codec`, `v4.std.protocol.mock_codec_alt` |
-| chat_process | `v4.std.chat_process.request_governance`, `v4.std.chat_process.response_governance` |
+| chat_process | `v4.std.chat_process.request_governance`, `v4.std.chat_process.response_governance`, `v4.std.chat_process.tool_harvest`, `v4.std.chat_process.continuation_commit` |
 | routing | `v4.std.routing.route_facts_producer`, `v4.std.routing.route_facts_consumer` |
 | provider | `v4.std.provider.capability_mock`, `v4.std.provider.auth_handle_mock`, `v4.std.provider.wire_mock`, `v4.std.provider.transport_mock` |
 

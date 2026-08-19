@@ -194,6 +194,10 @@ pub fn standard_resource_registry() -> ResourceRegistry {
                 axis: ResourceAxis::Data,
             },
             ResourceEntry {
+                resource_id: "v4.response.provider_raw".to_string(),
+                axis: ResourceAxis::Data,
+            },
+            ResourceEntry {
                 resource_id: "v4.response.normal_payload".to_string(),
                 axis: ResourceAxis::Data,
             },
@@ -342,6 +346,7 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.config.manifest".to_string(),
             "v4.secret.provider_auth_handle".to_string(),
         ],
+        "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.normal_payload".to_string()],
         "V4MetadataCenter01ScopeRegistry" => vec!["v4.control.metadata_center".to_string()],
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],
@@ -474,7 +479,6 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
         vec!["v4.response.client_wire_payload"],
         vec!["v4.response.client_wire_payload"],
     );
-
     let mut plugins = vec![
         plugin(
             "v4.std.contract.input_validate",
@@ -618,6 +622,32 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::Semantic,
             PluginPhase::Semantic,
             300,
+            vec!["v4.response.normal_payload"],
+            vec!["v4.response.normal_payload"],
+        ),
+        plugin(
+            "v4.std.chat_process.continuation_commit",
+            PluginCategory::ChatProcess,
+            "V4HubRespChatProcess03Governed",
+            "response_chat_process",
+            Some(3),
+            PluginKind::Control,
+            PluginEffect::ControlOnly,
+            PluginPhase::Control,
+            200,
+            vec!["v4.response.normal_payload"],
+            vec![],
+        ),
+        plugin(
+            "v4.std.chat_process.tool_harvest",
+            PluginCategory::ChatProcess,
+            "V4HubRespChatProcess03Governed",
+            "response_chat_process",
+            Some(3),
+            PluginKind::Operator,
+            PluginEffect::Semantic,
+            PluginPhase::Semantic,
+            350,
             vec!["v4.response.normal_payload"],
             vec!["v4.response.normal_payload"],
         ),
@@ -915,10 +945,182 @@ fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 
 fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut data = ctx.read_data().clone();
-    if let Some(object) = data.as_object_mut() {
-        object.insert("governance".to_string(), json!("response_governance"));
+    let object = data
+        .as_object_mut()
+        .ok_or_else(|| "response governance requires an object".to_string())?;
+    for key in [
+        "control",
+        "metadata_center",
+        "error_chain",
+        "route_facts",
+        "target_selection",
+        "stopless_state",
+        "payload_cycle",
+        "diagnostics",
+    ] {
+        if object.contains_key(key) {
+            return Err(format!("control state {key} leaked into response payload"));
+        }
     }
+    object.insert("governance".to_string(), json!("response_governance"));
     ctx.write_data(data).map_err(|error| error.to_string())
+}
+
+fn tool_harvest(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let mut data = ctx.read_data().clone();
+    let object = data
+        .as_object_mut()
+        .ok_or_else(|| "tool harvest requires an object".to_string())?;
+
+    let mut calls = Vec::new();
+    collect_tool_calls(object.get("tool_calls"), &mut calls)?;
+    if let Some(choices) = object.get("choices").and_then(|value| value.as_array()) {
+        for choice in choices {
+            let message = choice.get("message");
+            collect_tool_calls(message.and_then(|value| value.get("tool_calls")), &mut calls)?;
+        }
+    }
+
+    let mut outputs = Vec::new();
+    collect_tool_outputs(object.get("tool_outputs"), &mut outputs)?;
+    if let Some(choices) = object.get("choices").and_then(|value| value.as_array()) {
+        for choice in choices {
+            let message = choice.get("message");
+            collect_tool_outputs(
+                message.and_then(|value| value.get("tool_outputs")),
+                &mut outputs,
+            )?;
+        }
+    }
+
+    object.insert(
+        "harvest".to_string(),
+        json!({
+            "tool_calls": calls.len(),
+            "tool_outputs": outputs.len(),
+        }),
+    );
+    ctx.emit(
+        "tool_harvest_count",
+        format!("tool_calls={} tool_outputs={}", calls.len(), outputs.len()),
+    );
+    ctx.write_data(data).map_err(|error| error.to_string())
+}
+
+fn collect_tool_calls(value: Option<&serde_json::Value>, calls: &mut Vec<String>) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let Some(items) = value.as_array() else {
+        return Err("tool_calls must be an array".to_string());
+    };
+    for item in items {
+        let Some(item) = item.as_object() else {
+            return Err("tool call must be an object".to_string());
+        };
+        let id = required_string(item, "id")?;
+        let function = item
+            .get("function")
+            .and_then(|value| value.as_object())
+            .ok_or_else(|| "tool call function must be an object".to_string())?;
+        let name = required_string(function, "name")?;
+        if function.get("arguments").is_none() {
+            return Err("tool call arguments are required".to_string());
+        }
+        if calls.contains(&id) {
+            return Err(format!("duplicate tool call id {id}"));
+        }
+        calls.push(id);
+        let _ = name;
+    }
+    Ok(())
+}
+
+fn collect_tool_outputs(
+    value: Option<&serde_json::Value>,
+    outputs: &mut Vec<String>,
+) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let Some(items) = value.as_array() else {
+        return Err("tool_outputs must be an array".to_string());
+    };
+    for item in items {
+        let Some(item) = item.as_object() else {
+            return Err("tool output must be an object".to_string());
+        };
+        let call_id = required_string(item, "call_id")?;
+        if item.get("output").is_none() {
+            return Err("tool output is required".to_string());
+        }
+        if outputs.contains(&call_id) {
+            return Err(format!("duplicate tool output call_id {call_id}"));
+        }
+        outputs.push(call_id);
+    }
+    Ok(())
+}
+
+fn required_string(object: &serde_json::Map<String, serde_json::Value>, key: &str) -> Result<String, String> {
+    object
+        .get(key)
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| format!("{key} must be a non-empty string"))
+}
+
+fn continuation_commit(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let data = ctx.read_data();
+    let object = data
+        .as_object()
+        .ok_or_else(|| "continuation commit requires an object".to_string())?;
+    let Some(scope) = object.get("continuation") else {
+        return Ok(());
+    };
+    let Some(scope) = scope.as_object() else {
+        return Err("continuation scope must be an object".to_string());
+    };
+    let owner = required_string(scope, "continuation_owner")?;
+    if owner == "none" {
+        return Ok(());
+    }
+    let protocol = required_string(scope, "entry_protocol")?;
+    let port = scope
+        .get("port")
+        .and_then(|value| value.as_u64())
+        .filter(|value| *value > 0)
+        .ok_or_else(|| "port must be a positive integer".to_string())?;
+    let session_scope = required_string(scope, "session_scope")?;
+    let conversation_scope = required_string(scope, "conversation_scope")?;
+    let _ = required_string(scope, "full_input_hash")?;
+    if owner == "direct" && protocol != "responses" {
+        return Err("direct continuation requires responses entry protocol".to_string());
+    }
+    if owner == "relay" && protocol == "responses" {
+        return Err("responses continuation cannot use relay owner".to_string());
+    }
+    if scope
+        .get("allow_continuation")
+        .and_then(|value| value.as_bool())
+        == Some(false)
+    {
+        ctx.emit(
+            "continuation_release_ready",
+            format!(
+                "owner={owner} protocol={protocol} port={port} session={session_scope} conversation={conversation_scope}"
+            ),
+        );
+    } else {
+        ctx.emit(
+            "continuation_commit_ready",
+            format!(
+                "owner={owner} protocol={protocol} port={port} session={session_scope} conversation={conversation_scope}"
+            ),
+        );
+    }
+    Ok(())
 }
 
 fn route_facts_produce(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -1005,6 +1207,11 @@ impl StandardHandleRegistry {
                 "v4.std.chat_process.response_governance",
                 response_governance,
             ),
+            (
+                "v4.std.chat_process.continuation_commit",
+                continuation_commit,
+            ),
+            ("v4.std.chat_process.tool_harvest", tool_harvest),
             ("v4.std.routing.route_facts_producer", route_facts_produce),
             ("v4.std.routing.route_facts_consumer", route_facts_consume),
             ("v4.std.provider.capability_mock", capability_mock),
