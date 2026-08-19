@@ -10,6 +10,7 @@ const configTypesPath = 'v3/crates/routecodex-v3-config/src/types.rs';
 const configValidatePath = 'v3/crates/routecodex-v3-config/src/validate.rs';
 const providerTransportPath = 'v3/crates/routecodex-v3-provider-responses/src/transport.rs';
 const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
+const serverScopePath = 'v3/crates/routecodex-v3-server/src/scope_metadata.rs';
 const testPath = 'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs';
 const configTestPath = 'v3/crates/routecodex-v3-config/tests/config_v3_contract.rs';
 const websocketTestPath = 'v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs';
@@ -29,6 +30,7 @@ const providerTransportControlSource = providerTransport.replaceAll(
   'anthropic-credit-beta',
 );
 const server = readFileSync(serverPath, 'utf8');
+const serverScope = readFileSync(serverScopePath, 'utf8');
 const tests = readFileSync(testPath, 'utf8');
 const configTests = readFileSync(configTestPath, 'utf8');
 const websocketTests = readFileSync(websocketTestPath, 'utf8');
@@ -107,11 +109,14 @@ for (const [owner, text, phrases] of [
   ]],
   [serverPath, server, [
     'responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>',
+    'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(',
+  ]],
+  [serverScopePath, serverScope, [
     'build_responses_direct_continuation_scope(',
     'request_local_continuation_scope(',
     'request payload and client metadata cannot construct continuation control identity',
-    'entry_facts.previous_response_id.is_some() || entry_facts.has_function_call_output',
-    'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(',
+    'entry_facts.has_unpaired_function_call_output',
+    'payload_input_has_unpaired_function_call_output(',
   ]],
   [testPath, tests, [
     'json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry',
