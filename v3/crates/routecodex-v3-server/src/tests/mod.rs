@@ -185,6 +185,7 @@ fn test_v3_listener_state_with_debug(
         )),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
+        request_activity: Arc::new(V3ServerRequestActivityGate::default()),
     })
 }
 
@@ -3046,6 +3047,7 @@ fn error_projection_appends_human_console_failure_line() {
         )),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
+        request_activity: Arc::new(V3ServerRequestActivityGate::default()),
     };
     let trace_scope = state
         .debug
@@ -3293,7 +3295,8 @@ async fn relay_sse_closeout_emits_failed_terminal_on_stream_error() {
 }
 
 #[tokio::test]
-async fn relay_sse_accept_stream_error_projects_post_commit_provider_failure_not_contract_failure() {
+async fn relay_sse_accept_stream_error_projects_post_commit_provider_failure_not_contract_failure()
+{
     let log_file = test_v3_console_log_file("relay-sse-accept-error");
     let _ = std::fs::remove_file(&log_file);
     let state = test_v3_listener_state(&log_file, 5555);
