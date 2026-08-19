@@ -1113,11 +1113,6 @@ pub fn raise_v3_sse_client_disconnect() -> V3Error01SourceRaised {
     )
 }
 
-pub fn is_v3_sse_client_disconnect(source: &V3Error01SourceRaised) -> bool {
-    source.source_kind == V3ErrorSourceKind::ClientDisconnect
-        || source.code == "client_disconnect"
-}
-
 pub fn is_v3_client_disconnect_source(source: &V3Error01SourceRaised) -> bool {
     matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect)
 }
