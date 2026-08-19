@@ -1,20 +1,16 @@
-mod responses_direct_server_outcome;
-mod session_admission;
 mod console;
-mod models_catalog;
-mod request_id;
 mod endpoint_handlers;
-mod websocket;
-mod live_snapshot;
-mod scope_metadata;
 mod executors;
 mod frame_builders;
+mod live_snapshot;
+mod models_catalog;
+mod request_id;
+mod responses_direct_server_outcome;
+mod scope_metadata;
+mod session_admission;
+mod websocket;
 
 use console::*;
-pub(crate) use live_snapshot::*;
-pub(crate) use scope_metadata::*;
-pub(crate) use frame_builders::*;
-pub use executors::*;
 use endpoint_handlers::{
     allocate_v3_console_request_id, allocate_v3_console_request_identity,
     format_v3_request_id_entry, format_v3_request_id_token,
@@ -24,13 +20,16 @@ use endpoint_handlers::{
     prepend_v3_protocol_plan_trace_to_responses_relay_output,
     prepend_v3_relay_handoff_trace_to_direct_frame,
 };
-use websocket::{
-    responses_websocket_endpoint, responses_websocket_session,
-    send_responses_websocket_sse_stream,
-};
+pub use executors::*;
+pub(crate) use frame_builders::*;
+pub(crate) use live_snapshot::*;
 use request_id::{
     format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
     V3RequestIdCounter,
+};
+pub(crate) use scope_metadata::*;
+use websocket::{
+    responses_websocket_endpoint, responses_websocket_session, send_responses_websocket_sse_stream,
 };
 
 use axum::body::{to_bytes, Body};
@@ -65,7 +64,7 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
-    build_v3_server_03_http_request_raw,
+    build_v3_provider_global_probe_target, build_v3_server_03_http_request_raw,
     execute_v3_anthropic_relay_dry_run_runtime_with_client_headers,
     execute_v3_anthropic_relay_runtime_with_default_transport,
     execute_v3_anthropic_relay_runtime_with_default_transport_and_client_headers,
@@ -79,24 +78,25 @@ use routecodex_v3_runtime::{
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
     execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control,
-    execute_v3_responses_relay_runtime_with_default_transport, V3ChatDirectCodec,
+    execute_v3_responses_relay_runtime_with_default_transport,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target,
-    project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
-    project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
+    probe_v3_provider_global_target, project_v3_anthropic_relay_runtime_failure,
+    project_v3_debug_failure, project_v3_gemini_relay_runtime_failure,
+    project_v3_openai_chat_relay_runtime_failure,
     project_v3_responses_previous_response_owner_resolution_error,
     project_v3_responses_relay_runtime_failure, project_v3_virtual_router_dry_run,
     project_v3_virtual_router_status, register_responses_direct_hooks,
     resolve_v3_responses_previous_response_owner_execution_mode_at_req03,
     V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
-    V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
-    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
-    V3OpenAiChatClientStream, V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput,
-    V3OpenAiChatRelayRuntimeOutput,
-    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3ChatDirectCodec, V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput,
+    V3FoundationRuntimeOutput, V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput,
+    V3GeminiRelayRuntimeOutput, V3OpenAiChatClientStream, V3OpenAiChatRelayClientBody,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
+    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayDryRunOutcome, V3ResponsesRelayLocalContinuationScope,
@@ -107,7 +107,6 @@ use routecodex_v3_runtime::{
     V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
     V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
-    build_v3_provider_global_probe_target, probe_v3_provider_global_target,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -119,7 +118,8 @@ use routecodex_v3_sse::{
 use serde_json::{json, Map, Value};
 use session_admission::{
     hold_response_body_admission_permit, V3ResponsesSessionAdmissionGate,
-    V3ResponsesSessionAdmissionPermit, V3ResponsesSessionAdmissionScope,
+    hold_response_body_request_activity_permit, V3ResponsesSessionAdmissionPermit,
+    V3ResponsesSessionAdmissionScope, V3ServerRequestActivityGate,
 };
 use std::collections::BTreeSet;
 use std::env;
@@ -161,6 +161,7 @@ struct V3ListenerState {
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeSet<String>>>,
     responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
+    request_activity: Arc<V3ServerRequestActivityGate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,12 +208,14 @@ pub struct V3ListenerHandle {
     pub server_id: String,
     pub addr: SocketAddr,
     shutdown: Option<oneshot::Sender<()>>,
+    join: Option<tokio::task::JoinHandle<Result<(), std::io::Error>>>,
 }
 
 #[derive(Debug)]
 pub struct V3ServerAggregateHandle {
     pub listeners: Vec<V3ListenerHandle>,
     probe_shutdown: Option<oneshot::Sender<()>>,
+    request_activity: Arc<V3ServerRequestActivityGate>,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -231,12 +234,21 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 
 impl V3ServerAggregateHandle {
     pub async fn shutdown(mut self) {
+        // Keep listeners open while active requests complete. This lets new
+        // requests enter the old runtime during restart instead of receiving
+        // a connection-refused storm; only then hand control to exec.
+        self.request_activity.wait_for_quiescence().await;
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
         for listener in &mut self.listeners {
             if let Some(shutdown) = listener.shutdown.take() {
                 let _ = shutdown.send(());
+            }
+        }
+        for listener in &mut self.listeners {
+            if let Some(join) = listener.join.take() {
+                let _ = join.await;
             }
         }
     }
@@ -306,6 +318,7 @@ pub async fn spawn_v3_server_aggregate(
 
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
     let mut listeners = Vec::with_capacity(bound.len());
+    let request_activity = Arc::new(V3ServerRequestActivityGate::default());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
         let app = build_v3_listener_router(V3ListenerState {
@@ -324,22 +337,24 @@ pub async fn spawn_v3_server_aggregate(
             provider_health: provider_health.clone(),
             realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
             responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
+            request_activity: Arc::clone(&request_activity),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        tokio::spawn(async move {
-            let _ = axum::serve(
+        let join = tokio::spawn(async move {
+            axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<SocketAddr>(),
             )
             .with_graceful_shutdown(async move {
                 let _ = shutdown_rx.await;
             })
-            .await;
+            .await
         });
         listeners.push(V3ListenerHandle {
             server_id,
             addr,
             shutdown: Some(shutdown_tx),
+            join: Some(join),
         });
     }
     if console_enabled {
@@ -416,6 +431,7 @@ pub async fn spawn_v3_server_aggregate(
     Ok(V3ServerAggregateHandle {
         listeners,
         probe_shutdown: Some(probe_shutdown),
+        request_activity,
     })
 }
 
@@ -615,7 +631,7 @@ fn current_epoch_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn admit_v3_responses_session_after_json_parse(
+async fn admit_v3_responses_session(
     state: &Arc<V3ListenerState>,
     path: &str,
     request_headers: &HeaderMap,
@@ -641,33 +657,14 @@ fn admit_v3_responses_session_after_json_parse(
             );
         }
     };
-    let permit = match state.responses_session_admission.try_admit(
-        V3ResponsesSessionAdmissionScope {
+    let permit = state
+        .responses_session_admission
+        .admit(V3ResponsesSessionAdmissionScope {
             endpoint: "/v1/responses".to_string(),
             session_id,
             conversation_id,
-        },
-    ) {
-        Ok(permit) => permit,
-        Err(()) => {
-            let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
-                Ok(request_id) => request_id,
-                Err(response) => return Err(*response),
-            };
-            return Err(error_output_response_for_responses_request_with_project_path(
-                &state.server,
-                path,
-                &request_id,
-                project_http_input_error(
-                    V3HttpBoundaryErrorKind::RequestInFlight,
-                    "another /v1/responses request is still active for this listener session or conversation",
-                ),
-                request_headers,
-                Some(payload),
-                resolve_v3_console_project_path(request_headers, payload).as_deref(),
-            ));
-        }
-    };
+        })
+        .await;
     Ok(permit)
 }
 
@@ -675,6 +672,7 @@ async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
+    let request_activity_permit = state.request_activity.admit();
     let request_headers = request.headers().clone();
     let method = request.method().as_str().to_string();
     let path = request.uri().path().to_string();
@@ -689,7 +687,7 @@ async fn pending_endpoint(
             Ok(request_id) => request_id,
             Err(response) => return *response,
         };
-        return error_output_response_for_server(
+        let response = error_output_response_for_server(
             &state.server,
             &path,
             &request_id,
@@ -698,6 +696,7 @@ async fn pending_endpoint(
                 format!("endpoint path {path} has no entry protocol binding"),
             ),
         );
+        return hold_response_body_request_activity_permit(response, request_activity_permit);
     };
     let entry_protocol = binding.entry_protocol.clone();
     let execution_mode = binding.execution_mode;
@@ -712,7 +711,7 @@ async fn pending_endpoint(
             Ok(request_id) => request_id,
             Err(response) => return *response,
         };
-        return error_output_response_for_server(
+        let response = error_output_response_for_server(
             &state.server,
             &path,
             &request_id,
@@ -724,7 +723,16 @@ async fn pending_endpoint(
                 ),
             ),
         );
+        return hold_response_body_request_activity_permit(response, request_activity_permit);
     }
+    let admission_permit = if entry_protocol == "responses" {
+        match admit_v3_responses_session(&state, &path, &request_headers, &Value::Null).await {
+            Ok(permit) => permit,
+            Err(response) => return response,
+        }
+    } else {
+        None
+    };
     let payload = match read_json_payload(request).await {
         Ok(payload) => payload,
         Err(projected) => {
@@ -770,20 +778,16 @@ async fn pending_endpoint(
             } else {
                 frame
             };
-            return responses_direct_output_response(
+            let response = responses_direct_output_response(
                 frame,
                 Duration::from_millis(state.server.http_sse_keepalive_ms),
             );
+            let response = match admission_permit {
+                Some(permit) => hold_response_body_admission_permit(response, permit),
+                None => response,
+            };
+            return hold_response_body_request_activity_permit(response, request_activity_permit);
         }
-    };
-    let admission_permit = if entry_protocol == "responses" {
-        match admit_v3_responses_session_after_json_parse(&state, &path, &request_headers, &payload)
-        {
-            Ok(permit) => permit,
-            Err(response) => return response,
-        }
-    } else {
-        None
     };
     let response = pending_endpoint_after_responses_admission(
         state,
@@ -797,12 +801,12 @@ async fn pending_endpoint(
         payload,
     )
     .await;
-    match admission_permit {
+    let response = match admission_permit {
         Some(permit) => hold_response_body_admission_permit(response, permit),
         None => response,
-    }
+    };
+    hold_response_body_request_activity_permit(response, request_activity_permit)
 }
-
 
 /// v3.protocol.pending_projection：尚未实现协议绑定的客户端响应统一由
 /// foundation pending 投影出站（见 v3-resource-operation-map.yml 同名资源）。
@@ -944,7 +948,6 @@ fn provider_failure_session_id_from_request_headers(
         ],
     )
 }
-
 
 #[cfg(test)]
 mod tests;
