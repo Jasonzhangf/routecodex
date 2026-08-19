@@ -199,6 +199,7 @@ struct V3ProviderFailureSessionKey {
 #[derive(Debug, Clone)]
 struct V3ProviderCooldown {
     reason: String,
+    original_cooldown_until_ms: Option<u64>,
     until_ms: Option<u64>,
     next_probe_at_ms: Option<u64>,
     probe_in_flight: bool,
@@ -456,6 +457,7 @@ impl V3ProviderHealthStore {
                 reason: record_reason
                     .clone()
                     .unwrap_or_else(|| "provider_consecutive_failures".to_string()),
+                original_cooldown_until_ms: cooldown_until_ms,
                 until_ms: cooldown_until_ms,
                 // provider 级冷却到期后由后台 probe 复活；until_restart 冷却
                 // 不设探针（保持"直到重启"语义）。
@@ -534,6 +536,7 @@ impl V3ProviderHealthStore {
                 reason: reason
                     .map(str::to_string)
                     .unwrap_or_else(|| "provider_transient_exhausted".to_string()),
+                original_cooldown_until_ms: Some(until_ms),
                 until_ms: Some(until_ms),
                 next_probe_at_ms: None,
                 probe_in_flight: false,
