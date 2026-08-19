@@ -653,7 +653,8 @@ targets = [
 }
 
 #[test]
-fn requested_explicit_model_route_maps_to_declared_targets_without_alias_requirement() {    let source = r#"
+fn requested_explicit_model_route_maps_to_declared_targets_without_alias_requirement() {
+    let source = r#"
 version = 3
 [servers.s]
 bind = "127.0.0.1"
@@ -1417,6 +1418,88 @@ targets = [
 }
 
 #[test]
+fn category_route_keeps_cross_model_candidates_and_default_floor_switchable() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.cc_sol]
+type = "responses"
+base_url = "http://cc-sol.invalid/v1"
+default_model = "gpt-5.6-sol"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "CC_SOL_KEY" }] }
+[providers.cc_sol.models."gpt-5.6-sol"]
+capabilities = ["text"]
+[providers.backup]
+type = "responses"
+base_url = "http://backup.invalid/v1"
+default_model = "deepseek-v4-flash"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "BACKUP_KEY" }] }
+[providers.backup.models."deepseek-v4-flash"]
+capabilities = ["text"]
+[providers.fallback]
+type = "responses"
+base_url = "http://fallback.invalid/v1"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "FALLBACK_KEY" }] }
+[providers.fallback.models."MiniMax-M3"]
+capabilities = ["text"]
+[route_groups.g.pools.thinking]
+selection = { strategy = "priority" }
+match = { precedence = 2, entry_protocol = "responses", required_capabilities = ["thinking"] }
+targets = [
+  { kind = "provider_model", provider = "cc_sol", model = "gpt-5.6-sol", priority = 1 },
+  { kind = "provider_model", provider = "backup", model = "deepseek-v4-flash", priority = 2 }
+]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "fallback", model = "MiniMax-M3", priority = 1 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("gpt-5.6-sol".into()),
+                capabilities: BTreeSet::from(["thinking".into()]),
+                input_tokens: 10,
+                route_classification: RouteClassification::default(),
+            },
+        )
+        .unwrap();
+    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "thinking");
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    assert!(expanded
+        .candidates
+        .iter()
+        .any(|candidate| candidate.provider_id == "cc_sol"));
+    assert!(expanded
+        .candidates
+        .iter()
+        .any(|candidate| candidate.provider_id == "backup"));
+    assert!(expanded
+        .candidates
+        .iter()
+        .any(|candidate| candidate.default_pool_member));
+    assert!(expanded
+        .candidates
+        .iter()
+        .any(|candidate| candidate.provider_id == "fallback"));
+}
+
+#[test]
 fn forwarder_target_model_visible_ids_match_requested_target_model() {
     // 22:34 生产 503 复刻：forwarder.model=gpt-5.6 而 forwarder target
     // model=gpt-5.6-sol（client 请求裸 gpt-5.6-sol）。pool_targets_route_model
@@ -1484,10 +1567,8 @@ targets = [{ kind = "forwarder", id = "fwd_free", priority = 1 }]
 }
 
 #[test]
-fn keyless_provider_target_rotates_auth_entry_start_by_sample() {
-    // target 不指明 key：展开 provider 全部 auth entries（key1/key2/key3 同
-    // priority 候选）。select_available 选第一个可用 → 固定顺序永远命中 key1；
-    // 按每请求 deterministic_sample 旋转展开起点，使多 key 轮流成为首选。
+fn keyless_provider_target_expands_auth_entries_by_priority() {
+    // target 不指明 key：按 provider.auth.selection + entry priority 展开。
     let source = r#"
 version = 3
 [servers.s]
@@ -1499,9 +1580,87 @@ type = "responses"
 base_url = "http://multi.invalid/v1"
 default_model = "m"
 auth = { type = "api_key", entries = [
-  { alias = "key1", env = "M_KEY1" },
+  { alias = "key1", env = "M_KEY1", priority = 1 },
   { alias = "key2", env = "M_KEY2" },
-  { alias = "key3", env = "M_KEY3" }
+  { alias = "key3", env = "M_KEY3", priority = 3 }
+] }
+[providers.multi.models.m]
+capabilities = ["text", "tools"]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "multi", model = "m", priority = 1 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let target = V3TargetInterpreter::default();
+    let aliases_at = |sample: u64| -> Vec<String> {
+        expanded_with(&manifest, &target, sample)
+            .candidates
+            .iter()
+            .map(|candidate| candidate.auth_alias.clone())
+            .collect()
+    };
+    assert_eq!(aliases_at(0), vec!["key2", "key1", "key3"]);
+    assert_eq!(aliases_at(1), aliases_at(0));
+    assert_eq!(aliases_at(2), aliases_at(0));
+}
+
+#[test]
+fn keyless_provider_target_selects_next_auth_entry_when_lower_tier_is_unavailable() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.multi]
+type = "responses"
+base_url = "http://multi.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [
+  { alias = "key1", env = "M_KEY1", priority = 1 },
+  { alias = "key2", env = "M_KEY2" },
+  { alias = "key3", env = "M_KEY3", priority = 3 }
+] }
+[providers.multi.models.m]
+capabilities = ["text"]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "multi", model = "m", priority = 1 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let target = V3TargetInterpreter::default();
+    let expanded = expanded_with(&manifest, &target, 0);
+    let selected = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::from(["multi:key2:m".to_string()]),
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(selected.candidate.auth_alias, "key1");
+    assert_eq!(selected.attempts, 2);
+}
+
+#[test]
+fn keyless_provider_target_expands_auth_entries_by_weighted_mode() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.multi]
+type = "responses"
+base_url = "http://multi.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", selection = { strategy = "weighted" }, entries = [
+  { alias = "key1", env = "M_KEY1", weight = 1 },
+  { alias = "key2", env = "M_KEY2", weight = 3 },
+  { alias = "key3", env = "M_KEY3", weight = 1 }
 ] }
 [providers.multi.models.m]
 capabilities = ["text", "tools"]
@@ -1521,6 +1680,6 @@ targets = [{ kind = "provider_model", provider = "multi", model = "m", priority 
     };
     assert_eq!(aliases_at(0), vec!["key1", "key2", "key3"]);
     assert_eq!(aliases_at(1), vec!["key2", "key3", "key1"]);
-    assert_eq!(aliases_at(2), vec!["key3", "key1", "key2"]);
-    assert_eq!(aliases_at(6), aliases_at(0), "rotation is periodic in entry count");
+    assert_eq!(aliases_at(3), vec!["key2", "key3", "key1"]);
+    assert_eq!(aliases_at(4), vec!["key3", "key1", "key2"]);
 }

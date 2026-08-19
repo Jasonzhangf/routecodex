@@ -1,8 +1,8 @@
 use routecodex_v3_config::{
     internal::is_v3_builtin_catalog_model, V3Config05ManifestPublished, V3ForwarderTargetManifest,
-    V3ProviderModelManifest, V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind,
-    V3RouteGroupManifest, V3RoutePoolManifest, V3RoutePoolTargetManifest, V3RouteTargetKind,
-    V3SelectionStrategy, V3WebSearchExecutionMode,
+    V3ProviderAuthEntryManifest, V3ProviderModelManifest, V3ProviderRequestCleanupAuthoringConfig,
+    V3ResponsesTransportKind, V3RouteGroupManifest, V3RoutePoolManifest, V3RoutePoolTargetManifest,
+    V3RouteTargetKind, V3SelectionStrategy, V3WebSearchExecutionMode,
 };
 use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
 use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTargetHitOnce};
@@ -474,14 +474,14 @@ impl V3TargetInterpreter {
                     auth_alias: key.to_string(),
                 })?]
         } else {
-            // 不指明 key：展开 provider 全部 auth entries（key1/key2/...）。
-            // 同 priority 候选按序选第一个可用（select_available），若不轮换
-            // 起点会永远命中第一个 key——用每请求 deterministic_sample
-            // （request_id FNV hash）旋转展开起点，使多 key 轮流成为首选。
-            let mut entries: Vec<_> = provider.auth.entries.iter().collect();
-            let offset = (sample % entries.len() as u64) as usize;
-            entries.rotate_left(offset);
-            entries
+            auth_entry_order(
+                &provider.auth.selection.strategy,
+                &provider.auth.entries,
+                sample,
+            )
+            .into_iter()
+            .map(|index| &provider.auth.entries[index])
+            .collect()
         };
         Ok(entries
             .into_iter()
@@ -619,11 +619,10 @@ fn selected_route_requested_model_filter(
         return None;
     }
     let pool = group.pools.get(&route.pool_id);
-    let pool_is_explicit_model_pool = route.pool_id != "default"
-        && pool
-            .and_then(|pool| pool.match_rule.as_ref())
-            .is_some_and(|rule| rule.models.iter().any(|model| model.trim() == requested));
-    if pool_is_explicit_model_pool {
+    // A non-default classified pool is already the routing decision. Its requested
+    // model names the client-facing route identity; it must not filter cross-model
+    // candidates or the captured default floor needed for provider switching.
+    if route.pool_id != "default" && pool.is_some_and(|pool| pool.match_rule.is_some()) {
         return None;
     }
     if pool.is_some_and(|pool| pool_targets_route_model(manifest, pool, requested)) {
@@ -762,6 +761,37 @@ fn candidate_satisfies_required_capabilities(candidate: &V3TargetCandidate) -> b
         .required_capabilities
         .iter()
         .all(|required| candidate_has_required_capability(&candidate.model_capabilities, required))
+}
+
+fn auth_entry_order(
+    strategy: &V3SelectionStrategy,
+    entries: &[V3ProviderAuthEntryManifest],
+    sample: u64,
+) -> Vec<usize> {
+    let tiers = priority_tier_indices(entries, |entry| entry.priority);
+
+    let mut order = Vec::with_capacity(entries.len());
+    for mut tier in tiers {
+        if matches!(strategy, V3SelectionStrategy::Weighted) && tier.len() > 1 {
+            let total = tier
+                .iter()
+                .map(|index| u64::from(entries[*index].weight.unwrap_or(1)))
+                .sum::<u64>();
+            let mut point = sample % total;
+            let mut chosen = 0;
+            for (tier_index, entry_index) in tier.iter().enumerate() {
+                let weight = u64::from(entries[*entry_index].weight.unwrap_or(1));
+                if point < weight {
+                    chosen = tier_index;
+                    break;
+                }
+                point -= weight;
+            }
+            tier.rotate_left(chosen);
+        }
+        order.extend(tier);
+    }
+    order
 }
 
 fn candidate_has_required_capability(capabilities: &[String], required: &str) -> bool {
