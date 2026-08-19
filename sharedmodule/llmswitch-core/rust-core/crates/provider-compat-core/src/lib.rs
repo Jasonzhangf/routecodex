@@ -22,6 +22,11 @@ pub fn apply_deepseek_console_go_response_compat(payload: Value) -> Value {
     deepseek_console_go::apply_response_compat(payload)
 }
 
+/// DeepSeek V4 request-side 400 compatibility owner.
+pub fn apply_deepseek_v4_request_compat(payload: &mut Value) {
+    deepseek_console_go::apply_deepseek_v4_request_compat(payload)
+}
+
 // feature_id: v3.provider_compat_profile_loading
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

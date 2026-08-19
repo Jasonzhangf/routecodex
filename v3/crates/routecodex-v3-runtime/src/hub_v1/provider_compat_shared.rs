@@ -4,7 +4,6 @@ use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     V3Provider12ResponsesWirePayload, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
 };
-use serde_json::Value;
 use std::time::Duration;
 
 pub(crate) fn provider_protocol_compat_id(protocol: V3HubProviderWireProtocol) -> String {
@@ -127,7 +126,7 @@ fn build_v3_openai_chat_transport_request_from_v3_provider_08(
     let stream_intent = wire.stream_intent();
     let mut body = wire.body().clone();
     if is_v3_deepseek_reasoning_target(&target.canonical_model_id) {
-        apply_v3_opencode_deepseek_reasoning_passthrough(&mut body);
+        provider_compat_core::apply_deepseek_v4_request_compat(&mut body);
     }
     let url_text = format!("{}/chat/completions", target.base_url.trim_end_matches('/'));
     build_v3_transport_13_responses_http_request_from_parts_with_timeout(
@@ -141,39 +140,6 @@ fn build_v3_openai_chat_transport_request_from_v3_provider_08(
         Some(Duration::from_millis(target.request_timeout_ms)),
     )
     .map_err(|error| error.to_string())
-}
-
-/// opencode 对 DeepSeek 系模型的标准 reasoning 回传处理（transform.ts interleaved）：
-/// DeepSeek 上游要求**每条 assistant 消息都必须携带 `reasoning_content`**——即使本轮没有
-/// 明文 reasoning 也要回传空字符串（"DeepSeek may return empty reasoning_content which
-/// still needs to be sent back"）。缺失该字段会触发上游 400：
-/// `The reasoning_content in the thinking mode must be passed back to the API`。
-/// 只补缺失字段：已有 reasoning_content（明文或空占位）的消息保持不变。
-fn apply_v3_opencode_deepseek_reasoning_passthrough(body: &mut Value) {
-    let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for message in messages {
-        let Some(message_object) = message.as_object_mut() else {
-            continue;
-        };
-        if message_object
-            .get("role")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .map(str::to_ascii_lowercase)
-            .as_deref()
-            != Some("assistant")
-        {
-            continue;
-        }
-        if !message_object.contains_key("reasoning_content") {
-            message_object.insert(
-                "reasoning_content".to_string(),
-                Value::String(String::new()),
-            );
-        }
-    }
 }
 
 fn is_v3_deepseek_reasoning_target(canonical_model_id: &str) -> bool {

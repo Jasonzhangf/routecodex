@@ -167,28 +167,13 @@ fn normalize_deepseek_thinking_stopless_tool_choice(
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
 ) {
-    if !matches!(
+    if matches!(
         provider_protocol,
         V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Responses
-    ) || (selected.model_id != "deepseek-v4-flash" && selected.wire_model != "deepseek-v4-flash")
-        || !payload_is_thinking_mode(payload)
+    ) && (selected.model_id == "deepseek-v4-flash" || selected.wire_model == "deepseek-v4-flash")
+        && payload_is_thinking_mode(payload)
     {
-        return;
-    }
-    let has_reasoning_stop = payload
-        .get("tools")
-        .and_then(Value::as_array)
-        .is_some_and(|tools| {
-            tools.iter().any(|tool| {
-                tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
-                    || tool.pointer("/function/name").and_then(Value::as_str)
-                        == Some("reasoningStop")
-            })
-        });
-    if has_reasoning_stop {
-        if let Some(object) = payload.as_object_mut() {
-            object.remove("tool_choice");
-        }
+        provider_compat_core::apply_deepseek_v4_request_compat(payload);
     }
 }
 
@@ -368,6 +353,31 @@ mod tests {
             .provider_semantic_payload()
             .get("tool_choice")
             .is_none());
+    }
+
+    #[test]
+    fn deepseek_generic_compat_loads_without_provider_profile() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::OpenAiChat,
+            json!({
+                "model": "client-route-alias",
+                "reasoning_effort": "high",
+                "messages": [{"role":"assistant", "content": null, "tool_calls": [{"id":"call_1"}]}],
+                "tool_choice": "auto"
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_type = "openai_chat".to_string();
+        req07.previous.selected_target.model_id = "deepseek-v4-flash".to_string();
+        req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
+        req07.previous.selected_target.compatibility_profile = None;
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("model-family DeepSeek compat must not depend on provider profile");
+        let payload = req_compat.provider_semantic_payload();
+        assert!(payload.get("tool_choice").is_none());
+        assert_eq!(payload["messages"][0]["content"], "");
+        assert_eq!(payload["messages"][0]["reasoning_content"], "");
     }
 
     #[test]
