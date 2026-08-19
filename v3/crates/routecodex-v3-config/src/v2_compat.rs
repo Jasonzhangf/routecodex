@@ -941,6 +941,8 @@ pub struct V2ProviderModelConfig {
     pub max_context: Option<u64>,
     pub max_context_tokens: Option<u64>,
     pub context_window: Option<u64>,
+    #[serde(default = "default_context_token_estimate_scale_bps")]
+    pub context_token_estimate_scale_bps: u64,
     /// Mode B 显式声明（v2 配置可选；缺省时按 `web_search_direct`
     /// capability 兼容推断 Mode A）。生产 v2 配置通过此字段启用
     /// `metadata_center_local_search` 与编译期 backend binding。
@@ -953,10 +955,6 @@ pub struct V2ProviderModelConfig {
     pub web_search_backend: Option<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
-}
-
-fn default_context_token_estimate_scale_bps() -> u64 {
-    10_000
 }
 
 fn default_context_token_estimate_scale_bps() -> u64 {
@@ -1030,6 +1028,21 @@ webSearchBackend = "MiniMax-M3"
             "metadata_center_local_search"
         );
         assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
+    }
+
+    #[test]
+    fn context_token_estimate_scale_parses_explicit_and_defaults() {
+        let explicit: V2ProviderModelConfig = toml::from_str(
+            r#"
+contextTokenEstimateScaleBps = 17000
+"#,
+        )
+        .expect("explicit scale must parse");
+        assert_eq!(explicit.context_token_estimate_scale_bps, 17_000);
+
+        let defaulted: V2ProviderModelConfig =
+            toml::from_str("").expect("omitted scale must use the V2 compatibility default");
+        assert_eq!(defaulted.context_token_estimate_scale_bps, 10_000);
     }
 
     #[test]
@@ -1382,182 +1395,6 @@ capabilities = ["text", "reasoning", "tools"]
             generated.contains("env = \"GEN_PROVIDER_KEY\""),
             "{generated}"
         );
-    }
-
-    #[test]
-    fn provider_auth_secret_file_auto_discovers_single_or_multiple_handles() {
-        let tmp = std::env::temp_dir().join(format!(
-            "rccv3-auth-key-file-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).expect("create temp dir");
-        let key_file = tmp.join("opencode-go.conf");
-        std::fs::write(
-            &key_file,
-            "opencode-go.key1 = first-secret\nopencode-go.key2 = second-secret\n",
-        )
-        .expect("write key file");
-        let key_file = key_file.to_string_lossy().into_owned();
-        let compiled = compile_v2_auth(
-            &tmp,
-            "opencode-go",
-            "source".to_string(),
-            V2ProviderAuthConfig {
-                api_key: None,
-                env: None,
-                token_file: None,
-                secret_file: Some(key_file.clone()),
-                entries: None,
-            },
-        )
-        .expect("auto discover key file");
-        assert_eq!(compiled.entries.len(), 2);
-        assert_eq!(compiled.entries[0].alias, "key1");
-        assert_eq!(
-            compiled.entries[0].secret_file.as_deref(),
-            Some(key_file.as_str())
-        );
-        assert_eq!(
-            compiled.entries[0].secret_key.as_deref(),
-            Some("opencode-go.key1")
-        );
-        assert_eq!(compiled.entries[1].alias, "key2");
-        assert_eq!(
-            compiled.entries[1].secret_key.as_deref(),
-            Some("opencode-go.key2")
-        );
-        assert!(compiled.entries.iter().all(|entry| entry.api_key.is_none()));
-
-        std::fs::write(&key_file, "opencode-go = single-secret\n").expect("write single key");
-        let single = compile_v2_auth(
-            &tmp,
-            "opencode-go",
-            "source".to_string(),
-            V2ProviderAuthConfig {
-                api_key: None,
-                env: None,
-                token_file: None,
-                secret_file: Some(key_file.clone()),
-                entries: None,
-            },
-        )
-        .expect("auto discover single key");
-        assert_eq!(single.entries.len(), 1);
-        assert_eq!(single.entries[0].alias, "key1");
-        assert_eq!(single.entries[0].secret_key.as_deref(), Some("opencode-go"));
-        std::fs::remove_dir_all(&tmp).ok();
-    }
-
-    #[test]
-    fn provider_auth_secret_file_auto_discovery_rejects_mixed_authoring() {
-        let error = compile_v2_auth(
-            Path::new("."),
-            "opencode-go",
-            "source".to_string(),
-            V2ProviderAuthConfig {
-                api_key: None,
-                env: None,
-                token_file: None,
-                secret_file: Some("keys.conf".to_string()),
-                entries: Some(Vec::new()),
-            },
-        )
-        .expect_err("entries plus secretFile must fail");
-        assert!(error
-            .to_string()
-            .contains("cannot combine entries with secretFile"));
-    }
-
-    #[test]
-    fn provider_auth_secret_file_auto_discovers_single_or_multiple_handles() {
-        let tmp = std::env::temp_dir().join(format!(
-            "rccv3-auth-key-file-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).expect("create temp dir");
-        let key_file = tmp.join("opencode-go.conf");
-        std::fs::write(
-            &key_file,
-            "opencode-go.key1 = first-secret\nopencode-go.key2 = second-secret\n",
-        )
-        .expect("write key file");
-        let key_file = key_file.to_string_lossy().into_owned();
-        let compiled = compile_v2_auth(
-            &tmp,
-            "opencode-go",
-            "source".to_string(),
-            V2ProviderAuthConfig {
-                api_key: None,
-                env: None,
-                token_file: None,
-                secret_file: Some(key_file.clone()),
-                entries: None,
-            },
-        )
-        .expect("auto discover key file");
-        assert_eq!(compiled.entries.len(), 2);
-        assert_eq!(compiled.entries[0].alias, "key1");
-        assert_eq!(
-            compiled.entries[0].secret_file.as_deref(),
-            Some(key_file.as_str())
-        );
-        assert_eq!(
-            compiled.entries[0].secret_key.as_deref(),
-            Some("opencode-go.key1")
-        );
-        assert_eq!(compiled.entries[1].alias, "key2");
-        assert_eq!(
-            compiled.entries[1].secret_key.as_deref(),
-            Some("opencode-go.key2")
-        );
-        assert!(compiled.entries.iter().all(|entry| entry.api_key.is_none()));
-
-        std::fs::write(&key_file, "opencode-go = single-secret\n").expect("write single key");
-        let single = compile_v2_auth(
-            &tmp,
-            "opencode-go",
-            "source".to_string(),
-            V2ProviderAuthConfig {
-                api_key: None,
-                env: None,
-                token_file: None,
-                secret_file: Some(key_file.clone()),
-                entries: None,
-            },
-        )
-        .expect("auto discover single key");
-        assert_eq!(single.entries.len(), 1);
-        assert_eq!(single.entries[0].alias, "key1");
-        assert_eq!(single.entries[0].secret_key.as_deref(), Some("opencode-go"));
-        std::fs::remove_dir_all(&tmp).ok();
-    }
-
-    #[test]
-    fn provider_auth_secret_file_auto_discovery_rejects_mixed_authoring() {
-        let error = compile_v2_auth(
-            Path::new("."),
-            "opencode-go",
-            "source".to_string(),
-            V2ProviderAuthConfig {
-                api_key: None,
-                env: None,
-                token_file: None,
-                secret_file: Some("keys.conf".to_string()),
-                entries: Some(Vec::new()),
-            },
-        )
-        .expect_err("entries plus secretFile must fail");
-        assert!(error
-            .to_string()
-            .contains("cannot combine entries with secretFile"));
     }
 
     #[test]
