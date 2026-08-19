@@ -216,7 +216,15 @@ fn is_v3_provider_sse_protocol_neutral_keepalive_json_event(event: &Value) -> bo
     let Some(object) = event.as_object() else {
         return false;
     };
-    object.contains_key("ping") || object.is_empty()
+    if matches!(
+        object.get("choices").and_then(Value::as_array),
+        Some(choices) if choices.is_empty()
+    ) {
+        return true;
+    }
+    object.get("type").and_then(Value::as_str) == Some("ping")
+        || object.contains_key("ping")
+        || object.is_empty()
 }
 
 /// 非 JSON keepalive data 文本（如 `data: ping` / `data: keep-alive`）：
@@ -1069,6 +1077,15 @@ mod provider_sse_json_codec_tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn json_ping_event_is_transport_keepalive() {
+        assert_eq!(
+            classify_v3_provider_generic_sse_json_data(r#"{"type":"ping"}"#)
+                .expect("JSON ping must remain a keepalive"),
+            None
+        );
     }
 
     #[test]
