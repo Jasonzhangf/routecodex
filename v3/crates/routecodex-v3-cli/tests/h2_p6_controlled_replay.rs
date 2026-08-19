@@ -166,6 +166,9 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         "event: response.created\ndata: {\"type\":\"response.created\",\"id\":\"h2_sse\"}"
     ));
     assert!(sse_body.contains(
+        "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}"
+    ));
+    assert!(sse_body.contains(
         "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\"}}"
     ));
     assert!(sse_body.contains("data: [DONE]"));
@@ -412,7 +415,7 @@ async fn controlled_responses_upstream(
                 .status(StatusCode::OK)
                 .header("content-type", "text/event-stream")
                 .body(Body::from(
-                    "event: response.created\ndata: {\"type\":\"response.created\",\"id\":\"h2_sse\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n",
+                    "event: response.created\ndata: {\"type\":\"response.created\",\"id\":\"h2_sse\"}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n",
                 ))
                 .unwrap()
         }
