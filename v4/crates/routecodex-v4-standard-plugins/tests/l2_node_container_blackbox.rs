@@ -201,6 +201,73 @@ fn positive_server_input_does_not_inspect_model() {
 }
 
 #[test]
+fn target_selection_consumes_candidate_filter_output() {
+    let plan = compile_standard_plan(
+        "V4Router06SelectionPlan",
+        "request_execution",
+        "request",
+        6,
+        &["v4.std.routing.target_selection"],
+    )
+    .expect("target-selection plan compiles");
+    let hash = plan.plan_hash();
+    let mut container = NodeContainer::declare(
+        "V4Router06SelectionPlan",
+        plan.clone(),
+        plan_bindings(&plan),
+    )
+    .expect("binding passes");
+    container = publish_container(container);
+
+    let registry = StandardHandleRegistry::new();
+    let output = container
+        .execute_with_plan_hash(
+            &hash,
+            NodeExecutionInput {
+                data: json!({"model": "entry-relay"}),
+                control: json!({
+                    "route_facts": {
+                        "entry_model": "entry-relay",
+                        "eligible_candidates": [{
+                            "provider_id": "eligible-relay",
+                            "config_path": "/tmp/relay.toml",
+                            "protocol": "responses",
+                            "model": "wire-relay",
+                            "priority": 20,
+                            "entry_models": ["entry-relay"],
+                            "execution_mode": "relay"
+                        }]
+                    },
+                    "config_manifest": {
+                        "candidates": [{
+                            "provider_id": "unfiltered-direct",
+                            "config_path": "/tmp/direct.toml",
+                            "protocol": "responses",
+                            "model": "wire-direct",
+                            "priority": 1,
+                            "entry_models": ["entry-relay"],
+                            "execution_mode": "direct"
+                        }]
+                    }
+                }),
+            },
+            &registry,
+        )
+        .expect("target selection consumes typed filtered candidates");
+
+    assert_eq!(
+        output.control["target_selection"]["provider_id"],
+        "eligible-relay"
+    );
+    assert_eq!(
+        output.control["target_selection"]["execution_mode"],
+        "relay"
+    );
+    container.drain().unwrap();
+    container.dispose().unwrap();
+}
+
+#[test]
 fn negative_execute_rejects_plan_hash_drift() {
     let plan = chat_process_plan();
     let mut container = NodeContainer::declare(

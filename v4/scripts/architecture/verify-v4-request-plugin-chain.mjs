@@ -7,7 +7,7 @@ function read(relative) {
   return fs.readFileSync(path.join(root, relative), 'utf8');
 }
 
-function verifySources({ standard, runtime, runtimeBin, mainline, verification }) {
+function verifySources({ standard, runtime, runtimeBin, mainline, verification, functionMap }) {
   const errors = [];
   const requiredPluginIds = [
     'v4.std.protocol.server_input',
@@ -49,6 +49,19 @@ function verifySources({ standard, runtime, runtimeBin, mainline, verification }
   if (!verification.includes('v4_request_plugin_chain_l2_regression')) {
     errors.push('verification map missing request chain gate');
   }
+  let requestFeature;
+  try {
+    requestFeature = JSON.parse(functionMap).functions.find(
+      (entry) => entry.function_id === 'v4.pipeline.request_plugin_chain',
+    );
+  } catch (error) {
+    errors.push(`function map is invalid JSON: ${error.message}`);
+  }
+  if (!requestFeature) {
+    errors.push('function map missing v4.pipeline.request_plugin_chain');
+  } else if (requestFeature.status !== 'active' || requestFeature.binding_status !== 'anchored') {
+    errors.push('request plugin function binding must be active/anchored');
+  }
   return errors;
 }
 
@@ -60,6 +73,7 @@ const sources = {
   runtimeBin: read('crates/routecodex-v4-runtime-bin/src/main.rs'),
   mainline: read('.appsdk/maps/mainline-call-map.json'),
   verification: read('.appsdk/maps/verification-map.json'),
+  functionMap: read('.appsdk/maps/function-map.json'),
 };
 
 if (process.argv.includes('--red-self-test')) {
@@ -68,6 +82,7 @@ if (process.argv.includes('--red-self-test')) {
     { name: 'handler bypass', value: { ...sources, runtimeBin: `${sources.runtimeBin}\nroute_request(` } },
     { name: 'runtime dispatch removed', value: { ...sources, runtimeBin: sources.runtimeBin.replaceAll('RequestPluginRuntime', 'RemovedRuntime') } },
     { name: 'map edge removed', value: { ...sources, mainline: sources.mainline.replaceAll('V4Router06SelectionPlan', 'RemovedRouter06') } },
+    { name: 'function binding downgraded', value: { ...sources, functionMap: sources.functionMap.replace('"binding_status": "anchored"', '"binding_status": "pending"') } },
   ];
   let passed = 0;
   for (const mutation of mutations) {

@@ -707,8 +707,8 @@
     {
       "function_id": "v4.pipeline.request_plugin_chain",
       "owner": "routecodex-v4-runtime",
-      "status": "design",
-      "binding_status": "pending",
+      "status": "active",
+      "binding_status": "anchored",
       "entry_symbols": [
         "RequestPluginRuntime",
         "RequestPluginRuntime::execute_responses",

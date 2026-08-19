@@ -272,16 +272,20 @@ try {
   };
   const sseResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'Accept': 'text/event-stream' }, 60000);
   if (sseResp.status !== 200) throw new Error(`responses SSE status ${sseResp.status}, body=${sseResp.body.substring(0, 200)}`);
-  // Server may return JSON-wrapped terminal (provider_response config) or actual SSE
+  const contentType = String(sseResp.headers['content-type'] ?? '').toLowerCase();
+  if (!contentType.includes('text/event-stream')) {
+    throw new Error(`SSE response content-type is ${contentType || '<missing>'}`);
+  }
   const body = sseResp.body;
-  const hasEvent = body.includes('event:') || body.includes('data:');
   const hasResponseId = body.includes('response_id') || /"id"\s*:\s*"[0-9a-f]{32}"/.test(body);
   if (!hasResponseId) throw new Error('SSE response has no recognizable response_id');
-  // Pass either true SSE frame OR JSON terminal carrying real upstream response
-  const isSseFrame = body.includes('event:') && body.includes('data:');
-  const isJsonTerminal = /"id"\s*:\s*"[0-9a-f]{32}"/.test(body) && (body.includes('response.completed') || body.includes('"status":"completed"'));
-  if (!isSseFrame && !isJsonTerminal) throw new Error('SSE response has no event/data markers and no JSON terminal');
-  console.log(`[v4_real_runtime_admission] POST /v1/responses SSE OK: frame=${isSseFrame}, json_terminal=${isJsonTerminal}, len=${body.length}`);
+  if (!body.includes('event:') || !body.includes('data:')) {
+    throw new Error('SSE response has no event/data frame');
+  }
+  if (!body.includes('response.completed')) {
+    throw new Error('SSE response did not complete successfully');
+  }
+  console.log(`[v4_real_runtime_admission] POST /v1/responses SSE OK: len=${body.length}`);
   passed++;
 } catch (e) {
   console.error(`[v4_real_runtime_admission] POST /v1/responses SSE FAIL: ${e.message}`);
@@ -313,8 +317,8 @@ try {
   const relaySse = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { Accept: 'text/event-stream' }, 60000);
   if (relaySse.status !== 200) throw new Error(`relay SSE status ${relaySse.status}, body=${relaySse.body.substring(0, 200)}`);
   if (!relaySse.body.includes('data:')) throw new Error('relay SSE has no data frame');
-  if (!relaySse.body.includes('response.completed') && !relaySse.body.includes('response.failed')) {
-    throw new Error('relay SSE has no terminal frame');
+  if (!relaySse.body.includes('response.completed')) {
+    throw new Error('relay SSE did not complete successfully');
   }
   console.log(`[v4_real_runtime_admission] Relay SSE OK: len=${relaySse.body.length}`);
   passed++;

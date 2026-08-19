@@ -516,7 +516,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::ControlOnly,
             PluginPhase::Semantic,
             220,
-            vec!["v4.control.route_facts", "v4.config.manifest"],
+            vec!["v4.control.route_facts"],
             vec!["v4.control.target_selection"],
         ),
         plugin(
@@ -872,13 +872,18 @@ fn candidate_filter(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn target_selection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let candidates = manifest_candidates(ctx)?;
     let route_facts = ctx
         .read_control_resource("v4.control.route_facts")
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "target selection requires route facts".to_string())?;
-    let requested = route_facts.get("entry_model").and_then(Value::as_str);
-    let target = select_target(&candidates, requested).map_err(|error| error.to_string())?;
+    let eligible: Vec<ProviderCandidate> = serde_json::from_value(
+        route_facts
+            .get("eligible_candidates")
+            .cloned()
+            .ok_or_else(|| "target selection requires filtered candidates".to_string())?,
+    )
+    .map_err(|error| format!("filtered candidate set invalid: {error}"))?;
+    let target = select_target(&eligible, None).map_err(|error| error.to_string())?;
     ctx.write_control_resource(
         "v4.control.target_selection",
         serde_json::to_value(target).map_err(|error| error.to_string())?,
