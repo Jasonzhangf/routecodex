@@ -35,15 +35,20 @@ features:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
+  - docs/goals/v3-install-interrupt-process-group-test-design.md
+  - docs/architecture/manifests/v3.global_binary_install.interruption.mainline.yml
   required_positive:
   - Installed rccv3 path is ~/.local/bin/rccv3 and reports the embedded RouteCodex build version.
   - routecodex and rcc execute the same installed binary.
   - Aggregate restart and every configured listener health endpoint succeed after installation.
+  - On Unix, SIGINT and SIGTERM signal the exact installer-owned command process group and wait for every descendant to exit before releasing the owned Cargo target.
   required_negative:
   - Installation does not create ~/.rcc/install/current or ~/.rcc/install/releases.
   - Command aliases do not fall back to a repository build, npm global package, or release snapshot.
   - Installation state never enters request, response, provider wire, MetadataCenter, or Error payloads.
   - Direct binary installation is not blocked by unrelated in-progress provider/runtime feature gates; full architecture CI remains required by the build chain.
+  - The interruption regression does not use ps or PGID introspection; it proves descendant readiness, signal observation, exit-before-target-release, and absence of delayed work by behavior.
+  - On Windows, an install command fails before spawn until a Job Object owner exists.
   required_gates:
   - npm --prefix v3 run test:distribution
   - npm --prefix v3 run test:install-cleanup

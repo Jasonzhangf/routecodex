@@ -1560,7 +1560,7 @@ resources:
     resource_kind: installed_runtime_executable
     lifecycle: v3.global_binary_install
     owner_feature_id: v3.global_binary_install
-    owner_crate: routecodex-v3-config
+    owner_crate: routecodex-v3-cli
     owner_module: v3-global-binary-install
     owner_node: V3Install03DirectBinaryPublished
     identity: [absoluteBinaryPath, buildVersion, sha256]
@@ -1574,7 +1574,43 @@ resources:
     may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: anchored
-    required_gates: [npm --prefix v3 run test:distribution, npm --prefix v3 run test:install-cleanup, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]
+    required_gates: [npm --prefix v3 run test:distribution, npm --prefix v3 run test:install-cleanup, npm --prefix v3 run verify:v3-resource-map, npm --prefix v3 run verify:v3-module-boundaries]
+
+  - resource_id: v3.install.command_process_group
+    resource_kind: process_group_control
+    lifecycle: v3.global_binary_install.interruption
+    owner_feature_id: v3.global_binary_install
+    owner_crate: routecodex-v3-cli
+    owner_module: v3-global-binary-install
+    owner_node: V3InstallOwnedCommandGroupActive
+    identity: [installerPid, processGroupId]
+    allowed_writers: [runInterruptibleCommand, signalOwnedProcessGroup]
+    allowed_readers: [waitForOwnedProcessGroupExit, cleanupOwnedCargoTargetWhenSafe]
+    allowed_operations: [spawn_isolated_group, signal_exact_group, observe_group_exit]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm --prefix v3 run test:install-cleanup, npm --prefix v3 run verify:v3-resource-map, npm --prefix v3 run verify:v3-module-boundaries]
+
+  - resource_id: v3.install.owned_cargo_target
+    resource_kind: owned_temporary_build_artifact
+    lifecycle: v3.global_binary_install.interruption
+    owner_feature_id: v3.global_binary_install
+    owner_crate: routecodex-v3-cli
+    owner_module: v3-global-binary-install
+    owner_node: V3InstallOwnedCargoTargetCreated
+    identity: [absolutePath, installerPid]
+    allowed_writers: [buildV3CargoEnv, cargo_build, cleanupOwnedCargoTarget]
+    allowed_readers: [buildV3Cli, copyExecutableAtomic]
+    release_requires: [V3InstallOwnedCommandGroupExited]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm --prefix v3 run test:install-cleanup, npm --prefix v3 run verify:v3-resource-map, npm --prefix v3 run verify:v3-module-boundaries]
 
   - resource_id: v3.build.node_dependency_lock
     resource_kind: build_dependency_lock

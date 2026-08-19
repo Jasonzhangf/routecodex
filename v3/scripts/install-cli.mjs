@@ -63,24 +63,46 @@ class InstallInterruptedError extends Error {
   }
 }
 
+export function assertInstallCommandOwnershipSupported(platform = process.platform) {
+  if (platform === 'win32') {
+    throw new Error('Windows install command ownership requires a Job Object');
+  }
+}
+
 export function runInterruptibleCommand(command, args, options, build, label) {
+  if (build.interruptedSignal) {
+    return Promise.reject(new InstallInterruptedError(build.interruptedSignal));
+  }
+  try {
+    assertInstallCommandOwnershipSupported();
+  } catch (error) {
+    return Promise.reject(error);
+  }
   return new Promise((resolve, reject) => {
     let spawnFailed = false;
-    const child = spawn(command, args, options);
-    build.activeChildRootPid = child.pid;
+    const child = spawn(command, args, { ...options, detached: true });
+    build.activeProcessGroupPid = Number.isInteger(child.pid) ? -child.pid : null;
     build.activeChild = child;
     child.once('error', (error) => {
       spawnFailed = true;
       build.activeChild = null;
+      build.activeProcessGroupPid = null;
       reject(new Error(`${label} could not start: ${error.message}`));
     });
     child.once('close', async (status, signal) => {
       if (spawnFailed) {
         return;
       }
-      await waitForOwnedPidsExit(build.interruptedPids);
+      const ownedProcessGroupPid = build.interruptedProcessGroupPid
+        ?? build.activeProcessGroupPid;
+      try {
+        await waitForOwnedProcessGroupExit(ownedProcessGroupPid);
+      } catch (error) {
+        reject(error);
+        return;
+      }
       build.activeChild = null;
-      build.activeChildRootPid = null;
+      build.activeProcessGroupPid = null;
       if (build.interruptedSignal) {
         reject(new InstallInterruptedError(build.interruptedSignal));
       } else if (signal) {
@@ -94,48 +116,50 @@ export function runInterruptibleCommand(command, args, options, build, label) {
   });
 }
 
-function processExists(pid) {
+function ownedProcessGroupExists(processGroupPid) {
   try {
-    process.kill(pid, 0);
+    process.kill(processGroupPid, 0);
     return true;
   } catch (error) {
     if (error?.code === 'ESRCH') {
       return false;
     }
+    if (error?.code === 'EPERM') {
+      return true;
+    }
     throw error;
   }
 }
 
-function signalOwnedChild(build, signal) {
-  if (Number.isInteger(build.activeChildRootPid) && build.activeChildRootPid > 0) {
-    try {
-      process.kill(build.activeChildRootPid, signal);
-      return [build.activeChildRootPid];
-    } catch (error) {
-      if (error?.code === 'ESRCH') {
-        return [];
-      }
-      throw error;
+function signalOwnedProcessGroup(processGroupPid, signal) {
+  assertInstallCommandOwnershipSupported();
+  if (!Number.isInteger(processGroupPid) || processGroupPid >= 0) {
+    throw new Error(`invalid owned process-group id: ${processGroupPid}`);
+  }
+  try {
+    process.kill(processGroupPid, signal);
+    return processGroupPid;
+  } catch (error) {
+    if (error?.code === 'ESRCH') {
+      return null;
     }
+    throw error;
   }
-  if (build.activeChild && !build.activeChild.killed) {
-    build.activeChild.kill(signal);
-  }
-  return [];
 }
 
-async function waitForOwnedPidsExit(pids) {
-  for (const pid of pids ?? []) {
-    while (processExists(pid)) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
+async function waitForOwnedProcessGroupExit(processGroupPid) {
+  if (!Number.isInteger(processGroupPid) || processGroupPid >= 0) {
+    return;
+  }
+  while (ownedProcessGroupExists(processGroupPid)) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
 
 async function waitForOwnedTargetSafeToRemove(build) {
-  if (Number.isInteger(build.activeChildRootPid) && build.activeChildRootPid > 0) {
-    await waitForOwnedPidsExit([build.activeChildRootPid]);
-  }
+  await waitForOwnedProcessGroupExit(
+    build.interruptedProcessGroupPid ?? build.activeProcessGroupPid,
+  );
 }
 
 async function cleanupOwnedCargoTargetWhenSafe(build) {
@@ -204,15 +228,19 @@ export function cleanupOwnedCargoTarget(cargoTargetDir, ownsCargoTargetDir) {
 export async function withOwnedV3CargoTarget(run, sourceEnv = process.env) {
   const build = buildV3CargoEnv(sourceEnv);
   build.activeChild = null;
-  build.activeChildRootPid = null;
+  build.activeProcessGroupPid = null;
   build.interruptedSignal = null;
-  build.interruptedPids = [];
+  build.interruptedProcessGroupPid = null;
   const handleSignal = (signal) => {
-    build.interruptedSignal ??= signal;
-    if (Number.isInteger(build.activeChildRootPid)) {
-      build.interruptedPids = signalOwnedChild(build, signal);
-    } else if (build.activeChild && !build.activeChild.killed) {
-      build.activeChild.kill(signal);
+    if (build.interruptedSignal) {
+      return;
+    }
+    build.interruptedSignal = signal;
+    if (Number.isInteger(build.activeProcessGroupPid)) {
+      build.interruptedProcessGroupPid = signalOwnedProcessGroup(
+        build.activeProcessGroupPid,
+        signal,
+      );
     }
   };
   process.once('SIGINT', handleSignal);

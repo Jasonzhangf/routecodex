@@ -22,27 +22,45 @@ modules:
   - module_id: v3-global-binary-install
     owner_feature_id: v3.global_binary_install
     owned_paths:
-      - scripts/install-v3-cli.mjs
-      - scripts/ensure-cli-command-shim.mjs
-      - scripts/install-global.sh
-      - tests/scripts/v3-cli-distribution.spec.mjs
-      - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
-      - v3/crates/routecodex-v3-config/src/lib.rs
-      - package.json
-      - package-lock.json
-      - src/build-info.ts
+      - v3/scripts/install-cli.mjs
+      - v3/tests/scripts/v3-cli-distribution.spec.mjs
+      - v3/tests/scripts/install-cli-target-cleanup.spec.mjs
+      - v3/package.json
+      - v3/package-lock.json
+      - docs/goals/v3-install-interrupt-process-group-test-design.md
+      - docs/architecture/manifests/v3.global_binary_install.interruption.mainline.yml
     allowed_dependencies:
       - v3/crates/routecodex-v3-cli
       - v3/dist/bin/rccv3
       - ~/.local/bin/rccv3
+      - node:child_process
+      - node:crypto
+      - node:fs
+      - node:os
+      - node:path
+      - node:url
     forbidden_paths:
       - sharedmodule
       - ~/.rcc/install
+      - scripts/install-v3-cli.mjs
+      - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
+      - request.normal_payload
+      - response.client_payload
+      - MetadataCenter
+    allowed_edges:
+      - V3InstallOwnedCargoTargetCreated -> V3InstallOwnedCommandGroupActive
+      - V3InstallOwnedCommandGroupActive -> V3InstallOwnedCommandGroupSignalled
+      - V3InstallOwnedCommandGroupSignalled -> V3InstallOwnedCommandGroupExited
+      - V3InstallOwnedCommandGroupExited -> V3InstallOwnedCargoTargetReleased
+    resources:
+      - v3.global_binary_install
+      - v3.install.command_process_group
+      - v3.install.owned_cargo_target
     required_gates:
       - npm --prefix v3 run test:distribution
       - npm --prefix v3 run test:install-cleanup
-      - npm run verify:v3-resource-map
-      - npm run verify:v3-module-boundaries
+      - npm --prefix v3 run verify:v3-resource-map
+      - npm --prefix v3 run verify:v3-module-boundaries
 
   - module_id: v3-build-test-artifact-budget
     owner_feature_id: v3.build_test_artifact_budget

@@ -4473,57 +4473,59 @@ features:
   owner_crates:
   - routecodex-v3-cli
   owner_files:
-  - scripts/install-v3-cli.mjs
-  - scripts/ensure-cli-command-shim.mjs
-  - scripts/install-global.sh
-  - v3/crates/routecodex-v3-config/Cargo.toml
-  - v3/crates/routecodex-v3-config/build.rs
-  - v3/crates/routecodex-v3-config/src/lib.rs
-  - package.json
-  - package-lock.json
-  - src/build-info.ts
+  - v3/scripts/install-cli.mjs
+  - v3/tests/scripts/v3-cli-distribution.spec.mjs
+  - v3/tests/scripts/install-cli-target-cleanup.spec.mjs
+  - v3/package.json
+  - v3/package-lock.json
   resource_bindings:
   - v3.global_binary_install
+  - v3.install.command_process_group
+  - v3.install.owned_cargo_target
   entry_symbols:
   - buildV3CargoEnv
+  - runInterruptibleCommand
+  - assertInstallCommandOwnershipSupported
+  - signalOwnedProcessGroup
+  - waitForOwnedProcessGroupExit
+  - cleanupOwnedCargoTargetWhenSafe
   - withOwnedV3CargoTarget
   - installAliasAtomic
   allowed_paths:
-  - scripts/install-v3-cli.mjs
-  - scripts/ensure-cli-command-shim.mjs
-  - scripts/install-global.sh
-  - tests/scripts/v3-cli-distribution.spec.mjs
-  - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
-  - v3/crates/routecodex-v3-config/Cargo.toml
-  - v3/crates/routecodex-v3-config/build.rs
-  - v3/crates/routecodex-v3-config/src/lib.rs
-  - package.json
-  - package-lock.json
-  - src/build-info.ts
+  - v3/scripts/install-cli.mjs
+  - v3/tests/scripts/v3-cli-distribution.spec.mjs
+  - v3/tests/scripts/install-cli-target-cleanup.spec.mjs
+  - v3/package.json
+  - v3/package-lock.json
+  - docs/goals/v3-install-interrupt-process-group-test-design.md
+  - docs/architecture/manifests/v3.global_binary_install.interruption.mainline.yml
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/v3-build-tool-module-registry.yml
   - .github/workflows/test.yml
-  - package.json
-  - package-lock.json
-  - src/build-info.ts
   forbidden_paths:
   - src/modules
   - src/providers
   - src/server
   - sharedmodule
   - ~/.rcc/install
+  - scripts/install-v3-cli.mjs
+  - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
   required_gates:
   - npm --prefix v3 run test:distribution
   - npm --prefix v3 run test:install-cleanup
-  - npm run verify:v3-resource-map
-  - npm run verify:v3-module-boundaries
+  - npm --prefix v3 run verify:v3-resource-map
+  - npm --prefix v3 run verify:v3-module-boundaries
   mainline_bindings:
   - v3-install-01
   - v3-install-02
   - v3-install-03
+  - v3-install-interrupt-01
+  - v3-install-interrupt-02
+  - v3-install-interrupt-03
+  - v3-install-interrupt-04
   runtime_status: direct_binary_install_live_verified_0_90_4574
 - feature_id: v3.route_classifier_local_owner
   status: source_controlled_runtime_boundary_verified
