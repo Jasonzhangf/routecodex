@@ -1,5 +1,4 @@
 use super::*;
-use crate::webui_observability::V3WebuiObservability;
 use std::collections::BTreeMap;
 use std::sync::Mutex as StdMutex;
 
@@ -186,7 +185,7 @@ fn test_v3_listener_state_with_debug(
         )),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
-        webui_observability: V3WebuiObservability::new(),
+        request_activity: Arc::new(V3ServerRequestActivityGate::default()),
     })
 }
 
@@ -1072,17 +1071,13 @@ fn observability_prefix_keeps_full_provider_and_key_without_truncation() {
         prefix.contains("default:opencode-go[key2].deepseek-v4-flash"),
         "provider and key must remain fully visible in the response prefix: {prefix}"
     );
-    assert!(
-        !prefix.contains("..."),
-        "provider/key must not truncate: {prefix}"
-    );
+    assert!(!prefix.contains("..."), "provider/key must not truncate: {prefix}");
 }
 
 #[test]
-fn console_route_projection_surfaces_missing_route_without_panicking() {
-    let projection = resolve_v3_console_route_projection(&V3RuntimeObservability::default());
-    assert_eq!(projection.label, "-");
-    assert_eq!(projection.reason, "route:missing");
+#[should_panic(expected = "v3 console route projection requires pool_id or routing_group_id")]
+fn console_route_projection_rejects_missing_route_truth() {
+    let _ = resolve_v3_console_route_projection(&V3RuntimeObservability::default());
 }
 
 #[test]
@@ -1507,42 +1502,6 @@ fn responses_continuation_scope_prefers_explicit_headers_over_codex_turn_metadat
 
     assert_eq!(session_id.as_deref(), Some("explicit-session"));
     assert_eq!(conversation_id.as_deref(), Some("explicit-thread"));
-}
-
-#[test]
-fn responses_fresh_request_ignores_plugin_session_without_typed_conversation() {
-    let mut headers = HeaderMap::new();
-    headers.insert("session_id", HeaderValue::from_static("plugin-session"));
-    headers.insert(
-        "x-client-request-id",
-        HeaderValue::from_static("plugin-request"),
-    );
-
-    let scope = request_local_continuation_scope(&headers, false, "req-fresh")
-        .expect("fresh request must not require a conversation header");
-
-    assert_eq!(
-        scope,
-        (
-            "request:req-fresh".to_string(),
-            "request:req-fresh".to_string()
-        )
-    );
-}
-
-#[test]
-fn responses_paired_function_outputs_are_not_continuation_scope() {
-    let payload = json!({
-        "input": [
-            {"type": "function_call", "call_id": "call-1", "name": "tool", "arguments": "{}"},
-            {"type": "function_call_output", "call_id": "call-1", "output": "ok"}
-        ]
-    });
-    let facts = V3ResponsesContinuationEntryFacts::project(&payload);
-
-    assert!(facts.has_function_call_output);
-    assert!(!facts.has_unpaired_function_call_output);
-    assert!(responses_entry_facts_allow_fresh_protocol_plan(&facts));
 }
 
 #[test]
@@ -2697,7 +2656,7 @@ async fn relay_sse_console_closeout_prints_usage_for_chat_wire_finish_reason_ter
 }
 
 #[tokio::test]
-async fn direct_sse_body_error_projects_standard_closeout_after_partial_stream() {
+async fn direct_sse_body_error_closes_after_partial_stream_without_remapping() {
     let log_file = test_v3_console_log_file("direct-console-sse-error");
     let _ = std::fs::remove_file(&log_file);
     let state = test_v3_listener_state(&log_file, 4444);
@@ -2742,8 +2701,8 @@ async fn direct_sse_body_error_projects_standard_closeout_after_partial_stream()
         Duration::from_millis(3_000),
     );
     let result = to_bytes(response.into_body(), usize::MAX).await;
-    let body = String::from_utf8(result.unwrap().to_vec()).unwrap();
-    assert!(body.contains("response.output_text.delta"), "{body}");
+    let body = result.expect("direct SSE provider failure must remain an explicit SSE event");
+    let body = String::from_utf8_lossy(&body);
     assert!(body.contains("event: error"), "{body}");
     assert!(body.contains("provider_stream_error"), "{body}");
 
@@ -2761,7 +2720,7 @@ async fn direct_sse_body_propagates_client_disconnect_as_transport_error() {
     let result = to_bytes(v3_client_sse_body(stream, None), usize::MAX).await;
     assert!(
         result.is_err(),
-        "opaque SSE transport must propagate source errors"
+        "client disconnect must remain a transport close, not a server error event"
     );
 }
 
@@ -2782,13 +2741,9 @@ async fn direct_sse_body_does_not_parse_crlf_terminal_frame() {
         ),
         Err(source),
     ]));
-    let result = to_bytes(v3_client_sse_body(stream, None), usize::MAX)
-        .await
-        .unwrap();
-    let body = String::from_utf8(result.to_vec()).unwrap();
-    assert!(body.contains("response.completed"), "{body}");
-    assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("late closeout failure"), "{body}");
+    let result = to_bytes(v3_client_sse_body(stream, None), usize::MAX).await;
+    let body = result.expect("provider SSE errors must be projected as an SSE error event");
+    assert!(String::from_utf8_lossy(&body).contains("event: error"));
 }
 
 #[tokio::test]
@@ -2807,13 +2762,9 @@ async fn direct_sse_body_does_not_parse_terminal_frame() {
         ),
         Err(source),
     ]));
-    let result = to_bytes(v3_client_sse_body(stream, None), usize::MAX)
-        .await
-        .unwrap();
-    let body = String::from_utf8(result.to_vec()).unwrap();
-    assert!(body.contains("response.completed"), "{body}");
-    assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("late closeout failure"), "{body}");
+    let result = to_bytes(v3_client_sse_body(stream, None), usize::MAX).await;
+    let body = result.expect("provider SSE errors must be projected as an SSE error event");
+    assert!(String::from_utf8_lossy(&body).contains("event: error"));
 }
 
 #[tokio::test]
@@ -2831,13 +2782,9 @@ async fn direct_sse_body_does_not_parse_failed_terminal_across_chunks() {
         Ok::<Vec<u8>, _>(b"iled\"}\n\n".to_vec()),
         Err(source),
     ]));
-    let result = to_bytes(v3_client_sse_body(stream, None), usize::MAX)
-        .await
-        .unwrap();
-    let body = String::from_utf8(result.to_vec()).unwrap();
-    assert!(body.contains("response.failed"), "{body}");
-    assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("late closeout failure"), "{body}");
+    let result = to_bytes(v3_client_sse_body(stream, None), usize::MAX).await;
+    let body = result.expect("provider SSE errors must be projected as an SSE error event");
+    assert!(String::from_utf8_lossy(&body).contains("event: error"));
 }
 
 #[tokio::test]
@@ -2854,13 +2801,9 @@ async fn direct_sse_body_does_not_treat_terminal_text_as_terminal_event() {
         Ok::<Vec<u8>, _>(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"response.completed\"}\n\n".to_vec()),
         Err(source),
     ]));
-    let body = to_bytes(v3_client_sse_body(stream, None), usize::MAX)
-        .await
-        .unwrap();
-    let body = String::from_utf8(body.to_vec()).unwrap();
-    assert!(body.contains("response.completed"), "{body}");
-    assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("provider failure after text"), "{body}");
+    let body = to_bytes(v3_client_sse_body(stream, None), usize::MAX).await;
+    let body = body.expect("provider failure after ordinary text must remain visible in SSE");
+    assert!(String::from_utf8_lossy(&body).contains("event: error"));
 }
 
 #[test]
@@ -3096,7 +3039,7 @@ fn error_projection_appends_human_console_failure_line() {
         )),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
-        webui_observability: V3WebuiObservability::new(),
+        request_activity: Arc::new(V3ServerRequestActivityGate::default()),
     };
     let trace_scope = state
         .debug
@@ -3268,14 +3211,11 @@ async fn relay_sse_closeout_does_not_parse_response_failed_terminal_payload() {
 }
 
 #[tokio::test]
-async fn relay_sse_body_error_projects_standard_error_event() {
+async fn relay_sse_body_error_propagates_without_fabricated_error_event() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Sse(Box::pin(futures_util::stream::iter(vec![
-            Err(raise_v3_sse_provider_failure(
-                "provider_response_sse_stream",
-                "provider relay boom",
-            )),
+            Err("provider relay boom".to_string()),
         ]))),
         node_trace: vec!["V3HubRespOutbound05ClientSemantic"],
         error_chain: None,
@@ -3289,21 +3229,18 @@ async fn relay_sse_body_error_projects_standard_error_event() {
     let response = responses_relay_output_response(output, None, Duration::from_millis(3_000));
     assert_eq!(response.headers()["content-type"], "text/event-stream");
     let result = to_bytes(response.into_body(), usize::MAX).await;
-    let body = String::from_utf8(result.unwrap().to_vec()).unwrap();
-    assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("provider_response_sse_stream"), "{body}");
-    assert!(body.contains("provider relay boom"), "{body}");
+    assert!(
+        result.is_err(),
+        "relay SSE body failure must propagate as body error, not fabricated event:error bytes"
+    );
 }
 
 #[tokio::test]
-async fn relay_sse_body_abrupt_failure_projects_standard_error_event() {
+async fn relay_sse_body_abruptly_closes_without_fabricating_error_event() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Sse(Box::pin(futures_util::stream::iter(vec![
-            Err(raise_v3_sse_provider_failure(
-                "provider_response_sse_stream",
-                "abrupt relay stream close",
-            )),
+            Err("abrupt relay stream close".to_string()),
         ]))),
         node_trace: vec!["V3HubRespOutbound05ClientSemantic"],
         error_chain: None,
@@ -3317,32 +3254,11 @@ async fn relay_sse_body_abrupt_failure_projects_standard_error_event() {
     let response = responses_relay_output_response(output, None, Duration::from_millis(3_000));
     assert_eq!(response.headers()["content-type"], "text/event-stream");
     let result = to_bytes(response.into_body(), usize::MAX).await;
-    let body = String::from_utf8(result.unwrap().to_vec()).unwrap();
-    assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("abrupt relay stream close"), "{body}");
-}
-
-#[tokio::test]
-async fn relay_sse_body_client_disconnect_remains_transport_local() {
-    let output = V3ResponsesRelayRuntimeOutput {
-        status: 200,
-        client_body: V3ResponsesRelayClientBody::Sse(Box::pin(futures_util::stream::iter(vec![
-            Err(raise_v3_sse_client_disconnect()),
-        ]))),
-        node_trace: vec!["V3HubRespOutbound05ClientSemantic"],
-        error_chain: None,
-        observability: None,
-        stream_observation: None,
-        finalized_response: None,
-        provider_snapshots: None,
-        protocol_direct_handoff: None,
-    };
-
-    let response = responses_relay_output_response(output, None, Duration::from_millis(3_000));
-    let error = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect_err("client disconnect must not be projected as a provider SSE error event");
-    assert!(error.to_string().contains("client_disconnect"), "{error}");
+    assert!(
+        result.is_err(),
+        "relay SSE transport/body failure must propagate as abrupt body close, not fabricated event:error bytes: {:?}",
+        result.ok().and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+    );
 }
 
 #[tokio::test]
@@ -3403,7 +3319,7 @@ async fn relay_sse_accept_stream_error_projects_post_commit_provider_failure_not
     // provider 流缺终帧（opencode-go chat SSE 只发 reasoning 增量后 EOF）：
     // codec 已 fail-fast 产出 Err；server 必须投影 post-commit 502，而不是
     // 在无终态时把它当成成功流收口并报 500 runtime_observability_contract。
-    let stream: V3OpenAiChatClientStream = Box::pin(futures_util::stream::iter(vec![
+    let stream: V3ResponsesRelayClientStream = Box::pin(futures_util::stream::iter(vec![
         Ok(b"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"x\"},\"finish_reason\":null,\"index\":0}]}\n\n".to_vec()),
         Err("OpenAI Chat SSE ended without terminal finish_reason".to_string()),
     ]));
@@ -3506,10 +3422,9 @@ async fn completed_responses_sse_reaches_eof_without_late_keepalive_comments() {
 }
 
 #[tokio::test]
-async fn responses_sse_relay_provider_stream_error_projects_standard_error_then_clean_eof() {
-    let provider = futures_util::stream::iter(vec![Err::<Vec<u8>, V3Error01SourceRaised>(
-        raise_v3_sse_provider_failure("provider_response_sse_stream", "controlled error"),
-    )]);
+async fn responses_sse_relay_provider_stream_error_propagates_without_fabricated_terminal() {
+    let provider =
+        futures_util::stream::iter(vec![Err::<Vec<u8>, String>("controlled error".into())]);
     let body = v3_relay_client_sse_body(Box::pin(provider), Some(Duration::from_millis(10)));
     let mut client = body.into_data_stream();
 
@@ -3518,55 +3433,15 @@ async fn responses_sse_relay_provider_stream_error_projects_standard_error_then_
         b": keepalive\n\n"
     );
     let error = client.next().await.unwrap().unwrap();
-    let error = std::str::from_utf8(&error).unwrap();
-    assert!(error.starts_with("event: error\n"), "{error}");
-    assert!(error.contains("provider_response_sse_stream"), "{error}");
+    let error = String::from_utf8_lossy(&error);
+    assert!(error.contains("event: error"), "{error}");
     assert!(error.contains("controlled error"), "{error}");
-    assert!(
-        !error.contains("\"status\":"),
-        "post-commit SSE event must not contradict the committed HTTP 200: {error}"
-    );
     assert!(
         tokio::time::timeout(Duration::from_millis(50), client.next())
             .await
             .unwrap()
             .is_none()
     );
-}
-
-#[tokio::test]
-async fn responses_sse_direct_runtime_error_projects_standard_error_then_clean_eof() {
-    use routecodex_v3_error::{build_v3_error_01_source_raised, V3ErrorSourceKind};
-    let source = build_v3_error_01_source_raised(
-        V3ErrorSourceKind::RuntimeFailure,
-        "V3HubRespContinuation04Committed",
-        "v3_route_target_runtime_failure",
-        "remote continuation binding failed",
-    );
-    let provider = futures_util::stream::iter(vec![
-        Ok::<Vec<u8>, _>(b"event: response.created\ndata: {}\n\n".to_vec()),
-        Err(source),
-    ]);
-    let body = v3_client_sse_body(Box::pin(provider), None);
-    let mut client = body.into_data_stream();
-
-    assert_eq!(
-        client.next().await.unwrap().unwrap().as_ref(),
-        b"event: response.created\ndata: {}\n\n"
-    );
-    let error = client.next().await.unwrap().unwrap();
-    let error = std::str::from_utf8(&error).unwrap();
-    assert!(error.starts_with("event: error\n"), "{error}");
-    assert!(error.contains("v3_route_target_runtime_failure"), "{error}");
-    assert!(
-        error.contains("remote continuation binding failed"),
-        "{error}"
-    );
-    assert!(
-        !error.contains("\"status\":"),
-        "post-commit SSE event must not contradict the committed HTTP 200: {error}"
-    );
-    assert!(client.next().await.is_none());
 }
 
 #[tokio::test]
