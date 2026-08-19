@@ -1675,7 +1675,16 @@ fn project_responses_event_to_chat(value: &Value) -> Value {
                 })]),
             );
         }
-        "response.completed" => finish_reason = Value::String("stop".to_string()),
+        "response.completed" => {
+            finish_reason = Value::String(
+                if responses_tool_calls(response).is_empty() {
+                    "stop"
+                } else {
+                    "tool_calls"
+                }
+                .to_string(),
+            )
+        }
         _ => {}
     }
     serde_json::json!({

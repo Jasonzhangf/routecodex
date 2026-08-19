@@ -580,6 +580,27 @@ fn relay_sse_delta_projects_responses_event_to_chat_chunk() {
 }
 
 #[test]
+fn relay_sse_tool_terminal_projects_tool_calls_finish_reason() {
+    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let report = runtime
+        .execute_provider_response_scoped(
+            "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_tool\",\"model\":\"m\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"{}\"}]}}\n\n",
+            "r-relay-sse-tool-terminal",
+            5555,
+            "session-relay-sse-tool-terminal",
+            "conversation-relay-sse-tool-terminal",
+            "chat",
+            "relay",
+        )
+        .expect("relay SSE tool terminal must traverse response nodes");
+    let frame: serde_json::Value = serde_json::from_str(
+        report.client_frame.as_deref().expect("chat chunk must exist"),
+    )
+    .expect("chat chunk must be JSON");
+    assert_eq!(frame["choices"][0]["finish_reason"], "tool_calls");
+}
+
+#[test]
 fn continuation_rotates_after_restore_for_next_response() {
     let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
     runtime
