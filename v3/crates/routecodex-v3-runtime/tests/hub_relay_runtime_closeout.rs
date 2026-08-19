@@ -1446,8 +1446,8 @@ impl ResponsesTransport for ResponsesSseUnterminatedFramingTransport {
                 name: "content-type".to_string(),
                 value: b"text/event-stream".to_vec(),
             }],
-            // JSON 感知分帧：未闭合 JSON（缺 `}`）时空行不结束帧，流结束
-            // 后仍是 UnterminatedFrame——transport 层 framing 错误。
+            // JSON 感知分帧：未闭合 JSON（缺 `}`）时空行不结束帧；EOF
+            // 收口仍须把 malformed data 载荷归给 provider event codec。
             Box::pin(futures_util::stream::iter([Ok(
                 b"data: {\"delta\":\"partial\"\n\n".to_vec(),
             )])),
@@ -2264,7 +2264,7 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
 }
 
 #[tokio::test]
-async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
+async fn responses_relay_unterminated_malformed_event_json_stays_codec_owned() {
     let output = execute_v3_responses_relay_runtime_with_retry_policy(
         &responses_single_limited_manifest(),
         V3ResponsesRelayRuntimeInput {
@@ -2299,12 +2299,12 @@ async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
         .and_then(Value::as_str)
         .expect("projected provider error message");
     assert!(
-        message.contains("malformed SSE"),
-        "actual frame/UTF-8 failures remain SSE transport-owned: {message}"
+        !message.contains("malformed SSE"),
+        "unterminated malformed event JSON remains codec-owned: {message}"
     );
     assert!(
-        message.contains("provider SSE transport failed"),
-        "transport error must name transport owner: {message}"
+        message.contains("provider response event codec failed"),
+        "unterminated malformed event JSON must name provider event codec owner: {message}"
     );
 }
 
