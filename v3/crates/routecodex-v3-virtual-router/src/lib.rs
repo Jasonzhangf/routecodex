@@ -234,6 +234,7 @@ impl V3VirtualRouter {
                 &classified.routing_group_id,
                 &group.pools,
                 &classified.facts,
+                None,
                 |pool_id, rule| {
                     !pool_has_route_signal(pool_id, rule)
                         && rule.models.iter().any(|model| model == client_model)
@@ -282,6 +283,7 @@ impl V3VirtualRouter {
                 &classified.routing_group_id,
                 &group.pools,
                 &classified.facts,
+                Some(candidate),
                 |pool_id, rule| pool_route_signal_matches(pool_id, rule, candidate),
             )? {
                 append_route_pool_tier(
@@ -305,6 +307,7 @@ impl V3VirtualRouter {
                 &classified.routing_group_id,
                 &group.pools,
                 &classified.facts,
+                Some(signal),
                 |pool_id, rule| pool_route_signal_matches(pool_id, rule, signal),
             )? {
                 append_route_pool_tier(
@@ -327,6 +330,7 @@ impl V3VirtualRouter {
                 &classified.routing_group_id,
                 &group.pools,
                 &classified.facts,
+                None,
                 |pool_id, rule| !pool_has_route_signal(pool_id, rule),
             )? {
                 append_route_pool_tier(
@@ -465,8 +469,8 @@ fn build_implicit_capability_pool_tier(
     let mut targets = Vec::new();
     for candidate in models {
         if let Some(client) = client_model {
-            let matches = candidate.model == client
-                || candidate.aliases.iter().any(|alias| alias == client);
+            let matches =
+                candidate.model == client || candidate.aliases.iter().any(|alias| alias == client);
             if !matches {
                 continue;
             }
@@ -492,9 +496,11 @@ fn build_implicit_capability_pool_tier(
     })
 }
 
-fn select_best_matching_pool<'a, F>(    group_id: &str,
+fn select_best_matching_pool<'a, F>(
+    group_id: &str,
     pools: &'a BTreeMap<String, V3RoutePoolManifest>,
     facts: &V3RouterRequestFacts,
+    route_signal: Option<&str>,
     mut candidate_matches: F,
 ) -> Result<Option<&'a V3RoutePoolManifest>, V3VirtualRouterError>
 where
@@ -507,7 +513,9 @@ where
                 return None;
             }
             let rule = pool.match_rule.as_ref()?;
-            (pool_matches(rule, facts) && candidate_matches(pool_id, rule)).then_some((
+        (pool_matches(rule, facts, route_signal)
+                && candidate_matches(pool_id, rule))
+                .then_some((
                 rule.precedence,
                 pool_id.as_str(),
                 pool,
@@ -619,7 +627,11 @@ fn resolve_v3_direct_model_plan(
     }))
 }
 
-fn pool_matches(rule: &V3RoutePoolMatchManifest, facts: &V3RouterRequestFacts) -> bool {
+fn pool_matches(
+    rule: &V3RoutePoolMatchManifest,
+    facts: &V3RouterRequestFacts,
+    route_signal: Option<&str>,
+) -> bool {
     rule.entry_protocol
         .as_ref()
         .is_none_or(|protocol| protocol == &facts.entry_protocol)
@@ -628,10 +640,13 @@ fn pool_matches(rule: &V3RoutePoolMatchManifest, facts: &V3RouterRequestFacts) -
                 .client_model
                 .as_ref()
                 .is_some_and(|model| rule.models.contains(model)))
-        && rule
-            .required_capabilities
-            .iter()
-            .all(|capability| facts.capabilities.contains(capability))
+        // The classifier already selected the request route. A route label
+        // repeated in required_capabilities is a pool selector, not a second
+        // request-capability gate (e.g. 7777 thinking/search/tools pools).
+        && rule.required_capabilities.iter().all(|capability| {
+            route_signal.is_some_and(|signal| signal == capability)
+                || facts.capabilities.contains(capability)
+        })
         && rule
             .min_input_tokens
             .is_none_or(|minimum| facts.input_tokens >= minimum)

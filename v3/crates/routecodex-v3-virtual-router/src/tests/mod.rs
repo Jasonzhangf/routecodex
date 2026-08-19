@@ -103,6 +103,54 @@ fn matching_facts() -> V3RouterRequestFacts {
     }
 }
 
+#[test]
+fn classified_route_hits_pool_without_reclassifying_as_capability() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .insert(
+            "thinking".into(),
+            V3RoutePoolManifest {
+                id: "thinking".into(),
+                selection: V3SelectionPolicy {
+                    strategy: V3SelectionStrategy::Priority,
+                },
+                match_rule: Some(V3RoutePoolMatchManifest {
+                    precedence: 2,
+                    entry_protocol: Some("responses".into()),
+                    models: Vec::new(),
+                    required_capabilities: vec!["thinking".into()],
+                    min_input_tokens: None,
+                    max_input_tokens: None,
+                }),
+                features: BTreeMap::new(),
+                targets: vec![target("thinking-target", 1, 1)],
+            },
+        );
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::from(["text".into(), "tools".into()]),
+                input_tokens: 1,
+                route_classification: test_route("thinking", &["thinking", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(plan.tiers[0].pool_id, "thinking");
+}
+
 fn test_route(route: &str, candidates: &[&str]) -> RouteClassification {
     RouteClassification {
         route_name: route.to_string(),
@@ -127,8 +175,11 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
             default_model: "model-x".into(),
             auth: V3ProviderAuthManifest {
                 auth_type: V3ProviderAuthType::ApiKey,
+                selection: V3SelectionPolicy::default(),
                 entries: vec![V3ProviderAuthEntryManifest {
                     alias: "key1".into(),
+                    priority: None,
+                    weight: None,
                     env: Some("PROV_KEY".into()),
                     token_file: None,
                     secret_file: None,
@@ -975,8 +1026,11 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
             default_model: "MiniMax-M3".into(),
             auth: V3ProviderAuthManifest {
                 auth_type: V3ProviderAuthType::ApiKey,
+                selection: V3SelectionPolicy::default(),
                 entries: vec![V3ProviderAuthEntryManifest {
                     alias: "key1".into(),
+                    priority: None,
+                    weight: None,
                     env: Some("MM_KEY".into()),
                     token_file: None,
                     secret_file: None,
@@ -990,11 +1044,7 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
                     id: "MiniMax-M3".into(),
                     wire_name: "MiniMax-M3".into(),
                     aliases: vec![],
-                    capabilities: vec![
-                        "text".into(),
-                        "multimodal".into(),
-                        "web_search".into(),
-                    ],
+                    capabilities: vec!["text".into(), "multimodal".into(), "web_search".into()],
                     web_search_execution_mode: V3WebSearchExecutionMode::None,
                     web_search_backend_binding: None,
                     supports_streaming: true,
@@ -1032,7 +1082,11 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    let tier_ids: Vec<&str> = plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect();
+    let tier_ids: Vec<&str> = plan
+        .tiers
+        .iter()
+        .map(|tier| tier.pool_id.as_str())
+        .collect();
     assert!(
         tier_ids.iter().any(|id| *id == "implicit:multimodal"),
         "implicit multimodal pool tier must exist when no explicit pool: {tier_ids:?}"
@@ -1080,7 +1134,11 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    let tier_ids: Vec<&str> = plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect();
+    let tier_ids: Vec<&str> = plan
+        .tiers
+        .iter()
+        .map(|tier| tier.pool_id.as_str())
+        .collect();
     let web_index = tier_ids
         .iter()
         .position(|id| *id == "implicit:web_search")
