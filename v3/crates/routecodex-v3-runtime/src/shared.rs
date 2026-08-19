@@ -626,10 +626,6 @@ fn observed_sse_client_stream_with_timeout(
             };
             match next {
                 Some(Ok(chunk)) => {
-                    // transport 帧活跃即保活：任何 provider 字节（含 keepalive/
-                    // 非语义帧）都刷新帧间隔 deadline，避免"活着但语义安静"
-                    // 的流被误杀；只有完全无字节的挂起流才超时。
-                    state.semantic_deadline = tokio::time::Instant::now() + frame_interval_timeout;
                     let result = observe_sse_remote_continuation_chunk(
                         &state.provider_id,
                         &chunk,
@@ -641,11 +637,11 @@ fn observed_sse_client_stream_with_timeout(
                     let result = match result {
                         Ok((terminal, semantic)) => {
                             state.terminal_observed |= terminal;
-                            if terminal {
-                                state.semantic_deadline =
-                                    tokio::time::Instant::now() + frame_interval_timeout;
-                            }
-                            if semantic && !terminal {
+                            // Only a provider semantic event advances the deadline.
+                            // Repeated keepalive/comment bytes must not keep a
+                            // semantically stalled stream alive forever; otherwise the
+                            // client can receive half a response and then wait silently.
+                            if semantic || terminal {
                                 state.semantic_deadline =
                                     tokio::time::Instant::now() + frame_interval_timeout;
                             }
@@ -1263,6 +1259,31 @@ mod tests {
             .await
             .expect("mid-stream stall must become an explicit error")
             .expect_err("mid-stream stall must not become silent EOF");
+        assert_eq!(error.code, "provider_response_sse_inter_event_timeout");
+    }
+
+    #[tokio::test]
+    async fn direct_sse_projection_does_not_keep_alive_on_comments_only() {
+        let mut stream = observed_sse_client_stream_with_timeout(
+            "provider".to_string(),
+            Box::pin(stream::unfold(0u8, |index| async move {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                Some((
+                    Ok::<Vec<u8>, V3ProviderError>(b": keepalive\n\n".to_vec()),
+                    index.wrapping_add(1),
+                ))
+            })),
+            V3SseRemoteContinuationObservationState::default(),
+            V3RuntimeStreamObservation::default(),
+            std::time::Duration::from_millis(20),
+        );
+        let error = loop {
+            match stream.next().await {
+                Some(Ok(_)) => continue,
+                Some(Err(error)) => break error,
+                None => panic!("comment-only provider stream must not end silently"),
+            }
+        };
         assert_eq!(error.code, "provider_response_sse_inter_event_timeout");
     }
 
