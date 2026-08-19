@@ -470,7 +470,7 @@
       "entry_symbols": [
         "build_binary",
         "consumer_package_version",
-        "run_binary_rustc"
+        "run_rustc"
       ],
       "entry_paths": [
         "crates/routecodex-v4-build-link/src/main.rs"

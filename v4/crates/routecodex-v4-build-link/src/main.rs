@@ -124,9 +124,13 @@ fn resolve_dependencies(
     Ok(resolutions)
 }
 
-fn run_rustc(args: &[String]) -> Result<(), ActiveLinkError> {
-    let output = Command::new("rustc")
-        .args(args)
+fn run_rustc(args: &[String], package_version: Option<&str>) -> Result<(), ActiveLinkError> {
+    let mut command = Command::new("rustc");
+    command.args(args);
+    if let Some(package_version) = package_version {
+        command.env("CARGO_PKG_VERSION", package_version);
+    }
+    let output = command
         .output()
         .map_err(|e| ActiveLinkError::LinkFailed(format!("spawn rustc: {e}")))?;
     if !output.status.success() {
@@ -159,22 +163,6 @@ fn consumer_package_version(root: &Path, consumer: &str) -> Result<String, Activ
                 manifest.display()
             ))
         })
-}
-
-fn run_binary_rustc(args: &[String], package_version: &str) -> Result<(), ActiveLinkError> {
-    let output = Command::new("rustc")
-        .args(args)
-        .env("CARGO_PKG_VERSION", package_version)
-        .output()
-        .map_err(|error| ActiveLinkError::LinkFailed(format!("spawn rustc: {error}")))?;
-    if !output.status.success() {
-        return Err(ActiveLinkError::LinkFailed(format!(
-            "rustc failed:\nstdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        )));
-    }
-    Ok(())
 }
 
 /// `-L dependency=<dir>` search arguments for every rlib in the closure.
@@ -413,7 +401,7 @@ fn build_consumer(
     rustc_args.extend(source_args.iter().cloned());
     rustc_args.push("-o".to_string());
     rustc_args.push(out.to_str().unwrap_or("").to_string());
-    run_rustc(&rustc_args)?;
+    run_rustc(&rustc_args, None)?;
     Ok(out)
 }
 
@@ -511,7 +499,7 @@ fn build_binary(
     rustc_args.extend(source_args.iter().cloned());
     rustc_args.push("-o".to_string());
     rustc_args.push(out_override.to_string_lossy().into_owned());
-    run_binary_rustc(&rustc_args, &package_version)
+    run_rustc(&rustc_args, Some(&package_version))
 }
 
 fn test_consumer(
@@ -579,7 +567,7 @@ fn test_consumer(
         rustc_args.extend(source_args.iter().cloned());
         rustc_args.push("-o".to_string());
         rustc_args.push(test_bin.to_str().unwrap_or("").to_string());
-        run_rustc(&rustc_args)?;
+        run_rustc(&rustc_args, None)?;
         let run = Command::new(&test_bin)
             // L2 consumer tests may read cwd-relative contracts (for example
             // routecodex-v4-runtime's skeleton-plan contract default path).
