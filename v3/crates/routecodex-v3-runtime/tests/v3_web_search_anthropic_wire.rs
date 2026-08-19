@@ -32,7 +32,7 @@ impl ResponsesTransport for WireCaptureTransport {
                 name: "content-type".to_string(),
                 value: b"application/json".to_vec(),
             }],
-            br#"{"id":"resp_hosted","type":"message","role":"assistant","model":"MiniMax-M3","content":[{"type":"text","text":"I searched."},{"type":"server_tool_use","id":"call_h1","name":"web_search","input":{"query":"routecodex"}},{"type":"web_search_tool_result","tool_use_id":"call_h1","content":[{"type":"web_search_result","title":"RouteCodex","url":"https://github.com/example/routecodex","page_age":"2026-07-07","content":"a routing gateway"}]}],"stop_reason":"tool_use"}"#
+            br#"{"id":"resp_hosted","type":"message","role":"assistant","model":"MiniMax-M3","content":[{"type":"text","text":"I searched."},{"type":"server_tool_use","id":"call_h1","name":"web_search","input":{"query":"routecodex"}},{"type":"web_search_tool_result","tool_use_id":"call_h1","content":[{"type":"web_search_result","title":"RouteCodex","url":"https://github.com/example/routecodex","page_age":"2026-07-07","content":"a routing gateway"}]}],"stop_reason":"end_turn"}"#
                 .to_vec(),
         ))
     }
