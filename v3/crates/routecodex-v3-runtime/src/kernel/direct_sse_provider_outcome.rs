@@ -66,8 +66,7 @@ impl V3DirectSseProviderOutcome {
                     message,
                 ));
             }
-            V3ProviderResponsesJsonFrameOutcome::Terminal
-            | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput => self.terminal = true,
+            V3ProviderResponsesJsonFrameOutcome::Terminal => self.terminal = true,
             V3ProviderResponsesJsonFrameOutcome::ContinueBuffering => {}
             V3ProviderResponsesJsonFrameOutcome::StartClientStream => {}
         }

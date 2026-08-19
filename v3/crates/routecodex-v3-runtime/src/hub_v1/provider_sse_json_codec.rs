@@ -8,7 +8,6 @@ pub(crate) enum V3ProviderResponsesJsonFrameOutcome {
     ContinueBuffering,
     StartClientStream,
     Terminal,
-    TerminalWithoutOutput,
     Failure { code: String, message: String },
 }
 
@@ -313,185 +312,41 @@ pub(crate) fn classify_v3_provider_responses_json_event(
     }
 
     if event_type == "response.completed" {
-        let output = event
-            .pointer("/response/output")
-            .or_else(|| event.get("output"))
-            .and_then(Value::as_array)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        let mut has_output = false;
-        for item in output {
-            has_output |= response_output_item_has_client_output(item)?;
-        }
-        return Ok(if has_output {
-            V3ProviderResponsesJsonFrameOutcome::Terminal
-        } else {
-            V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput
-        });
+        return Ok(V3ProviderResponsesJsonFrameOutcome::Terminal);
     }
-    if matches!(
-        event_type,
-        "response.output_item.added" | "response.output_item.done"
-    ) {
-        let item = event
-            .get("item")
-            .ok_or_else(|| format!("{event_type} requires an item object"))?;
-        return Ok(if response_output_item_has_client_output(item)? {
-            V3ProviderResponsesJsonFrameOutcome::StartClientStream
-        } else {
-            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
-        });
+    if matches!(event_type, "response.created" | "response.in_progress")
+        || is_empty_v3_provider_responses_output_item_added(event_type, event)
+    {
+        return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
     }
-    if matches!(
-        event_type,
-        "response.content_part.added" | "response.content_part.done"
-    ) {
-        let part = event
-            .get("part")
-            .ok_or_else(|| format!("{event_type} requires a part object"))?;
-        return Ok(if response_message_part_has_client_output(part)? {
-            V3ProviderResponsesJsonFrameOutcome::StartClientStream
-        } else {
-            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
-        });
-    }
-    if matches!(
-        event_type,
-        "response.output_text.delta"
-            | "response.output_text.done"
-            | "response.refusal.delta"
-            | "response.refusal.done"
-    ) {
-        let has_text = ["delta", "text", "refusal"].iter().any(|field| {
-            event
-                .get(*field)
-                .and_then(Value::as_str)
-                .is_some_and(|text| !text.trim().is_empty())
-        });
-        return Ok(if has_text {
-            V3ProviderResponsesJsonFrameOutcome::StartClientStream
-        } else {
-            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
-        });
-    }
-    Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
+    Ok(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
 }
 
-fn response_output_item_has_client_output(item: &Value) -> Result<bool, String> {
-    let Some(item) = item.as_object() else {
-        return Err("provider Responses output item must be an object".to_string());
+fn is_empty_v3_provider_responses_output_item_added(event_type: &str, event: &Value) -> bool {
+    if event_type != "response.output_item.added" {
+        return false;
+    }
+    let Some(item) = event.get("item").and_then(Value::as_object) else {
+        return false;
     };
+    if item.get("status").and_then(Value::as_str) != Some("in_progress") {
+        return false;
+    }
+    let content_is_empty = matches!(
+        item.get("content").and_then(Value::as_array),
+        Some(content) if content.is_empty()
+    );
     match item.get("type").and_then(Value::as_str) {
-        Some("message") => {
-            let content = item
-                .get("content")
-                .and_then(Value::as_array)
-                .ok_or_else(|| {
-                    "provider Responses message output requires content array".to_string()
-                })?;
-            let mut has_output = false;
-            for part in content {
-                has_output |= response_message_part_has_client_output(part)?;
-            }
-            Ok(has_output)
+        Some("message") => content_is_empty,
+        Some("reasoning") => {
+            content_is_empty
+                && matches!(
+                    item.get("summary").and_then(Value::as_array),
+                    Some(summary) if summary.is_empty()
+                )
         }
-        Some("reasoning") => Ok(false),
-        Some("function_call") => {
-            require_non_empty_output_string(item, "function_call", "call_id")?;
-            require_non_empty_output_string(item, "function_call", "name")?;
-            require_output_string(item, "function_call", "arguments")?;
-            Ok(true)
-        }
-        Some("custom_tool_call") => {
-            require_non_empty_output_string(item, "custom_tool_call", "call_id")?;
-            require_non_empty_output_string(item, "custom_tool_call", "name")?;
-            require_output_string(item, "custom_tool_call", "input")?;
-            Ok(true)
-        }
-        Some("tool_search_call") => {
-            require_non_empty_output_string(item, "tool_search_call", "call_id")?;
-            if !item.get("arguments").is_some_and(Value::is_object) {
-                return Err(
-                    "provider Responses tool_search_call output requires arguments object"
-                        .to_string(),
-                );
-            }
-            Ok(true)
-        }
-        Some("web_search_call") => {
-            if !["id", "call_id"].iter().any(|field| {
-                item.get(*field)
-                    .and_then(Value::as_str)
-                    .is_some_and(|value| !value.trim().is_empty())
-            }) {
-                return Err(
-                    "provider Responses web_search_call output requires id or call_id".to_string(),
-                );
-            }
-            require_non_empty_output_string(item, "web_search_call", "status")?;
-            Ok(true)
-        }
-        Some(output_type) => Err(format!(
-            "provider Responses output item type {output_type:?} is not registered"
-        )),
-        None => Err("provider Responses output item requires a non-empty type".to_string()),
+        _ => false,
     }
-}
-
-fn response_message_part_has_client_output(part: &Value) -> Result<bool, String> {
-    if let Some(text) = part.as_str() {
-        return Ok(!text.trim().is_empty());
-    }
-    let part = part
-        .as_object()
-        .ok_or_else(|| "provider Responses message content part must be an object".to_string())?;
-    let part_type = part
-        .get("type")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "provider Responses message content part requires type".to_string())?;
-    let field = match part_type {
-        "output_text" => "text",
-        "refusal" => "refusal",
-        "output_audio" => "transcript",
-        other => {
-            return Err(format!(
-                "provider Responses message content part type {other:?} is not registered"
-            ))
-        }
-    };
-    let text = part.get(field).and_then(Value::as_str).ok_or_else(|| {
-        format!("provider Responses {part_type} content part requires string field {field}")
-    })?;
-    Ok(!text.trim().is_empty())
-}
-
-fn require_non_empty_output_string(
-    item: &serde_json::Map<String, Value>,
-    output_type: &str,
-    field: &str,
-) -> Result<(), String> {
-    let value = item
-        .get(field)
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            format!("provider Responses {output_type} output requires non-empty {field}")
-        })?;
-    let _ = value;
-    Ok(())
-}
-
-fn require_output_string(
-    item: &serde_json::Map<String, Value>,
-    output_type: &str,
-    field: &str,
-) -> Result<(), String> {
-    if item.get(field).and_then(Value::as_str).is_none() {
-        return Err(format!(
-            "provider Responses {output_type} output requires string field {field}"
-        ));
-    }
-    Ok(())
 }
 
 pub(crate) fn record_v3_provider_sse_json_frame(
@@ -522,44 +377,11 @@ mod provider_sse_json_codec_tests {
     use super::*;
 
     #[test]
-    fn empty_completed_terminal_has_no_precommit_output_authority() {
+    fn json_type_is_the_only_semantic_source() {
         let outcome = classify_v3_provider_responses_json_data(
             r#"{"type":"response.completed","response":{"id":"resp_1"}}"#,
         )
         .expect("JSON type must classify terminal data");
-        assert_eq!(
-            outcome,
-            Some(V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput)
-        );
-    }
-
-    #[test]
-    fn completed_terminal_with_output_can_authorize_client_commit() {
-        let outcome = classify_v3_provider_responses_json_data(
-            r#"{"type":"response.completed","response":{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}}"#,
-        )
-        .expect("completed response output must classify");
-        assert_eq!(outcome, Some(V3ProviderResponsesJsonFrameOutcome::Terminal));
-    }
-
-    #[test]
-    fn completed_terminal_with_structurally_empty_message_has_no_output_authority() {
-        let outcome = classify_v3_provider_responses_json_data(
-            r#"{"type":"response.completed","response":{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":""}]}]}}"#,
-        )
-        .expect("structurally empty completed response must classify");
-        assert_eq!(
-            outcome,
-            Some(V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput)
-        );
-    }
-
-    #[test]
-    fn completed_terminal_with_tool_call_can_authorize_client_commit() {
-        let outcome = classify_v3_provider_responses_json_data(
-            r#"{"type":"response.completed","response":{"id":"resp_1","output":[{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}]}}"#,
-        )
-        .expect("completed response tool call must classify");
         assert_eq!(outcome, Some(V3ProviderResponsesJsonFrameOutcome::Terminal));
     }
 
@@ -584,29 +406,13 @@ mod provider_sse_json_codec_tests {
     fn empty_output_item_lifecycle_frames_do_not_authorize_client_commit() {
         for data in [
             r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"message","status":"in_progress","content":[]}}"#,
-            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"message","status":"in_progress","content":[{"type":"output_text","text":""}]}}"#,
             r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","status":"in_progress","content":[],"summary":[]}}"#,
-            r#"{"type":"response.content_part.added","output_index":0,"item_id":"msg_1","content_index":0,"part":{"type":"output_text","text":""}}"#,
         ] {
             assert_eq!(
                 classify_v3_provider_generic_sse_json_data(data)
                     .expect("empty lifecycle frame must classify"),
                 Some(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering),
                 "empty output item must remain precommit: {data}"
-            );
-        }
-    }
-
-    #[test]
-    fn completed_terminal_rejects_unknown_or_malformed_output_items() {
-        for data in [
-            r#"{"type":"response.completed","response":{"output":[{"type":"unknown"}]}}"#,
-            r#"{"type":"response.completed","response":{"output":[{"type":"function_call","call_id":"call_1","arguments":"{}"}]}}"#,
-            r#"{"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"unknown","text":"x"}]}]}}"#,
-        ] {
-            assert!(
-                classify_v3_provider_generic_sse_json_data(data).is_err(),
-                "unknown or malformed output must fail codec classification: {data}"
             );
         }
     }
