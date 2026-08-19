@@ -1939,13 +1939,18 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/tests/responses_relay_stopless_anthropic_provider_wire_integration.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/protocol_tables.rs
+  - v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json
   - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
   design:
   - docs/goals/v3-protocol-conversion-field-parity-test-design.md
   - docs/goals/v3-responses-malformed-input-error-origin-test-design.md
   - docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md
+  - docs/goals/v3-anthropic-protocol-matrix-projection-completion-plan.md
   - docs/architecture/reviews/v3-protocol-semantic-matrix-review.md
   - docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml
   - docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html
@@ -2010,6 +2015,9 @@ features:
     fail explicitly instead of flattening block-local cache semantics.
   - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content
     before Stopless governance.
+  - Anthropic final stop_reason uses one closed terminal projector shared by JSON and SSE materialization. end_turn, tool_use, max_tokens, stop_sequence, pause_turn, and refusal retain their registered status/details; model_context_window_exceeded and malformed/unknown terminal values fail explicitly instead of becoming completed.
+  - Responses tool-result status is the only source for Anthropic tool_result.is_error. Absent/completed remain success, incomplete becomes is_error=true, and nonterminal/malformed/unknown values fail before provider wire without text, HTTP, provider, or MetadataCenter inference.
+  - Anthropic response content blocks use the registered closed enum. Exact/compatible blocks preserve order and identity; source-roundtrip-only, unsupported, missing, and unknown blocks fail with the exact response.content[index].type diagnostic and are never silently dropped or textified.
   - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use,
     usage, stop_reason, and rejects malformed function arguments.
   - Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect.
@@ -2041,6 +2049,16 @@ features:
   - responses_supported_verbosity_is_registered_local_style_hint_for_anthropic
   - anthropic_wire_consumes_reasoning_summary_policy_as_local_response_hint
   - anthropic_projection_context_consumes_reasoning_summary_policy_for_response_shape
+  - anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix
+  - anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_values
+  - anthropic_model_context_window_stop_is_explicitly_unsupported_for_responses
+  - responses_tool_result_status_projects_only_registered_anthropic_is_error_semantic
+  - responses_tool_result_status_rejects_nonterminal_or_unknown_values
+  - anthropic_response_content_block_enum_is_closed_and_diagnostic
+  - anthropic_web_search_result_requires_exact_pairing
+  - anthropic_json_and_sse_materialization_share_terminal_projection_owner
+  - anthropic_json_and_sse_reject_unknown_terminal_without_success_projection
+  - responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details
   - openai_chat_wire_rejects_invalid_reasoning_summary_policy
   - Live V3 0.90.4017 request `openai-responses-router-gpt-5.5-20260801T215453223-700406-1956`
     entered on 5520, targeted `modrouter_anthropic[key2].claude-fable-5`, and returned

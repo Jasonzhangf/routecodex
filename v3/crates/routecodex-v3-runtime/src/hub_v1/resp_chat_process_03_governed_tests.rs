@@ -4,6 +4,38 @@
 use super::*;
 
 #[test]
+fn responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details() {
+    for reason in ["max_output_tokens", "content_filter"] {
+        let governance = build_v3_responses_resp03_protocol_governance(&json!({
+            "status":"incomplete",
+            "incomplete_details":{"reason":reason},
+            "output":[]
+        }))
+        .expect("registered Responses incomplete reason must remain a terminal response");
+        assert_eq!(
+            governance.status_terminality,
+            V3HubResponseTerminality::Terminal
+        );
+    }
+
+    for payload in [
+        json!({"status":"incomplete","output":[]}),
+        json!({"status":"incomplete","incomplete_details":{"reason":"internal_error"},"output":[]}),
+    ] {
+        let error = match build_v3_responses_resp03_protocol_governance(&payload) {
+            Ok(_) => {
+                panic!("malformed Responses incomplete details must fail at typed terminal owner")
+            }
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            V3HubRelayResponseError::InvalidIncompleteDetails { .. }
+        ));
+    }
+}
+
+#[test]
 fn resp03_recursive_strips_codex_ciphers_but_keeps_anthropic_signature() {
     // recursive 层按值前缀区分：Codex 密文（rsn_ / gAAAA 开头）丢弃（客户端
     // 透明无感知）；anthropic 链的 thinking signature 载体（redacted_thinking.data

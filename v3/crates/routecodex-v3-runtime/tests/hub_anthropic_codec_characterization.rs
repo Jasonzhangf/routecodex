@@ -6,6 +6,7 @@ use routecodex_v3_runtime::{
     collect_v3_anthropic_request_shape_branch_semantics,
     encode_v3_anthropic_request_as_responses_semantic,
     encode_v3_responses_semantic_as_anthropic_request,
+    encode_v3_responses_semantic_as_anthropic_request_for_target,
     project_v3_anthropic_message_as_responses_response,
     project_v3_anthropic_message_as_responses_response_with_context,
     V3AnthropicChatShapeBranchSemantic, V3AnthropicCodecError, V3AnthropicCodecStage,
@@ -218,7 +219,9 @@ fn multi_turn_tool_history_with_current_image_projects_full_anthropic_wire_shape
     }))
     .expect("multi-turn tool history with image must project to Anthropic wire");
 
-    let messages = provider_request["messages"].as_array().expect("messages array");
+    let messages = provider_request["messages"]
+        .as_array()
+        .expect("messages array");
     assert_eq!(messages.len(), 6, "6 条输入 → 6 条 anthropic 消息（1:1）");
 
     // assistant 带 tool_use
@@ -230,7 +233,10 @@ fn multi_turn_tool_history_with_current_image_projects_full_anthropic_wire_shape
     );
     // reasoning_content 不得泄漏
     assert!(
-        serde_json::to_string(assistant).unwrap().contains("reasoning_content") == false,
+        serde_json::to_string(assistant)
+            .unwrap()
+            .contains("reasoning_content")
+            == false,
         "reasoning_content must not leak into Anthropic wire"
     );
 
@@ -550,6 +556,24 @@ fn responses_reasoning_summary_policy_enables_native_thinking_without_effort() {
     assert!(!serde_json::to_string(&wire)
         .unwrap()
         .contains("reasoning_summary_policy"));
+}
+
+#[test]
+fn responses_reasoning_is_not_emitted_to_anthropic_target_without_thinking_capability() {
+    let wire = encode_v3_responses_semantic_as_anthropic_request_for_target(
+        json!({
+            "model":"glm-5.2",
+            "reasoning_effort":"high",
+            "reasoning_summary_policy":"detailed",
+            "messages":[{"role":"user","content":"do not send unsupported thinking"}]
+        }),
+        false,
+    )
+    .expect("valid Responses reasoning fields must still normalize for a non-thinking target");
+
+    assert!(wire.get("thinking").is_none(), "{wire}");
+    assert!(wire.get("output_config").is_none(), "{wire}");
+    assert!(wire.get("reasoning_summary_policy").is_none(), "{wire}");
 }
 
 #[test]
@@ -2322,4 +2346,299 @@ fn anthropic_rejects_unmapped_responses_text_format_nested_fields() {
     let error = encode_v3_responses_semantic_as_anthropic_request(malformed_strict)
         .expect_err("malformed strict must fail before dropping structured-output semantics");
     assert!(error.to_string().contains("format.strict"), "{error}");
+}
+
+#[test]
+fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
+    let cases = [
+        (
+            json!({
+                "id":"msg_end_turn",
+                "role":"assistant",
+                "content":[{"type":"text","text":"done"}],
+                "stop_reason":"end_turn"
+            }),
+            "completed",
+            "end_turn",
+            None,
+        ),
+        (
+            json!({
+                "id":"msg_tool_use",
+                "role":"assistant",
+                "content":[{"type":"tool_use","id":"call_terminal","name":"lookup","input":{"q":"x"}}],
+                "stop_reason":"tool_use"
+            }),
+            "requires_action",
+            "tool_use",
+            None,
+        ),
+        (
+            json!({
+                "id":"msg_max_tokens",
+                "role":"assistant",
+                "content":[{"type":"text","text":"partial"}],
+                "stop_reason":"max_tokens"
+            }),
+            "incomplete",
+            "max_tokens",
+            Some("max_output_tokens"),
+        ),
+        (
+            json!({
+                "id":"msg_stop_sequence",
+                "role":"assistant",
+                "content":[{"type":"text","text":"matched"}],
+                "stop_reason":"stop_sequence",
+                "stop_sequence":"</answer>"
+            }),
+            "completed",
+            "stop_sequence",
+            None,
+        ),
+        (
+            json!({
+                "id":"msg_pause_turn",
+                "role":"assistant",
+                "content":[{"type":"text","text":"resume this turn"}],
+                "stop_reason":"pause_turn"
+            }),
+            "in_progress",
+            "pause_turn",
+            None,
+        ),
+        (
+            json!({
+                "id":"msg_refusal",
+                "role":"assistant",
+                "content":[{"type":"text","text":"I cannot help with that."}],
+                "stop_reason":"refusal",
+                "stop_details":{"category":"cyber","explanation":"policy"}
+            }),
+            "incomplete",
+            "refusal",
+            Some("content_filter"),
+        ),
+    ];
+
+    for (payload, expected_status, expected_finish_reason, expected_incomplete_reason) in cases {
+        let response = project_v3_anthropic_message_as_responses_response(&payload)
+            .unwrap_or_else(|error| panic!("registered terminal value must project: {error}"));
+        assert_eq!(response["status"], expected_status, "{response}");
+        assert_eq!(
+            response["finish_reason"], expected_finish_reason,
+            "{response}"
+        );
+        match expected_incomplete_reason {
+            Some(reason) => assert_eq!(response["incomplete_details"]["reason"], reason),
+            None => assert!(response.get("incomplete_details").is_none(), "{response}"),
+        }
+        if expected_finish_reason == "stop_sequence" {
+            assert_eq!(response["stop_sequence"], "</answer>", "{response}");
+        }
+        if expected_finish_reason == "refusal" {
+            assert_eq!(response["stop_details"]["category"], "cyber", "{response}");
+        }
+    }
+}
+
+#[test]
+fn anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_values() {
+    let malformed = [
+        json!({
+            "id":"msg_missing_stop",
+            "role":"assistant",
+            "content":[{"type":"text","text":"missing"}]
+        }),
+        json!({
+            "id":"msg_null_stop",
+            "role":"assistant",
+            "content":[{"type":"text","text":"null"}],
+            "stop_reason":null
+        }),
+        json!({
+            "id":"msg_unknown_stop",
+            "role":"assistant",
+            "content":[{"type":"text","text":"unknown"}],
+            "stop_reason":"future_reason"
+        }),
+        json!({
+            "id":"msg_non_string_stop",
+            "role":"assistant",
+            "content":[{"type":"text","text":"malformed"}],
+            "stop_reason":42
+        }),
+        json!({
+            "id":"msg_missing_sequence",
+            "role":"assistant",
+            "content":[{"type":"text","text":"sequence"}],
+            "stop_reason":"stop_sequence"
+        }),
+        json!({
+            "id":"msg_contradictory_sequence",
+            "role":"assistant",
+            "content":[{"type":"text","text":"done"}],
+            "stop_reason":"end_turn",
+            "stop_sequence":"unexpected"
+        }),
+        json!({
+            "id":"msg_malformed_details",
+            "role":"assistant",
+            "content":[{"type":"text","text":"refusal"}],
+            "stop_reason":"refusal",
+            "stop_details":"not-an-object"
+        }),
+    ];
+
+    for payload in malformed {
+        let error = project_v3_anthropic_message_as_responses_response(&payload)
+            .expect_err("malformed terminal truth must fail at the Anthropic codec owner");
+        assert!(
+            error.to_string().contains("stop_reason")
+                || error.to_string().contains("stop_sequence")
+                || error.to_string().contains("stop_details"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn anthropic_model_context_window_stop_is_explicitly_unsupported_for_responses() {
+    let error = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_context_window",
+        "role":"assistant",
+        "content":[{"type":"text","text":"partial"}],
+        "stop_reason":"model_context_window_exceeded"
+    }))
+    .expect_err("Responses has no exact incomplete reason for Anthropic input-context exhaustion");
+
+    assert!(
+        error.to_string().contains("model_context_window_exceeded"),
+        "{error}"
+    );
+}
+
+#[test]
+fn responses_tool_result_status_projects_only_registered_anthropic_is_error_semantic() {
+    let incomplete = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"run"}]},
+            {"type":"function_call","call_id":"call_error","name":"exec_command","arguments":"{\"cmd\":\"false\"}"},
+            {"type":"function_call_output","call_id":"call_error","status":"incomplete","output":"command failed"}
+        ]
+    }))
+    .expect("registered incomplete tool result must project to Anthropic");
+    assert_eq!(
+        incomplete["messages"][2]["content"][0]["is_error"], true,
+        "{incomplete}"
+    );
+
+    for status in [None, Some("completed")] {
+        let mut output = json!({
+            "type":"function_call_output",
+            "call_id":"call_success",
+            "output":"ok"
+        });
+        if let Some(status) = status {
+            output["status"] = json!(status);
+        }
+        let success = encode_v3_responses_semantic_as_anthropic_request(json!({
+            "model":"MiniMax-M3",
+            "input":[
+                {"type":"function_call","call_id":"call_success","name":"exec_command","arguments":"{\"cmd\":\"true\"}"},
+                output
+            ]
+        }))
+        .expect("registered successful tool result must project to Anthropic");
+        assert!(
+            success["messages"][1]["content"][0]
+                .get("is_error")
+                .is_none(),
+            "{success}"
+        );
+    }
+}
+
+#[test]
+fn responses_tool_result_status_rejects_nonterminal_or_unknown_values() {
+    for status in [
+        json!("in_progress"),
+        json!("future_status"),
+        json!(null),
+        json!(7),
+    ] {
+        let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+            "model":"MiniMax-M3",
+            "input":[
+                {"type":"function_call","call_id":"call_invalid","name":"exec_command","arguments":"{}"},
+                {"type":"function_call_output","call_id":"call_invalid","status":status,"output":"not terminal"}
+            ]
+        }))
+        .expect_err("unregistered or nonterminal tool result status must fail before Anthropic wire");
+        assert!(
+            error.to_string().contains("function_call_output.status"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn anthropic_response_content_block_enum_is_closed_and_diagnostic() {
+    for content_type in [
+        "web_fetch_tool_result",
+        "code_execution_tool_result",
+        "bash_code_execution_tool_result",
+        "text_editor_code_execution_tool_result",
+        "tool_search_tool_result",
+        "container_upload",
+        "future_content_block",
+    ] {
+        let error = project_v3_anthropic_message_as_responses_response(&json!({
+            "id":"msg_unsupported_content",
+            "role":"assistant",
+            "content":[{"type":content_type}],
+            "stop_reason":"end_turn"
+        }))
+        .expect_err("source-roundtrip-only or unknown content must fail in cross-protocol Relay");
+        let diagnostic = error.to_string();
+        assert!(
+            diagnostic.contains("response.content[0].type"),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains(content_type), "{diagnostic}");
+    }
+
+    let missing = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_missing_content_type",
+        "role":"assistant",
+        "content":[{}],
+        "stop_reason":"end_turn"
+    }))
+    .expect_err("missing content type must be distinct and explicit");
+    assert!(
+        missing.to_string().contains("response.content[0].type"),
+        "{missing}"
+    );
+}
+
+#[test]
+fn anthropic_web_search_result_requires_exact_pairing() {
+    let error = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_unpaired_search_result",
+        "role":"assistant",
+        "content":[{
+            "type":"web_search_tool_result",
+            "tool_use_id":"srvtoolu_missing",
+            "content":[]
+        }],
+        "stop_reason":"end_turn"
+    }))
+    .expect_err("unpaired hosted search result must not be silently stripped");
+
+    assert!(
+        error.to_string().contains("web_search_tool_result")
+            && error.to_string().contains("srvtoolu_missing"),
+        "{error}"
+    );
 }

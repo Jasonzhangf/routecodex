@@ -5,7 +5,7 @@ use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode,
     build_v3_openai_responses_standard_request_from_chat_canonical,
-    encode_v3_responses_semantic_as_anthropic_request, provider_protocol_compat_id,
+    encode_v3_responses_semantic_as_anthropic_request_for_target, provider_protocol_compat_id,
     V3HubOpaquePayload, V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic,
     V3ProviderCompatError, V3ProviderCompatProfileId,
 };
@@ -150,8 +150,14 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
                 input.provider_semantic_payload(),
                 input.entry_protocol(),
             )?;
-            encode_v3_responses_semantic_as_anthropic_request(source)
-                .map_err(|error| error.to_string())?
+            encode_v3_responses_semantic_as_anthropic_request_for_target(
+                source,
+                selected
+                    .model_capabilities
+                    .iter()
+                    .any(|capability| capability == "reasoning" || capability == "thinking"),
+            )
+            .map_err(|error| error.to_string())?
         }
         V3HubProviderWireProtocol::Gemini => project_outbound_payload_for_target_protocol(
             input.provider_semantic_payload(),
@@ -328,6 +334,36 @@ mod tests {
             req_compat.provider_semantic_payload()["messages"][0]["role"],
             "user"
         );
+    }
+
+    #[test]
+    fn anthropic_provider_without_reasoning_capability_does_not_receive_thinking() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "reasoning_effort": "high",
+                "reasoning_summary_policy": "detailed",
+                "messages": [{"role":"user","content":"hello"}],
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("Anthropic wire normalization must succeed without unsupported thinking");
+
+        assert!(req_compat
+            .provider_semantic_payload()
+            .get("thinking")
+            .is_none());
+        assert!(req_compat
+            .provider_semantic_payload()
+            .get("output_config")
+            .is_none());
+        assert!(req_compat
+            .provider_semantic_payload()
+            .get("reasoning_summary_policy")
+            .is_none());
     }
 
     #[test]

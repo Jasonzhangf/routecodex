@@ -12,12 +12,13 @@ use super::anthropic_request_field_projection::{
     validate_responses_cache_and_store_for_anthropic,
 };
 use super::client_metadata_projection::unsupported_client_metadata_paths;
-use std::collections::HashSet;
-use std::sync::OnceLock;
+use crate::protocol_tables::{map_value as table_map_value, V3TableDirection, V3TableKind};
+use std::collections::{BTreeMap, HashSet};
 
 mod message_encoding;
 mod projection_context;
 mod responses_to_anthropic;
+mod validation;
 use message_encoding::non_empty_string;
 pub use projection_context::V3AnthropicResponsesProjectionContext;
 use responses_to_anthropic::{
@@ -29,6 +30,7 @@ pub(crate) use responses_to_anthropic::{
     project_v3_responses_reasoning_item_as_anthropic_content,
     responses_web_search_tool_as_anthropic_tool,
 };
+use validation::*;
 
 const CLAUDE_CODE_SYSTEM_PROMPT_MD: &str = include_str!("claude_code_system_prompt.md");
 const ANTHROPIC_REQUEST_EXTENSION: &str = "anthropic_request";
@@ -111,8 +113,123 @@ pub enum V3AnthropicCodecError {
     MalformedProviderError,
     #[error("Anthropic codec malformed {field}")]
     MalformedField { field: &'static str },
+    #[error("Anthropic terminal field {field} is invalid: {reason}")]
+    InvalidTerminalField { field: &'static str, reason: String },
+    #[error("Anthropic stop_reason '{stop_reason}' is unsupported for Responses projection")]
+    UnsupportedStopReason { stop_reason: String },
+    #[error("Anthropic provider response.content[{index}].type is missing or malformed")]
+    MalformedResponseContentBlockType { index: usize },
+    #[error("Anthropic provider response.content[{index}].type '{content_type}' is unknown")]
+    UnknownResponseContentBlock { index: usize, content_type: String },
+    #[error("Anthropic provider response.content[{index}].type '{content_type}' is source-roundtrip-only and unsupported for Responses Relay")]
+    UnsupportedResponseContentBlock { index: usize, content_type: String },
+    #[error(
+        "Anthropic provider response.content[{index}].type '{content_type}' is malformed: {reason}"
+    )]
+    MalformedResponseContentBlock {
+        index: usize,
+        content_type: String,
+        reason: String,
+    },
+    #[error("Anthropic provider response.content[{index}].type 'server_tool_use' name '{name}' is unsupported for Responses Relay")]
+    UnsupportedServerToolUse { index: usize, name: String },
+    #[error("Anthropic provider response.content[{index}].type 'web_search_tool_result' tool_use_id '{tool_use_id}' has no matching server_tool_use")]
+    UnpairedWebSearchToolResult { index: usize, tool_use_id: String },
     #[error("UnmappedOutboundFields target_protocol=anthropic paths={paths}")]
     UnmappedOutboundFields { paths: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V3AnthropicResponseContentBlockKind {
+    Text,
+    Thinking,
+    RedactedThinking,
+    ToolUse,
+    ServerToolUse,
+    WebSearchToolResult,
+    WebFetchToolResult,
+    CodeExecutionToolResult,
+    BashCodeExecutionToolResult,
+    TextEditorCodeExecutionToolResult,
+    ToolSearchToolResult,
+    ContainerUpload,
+}
+
+impl V3AnthropicResponseContentBlockKind {
+    fn parse(part: &Value, index: usize) -> Result<Self, V3AnthropicCodecError> {
+        let content_type = part
+            .get("type")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(V3AnthropicCodecError::MalformedResponseContentBlockType { index })?;
+        match content_type {
+            "text" => Ok(Self::Text),
+            "thinking" => Ok(Self::Thinking),
+            "redacted_thinking" => Ok(Self::RedactedThinking),
+            "tool_use" => Ok(Self::ToolUse),
+            "server_tool_use" => Ok(Self::ServerToolUse),
+            "web_search_tool_result" => Ok(Self::WebSearchToolResult),
+            "web_fetch_tool_result" => Ok(Self::WebFetchToolResult),
+            "code_execution_tool_result" => Ok(Self::CodeExecutionToolResult),
+            "bash_code_execution_tool_result" => Ok(Self::BashCodeExecutionToolResult),
+            "text_editor_code_execution_tool_result" => Ok(Self::TextEditorCodeExecutionToolResult),
+            "tool_search_tool_result" => Ok(Self::ToolSearchToolResult),
+            "container_upload" => Ok(Self::ContainerUpload),
+            other => Err(V3AnthropicCodecError::UnknownResponseContentBlock {
+                index,
+                content_type: other.to_string(),
+            }),
+        }
+    }
+
+    fn source_type(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Thinking => "thinking",
+            Self::RedactedThinking => "redacted_thinking",
+            Self::ToolUse => "tool_use",
+            Self::ServerToolUse => "server_tool_use",
+            Self::WebSearchToolResult => "web_search_tool_result",
+            Self::WebFetchToolResult => "web_fetch_tool_result",
+            Self::CodeExecutionToolResult => "code_execution_tool_result",
+            Self::BashCodeExecutionToolResult => "bash_code_execution_tool_result",
+            Self::TextEditorCodeExecutionToolResult => "text_editor_code_execution_tool_result",
+            Self::ToolSearchToolResult => "tool_search_tool_result",
+            Self::ContainerUpload => "container_upload",
+        }
+    }
+
+    fn is_source_roundtrip_only(self) -> bool {
+        matches!(
+            self,
+            Self::WebFetchToolResult
+                | Self::CodeExecutionToolResult
+                | Self::BashCodeExecutionToolResult
+                | Self::TextEditorCodeExecutionToolResult
+                | Self::ToolSearchToolResult
+                | Self::ContainerUpload
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V3AnthropicTerminalKind {
+    EndTurn,
+    ToolUse,
+    MaxTokens,
+    StopSequence,
+    PauseTurn,
+    Refusal,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct V3AnthropicResponsesTerminalProjection {
+    kind: V3AnthropicTerminalKind,
+    source_stop_reason: String,
+    responses_status: &'static str,
+    incomplete_reason: Option<&'static str>,
+    stop_sequence: Option<String>,
+    stop_details: Option<Value>,
 }
 
 pub fn validate_v3_anthropic_client_input_payload(
@@ -387,9 +504,15 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
 pub fn encode_v3_responses_semantic_as_anthropic_request(
     input: Value,
 ) -> Result<Value, V3AnthropicCodecError> {
+    encode_v3_responses_semantic_as_anthropic_request_for_target(input, true)
+}
+
+pub fn encode_v3_responses_semantic_as_anthropic_request_for_target(
+    input: Value,
+    supports_thinking: bool,
+) -> Result<Value, V3AnthropicCodecError> {
     reject_side_channel_fields(&input)?;
-    let mut input = input;
-    strip_unmapped_responses_reasoning_extensions(&mut input);
+    reject_unmapped_responses_reasoning_extensions(&input)?;
     let object = input
         .as_object()
         .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
@@ -441,7 +564,9 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
         );
     }
     if let Some(thinking) = responses_reasoning_fields_as_anthropic_thinking(object)? {
-        output.insert("thinking".to_string(), thinking);
+        if supports_thinking {
+            output.insert("thinking".to_string(), thinking);
+        }
     }
     for key in ANTHROPIC_ENTRY_PASSTHROUGH_EXTENSION_KEYS {
         if let Some(value) = object.get(*key) {
@@ -450,7 +575,11 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
     }
     project_responses_text_as_anthropic_output_config(&mut output, responses_request_extension)?;
     validate_responses_cache_and_store_for_anthropic(responses_request_extension)?;
-    project_chat_reasoning_effort_as_anthropic_output_config(&mut output, object)?;
+    let mut reasoning_output_config = Map::new();
+    project_chat_reasoning_effort_as_anthropic_output_config(&mut reasoning_output_config, object)?;
+    if supports_thinking {
+        output.extend(reasoning_output_config);
+    }
     for key in ["temperature", "top_p", "top_k"] {
         if let Some(value) = object.get(key) {
             output.insert(key.to_string(), value.to_owned());
@@ -479,60 +608,6 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
         ),
     );
     Ok(Value::Object(output))
-}
-
-fn claude_code_system_prompt_for_model(model: &str) -> Option<Value> {
-    if !model.trim().starts_with("claude-") {
-        return None;
-    }
-    Some(Value::Array(claude_code_system_prompt_blocks().to_vec()))
-}
-
-fn claude_code_system_prompt_blocks() -> &'static [Value] {
-    static BLOCKS: OnceLock<Vec<Value>> = OnceLock::new();
-    BLOCKS
-        .get_or_init(|| {
-            parse_claude_code_system_prompt_blocks(CLAUDE_CODE_SYSTEM_PROMPT_MD)
-                .expect("Claude Code Anthropic system prompt markdown must parse")
-        })
-        .as_slice()
-}
-
-fn parse_claude_code_system_prompt_blocks(content: &str) -> Result<Vec<Value>, String> {
-    let mut blocks = Vec::new();
-    let mut lines = content.lines();
-    while let Some(line) = lines.next() {
-        let marker = line.trim();
-        let Some(marker_tail) = marker.strip_prefix("<!-- routecodex-system-block:") else {
-            continue;
-        };
-        if !marker_tail.ends_with("-->") {
-            return Err("system block marker is unterminated".to_string());
-        }
-        let cache_control_ephemeral = marker_tail.contains("cache_control=ephemeral");
-        let mut text_lines = Vec::new();
-        loop {
-            let Some(next_line) = lines.next() else {
-                return Err("system block is missing closing marker".to_string());
-            };
-            if next_line.trim() == "<!-- /routecodex-system-block -->" {
-                break;
-            }
-            text_lines.push(next_line);
-        }
-        let text = text_lines.join("\n");
-        let mut entry = Map::new();
-        entry.insert("type".to_string(), Value::String("text".to_string()));
-        entry.insert("text".to_string(), Value::String(text));
-        if cache_control_ephemeral {
-            entry.insert("cache_control".to_string(), json!({"type":"ephemeral"}));
-        }
-        blocks.push(Value::Object(entry));
-    }
-    if blocks.is_empty() {
-        return Err("no routecodex-system-block entries found".to_string());
-    }
-    Ok(blocks)
 }
 
 fn responses_request_chat_extension(
@@ -694,29 +769,28 @@ fn responses_reasoning_fields_as_anthropic_thinking(
     Ok(Some(Value::Object(thinking)))
 }
 
-fn strip_unmapped_responses_reasoning_extensions(input: &mut Value) {
+fn reject_unmapped_responses_reasoning_extensions(
+    input: &Value,
+) -> Result<(), V3AnthropicCodecError> {
     const RESPONSES_ONLY_REASONING_KEYS: &[&str] = &[
         "reasoning_context_policy",
         "reasoning_mode",
         "reasoning_include_thoughts",
     ];
-    let Some(object) = input.as_object_mut() else {
-        return;
+    let Some(object) = input.as_object() else {
+        return Ok(());
     };
-    let mut stripped = Vec::new();
-    for key in RESPONSES_ONLY_REASONING_KEYS {
-        if object.remove(*key).is_some() {
-            stripped.push((*key).to_string());
-        }
-    }
-    if !stripped.is_empty() {
-        // Side-channel diagnostic only: stripped Responses-only reasoning fields
-        // never enter provider wire or response payload. An unmapped Responses
-        // semantic must not collapse a whole request into 502.
-        eprintln!(
-            "[routecodex] anthropic_outbound_stripped_responses_only_reasoning_fields fields={}",
-            stripped.join(",")
-        );
+    let paths = RESPONSES_ONLY_REASONING_KEYS
+        .iter()
+        .filter(|key| object.contains_key(**key))
+        .map(|key| format!("$.request.{key}"))
+        .collect::<Vec<_>>();
+    if paths.is_empty() {
+        Ok(())
+    } else {
+        Err(V3AnthropicCodecError::UnmappedOutboundFields {
+            paths: paths.join(","),
+        })
     }
 }
 
@@ -819,6 +893,132 @@ fn responses_reasoning_budget_tokens(value: &Value) -> Option<u64> {
         .filter(|budget| *budget > 0)
 }
 
+fn project_v3_anthropic_terminal_as_responses_terminal(
+    object: &Map<String, Value>,
+) -> Result<V3AnthropicResponsesTerminalProjection, V3AnthropicCodecError> {
+    let stop_reason = object
+        .get("stop_reason")
+        .ok_or_else(|| V3AnthropicCodecError::InvalidTerminalField {
+            field: "stop_reason",
+            reason: "missing on materialized final message".to_string(),
+        })?
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| V3AnthropicCodecError::InvalidTerminalField {
+            field: "stop_reason",
+            reason: "must be a non-empty string on materialized final message".to_string(),
+        })?;
+    let hub_reason = table_map_value(
+        V3TableKind::FinishReason,
+        "anthropic",
+        stop_reason,
+        V3TableDirection::Inbound,
+    )
+    .map_err(|error| V3AnthropicCodecError::InvalidTerminalField {
+        field: "stop_reason",
+        reason: format!("finish_reason_map failed: {error}"),
+    })?
+    .ok_or_else(|| V3AnthropicCodecError::InvalidTerminalField {
+        field: "stop_reason",
+        reason: format!("unknown value '{stop_reason}'"),
+    })?;
+
+    let kind = match hub_reason {
+        "stop" => V3AnthropicTerminalKind::EndTurn,
+        "tool_calls" => V3AnthropicTerminalKind::ToolUse,
+        "max_tokens" => V3AnthropicTerminalKind::MaxTokens,
+        "stop_sequence" => V3AnthropicTerminalKind::StopSequence,
+        "pause_turn" => V3AnthropicTerminalKind::PauseTurn,
+        "content_filter" => V3AnthropicTerminalKind::Refusal,
+        "context_window_exceeded" => {
+            return Err(V3AnthropicCodecError::UnsupportedStopReason {
+                stop_reason: stop_reason.to_string(),
+            })
+        }
+        other => {
+            return Err(V3AnthropicCodecError::InvalidTerminalField {
+                field: "stop_reason",
+                reason: format!("finish_reason_map produced unsupported hub value '{other}'"),
+            })
+        }
+    };
+
+    let stop_sequence = match (kind, object.get("stop_sequence")) {
+        (V3AnthropicTerminalKind::StopSequence, Some(Value::String(value)))
+            if !value.trim().is_empty() =>
+        {
+            Some(value.clone())
+        }
+        (V3AnthropicTerminalKind::StopSequence, _) => {
+            return Err(V3AnthropicCodecError::InvalidTerminalField {
+                field: "stop_sequence",
+                reason: "stop_reason=stop_sequence requires a non-empty string".to_string(),
+            })
+        }
+        (_, None | Some(Value::Null)) => None,
+        (_, Some(_)) => {
+            return Err(V3AnthropicCodecError::InvalidTerminalField {
+                field: "stop_sequence",
+                reason: format!("must be absent or null when stop_reason={stop_reason}"),
+            })
+        }
+    };
+
+    let stop_details = match object.get("stop_details") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(_)) if kind == V3AnthropicTerminalKind::Refusal => {
+            object.get("stop_details").cloned()
+        }
+        Some(Value::Object(_)) => {
+            return Err(V3AnthropicCodecError::InvalidTerminalField {
+                field: "stop_details",
+                reason: format!("must be absent or null when stop_reason={stop_reason}"),
+            })
+        }
+        Some(_) => {
+            return Err(V3AnthropicCodecError::InvalidTerminalField {
+                field: "stop_details",
+                reason: "must be an object when present".to_string(),
+            })
+        }
+    };
+
+    let (responses_status, incomplete_reason) = match kind {
+        V3AnthropicTerminalKind::EndTurn | V3AnthropicTerminalKind::StopSequence => {
+            ("completed", None)
+        }
+        V3AnthropicTerminalKind::ToolUse => ("requires_action", None),
+        V3AnthropicTerminalKind::MaxTokens => ("incomplete", Some("max_output_tokens")),
+        V3AnthropicTerminalKind::PauseTurn => ("in_progress", None),
+        V3AnthropicTerminalKind::Refusal => ("incomplete", Some("content_filter")),
+    };
+
+    Ok(V3AnthropicResponsesTerminalProjection {
+        kind,
+        source_stop_reason: stop_reason.to_string(),
+        responses_status,
+        incomplete_reason,
+        stop_sequence,
+        stop_details,
+    })
+}
+
+fn flush_v3_anthropic_text_content_as_responses_message(
+    output_items: &mut Vec<Value>,
+    message_content: &mut Vec<Value>,
+    role: &Value,
+) {
+    if message_content.is_empty() {
+        return;
+    }
+    output_items.push(json!({
+        "type":"message",
+        "role": role,
+        "content": std::mem::take(message_content)
+    }));
+}
+
 pub fn project_v3_anthropic_message_as_responses_response(
     payload: &Value,
 ) -> Result<Value, V3AnthropicCodecError> {
@@ -837,85 +1037,173 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
         .as_object()
         .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
     require_content_array(payload)?;
+    let content = object
+        .get("content")
+        .and_then(Value::as_array)
+        .ok_or(V3AnthropicCodecError::ContentNotArray)?;
+    let terminal = project_v3_anthropic_terminal_as_responses_terminal(object)?;
+    let classified_blocks = content
+        .iter()
+        .enumerate()
+        .map(|(index, part)| {
+            V3AnthropicResponseContentBlockKind::parse(part, index).map(|kind| (index, kind, part))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let has_client_tool_use = classified_blocks
+        .iter()
+        .any(|(_, kind, _)| *kind == V3AnthropicResponseContentBlockKind::ToolUse);
+    if terminal.kind == V3AnthropicTerminalKind::ToolUse && !has_client_tool_use {
+        return Err(V3AnthropicCodecError::InvalidTerminalField {
+            field: "stop_reason",
+            reason: "tool_use requires at least one response.content[].type=tool_use".to_string(),
+        });
+    }
+    if terminal.kind != V3AnthropicTerminalKind::ToolUse && has_client_tool_use {
+        return Err(V3AnthropicCodecError::InvalidTerminalField {
+            field: "stop_reason",
+            reason: format!(
+                "{} contradicts response.content[].type=tool_use",
+                terminal.source_stop_reason
+            ),
+        });
+    }
     let mut output_items = Vec::new();
     let mut message_content = Vec::new();
+    let message_role = object
+        .get("role")
+        .cloned()
+        .unwrap_or_else(|| Value::String("assistant".to_string()));
     // MiniMax hosted web search（Mode A）：预收集同响应 web_search_tool_result
     // 供 server_tool_use 投影消费（web_search_call results + 配对
-    // function_call_output）。先扫描一次 content，定位到 tool_use_id -> content 映射。
-    let mut hosted_results_by_call: std::collections::BTreeMap<String, Value> =
-        std::collections::BTreeMap::new();
-    for part in object
-        .get("content")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if part.get("type").and_then(Value::as_str) != Some("web_search_tool_result") {
+    // function_call_output）。content type 已在上方一次性分类；这里不做第二套判定。
+    let mut hosted_results_by_call: BTreeMap<String, (usize, Value)> = BTreeMap::new();
+    for (index, kind, part) in &classified_blocks {
+        if *kind != V3AnthropicResponseContentBlockKind::WebSearchToolResult {
             continue;
         }
-        let Some(call_id) = part
+        let call_id = part
             .get("tool_use_id")
             .and_then(Value::as_str)
+            .map(str::trim)
             .filter(|value| !value.is_empty())
-        else {
-            continue;
-        };
-        hosted_results_by_call.insert(
-            call_id.to_string(),
-            part.get("content")
-                .cloned()
-                .unwrap_or(Value::Array(Vec::new())),
-        );
+            .ok_or_else(|| V3AnthropicCodecError::MalformedResponseContentBlock {
+                index: *index,
+                content_type: kind.source_type().to_string(),
+                reason: "tool_use_id must be a non-empty string".to_string(),
+            })?;
+        let result_content = part
+            .get("content")
+            .filter(|value| value.is_array())
+            .cloned()
+            .ok_or_else(|| V3AnthropicCodecError::MalformedResponseContentBlock {
+                index: *index,
+                content_type: kind.source_type().to_string(),
+                reason: "content must be an array for the registered Responses mapping".to_string(),
+            })?;
+        if hosted_results_by_call
+            .insert(call_id.to_string(), (*index, result_content))
+            .is_some()
+        {
+            return Err(V3AnthropicCodecError::MalformedResponseContentBlock {
+                index: *index,
+                content_type: kind.source_type().to_string(),
+                reason: format!("duplicate tool_use_id '{call_id}'"),
+            });
+        }
     }
-    for part in object
-        .get("content")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        match part.get("type").and_then(Value::as_str) {
-            Some("text") => {
+    let mut consumed_hosted_result_ids = HashSet::new();
+    for (index, kind, part) in &classified_blocks {
+        if kind.is_source_roundtrip_only() {
+            return Err(V3AnthropicCodecError::UnsupportedResponseContentBlock {
+                index: *index,
+                content_type: kind.source_type().to_string(),
+            });
+        }
+        match kind {
+            V3AnthropicResponseContentBlockKind::Text => {
+                let text = part.get("text").and_then(Value::as_str).ok_or_else(|| {
+                    V3AnthropicCodecError::MalformedResponseContentBlock {
+                        index: *index,
+                        content_type: kind.source_type().to_string(),
+                        reason: "text must be a string".to_string(),
+                    }
+                })?;
                 message_content.push(json!({
                     "type":"output_text",
-                    "text": part.get("text").cloned().unwrap_or(Value::String(String::new()))
+                    "text": text
                 }));
             }
-            Some("thinking" | "redacted_thinking") => {
+            V3AnthropicResponseContentBlockKind::Thinking
+            | V3AnthropicResponseContentBlockKind::RedactedThinking => {
+                flush_v3_anthropic_text_content_as_responses_message(
+                    &mut output_items,
+                    &mut message_content,
+                    &message_role,
+                );
                 output_items.push(anthropic_reasoning_part_as_responses_reasoning(
                     part,
                     context.reasoning_summary_policy(),
                 )?);
             }
-            Some("tool_use") => {
+            V3AnthropicResponseContentBlockKind::ToolUse => {
+                flush_v3_anthropic_text_content_as_responses_message(
+                    &mut output_items,
+                    &mut message_content,
+                    &message_role,
+                );
                 output_items.push(anthropic_tool_use_as_responses_call(part, context)?);
             }
-            Some("server_tool_use") => {
+            V3AnthropicResponseContentBlockKind::ServerToolUse => {
+                flush_v3_anthropic_text_content_as_responses_message(
+                    &mut output_items,
+                    &mut message_content,
+                    &message_role,
+                );
                 // MiniMax hosted web search（Mode A）：server_tool_use 投影为
                 // Codex hosted `web_search_call` + 配对 `function_call_output`
                 // （results 从预收集的 hosted_results_by_call 提取）。
-                let name = part.get("name").and_then(Value::as_str).unwrap_or("");
+                let name = part
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| V3AnthropicCodecError::MalformedResponseContentBlock {
+                        index: *index,
+                        content_type: kind.source_type().to_string(),
+                        reason: "name must be a non-empty string".to_string(),
+                    })?;
                 if name != "web_search" {
-                    return Err(V3AnthropicCodecError::MalformedField {
-                        field: "provider response server_tool_use name",
+                    return Err(V3AnthropicCodecError::UnsupportedServerToolUse {
+                        index: *index,
+                        name: name.to_string(),
                     });
                 }
                 let call_id = part
                     .get("id")
                     .and_then(Value::as_str)
+                    .map(str::trim)
                     .filter(|value| !value.is_empty())
-                    .unwrap_or("");
+                    .ok_or_else(|| V3AnthropicCodecError::MalformedResponseContentBlock {
+                        index: *index,
+                        content_type: kind.source_type().to_string(),
+                        reason: "id must be a non-empty string".to_string(),
+                    })?;
                 let query = part
                     .get("input")
                     .and_then(Value::as_object)
                     .and_then(|input| input.get("query"))
                     .and_then(Value::as_str)
-                    .unwrap_or("");
-                let hosted_results = hosted_results_by_call.get(call_id).cloned();
-                let results = hosted_results
-                    .and_then(|value| value.as_array().cloned())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(|result| {
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| V3AnthropicCodecError::MalformedResponseContentBlock {
+                        index: *index,
+                        content_type: kind.source_type().to_string(),
+                        reason: "input.query must be a non-empty string".to_string(),
+                    })?;
+                let hosted_results = hosted_results_by_call.get(call_id);
+                let mut results = Vec::new();
+                if let Some((result_index, Value::Array(result_items))) = hosted_results {
+                    for result in result_items {
                         let title = result
                             .get("title")
                             .and_then(Value::as_str)
@@ -931,20 +1219,28 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
                             .or_else(|| result.get("content"))
                             .and_then(Value::as_str)
                             .map(str::trim)
-                            .filter(|value| !value.is_empty())?;
-                        Some(json!({
+                            .filter(|value| !value.is_empty())
+                            .ok_or_else(|| {
+                                V3AnthropicCodecError::MalformedResponseContentBlock {
+                                    index: *result_index,
+                                    content_type: "web_search_tool_result".to_string(),
+                                    reason: "each result requires non-empty text or content"
+                                        .to_string(),
+                                }
+                            })?;
+                        results.push(json!({
                             "type": "text_result",
                             "ref_id": call_id,
                             "title": title,
                             "url": url,
                             "text": text
-                        }))
-                    })
-                    .collect::<Vec<_>>();
-                let status = if results.is_empty() {
-                    "started"
-                } else {
+                        }));
+                    }
+                }
+                let status = if hosted_results.is_some() {
                     "completed"
+                } else {
+                    "started"
                 };
                 let mut call = Map::new();
                 call.insert(
@@ -953,11 +1249,7 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
                 );
                 call.insert(
                     "id".to_string(),
-                    Value::String(if call_id.is_empty() {
-                        "web_search_hosted".to_string()
-                    } else {
-                        format!("web_search_{call_id}")
-                    }),
+                    Value::String(format!("web_search_{call_id}")),
                 );
                 call.insert("name".to_string(), Value::String("web_search".to_string()));
                 call.insert("status".to_string(), Value::String(status.to_string()));
@@ -967,51 +1259,47 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
                 // 配对 function_call_output（Codex hosted search 在 output
                 // 中必须紧跟 function_call_output，否则 client 端 web search
                 // tool 装配失败）。
-                if !call_id.is_empty() {
+                if let Some((_, result_content)) = hosted_results {
+                    consumed_hosted_result_ids.insert(call_id.to_string());
                     let paired = json!({
                         "type": "function_call_output",
                         "call_id": call_id,
                         "output": json!({
                             "type":"web_search_tool_result",
-                            "results": hosted_results_by_call.get(call_id).cloned().unwrap_or(Value::Array(Vec::new()))
+                            "results": result_content
                         })
                     });
                     output_items.push(paired);
                 }
             }
-            Some("web_search_tool_result") => {
+            V3AnthropicResponseContentBlockKind::WebSearchToolResult => {
                 // MiniMax hosted web search（Mode A）：已由 server_tool_use 分支
                 // 投影为 web_search_call + function_call_output 配对；这里跳过，
                 // 避免在 client output 中重复出现原始 web_search_tool_result。
             }
-            Some(other) => {
-                return Err(V3AnthropicCodecError::MalformedField {
-                    field: match other {
-                        "image" => "provider response image content",
-                        _ => "provider response content type",
-                    },
-                });
-            }
-            None => {
-                return Err(V3AnthropicCodecError::MalformedField {
-                    field: "content type",
-                })
+            V3AnthropicResponseContentBlockKind::WebFetchToolResult
+            | V3AnthropicResponseContentBlockKind::CodeExecutionToolResult
+            | V3AnthropicResponseContentBlockKind::BashCodeExecutionToolResult
+            | V3AnthropicResponseContentBlockKind::TextEditorCodeExecutionToolResult
+            | V3AnthropicResponseContentBlockKind::ToolSearchToolResult
+            | V3AnthropicResponseContentBlockKind::ContainerUpload => {
+                unreachable!("source-roundtrip-only content blocks fail before the mapped match")
             }
         }
     }
-    if !message_content.is_empty() {
-        output_items.push(json!({
-            "type":"message",
-            "role": object.get("role").cloned().unwrap_or_else(|| Value::String("assistant".to_string())),
-            "content": message_content
-        }));
+    flush_v3_anthropic_text_content_as_responses_message(
+        &mut output_items,
+        &mut message_content,
+        &message_role,
+    );
+    for (tool_use_id, (index, _)) in &hosted_results_by_call {
+        if !consumed_hosted_result_ids.contains(tool_use_id) {
+            return Err(V3AnthropicCodecError::UnpairedWebSearchToolResult {
+                index: *index,
+                tool_use_id: tool_use_id.clone(),
+            });
+        }
     }
-    let stop_reason = object.get("stop_reason").and_then(Value::as_str);
-    let status = if stop_reason == Some("tool_use") {
-        "requires_action"
-    } else {
-        "completed"
-    };
     let mut response = Map::new();
     response.insert(
         "id".to_string(),
@@ -1021,7 +1309,10 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
             .unwrap_or_else(|| Value::String("resp_anthropic_relay".to_string())),
     );
     response.insert("object".to_string(), Value::String("response".to_string()));
-    response.insert("status".to_string(), Value::String(status.to_string()));
+    response.insert(
+        "status".to_string(),
+        Value::String(terminal.responses_status.to_string()),
+    );
     if let Some(model) = object.get("model") {
         response.insert("model".to_string(), model.clone());
     }
@@ -1029,113 +1320,23 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
     if let Some(usage) = anthropic_usage_as_responses_usage(object.get("usage")) {
         response.insert("usage".to_string(), usage);
     }
-    if let Some(stop_reason) = object.get("stop_reason") {
-        response.insert("finish_reason".to_string(), stop_reason.clone());
+    response.insert(
+        "finish_reason".to_string(),
+        Value::String(terminal.source_stop_reason),
+    );
+    if let Some(reason) = terminal.incomplete_reason {
+        response.insert("incomplete_details".to_string(), json!({"reason": reason}));
+    }
+    if let Some(stop_sequence) = terminal.stop_sequence {
+        response.insert("stop_sequence".to_string(), Value::String(stop_sequence));
+    }
+    if let Some(stop_details) = terminal.stop_details {
+        response.insert("stop_details".to_string(), stop_details);
     }
     if let Some(metadata) = context.metadata() {
         response.insert("metadata".to_string(), metadata.clone());
     }
     Ok(Value::Object(response))
-}
-
-/// 从 hosted `web_search_tool_result.content` 提取第一个可读文本结果
-/// （MiniMax hosted search），供 web_search_call 配对补齐。
-fn hosted_web_search_result_text_value(content: Value) -> Option<String> {
-    for result in content.as_array().into_iter().flatten() {
-        if result.get("type").and_then(Value::as_str) != Some("web_search_result") {
-            continue;
-        }
-        let text = result
-            .get("text")
-            .or_else(|| result.get("content"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        if let Some(text) = text {
-            return Some(text.to_string());
-        }
-    }
-    None
-}
-
-fn anthropic_reasoning_part_as_responses_reasoning(
-    part: &Value,
-    summary_policy: Option<&str>,
-) -> Result<Value, V3AnthropicCodecError> {
-    let object = part
-        .as_object()
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "reasoning content",
-        })?;
-    match object.get("type").and_then(Value::as_str) {
-        Some("thinking") => {
-            validate_anthropic_reasoning_object_keys(object, &["type", "thinking", "signature"])?;
-            let thinking = require_nonempty_reasoning_string(object.get("thinking"))?;
-            let summary_text = match summary_policy {
-                None | Some("auto" | "concise" | "detailed") => thinking,
-                Some(_) => {
-                    return Err(V3AnthropicCodecError::MalformedField {
-                        field: "reasoning_summary_policy",
-                    })
-                }
-            };
-            let mut item = json!({
-                "type":"reasoning",
-                "summary":[{"type":"summary_text","text":summary_text}]
-            });
-            if let Some(signature) = optional_nonempty_reasoning_string(object, "signature")? {
-                item["encrypted_content"] = Value::String(signature.to_string());
-            }
-            Ok(item)
-        }
-        Some("redacted_thinking") => {
-            validate_anthropic_reasoning_object_keys(object, &["type", "data"])?;
-            let data = require_nonempty_reasoning_string(object.get("data"))?;
-            Ok(json!({
-                "type":"reasoning",
-                "encrypted_content":data
-            }))
-        }
-        _ => Err(V3AnthropicCodecError::MalformedField {
-            field: "reasoning content",
-        }),
-    }
-}
-
-fn require_nonempty_reasoning_string(value: Option<&Value>) -> Result<&str, V3AnthropicCodecError> {
-    let value = value
-        .and_then(Value::as_str)
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "reasoning content",
-        })?;
-    if value.trim().is_empty() {
-        return Err(V3AnthropicCodecError::MalformedField {
-            field: "reasoning content",
-        });
-    }
-    Ok(value)
-}
-
-fn optional_nonempty_reasoning_string<'a>(
-    object: &'a Map<String, Value>,
-    key: &str,
-) -> Result<Option<&'a str>, V3AnthropicCodecError> {
-    let Some(value) = object.get(key) else {
-        return Ok(None);
-    };
-    Ok(Some(require_nonempty_reasoning_string(Some(value))?))
-}
-
-fn validate_anthropic_reasoning_object_keys(
-    object: &Map<String, Value>,
-    allowed: &[&str],
-) -> Result<(), V3AnthropicCodecError> {
-    if object.keys().any(|key| !allowed.contains(&key.as_str())) {
-        return Err(V3AnthropicCodecError::MalformedField {
-            field: "reasoning content",
-        });
-    }
-    Ok(())
 }
 
 pub fn characterize_v3_anthropic_client_input_to_hub_semantic(
@@ -1276,130 +1477,5 @@ impl V3AnthropicClientProjection {
 
     pub fn trace(&self) -> &V3AnthropicCodecTrace {
         &self.trace
-    }
-}
-
-fn trace(
-    stage: V3AnthropicCodecStage,
-    transport_intent: V3HubTransportIntent,
-) -> V3AnthropicCodecTrace {
-    V3AnthropicCodecTrace {
-        stage,
-        entry_protocol: V3HubEntryProtocol::Anthropic,
-        provider_protocol: V3HubProviderWireProtocol::Anthropic,
-        transport_intent,
-    }
-}
-
-fn require_object(value: &Value) -> Result<&Map<String, Value>, V3AnthropicCodecError> {
-    value
-        .as_object()
-        .ok_or(V3AnthropicCodecError::PayloadNotObject)
-}
-
-fn require_messages_array(value: &Value) -> Result<(), V3AnthropicCodecError> {
-    match value.get("messages") {
-        Some(Value::Array(_)) => Ok(()),
-        _ => Err(V3AnthropicCodecError::MessagesNotArray),
-    }
-}
-
-fn require_content_array(value: &Value) -> Result<(), V3AnthropicCodecError> {
-    match value.get("content") {
-        Some(Value::Array(_)) => Ok(()),
-        _ => Err(V3AnthropicCodecError::ContentNotArray),
-    }
-}
-
-fn validate_json_response(value: &Value) -> Result<(), V3AnthropicCodecError> {
-    if value.get("error").is_some() {
-        validate_provider_error(value)
-    } else {
-        require_content_array(value)
-    }
-}
-
-fn validate_sse_event(value: &Value) -> Result<(), V3AnthropicCodecError> {
-    let object = require_object(value)?;
-    let kind = object
-        .get("type")
-        .and_then(Value::as_str)
-        .ok_or(V3AnthropicCodecError::MalformedSseEvent)?;
-    match kind {
-        "message_start"
-        | "content_block_start"
-        | "content_block_delta"
-        | "content_block_stop"
-        | "message_delta"
-        | "message_stop"
-        | "ping" => Ok(()),
-        "error" => validate_provider_error(value),
-        _ => Err(V3AnthropicCodecError::MalformedSseEvent),
-    }
-}
-
-fn validate_provider_error(value: &Value) -> Result<(), V3AnthropicCodecError> {
-    let Some(error) = value.get("error").and_then(Value::as_object) else {
-        return Err(V3AnthropicCodecError::MalformedProviderError);
-    };
-    let has_type = error
-        .get("type")
-        .and_then(Value::as_str)
-        .is_some_and(|item| !item.is_empty());
-    let has_message = error
-        .get("message")
-        .and_then(Value::as_str)
-        .is_some_and(|item| !item.is_empty());
-    if has_type && has_message {
-        Ok(())
-    } else {
-        Err(V3AnthropicCodecError::MalformedProviderError)
-    }
-}
-
-fn into_object(value: Value) -> Result<Map<String, Value>, V3AnthropicCodecError> {
-    match value {
-        Value::Object(object) => Ok(object),
-        _ => Err(V3AnthropicCodecError::PayloadNotObject),
-    }
-}
-
-fn reject_side_channel_fields(value: &Value) -> Result<(), V3AnthropicCodecError> {
-    let object = require_object(value)?;
-    reject_side_channel_object_keys(object)
-}
-
-fn reject_side_channel_object_keys(
-    object: &Map<String, Value>,
-) -> Result<(), V3AnthropicCodecError> {
-    for key in object.keys() {
-        if is_internal_side_channel_field(key) {
-            return Err(V3AnthropicCodecError::SideChannelLeaked {
-                field: side_channel_label(key),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn is_internal_side_channel_field(key: &str) -> bool {
-    matches!(
-        key,
-        "routecodex_internal"
-            | "metadata_center"
-            | "debug_snapshot"
-            | "provider_protocol"
-            | "resource_handle"
-    )
-}
-
-fn side_channel_label(key: &str) -> &'static str {
-    match key {
-        "routecodex_internal" => "routecodex_internal",
-        "metadata_center" => "metadata_center",
-        "debug_snapshot" => "debug_snapshot",
-        "provider_protocol" => "provider_protocol",
-        "resource_handle" => "resource_handle",
-        _ => "unknown",
     }
 }

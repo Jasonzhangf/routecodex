@@ -229,6 +229,66 @@ JSON parse failure is not permission to fabricate `{}`, stringify twice, drop a
 paired result, or switch protocols. `reasoning.summary` response content is not
 reused to reconstruct a request `reasoning.summary` policy.
 
+### Anthropic response terminal projection
+
+Anthropic `stop_reason` is first normalized through `finish_reason_map.json` and
+then projected by the single typed terminal owner in the Anthropic response
+codec. The following table is closed-world; a value not listed here is not a
+successful terminal response.
+
+| Anthropic `stop_reason` | Hub terminal semantic | Responses projection | Mapping class | Additional contract |
+| --- | --- | --- | --- | --- |
+| `end_turn` | `stop` | `status=completed`, `finish_reason=end_turn` | `mapped_exact` | `stop_sequence` and `stop_details` must be absent/null. |
+| `tool_use` | `tool_calls` | `status=requires_action`, `finish_reason=tool_use` | `mapped_compatible_registered` | RouteCodex's registered local tool-continuation status; output must contain a typed tool call. |
+| `max_tokens` | `max_tokens` | `status=incomplete`, `incomplete_details.reason=max_output_tokens`, `finish_reason=max_tokens` | `mapped_exact` | Partial output remains business response data, not a provider error. |
+| `stop_sequence` | `stop_sequence` | `status=completed`, exact `finish_reason=stop_sequence` and exact `stop_sequence` | `mapped_exact` | A non-empty `stop_sequence` is required. |
+| `pause_turn` | `pause_turn` | `status=in_progress`, `finish_reason=pause_turn` | `mapped_compatible_registered` | Preserves Anthropic's resumable non-terminal meaning without fabricating a tool result or incomplete reason. |
+| `refusal` | `content_filter` | `status=incomplete`, `incomplete_details.reason=content_filter`, `finish_reason=refusal`, exact `stop_details` when present | `mapped_compatible_registered` | Refusal is response terminal semantics, not transport/provider failure. |
+| `model_context_window_exceeded` | `context_window_exceeded` | no exact Responses incomplete reason | `unsupported_fail_fast` | Fail with the exact source value; never relabel input-context exhaustion as `max_output_tokens`. |
+
+`stop_reason=null` is valid only on the Anthropic streaming `message_start`
+shape. A materialized final message, whether sourced from JSON or SSE, requires
+a listed non-null value. Unknown/non-string values, contradictory
+`stop_sequence`, and non-object `stop_details` fail at the same terminal owner.
+The SSE transport may only frame the resulting canonical response; it does not
+own another stop-reason mapping.
+
+### Typed tool-result error projection
+
+| Responses tool output status | Anthropic `tool_result` | Mapping class |
+| --- | --- | --- |
+| absent | omit `is_error` | `mapped_exact` legacy success |
+| `completed` | omit `is_error` | `mapped_exact` success |
+| `incomplete` | `is_error=true` | `mapped_compatible_registered` failed/incomplete tool outcome |
+| `in_progress` | fail before Anthropic wire | `unsupported_fail_fast` because Anthropic `tool_result` is terminal |
+| null, non-string, or unknown | fail before Anthropic wire | `unsupported_fail_fast` |
+
+Only the typed `function_call_output.status` semantic authorizes this mapping.
+Output text, tool name, HTTP status, provider identity, error-message text, and
+MetadataCenter are forbidden inference sources.
+
+### Anthropic response content block closed enum
+
+| Anthropic response block | Responses target policy | Mapping class |
+| --- | --- | --- |
+| `text` | ordered `output_text` message content | `mapped_exact` |
+| `thinking` | Responses reasoning summary/signature projection | `mapped_compatible_registered` |
+| `redacted_thinking` | opaque Responses reasoning encrypted content | `mapped_compatible_registered` |
+| `tool_use` | typed Responses function/custom tool call | `mapped_exact` or governed custom compatibility wrapper |
+| `server_tool_use` | only the registered `web_search` subset | `mapped_compatible_registered`; other names fail |
+| `web_search_tool_result` | only an exactly paired registered web-search result | `mapped_compatible_registered`; missing/duplicate/unpaired identity or unsupported result shape fails |
+| `web_fetch_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
+| `code_execution_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
+| `bash_code_execution_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
+| `text_editor_code_execution_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
+| `tool_search_tool_result` | no registered Responses mapping | `unsupported_fail_fast` |
+| `container_upload` | no registered Responses mapping | `unsupported_fail_fast` |
+
+Missing and unknown `content[].type` values are distinct malformed/unknown
+errors. Every unsupported diagnostic includes the exact
+`response.content[index].type` path and source type; silent skip, generic
+`provider response content type`, and text fallback are forbidden.
+
 ## Exact protocol projections
 
 ### Qualitative effort

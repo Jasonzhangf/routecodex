@@ -67,7 +67,7 @@ modules:
     allowed_operations:
       - decode Anthropic wire into Chat semantics
       - project governed Chat semantics into Anthropic wire
-      - enforce Anthropic metadata, effort, thinking, and budget domains
+      - enforce Anthropic metadata, effort, thinking, budget, terminal, tool-result error, and response content-block domains
     forbidden_operations:
       - encode reasoning policy as system marker
       - infer budget from qualitative effort
@@ -75,6 +75,32 @@ modules:
       - reconstruct Anthropic cache_control from Responses prompt_cache_key
       - consume unregistered Responses store or text.verbosity values
       - read MetadataCenter or raw Responses wire
+      - infer tool_result.is_error from output text, HTTP status, provider identity, or error messages
+      - treat unknown or unsupported terminal/content values as successful output
+  - module_id: v3.protocol_codec.typed_terminality
+    owner: routecodex-v3-runtime::hub_v1::resp_chat_process_03_governed
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
+    allowed_operations:
+      - validate canonical Responses completed, requires_action, incomplete, and registered nonterminal status semantics after adjacent response codec projection
+      - reject malformed or contradictory incomplete_details before continuation commit and client projection
+    forbidden_operations:
+      - parse Anthropic source wire or SSE frames
+      - invent provider-specific stop_reason mappings
+      - read MetadataCenter or reconstruct response payload from control state
+  - module_id: v3.protocol_codec.finish_reason_registry
+    owner: routecodex-v3-runtime::protocol_tables
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/protocol_tables.rs
+      - v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json
+    allowed_operations:
+      - publish the closed protocol finish-reason value correspondence table
+      - expose exact bidirectional registered mappings to adjacent codecs
+    forbidden_operations:
+      - classify transport, retry, routing, health, or continuation state
+      - approximate unknown protocol terminal values
+      - write provider or client payloads
   - module_id: v3.protocol_codec.gemini
     owner: routecodex-v3-runtime::hub_v1::gemini_codec
     owned_paths:
@@ -126,4 +152,10 @@ allowed_edges:
   - from: v3.protocol_codec.provider_compat_dispatch
     to: v3.protocol_codec.gemini
     direction: outbound_gemini_dispatch
+  - from: v3.protocol_codec.anthropic
+    to: v3.protocol_codec.finish_reason_registry
+    direction: terminal_value_registry
+  - from: v3.protocol_codec.anthropic
+    to: v3.protocol_codec.typed_terminality
+    direction: response_terminality_governance
 verification_gate: npm run verify:v3-protocol-conversion-field-parity

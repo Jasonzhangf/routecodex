@@ -237,7 +237,7 @@ pub(super) fn responses_input_array_as_anthropic_messages(
                     });
                 }
                 result_ids.push(result_id);
-                tool_results.push(responses_tool_output_as_anthropic_tool_result(object));
+                tool_results.push(responses_tool_output_as_anthropic_tool_result(object)?);
                 index += 1;
             }
 
@@ -303,7 +303,7 @@ pub(super) fn responses_input_item_as_anthropic_messages(
         | Some("tool_call_output") => {
             messages.push(json!({
                 "role":"user",
-                "content":[responses_tool_output_as_anthropic_tool_result(object)]
+                "content":[responses_tool_output_as_anthropic_tool_result(object)?]
             }));
             Ok(())
         }
@@ -373,12 +373,33 @@ pub(super) fn responses_tool_call_as_anthropic_tool_use(
     }))
 }
 
-pub(super) fn responses_tool_output_as_anthropic_tool_result(object: &Map<String, Value>) -> Value {
-    json!({
-        "type":"tool_result",
-        "tool_use_id": responses_tool_output_id_value(object),
-        "content": responses_tool_output_as_anthropic_content(object.get("output"))
-    })
+pub(super) fn responses_tool_output_as_anthropic_tool_result(
+    object: &Map<String, Value>,
+) -> Result<Value, V3AnthropicCodecError> {
+    let is_error = match object.get("status") {
+        None => false,
+        Some(Value::String(status)) if status == "completed" => false,
+        Some(Value::String(status)) if status == "incomplete" => true,
+        Some(_) => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "function_call_output.status",
+            })
+        }
+    };
+    let mut result = Map::new();
+    result.insert("type".to_string(), Value::String("tool_result".to_string()));
+    result.insert(
+        "tool_use_id".to_string(),
+        responses_tool_output_id_value(object),
+    );
+    result.insert(
+        "content".to_string(),
+        responses_tool_output_as_anthropic_content(object.get("output")),
+    );
+    if is_error {
+        result.insert("is_error".to_string(), Value::Bool(true));
+    }
+    Ok(Value::Object(result))
 }
 
 pub(crate) fn project_v3_responses_reasoning_item_as_anthropic_content(

@@ -139,6 +139,7 @@ export function renderV3ProtocolSemanticFieldMatrixHtml(matrix) {
     <nav class="nav" aria-label="Review sections">
       <a href="#source-inventory">source inventory</a>
       <a href="#audit-truth-contract">audit truth</a>
+      <a href="#anthropic-response-projection-contract">Anthropic response contract</a>
       <a href="#manual-semantic-translation-groups">manual semantic groups</a>
       <a href="#chat-standard-equivalence">Chat standard equivalence</a>
       <a href="#noncanonical-fields">non-canonical / isolated fields</a>
@@ -164,6 +165,13 @@ export function renderV3ProtocolSemanticFieldMatrixHtml(matrix) {
       <h2>Audit truth contract / 文本真相与 gap 审计</h2>
       <p>这部分把当前审计报告固化成可 gate 的文本真相：状态标签含义、精确计数、gap 分类和后续 closeout owner。它不宣称 runtime 全部完成。</p>
       ${renderAuditTruthContract(matrix)}
+    </section>
+
+    <section class="section" id="anthropic-response-projection-contract">
+      <span class="marker">anthropic-response-projection-contract closed-terminal-matrix typed-tool-result-is-error closed-content-block-enum source_roundtrip_only</span>
+      <h2>Anthropic response projection contract / Anthropic 响应投影闭合矩阵</h2>
+      <p>终止原因、tool-result 错误状态和 response content block 只由相邻 Rust codec 与通用 typed terminality owner 处理；Direct 保持同协议原样，SSE/handler/provider transport 不拥有第二套语义。</p>
+      ${renderAnthropicResponseProjectionContract(matrix)}
     </section>
 
     <section class="section" id="manual-semantic-translation-groups">
@@ -307,6 +315,57 @@ function renderAuditTruthContract(matrix) {
   <div class="table-wrap"><table>
     <thead><tr><th>gap id</th><th>category</th><th>affected status/count</th><th>evidence</th><th>owner / closeout rule</th></tr></thead>
     <tbody>${gapRows}</tbody>
+  </table></div>`;
+}
+
+function renderAnthropicResponseProjectionContract(matrix) {
+  const contract = matrix?.anthropic_response_projection_contract ?? {};
+  const terminalRows = (contract.terminal_values ?? []).map((row) => `<tr>
+    <td><code>${escapeHtml(row?.source ?? 'missing')}</code></td>
+    <td><code>${escapeHtml(row?.hub ?? 'missing')}</code></td>
+    <td><code>${escapeHtml(row?.responses_status ?? 'unsupported')}</code></td>
+    <td>${badge(row?.projection_status ?? 'missing')}</td>
+    <td>${escapeHtml(row?.supplemental ?? '')}</td>
+  </tr>`).join('\n');
+  const toolRows = (contract.tool_result_status_values ?? []).map((row) => `<tr>
+    <td><code>${escapeHtml(row?.source ?? 'missing')}</code></td>
+    <td><code>${escapeHtml(row?.anthropic_is_error ?? 'unsupported')}</code></td>
+    <td>${badge(row?.projection_status ?? 'missing')}</td>
+  </tr>`).join('\n');
+  const contentRows = (contract.response_content_blocks ?? []).map((row) => `<tr>
+    <td><code>${escapeHtml(row?.source ?? 'missing')}</code></td>
+    <td>${badge(row?.projection_status ?? 'missing')}</td>
+    <td>${escapeHtml(row?.relay_policy ?? '')}</td>
+  </tr>`).join('\n');
+  return `<div class="grid">
+    <article class="card"><h3>Owners and policy</h3><div class="source-meta">
+      <div>contract: <code>${escapeHtml(contract.contract_id ?? 'missing')}</code></div>
+      <div>terminal owner: <code>${escapeHtml(contract.terminal_owner ?? 'missing')}</code></div>
+      <div>typed terminality owner: <code>${escapeHtml(contract.typed_terminality_owner ?? 'missing')}</code></div>
+      <div>tool-result owner: <code>${escapeHtml(contract.tool_result_owner ?? 'missing')}</code></div>
+      <div>Direct policy: ${badge(contract.direct_same_protocol_policy ?? 'missing')}</div>
+    </div></article>
+    <article class="card"><h3>Forbidden semantic owners</h3>${renderCodeList(contract.forbidden_owners ?? [])}</article>
+    <article class="card"><h3>Unknown-value policies</h3><div class="source-meta">
+      <div>${escapeHtml(contract.terminal_unknown_policy ?? 'missing')}</div>
+      <div>${escapeHtml(contract.response_content_unknown_policy ?? 'missing')}</div>
+    </div></article>
+    <article class="card"><h3>Required regressions</h3>${renderCodeList(contract.required_tests ?? [])}</article>
+  </div>
+  <div class="protocol-title"><h3>Closed stop_reason matrix</h3><span class="muted">JSON and SSE materialization share this owner</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Anthropic stop_reason</th><th>Hub terminal</th><th>Responses status</th><th>mapping</th><th>supplemental contract</th></tr></thead>
+    <tbody>${terminalRows}</tbody>
+  </table></div>
+  <div class="protocol-title"><h3>Typed tool-result error projection</h3><span class="muted">no text or HTTP inference</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Responses status</th><th>Anthropic is_error</th><th>mapping</th></tr></thead>
+    <tbody>${toolRows}</tbody>
+  </table></div>
+  <div class="protocol-title"><h3>Closed response content block enum</h3><span class="muted">unsupported values fail with exact content path</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Anthropic content block</th><th>mapping</th><th>Relay policy</th></tr></thead>
+    <tbody>${contentRows}</tbody>
   </table></div>`;
 }
 

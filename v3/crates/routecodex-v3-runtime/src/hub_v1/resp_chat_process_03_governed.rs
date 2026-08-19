@@ -265,6 +265,8 @@ pub enum V3HubRelayResponseError {
     MissingStatus,
     #[error("unsupported provider response status: {status}")]
     UnsupportedStatus { status: String },
+    #[error("provider response incomplete_details.reason is invalid: {reason}")]
+    InvalidIncompleteDetails { reason: String },
     #[error("{protocol} provider response is malformed at Resp03: {reason}")]
     ProviderProtocolResponseMalformed {
         protocol: &'static str,
@@ -616,6 +618,22 @@ fn build_v3_responses_resp03_protocol_governance(
         .ok_or(V3HubRelayResponseError::MissingStatus)?;
     let status_terminality = match status {
         "completed" => V3HubResponseTerminality::Terminal,
+        "incomplete" => {
+            let reason = object
+                .get("incomplete_details")
+                .and_then(Value::as_object)
+                .and_then(|details| details.get("reason"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| V3HubRelayResponseError::InvalidIncompleteDetails {
+                    reason: "missing non-empty reason".to_string(),
+                })?;
+            if !matches!(reason, "max_output_tokens" | "content_filter") {
+                return Err(V3HubRelayResponseError::InvalidIncompleteDetails {
+                    reason: format!("unsupported value '{reason}'"),
+                });
+            }
+            V3HubResponseTerminality::Terminal
+        }
         "requires_action" | "in_progress" | "queued" => V3HubResponseTerminality::NonTerminal,
         _ => {
             return Err(V3HubRelayResponseError::UnsupportedStatus {

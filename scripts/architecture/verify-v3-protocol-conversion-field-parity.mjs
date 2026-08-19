@@ -14,6 +14,7 @@ const paths = {
   requestFieldProjectionManifest: 'docs/architecture/manifests/v3.protocol_request_field_projection.yml',
   requestFieldProjectionModules: 'docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml',
   gapCloseoutPlan: 'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
+  anthropicCompletionPlan: 'docs/goals/v3-anthropic-protocol-matrix-projection-completion-plan.md',
   hub: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   hubTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs',
   reqInbound02: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
@@ -39,6 +40,10 @@ const paths = {
   responsesToAnthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
   anthropicRequestFieldProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   anthropicProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
+  respChatProcess03: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+  respChatProcess03Tests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs',
+  protocolTables: 'v3/crates/routecodex-v3-runtime/src/protocol_tables.rs',
+  finishReasonMap: 'v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json',
   geminiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
   responsesTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
   responsesAnthropicProviderTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs',
@@ -105,6 +110,169 @@ const mainlineMap = YAML.parse(text.mainlineMap);
 const verificationMap = YAML.parse(text.verificationMap);
 const requestFieldProjectionManifest = YAML.parse(text.requestFieldProjectionManifest);
 const requestFieldProjectionModules = YAML.parse(text.requestFieldProjectionModules);
+const finishReasonMap = JSON.parse(text.finishReasonMap);
+
+function requireExactRegisteredRows(label, actual, expected) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    failures.push(`${label}: registered rows must match the closed protocol matrix`);
+  }
+}
+
+const anthropicResponseContract = fieldMatrix?.anthropic_response_projection_contract;
+if (!anthropicResponseContract) {
+  failures.push(`${paths.fieldMatrix}: missing anthropic_response_projection_contract`);
+} else {
+  for (const [key, expected] of [
+    ['contract_id', 'v3.anthropic_response_projection.closed_matrix.v1'],
+    ['owner_feature_id', 'v3.protocol_conversion_field_parity'],
+    ['terminal_owner', paths.anthropicCodec],
+    ['typed_terminality_owner', paths.respChatProcess03],
+    ['tool_result_owner', paths.responsesToAnthropicCodec],
+    ['direct_same_protocol_policy', 'source_roundtrip_only'],
+    ['terminal_unknown_policy', 'missing, null final, non-string, and unknown stop_reason fail at terminal_owner'],
+    ['response_content_unknown_policy', 'missing type and unknown type are distinct fail-fast diagnostics with response.content[index].type'],
+  ]) {
+    if (anthropicResponseContract?.[key] !== expected) failures.push(`${paths.fieldMatrix}: anthropic_response_projection_contract.${key} must be ${expected}`);
+  }
+  requireExactRegisteredRows(
+    `${paths.fieldMatrix}: anthropic response forbidden owners`,
+    anthropicResponseContract.forbidden_owners,
+    ['handler', 'SSE transport', 'provider transport', 'Virtual Router', 'MetadataCenter', 'continuation', 'request cleanup'],
+  );
+  requireExactRegisteredRows(
+    `${paths.fieldMatrix}: Anthropic terminal values`,
+    anthropicResponseContract.terminal_values,
+    [
+      { source: 'end_turn', hub: 'stop', responses_status: 'completed', projection_status: 'mapped_exact', supplemental: 'finish_reason=end_turn' },
+      { source: 'tool_use', hub: 'tool_calls', responses_status: 'requires_action', projection_status: 'mapped_compatible_registered', supplemental: 'typed tool call required' },
+      { source: 'max_tokens', hub: 'max_tokens', responses_status: 'incomplete', projection_status: 'mapped_exact', supplemental: 'incomplete_details.reason=max_output_tokens' },
+      { source: 'stop_sequence', hub: 'stop_sequence', responses_status: 'completed', projection_status: 'mapped_exact', supplemental: 'exact non-empty stop_sequence required' },
+      { source: 'pause_turn', hub: 'pause_turn', responses_status: 'in_progress', projection_status: 'mapped_compatible_registered', supplemental: 'preserve finish_reason=pause_turn without fabricating tool output' },
+      { source: 'refusal', hub: 'content_filter', responses_status: 'incomplete', projection_status: 'mapped_compatible_registered', supplemental: 'incomplete_details.reason=content_filter and exact optional stop_details' },
+      { source: 'model_context_window_exceeded', hub: 'context_window_exceeded', responses_status: null, projection_status: 'unsupported_fail_fast', supplemental: 'never relabel input context exhaustion as max_output_tokens' },
+    ],
+  );
+  requireExactRegisteredRows(
+    `${paths.fieldMatrix}: Responses tool-result status values`,
+    anthropicResponseContract.tool_result_status_values,
+    [
+      { source: 'absent', anthropic_is_error: 'omitted', projection_status: 'mapped_exact' },
+      { source: 'completed', anthropic_is_error: 'omitted', projection_status: 'mapped_exact' },
+      { source: 'incomplete', anthropic_is_error: true, projection_status: 'mapped_compatible_registered' },
+      { source: 'in_progress', anthropic_is_error: null, projection_status: 'unsupported_fail_fast' },
+      { source: 'unknown_or_malformed', anthropic_is_error: null, projection_status: 'unsupported_fail_fast' },
+    ],
+  );
+  requireExactRegisteredRows(
+    `${paths.fieldMatrix}: Anthropic response content blocks`,
+    anthropicResponseContract.response_content_blocks,
+    [
+      { source: 'text', projection_status: 'mapped_exact', relay_policy: 'ordered Responses output_text' },
+      { source: 'thinking', projection_status: 'mapped_compatible_registered', relay_policy: 'Responses reasoning summary plus opaque signature' },
+      { source: 'redacted_thinking', projection_status: 'mapped_compatible_registered', relay_policy: 'Responses reasoning encrypted_content' },
+      { source: 'tool_use', projection_status: 'mapped_exact', relay_policy: 'typed Responses function call or governed custom wrapper' },
+      { source: 'server_tool_use', projection_status: 'mapped_compatible_registered', relay_policy: 'registered web_search subset only; other names fail explicitly' },
+      { source: 'web_search_tool_result', projection_status: 'mapped_compatible_registered', relay_policy: 'exact paired registered web_search result only' },
+      { source: 'web_fetch_tool_result', projection_status: 'source_roundtrip_only', relay_policy: 'unsupported_fail_fast' },
+      { source: 'code_execution_tool_result', projection_status: 'source_roundtrip_only', relay_policy: 'unsupported_fail_fast' },
+      { source: 'bash_code_execution_tool_result', projection_status: 'source_roundtrip_only', relay_policy: 'unsupported_fail_fast' },
+      { source: 'text_editor_code_execution_tool_result', projection_status: 'source_roundtrip_only', relay_policy: 'unsupported_fail_fast' },
+      { source: 'tool_search_tool_result', projection_status: 'source_roundtrip_only', relay_policy: 'unsupported_fail_fast' },
+      { source: 'container_upload', projection_status: 'source_roundtrip_only', relay_policy: 'unsupported_fail_fast' },
+    ],
+  );
+  for (const [key, expected] of [
+    ['stop_reason', 'https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/src/anthropic/types/stop_reason.py'],
+    ['message', 'https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/src/anthropic/types/message.py'],
+    ['content_block', 'https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/src/anthropic/types/content_block.py'],
+    ['responses_status', 'https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/responses/response.py'],
+    ['verified_at', '2026-08-19'],
+  ]) {
+    if (anthropicResponseContract?.official_sources?.[key] !== expected) failures.push(`${paths.fieldMatrix}: anthropic official source ${key} must be ${expected}`);
+  }
+}
+
+const requiredAnthropicProjectionTests = [
+  'anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix',
+  'anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_values',
+  'anthropic_model_context_window_stop_is_explicitly_unsupported_for_responses',
+  'responses_tool_result_status_projects_only_registered_anthropic_is_error_semantic',
+  'responses_tool_result_status_rejects_nonterminal_or_unknown_values',
+  'anthropic_response_content_block_enum_is_closed_and_diagnostic',
+  'anthropic_web_search_result_requires_exact_pairing',
+  'anthropic_json_and_sse_materialization_share_terminal_projection_owner',
+  'anthropic_json_and_sse_reject_unknown_terminal_without_success_projection',
+  'responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details',
+];
+requireExactRegisteredRows(
+  `${paths.fieldMatrix}: Anthropic response required tests`,
+  [...(anthropicResponseContract?.required_tests ?? [])].sort(),
+  [...requiredAnthropicProjectionTests].sort(),
+);
+const anthropicProjectionTestSources = `${text.anthropicCodecTests}\n${text.anthropicTests}\n${text.respChatProcess03Tests}`;
+for (const testName of requiredAnthropicProjectionTests) {
+  requireText(anthropicProjectionTestSources, 'Anthropic response projection Rust tests', testName);
+}
+for (const phrase of [
+  'fn project_v3_anthropic_terminal_as_responses_terminal(',
+  'enum V3AnthropicResponseContentBlockKind',
+  'V3AnthropicResponseContentBlockKind::parse(part, index)',
+  'UnsupportedResponseContentBlock',
+  'UnsupportedStopReason',
+]) requireText(text.anthropicCodec, paths.anthropicCodec, phrase);
+for (const [contentType, variant] of [
+  ['text', 'Text'],
+  ['thinking', 'Thinking'],
+  ['redacted_thinking', 'RedactedThinking'],
+  ['tool_use', 'ToolUse'],
+  ['server_tool_use', 'ServerToolUse'],
+  ['web_search_tool_result', 'WebSearchToolResult'],
+  ['web_fetch_tool_result', 'WebFetchToolResult'],
+  ['code_execution_tool_result', 'CodeExecutionToolResult'],
+  ['bash_code_execution_tool_result', 'BashCodeExecutionToolResult'],
+  ['text_editor_code_execution_tool_result', 'TextEditorCodeExecutionToolResult'],
+  ['tool_search_tool_result', 'ToolSearchToolResult'],
+  ['container_upload', 'ContainerUpload'],
+]) requireText(text.anthropicCodec, paths.anthropicCodec, `"${contentType}" => Ok(Self::${variant})`);
+for (const phrase of [
+  'pub(super) fn responses_tool_output_as_anthropic_tool_result(',
+  'Some(Value::String(status)) if status == "completed" => false',
+  'Some(Value::String(status)) if status == "incomplete" => true',
+  'result.insert("is_error".to_string(), Value::Bool(true))',
+]) requireText(text.responsesToAnthropicCodec, paths.responsesToAnthropicCodec, phrase);
+for (const phrase of [
+  'matches!(reason, "max_output_tokens" | "content_filter")',
+  'provider response incomplete_details.reason is invalid',
+]) requireText(text.respChatProcess03, paths.respChatProcess03, phrase);
+for (const phrase of ['pause_turn', 'refusal', 'model_context_window_exceeded']) {
+  requireText(text.protocolTables, paths.protocolTables, phrase);
+  requireText(text.finishReasonMap, paths.finishReasonMap, phrase);
+}
+const finishReasonRows = finishReasonMap?.values ?? [];
+for (const [hub, anthropic, responses] of [
+  ['stop', 'end_turn', 'end_turn'],
+  ['tool_calls', 'tool_use', 'requires_action'],
+  ['max_tokens', 'max_tokens', 'max_tokens'],
+  ['stop_sequence', 'stop_sequence', 'stop_sequence'],
+  ['pause_turn', 'pause_turn', 'pause_turn'],
+  ['content_filter', 'refusal', 'content_filter'],
+  ['context_window_exceeded', 'model_context_window_exceeded', 'model_context_window_exceeded'],
+]) {
+  if (!finishReasonRows.some((row) => row?.hub === hub && row?.anthropic === anthropic && row?.responses === responses)) {
+    failures.push(`${paths.finishReasonMap}: missing registered ${anthropic} -> ${hub} -> ${responses} terminal row`);
+  }
+}
+const anthropicGap = (fieldMatrix?.audit_truth_contract?.gap_audit ?? []).find((gap) => gap?.gap_id === 'gap.anthropic_response_projection_completion');
+if (anthropicGap?.affected_count !== 3 || anthropicGap?.closeout_status !== 'source_closed_runtime_live_pending' || !(anthropicGap?.affected_statuses ?? []).includes('covered')) {
+  failures.push(`${paths.fieldMatrix}: gap.anthropic_response_projection_completion must record three source-closed rows with live closeout pending`);
+}
+for (const groupId of ['tool.result.error_status', 'response.finish_reason']) {
+  const group = (fieldMatrix?.chat_semantic_translation_groups ?? []).find((row) => row?.group_id === groupId);
+  if (group?.current_impl !== 'covered') failures.push(`${paths.fieldMatrix}: ${groupId}.current_impl must be covered after paired runtime regressions`);
+}
+if (fieldMatrix?.semantic_correspondence?.['terminal.finish_reason']?.current_impl !== 'covered') {
+  failures.push(`${paths.fieldMatrix}: semantic_correspondence.terminal.finish_reason.current_impl must be covered`);
+}
 
 requireText(text.responsesRelayTypes, `${paths.responsesRelayTypes}::client_input_error_type`, 'ClientInboundCanonical(String)');
 requireText(text.responsesRelayDryRun, `${paths.responsesRelayDryRun}::client_input_error_projection`, 'V3ResponsesRelayRuntimeError::ClientInboundCanonical(message)');
@@ -178,7 +346,7 @@ if (requestFieldProjectionModules?.status !== 'design_feature_scope' || requestF
   failures.push(`${paths.requestFieldProjectionModules}: feature module registry must remain design/pending until runtime verification`);
 }
 const scopedOwnedPaths = (requestFieldProjectionModules?.modules ?? []).flatMap((module) => module.owned_paths ?? []);
-for (const path of [paths.responsesOpenaiCodec, paths.requestOutboundFormat, paths.anthropicCodec, paths.anthropicProjectionContext, paths.anthropicRequestFieldProjection, paths.geminiCodec, paths.providerReqCompat]) {
+for (const path of [paths.responsesOpenaiCodec, paths.requestOutboundFormat, paths.anthropicCodec, paths.anthropicProjectionContext, paths.responsesToAnthropicCodec, paths.anthropicRequestFieldProjection, paths.respChatProcess03, paths.respChatProcess03Tests, paths.protocolTables, paths.finishReasonMap, paths.geminiCodec, paths.providerReqCompat]) {
   if (scopedOwnedPaths.filter((ownedPath) => ownedPath === path).length !== 1) failures.push(`${paths.requestFieldProjectionModules}: ${path} must have exactly one feature-scoped module owner`);
 }
 for (const [from, to, direction] of [
@@ -186,6 +354,8 @@ for (const [from, to, direction] of [
   ['v3.protocol_codec.provider_compat_dispatch', 'v3.protocol_codec.openai_outbound', 'outbound_openai'],
   ['v3.protocol_codec.provider_compat_dispatch', 'v3.protocol_codec.anthropic', 'outbound_anthropic'],
   ['v3.protocol_codec.provider_compat_dispatch', 'v3.protocol_codec.gemini', 'outbound_gemini_dispatch'],
+  ['v3.protocol_codec.anthropic', 'v3.protocol_codec.finish_reason_registry', 'terminal_value_registry'],
+  ['v3.protocol_codec.anthropic', 'v3.protocol_codec.typed_terminality', 'response_terminality_governance'],
 ]) {
   if (!(requestFieldProjectionModules?.allowed_edges ?? []).some((edge) => edge?.from === from && edge?.to === to && edge?.direction === direction)) {
     failures.push(`${paths.requestFieldProjectionModules}: missing adjacent ${direction} edge ${from} -> ${to}`);
@@ -451,6 +621,7 @@ for (const phrase of [
   'responses_reasoning_fields_as_anthropic_thinking',
   'project_chat_reasoning_effort_as_anthropic_output_config',
   'reject_unmapped_anthropic_payload_extensions',
+  'reject_unmapped_responses_reasoning_extensions',
   '"output_config"',
   '"effort"',
   '"budget_tokens"',
@@ -464,7 +635,8 @@ for (const phrase of [
   '$.request.client_metadata',
   '"metadata" | "client_metadata" | "prompt_cache_key" | "store" | "text"',
 ]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
-forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /responses_reasoning_effort_as_anthropic_budget/, /responses_reasoning_policy_as_anthropic_system_marker/, /<routecodex_reasoning_request/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s]);
+forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /strip_unmapped|silently_strip|anthropic_outbound_stripped/, /responses_reasoning_effort_as_anthropic_budget/, /responses_reasoning_policy_as_anthropic_system_marker/, /<routecodex_reasoning_request/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s]);
+requireText(text.hubTests, `${paths.hubTests}::unmapped_reasoning_policy_fail_fast`, 'anthropic_outbound_rejects_unmapped_responses_only_reasoning_policy_fields');
 forbid(text.anthropicCodec, `${paths.anthropicCodec}::registered_anthropic_system_extension`, [/anthropic_entry_system/]);
 for (const phrase of ['responses_metadata_as_anthropic_metadata', 'pub(super) fn validate_responses_cache_and_store_for_anthropic(', 'pub(super) fn reject_responses_reasoning_summary_for_anthropic(', 'pub(super) fn project_responses_text_as_anthropic_output_config(', 'extension.get("prompt_cache_key")', 'extension.get("store")', 'Some(false) => {}', 'Some(true) => {', 'matches!(value, "auto" | "concise" | "detailed")']) requireText(text.anthropicRequestFieldProjection, paths.anthropicRequestFieldProjection, phrase);
 for (const phrase of [
@@ -566,7 +738,9 @@ const providerReqCompat = functionSlice(
 for (const phrase of [
   'V3HubProviderWireProtocol::Anthropic',
   'let source = build_v3_anthropic_provider_request_source_from_chat_canonical(',
-  'encode_v3_responses_semantic_as_anthropic_request(source)',
+  'encode_v3_responses_semantic_as_anthropic_request_for_target(',
+  '.model_capabilities',
+  'capability == "reasoning" || capability == "thinking"',
   'input.provider_semantic_payload()',
   'input.entry_protocol()',
 ]) requireText(providerReqCompat, `${paths.providerReqCompat}::anthropic_chat_extension_surface`, phrase);
@@ -953,6 +1127,14 @@ const parityFeatureBlock = featureBlock(text.functionMap, 'feature_id: v3.protoc
 for (const phrase of [
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   'responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+  'v3/crates/routecodex-v3-runtime/src/protocol_tables.rs',
+  'v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json',
+  'project_v3_anthropic_terminal_as_responses_terminal',
+  'V3AnthropicResponseContentBlockKind::parse',
+  'responses_tool_output_as_anthropic_tool_result',
+  'responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details',
+  'docs/goals/v3-anthropic-protocol-matrix-projection-completion-plan.md',
 ]) requireText(parityFeatureBlock, `${paths.functionMap}::v3.protocol_conversion_field_parity`, phrase);
 for (const phrase of [
   'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
@@ -976,6 +1158,36 @@ forbid(allowedBlock, `${paths.functionMap}::v3.protocol_conversion_field_parity.
   /routecodex-v3-server\/src\/lib\.rs/,
   /routecodex-v3-provider-responses/,
 ]);
+for (const phrase of [
+  'Materialized Anthropic JSON and provider SSE final messages enter the same Anthropic response codec',
+  'Direct same-protocol Anthropic response bytes do not enter this Relay codec',
+  'Responses function_call_output.status is consumed as typed tool-result data',
+  'output text, HTTP status, provider identity, and MetadataCenter never infer is_error',
+]) requireText(text.mainlineMap, `${paths.mainlineMap}::v3.protocol_conversion_field_parity`, phrase);
+for (const phrase of [
+  'docs/goals/v3-anthropic-protocol-matrix-projection-completion-plan.md',
+  'Anthropic final stop_reason uses one closed terminal projector shared by JSON and SSE materialization',
+  'Responses tool-result status is the only source for Anthropic tool_result.is_error',
+  'Anthropic response content blocks use the registered closed enum',
+  ...requiredAnthropicProjectionTests,
+]) requireText(text.verificationMap, `${paths.verificationMap}::v3.protocol_conversion_field_parity`, phrase);
+for (const phrase of [
+  'docs/goals/v3-anthropic-protocol-matrix-projection-completion-plan.md',
+  'tool_result_status',
+  'tool_result_is_error',
+  'response_content_block_type',
+  'stop_reason',
+  'stop_sequence',
+  'stop_details',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+  'v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json',
+]) requireText(text.resourceMap, `${paths.resourceMap}::v3.protocol_conversion.field_parity_contract`, phrase);
+for (const phrase of [
+  '# V3 Anthropic Protocol Matrix Projection Completion Plan',
+  'Direct same-protocol Anthropic passthrough',
+  'JSON 和 SSE',
+  'DSH Review',
+]) requireText(text.anthropicCompletionPlan, paths.anthropicCompletionPlan, phrase);
 
 for (const phrase of [
   'V3 protocol semantic normalization matrix review',
@@ -984,17 +1196,19 @@ for (const phrase of [
   'Source field inventory',
   'Canonical textual truth for the field-matrix audit',
   'Audited status legend and counts',
-  '`extension_declared` | 221',
+  '`covered` | 162',
+  '`extension_declared` | 219',
   '`semantic_declared` | 50',
   '`source_inventory_only` | 0',
   '`shape_branch_gap` | 18',
   '`codec_shape_only` | 14',
-  '`runtime_conformance_pending` | 1',
+  '`runtime_conformance_pending` | 3',
   '`partial` | 112',
   'Gap audit for runtime closeout',
   'gap.runtime_extension_declared',
   'gap.semantic_declared_runtime_closeout',
   'gap.partial_cross_protocol_semantics',
+  'gap.anthropic_response_projection_completion',
   'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
 ]) requireText(text.matrixReview, paths.matrixReview, phrase);
 requireText(
@@ -1134,6 +1348,12 @@ for (const token of [
   'Source inventory / 下载字段清单证据',
   'Audit truth contract / 文本真相与 gap 审计',
   'Gap audit closeout categories',
+  'anthropic-response-projection-contract',
+  'v3.anthropic_response_projection.closed_matrix.v1',
+  'Closed stop_reason matrix',
+  'Typed tool-result error projection',
+  'Closed response content block enum',
+  'source_roundtrip_only',
   'OpenAI Chat',
   'Anthropic Messages',
   'Gemini',
@@ -1143,6 +1363,12 @@ for (const token of [
   'export function renderV3ProtocolSemanticFieldMatrixHtml',
   'V3_PROTOCOL_SEMANTIC_FIELD_MATRIX_HTML_PATH',
   'renderAuditTruthContract',
+  'renderAnthropicResponseProjectionContract',
+  'anthropic-response-projection-contract',
+  'Closed stop_reason matrix',
+  'Typed tool-result error projection',
+  'Closed response content block enum',
+  'source_roundtrip_only',
   'audit-truth-contract',
   'audited-status-counts',
   'gap-audit-closeout',
