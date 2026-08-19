@@ -3,7 +3,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = 'v3';
-const ignoredDirs = new Set(['target']);
+const ignoredDirs = new Set(['target', 'node_modules']);
 const offenders = [];
 
 function walk(dir) {
