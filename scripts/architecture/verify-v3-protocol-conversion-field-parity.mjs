@@ -36,6 +36,7 @@ const paths = {
   responsesOpenaiChatConversion: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
   anthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
   anthropicProjectionContext: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
+  anthropicResponseProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs',
   anthropicCodecToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
   responsesToAnthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
   anthropicRequestFieldProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
@@ -125,7 +126,8 @@ if (!anthropicResponseContract) {
   for (const [key, expected] of [
     ['contract_id', 'v3.anthropic_response_projection.closed_matrix.v1'],
     ['owner_feature_id', 'v3.protocol_conversion_field_parity'],
-    ['terminal_owner', paths.anthropicCodec],
+    ['terminal_owner', paths.anthropicResponseProjection],
+    ['content_block_owner', paths.anthropicResponseProjection],
     ['typed_terminality_owner', paths.respChatProcess03],
     ['tool_result_owner', paths.responsesToAnthropicCodec],
     ['direct_same_protocol_policy', 'source_roundtrip_only'],
@@ -216,6 +218,8 @@ for (const testName of requiredAnthropicProjectionTests) {
 for (const phrase of [
   'fn project_v3_anthropic_terminal_as_responses_terminal(',
   'enum V3AnthropicResponseContentBlockKind',
+]) requireText(text.anthropicResponseProjection, paths.anthropicResponseProjection, phrase);
+for (const phrase of [
   'V3AnthropicResponseContentBlockKind::parse(part, index)',
   'UnsupportedResponseContentBlock',
   'UnsupportedStopReason',
@@ -233,7 +237,7 @@ for (const [contentType, variant] of [
   ['text_editor_code_execution_tool_result', 'TextEditorCodeExecutionToolResult'],
   ['tool_search_tool_result', 'ToolSearchToolResult'],
   ['container_upload', 'ContainerUpload'],
-]) requireText(text.anthropicCodec, paths.anthropicCodec, `"${contentType}" => Ok(Self::${variant})`);
+]) requireText(text.anthropicResponseProjection, paths.anthropicResponseProjection, `"${contentType}" => Ok(Self::${variant})`);
 for (const phrase of [
   'pub(super) fn responses_tool_output_as_anthropic_tool_result(',
   'Some(Value::String(status)) if status == "completed" => false',
@@ -346,7 +350,7 @@ if (requestFieldProjectionModules?.status !== 'design_feature_scope' || requestF
   failures.push(`${paths.requestFieldProjectionModules}: feature module registry must remain design/pending until runtime verification`);
 }
 const scopedOwnedPaths = (requestFieldProjectionModules?.modules ?? []).flatMap((module) => module.owned_paths ?? []);
-for (const path of [paths.responsesOpenaiCodec, paths.requestOutboundFormat, paths.anthropicCodec, paths.anthropicProjectionContext, paths.responsesToAnthropicCodec, paths.anthropicRequestFieldProjection, paths.respChatProcess03, paths.respChatProcess03Tests, paths.protocolTables, paths.finishReasonMap, paths.geminiCodec, paths.providerReqCompat]) {
+for (const path of [paths.responsesOpenaiCodec, paths.requestOutboundFormat, paths.anthropicCodec, paths.anthropicProjectionContext, paths.anthropicResponseProjection, paths.responsesToAnthropicCodec, paths.anthropicRequestFieldProjection, paths.respChatProcess03, paths.respChatProcess03Tests, paths.protocolTables, paths.finishReasonMap, paths.geminiCodec, paths.providerReqCompat]) {
   if (scopedOwnedPaths.filter((ownedPath) => ownedPath === path).length !== 1) failures.push(`${paths.requestFieldProjectionModules}: ${path} must have exactly one feature-scoped module owner`);
 }
 for (const [from, to, direction] of [
@@ -1124,6 +1128,7 @@ for (const phrase of [
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   'responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/protocol_tables.rs',
   'v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json',
   'project_v3_anthropic_terminal_as_responses_terminal',

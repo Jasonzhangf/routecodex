@@ -143,7 +143,8 @@ audit_truth_contract:
 anthropic_response_projection_contract:
   contract_id: v3.anthropic_response_projection.closed_matrix.v1
   owner_feature_id: v3.protocol_conversion_field_parity
-  terminal_owner: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  terminal_owner: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs
+  content_block_owner: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs
   typed_terminality_owner: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   tool_result_owner: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   direct_same_protocol_policy: source_roundtrip_only

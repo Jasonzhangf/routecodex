@@ -79,6 +79,7 @@ SSE、provider transport、Virtual Router、MetadataCenter 或请求清理层补
 主要实现 owner：
 
 - `v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs`
+- `v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs`
 - 必要时在同一 Hub response semantic 模块内增加唯一 typed terminal helper；不得放入
   `anthropic_relay_runtime.rs`、server frame builder 或 SSE transport。
 

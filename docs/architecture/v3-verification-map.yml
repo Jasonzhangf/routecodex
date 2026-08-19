@@ -694,6 +694,7 @@ features:
     client projection
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs
   - scripts/architecture/verify-v3-anthropic-codec-characterization.mjs
   - scripts/tests/v3-anthropic-codec-characterization-red-fixtures.mjs
@@ -1938,6 +1939,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/tests/responses_relay_stopless_anthropic_provider_wire_integration.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs

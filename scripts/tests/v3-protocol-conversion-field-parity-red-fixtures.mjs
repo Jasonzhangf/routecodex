@@ -42,6 +42,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
@@ -879,7 +880,7 @@ const cases = [
   },
   {
     name: 'Anthropic response content enum drops container_upload',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs',
     from: '"container_upload" => Ok(Self::ContainerUpload),',
     to: '"container_upload_removed" => Ok(Self::ContainerUpload),',
     diagnostic: /container_upload.*ContainerUpload|anthropic_codec/u,
