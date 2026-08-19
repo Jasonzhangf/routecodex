@@ -223,6 +223,12 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream(
                             state,
                         ));
                     }
+                    if let Err(error) = state.runtime_timing.finish_external_if_active() {
+                        return Some((
+                            Err(runtime_source("V3RuntimeTimingExternal", error)),
+                            state,
+                        ));
+                    }
                     let timing = match state.runtime_timing.finish_runtime() {
                         Ok(timing) => timing,
                         Err(error) => {
