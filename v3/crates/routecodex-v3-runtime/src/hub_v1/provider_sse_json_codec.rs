@@ -176,7 +176,9 @@ pub(crate) fn is_v3_provider_sse_keepalive_json_event(event: &Value) -> bool {
     ) {
         return true;
     }
-    object.contains_key("ping") || object.is_empty()
+    object.get("type").and_then(Value::as_str) == Some("ping")
+        || object.contains_key("ping")
+        || object.is_empty()
 }
 
 /// 非 JSON keepalive data 文本（如 `data: ping` / `data: keep-alive`）：
@@ -387,6 +389,15 @@ mod provider_sse_json_codec_tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn json_ping_event_is_transport_keepalive() {
+        assert_eq!(
+            classify_v3_provider_generic_sse_json_data(r#"{"type":"ping"}"#)
+                .expect("JSON ping must remain a keepalive"),
+            None
+        );
     }
 
     #[test]
