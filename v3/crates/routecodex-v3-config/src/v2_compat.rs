@@ -1,4 +1,5 @@
 // feature_id: v3.v2_config_toml_compat_5555
+use crate::list_v3_secret_file_keys;
 use crate::{
     provider_directory::{V3Config02AuthoringResolved, V3ProviderDirectorySource},
     validation, V3Config02AuthoringParsed, V3ConfigError, V3ForwarderAuthoringConfig,
@@ -527,9 +528,33 @@ fn compile_v2_auth(
 ) -> Result<V3ProviderAuthAuthoringConfig, V3ConfigError> {
     let entries = if let Some(entries) = auth.entries {
         entries
+    } else if let Some(secret_file) = auth.secret_file.clone() {
+        let content = fs::read_to_string(&secret_file).map_err(|error| {
+            validation(format!(
+                "v2 provider {provider_id} secretFile is unreadable: {error}"
+            ))
+        })?;
+        list_v3_secret_file_keys(&content, provider_id)
+            .map_err(validation)?
+            .into_iter()
+            .map(|secret_key| V2ProviderAuthEntry {
+                alias: secret_key
+                    .strip_prefix(&format!("{provider_id}."))
+                    .map(str::to_string),
+                priority: None,
+                weight: None,
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some(secret_file.clone()),
+                secret_key: Some(secret_key),
+            })
+            .collect()
     } else {
         vec![V2ProviderAuthEntry {
             alias: Some("key1".to_string()),
+            priority: None,
+            weight: None,
             api_key: auth.api_key,
             env: auth.env,
             token_file: auth.token_file,
@@ -540,6 +565,8 @@ fn compile_v2_auth(
     let mut v3_entries = Vec::new();
     for entry in entries {
         let alias = entry.alias.unwrap_or_else(|| "key1".to_string());
+        let entry_priority = entry.priority;
+        let entry_weight = entry.weight;
         let handle_count = usize::from(entry.env.is_some())
             + usize::from(entry.token_file.is_some())
             + usize::from(entry.secret_file.is_some())
@@ -557,6 +584,8 @@ fn compile_v2_auth(
         if let Some(env) = entry.env {
             v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
                 alias,
+                priority: entry_priority,
+                weight: entry_weight,
                 env: Some(env),
                 token_file: None,
                 api_key: None,
@@ -585,6 +614,8 @@ fn compile_v2_auth(
             }
             v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
                 alias,
+                priority: entry_priority,
+                weight: entry_weight,
                 env: None,
                 token_file: None,
                 api_key: None,
@@ -602,6 +633,8 @@ fn compile_v2_auth(
             }
             v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
                 alias,
+                priority: entry_priority,
+                weight: entry_weight,
                 env: None,
                 token_file: Some(token_file.to_string()),
                 api_key: None,
@@ -622,6 +655,8 @@ fn compile_v2_auth(
         }
         v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
             alias,
+            priority: entry_priority,
+            weight: entry_weight,
             env: None,
             token_file: None,
             api_key: Some(api_key),
@@ -631,6 +666,7 @@ fn compile_v2_auth(
     }
     Ok(V3ProviderAuthAuthoringConfig {
         auth_type: V3ProviderAuthType::ApiKey,
+        selection: auth.selection.unwrap_or_default(),
         entries: v3_entries,
     })
 }
@@ -837,13 +873,20 @@ pub struct V2ProviderAuthConfig {
     pub api_key: Option<String>,
     pub env: Option<String>,
     pub token_file: Option<String>,
+    pub secret_file: Option<String>,
     pub entries: Option<Vec<V2ProviderAuthEntry>>,
+    #[serde(default)]
+    pub selection: Option<V3SelectionPolicy>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct V2ProviderAuthEntry {
     pub alias: Option<String>,
+    #[serde(default)]
+    pub priority: Option<i32>,
+    #[serde(default)]
+    pub weight: Option<u32>,
     pub api_key: Option<String>,
     pub env: Option<String>,
     pub token_file: Option<String>,
@@ -949,10 +992,7 @@ web_search_backend = "MiniMax-M3"
             "snake_case web_search_execution_mode must parse (found {:?})",
             parsed.web_search_execution_mode()
         );
-        assert_eq!(
-            parsed.web_search_backend.as_deref(),
-            Some("MiniMax-M3")
-        );
+        assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
     }
 
     #[test]
@@ -965,7 +1005,10 @@ webSearchBackend = "MiniMax-M3"
 "#,
         )
         .expect("parse");
-        assert_eq!(parsed.web_search_execution_mode().as_str(), "metadata_center_local_search");
+        assert_eq!(
+            parsed.web_search_execution_mode().as_str(),
+            "metadata_center_local_search"
+        );
         assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
     }
 
@@ -997,7 +1040,11 @@ apiKey = "test-key"
 "#,
         )
         .expect("parse");
-        assert_eq!(parsed.provider.timeout, Some(900_000), "snake_case timeout must parse");
+        assert_eq!(
+            parsed.provider.timeout,
+            Some(900_000),
+            "snake_case timeout must parse"
+        );
 
         // (2) 端到点：临时 provider 目录 → compile_v2_provider_directory →
         //      manifest request_timeout_ms == 900_000
@@ -1033,11 +1080,9 @@ apiKey = "test-key"
 
         let mut referenced_models: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         referenced_models.insert("test-provider".to_string(), BTreeSet::new());
-        let (providers, _sources) =
-            compile_v2_provider_directory(&tmp, &referenced_models).expect("compile v2 provider dir");
-        let authoring = providers
-            .get("test-provider")
-            .expect("provider compiled");
+        let (providers, _sources) = compile_v2_provider_directory(&tmp, &referenced_models)
+            .expect("compile v2 provider dir");
+        let authoring = providers.get("test-provider").expect("provider compiled");
         assert_eq!(
             authoring.request_timeout_ms, 900_000,
             "V2→V3 end-to-end: timeout=900_000 must land in request_timeout_ms (was silently dropped)"
@@ -1122,17 +1167,14 @@ apiKey = "test-key"
 "#,
             )
             .expect("write");
-        let (providers_default, _sources_default) = compile_v2_provider_directory(
-            &tmp_default,
-            &referenced_models,
-        )
-        .expect("compile v2 provider dir (absent timeout)");
+        let (providers_default, _sources_default) =
+            compile_v2_provider_directory(&tmp_default, &referenced_models)
+                .expect("compile v2 provider dir (absent timeout)");
         let authoring_default = providers_default
             .get("test-provider")
             .expect("provider compiled");
         assert_eq!(
-            authoring_default.request_timeout_ms,
-            DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+            authoring_default.request_timeout_ms, DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
             "absent timeout must fall back to DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS (300_000)"
         );
         std::fs::remove_dir_all(&tmp_default).ok();
@@ -1156,7 +1198,11 @@ apiKey = "test-key"
 "#,
         )
         .expect("parse");
-        assert_eq!(parsed.provider.timeout, Some(900_000), "snake_case timeout must parse");
+        assert_eq!(
+            parsed.provider.timeout,
+            Some(900_000),
+            "snake_case timeout must parse"
+        );
 
         let absent: V2ProviderConfigFile = toml::from_str(
             r#"
@@ -1175,7 +1221,10 @@ apiKey = "test-key"
 "#,
         )
         .expect("parse");
-        assert_eq!(absent.provider.timeout, None, "absent timeout must be None (default applies later)");
+        assert_eq!(
+            absent.provider.timeout, None,
+            "absent timeout must be None (default applies later)"
+        );
     }
 
     #[test]
@@ -1251,7 +1300,9 @@ capabilities = ["text", "reasoning", "tools"]
                     api_key: None,
                     env: Some("GEN_PROVIDER_KEY".into()),
                     token_file: None,
+                    secret_file: None,
                     entries: None,
+                    selection: None,
                 },
                 responses: None,
                 concurrency: Some(V2ProviderConcurrencyConfig {
@@ -1267,10 +1318,142 @@ capabilities = ["text", "reasoning", "tools"]
             },
         };
         let generated = generate_v2_provider_config_file(&config).expect("generate");
-        assert!(generated.contains("providerId = \"gen-provider\""), "{generated}");
-        assert!(generated.contains("baseURL = \"https://api.example.com/v1\""), "{generated}");
+        assert!(
+            generated.contains("providerId = \"gen-provider\""),
+            "{generated}"
+        );
+        assert!(
+            generated.contains("baseURL = \"https://api.example.com/v1\""),
+            "{generated}"
+        );
         assert!(generated.contains("type = \"anthropic\""), "{generated}");
         assert!(generated.contains("maxInFlight = 2"), "{generated}");
-        assert!(generated.contains("env = \"GEN_PROVIDER_KEY\""), "{generated}");
+        assert!(
+            generated.contains("env = \"GEN_PROVIDER_KEY\""),
+            "{generated}"
+        );
+    }
+
+    #[test]
+    fn v2_auth_selection_transfers_and_validates_at_v3_boundary() {
+        let compiled = compile_v2_auth(
+            Path::new("."),
+            "v2-selection-provider",
+            String::new(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: None,
+                entries: Some(vec![
+                    V2ProviderAuthEntry {
+                        alias: Some("key1".into()),
+                        priority: Some(1),
+                        weight: Some(2),
+                        api_key: None,
+                        env: Some("V2_SELECTION_KEY_1".into()),
+                        token_file: None,
+                        secret_file: None,
+                        secret_key: None,
+                    },
+                    V2ProviderAuthEntry {
+                        alias: Some("key2".into()),
+                        priority: Some(1),
+                        weight: Some(1),
+                        api_key: None,
+                        env: Some("V2_SELECTION_KEY_2".into()),
+                        token_file: None,
+                        secret_file: None,
+                        secret_key: None,
+                    },
+                ]),
+                selection: Some(V3SelectionPolicy {
+                    strategy: V3SelectionStrategy::Weighted,
+                }),
+            },
+        )
+        .unwrap();
+        assert_eq!(compiled.selection.strategy, V3SelectionStrategy::Weighted);
+        assert_eq!(compiled.entries[0].priority, Some(1));
+        assert_eq!(compiled.entries[0].weight, Some(2));
+        assert_eq!(compiled.entries[1].weight, Some(1));
+
+        let invalid = |strategy, priority, weight| {
+            let compiled = compile_v2_auth(
+                Path::new("."),
+                "v2-selection-provider",
+                String::new(),
+                V2ProviderAuthConfig {
+                    api_key: None,
+                    env: None,
+                    token_file: None,
+                    secret_file: None,
+                    entries: Some(vec![V2ProviderAuthEntry {
+                        alias: Some("key1".into()),
+                        priority,
+                        weight,
+                        api_key: None,
+                        env: Some("V2_SELECTION_KEY".into()),
+                        token_file: None,
+                        secret_file: None,
+                        secret_key: None,
+                    }]),
+                    selection: Some(V3SelectionPolicy { strategy }),
+                },
+            )
+            .unwrap();
+            crate::validate::compile_auth("v2-selection-provider", compiled)
+                .unwrap_err()
+                .to_string()
+        };
+        assert!(invalid(V3SelectionStrategy::RoundRobin, None, None)
+            .contains("only supports priority or weighted"));
+        assert!(invalid(V3SelectionStrategy::Priority, Some(-1), None)
+            .contains("priority cannot be negative"));
+        assert!(invalid(V3SelectionStrategy::Weighted, None, Some(0))
+            .contains("weight must be positive"));
+    }
+
+    #[test]
+    fn v2_auth_secret_file_discovers_provider_key_list_without_inline_entries() {
+        let dir =
+            std::env::temp_dir().join(format!("rcc-v2-auth-discovery-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let secret_file = dir.join("opencode-go.conf");
+        fs::write(
+            &secret_file,
+            "opencode-go.key1 = \"first\"\nopencode-go.key2 = \"second\"\nother.key = \"ignored\"\n",
+        )
+        .unwrap();
+
+        let compiled = compile_v2_auth(
+            &dir,
+            "opencode-go",
+            String::new(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some(secret_file.display().to_string()),
+                entries: None,
+                selection: Some(V3SelectionPolicy {
+                    strategy: V3SelectionStrategy::Priority,
+                }),
+            },
+        )
+        .unwrap();
+        assert_eq!(compiled.entries.len(), 2);
+        assert_eq!(compiled.entries[0].alias, "key1");
+        assert_eq!(compiled.entries[1].alias, "key2");
+        assert!(compiled.entries.iter().all(|entry| entry.api_key.is_none()));
+        assert!(compiled
+            .entries
+            .iter()
+            .all(|entry| entry.secret_file.is_some()));
+        assert!(compiled
+            .entries
+            .iter()
+            .all(|entry| entry.secret_key.is_some()));
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

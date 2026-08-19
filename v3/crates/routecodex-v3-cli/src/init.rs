@@ -11,7 +11,6 @@ use routecodex_v3_config::{
 use routecodex_v3_config_mgmt::{write_provider_file, ConfigMgmtStore};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
-use std::path::Path;
 
 pub struct OfficialProviderPreset {
     pub id: &'static str,
@@ -87,7 +86,8 @@ pub struct InitOptions {
 
 pub fn run_init(options: &InitOptions) -> Result<(), String> {
     if options.config_path.exists() && !options.force {
-        match routecodex_v3_config_mgmt::ConfigMgmtStore::new(&options.config_path).read_authoring() {
+        match routecodex_v3_config_mgmt::ConfigMgmtStore::new(&options.config_path).read_authoring()
+        {
             Ok(authoring) => {
                 println!(
                     "[init] existing config found at {} (version={}, servers={})",
@@ -104,7 +104,9 @@ pub fn run_init(options: &InitOptions) -> Result<(), String> {
                     options.config_path.display()
                 );
                 if !options.force {
-                    return Err("existing config unreadable; pass --force to reinitialize".to_string());
+                    return Err(
+                        "existing config unreadable; pass --force to reinitialize".to_string()
+                    );
                 }
             }
         }
@@ -171,7 +173,11 @@ pub fn run_init(options: &InitOptions) -> Result<(), String> {
         V2ProviderModelConfig {
             wire_name: None,
             aliases: Vec::new(),
-            capabilities: vec!["text".to_string(), "reasoning".to_string(), "tools".to_string()],
+            capabilities: vec![
+                "text".to_string(),
+                "reasoning".to_string(),
+                "tools".to_string(),
+            ],
             supports_streaming: Some(true),
             supports_thinking: Some(true),
             thinking: None,
@@ -204,8 +210,7 @@ pub fn run_init(options: &InitOptions) -> Result<(), String> {
             sse_first_frame_timeout_ms: None,
         },
     };
-    let provider_path =
-        write_provider_file(&config_dir, &provider_id, &provider_file)?;
+    let provider_path = write_provider_file(&config_dir, &provider_id, &provider_file)?;
     println!("[init] wrote provider file {}", provider_path.display());
 
     let authoring = build_minimal_authoring(&provider_id, &default_model, port)?;
@@ -221,12 +226,20 @@ pub fn run_init(options: &InitOptions) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_preset(provider: Option<&str>) -> Result<Option<&'static OfficialProviderPreset>, String> {
+fn resolve_preset(
+    provider: Option<&str>,
+) -> Result<Option<&'static OfficialProviderPreset>, String> {
     match provider {
         None => {
             println!("[init] official providers:");
             for (index, preset) in OFFICIAL_PROVIDER_PRESETS.iter().enumerate() {
-                println!("  {}. {} ({}) - {}", index + 1, preset.label, preset.id, preset.hint);
+                println!(
+                    "  {}. {} ({}) - {}",
+                    index + 1,
+                    preset.label,
+                    preset.id,
+                    preset.hint
+                );
             }
             println!("  {}. custom provider", OFFICIAL_PROVIDER_PRESETS.len() + 1);
             let choice = prompt("select provider number (default 1)")?;
@@ -261,7 +274,9 @@ fn resolve_auth(options: &InitOptions) -> Result<V2ProviderAuthConfig, String> {
             api_key: Some(api_key.clone()),
             env: None,
             token_file: None,
+            secret_file: None,
             entries: None,
+            selection: None,
         });
     }
     if let Some(env) = &options.env {
@@ -269,7 +284,9 @@ fn resolve_auth(options: &InitOptions) -> Result<V2ProviderAuthConfig, String> {
             api_key: None,
             env: Some(env.clone()),
             token_file: None,
+            secret_file: None,
             entries: None,
+            selection: None,
         });
     }
     if let Some(token_file) = &options.token_file {
@@ -277,7 +294,9 @@ fn resolve_auth(options: &InitOptions) -> Result<V2ProviderAuthConfig, String> {
             api_key: None,
             env: None,
             token_file: Some(token_file.clone()),
+            secret_file: None,
             entries: None,
+            selection: None,
         });
     }
     let raw = prompt_optional(
@@ -291,7 +310,9 @@ fn resolve_auth(options: &InitOptions) -> Result<V2ProviderAuthConfig, String> {
                 api_key: None,
                 env: Some(env),
                 token_file: None,
+                secret_file: None,
                 entries: None,
+                selection: None,
             })
         }
         "3" => {
@@ -300,7 +321,9 @@ fn resolve_auth(options: &InitOptions) -> Result<V2ProviderAuthConfig, String> {
                 api_key: None,
                 env: None,
                 token_file: Some(token_file),
+                secret_file: None,
                 entries: None,
+                selection: None,
             })
         }
         _ => {
@@ -309,7 +332,9 @@ fn resolve_auth(options: &InitOptions) -> Result<V2ProviderAuthConfig, String> {
                 api_key: Some(api_key),
                 env: None,
                 token_file: None,
+                secret_file: None,
                 entries: None,
+                selection: None,
             })
         }
     }

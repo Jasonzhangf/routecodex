@@ -564,6 +564,8 @@ pub struct V3ProviderHealthAuthoringConfig {
 pub struct V3ProviderAuthAuthoringConfig {
     #[serde(rename = "type")]
     pub auth_type: V3ProviderAuthType,
+    #[serde(default)]
+    pub selection: V3SelectionPolicy,
     pub entries: Vec<V3ProviderAuthEntryAuthoringConfig>,
 }
 
@@ -580,6 +582,10 @@ pub enum V3ProviderAuthType {
 #[serde(deny_unknown_fields)]
 pub struct V3ProviderAuthEntryAuthoringConfig {
     pub alias: String,
+    #[serde(default)]
+    pub priority: Option<i32>,
+    #[serde(default)]
+    pub weight: Option<u32>,
     #[serde(default)]
     pub env: Option<String>,
     #[serde(default, alias = "tokenFile")]
@@ -1080,12 +1086,15 @@ pub struct V3ProviderManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ProviderAuthManifest {
     pub auth_type: V3ProviderAuthType,
+    pub selection: V3SelectionPolicy,
     pub entries: Vec<V3ProviderAuthEntryManifest>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct V3ProviderAuthEntryManifest {
     pub alias: String,
+    pub priority: Option<i32>,
+    pub weight: Option<u32>,
     pub env: Option<String>,
     pub token_file: Option<String>,
     pub secret_file: Option<String>,

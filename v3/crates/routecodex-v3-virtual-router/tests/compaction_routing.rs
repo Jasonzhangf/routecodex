@@ -44,8 +44,11 @@ fn manifest() -> V3Config05ManifestPublished {
                 default_model: "model-x".into(),
                 auth: V3ProviderAuthManifest {
                     auth_type: V3ProviderAuthType::ApiKey,
+                    selection: V3SelectionPolicy::default(),
                     entries: vec![V3ProviderAuthEntryManifest {
                         alias: "key1".into(),
+                        priority: None,
+                        weight: None,
                         env: Some("PROV_KEY".into()),
                         token_file: None,
                         secret_file: None,

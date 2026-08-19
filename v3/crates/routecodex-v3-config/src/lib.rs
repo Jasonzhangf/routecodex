@@ -5,11 +5,15 @@ mod store;
 mod types;
 mod v2_compat;
 pub use v2_compat::{
-    generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderConfig,
-    V2ProviderConfigFile, V2ProviderAuthConfig, V2ProviderAuthEntry, V2ProviderConcurrencyConfig,
+    generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderAuthConfig,
+    V2ProviderAuthEntry, V2ProviderConcurrencyConfig, V2ProviderConfig, V2ProviderConfigFile,
     V2ProviderModelConfig, V2ProviderResponsesConfig, V2ProviderV3Config,
 };
 mod validate;
+#[cfg(test)]
+mod validate_auth_tests;
+#[cfg(test)]
+mod validate_debug_tests;
 mod validate_relations;
 
 pub use store::{default_v3_config_path, V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan};
@@ -507,16 +511,46 @@ pub fn resolve_v3_secret_file_key(content: &str, key: &str) -> Result<String, St
     Err(format!("secret file key {key} not found"))
 }
 
+/// List non-empty secret handles from a centralized secret file without exposing values.
+/// Caller supplies the provider namespace, e.g. `opencode-go`; returned names retain the
+/// full file key so runtime auth handles can resolve the same source of truth.
+pub fn list_v3_secret_file_keys(content: &str, provider_id: &str) -> Result<Vec<String>, String> {
+    let prefix = format!("{provider_id}.");
+    let mut keys = Vec::new();
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        let value = value.trim();
+        if value.is_empty() || (value.starts_with('"') && value.ends_with("\"")) && value.len() == 2
+        {
+            return Err(format!("secret file key {name} has an empty value"));
+        }
+        if !keys.iter().any(|key| key == name) {
+            keys.push(name.to_string());
+        }
+    }
+    if keys.is_empty() {
+        return Err(format!(
+            "secret file has no keys for provider {provider_id}"
+        ));
+    }
+    Ok(keys)
+}
+
 /// 读取集中 secret 文件并解析指定 key 的值（编译期校验辅助）。
-pub fn read_v3_secret_file_key(
-    path: &str,
-    key: &str,
-) -> Result<String, V3ConfigError> {
-    let content = std::fs::read_to_string(path).map_err(|error| {
-        validation(format!("secret file {path} is unreadable: {error}"))
-    })?;
-    resolve_v3_secret_file_key(&content, key)
-        .map_err(validation)
+pub fn read_v3_secret_file_key(path: &str, key: &str) -> Result<String, V3ConfigError> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|error| validation(format!("secret file {path} is unreadable: {error}")))?;
+    resolve_v3_secret_file_key(&content, key).map_err(validation)
 }
 
 pub fn resolve_routecodex_package_version_from_executable(_executable: &Path) -> Option<String> {
