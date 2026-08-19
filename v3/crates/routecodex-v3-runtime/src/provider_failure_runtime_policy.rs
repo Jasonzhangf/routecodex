@@ -976,7 +976,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     // 瞬态失败第 3 次尝试后：写 session 级短期绕行（30s），同 session 后续
     // 请求绕开该 provider，避免 health-neutral 导致反复命中；不触发 15 分钟
     // 冷却，超时自动恢复。
-    if transient && retries_done >= V3_TRANSIENT_RETRY_BUDGET {
+    if status == 400 || (transient && retries_done >= V3_TRANSIENT_RETRY_BUDGET) {
         context
             .provider_health
             .record_provider_transient_bypass_in_session(
