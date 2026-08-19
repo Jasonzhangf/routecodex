@@ -439,14 +439,17 @@ fn request_declares_v3_web_search_tool(
             .is_some_and(|tools| tools.iter().any(predicate))
     };
     let declares_anywhere = |predicate: fn(&Value) -> bool| {
-        body.get("tools").is_some_and(|tools| declares(tools, predicate))
+        body.get("tools")
+            .is_some_and(|tools| declares(tools, predicate))
             || body
                 .get("input")
                 .and_then(Value::as_array)
                 .is_some_and(|items| {
                     items.iter().any(|item| {
                         item.get("type").and_then(Value::as_str) == Some("additional_tools")
-                            && item.get("tools").is_some_and(|tools| declares(tools, predicate))
+                            && item
+                                .get("tools")
+                                .is_some_and(|tools| declares(tools, predicate))
                     })
                 })
     };
@@ -496,7 +499,10 @@ fn is_v3_web_search_standard_declaration(tool: &Value) -> bool {
         .and_then(Value::as_str)
         .map(|value| value.trim().to_ascii_lowercase())
         .unwrap_or_default();
-    matches!(kind.as_str(), "web_search" | "web_search_preview" | "web_search_20250305")
+    matches!(
+        kind.as_str(),
+        "web_search" | "web_search_preview" | "web_search_20250305"
+    )
 }
 
 fn is_v3_client_tool_declaration(tool: &Value) -> bool {
@@ -613,7 +619,21 @@ pub fn build_v3_execution_11_protocol_decision_from_v3_target_10(
             .as_deref()
             .map(|process| process.trim().eq_ignore_ascii_case("chat"))
             .unwrap_or(false);
-    let mode = if responses_process_requires_relay {
+    let mode = if entry_protocol != selected_provider_protocol {
+        if relay_allowed {
+            V3Execution11ProtocolDecisionMode::HubRelay
+        } else {
+            return Err(build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Execution11ProtocolDecision",
+                "protocol_mismatch_relay_not_allowed",
+                format!(
+                    "entry protocol {:?} selected provider protocol {:?} requires relay but relay is not allowed",
+                    entry_protocol, selected_provider_protocol
+                ),
+            ));
+        }
+    } else if responses_process_requires_relay {
         if !relay_allowed {
             return Err(build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -623,7 +643,7 @@ pub fn build_v3_execution_11_protocol_decision_from_v3_target_10(
             ));
         }
         V3Execution11ProtocolDecisionMode::HubRelay
-    } else if entry_protocol == selected_provider_protocol {
+    } else {
         if direct_allowed {
             V3Execution11ProtocolDecisionMode::SameProtocolDirect
         } else if relay_allowed {
@@ -636,18 +656,6 @@ pub fn build_v3_execution_11_protocol_decision_from_v3_target_10(
                 "same protocol selected target requires direct or relay mode but neither is allowed",
             ));
         }
-    } else if relay_allowed {
-        V3Execution11ProtocolDecisionMode::HubRelay
-    } else {
-        return Err(build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3Execution11ProtocolDecision",
-            "protocol_mismatch_relay_not_allowed",
-            format!(
-                "entry protocol {:?} selected provider protocol {:?} requires relay but relay is not allowed",
-                entry_protocol, selected_provider_protocol
-            ),
-        ));
     };
     Ok(V3Execution11ProtocolDecision {
         mode,
@@ -687,9 +695,9 @@ mod tests {
     use super::{
         build_v3_chat_req_04_standardized_from_v3_server_03,
         build_v3_req_04_standardized_responses_from_v3_server_03,
-        build_v3_router_request_facts_for_entry, build_v3_router_request_facts_for_entry_with_control,
-        build_v3_router_request_facts_from_v3_req_04_chat,
-        build_v3_server_03_http_request_raw,
+        build_v3_router_request_facts_for_entry,
+        build_v3_router_request_facts_for_entry_with_control,
+        build_v3_router_request_facts_from_v3_req_04_chat, build_v3_server_03_http_request_raw,
         build_v3_server_03_http_request_raw_with_purpose, V3RequestPurpose,
     };
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};

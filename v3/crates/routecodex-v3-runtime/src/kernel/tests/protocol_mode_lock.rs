@@ -211,3 +211,35 @@ fn same_protocol_without_direct_or_relay_fails_explicitly() {
 
     assert_eq!(error.code, "protocol_same_execution_mode_not_allowed");
 }
+
+#[test]
+fn protocol_mismatch_is_decided_before_same_protocol_process_policy() {
+    let manifest = test_manifest();
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        V3Server03HttpRequestRaw {
+            server_id: "test".to_string(),
+            failure_session_scope: test_failure_session_scope("default"),
+            request_id: "req-protocol-first".to_string(),
+            execution_id: "exec-protocol-first".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            request_purpose: crate::V3RequestPurpose::Conversation,
+            body: json!({"model":"client-model","input":"hello"}),
+        },
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        0,
+    )
+    .expect("baseline plan");
+    let mut selected = plan.decision.target;
+    selected.candidate.responses_process = Some("chat".to_string());
+
+    let error = build_v3_execution_11_protocol_decision_from_v3_target_10(
+        selected,
+        "anthropic_messages",
+        &["direct".to_string()],
+    )
+    .expect_err("protocol mismatch must require Relay before reading same-protocol policy");
+
+    assert_eq!(error.code, "protocol_mismatch_relay_not_allowed");
+}
