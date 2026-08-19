@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.4598",
+  "version": "0.90.4600",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "bin": {
@@ -82,6 +82,9 @@
     "verify:v3-file-size": "node scripts/architecture/verify-v3-file-size.mjs",
     "test:v3-file-size-red-fixtures": "node scripts/tests/v3-file-size-red-fixtures.mjs",
     "verify:v3-module-boundaries": "node scripts/architecture/verify-v3-module-boundaries.mjs",
+    "verify:v3-dependency-projection": "node scripts/architecture/verify-v3-dependency-projection.mjs",
+    "verify:v3-cargo-lock": "CARGO_NET_OFFLINE=true cargo +stable check --locked --manifest-path v3/Cargo.toml",
+    "test:v3-dependency-projection-red-fixtures": "node scripts/tests/v3-dependency-projection-red-fixtures.mjs",
     "test:v3-source-gate-red-fixtures": "node scripts/tests/v3-source-gate-red-fixtures.mjs",
     "verify:v3-normalization-payload-logic-boundary": "node scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs",
     "test:v3-normalization-payload-logic-boundary-red-fixtures": "node scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs",
@@ -179,7 +182,7 @@
     "test:v3-compile-fail": "node scripts/tests/v3-compile-fail-boundaries.mjs",
     "verify:v3-cargo-fmt": "cargo +stable fmt --manifest-path v3/Cargo.toml --all -- --check",
     "verify:v3-clippy": "CARGO_NET_OFFLINE=true cargo +stable clippy --manifest-path v3/Cargo.toml --workspace --all-targets -- -D warnings",
-    "build:v3-cli": "npm run verify:v3-architecture-ci && npm run verify:v3-debug-payload-budget && npm run verify:v3-selected-provider-model-binding && npm run verify:v3-provider-action-gate && npm run verify:v3-console-request-count-visibility && npm run verify:v3-responses-session-admission && npm run verify:v3-runtime-timing-observability && npm run test:route-classifier-semantics && npm run test:v3-cli-distribution && CARGO_NET_OFFLINE=true cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli",
+    "build:v3-cli": "npm run verify:v3-architecture-ci && npm run verify:v3-debug-payload-budget && npm run verify:v3-selected-provider-model-binding && npm run verify:v3-provider-action-gate && npm run verify:v3-console-request-count-visibility && npm run verify:v3-responses-session-admission && npm run verify:v3-runtime-timing-observability && npm run test:route-classifier-semantics && npm run test:v3-cli-distribution && CARGO_NET_OFFLINE=true cargo +stable build --locked --manifest-path v3/Cargo.toml -p routecodex-v3-cli",
     "test:v3-cli-distribution": "node --test tests/scripts/v3-cli-distribution.spec.mjs",
     "test:v3-responses-direct-unit": "node scripts/run-v3-cargo-test.mjs --workspace --lib -- --nocapture",
     "test:v3-responses-direct-blackbox": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server -- --nocapture",

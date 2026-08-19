@@ -1,0 +1,27 @@
+version: 1
+status: active
+lifecycle_id: v3.build.dependency_projection
+owner_feature_id: v3.build.dependency_projection
+owner_module: v3-cargo-dependency-projection
+nodes:
+  - id: V3DependencyManifestTruth
+    owner_feature_id: v3.build.dependency_projection
+    semantic: Workspace Cargo manifests declare every V3 crate dependency truth.
+  - id: V3DependencyLockProjection
+    owner_feature_id: v3.build.dependency_projection
+    semantic: Cargo produces and verifies the deterministic v3/Cargo.lock projection.
+edges:
+  - id: v3-dependency-projection-01
+    from: V3DependencyManifestTruth
+    to: V3DependencyLockProjection
+    owner_feature_id: v3.build.dependency_projection
+    semantic_contract:
+      - Every manifest-to-lock update goes through Cargo.
+      - Locked Cargo check is the required source gate.
+verification_gates:
+  - cargo +stable check --locked --manifest-path v3/Cargo.toml
+  - npm run verify:v3-cargo-lock
+  - npm run verify:v3-dependency-projection
+  - npm run test:v3-dependency-projection-red-fixtures
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries

@@ -28,6 +28,7 @@ if (!Object.prototype.hasOwnProperty.call(env, 'CARGO_NET_OFFLINE')) {
 
 const result = spawnSync('cargo', [
   'build',
+  '--locked',
   '--manifest-path',
   manifestPath,
   '-p',

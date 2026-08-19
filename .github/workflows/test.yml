@@ -75,15 +75,13 @@ jobs:
         env:
           BUILD_MODE: release
           # Prevent build scripts from mutating version files in CI.
-          ROUTECODEX_SKIP_AUTO_BUMP: "1"
         run: npm run build:min
       - name: Install direct V3 CLI binary
-        run: ROUTECODEX_SKIP_AUTO_BUMP=1 RUSTUP_TOOLCHAIN=stable npm run install:v3
+        run: RUSTUP_TOOLCHAIN=stable npm run install:v3
       - name: Install built V3 CLI shim
         run: npm run fix:cli-shim
       - name: Run host tests
         env:
-          ROUTECODEX_SKIP_AUTO_BUMP: "1"
         run: npm run test:v3-workspace
 
   v4-build:

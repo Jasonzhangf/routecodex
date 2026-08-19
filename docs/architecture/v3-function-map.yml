@@ -4610,6 +4610,11 @@ features:
   - scripts/install-v3-cli.mjs
   - scripts/ensure-cli-command-shim.mjs
   - scripts/install-global.sh
+  - scripts/gen-build-info.mjs
+  - scripts/copy-v3-cli-bin.mjs
+  - package.json
+  - package-lock.json
+  - src/build-info.ts
   - v3/crates/routecodex-v3-config/Cargo.toml
   - v3/crates/routecodex-v3-config/build.rs
   - v3/crates/routecodex-v3-config/src/lib.rs
@@ -4617,6 +4622,7 @@ features:
   - v3.global_binary_install
   - v3.install.command_process_group
   - v3.install.owned_cargo_target
+  - v3.build.version_projection
   entry_symbols:
   - buildV3CargoEnv
   - runInterruptibleCommand
@@ -4624,12 +4630,18 @@ features:
   - waitForOwnedProcessTreeExit
   - cleanupOwnedCargoTargetWhenSafe
   - withOwnedV3CargoTarget
+  - readPackageVersion
   - resolve_routecodex_package_version_from_executable
   - installDirectNativeCommand
   allowed_paths:
   - scripts/install-v3-cli.mjs
   - scripts/ensure-cli-command-shim.mjs
   - scripts/install-global.sh
+  - scripts/gen-build-info.mjs
+  - scripts/copy-v3-cli-bin.mjs
+  - package.json
+  - package-lock.json
+  - src/build-info.ts
   - tests/scripts/v3-cli-distribution.spec.mjs
   - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
   - v3/crates/routecodex-v3-config/Cargo.toml
@@ -4644,7 +4656,6 @@ features:
   - docs/architecture/manifests/v3.global_binary_install.interruption.mainline.yml
   - .github/workflows/test.yml
   forbidden_paths:
-  - src
   - sharedmodule
   - ~/.rcc/install
   required_gates:
@@ -4652,15 +4663,61 @@ features:
   - npm run test:install-v3-target-cleanup
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
+  - cargo +stable check --locked --manifest-path v3/Cargo.toml
   mainline_bindings:
   - v3-install-01
   - v3-install-02
   - v3-install-03
+  - v3-install-version-projection-01
   - v3-install-interrupt-01
   - v3-install-interrupt-02
   - v3-install-interrupt-03
   - v3-install-interrupt-04
   runtime_status: direct_binary_install_live_verified_0_90_4127
+- feature_id: v3.build.dependency_projection
+  status: source_active
+  owner_kind: cargo_workspace_dependency_projection
+  owner_scope: Deterministic Cargo workspace manifest-to-lockfile projection for the
+    V3 workspace. The admin manifest is the semantic dependency source and v3/Cargo.lock
+    is the machine-verifiable generated projection; no direct lockfile edit bypasses
+    the owner.
+  owner_crates:
+  - routecodex-v3-admin
+  owner_files:
+  - v3/Cargo.toml
+  - v3/Cargo.lock
+  - v3/crates/routecodex-v3-admin/Cargo.toml
+  - scripts/architecture/verify-v3-dependency-projection.mjs
+  - scripts/tests/v3-dependency-projection-red-fixtures.mjs
+  resource_bindings:
+  - v3.build.dependency_projection
+  entry_symbols:
+  - cargo build
+  - cargo check
+  allowed_paths:
+  - v3/Cargo.toml
+  - v3/Cargo.lock
+  - v3/crates/routecodex-v3-admin/Cargo.toml
+  - scripts/architecture/verify-v3-dependency-projection.mjs
+  - scripts/tests/v3-dependency-projection-red-fixtures.mjs
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+  - docs/architecture/v3-build-tool-module-registry.yml
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  - MetadataCenter
+  required_gates:
+  - cargo +stable check --locked --manifest-path v3/Cargo.toml
+  - npm run verify:v3-cargo-lock
+  - npm run verify:v3-dependency-projection
+  - npm run test:v3-dependency-projection-red-fixtures
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  mainline_bindings:
+  - v3-dependency-projection-01
 - feature_id: v3.route_classifier_local_owner
   status: source_controlled_runtime_boundary_verified
   change_risk: critical
