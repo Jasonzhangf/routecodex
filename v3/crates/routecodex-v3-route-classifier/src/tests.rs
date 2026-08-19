@@ -182,10 +182,7 @@ fn shared_route_priority_matches_v2() {
         ..Default::default()
     });
     assert_eq!(coding_long.route_name, "longcontext");
-    assert_eq!(
-        coding_long.candidates,
-        vec!["longcontext", "default"]
-    );
+    assert_eq!(coding_long.candidates, vec!["longcontext", "default"]);
 
     for category in ["thinking", "search", "other"] {
         let long = classify_route(&RouteClassifierInput {
@@ -227,6 +224,23 @@ fn explicit_web_search_does_not_get_shadowed_by_generic_user_thinking() {
     });
     assert_eq!(classified.route_name, "web_search");
     assert_eq!(classified.candidates, vec!["web_search", "default"]);
+}
+
+#[test]
+fn compaction_is_the_highest_priority_route_signal() {
+    let classified = classify_route(&RouteClassifierInput {
+        is_compaction: true,
+        reached_long_context: true,
+        has_image_attachment: true,
+        latest_message_from_user: true,
+        has_current_turn_tool_output: true,
+        has_current_turn_web_search: true,
+        last_assistant_tool_category: Some("coding".into()),
+        ..Default::default()
+    });
+    assert_eq!(classified.route_name, "compact");
+    assert_eq!(classified.candidates, vec!["compact", "default"]);
+    assert!(classified.required_capabilities.is_empty());
 }
 
 #[test]
@@ -309,7 +323,11 @@ fn dryrun_search_continuation_cascades_to_tools_and_default() {
     // default as fallbacks so VR can walk the candidate list in order.
     assert_eq!(
         r.candidates,
-        vec!["search".to_string(), "tools".to_string(), "default".to_string()]
+        vec![
+            "search".to_string(),
+            "tools".to_string(),
+            "default".to_string()
+        ]
     );
 }
 
@@ -346,6 +364,7 @@ fn route_classifier_input_has_no_control_state_fields() {
         input.has_current_turn_web_search,
         input.last_assistant_tool_category,
         input.has_background_keyword,
+        input.is_compaction,
     );
     // Compile-time check passed: every field is enumerated. If a new field
     // is added, this destructuring must be updated — that is the
@@ -362,6 +381,7 @@ fn route_classifier_input_has_no_control_state_fields() {
         "has_current_turn_web_search",
         "last_assistant_tool_category",
         "has_background_keyword",
+        "is_compaction",
     ];
     let forbidden = [
         "metadata",

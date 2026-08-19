@@ -216,6 +216,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                 None,
                 None,
                 None,
+                V3RequestPurpose::Conversation,
             )
             .await;
             match outcome {
@@ -361,6 +362,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             Some(handoff.observability_accumulator),
             None,
             None,
+            V3RequestPurpose::Conversation,
         )
         .await;
         return match outcome {

@@ -983,7 +983,10 @@ fn compiles_hub_v1_declarations_without_request_branch_decisions() {
         .iter()
         .find(|binding| binding.entry_protocol == "responses")
         .expect("responses binding");
-    assert_eq!(responses.endpoint_patterns, vec!["/v1/responses"]);
+    assert_eq!(
+        responses.endpoint_patterns,
+        vec!["/v1/responses", "/v1/responses/compact"]
+    );
     assert_eq!(responses.execution_mode.as_str(), "direct");
     assert!(responses.implemented);
     assert_eq!(
@@ -1472,6 +1475,10 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
             && binding.execution_mode.as_str() == "direct"
             && binding.runtime_owner_symbol.as_deref()
                 == Some("execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation")));
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/responses/compact")
+        .is_some_and(|binding| binding.entry_protocol == "responses"
+            && binding.execution_mode.as_str() == "direct"));
     assert!(hub
         .entry_protocol_binding_for_endpoint("/v1/chat/completions")
         .is_some_and(|binding| binding.entry_protocol == "openai_chat"));
@@ -2288,7 +2295,7 @@ skeleton = "hub_v1"
 entry_protocols = ["responses", "anthropic", "gemini", "openai_chat"]
 hook_set_id = "hub_v1.default"
 entry_protocol_bindings = [
-  { entry_protocol = "responses", endpoint_patterns = ["/v1/responses"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" },
+  { entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" },
   { entry_protocol = "anthropic", endpoint_patterns = ["/v1/messages"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Anthropic Messages endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_anthropic_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs" },
   { entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" },
   { entry_protocol = "gemini", endpoint_patterns = ["/v1beta/models/:model/generateContent"], execution_mode = "relay", protocol_profile_owner = "v3.gemini_relay_runtime_integration", implemented = true, forbidden_reentry_behavior = "Gemini endpoint must not fall through to pending or direct runtime.", runtime_owner_symbol = "execute_v3_gemini_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs" },

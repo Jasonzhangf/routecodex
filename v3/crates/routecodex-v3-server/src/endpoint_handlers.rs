@@ -15,6 +15,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     entry_protocol: String,
     mut execution_mode: V3EntryProtocolExecutionMode,
     pending_owner_symbol: Option<String>,
+    request_purpose: V3RequestPurpose,
     payload: Value,
 ) -> Response<Body> {
     let request_identity = match allocate_v3_console_request_identity(&state, &path, Some(&payload))
@@ -54,6 +55,17 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             "V3Server03HttpRequestRaw",
             error,
         ));
+    }
+    if request_purpose.is_compaction() && execution_mode == V3EntryProtocolExecutionMode::Relay {
+        return error_output_response_for_server(
+            &state.server,
+            &path,
+            &request_id,
+            project_http_input_error(
+                V3HttpBoundaryErrorKind::EndpointNotEnabled,
+                "compaction request requires a Direct entry binding",
+            ),
+        );
     }
     if entry_protocol == "responses" {
         let owner_resolution_context =
@@ -491,6 +503,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             &request_identity,
             started_at,
             request_console_project_path.as_deref(),
+            request_purpose,
         )
         .await;
     }
@@ -886,6 +899,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                 Some(handoff.observability_accumulator),
                 Some(provider_failure_event_sink.clone()),
                 Some(route_selection_event_sink.clone()),
+                request_purpose,
             )
             .await;
             match outcome {
@@ -1027,6 +1041,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             None,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
+            request_purpose,
         )
         .await;
         match outcome {

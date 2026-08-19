@@ -10,13 +10,17 @@ pub struct V3CurrentTurnRouteFacts {
     pub has_current_turn_web_search: bool,
     pub last_assistant_tool_category: Option<String>,
     pub has_background_keyword: bool,
+    /// Typed request-purpose projection from the registered ingress whitelist.
+    /// This is never reconstructed from request text or payload metadata.
+    pub is_compaction: bool,
 }
 
 pub type RouteClassifierInput = V3CurrentTurnRouteFacts;
 
 pub const DEFAULT_ROUTE: &str = "default";
 
-pub const ROUTE_PRIORITY: [&str; 8] = [
+pub const ROUTE_PRIORITY: [&str; 9] = [
+    "compact",
     "multimodal",
     "longcontext",
     "thinking",
@@ -63,10 +67,10 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
     let web_search_tool_intent = continuation && last_tool_category == "websearch";
     let other_tool_continuation = continuation && last_tool_category == "other";
     let unknown_tool_continuation = continuation && last_tool_category.is_empty();
-    let web_search = web_search_tool_intent
-        || input.has_current_turn_web_search;
+    let web_search = web_search_tool_intent || input.has_current_turn_web_search;
 
     let evaluation = vec![
+        ("compact", input.is_compaction, "compact:registered-ingress"),
         (
             "multimodal",
             input.has_image_attachment,
@@ -132,12 +136,13 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
         }
     }
     let mut required_capabilities = Vec::new();
-    if web_search {
+    if web_search && !input.is_compaction {
         required_capabilities.push("web_search".to_string());
     }
 
     let mut candidates = vec![route_name.clone()];
-    if route_name != "longcontext"
+    if route_name != "compact"
+        && route_name != "longcontext"
         && input.reached_long_context
         && !candidates.iter().any(|route| route == "longcontext")
     {

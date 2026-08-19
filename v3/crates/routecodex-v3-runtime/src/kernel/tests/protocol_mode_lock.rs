@@ -35,6 +35,7 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
         execution_id: "exec".to_string(),
         method: "POST".to_string(),
         path: "/v1/responses".to_string(),
+        request_purpose: crate::V3RequestPurpose::Conversation,
         body: json!({"model":"client-model","input":"hello"}),
     };
     let plan = plan_v3_responses_protocol_execution_with_provider_health(
@@ -163,6 +164,7 @@ fn relay_only_same_protocol_responses_is_planned_as_hub_relay() {
         execution_id: "exec-relay-only".to_string(),
         method: "POST".to_string(),
         path: "/v1/responses".to_string(),
+        request_purpose: crate::V3RequestPurpose::Conversation,
         body: json!({"model":"client-model","input":"hello"}),
     };
 
@@ -192,6 +194,7 @@ fn same_protocol_without_direct_or_relay_fails_explicitly() {
             execution_id: "exec-no-mode".to_string(),
             method: "POST".to_string(),
             path: "/v1/responses".to_string(),
+            request_purpose: crate::V3RequestPurpose::Conversation,
             body: json!({"model":"client-model","input":"hello"}),
         },
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),

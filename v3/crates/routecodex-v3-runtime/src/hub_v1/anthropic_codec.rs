@@ -12,15 +12,21 @@ use super::anthropic_request_field_projection::{
     validate_responses_cache_and_store_for_anthropic,
 };
 use super::client_metadata_projection::unsupported_client_metadata_paths;
-use crate::protocol_tables::{map_value as table_map_value, V3TableDirection, V3TableKind};
 use std::collections::{BTreeMap, HashSet};
 
 mod message_encoding;
 mod projection_context;
+mod response_projection;
 mod responses_to_anthropic;
 mod validation;
 use message_encoding::non_empty_string;
 pub use projection_context::V3AnthropicResponsesProjectionContext;
+use response_projection::{
+    anthropic_reasoning_part_as_responses_reasoning,
+    flush_v3_anthropic_text_content_as_responses_message,
+    project_v3_anthropic_terminal_as_responses_terminal, V3AnthropicResponseContentBlockKind,
+    V3AnthropicTerminalKind,
+};
 use responses_to_anthropic::{
     anthropic_usage_as_responses_usage, chat_messages_as_anthropic_messages,
     responses_input_as_anthropic_messages, responses_system_as_anthropic_system,
@@ -137,99 +143,6 @@ pub enum V3AnthropicCodecError {
     UnpairedWebSearchToolResult { index: usize, tool_use_id: String },
     #[error("UnmappedOutboundFields target_protocol=anthropic paths={paths}")]
     UnmappedOutboundFields { paths: String },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum V3AnthropicResponseContentBlockKind {
-    Text,
-    Thinking,
-    RedactedThinking,
-    ToolUse,
-    ServerToolUse,
-    WebSearchToolResult,
-    WebFetchToolResult,
-    CodeExecutionToolResult,
-    BashCodeExecutionToolResult,
-    TextEditorCodeExecutionToolResult,
-    ToolSearchToolResult,
-    ContainerUpload,
-}
-
-impl V3AnthropicResponseContentBlockKind {
-    fn parse(part: &Value, index: usize) -> Result<Self, V3AnthropicCodecError> {
-        let content_type = part
-            .get("type")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or(V3AnthropicCodecError::MalformedResponseContentBlockType { index })?;
-        match content_type {
-            "text" => Ok(Self::Text),
-            "thinking" => Ok(Self::Thinking),
-            "redacted_thinking" => Ok(Self::RedactedThinking),
-            "tool_use" => Ok(Self::ToolUse),
-            "server_tool_use" => Ok(Self::ServerToolUse),
-            "web_search_tool_result" => Ok(Self::WebSearchToolResult),
-            "web_fetch_tool_result" => Ok(Self::WebFetchToolResult),
-            "code_execution_tool_result" => Ok(Self::CodeExecutionToolResult),
-            "bash_code_execution_tool_result" => Ok(Self::BashCodeExecutionToolResult),
-            "text_editor_code_execution_tool_result" => Ok(Self::TextEditorCodeExecutionToolResult),
-            "tool_search_tool_result" => Ok(Self::ToolSearchToolResult),
-            "container_upload" => Ok(Self::ContainerUpload),
-            other => Err(V3AnthropicCodecError::UnknownResponseContentBlock {
-                index,
-                content_type: other.to_string(),
-            }),
-        }
-    }
-
-    fn source_type(self) -> &'static str {
-        match self {
-            Self::Text => "text",
-            Self::Thinking => "thinking",
-            Self::RedactedThinking => "redacted_thinking",
-            Self::ToolUse => "tool_use",
-            Self::ServerToolUse => "server_tool_use",
-            Self::WebSearchToolResult => "web_search_tool_result",
-            Self::WebFetchToolResult => "web_fetch_tool_result",
-            Self::CodeExecutionToolResult => "code_execution_tool_result",
-            Self::BashCodeExecutionToolResult => "bash_code_execution_tool_result",
-            Self::TextEditorCodeExecutionToolResult => "text_editor_code_execution_tool_result",
-            Self::ToolSearchToolResult => "tool_search_tool_result",
-            Self::ContainerUpload => "container_upload",
-        }
-    }
-
-    fn is_source_roundtrip_only(self) -> bool {
-        matches!(
-            self,
-            Self::WebFetchToolResult
-                | Self::CodeExecutionToolResult
-                | Self::BashCodeExecutionToolResult
-                | Self::TextEditorCodeExecutionToolResult
-                | Self::ToolSearchToolResult
-                | Self::ContainerUpload
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum V3AnthropicTerminalKind {
-    EndTurn,
-    ToolUse,
-    MaxTokens,
-    StopSequence,
-    PauseTurn,
-    Refusal,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct V3AnthropicResponsesTerminalProjection {
-    kind: V3AnthropicTerminalKind,
-    source_stop_reason: String,
-    responses_status: &'static str,
-    incomplete_reason: Option<&'static str>,
-    stop_sequence: Option<String>,
-    stop_details: Option<Value>,
 }
 
 pub fn validate_v3_anthropic_client_input_payload(
@@ -891,132 +804,6 @@ fn responses_reasoning_budget_tokens(value: &Value) -> Option<u64> {
         .as_u64()
         .or_else(|| value.as_str().and_then(|text| text.trim().parse().ok()))
         .filter(|budget| *budget > 0)
-}
-
-fn project_v3_anthropic_terminal_as_responses_terminal(
-    object: &Map<String, Value>,
-) -> Result<V3AnthropicResponsesTerminalProjection, V3AnthropicCodecError> {
-    let stop_reason = object
-        .get("stop_reason")
-        .ok_or_else(|| V3AnthropicCodecError::InvalidTerminalField {
-            field: "stop_reason",
-            reason: "missing on materialized final message".to_string(),
-        })?
-        .as_str()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| V3AnthropicCodecError::InvalidTerminalField {
-            field: "stop_reason",
-            reason: "must be a non-empty string on materialized final message".to_string(),
-        })?;
-    let hub_reason = table_map_value(
-        V3TableKind::FinishReason,
-        "anthropic",
-        stop_reason,
-        V3TableDirection::Inbound,
-    )
-    .map_err(|error| V3AnthropicCodecError::InvalidTerminalField {
-        field: "stop_reason",
-        reason: format!("finish_reason_map failed: {error}"),
-    })?
-    .ok_or_else(|| V3AnthropicCodecError::InvalidTerminalField {
-        field: "stop_reason",
-        reason: format!("unknown value '{stop_reason}'"),
-    })?;
-
-    let kind = match hub_reason {
-        "stop" => V3AnthropicTerminalKind::EndTurn,
-        "tool_calls" => V3AnthropicTerminalKind::ToolUse,
-        "max_tokens" => V3AnthropicTerminalKind::MaxTokens,
-        "stop_sequence" => V3AnthropicTerminalKind::StopSequence,
-        "pause_turn" => V3AnthropicTerminalKind::PauseTurn,
-        "content_filter" => V3AnthropicTerminalKind::Refusal,
-        "context_window_exceeded" => {
-            return Err(V3AnthropicCodecError::UnsupportedStopReason {
-                stop_reason: stop_reason.to_string(),
-            })
-        }
-        other => {
-            return Err(V3AnthropicCodecError::InvalidTerminalField {
-                field: "stop_reason",
-                reason: format!("finish_reason_map produced unsupported hub value '{other}'"),
-            })
-        }
-    };
-
-    let stop_sequence = match (kind, object.get("stop_sequence")) {
-        (V3AnthropicTerminalKind::StopSequence, Some(Value::String(value)))
-            if !value.trim().is_empty() =>
-        {
-            Some(value.clone())
-        }
-        (V3AnthropicTerminalKind::StopSequence, _) => {
-            return Err(V3AnthropicCodecError::InvalidTerminalField {
-                field: "stop_sequence",
-                reason: "stop_reason=stop_sequence requires a non-empty string".to_string(),
-            })
-        }
-        (_, None | Some(Value::Null)) => None,
-        (_, Some(_)) => {
-            return Err(V3AnthropicCodecError::InvalidTerminalField {
-                field: "stop_sequence",
-                reason: format!("must be absent or null when stop_reason={stop_reason}"),
-            })
-        }
-    };
-
-    let stop_details = match object.get("stop_details") {
-        None | Some(Value::Null) => None,
-        Some(Value::Object(_)) if kind == V3AnthropicTerminalKind::Refusal => {
-            object.get("stop_details").cloned()
-        }
-        Some(Value::Object(_)) => {
-            return Err(V3AnthropicCodecError::InvalidTerminalField {
-                field: "stop_details",
-                reason: format!("must be absent or null when stop_reason={stop_reason}"),
-            })
-        }
-        Some(_) => {
-            return Err(V3AnthropicCodecError::InvalidTerminalField {
-                field: "stop_details",
-                reason: "must be an object when present".to_string(),
-            })
-        }
-    };
-
-    let (responses_status, incomplete_reason) = match kind {
-        V3AnthropicTerminalKind::EndTurn | V3AnthropicTerminalKind::StopSequence => {
-            ("completed", None)
-        }
-        V3AnthropicTerminalKind::ToolUse => ("requires_action", None),
-        V3AnthropicTerminalKind::MaxTokens => ("incomplete", Some("max_output_tokens")),
-        V3AnthropicTerminalKind::PauseTurn => ("in_progress", None),
-        V3AnthropicTerminalKind::Refusal => ("incomplete", Some("content_filter")),
-    };
-
-    Ok(V3AnthropicResponsesTerminalProjection {
-        kind,
-        source_stop_reason: stop_reason.to_string(),
-        responses_status,
-        incomplete_reason,
-        stop_sequence,
-        stop_details,
-    })
-}
-
-fn flush_v3_anthropic_text_content_as_responses_message(
-    output_items: &mut Vec<Value>,
-    message_content: &mut Vec<Value>,
-    role: &Value,
-) {
-    if message_content.is_empty() {
-        return;
-    }
-    output_items.push(json!({
-        "type":"message",
-        "role": role,
-        "content": std::mem::take(message_content)
-    }));
 }
 
 pub fn project_v3_anthropic_message_as_responses_response(

@@ -27,6 +27,7 @@ const STEPS = [
   ['test:v3-provider-session-cooldown-red-fixtures', 'Session cooldown architecture mutations are rejected'],
   ['test:v3-provider-session-cooldown', 'Session cooldown and cross-session revive behavior'],
   ['test:v3-p5-router-target', 'Priority-first and same-priority weighted Router/Target selection'],
+  ['test:v3-compaction-request-routing', 'Whitelisted compact ingress selects the highest-priority compact route and preserves endpoint semantics'],
   ['verify:v3-module-boundaries', 'V3 module boundaries (Server cannot build/classify Error)'],
   ['test:v3-module-boundaries-red-fixtures', 'V3 source ownership and dependency edge mutations are rejected'],
   ['verify:sse-architecture-boundary', 'SSE runtime dispatch remains Rust-owned'],

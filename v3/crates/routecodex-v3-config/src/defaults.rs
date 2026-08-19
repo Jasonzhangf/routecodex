@@ -19,7 +19,10 @@ pub(crate) fn default_hub_v1_authoring() -> V3HubV1AuthoringConfig {
         entry_protocol_bindings: vec![
             V3EntryProtocolBindingAuthoringConfig {
                 entry_protocol: "responses".to_string(),
-                endpoint_patterns: vec!["/v1/responses".to_string()],
+                endpoint_patterns: vec![
+                    "/v1/responses".to_string(),
+                    "/v1/responses/compact".to_string(),
+                ],
                 execution_mode: V3EntryProtocolExecutionMode::Direct,
                 protocol_profile_owner: "v3.entry_protocol_registry_contract".to_string(),
                 implemented: true,

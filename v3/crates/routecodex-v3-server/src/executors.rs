@@ -476,6 +476,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
     request_identity: &V3AllocatedRequestIdentity,
     started_at: Instant,
     _project_path: Option<&str>,
+    request_purpose: V3RequestPurpose,
 ) -> Response<Body> {
     let console_payload = payload.clone();
     let console_context = build_v3_console_emission_context(
@@ -488,13 +489,14 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
     );
     let provider_failure_event_sink = build_v3_provider_failure_event_sink(&console_context);
     let route_selection_event_sink = build_v3_route_selection_event_sink(&console_context);
-    let raw = build_v3_server_03_http_request_raw(
+    let raw = build_v3_server_03_http_request_raw_with_purpose(
         state.server.id.clone(),
         provider_failure_session_scope.clone(),
         request_id.clone(),
         execution_id,
         method,
         path.clone(),
+        request_purpose,
         payload.clone(),
     );
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
@@ -514,6 +516,17 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         )
         .await;
     if let Some(handoff) = output.protocol_relay_handoff {
+        if request_purpose.is_compaction() {
+            return error_output_response_for_server(
+                &state.server,
+                &path,
+                &request_id,
+                project_http_input_error(
+                    V3HttpBoundaryErrorKind::EndpointNotEnabled,
+                    "compaction request cannot cross into Hub Relay",
+                ),
+            );
+        }
         let relay_trace = handoff.node_trace;
         // SSE 请求：立即 201 + keepalive 维持连接，后台执行完整 relay 链
         // （客户端连接与 provider 解耦，provider 挂起/慢不影响 client 连接）。

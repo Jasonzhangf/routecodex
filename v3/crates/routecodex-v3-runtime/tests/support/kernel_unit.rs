@@ -157,6 +157,7 @@ fn test_plan_http_request(
         execution_id: execution_id.to_string(),
         method: "POST".to_string(),
         path: "/v1/responses".to_string(),
+        request_purpose: crate::V3RequestPurpose::Conversation,
         body: json!({"model":"client-model","input":"hello"}),
     }
 }
@@ -174,6 +175,7 @@ fn test_responses_raw(
         execution_id: execution_id.to_string(),
         method: "POST".to_string(),
         path: "/v1/responses".to_string(),
+        request_purpose: crate::V3RequestPurpose::Conversation,
         body,
     }
 }
@@ -1023,6 +1025,7 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
             execution_id: "exec".to_string(),
             method: "POST".to_string(),
             path: "/v1/responses".to_string(),
+            request_purpose: crate::V3RequestPurpose::Conversation,
             body: json!({
                 "model":"client-model",
                 "input":"hello",
@@ -1141,6 +1144,7 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
             execution_id: "exec-plan-session-a".to_string(),
             method: "POST".to_string(),
             path: "/v1/responses".to_string(),
+            request_purpose: crate::V3RequestPurpose::Conversation,
             body: json!({"model":"client-model","input":"hello"}),
         },
         provider_health.clone(),
@@ -1172,6 +1176,7 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
             execution_id: "exec-plan-session-b".to_string(),
             method: "POST".to_string(),
             path: "/v1/responses".to_string(),
+            request_purpose: crate::V3RequestPurpose::Conversation,
             body: json!({"model":"client-model","input":"hello"}),
         },
         provider_health,
@@ -1858,6 +1863,7 @@ async fn pinned_unavailable_provider_consumes_error05_gate_before_terminal_relea
             execution_id: "exec-pinned-unavailable-retry".to_string(),
             method: "POST".to_string(),
             path: "/v1/responses".to_string(),
+            request_purpose: crate::V3RequestPurpose::Conversation,
             body: json!({
                 "model":"client-model",
                 "previous_response_id":"resp_pinned_unavailable",

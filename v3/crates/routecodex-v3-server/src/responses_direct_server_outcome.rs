@@ -17,6 +17,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    request_purpose: V3RequestPurpose,
 ) -> V3ResponsesDirectServerOutcome {
     let requested_stream = v3_responses_request_wants_sse(request_headers, &payload);
     let entry_facts = V3ResponsesContinuationEntryFacts::project(&payload);
@@ -83,13 +84,14 @@ pub(super) async fn execute_responses_direct_server_outcome(
     let provider_failure_session_scope =
         get_failure_session_scope(&state.server, request_headers, "responses", &request_id)
             .expect("responses continuation requires session-id for failure scope");
-    let raw = build_v3_server_03_http_request_raw(
+    let raw = build_v3_server_03_http_request_raw_with_purpose(
         state.server.id.clone(),
         provider_failure_session_scope.clone(),
         request_id.clone(),
         execution_id.clone(),
         method.clone(),
         path.clone(),
+        request_purpose,
         payload.clone(),
     );
     let output = match responses_protocol_plan {
@@ -149,6 +151,13 @@ pub(super) async fn execute_responses_direct_server_outcome(
         }
     };
     if let Some(handoff) = output.protocol_relay_handoff {
+        if request_purpose.is_compaction() {
+            let frame = build_v3_server_16_http_frame_from_v3_error_06(project_http_input_error(
+                V3HttpBoundaryErrorKind::EndpointNotEnabled,
+                "Responses compact cannot cross into Hub Relay",
+            ));
+            return V3ResponsesDirectServerOutcome::DirectFrame(frame);
+        }
         let runtime_input = V3ResponsesRelayRuntimeInput {
             server_id: state.server.id.clone(),
             failure_session_scope: provider_failure_session_scope,
@@ -237,6 +246,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 Some(next_handoff.observability_accumulator),
                 provider_failure_event_sink,
                 route_selection_event_sink,
+                request_purpose,
             ))
             .await;
             return match nested_outcome {

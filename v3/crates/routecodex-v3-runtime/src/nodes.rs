@@ -19,7 +19,21 @@ pub struct V3Server03HttpRequestRaw {
     pub execution_id: String,
     pub method: String,
     pub path: String,
+    pub request_purpose: V3RequestPurpose,
     pub body: Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3RequestPurpose {
+    Conversation,
+    AuxiliaryCompaction,
+    NativeCompaction,
+}
+
+impl V3RequestPurpose {
+    pub fn is_compaction(self) -> bool {
+        matches!(self, Self::AuxiliaryCompaction | Self::NativeCompaction)
+    }
 }
 
 pub fn build_v3_server_03_http_request_raw(
@@ -31,6 +45,28 @@ pub fn build_v3_server_03_http_request_raw(
     path: String,
     body: Value,
 ) -> V3Server03HttpRequestRaw {
+    build_v3_server_03_http_request_raw_with_purpose(
+        server_id,
+        failure_session_scope,
+        request_id,
+        execution_id,
+        method,
+        path,
+        V3RequestPurpose::Conversation,
+        body,
+    )
+}
+
+pub fn build_v3_server_03_http_request_raw_with_purpose(
+    server_id: String,
+    failure_session_scope: V3ProviderFailureSessionScope,
+    request_id: String,
+    execution_id: String,
+    method: String,
+    path: String,
+    request_purpose: V3RequestPurpose,
+    body: Value,
+) -> V3Server03HttpRequestRaw {
     V3Server03HttpRequestRaw {
         server_id,
         failure_session_scope,
@@ -38,6 +74,7 @@ pub fn build_v3_server_03_http_request_raw(
         execution_id,
         method,
         path,
+        request_purpose,
         body,
     }
 }
@@ -84,6 +121,7 @@ pub struct V3ProtocolContext {
     pub execution_id: String,
     pub endpoint: String,
     pub method: String,
+    pub request_purpose: V3RequestPurpose,
     pub previous_response_id: Option<String>,
 }
 
@@ -92,6 +130,7 @@ pub struct V3ResponsesDirect11Policy {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     pub request_id: String,
     pub request_body: Value,
+    pub request_purpose: V3RequestPurpose,
     pub previous_response_id: Option<String>,
 }
 
@@ -160,14 +199,19 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
             return Err("previous_response_id must be null or a non-empty string".to_string())
         }
     };
-    if body.get("previous_response_id").is_some() {
-        body.as_object_mut()
-            .ok_or_else(|| "Responses request payload must be an object".to_string())?
-            .remove("previous_response_id");
+    if raw.request_purpose.is_compaction() && previous_response_id.is_some() {
+        return Err("compact request cannot carry previous_response_id".to_string());
     }
-    // 与 chat direct / relay req_inbound 一致：历史轮图片占位符做语义等价归一化
-    // （只清理历史轮图片引用，不影响当前轮输入；禁止在不可变区做任何修补）。
-    crate::hub_v1::normalize_v3_history_image_placeholders(&mut body);
+    if raw.request_purpose == V3RequestPurpose::Conversation {
+        if body.get("previous_response_id").is_some() {
+            body.as_object_mut()
+                .ok_or_else(|| "Responses request payload must be an object".to_string())?
+                .remove("previous_response_id");
+        }
+        // 与 chat direct / relay req_inbound 一致：历史轮图片占位符做语义等价归一化
+        // （只清理历史轮图片引用，不影响当前轮输入；禁止在不可变区做任何修补）。
+        crate::hub_v1::normalize_v3_history_image_placeholders(&mut body);
+    }
     Ok(V3Req04StandardizedResponses {
         protocol_context: V3ProtocolContext {
             server_id: raw.server_id,
@@ -176,6 +220,7 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
             execution_id: raw.execution_id,
             endpoint: raw.path,
             method: raw.method,
+            request_purpose: raw.request_purpose,
             previous_response_id,
         },
         body,
@@ -203,6 +248,7 @@ pub fn build_v3_chat_req_04_standardized_from_v3_server_03(
             execution_id: raw.execution_id,
             endpoint: raw.path,
             method: raw.method,
+            request_purpose: raw.request_purpose,
             previous_response_id: None,
         },
         body,
@@ -221,6 +267,10 @@ pub fn build_v3_router_request_facts_from_v3_req_04_chat(
             &standardized.protocol_context.server_id,
         ),
         false,
+        standardized
+            .protocol_context
+            .request_purpose
+            .is_compaction(),
         Some(manifest),
     )
 }
@@ -237,6 +287,10 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
             &standardized.protocol_context.server_id,
         ),
         false,
+        standardized
+            .protocol_context
+            .request_purpose
+            .is_compaction(),
         Some(manifest),
     )
 }
@@ -254,6 +308,7 @@ pub fn build_v3_router_request_facts_for_entry(
         &normalized,
         entry_protocol,
         longcontext_threshold_tokens,
+        false,
         false,
         None,
     )
@@ -275,6 +330,7 @@ pub(crate) fn build_v3_router_request_facts_for_entry_with_manifest(
         entry_protocol,
         longcontext_threshold_tokens,
         false,
+        false,
         Some(manifest),
     )
 }
@@ -284,6 +340,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
     entry_protocol: &str,
     longcontext_threshold_tokens: Option<u64>,
     stopless_followup: bool,
+    is_compaction: bool,
     _manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
@@ -303,6 +360,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
             .as_ref()
             .map(|tool| tool.category.clone()),
         has_background_keyword: false,
+        is_compaction,
     };
     let route_classification = classify_route(&route_facts);
     for capability in &route_classification.required_capabilities {
@@ -427,6 +485,7 @@ pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
         target: selected,
         request_id: standardized.protocol_context.request_id.clone(),
         request_body: standardized.body.clone(),
+        request_purpose: standardized.protocol_context.request_purpose,
         previous_response_id: standardized.protocol_context.previous_response_id.clone(),
     }
 }
@@ -540,12 +599,54 @@ mod tests {
         build_v3_router_request_facts_for_entry,
         build_v3_router_request_facts_for_entry_with_control,
         build_v3_router_request_facts_from_v3_req_04_chat, build_v3_server_03_http_request_raw,
+        build_v3_server_03_http_request_raw_with_purpose, V3RequestPurpose,
     };
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use routecodex_v3_error::V3ProviderFailureSessionScope;
     use serde_json::json;
 
     const TEST_LONGCONTEXT_THRESHOLD_TOKENS: Option<u64> = Some(180_000);
+
+    #[test]
+    fn compact_purpose_survives_req04_and_drives_highest_priority_route() {
+        let raw = build_v3_server_03_http_request_raw_with_purpose(
+            "server".to_string(),
+            V3ProviderFailureSessionScope::new("server", "default", "request")
+                .expect("failure scope"),
+            "request".to_string(),
+            "execution".to_string(),
+            "POST".to_string(),
+            "/v1/responses/compact".to_string(),
+            V3RequestPurpose::NativeCompaction,
+            json!({
+                "model":"gpt-5.5",
+                "input":[{"role":"user","content":"history"}],
+                "tools":[{"type":"web_search"}]
+            }),
+        );
+
+        let standardized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
+            .expect("compact request must preserve the registered typed purpose");
+        let facts = build_v3_router_request_facts_for_entry_with_control(
+            &standardized.body,
+            "responses",
+            Some(1),
+            false,
+            standardized
+                .protocol_context
+                .request_purpose
+                .is_compaction(),
+            None,
+        );
+
+        assert_eq!(
+            standardized.protocol_context.request_purpose,
+            V3RequestPurpose::NativeCompaction
+        );
+        assert_eq!(facts.route_classification.route_name, "compact");
+        assert_eq!(facts.route_classification.candidates[0], "compact");
+        assert_eq!(facts.route_classification.candidates[1..], ["default"]);
+    }
 
     #[test]
     fn req04_preserves_responses_data_and_extracts_typed_continuation_locator() {
@@ -994,6 +1095,7 @@ mod tests {
             "responses",
             TEST_LONGCONTEXT_THRESHOLD_TOKENS,
             false,
+            false,
             Some(&manifest),
         );
         assert!(
@@ -1016,6 +1118,7 @@ mod tests {
             &request,
             "responses",
             TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+            false,
             false,
             Some(&manifest),
         );
@@ -1040,6 +1143,7 @@ mod tests {
             &request,
             "responses",
             TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+            false,
             false,
             Some(&manifest),
         );

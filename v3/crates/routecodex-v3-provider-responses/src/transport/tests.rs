@@ -1,5 +1,6 @@
 use super::*;
 use crate::wire::{
+    build_v3_provider_12_responses_compact_wire_payload,
     build_v3_provider_12_responses_wire_payload, V3ProviderAuthSecretHandle,
     V3ResponsesProviderTarget,
 };
@@ -25,6 +26,37 @@ fn responses_http_target() -> V3ResponsesProviderTarget {
         sse_first_frame_timeout_ms: None,
         initial_concurrency_budget: 8,
     }
+}
+
+#[test]
+fn compact_wire_uses_the_native_http_endpoint() {
+    let wire = build_v3_provider_12_responses_compact_wire_payload(
+        "req-compact",
+        responses_http_target(),
+        json!({"model":"glm-5.2","input":[{"role":"user","content":"history"}]}),
+    )
+    .unwrap();
+    let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
+    assert_eq!(
+        request.url(),
+        "https://api2.orangeai.cc/v1/responses/compact"
+    );
+}
+
+#[test]
+fn compact_wire_rejects_websocket_transport() {
+    let mut target = responses_http_target();
+    target.responses_transport = V3ResponsesTransportKind::WebsocketV2;
+    target.websocket_v2_url = Some("wss://provider.invalid/v1/responses".to_string());
+    let wire = build_v3_provider_12_responses_compact_wire_payload(
+        "req-compact-websocket",
+        target,
+        json!({"model":"glm-5.2","input":[{"role":"user","content":"history"}]}),
+    )
+    .unwrap();
+    let error = build_v3_transport_13_responses_request_from_v3_provider_12(wire)
+        .expect_err("native compact must not use Responses WebSocket transport");
+    assert!(error.to_string().contains("responses compact requires HTTP transport"));
 }
 
 fn reasoning_stop_tool_fixture() -> Value {

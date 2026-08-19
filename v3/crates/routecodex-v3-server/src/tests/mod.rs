@@ -2891,6 +2891,7 @@ async fn direct_continuation_scope_error_for_stream_request_projects_sse_not_jso
         None,
         None,
         None,
+        V3RequestPurpose::Conversation,
     )
     .await;
     let frame = match outcome {
