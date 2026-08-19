@@ -41,33 +41,31 @@ pub struct ReloadResult {
 async fn reload(
     State(state): State<AppState>,
 ) -> Result<Json<ReloadResult>, (axum::http::StatusCode, String)> {
-    let authoring = state
-        .store
-        .read_authoring()
-        .map_err(|error| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let authoring = state.store.read_authoring().map_err(|error| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        )
+    })?;
     state
         .store
         .validate(&authoring)
         .map_err(|error| (axum::http::StatusCode::BAD_REQUEST, error.to_string()))?;
 
-    let output = tokio::task::spawn_blocking(|| {
-        Command::new("routecodex")
-            .arg("restart")
-            .output()
-    })
-    .await
-    .map_err(|error| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            format!("reload task failed: {error}"),
-        )
-    })?
-    .map_err(|error| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to invoke `routecodex restart`: {error}"),
-        )
-    })?;
+    let output = tokio::task::spawn_blocking(|| Command::new("routecodex").arg("restart").output())
+        .await
+        .map_err(|error| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("reload task failed: {error}"),
+            )
+        })?
+        .map_err(|error| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to invoke `routecodex restart`: {error}"),
+            )
+        })?;
 
     if output.status.success() {
         state

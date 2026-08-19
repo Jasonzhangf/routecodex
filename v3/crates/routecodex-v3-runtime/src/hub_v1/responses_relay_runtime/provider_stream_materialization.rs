@@ -145,9 +145,7 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
     // Error05 policy 把它当 provider_runtime_error 立即切 provider。
     let Some(first_chunk) = futures_util::StreamExt::next(&mut provider).await else {
         let provider_id = format!("{provider_protocol:?}");
-        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEmpty {
-            provider_id,
-        });
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEmpty { provider_id });
     };
     let replayed = merge_first_chunk_back_into_provider_stream(first_chunk, provider);
     match provider_protocol {

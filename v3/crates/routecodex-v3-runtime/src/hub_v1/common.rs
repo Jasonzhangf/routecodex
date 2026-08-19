@@ -1266,7 +1266,6 @@ mod server_tool_center_tests {
             )
             .expect("register stopless");
         assert_eq!(center.len().expect("len"), 2);
-        // 同 key 重复注册 fail-fast
         let duplicate = center.register(
             web_key.clone(),
             V3ServerToolInstanceState::WebSearch(web_search_instance()),
@@ -1275,7 +1274,6 @@ mod server_tool_center_tests {
             None,
         );
         assert!(duplicate.is_err());
-        // 各自工具实例互不可见
         let web = center
             .load(&web_key)
             .expect("load web_search")
@@ -1293,7 +1291,6 @@ mod server_tool_center_tests {
         let center = V3ServerToolCenter::default();
         let web_key = key(V3ServerToolName::WebSearch, "session-a");
         let stopless_key = key(V3ServerToolName::Stopless, "session-a");
-        // register: key=websearch, instance=stopless -> reject
         let cross_register = center.register(
             web_key.clone(),
             V3ServerToolInstanceState::Stopless(stopless_instance()),
@@ -1305,7 +1302,6 @@ mod server_tool_center_tests {
         assert!(cross_register
             .expect_err("cross-tool register")
             .contains("cross-tool register rejected"));
-        // store: key=stopless, instance=websearch -> reject
         let cross_store = center.store(
             stopless_key.clone(),
             V3ServerToolInstanceState::WebSearch(web_search_instance()),
@@ -1327,13 +1323,10 @@ mod server_tool_center_tests {
                 None,
             )
             .expect("register web_search");
-        let cross_transition = center.transition(
-            &web_key,
-            test_origin(),
-            Some("test"),
-            None,
-            |_| Ok(V3ServerToolInstanceState::Stopless(stopless_instance())),
-        );
+        let cross_transition =
+            center.transition(&web_key, test_origin(), Some("test"), None, |_| {
+                Ok(V3ServerToolInstanceState::Stopless(stopless_instance()))
+            });
         assert!(cross_transition.is_err());
         assert!(cross_transition
             .expect_err("cross-tool transition")
@@ -1371,15 +1364,19 @@ mod server_tool_center_tests {
                 Some("test"),
                 None,
                 |instance| match instance {
-                V3ServerToolInstanceState::WebSearch(state) => {
-                    Ok(V3ServerToolInstanceState::WebSearch(
-                        state
-                            .transition_to(V3WebSearchCenterPhase::LocalToolSurfaceActive, "req04")
-                            .expect("adjacent"),
-                    ))
-                }
-                other => Err(format!("unexpected tool instance {:?}", other)),
-            })
+                    V3ServerToolInstanceState::WebSearch(state) => {
+                        Ok(V3ServerToolInstanceState::WebSearch(
+                            state
+                                .transition_to(
+                                    V3WebSearchCenterPhase::LocalToolSurfaceActive,
+                                    "req04",
+                                )
+                                .expect("adjacent"),
+                        ))
+                    }
+                    other => Err(format!("unexpected tool instance {:?}", other)),
+                },
+            )
             .expect("transition session-a");
         let a = center.load(&session_a).expect("load a").expect("a present");
         let b = center.load(&session_b).expect("load b").expect("b present");
@@ -1442,10 +1439,7 @@ mod server_tool_center_tests {
                 web_key.clone(),
                 V3ServerToolInstanceState::WebSearch(
                     web_search_instance()
-                        .transition_to(
-                            V3WebSearchCenterPhase::LocalToolSurfaceActive,
-                            "req04",
-                        )
+                        .transition_to(V3WebSearchCenterPhase::LocalToolSurfaceActive, "req04")
                         .expect("adjacent"),
                 ),
                 V3ServerToolCenterWriteOrigin {
@@ -1471,11 +1465,18 @@ mod server_tool_center_tests {
             .expect("clear web_search");
 
         let trail = center.audit_trail().expect("audit trail");
-        assert_eq!(trail.len(), 3, "register/store/clear must all be recorded: {trail:#?}");
+        assert_eq!(
+            trail.len(),
+            3,
+            "register/store/clear must all be recorded: {trail:#?}"
+        );
         // 最新在前：clear -> store -> register
         assert_eq!(trail[0].action, V3ServerToolCenterWriteAction::Clear);
         assert_eq!(trail[0].written_by.stage, "req02");
-        assert_eq!(trail[0].reason.as_deref(), Some("req02 pair verified, release state"));
+        assert_eq!(
+            trail[0].reason.as_deref(),
+            Some("req02 pair verified, release state")
+        );
         assert_eq!(trail[0].request_id, None);
         assert_eq!(trail[1].action, V3ServerToolCenterWriteAction::Store);
         assert_eq!(trail[1].written_by.module, "common_tests");

@@ -544,7 +544,11 @@ async fn direct_stopless_fifth_activation_guards_clears_and_next_request_reactiv
         let serialized = serde_json::to_string(body).unwrap();
         assert_eq!(
             body["status"],
-            if round < 5 { "requires_action" } else { "completed" },
+            if round < 5 {
+                "requires_action"
+            } else {
+                "completed"
+            },
             "{body}"
         );
         assert!(!serialized.contains("call_stopless_reasoning"), "{body}");
@@ -1671,7 +1675,9 @@ async fn direct_provider_failed_terminal_enters_error_chain_before_client_stream
         panic!("provider terminal failed event must project JSON Error06 before client SSE starts")
     };
     assert_eq!(body["error"]["code"], "provider_response_sse_event_invalid");
-    assert!(body["error"]["message"].as_str().is_some_and(|message| !message.is_empty()));
+    assert!(body["error"]["message"]
+        .as_str()
+        .is_some_and(|message| !message.is_empty()));
     assert!(output.stream_observation.is_none());
     assert_eq!(state.len().unwrap(), 0);
 }

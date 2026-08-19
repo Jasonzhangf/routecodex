@@ -192,7 +192,9 @@ pub(crate) fn provider_response_stream_failure(
             V3ProviderError::ResponseBody {
                 request_id: request_id.to_string(),
                 provider_id: provider_id.to_string(),
-                reason: "provider response body is empty: upstream declared SSE but emitted zero bytes".to_string(),
+                reason:
+                    "provider response body is empty: upstream declared SSE but emitted zero bytes"
+                        .to_string(),
             }
         }
         V3ResponsesRelayRuntimeError::ProviderSseTransport(reason) => {

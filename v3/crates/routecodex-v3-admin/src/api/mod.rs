@@ -5,8 +5,8 @@ pub mod reload;
 pub mod routes;
 
 use crate::AppState;
-use axum::Router;
 use axum::routing::get;
+use axum::Router;
 
 pub fn build_router(state: AppState) -> Router {
     Router::new()
@@ -26,13 +26,10 @@ pub fn build_router(state: AppState) -> Router {
 
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{StatusCode, header};
+use axum::http::{header, StatusCode};
 use axum::response::Response;
 
-async fn static_serve(
-    State(state): State<AppState>,
-    uri: axum::http::Uri,
-) -> Response {
+async fn static_serve(State(state): State<AppState>, uri: axum::http::Uri) -> Response {
     let path = uri.path();
     let relative = path.trim_start_matches('/');
     if relative.starts_with("api/") {

@@ -51,7 +51,8 @@ impl V3TableKind {
 /// transform 注册函数：少数无法纯数据表达的转换（折叠、状态机）的兜底。
 pub type V3TableTransform = fn(&Value) -> Result<Value, String>;
 
-static TRANSFORM_REGISTRY: OnceLock<Mutex<HashMap<&'static str, V3TableTransform>>> = OnceLock::new();
+static TRANSFORM_REGISTRY: OnceLock<Mutex<HashMap<&'static str, V3TableTransform>>> =
+    OnceLock::new();
 
 fn transform_registry() -> &'static Mutex<HashMap<&'static str, V3TableTransform>> {
     TRANSFORM_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
@@ -169,13 +170,25 @@ struct V3ProtocolTables {
 
 /// 表源：table_id -> JSON 文件内容（编译期嵌入）。
 const TABLE_SOURCES: &[(&str, &str)] = &[
-    ("finish_reason_map", include_str!("../tables/finish_reason_map.json")),
+    (
+        "finish_reason_map",
+        include_str!("../tables/finish_reason_map.json"),
+    ),
     ("role_map", include_str!("../tables/role_map.json")),
-    ("part_type_map", include_str!("../tables/part_type_map.json")),
+    (
+        "part_type_map",
+        include_str!("../tables/part_type_map.json"),
+    ),
     ("field_map", include_str!("../tables/field_map.json")),
-    ("tool_choice_map", include_str!("../tables/tool_choice_map.json")),
+    (
+        "tool_choice_map",
+        include_str!("../tables/tool_choice_map.json"),
+    ),
     ("usage_map", include_str!("../tables/usage_map.json")),
-    ("request_field_map", include_str!("../tables/request_field_map.json")),
+    (
+        "request_field_map",
+        include_str!("../tables/request_field_map.json"),
+    ),
 ];
 
 static TABLES: OnceLock<Result<V3ProtocolTables, String>> = OnceLock::new();
@@ -205,20 +218,22 @@ fn load_all_tables() -> Result<V3ProtocolTables, String> {
             }
             "bidi_field_map" => {
                 let entries = validate_field_table(table_id, &protocols, &parsed)?;
-                tables.insert(table_id.to_string(), V3TableData::Field { protocols, entries });
+                tables.insert(
+                    table_id.to_string(),
+                    V3TableData::Field { protocols, entries },
+                );
             }
             "field_whitelist_map" => {
                 let whitelists = validate_whitelist_table(table_id, &protocols, &parsed)?;
                 tables.insert(
                     table_id.to_string(),
-                    V3TableData::FieldWhitelist { protocols, whitelists },
+                    V3TableData::FieldWhitelist {
+                        protocols,
+                        whitelists,
+                    },
                 );
             }
-            other => {
-                return Err(format!(
-                    "table '{table_id}' has unsupported kind '{other}'"
-                ))
-            }
+            other => return Err(format!("table '{table_id}' has unsupported kind '{other}'")),
         }
     }
     Ok(V3ProtocolTables { tables })
@@ -514,7 +529,10 @@ impl V3ProtocolTables {
             .tables
             .get(V3TableKind::RequestField.table_id())
             .ok_or_else(|| {
-                format!("table '{}' not loaded", V3TableKind::RequestField.table_id())
+                format!(
+                    "table '{}' not loaded",
+                    V3TableKind::RequestField.table_id()
+                )
             })?;
         let V3TableData::FieldWhitelist { whitelists, .. } = table else {
             return Err("table 'request_field_map' is not a whitelist map".to_string());
@@ -531,7 +549,10 @@ impl V3ProtocolTables {
             .tables
             .get(V3TableKind::RequestField.table_id())
             .ok_or_else(|| {
-                format!("table '{}' not loaded", V3TableKind::RequestField.table_id())
+                format!(
+                    "table '{}' not loaded",
+                    V3TableKind::RequestField.table_id()
+                )
             })?;
         let V3TableData::FieldWhitelist { whitelists, .. } = table else {
             return Err("table 'request_field_map' is not a whitelist map".to_string());
@@ -568,7 +589,9 @@ pub fn is_whitelisted(protocol: &str, field: &str) -> Result<bool, String> {
 }
 
 /// 便捷查询：返回协议的全部允许透传字段（见 [`V3ProtocolTables::whitelisted_fields`]）。
-pub fn whitelisted_fields(protocol: &str) -> Result<std::collections::BTreeSet<&'static str>, String> {
+pub fn whitelisted_fields(
+    protocol: &str,
+) -> Result<std::collections::BTreeSet<&'static str>, String> {
     protocol_tables()?.whitelisted_fields(protocol)
 }
 
@@ -601,19 +624,34 @@ mod tests {
         // inbound：协议值 -> hub
         assert_eq!(
             tables
-                .map_value(V3TableKind::FinishReason, "openai_chat", "stop", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::FinishReason,
+                    "openai_chat",
+                    "stop",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             Some("stop")
         );
         assert_eq!(
             tables
-                .map_value(V3TableKind::FinishReason, "openai_chat", "length", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::FinishReason,
+                    "openai_chat",
+                    "length",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             Some("max_tokens")
         );
         assert_eq!(
             tables
-                .map_value(V3TableKind::FinishReason, "anthropic", "tool_use", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::FinishReason,
+                    "anthropic",
+                    "tool_use",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             Some("tool_calls")
         );
@@ -623,7 +661,7 @@ mod tests {
                     V3TableKind::FinishReason,
                     "anthropic",
                     "pause_turn",
-                    V3TableDirection::Inbound,
+                    V3TableDirection::Inbound
                 )
                 .unwrap(),
             Some("pause_turn")
@@ -634,7 +672,7 @@ mod tests {
                     V3TableKind::FinishReason,
                     "anthropic",
                     "refusal",
-                    V3TableDirection::Inbound,
+                    V3TableDirection::Inbound
                 )
                 .unwrap(),
             Some("content_filter")
@@ -645,27 +683,42 @@ mod tests {
                     V3TableKind::FinishReason,
                     "anthropic",
                     "model_context_window_exceeded",
-                    V3TableDirection::Inbound,
+                    V3TableDirection::Inbound
                 )
                 .unwrap(),
             Some("context_window_exceeded")
         );
         assert_eq!(
             tables
-                .map_value(V3TableKind::FinishReason, "responses", "requires_action", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::FinishReason,
+                    "responses",
+                    "requires_action",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             Some("tool_calls")
         );
         // outbound：hub -> 协议值
         assert_eq!(
             tables
-                .map_value(V3TableKind::FinishReason, "responses", "stop", V3TableDirection::Outbound)
+                .map_value(
+                    V3TableKind::FinishReason,
+                    "responses",
+                    "stop",
+                    V3TableDirection::Outbound
+                )
                 .unwrap(),
             Some("end_turn")
         );
         assert_eq!(
             tables
-                .map_value(V3TableKind::FinishReason, "openai_chat", "max_tokens", V3TableDirection::Outbound)
+                .map_value(
+                    V3TableKind::FinishReason,
+                    "openai_chat",
+                    "max_tokens",
+                    V3TableDirection::Outbound
+                )
                 .unwrap(),
             Some("length")
         );
@@ -683,7 +736,12 @@ mod tests {
         // 未命中
         assert_eq!(
             tables
-                .map_value(V3TableKind::FinishReason, "openai_chat", "unknown_reason", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::FinishReason,
+                    "openai_chat",
+                    "unknown_reason",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             None
         );
@@ -694,20 +752,35 @@ mod tests {
         let tables = load_or_panic();
         assert_eq!(
             tables
-                .map_value(V3TableKind::Role, "openai_chat", "developer", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::Role,
+                    "openai_chat",
+                    "developer",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             Some("developer")
         );
         // anthropic 无 developer role：outbound 应返回 None（需 transform 折叠兜底）
         assert_eq!(
             tables
-                .map_value(V3TableKind::Role, "anthropic", "developer", V3TableDirection::Outbound)
+                .map_value(
+                    V3TableKind::Role,
+                    "anthropic",
+                    "developer",
+                    V3TableDirection::Outbound
+                )
                 .unwrap(),
             None
         );
         assert_eq!(
             tables
-                .map_value(V3TableKind::Role, "anthropic", "system", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::Role,
+                    "anthropic",
+                    "system",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             Some("system")
         );
@@ -719,34 +792,59 @@ mod tests {
         // 请求侧归一化：openai_chat text part -> hub input_text
         assert_eq!(
             tables
-                .map_value(V3TableKind::PartType, "openai_chat", "text", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::PartType,
+                    "openai_chat",
+                    "text",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             Some("input_text")
         );
         // 响应侧投影：hub text -> responses output_text
         assert_eq!(
             tables
-                .map_value(V3TableKind::PartType, "responses", "text", V3TableDirection::Outbound)
+                .map_value(
+                    V3TableKind::PartType,
+                    "responses",
+                    "text",
+                    V3TableDirection::Outbound
+                )
                 .unwrap(),
             Some("output_text")
         );
         // 方向隔离：hub text 在 inbound 方向不存在（无该行）
         assert_eq!(
             tables
-                .map_value(V3TableKind::PartType, "responses", "text", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::PartType,
+                    "responses",
+                    "text",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             None
         );
         // reasoning：responses 无原生列 -> outbound None；anthropic -> thinking
         assert_eq!(
             tables
-                .map_value(V3TableKind::PartType, "responses", "reasoning", V3TableDirection::Outbound)
+                .map_value(
+                    V3TableKind::PartType,
+                    "responses",
+                    "reasoning",
+                    V3TableDirection::Outbound
+                )
                 .unwrap(),
             Some("reasoning")
         );
         assert_eq!(
             tables
-                .map_value(V3TableKind::PartType, "anthropic", "reasoning", V3TableDirection::Outbound)
+                .map_value(
+                    V3TableKind::PartType,
+                    "anthropic",
+                    "reasoning",
+                    V3TableDirection::Outbound
+                )
                 .unwrap(),
             Some("thinking")
         );
@@ -763,7 +861,11 @@ mod tests {
         );
         assert_eq!(
             tables
-                .map_field("openai_chat", "responses_item_id", V3TableDirection::Outbound)
+                .map_field(
+                    "openai_chat",
+                    "responses_item_id",
+                    V3TableDirection::Outbound
+                )
                 .unwrap(),
             Some("id")
         );
@@ -789,7 +891,10 @@ mod tests {
         let parsed: Value = serde_json::from_str(json).unwrap();
         let error = validate_value_table("bad_map", &["openai_chat".to_string()], &parsed)
             .expect_err("inbound ambiguity must be rejected");
-        assert!(error.contains("inbound ambiguity"), "unexpected error: {error}");
+        assert!(
+            error.contains("inbound ambiguity"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -806,7 +911,10 @@ mod tests {
         let parsed: Value = serde_json::from_str(json).unwrap();
         let error = validate_field_table("bad_field_map", &["openai_chat".to_string()], &parsed)
             .expect_err("field ambiguity must be rejected");
-        assert!(error.contains("inbound ambiguity"), "unexpected error: {error}");
+        assert!(
+            error.contains("inbound ambiguity"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -815,39 +923,69 @@ mod tests {
         // inbound：协议值 -> hub
         assert_eq!(
             tables
-                .map_value(V3TableKind::ToolChoice, "responses", "auto", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::ToolChoice,
+                    "responses",
+                    "auto",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             Some("auto")
         );
         assert_eq!(
             tables
-                .map_value(V3TableKind::ToolChoice, "anthropic", "any", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::ToolChoice,
+                    "anthropic",
+                    "any",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             Some("required")
         );
         // responses function/tool/custom 均归一化为 hub tool
         assert_eq!(
             tables
-                .map_value(V3TableKind::ToolChoice, "responses", "function", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::ToolChoice,
+                    "responses",
+                    "function",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             Some("tool")
         );
         assert_eq!(
             tables
-                .map_value(V3TableKind::ToolChoice, "responses", "custom", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::ToolChoice,
+                    "responses",
+                    "custom",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             Some("tool")
         );
         // outbound：hub -> 协议值
         assert_eq!(
             tables
-                .map_value(V3TableKind::ToolChoice, "anthropic", "required", V3TableDirection::Outbound)
+                .map_value(
+                    V3TableKind::ToolChoice,
+                    "anthropic",
+                    "required",
+                    V3TableDirection::Outbound
+                )
                 .unwrap(),
             Some("any")
         );
         assert_eq!(
             tables
-                .map_value(V3TableKind::ToolChoice, "anthropic", "tool", V3TableDirection::Outbound)
+                .map_value(
+                    V3TableKind::ToolChoice,
+                    "anthropic",
+                    "tool",
+                    V3TableDirection::Outbound
+                )
                 .unwrap(),
             Some("tool")
         );
@@ -858,13 +996,23 @@ mod tests {
         let tables = load_or_panic();
         assert_eq!(
             tables
-                .map_value(V3TableKind::Usage, "responses", "input_tokens", V3TableDirection::Inbound)
+                .map_value(
+                    V3TableKind::Usage,
+                    "responses",
+                    "input_tokens",
+                    V3TableDirection::Inbound
+                )
                 .unwrap(),
             Some("input_tokens")
         );
         assert_eq!(
             tables
-                .map_value(V3TableKind::Usage, "anthropic", "output_tokens", V3TableDirection::Outbound)
+                .map_value(
+                    V3TableKind::Usage,
+                    "anthropic",
+                    "output_tokens",
+                    V3TableDirection::Outbound
+                )
                 .unwrap(),
             Some("output_tokens")
         );
@@ -875,26 +1023,18 @@ mod tests {
         let tables = load_or_panic();
         // 白名单查询
         assert!(
-            tables
-                .is_whitelisted("responses", "model")
-                .unwrap(),
+            tables.is_whitelisted("responses", "model").unwrap(),
             "responses model must be whitelisted"
         );
-        assert!(
-            tables
-                .is_whitelisted("openai_chat", "max_completion_tokens")
-                .unwrap()
-        );
-        assert!(
-            tables
-                .is_whitelisted("anthropic", "stop_sequences")
-                .unwrap()
-        );
-        assert!(
-            tables
-                .is_whitelisted("gemini", "systemInstruction")
-                .unwrap()
-        );
+        assert!(tables
+            .is_whitelisted("openai_chat", "max_completion_tokens")
+            .unwrap());
+        assert!(tables
+            .is_whitelisted("anthropic", "stop_sequences")
+            .unwrap());
+        assert!(tables
+            .is_whitelisted("gemini", "systemInstruction")
+            .unwrap());
         // 非白名单字段
         assert!(!tables.is_whitelisted("responses", "no_such_field").unwrap());
         // 未声明的协议 -> false（不 panic）

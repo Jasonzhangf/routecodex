@@ -90,10 +90,7 @@ fn passthrough_keeps_string_user_content_unchanged() {
         result["messages"][0]["content"][0]["input"],
         json!({"type":"search","query":"Ubuntu ARM64","ignored":"provider-specific"})
     );
-    assert_eq!(
-        result["messages"][1]["content"],
-        json!("continue")
-    );
+    assert_eq!(result["messages"][1]["content"], json!("continue"));
 }
 
 #[test]
@@ -111,7 +108,10 @@ fn passthrough_does_not_require_query_field() {
         }]
     }))
     .unwrap();
-    assert_eq!(result["messages"][0]["content"][0]["name"], json!("web_search"));
+    assert_eq!(
+        result["messages"][0]["content"][0]["name"],
+        json!("web_search")
+    );
 }
 
 #[test]

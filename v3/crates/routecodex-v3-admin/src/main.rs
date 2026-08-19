@@ -1,6 +1,6 @@
 // feature_id: v3.admin_bin
 // rccv3-admin：RCC V3 Config Management WebUI Backend 入口。
-use routecodex_v3_admin::{AppState, router};
+use routecodex_v3_admin::{router, AppState};
 use std::path::PathBuf;
 
 const DEFAULT_BIND: &str = "127.0.0.1:8777";
@@ -14,7 +14,10 @@ fn main() {
         match args[index].as_str() {
             "--bind" => {
                 index += 1;
-                bind = args.get(index).cloned().unwrap_or_else(|| DEFAULT_BIND.to_string());
+                bind = args
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| DEFAULT_BIND.to_string());
             }
             "--config" => {
                 index += 1;

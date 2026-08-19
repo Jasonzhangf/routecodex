@@ -53,9 +53,7 @@ pub struct RouteGroupView {
     pub ports: Vec<RoutePortView>,
 }
 
-pub fn route_groups_from_authoring(
-    authoring: &V3Config02AuthoringParsed,
-) -> Vec<RouteGroupView> {
+pub fn route_groups_from_authoring(authoring: &V3Config02AuthoringParsed) -> Vec<RouteGroupView> {
     let mut groups: BTreeMap<String, Vec<RoutePortView>> = BTreeMap::new();
     for (server_id, server) in &authoring.servers {
         groups
@@ -99,10 +97,7 @@ pub fn port_view_from_authoring(
     }
 }
 
-pub fn pool_view_from_authoring(
-    name: &str,
-    pool: &V3RoutePoolAuthoringConfig,
-) -> RoutePoolView {
+pub fn pool_view_from_authoring(name: &str, pool: &V3RoutePoolAuthoringConfig) -> RoutePoolView {
     let mut grouped: BTreeMap<i32, Vec<RouteMemberView>> = BTreeMap::new();
     for target in &pool.targets {
         let priority = target.priority.unwrap_or(0);

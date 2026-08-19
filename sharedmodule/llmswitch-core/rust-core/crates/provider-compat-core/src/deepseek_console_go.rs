@@ -366,9 +366,15 @@ mod tests {
         assert_eq!(mapped["tools"][0]["type"], json!("function"));
         assert_eq!(mapped["input"][0]["type"], json!("function_call"));
         assert_eq!(mapped["input"][0]["name"], json!("tool_search"));
-        assert_eq!(mapped["input"][0]["arguments"], json!("{\"query\":\"dsh\"}"));
+        assert_eq!(
+            mapped["input"][0]["arguments"],
+            json!("{\"query\":\"dsh\"}")
+        );
         assert_eq!(mapped["input"][1]["type"], json!("function_call_output"));
-        assert_eq!(mapped["input"][1]["output"], json!("[{\"name\":\"dsh_review_start\"}]"));
+        assert_eq!(
+            mapped["input"][1]["output"],
+            json!("[{\"name\":\"dsh_review_start\"}]")
+        );
     }
 
     #[test]

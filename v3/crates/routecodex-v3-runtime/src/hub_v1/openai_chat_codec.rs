@@ -1154,7 +1154,9 @@ mod openai_chat_responses_sse_transducer_tests {
             json!(42),
             "terminal chunk must carry normalized usage: {terminal}"
         );
-        transducer.finish().expect("finish accepts incomplete terminal");
+        transducer
+            .finish()
+            .expect("finish accepts incomplete terminal");
     }
 
     #[test]
@@ -1176,7 +1178,9 @@ mod openai_chat_responses_sse_transducer_tests {
             chunks[0]["choices"][0]["finish_reason"],
             json!("content_filter")
         );
-        transducer.finish().expect("finish accepts incomplete terminal");
+        transducer
+            .finish()
+            .expect("finish accepts incomplete terminal");
     }
 
     #[test]

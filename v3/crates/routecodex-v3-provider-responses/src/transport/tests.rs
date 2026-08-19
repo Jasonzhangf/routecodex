@@ -56,7 +56,9 @@ fn compact_wire_rejects_websocket_transport() {
     .unwrap();
     let error = build_v3_transport_13_responses_request_from_v3_provider_12(wire)
         .expect_err("native compact must not use Responses WebSocket transport");
-    assert!(error.to_string().contains("responses compact requires HTTP transport"));
+    assert!(error
+        .to_string()
+        .contains("responses compact requires HTTP transport"));
 }
 
 fn reasoning_stop_tool_fixture() -> Value {

@@ -5,7 +5,7 @@ use axum::extract::State;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use routecodex_v3_config_mgmt::{
-    RouteGroupView, apply_route_group_view_to_authoring, route_groups_from_authoring,
+    apply_route_group_view_to_authoring, route_groups_from_authoring, RouteGroupView,
 };
 use serde::Serialize;
 
@@ -15,11 +15,15 @@ pub fn routes() -> Router<AppState> {
         .route("/api/routes/validate", post(validate_routes))
 }
 
-async fn get_routes(State(state): State<AppState>) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
-    let authoring = state
-        .store
-        .read_authoring()
-        .map_err(|error| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+async fn get_routes(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    let authoring = state.store.read_authoring().map_err(|error| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        )
+    })?;
     let groups = route_groups_from_authoring(&authoring);
     Ok(Json(serde_json::json!({ "groups": groups })))
 }
@@ -42,10 +46,12 @@ async fn put_routes(
     State(state): State<AppState>,
     Json(request): Json<RoutesUpdateRequest>,
 ) -> Result<Json<RoutesUpdateResult>, (axum::http::StatusCode, String)> {
-    let mut authoring = state
-        .store
-        .read_authoring()
-        .map_err(|error| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let mut authoring = state.store.read_authoring().map_err(|error| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        )
+    })?;
     for group in &request.groups {
         apply_route_group_view_to_authoring(&mut authoring, group);
     }

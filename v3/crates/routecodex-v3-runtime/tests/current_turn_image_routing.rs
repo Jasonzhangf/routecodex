@@ -7,17 +7,15 @@
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_runtime::{
-    build_v3_chat_req_04_standardized_from_v3_server_03,
-    build_v3_router_request_facts_for_entry,
-    build_v3_router_request_facts_from_v3_req_04_chat,
-    build_v3_server_03_http_request_raw,
+    build_v3_chat_req_04_standardized_from_v3_server_03, build_v3_router_request_facts_for_entry,
+    build_v3_router_request_facts_from_v3_req_04_chat, build_v3_server_03_http_request_raw,
 };
 use serde_json::json;
 
 const TEST_LONGCONTEXT_THRESHOLD_TOKENS: Option<u64> = Some(180_000);
 
-fn manifest_mode_b_websearch_for_routing_facts(
-) -> routecodex_v3_config::V3Config05ManifestPublished {
+fn manifest_mode_b_websearch_for_routing_facts() -> routecodex_v3_config::V3Config05ManifestPublished
+{
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
             r#"
@@ -57,8 +55,7 @@ fn v3_routing_facts_ignore_history_images_when_current_turn_is_text_only() {
     // 历史轮图片（含已归一化占位）不得再产生 multimodal/vision 能力。
     let raw = build_v3_server_03_http_request_raw(
         "server".to_string(),
-        V3ProviderFailureSessionScope::new("server", "default", "request")
-            .expect("failure scope"),
+        V3ProviderFailureSessionScope::new("server", "default", "request").expect("failure scope"),
         "request".to_string(),
         "execution".to_string(),
         "POST".to_string(),
@@ -79,8 +76,8 @@ fn v3_routing_facts_ignore_history_images_when_current_turn_is_text_only() {
         }),
     );
 
-    let normalized = build_v3_chat_req_04_standardized_from_v3_server_03(raw)
-        .expect("chat req04 normalize");
+    let normalized =
+        build_v3_chat_req_04_standardized_from_v3_server_03(raw).expect("chat req04 normalize");
     let facts = build_v3_router_request_facts_from_v3_req_04_chat(
         &normalized,
         &manifest_mode_b_websearch_for_routing_facts(),

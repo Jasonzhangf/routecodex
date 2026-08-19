@@ -521,7 +521,9 @@ impl V3ManagedLifecycle {
                     instance_id: declaration.instance_id,
                     state: V3ManagedRunState::Stopped,
                     updated_at_epoch_ms: epoch_ms(),
-                    detail: Some(format!("no managed runtime state; query_live failed: {error}")),
+                    detail: Some(format!(
+                        "no managed runtime state; query_live failed: {error}"
+                    )),
                 })
             }
         })
@@ -1410,8 +1412,6 @@ async fn wait_for_listener_set_available(
         tokio::time::sleep(START_TAKEOVER_POLL).await;
     }
 }
-
-
 
 #[cfg(test)]
 mod tests;
