@@ -47,7 +47,7 @@ pub(crate) async fn restart_managed_runtime_in_place(
         Some("exec restart accepted".to_string()),
     )?;
     let _ = fs::remove_file(instance_dir.join(RESTART_PLAN_FILE));
-    handle.shutdown().await;
+    handle.prepare_for_exec().await;
     write_json_atomic(&instance_dir.join("instance.json"), declaration)?;
     let _ = fs::remove_file(instance_dir.join("control.json"));
     let _ = fs::remove_file(socket_path);
@@ -201,4 +201,3 @@ pub(crate) async fn send_control_without_timeout(
     BufReader::new(stream).read_line(&mut line).await?;
     Ok(serde_json::from_str(&line)?)
 }
-

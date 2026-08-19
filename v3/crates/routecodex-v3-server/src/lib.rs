@@ -234,21 +234,33 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 
 impl V3ServerAggregateHandle {
     pub async fn shutdown(mut self) {
-        // Keep listeners open while active requests complete. This lets new
-        // requests enter the old runtime during restart instead of receiving
-        // a connection-refused storm; only then hand control to exec.
+        // Normal shutdown is graceful: stop accepting, then let active
+        // responses drain before the managed process exits.
         self.request_activity.wait_for_quiescence().await;
+        self.signal_shutdown();
+        for listener in &mut self.listeners {
+            if let Some(join) = listener.join.take() {
+                let _ = join.await;
+            }
+        }
+    }
+
+    /// Restart handoff follows the V1 exec contract. Signal the listeners and
+    /// immediately return control to the lifecycle owner; waiting for request
+    /// activity here deadlocks under continuous traffic and prevents exec.
+    /// In-flight clients receive the existing stream/error-chain outcome and
+    /// may reconnect against the replacement runtime.
+    pub async fn prepare_for_exec(mut self) {
+        self.signal_shutdown();
+    }
+
+    fn signal_shutdown(&mut self) {
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
         for listener in &mut self.listeners {
             if let Some(shutdown) = listener.shutdown.take() {
                 let _ = shutdown.send(());
-            }
-        }
-        for listener in &mut self.listeners {
-            if let Some(join) = listener.join.take() {
-                let _ = join.await;
             }
         }
     }
