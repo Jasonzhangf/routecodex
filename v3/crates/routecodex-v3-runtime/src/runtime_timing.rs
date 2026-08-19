@@ -89,6 +89,27 @@ impl V3RuntimeTimingState {
         Ok(())
     }
 
+    /// Close the current external attempt when one is still owned by a
+    /// streaming terminal wrapper.  Direct SSE has two adjacent wrappers:
+    /// the protocol observation wrapper may already close the attempt, while
+    /// the provider-outcome wrapper owns the final terminal decision.  The
+    /// terminal owner must therefore be able to close an outstanding attempt
+    /// without turning an already-closed adjacent stage into a runtime error.
+    pub(crate) fn finish_external_if_active(&self) -> Result<bool, String> {
+        let mut state = self.lock()?;
+        if state.finished {
+            return Err("V3 Runtime timing is already terminal".to_string());
+        }
+        let Some(started) = state.external_started.take() else {
+            return Ok(false);
+        };
+        state.external_total = state
+            .external_total
+            .checked_add(started.elapsed())
+            .ok_or_else(|| "V3 Runtime external timing overflowed".to_string())?;
+        Ok(true)
+    }
+
     pub(crate) fn finish_runtime(&self) -> Result<V3RuntimeTimingSummary, String> {
         let mut state = self.lock()?;
         if state.finished {

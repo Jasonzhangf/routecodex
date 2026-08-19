@@ -246,6 +246,32 @@ async fn direct_sse_runtime_timing_publishes_only_after_clean_eof() {
 }
 
 #[tokio::test]
+async fn direct_sse_terminal_owner_closes_unfinished_external_attempt() {
+    let runtime_timing = V3RuntimeTimingState::start();
+    runtime_timing.start_external().unwrap();
+    let observation = V3RuntimeStreamObservation::default();
+    let source = Box::pin(stream::iter(vec![Ok(
+        b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
+            .to_vec(),
+    )]));
+    let mut governed = wrap_direct_sse_provider_outcome_stream(
+        source,
+        test_direct_sse_provider_outcome("direct_sse_terminal_owner_closes_external"),
+        runtime_timing.clone(),
+        observation.clone(),
+    );
+
+    while let Some(item) = governed.next().await {
+        assert!(item.is_ok(), "terminal closeout must not fail timing: {item:?}");
+    }
+
+    assert!(
+        observation.snapshot().unwrap().timing.is_some(),
+        "terminal owner must publish timing after closing the active external attempt"
+    );
+}
+
+#[tokio::test]
 async fn direct_sse_keepalive_text_frames_do_not_fail_the_stream() {
     let runtime_timing = V3RuntimeTimingState::start();
     runtime_timing.start_external().unwrap();
