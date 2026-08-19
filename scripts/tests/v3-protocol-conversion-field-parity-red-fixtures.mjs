@@ -9,6 +9,7 @@ const verifier = resolve(repo, 'scripts/architecture/verify-v3-protocol-conversi
 const files = [
   'docs/goals/v3-protocol-conversion-field-parity-test-design.md',
   'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
+  'docs/goals/v3-anthropic-protocol-matrix-projection-completion-plan.md',
   'docs/design/v3-protocol-request-field-projection.md',
   'docs/architecture/manifests/v3.protocol_request_field_projection.yml',
   'docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml',
@@ -18,6 +19,8 @@ const files = [
   'scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
   'scripts/architecture/verify-v3-architecture-ci.mjs',
   'v3/crates/routecodex-v3-runtime/tables/request_field_map.json',
+  'v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json',
+  'v3/crates/routecodex-v3-runtime/src/protocol_tables.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
@@ -42,6 +45,8 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
@@ -393,8 +398,8 @@ const cases = [
   {
     name: 'Audit truth status count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    extension_declared: 220\n',
-    to: '    extension_declared: 219\n',
+    from: '    extension_declared: 219\n',
+    to: '    extension_declared: 218\n',
     diagnostic: /audited_status_counts\.extension_declared|must equal current_impl count/u,
   },
   {
@@ -414,8 +419,8 @@ const cases = [
   {
     name: 'Textual truth audited extension count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
-    from: '| `extension_declared` | 221 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
-    to: '| `extension_declared` | 222 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
+    from: '| `extension_declared` | 219 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
+    to: '| `extension_declared` | 220 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
     diagnostic: /`extension_declared` \| 221|v3-protocol-semantic-matrix-review/u,
   },
   {
@@ -857,6 +862,55 @@ const cases = [
     from: '.map(|key| format!("$.request.{key}"))',
     to: '.map(|key| key.to_string())',
     diagnostic: /registered_extension_unmapped|\.request/u,
+  },
+  {
+    name: 'Anthropic max_tokens terminal contract is relabeled completed',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '    - source: max_tokens\n      hub: max_tokens\n      responses_status: incomplete\n',
+    to: '    - source: max_tokens\n      hub: max_tokens\n      responses_status: completed\n',
+    diagnostic: /Anthropic terminal values|closed protocol matrix/u,
+  },
+  {
+    name: 'Responses incomplete tool result loses Anthropic is_error projection',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
+    from: 'Some(Value::String(status)) if status == "incomplete" => true,',
+    to: 'Some(Value::String(status)) if status == "incomplete" => false,',
+    diagnostic: /status == "incomplete" => true|responses_to_anthropic/u,
+  },
+  {
+    name: 'Anthropic response content enum drops container_upload',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+    from: '"container_upload" => Ok(Self::ContainerUpload),',
+    to: '"container_upload_removed" => Ok(Self::ContainerUpload),',
+    diagnostic: /container_upload.*ContainerUpload|anthropic_codec/u,
+  },
+  {
+    name: 'Anthropic response contract permits SSE semantic ownership',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '  forbidden_owners:\n    - handler\n    - SSE transport\n    - provider transport\n',
+    to: '  forbidden_owners:\n    - handler\n    - provider transport\n',
+    diagnostic: /Anthropic response forbidden owners|closed protocol matrix/u,
+  },
+  {
+    name: 'JSON and SSE shared terminal owner regression is removed',
+    file: 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs',
+    from: 'anthropic_json_and_sse_materialization_share_terminal_projection_owner',
+    to: 'anthropic_json_and_sse_terminal_projection_owner_removed',
+    diagnostic: /anthropic_json_and_sse_materialization_share_terminal_projection_owner/u,
+  },
+  {
+    name: 'Anthropic refusal finish-reason registry loses content_filter identity',
+    file: 'v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json',
+    from: '{ "hub": "content_filter", "responses": "content_filter", "openai_chat": "content_filter", "anthropic": "refusal" }',
+    to: '{ "hub": "stop", "responses": "end_turn", "openai_chat": "stop", "anthropic": "refusal" }',
+    diagnostic: /missing registered refusal|finish_reason_map/u,
+  },
+  {
+    name: 'Resp03 registered incomplete terminal regression is removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs',
+    from: 'responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details',
+    to: 'responses_resp03_incomplete_terminal_regression_removed',
+    diagnostic: /responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details/u,
   },
 ];
 

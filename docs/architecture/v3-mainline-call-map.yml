@@ -1205,6 +1205,10 @@ chains:
     status: anchored
     binding_kind: adjacent_response_codec_with_typed_same_request_projection_context
     owner_feature_id: v3.protocol_conversion_field_parity
+    semantic_contract:
+      - Materialized Anthropic JSON and provider SSE final messages enter the same Anthropic response codec and call one closed stop_reason terminal projector.
+      - Anthropic response content block type is parsed through the registered closed enum; unsupported, missing, and unknown types fail with the exact response.content[index].type path.
+      - Direct same-protocol Anthropic response bytes do not enter this Relay codec, and SSE transport does not own terminal or content semantics.
     resource_flow:
       consumes:
       - v3.response.provider_raw
@@ -4102,6 +4106,9 @@ chains:
     nonconformance: Current bound test asserts a reasoning-policy system marker; implementation must replace it with exact effort projection or canonical UnmappedOutboundFields before this edge is conformant.
     binding_kind: protocol_field_parity_test_over_existing_relay_chain
     owner_feature_id: v3.protocol_conversion_field_parity
+    semantic_contract:
+      - Responses function_call_output.status is consumed as typed tool-result data by the adjacent Anthropic codec; absent/completed omit is_error and incomplete projects is_error=true.
+      - In-progress, null, non-string, unknown, or conflicting status fails before Anthropic wire build; output text, HTTP status, provider identity, and MetadataCenter never infer is_error.
     resource_flow:
       consumes:
       - v3.request.normal_payload

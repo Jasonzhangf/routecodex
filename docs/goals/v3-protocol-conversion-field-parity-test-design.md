@@ -258,6 +258,16 @@ OpenAI metadata projection requires at most 16 string pairs, keys no longer than
 | `finish_reason` / `status` | `stop_reason` (`tool_use`, `end_turn`, `max_tokens`, `stop_sequence`) | response matrix |
 | malformed JSON function arguments | exact string preservation at the adjacent codec, not JSON-string rewrapping, empty-object fallback, MetadataCenter reconstruction, or provider switch | negative/positive paired tests |
 
+### Anthropic provider response -> Responses terminal/content projection
+
+| Positive lock | Negative lock | Required test |
+| --- | --- | --- |
+| `end_turn`, `tool_use`, `max_tokens`, `stop_sequence`, `pause_turn`, and `refusal` each produce their registered Responses status/details and preserve the exact source finish reason | missing/null/non-string/unknown stop reason, contradictory stop sequence, and malformed refusal details fail at the Anthropic terminal owner | `anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix`; `anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_values` |
+| JSON final message and SSE-materialized final message call the same Anthropic terminal projection and produce JSON-equivalent terminal fields | SSE transport/frame code contains no second Anthropic stop-reason mapping | `anthropic_json_and_sse_materialization_share_terminal_projection_owner` plus source gate |
+| completed/absent tool-output status remains success; incomplete becomes `tool_result.is_error=true` | in-progress/null/non-string/unknown status fails before Anthropic wire; output text never infers error | `responses_tool_result_status_projects_only_registered_anthropic_is_error_semantic`; `responses_tool_result_status_rejects_nonterminal_or_unknown_values` |
+| all twelve active Anthropic response content block enum values are registered as exact, compatible, or unsupported | unsupported/unknown/missing types retain exact `response.content[index].type` diagnostics; web-search results cannot be silently skipped when unpaired | `anthropic_response_content_block_enum_is_closed_and_diagnostic`; `anthropic_web_search_result_requires_exact_pairing` |
+| `model_context_window_exceeded` is recognized but fails as an unsupported Responses projection | it is never rewritten as output-token exhaustion or completed | `anthropic_model_context_window_stop_is_explicitly_unsupported_for_responses` |
+
 ### OpenAI Chat -> OpenAI Chat same-protocol
 
 | Field family | Required test |

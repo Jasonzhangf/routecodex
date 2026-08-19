@@ -5,10 +5,11 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_anthropic_relay_runtime,
+    execute_v3_anthropic_relay_runtime, materialize_v3_provider_sse_as_canonical_response,
     materialize_v3_responses_provider_sse_as_canonical_response,
-    project_v3_anthropic_events_after_resp04, project_v3_responses_json_as_anthropic_events,
-    project_v3_responses_json_as_anthropic_message, V3AnthropicRelayRuntimeInput,
+    project_v3_anthropic_events_after_resp04, project_v3_anthropic_message_as_responses_response,
+    project_v3_responses_json_as_anthropic_events, project_v3_responses_json_as_anthropic_message,
+    V3AnthropicRelayRuntimeInput, V3HubProviderWireProtocol,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -49,6 +50,111 @@ impl ResponsesTransport for JsonTransport {
 struct MatrixJsonTransport {
     captured: Mutex<Option<Value>>,
     response: Value,
+}
+
+#[tokio::test]
+async fn anthropic_json_and_sse_materialization_share_terminal_projection_owner() {
+    let json_response = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_terminal_parity",
+        "type":"message",
+        "role":"assistant",
+        "model":"MiniMax-M3",
+        "content":[{"type":"text","text":"partial"}],
+        "usage":{"input_tokens":3,"output_tokens":2},
+        "stop_reason":"max_tokens",
+        "stop_sequence":null
+    }))
+    .expect("Anthropic JSON max_tokens must use the registered terminal projection");
+
+    let stream = futures_util::stream::iter([
+        Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_terminal_parity","type":"message","role":"assistant","model":"MiniMax-M3","content":[],"stop_reason":null,"usage":{"input_tokens":3}}}
+
+"#.to_vec()),
+        Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+"#.to_vec()),
+        Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}
+
+"#.to_vec()),
+        Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#.to_vec()),
+        Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"output_tokens":2}}
+
+"#.to_vec()),
+        Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#.to_vec()),
+    ]);
+    let sse_response = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Anthropic,
+        Box::pin(stream),
+    )
+    .await
+    .expect("Anthropic SSE max_tokens must materialize through the JSON terminal owner");
+
+    for response in [&json_response, &sse_response] {
+        assert_eq!(response["status"], "incomplete");
+        assert_eq!(
+            response["incomplete_details"]["reason"],
+            "max_output_tokens"
+        );
+        assert_eq!(response["finish_reason"], "max_tokens");
+    }
+}
+
+#[tokio::test]
+async fn anthropic_json_and_sse_reject_unknown_terminal_without_success_projection() {
+    let json_error = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_unknown_terminal",
+        "type":"message",
+        "role":"assistant",
+        "model":"MiniMax-M3",
+        "content":[{"type":"text","text":"must fail"}],
+        "stop_reason":"future_terminal"
+    }))
+    .expect_err("unknown Anthropic JSON stop_reason must fail at the terminal owner");
+    assert!(json_error.to_string().contains("future_terminal"));
+
+    let stream = futures_util::stream::iter([
+        Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_unknown_terminal","type":"message","role":"assistant","model":"MiniMax-M3","content":[],"stop_reason":null}}
+
+"#.to_vec()),
+        Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+"#.to_vec()),
+        Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"must fail"}}
+
+"#.to_vec()),
+        Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#.to_vec()),
+        Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"future_terminal","stop_sequence":null}}
+
+"#.to_vec()),
+        Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#.to_vec()),
+    ]);
+    let sse_error = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Anthropic,
+        Box::pin(stream),
+    )
+    .await
+    .expect_err("unknown Anthropic SSE stop_reason must fail at the same terminal owner");
+    assert!(sse_error.to_string().contains("future_terminal"));
 }
 
 #[async_trait]
