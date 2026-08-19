@@ -202,6 +202,187 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
 }
 
 #[tokio::test]
+async fn responses_relay_anthropic_wire_preserves_typed_tool_result_error_status() {
+    let transport = AnthropicProviderJsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-anthropic-tool-result-status".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[
+                    {
+                        "type":"function_call",
+                        "call_id":"call_error_status",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"false\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_error_status",
+                        "status":"incomplete",
+                        "output":"command failed"
+                    }
+                ],
+                "stream":false,
+                "max_output_tokens":64
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("registered tool-result error status must reach Anthropic wire");
+
+    assert_eq!(output.status, 200, "{output:?}");
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    let tool_result = captured["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|part| part["type"] == "tool_result" && part["tool_use_id"] == "call_error_status")
+        .unwrap_or_else(|| panic!("typed tool result missing from Anthropic wire: {captured}"));
+    assert_eq!(
+        tool_result["is_error"], true,
+        "incomplete Responses tool result must project to Anthropic is_error=true: {captured}"
+    );
+    assert!(
+        !captured.to_string().contains("routecodex_chat_extension"),
+        "Chat payload extension must be consumed at the Anthropic codec boundary: {captured}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_wire_omits_is_error_for_registered_success_statuses() {
+    for (case, status) in [("absent", None), ("completed", Some("completed"))] {
+        let transport = AnthropicProviderJsonTransport {
+            captured_url: Mutex::new(None),
+            captured_body: Mutex::new(None),
+        };
+        let mut tool_output = json!({
+            "type":"function_call_output",
+            "call_id":"call_success_status",
+            "output":"ok"
+        });
+        if let Some(status) = status {
+            tool_output["status"] = json!(status);
+        }
+        let output = execute_v3_responses_relay_runtime(
+            &manifest(),
+            V3ResponsesRelayRuntimeInput {
+                server_id: "gateway_priority_5555".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                request_id: format!("req-responses-anthropic-tool-result-{case}"),
+                payload: json!({
+                    "model":"MiniMax-M3",
+                    "input":[
+                        {
+                            "type":"function_call",
+                            "call_id":"call_success_status",
+                            "name":"exec_command",
+                            "arguments":"{\"cmd\":\"true\"}"
+                        },
+                        tool_output
+                    ],
+                    "stream":false,
+                    "max_output_tokens":64
+                }),
+            },
+            &transport,
+        )
+        .await
+        .expect("registered successful tool-result status must reach Anthropic wire");
+
+        assert_eq!(output.status, 200, "case={case}: {output:?}");
+        let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+        let tool_result = captured["messages"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|message| message["content"].as_array().into_iter().flatten())
+            .find(|part| {
+                part["type"] == "tool_result" && part["tool_use_id"] == "call_success_status"
+            })
+            .unwrap_or_else(|| panic!("case={case}: typed tool result missing: {captured}"));
+        assert!(
+            tool_result.get("is_error").is_none(),
+            "case={case}: successful tool result must omit is_error: {captured}"
+        );
+        assert!(
+            !captured.to_string().contains("routecodex_chat_extension"),
+            "case={case}: Chat payload extension must not reach Anthropic wire: {captured}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_rejects_unregistered_tool_result_status_before_transport() {
+    let transport = AnthropicProviderJsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let error = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-anthropic-tool-result-invalid".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[
+                    {
+                        "type":"function_call",
+                        "call_id":"call_invalid_status",
+                        "name":"exec_command",
+                        "arguments":"{}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_invalid_status",
+                        "status":"in_progress",
+                        "output":"still running"
+                    }
+                ],
+                "stream":false,
+                "max_output_tokens":64
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect_err("unregistered tool-result status must fail before provider transport");
+
+    assert!(
+        error.to_string().contains("function_call_output.status"),
+        "{error}"
+    );
+    assert!(
+        transport.captured_body.lock().unwrap().is_none(),
+        "invalid tool-result status must not reach provider transport"
+    );
+}
+
+#[tokio::test]
 async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_headers() {
     let transport = AnthropicProviderProjectionTransport {
         captured_projection: Mutex::new(None),

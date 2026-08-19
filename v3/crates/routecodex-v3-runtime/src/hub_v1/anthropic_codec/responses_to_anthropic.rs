@@ -72,13 +72,23 @@ pub(super) fn chat_messages_as_anthropic_messages(
             continue;
         }
         if role == "tool" {
+            let is_error = responses_tool_result_is_error(chat_tool_result_status(object)?)?;
+            let mut tool_result = Map::new();
+            tool_result.insert("type".to_string(), Value::String("tool_result".to_string()));
+            tool_result.insert(
+                "tool_use_id".to_string(),
+                object.get("tool_call_id").cloned().unwrap_or(Value::Null),
+            );
+            tool_result.insert(
+                "content".to_string(),
+                responses_tool_output_as_anthropic_content(object.get("content")),
+            );
+            if is_error {
+                tool_result.insert("is_error".to_string(), Value::Bool(true));
+            }
             output.push(json!({
                 "role":"user",
-                "content":[{
-                    "type":"tool_result",
-                    "tool_use_id": object.get("tool_call_id").cloned().unwrap_or(Value::Null),
-                    "content": responses_tool_output_as_anthropic_content(object.get("content"))
-                }]
+                "content":[Value::Object(tool_result)]
             }));
             continue;
         }
@@ -376,16 +386,7 @@ pub(super) fn responses_tool_call_as_anthropic_tool_use(
 pub(super) fn responses_tool_output_as_anthropic_tool_result(
     object: &Map<String, Value>,
 ) -> Result<Value, V3AnthropicCodecError> {
-    let is_error = match object.get("status") {
-        None => false,
-        Some(Value::String(status)) if status == "completed" => false,
-        Some(Value::String(status)) if status == "incomplete" => true,
-        Some(_) => {
-            return Err(V3AnthropicCodecError::MalformedField {
-                field: "function_call_output.status",
-            })
-        }
-    };
+    let is_error = responses_tool_result_is_error(object.get("status"))?;
     let mut result = Map::new();
     result.insert("type".to_string(), Value::String("tool_result".to_string()));
     result.insert(
@@ -400,6 +401,31 @@ pub(super) fn responses_tool_output_as_anthropic_tool_result(
         result.insert("is_error".to_string(), Value::Bool(true));
     }
     Ok(Value::Object(result))
+}
+
+fn chat_tool_result_status<'a>(
+    object: &'a Map<String, Value>,
+) -> Result<Option<&'a Value>, V3AnthropicCodecError> {
+    match object.get("routecodex_chat_extension") {
+        None => Ok(None),
+        Some(Value::Object(extension)) => Ok(extension.get("responses_tool_output_status")),
+        Some(_) => Err(V3AnthropicCodecError::MalformedField {
+            field: "routecodex_chat_extension",
+        }),
+    }
+}
+
+fn responses_tool_result_is_error(status: Option<&Value>) -> Result<bool, V3AnthropicCodecError> {
+    Ok(match status {
+        None => false,
+        Some(Value::String(status)) if status == "completed" => false,
+        Some(Value::String(status)) if status == "incomplete" => true,
+        Some(_) => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "function_call_output.status",
+            })
+        }
+    })
 }
 
 pub(crate) fn project_v3_responses_reasoning_item_as_anthropic_content(

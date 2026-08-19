@@ -785,6 +785,21 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
             Value::String(item_id.to_string()),
         );
     }
+    match item.get("status") {
+        None => {}
+        Some(Value::String(status)) if matches!(status.as_str(), "completed" | "incomplete") => {
+            extension.insert(
+                "responses_tool_output_status".to_string(),
+                Value::String(status.clone()),
+            );
+        }
+        Some(_) => {
+            return Err(
+                "Responses function_call_output.status must be completed or incomplete before OpenAI Chat encoding"
+                    .to_string(),
+            )
+        }
+    }
     Ok(json!({
         "role":"tool",
         "tool_call_id":call_id,

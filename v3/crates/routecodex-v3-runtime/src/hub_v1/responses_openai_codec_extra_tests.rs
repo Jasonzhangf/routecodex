@@ -299,3 +299,58 @@ fn responses_summary_reasoning_item_projects_plaintext_reasoning_content() {
         "summary plaintext must be carried as reasoning_content for the next wire"
     );
 }
+
+#[test]
+fn responses_tool_result_status_survives_chat_canonical_carrier() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "MiniMax-M3",
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_status_carrier",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"false\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_status_carrier",
+                "status": "incomplete",
+                "output": "command failed"
+            }
+        ]
+    }))
+    .expect("registered tool-result status must enter Chat canonical");
+
+    let tool_result = request["messages"]
+        .as_array()
+        .and_then(|messages| messages.iter().find(|message| message["role"] == "tool"))
+        .expect("Chat canonical tool result");
+    assert_eq!(
+        tool_result["routecodex_chat_extension"]["responses_tool_output_status"], "incomplete",
+        "typed Responses status must survive the adjacent Responses-to-Chat projection: {request}"
+    );
+}
+
+#[test]
+fn responses_tool_result_status_rejects_unregistered_value_before_chat_canonical() {
+    let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "MiniMax-M3",
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_invalid_status",
+                "name": "exec_command",
+                "arguments": "{}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_invalid_status",
+                "status": "in_progress",
+                "output": "still running"
+            }
+        ]
+    }))
+    .expect_err("nonterminal tool-result status must fail before Chat canonical");
+
+    assert!(error.contains("function_call_output.status"), "{error}");
+}
