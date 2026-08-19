@@ -321,6 +321,7 @@ fn build_consumer(
     out_override: Option<&Path>,
     external: &ExternalLink,
     source_args: &[String],
+    rlib_deps: &[(String, PathBuf)],
 ) -> Result<PathBuf, ActiveLinkError> {
     let dep_resolutions = resolve_dependencies(root, deps, target)?;
     let src = root.join("crates").join(consumer).join("src/lib.rs");
@@ -355,8 +356,19 @@ fn build_consumer(
     ];
     rustc_args.extend(extern_args(&dep_resolutions));
     rustc_args.extend(dependency_search_args(&dep_resolutions));
+    for (name, path) in rlib_deps {
+        rustc_args.push("--extern".to_string());
+        rustc_args.push(format!("{name}={}", path.display()));
+        if let Some(parent) = path.parent() {
+            rustc_args.push("-L".to_string());
+            rustc_args.push(format!("dependency={}", parent.display()));
+        }
+    }
     rustc_args.push("-L".to_string());
-    rustc_args.push(format!("dependency={}", root.join("target/release/deps").display()));
+    rustc_args.push(format!(
+        "dependency={}",
+        root.join("target/release/deps").display()
+    ));
     rustc_args.extend(external.extern_args.iter().cloned());
     rustc_args.extend(external.search_args.iter().cloned());
     rustc_args.extend(source_args.iter().cloned());
@@ -445,7 +457,10 @@ fn build_binary(
         }
     }
     rustc_args.push("-L".to_string());
-    rustc_args.push(format!("dependency={}", root.join("target/release/deps").display()));
+    rustc_args.push(format!(
+        "dependency={}",
+        root.join("target/release/deps").display()
+    ));
     rustc_args.extend(external.extern_args.iter().cloned());
     rustc_args.extend(external.search_args.iter().cloned());
     rustc_args.extend(source_args.iter().cloned());
@@ -460,11 +475,21 @@ fn test_consumer(
     deps: &[String],
     target: &str,
     source_args: &[String],
+    rlib_deps: &[(String, PathBuf)],
 ) -> Result<(), ActiveLinkError> {
     let dep_resolutions = resolve_dependencies(root, deps, target)?;
     let external_crates = parse_external_deps(&root.join("crates").join(consumer))?;
     let external = build_external_deps(root, &external_crates)?;
-    let consumer_lib = build_consumer(root, consumer, deps, target, None, &external, source_args)?;
+    let consumer_lib = build_consumer(
+        root,
+        consumer,
+        deps,
+        target,
+        None,
+        &external,
+        source_args,
+        rlib_deps,
+    )?;
     let tests_dir = root.join("crates").join(consumer).join("tests");
     let mut test_files = fs::read_dir(&tests_dir)
         .map_err(|e| ActiveLinkError::LinkFailed(format!("read {}: {e}", tests_dir.display())))?
@@ -496,6 +521,14 @@ fn test_consumer(
         ];
         rustc_args.extend(extern_args(&dep_resolutions));
         rustc_args.extend(dependency_search_args(&dep_resolutions));
+        for (name, path) in rlib_deps {
+            rustc_args.push("--extern".to_string());
+            rustc_args.push(format!("{name}={}", path.display()));
+            if let Some(parent) = path.parent() {
+                rustc_args.push("-L".to_string());
+                rustc_args.push(format!("dependency={}", parent.display()));
+            }
+        }
         rustc_args.extend(external.extern_args.iter().cloned());
         rustc_args.extend(external.search_args.iter().cloned());
         rustc_args.extend(source_args.iter().cloned());
@@ -601,6 +634,7 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
             let source_deps = parse_source_deps(args).map_err(ActiveLinkError::LinkFailed)?;
             let frozen = frozen_module_ids(&root)?;
             let source_args = source_dep_link_args_all(&root, &source_deps, &frozen)?;
+            let rlib_deps = parse_rlib_deps(args)?;
             let external_crates = parse_external_deps(&root.join("crates").join(&consumer))?;
             let external = build_external_deps(&root, &external_crates)?;
             let out = build_consumer(
@@ -611,6 +645,7 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
                 out_override.as_deref(),
                 &external,
                 &source_args,
+                &rlib_deps,
             )?;
             println!(
                 "{consumer} lib built via Active link surface: {}",
@@ -628,7 +663,8 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
             let source_deps = parse_source_deps(args).map_err(ActiveLinkError::LinkFailed)?;
             let frozen = frozen_module_ids(&root)?;
             let source_args = source_dep_link_args_all(&root, &source_deps, &frozen)?;
-            test_consumer(&root, &consumer, &deps, &target, &source_args)
+            let rlib_deps = parse_rlib_deps(args)?;
+            test_consumer(&root, &consumer, &deps, &target, &source_args, &rlib_deps)
         }
         "build-binary" => {
             let root = root_from(args).map_err(ActiveLinkError::ManifestInvalid)?;
@@ -637,7 +673,8 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
                 arg_value(args, "--consumer").map_err(ActiveLinkError::IdentityMissing)?;
             let deps = arg_value(args, "--deps").map_err(ActiveLinkError::IdentityMissing)?;
             let deps = deps.split(',').map(str::to_string).collect::<Vec<_>>();
-            let out = PathBuf::from(arg_value(args, "--out").map_err(ActiveLinkError::IdentityMissing)?);
+            let out =
+                PathBuf::from(arg_value(args, "--out").map_err(ActiveLinkError::IdentityMissing)?);
             let source_deps = parse_source_deps(args).map_err(ActiveLinkError::LinkFailed)?;
             let frozen = frozen_module_ids(&root)?;
             let source_args = source_dep_link_args_all(&root, &source_deps, &frozen)?;
@@ -654,7 +691,10 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
                 &source_args,
                 &rlib_deps,
             )?;
-            println!("{consumer} binary built via Active link surface: {}", out.display());
+            println!(
+                "{consumer} binary built via Active link surface: {}",
+                out.display()
+            );
             Ok(())
         }
         _ => {

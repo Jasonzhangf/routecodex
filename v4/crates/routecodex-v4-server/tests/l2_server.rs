@@ -2,7 +2,7 @@
 
 use routecodex_v4_server::{
     RequestIdentityError, V4ConsoleTerminalOutput, V4ErrorEvidenceFlushOnTerminalFailure,
-    V4RequestIdCounter, WireEvidenceError,
+    V4HttpServer, V4RequestIdCounter, WireEvidenceError,
 };
 
 #[test]
@@ -11,6 +11,14 @@ fn console_output_projection_positive() {
     console.write("srv-1", "req-1", "responses", "info", "route ok");
     assert_eq!(console.lines().count(), 1);
     assert_eq!(console.lines().next().unwrap().severity, "info");
+}
+
+#[test]
+fn listener_uses_supplied_address_without_default_port() {
+    let server = V4HttpServer::bind("127.0.0.1:0").expect("bind configured address");
+    let address = server.local_address().expect("local address");
+    assert!(address.starts_with("127.0.0.1:"));
+    assert!(!address.ends_with(":0"));
 }
 
 #[test]

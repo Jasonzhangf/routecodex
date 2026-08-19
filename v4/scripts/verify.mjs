@@ -24,7 +24,6 @@ function restoreHermeticActive() {
   fs.cpSync(fixture, target, { recursive: true });
 }
 
-run('node scripts/compile-real-runtime-manifest.mjs');
 run('cargo build --release --manifest-path Cargo.toml --locked');
 restoreHermeticActive();
 

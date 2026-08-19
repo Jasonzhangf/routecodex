@@ -51,12 +51,22 @@ pub enum ResponsesProviderPayload {
     Sse(Vec<u8>),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResponsesSseFrame {
+    pub events: Vec<Value>,
+    pub terminal: bool,
+}
+
 /// Validate one complete Responses SSE frame. Returns true only for a
 /// terminal `response.completed` or `response.failed` event.
 pub fn validate_responses_sse_frame(frame: &[u8]) -> Result<bool, RuntimeFault> {
+    parse_responses_sse_frame(frame).map(|parsed| parsed.terminal)
+}
+
+pub fn parse_responses_sse_frame(frame: &[u8]) -> Result<ResponsesSseFrame, RuntimeFault> {
     let text = std::str::from_utf8(frame)
         .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?;
-    let mut data = Vec::new();
+    let mut events = Vec::new();
     let mut terminal = false;
     for line in text.lines() {
         let line = line.strip_suffix('\r').unwrap_or(line);
@@ -75,16 +85,16 @@ pub fn validate_responses_sse_frame(frame: &[u8]) -> Result<bool, RuntimeFault> 
             if matches!(event_type, "response.completed" | "response.failed") {
                 terminal = true;
             }
-            data.push(value);
+            events.push(event);
         }
     }
-    if data.is_empty() {
+    if events.is_empty() {
         return Err(RuntimeFault::new(
             "provider_sse_missing_data",
             "Responses SSE frame has no data field",
         ));
     }
-    Ok(terminal)
+    Ok(ResponsesSseFrame { events, terminal })
 }
 
 /// Build the only provider-bound Responses request shape. The input is the
@@ -1801,7 +1811,7 @@ pub fn project_runtime_fault(
 
 #[cfg(test)]
 mod admission_sse_tests {
-    use super::validate_responses_sse_frame;
+    use super::{parse_responses_sse_frame, validate_responses_sse_frame};
 
     #[test]
     fn completed_frame_is_terminal() {
@@ -1819,6 +1829,8 @@ mod admission_sse_tests {
     fn intermediate_frame_is_not_terminal() {
         let frame = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n";
         assert!(!validate_responses_sse_frame(frame.as_bytes()).expect("delta frame is valid"));
+        let parsed = parse_responses_sse_frame(frame.as_bytes()).expect("parsed frame");
+        assert_eq!(parsed.events[0]["delta"], "hi");
     }
 
     #[test]

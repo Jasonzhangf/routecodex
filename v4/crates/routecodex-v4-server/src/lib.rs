@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -104,30 +104,65 @@ impl std::fmt::Display for HttpServerError {
 
 impl std::error::Error for HttpServerError {}
 
+pub struct V4HttpServer {
+    listener: TcpListener,
+    server_id: String,
+    port: u16,
+}
+
+impl V4HttpServer {
+    pub fn bind(listen_address: &str) -> Result<Self, HttpServerError> {
+        let listener = TcpListener::bind(listen_address).map_err(HttpServerError::Bind)?;
+        listener.set_nonblocking(true).map_err(HttpServerError::Bind)?;
+        let local = listener.local_addr().map_err(HttpServerError::Bind)?;
+        Ok(Self {
+            listener,
+            server_id: listen_address.to_string(),
+            port: local.port(),
+        })
+    }
+
+    pub fn local_address(&self) -> Result<String, HttpServerError> {
+        self.listener
+            .local_addr()
+            .map(|address| address.to_string())
+            .map_err(HttpServerError::Bind)
+    }
+
+    pub fn run_until<H: HttpHandler>(
+        self,
+        handler: &mut H,
+        mut should_stop: impl FnMut() -> bool,
+    ) -> Result<(), HttpServerError> {
+        let local_day = local_day();
+        let mut request_ids = V4RequestIdCounter::new();
+        while !should_stop() {
+            let stream = match self.listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(error) => return Err(HttpServerError::Accept(error)),
+            };
+            let request_identity = request_ids
+                .next_request_identity(&self.server_id, &local_day)
+                .map_err(|error| HttpServerError::RequestIdentity(error.to_string()))?;
+            if let Err(error) = serve_connection(stream, handler, request_identity, self.port) {
+                if !matches!(error, ConnectionError::ClientDisconnected) {
+                    eprintln!("v4 server connection failed: {error}");
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The server crate owns listener lifecycle, HTTP admission/framing, endpoint
 /// dispatch entry, and client response emission. Application code only owns
 /// the typed request-to-response business callback.
 pub fn serve<H: HttpHandler>(listen_address: &str, handler: &mut H) -> Result<(), HttpServerError> {
-    let listener = TcpListener::bind(listen_address).map_err(HttpServerError::Bind)?;
-    let server_id = listen_address.to_string();
-    let port = listener
-        .local_addr()
-        .map_err(HttpServerError::Bind)?
-        .port();
-    let local_day = local_day();
-    let mut request_ids = V4RequestIdCounter::new();
-    for incoming in listener.incoming() {
-        let stream = incoming.map_err(HttpServerError::Accept)?;
-        let request_identity = request_ids
-            .next_request_identity(&server_id, &local_day)
-            .map_err(|error| HttpServerError::RequestIdentity(error.to_string()))?;
-        if let Err(error) = serve_connection(stream, handler, request_identity, port) {
-            if !matches!(error, ConnectionError::ClientDisconnected) {
-                eprintln!("v4 server connection failed: {error}");
-            }
-        }
-    }
-    Ok(())
+    V4HttpServer::bind(listen_address)?.run_until(handler, || false)
 }
 
 #[derive(Debug)]

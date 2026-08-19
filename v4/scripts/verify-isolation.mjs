@@ -237,6 +237,14 @@ function checkMainlineEdges(mainlinePath = path.join(v4Root, '.appsdk/maps/mainl
   allowedOwners.add('routecodex-v4-runtime::NodePlugin');
   allowedOwners.add('routecodex-v4-runtime::project_runtime_fault');
   allowedOwners.add('routecodex-v4-runtime-bin::main');
+  allowedOwners.add('routecodex-v4-runtime-bin::spawn_servers');
+  allowedOwners.add('routecodex-v4-runtime-bin::PipelineHandler');
+  allowedOwners.add('routecodex-v4-runtime-bin::handle_responses');
+  allowedOwners.add('routecodex-v4-runtime-bin::run_managed_child');
+  allowedOwners.add('routecodex-v4-runtime-bin::run_servertool');
+  allowedOwners.add('routecodex-v4-cli::V4CommandIntent');
+  allowedOwners.add('routecodex-v4-config::compile_runtime_config');
+  allowedOwners.add('routecodex-v4-lifecycle::ManagedControlPlane');
   allowedOwners.add('routecodex-v4-server::http_listener');
   allowedOwners.add('routecodex-v4-runtime::request_chat_process');
   allowedOwners.add('routecodex-v4-router::typed_target_selection');

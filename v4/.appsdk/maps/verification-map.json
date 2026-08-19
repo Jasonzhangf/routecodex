@@ -662,31 +662,31 @@
     },
     {
       "gate_id": "v4_real_runtime_compiled_manifest",
-      "status": "design",
-      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "status": "active",
+      "command": "cargo test -p routecodex-v4-config --test l2_runtime_config --manifest-path Cargo.toml --locked",
       "required_for": [
         "routecodex-v4-runtime-bin:design"
       ]
     },
     {
       "gate_id": "v4_real_runtime_provider_transport",
-      "status": "design",
-      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "status": "active",
+      "command": "cargo test -p routecodex-v4-provider --test l2_provider --manifest-path Cargo.toml --locked",
       "required_for": [
         "routecodex-v4-provider:real_runtime_design"
       ]
     },
     {
       "gate_id": "v4_real_runtime_server_http",
-      "status": "design",
-      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "status": "active",
+      "command": "cargo test -p routecodex-v4-server --test l2_server --manifest-path Cargo.toml --locked",
       "required_for": [
         "routecodex-v4-server:real_runtime_design"
       ]
     },
     {
       "gate_id": "v4_real_runtime_responses_json",
-      "status": "design",
+      "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
       "required_for": [
         "routecodex-v4-runtime:real_runtime_design"
@@ -694,7 +694,7 @@
     },
     {
       "gate_id": "v4_real_runtime_responses_sse",
-      "status": "design",
+      "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
       "required_for": [
         "routecodex-v4-runtime:real_runtime_design"
@@ -702,10 +702,58 @@
     },
     {
       "gate_id": "v4_real_runtime_v3_isolation",
-      "status": "design",
-      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "status": "active",
+      "command": "node scripts/verify-isolation.mjs",
       "required_for": [
         "routecodex-v4-runtime-bin:design"
+      ]
+    },
+    {
+      "gate_id": "v4_cli_l2_regression",
+      "status": "active",
+      "command": "cargo test -p routecodex-v4-cli --manifest-path Cargo.toml --locked",
+      "required_for": [
+        "routecodex-v4-cli:design"
+      ]
+    },
+    {
+      "gate_id": "v4_lifecycle_l2_regression",
+      "status": "active",
+      "command": "cargo test -p routecodex-v4-lifecycle --manifest-path Cargo.toml --locked",
+      "required_for": [
+        "routecodex-v4-lifecycle:design"
+      ]
+    },
+    {
+      "gate_id": "v4_infrastructure_contract",
+      "status": "active",
+      "command": "node scripts/architecture/verify-v4-infrastructure.mjs",
+      "required_for": [
+        "routecodex-v4-governance:architecture_stable"
+      ]
+    },
+    {
+      "gate_id": "v4_infrastructure_contract_red",
+      "status": "active",
+      "command": "node scripts/architecture/verify-v4-infrastructure.mjs --red-self-test",
+      "required_for": [
+        "routecodex-v4-governance:architecture_stable"
+      ]
+    },
+    {
+      "gate_id": "v4_runtime_bin_l2_regression",
+      "status": "active",
+      "command": "cargo test -p routecodex-v4-runtime-bin --test l2_cli_blackbox --manifest-path Cargo.toml --locked",
+      "required_for": [
+        "routecodex-v4-runtime-bin:active"
+      ]
+    },
+    {
+      "gate_id": "v4_servertool_l2_regression",
+      "status": "active",
+      "command": "cargo test -p routecodex-v4-servertool --test l2_servertool --manifest-path Cargo.toml --locked",
+      "required_for": [
+        "routecodex-v4-servertool:active"
       ]
     }
   ]
