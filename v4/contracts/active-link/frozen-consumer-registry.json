@@ -233,6 +233,20 @@
       "mode": "source_path",
       "status": "transitional",
       "manifest_path": "crates/routecodex-v4-standard-plugins/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-standard-plugins",
+      "dependency": "routecodex-v4-provider",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-standard-plugins/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-standard-plugins",
+      "dependency": "routecodex-v4-router",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-standard-plugins/Cargo.toml"
     }
   ],
   "forbidden_path_roots": [

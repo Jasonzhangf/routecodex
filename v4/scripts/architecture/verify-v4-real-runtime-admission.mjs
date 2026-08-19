@@ -20,10 +20,15 @@ const providerPath = path.join(root, 'crates/routecodex-v4-provider/src/lib.rs')
 const serverPath = path.join(root, 'crates/routecodex-v4-server/src/lib.rs');
 const routerPath = path.join(root, 'crates/routecodex-v4-router/src/lib.rs');
 
-const RCCV4_HOST = process.env.RCCV4_LISTEN ?? '127.0.0.1:17777';
 const BINARY_PATH = path.join(root, 'target/release/rccv4');
 const COMPILED_MANIFEST = path.join(root, 'generated/real-runtime-admission/manifest.compiled.json');
+const compiledListen = fs.existsSync(COMPILED_MANIFEST)
+  ? JSON.parse(fs.readFileSync(COMPILED_MANIFEST, 'utf8')).listen_address
+  : undefined;
+const RCCV4_HOST = process.env.RCCV4_LISTEN ?? compiledListen;
+if (!RCCV4_HOST) throw new Error('RCCV4_LISTEN or compiled manifest listen_address is required');
 const ADMISSION_MODEL = process.env.RCCV4_ADMISSION_MODEL ?? 'MiniMax-M3';
+const RELAY_MODEL = process.env.RCCV4_RELAY_MODEL ?? 'MiniMax-M3-relay';
 
 const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 const readText = (file) => fs.readFileSync(file, 'utf8');
@@ -263,6 +268,7 @@ try {
   const requestBody = {
     model: ADMISSION_MODEL,
     input: [{ role: 'user', content: 'count 1,2,3' }],
+    stream: true,
   };
   const sseResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'Accept': 'text/event-stream' }, 60000);
   if (sseResp.status !== 200) throw new Error(`responses SSE status ${sseResp.status}, body=${sseResp.body.substring(0, 200)}`);
@@ -279,6 +285,41 @@ try {
   passed++;
 } catch (e) {
   console.error(`[v4_real_runtime_admission] POST /v1/responses SSE FAIL: ${e.message}`);
+  failed++;
+}
+
+try {
+  const requestBody = {
+    model: RELAY_MODEL,
+    input: [{ role: 'user', content: 'say relay ok in 3 words' }],
+  };
+  const relayResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, {}, 60000);
+  if (relayResp.status !== 200) throw new Error(`relay JSON status ${relayResp.status}, body=${relayResp.body.substring(0, 200)}`);
+  const relayBody = JSON.parse(relayResp.body);
+  if (relayBody.object !== 'response' || !relayBody.id) throw new Error('relay JSON missing response identity');
+  console.log(`[v4_real_runtime_admission] Relay JSON OK: id=${relayBody.id}`);
+  passed++;
+} catch (e) {
+  console.error(`[v4_real_runtime_admission] Relay JSON FAIL: ${e.message}`);
+  failed++;
+}
+
+try {
+  const requestBody = {
+    model: RELAY_MODEL,
+    input: [{ role: 'user', content: 'count relay 1,2,3' }],
+    stream: true,
+  };
+  const relaySse = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { Accept: 'text/event-stream' }, 60000);
+  if (relaySse.status !== 200) throw new Error(`relay SSE status ${relaySse.status}, body=${relaySse.body.substring(0, 200)}`);
+  if (!relaySse.body.includes('data:')) throw new Error('relay SSE has no data frame');
+  if (!relaySse.body.includes('response.completed') && !relaySse.body.includes('response.failed')) {
+    throw new Error('relay SSE has no terminal frame');
+  }
+  console.log(`[v4_real_runtime_admission] Relay SSE OK: len=${relaySse.body.length}`);
+  passed++;
+} catch (e) {
+  console.error(`[v4_real_runtime_admission] Relay SSE FAIL: ${e.message}`);
   failed++;
 }
 

@@ -468,7 +468,7 @@
     },
     {
       "gate_id": "v4_standard_plugins_test_consumer",
-      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-standard-plugins --deps routecodex-v4-base-node --source-deps routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container",
+      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-standard-plugins --deps routecodex-v4-base-node --source-deps routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-provider,routecodex-v4-router",
       "required_for": [
         "routecodex-v4-standard-plugins:architecture_stable"
       ]
@@ -655,57 +655,81 @@
     {
       "gate_id": "v4_real_runtime_admission_red",
       "status": "active",
-      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs ",
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs --red-self-test",
       "required_for": [
         "routecodex-v4-governance:real_runtime_admission"
       ]
     },
     {
       "gate_id": "v4_real_runtime_compiled_manifest",
-      "status": "design",
+      "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
       "required_for": [
-        "routecodex-v4-runtime-bin:design"
+        "routecodex-v4-runtime-bin:runtime"
       ]
     },
     {
       "gate_id": "v4_real_runtime_provider_transport",
-      "status": "design",
+      "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
       "required_for": [
-        "routecodex-v4-provider:real_runtime_design"
+        "routecodex-v4-provider:real_runtime"
       ]
     },
     {
       "gate_id": "v4_real_runtime_server_http",
-      "status": "design",
+      "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
       "required_for": [
-        "routecodex-v4-server:real_runtime_design"
+        "routecodex-v4-server:real_runtime"
       ]
     },
     {
       "gate_id": "v4_real_runtime_responses_json",
-      "status": "design",
+      "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
       "required_for": [
-        "routecodex-v4-runtime:real_runtime_design"
+        "routecodex-v4-runtime:real_runtime"
       ]
     },
     {
       "gate_id": "v4_real_runtime_responses_sse",
-      "status": "design",
+      "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
       "required_for": [
-        "routecodex-v4-runtime:real_runtime_design"
+        "routecodex-v4-runtime:real_runtime"
       ]
     },
     {
       "gate_id": "v4_real_runtime_v3_isolation",
-      "status": "design",
+      "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
       "required_for": [
-        "routecodex-v4-runtime-bin:design"
+        "routecodex-v4-runtime-bin:runtime"
+      ]
+    },
+    {
+      "gate_id": "v4_request_plugin_chain_l2_regression",
+      "status": "active",
+      "command": "cargo test -p routecodex-v4-standard-plugins --locked && cargo test -p routecodex-v4-runtime --test l2_request_plugin_runtime --locked && cargo test -p routecodex-v4-cordis-bridge --locked",
+      "required_for": [
+        "routecodex-v4-runtime:request_plugin_chain"
+      ]
+    },
+    {
+      "gate_id": "v4_parity_gate_request_plugin_chain",
+      "status": "active",
+      "command": "node scripts/architecture/verify-v4-request-plugin-chain.mjs",
+      "required_for": [
+        "routecodex-v4-governance:architecture_stable"
+      ]
+    },
+    {
+      "gate_id": "v4_parity_gate_request_plugin_chain_red",
+      "status": "active",
+      "command": "node scripts/architecture/verify-v4-request-plugin-chain.mjs --red-self-test",
+      "required_for": [
+        "routecodex-v4-governance:architecture_stable"
       ]
     }
   ]

@@ -44,10 +44,10 @@ fn positive_different_nodes_compile_distinct_deterministic_plans() {
         "request",
         4,
         &[
-            "v4.std.chat_process.request_governance",
+            "v4.std.chat_process.scope_restore",
+            "v4.std.chat_process.continuation_restore",
+            "v4.std.chat_process.tool_governance",
             "v4.std.diagnostic.debug_observe",
-            "v4.std.diagnostic.timing",
-            "v4.std.diagnostic.snapshot_record",
         ],
     )
     .expect("chat-process plan compiles");
@@ -57,7 +57,7 @@ fn positive_different_nodes_compile_distinct_deterministic_plans() {
         "request_outbound",
         "request",
         6,
-        &["v4.std.protocol.mock_codec"],
+        &["v4.std.provider.compat"],
     )
     .expect("outbound plan compiles");
 
@@ -69,15 +69,16 @@ fn positive_different_nodes_compile_distinct_deterministic_plans() {
         .iter()
         .map(|entry| entry.plugin_id.as_str())
         .collect();
-    assert_eq!(chat_ids[0], "v4.std.chat_process.request_governance");
+    assert_eq!(chat_ids[0], "v4.std.chat_process.scope_restore");
 }
 
 #[test]
 fn positive_same_semantics_different_authoring_order_same_hash() {
     let ids = [
-        "v4.std.chat_process.request_governance",
+        "v4.std.chat_process.scope_restore",
+        "v4.std.chat_process.continuation_restore",
+        "v4.std.chat_process.tool_governance",
         "v4.std.diagnostic.debug_observe",
-        "v4.std.diagnostic.timing",
     ];
     let first = compile_standard_plan(
         "V4HubReqChatProcess04Governed",
@@ -121,31 +122,33 @@ fn positive_every_category_has_registered_plugins() {
 }
 
 #[test]
-fn positive_response_chat_process_plan_compiles() {
-    let response = compile_standard_plan(
-        "V4HubRespChatProcess03Governed",
-        "response_chat_process",
-        "response",
+fn positive_request_inbound_plan_compiles() {
+    let inbound = compile_standard_plan(
+        "V4HubReqInbound03Normalized",
+        "request_inbound",
+        "request",
         3,
-        &["v4.std.chat_process.response_governance"],
+        &["v4.std.protocol.responses_inbound"],
     )
-    .expect("response chat-process plan compiles");
+    .expect("request inbound plan compiles");
 
-    assert!(response.verify());
-    assert_eq!(response.entries.len(), 1);
+    assert!(inbound.verify());
+    assert_eq!(inbound.entries.len(), 1);
     assert_eq!(
-        response.entries[0].plugin_id,
-        "v4.std.chat_process.response_governance"
+        inbound.entries[0].plugin_id,
+        "v4.std.protocol.responses_inbound"
     );
 }
 
 #[test]
 fn negative_selection_group_multi_active_rejected() {
-    let mut authoring = standard_authoring(&[
-        "v4.std.protocol.mock_codec",
-        "v4.std.protocol.mock_codec_alt",
-    ])
-    .expect("standard authoring succeeds for known ids");
+    let mut authoring = standard_authoring(&["v4.std.provider.compat"])
+        .expect("standard authoring succeeds for known id");
+    let mut alternate = authoring[0].clone();
+    authoring[0].descriptor.selection_group = Some("provider_compat".to_string());
+    alternate.descriptor.plugin_id = "v4.std.provider.compat.alternate".to_string();
+    alternate.descriptor.selection_group = Some("provider_compat".to_string());
+    authoring.push(alternate);
     // Both protocol variants enabled -> group has two active variants.
     for plugin in &mut authoring {
         plugin.enabled = true;
@@ -164,7 +167,7 @@ fn negative_selection_group_multi_active_rejected() {
 #[test]
 fn negative_order_tie_without_relation_rejected() {
     let mut authoring = standard_authoring(&[
-        "v4.std.chat_process.request_governance",
+        "v4.std.chat_process.tool_governance",
         "v4.std.diagnostic.debug_observe",
     ])
     .expect("standard authoring succeeds for known ids");
@@ -184,14 +187,14 @@ fn negative_order_tie_without_relation_rejected() {
 
 #[test]
 fn negative_unauthorized_write_rejected() {
-    let mut authoring = standard_authoring(&["v4.std.chat_process.request_governance"])
+    let mut authoring = standard_authoring(&["v4.std.routing.model_replacement"])
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.writes = vec!["v4.response.client_wire_payload".to_string()];
     let error = compile_authoring(
-        "V4HubReqChatProcess04Governed",
-        "request_chat_process",
+        "V4HubReqOutbound05ProviderSemantic",
+        "request_outbound",
         "request",
-        4,
+        5,
         &authoring,
     )
     .expect_err("unauthorized write must fail");
@@ -200,7 +203,7 @@ fn negative_unauthorized_write_rejected() {
 
 #[test]
 fn negative_missing_before_target_rejected() {
-    let mut authoring = standard_authoring(&["v4.std.chat_process.request_governance"])
+    let mut authoring = standard_authoring(&["v4.std.chat_process.tool_governance"])
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.before = vec!["v4.std.ghost.plugin".to_string()];
     let error = compile_authoring(
@@ -216,7 +219,7 @@ fn negative_missing_before_target_rejected() {
 
 #[test]
 fn negative_unknown_node_id_rejected() {
-    let mut authoring = standard_authoring(&["v4.std.protocol.mock_codec"])
+    let mut authoring = standard_authoring(&["v4.std.provider.compat"])
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.node_selector.node_id =
         "V4ProviderReqOutbound06WirePayload".to_string();
@@ -233,7 +236,7 @@ fn negative_unknown_node_id_rejected() {
 
 #[test]
 fn negative_active_node_role_mismatch_rejected() {
-    let authoring = standard_authoring(&["v4.std.protocol.mock_codec"])
+    let authoring = standard_authoring(&["v4.std.provider.compat"])
         .expect("standard authoring succeeds for known id");
     let error = compile_authoring(
         "V4ProviderReqCompat06Compat",
@@ -248,7 +251,7 @@ fn negative_active_node_role_mismatch_rejected() {
 
 #[test]
 fn negative_active_node_position_mismatch_rejected() {
-    let authoring = standard_authoring(&["v4.std.protocol.mock_codec"])
+    let authoring = standard_authoring(&["v4.std.provider.compat"])
         .expect("standard authoring succeeds for known id");
     let error = compile_authoring(
         "V4ProviderReqCompat06Compat",
@@ -279,7 +282,7 @@ fn negative_unknown_plugin_id_returns_typed_plan_error() {
 
 #[test]
 fn negative_non_adjacent_provider_semantic_reversal_rejected() {
-    let mut authoring = standard_authoring(&["v4.std.protocol.mock_codec"])
+    let mut authoring = standard_authoring(&["v4.std.provider.compat"])
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.writes = vec!["v4.request.normal_payload".to_string()];
     let error = compile_authoring(

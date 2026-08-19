@@ -9,6 +9,11 @@
 //! - control fields never enter provider/client normal payload.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+fn default_execution_mode() -> String {
+    "direct".to_string()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderCandidate {
@@ -17,51 +22,120 @@ pub struct ProviderCandidate {
     pub protocol: String,
     pub model: String,
     pub priority: u32,
+    #[serde(default)]
+    pub entry_models: Vec<String>,
+    #[serde(default = "default_execution_mode")]
+    pub execution_mode: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectedTarget {
     pub provider_id: String,
     pub config_path: String,
     pub protocol: String,
     pub model: String,
+    pub execution_mode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteDecision {
+    pub entry_model: Option<String>,
+    pub target: SelectedTarget,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetSelectionError {
     EmptyCandidates,
     ModelUnavailable(String),
+    InvalidModel(String),
+    InvalidExecutionMode(String),
 }
 
 impl std::fmt::Display for TargetSelectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyCandidates => write!(f, "compiled provider candidate set is empty"),
-            Self::ModelUnavailable(model) => write!(f, "no compiled provider candidate supports model {model}"),
+            Self::ModelUnavailable(model) => {
+                write!(f, "no compiled provider candidate supports model {model}")
+            }
+            Self::InvalidModel(message) => write!(f, "invalid request model: {message}"),
+            Self::InvalidExecutionMode(mode) => {
+                write!(
+                    f,
+                    "compiled provider candidate has invalid execution mode {mode}"
+                )
+            }
         }
     }
 }
 
 impl std::error::Error for TargetSelectionError {}
 
-pub fn select_target(
-    candidates: &[ProviderCandidate],
-    requested_model: &str,
-) -> Result<SelectedTarget, TargetSelectionError> {
+pub fn admit_entry_model(body: &Value) -> Result<Option<String>, TargetSelectionError> {
+    match body.get("model") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(model)) if !model.trim().is_empty() => Ok(Some(model.clone())),
+        Some(_) => Err(TargetSelectionError::InvalidModel(
+            "model must be a non-empty string".to_string(),
+        )),
+    }
+}
+
+pub fn filter_candidates<'a>(
+    candidates: &'a [ProviderCandidate],
+    requested_model: Option<&str>,
+) -> Result<Vec<&'a ProviderCandidate>, TargetSelectionError> {
     if candidates.is_empty() {
         return Err(TargetSelectionError::EmptyCandidates);
     }
-    candidates
+    let eligible = candidates
         .iter()
-        .filter(|candidate| candidate.model == requested_model)
-        .min_by_key(|candidate| candidate.priority)
-        .map(|candidate| SelectedTarget {
-            provider_id: candidate.provider_id.clone(),
-            config_path: candidate.config_path.clone(),
-            protocol: candidate.protocol.clone(),
-            model: candidate.model.clone(),
+        .filter(|candidate| {
+            requested_model.map_or(true, |model| {
+                candidate.entry_models.iter().any(|entry| entry == model)
+            })
         })
-        .ok_or_else(|| TargetSelectionError::ModelUnavailable(requested_model.to_string()))
+        .collect::<Vec<_>>();
+    if eligible.is_empty() {
+        return Err(TargetSelectionError::ModelUnavailable(
+            requested_model.unwrap_or("<unspecified>").to_string(),
+        ));
+    }
+    Ok(eligible)
+}
+
+pub fn select_target(
+    candidates: &[ProviderCandidate],
+    requested_model: Option<&str>,
+) -> Result<SelectedTarget, TargetSelectionError> {
+    let candidate = filter_candidates(candidates, requested_model)?
+        .into_iter()
+        .min_by_key(|candidate| candidate.priority)
+        .expect("non-empty eligible candidate set checked");
+    if !matches!(candidate.execution_mode.as_str(), "direct" | "relay") {
+        return Err(TargetSelectionError::InvalidExecutionMode(
+            candidate.execution_mode.clone(),
+        ));
+    }
+    Ok(SelectedTarget {
+        provider_id: candidate.provider_id.clone(),
+        config_path: candidate.config_path.clone(),
+        protocol: candidate.protocol.clone(),
+        model: candidate.model.clone(),
+        execution_mode: candidate.execution_mode.clone(),
+    })
+}
+
+pub fn route_request(
+    candidates: &[ProviderCandidate],
+    body: &Value,
+) -> Result<RouteDecision, TargetSelectionError> {
+    let entry_model = admit_entry_model(body)?;
+    let target = select_target(candidates, entry_model.as_deref())?;
+    Ok(RouteDecision {
+        entry_model,
+        target,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,7 +202,12 @@ impl V4Router08LivePolicyOverride {
         Ok(())
     }
 
-    pub fn current(&self, server_id: &str, route_group_id: &str, scope_key: &str) -> Option<&LivePolicyOverride> {
+    pub fn current(
+        &self,
+        server_id: &str,
+        route_group_id: &str,
+        scope_key: &str,
+    ) -> Option<&LivePolicyOverride> {
         self.history.iter().rev().find(|entry| {
             entry.server_id == server_id
                 && entry.route_group_id == route_group_id

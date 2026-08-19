@@ -20,8 +20,8 @@
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::MetadataCenter;
 use routecodex_v4_error::{
-    ClientProjection, DecisionAction, ErrorCenter, ErrorChain, ErrorChainError,
-    ExecutionDecision, RetryPolicy,
+    ClientProjection, DecisionAction, ErrorCenter, ErrorChain, ErrorChainError, ExecutionDecision,
+    RetryPolicy,
 };
 use routecodex_v4_skeleton::SkeletonPlan;
 use serde_json::Value;
@@ -31,8 +31,10 @@ use std::collections::HashSet;
 use std::fmt;
 
 mod control_resources;
+mod request_plugin_runtime;
 
 pub use control_resources::*;
+pub use request_plugin_runtime::{RequestPluginOutput, RequestPluginRuntime};
 // Single source of truth: `PluginKind` is owned by routecodex-v4-plugin-contract
 // (v4/contracts/node-plugin.contract.json kinds). The runtime never defines a
 // second plugin-kind taxonomy; it only re-exports the contract type.
@@ -65,9 +67,8 @@ pub fn validate_responses_sse_frame(frame: &[u8]) -> Result<bool, RuntimeFault> 
             if value == "[DONE]" {
                 continue;
             }
-            let event: Value = serde_json::from_str(value).map_err(|error| {
-                RuntimeFault::new("provider_sse_malformed", error.to_string())
-            })?;
+            let event: Value = serde_json::from_str(value)
+                .map_err(|error| RuntimeFault::new("provider_sse_malformed", error.to_string()))?;
             let event_type = event
                 .get("type")
                 .and_then(Value::as_str)
@@ -97,7 +98,10 @@ pub fn build_responses_wire_request(
 ) -> Result<ResponsesWireRequest, RuntimeFault> {
     let mut body = client_body.clone();
     let object = body.as_object_mut().ok_or_else(|| {
-        RuntimeFault::new("responses_request_invalid", "Responses request must be a JSON object")
+        RuntimeFault::new(
+            "responses_request_invalid",
+            "Responses request must be a JSON object",
+        )
     })?;
     if wire_model.trim().is_empty() {
         return Err(RuntimeFault::new(
@@ -123,9 +127,8 @@ pub fn build_responses_wire_request(
     }
     object.insert("model".to_string(), Value::String(wire_model.to_string()));
     object.insert("stream".to_string(), Value::Bool(stream));
-    let body = serde_json::to_vec(&body).map_err(|error| {
-        RuntimeFault::new("provider_wire_encode", error.to_string())
-    })?;
+    let body = serde_json::to_vec(&body)
+        .map_err(|error| RuntimeFault::new("provider_wire_encode", error.to_string()))?;
     Ok(ResponsesWireRequest {
         body,
         model: wire_model.to_string(),
@@ -149,13 +152,16 @@ pub fn parse_responses_provider_payload(
         )
         .with_status(status));
     }
-    if stream || content_type.to_ascii_lowercase().contains("text/event-stream") {
+    if stream
+        || content_type
+            .to_ascii_lowercase()
+            .contains("text/event-stream")
+    {
         validate_responses_sse(body)?;
         return Ok(ResponsesProviderPayload::Sse(body.to_vec()));
     }
-    let value: Value = serde_json::from_slice(body).map_err(|error| {
-        RuntimeFault::new("provider_json_parse", error.to_string())
-    })?;
+    let value: Value = serde_json::from_slice(body)
+        .map_err(|error| RuntimeFault::new("provider_json_parse", error.to_string()))?;
     let object = value.as_object().ok_or_else(|| {
         RuntimeFault::new(
             "provider_json_shape",
@@ -172,9 +178,7 @@ pub fn parse_responses_provider_payload(
             format!("Responses provider JSON terminal status must be completed, got {response_status:?}"),
         ));
     }
-    let response_error = object
-        .get("error")
-        .filter(|value| !value.is_null());
+    let response_error = object.get("error").filter(|value| !value.is_null());
     if let Some(error) = response_error {
         return Err(RuntimeFault::new(
             "provider_response_failed",
@@ -378,13 +382,17 @@ impl fmt::Display for ScopeError {
             Self::AlreadyBound => "continuation key already bound",
             Self::NotBound => "continuation key not bound",
             Self::OwnerMismatch => "continuation owner mismatch (direct/relay cross-continuation)",
-            Self::EntryProtocolMismatch => "entry protocol mismatch (chat/messages hit responses continuation)",
+            Self::EntryProtocolMismatch => {
+                "entry protocol mismatch (chat/messages hit responses continuation)"
+            }
             Self::PortMismatch => "port/group mismatch",
             Self::SessionMismatch => "session scope mismatch",
             Self::ConversationMismatch => "conversation scope mismatch",
             Self::CrossRequestReuse => "cross-request reuse of continuation binding",
             Self::FullInputMissing => "full input missing for continuation restore",
-            Self::ImmutableIntervalViolation => "continuation restored more than once (immutable interval)",
+            Self::ImmutableIntervalViolation => {
+                "continuation restored more than once (immutable interval)"
+            }
             Self::RestoreAfterRelease => "continuation restored after release",
         };
         write!(formatter, "{message}")
@@ -474,10 +482,7 @@ impl ScopeRegistry {
             if full_input_hash.is_none() {
                 return Err(ScopeError::FullInputMissing);
             }
-            self.bindings
-                .get_mut(key)
-                .expect("binding exists")
-                .restored = true;
+            self.bindings.get_mut(key).expect("binding exists").restored = true;
             self.append_record(key.clone(), "restore", request_id);
             return Ok(self.bindings.get(key).expect("binding exists"));
         }
@@ -506,10 +511,7 @@ impl ScopeRegistry {
         request_id: &str,
     ) -> Result<ScopeRecord, ScopeError> {
         {
-            let binding = self
-                .bindings
-                .get_mut(key)
-                .ok_or(ScopeError::NotBound)?;
+            let binding = self.bindings.get_mut(key).ok_or(ScopeError::NotBound)?;
             if binding.released {
                 return Err(ScopeError::RestoreAfterRelease);
             }
@@ -525,7 +527,12 @@ impl ScopeRegistry {
     /// Whether any binding exists on the same port/session/conversation trio.
     /// Used to distinguish a fresh turn (no binding at all) from a three-key
     /// isolation violation (binding exists but entry/owner mismatch).
-    pub fn session_trio_bound(&self, port: u16, session_scope: &str, conversation_scope: &str) -> bool {
+    pub fn session_trio_bound(
+        &self,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> bool {
         self.bindings.keys().any(|key| {
             key.port == port
                 && key.session_scope == session_scope
@@ -636,10 +643,7 @@ impl PayloadCycleRegistry {
         Ok(cycle)
     }
 
-    pub fn close_success(
-        &mut self,
-        request_id: &str,
-    ) -> Result<&PayloadCycle, PayloadCycleError> {
+    pub fn close_success(&mut self, request_id: &str) -> Result<&PayloadCycle, PayloadCycleError> {
         let cycle = self
             .cycles
             .get_mut(request_id)
@@ -1027,27 +1031,37 @@ impl NodePlugin for ContinuationRestore {
             ctx.session_scope(),
             ctx.conversation_scope(),
         );
-        let full_input = ctx
-            .data
-            .normalized_request
-            .as_deref()
-            .ok_or_else(|| RuntimeFault::new("full_input_missing", "continuation restore requires full input"))?;
+        let full_input = ctx.data.normalized_request.as_deref().ok_or_else(|| {
+            RuntimeFault::new(
+                "full_input_missing",
+                "continuation restore requires full input",
+            )
+        })?;
         if registries.scope.is_bound(&key) {
             registries
                 .scope
-                .restore(&key, ctx.request_id(), Some(&format!("sha256:{full_input}")))
+                .restore(
+                    &key,
+                    ctx.request_id(),
+                    Some(&format!("sha256:{full_input}")),
+                )
                 .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))?;
             ctx.control.continuation_restored = true;
-        } else if registries
-            .scope
-            .session_trio_bound(ctx.port(), ctx.session_scope(), ctx.conversation_scope())
-        {
+        } else if registries.scope.session_trio_bound(
+            ctx.port(),
+            ctx.session_scope(),
+            ctx.conversation_scope(),
+        ) {
             // A continuation exists for this session trio but the requested
             // three keys do not match: fail fast with the exact isolation
             // error instead of silently starting a fresh turn.
             registries
                 .scope
-                .restore(&key, ctx.request_id(), Some(&format!("sha256:{full_input}")))
+                .restore(
+                    &key,
+                    ctx.request_id(),
+                    Some(&format!("sha256:{full_input}")),
+                )
                 .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))?;
             ctx.control.continuation_restored = true;
         }
@@ -1600,10 +1614,17 @@ impl SkeletonRuntime {
         conversation_scope: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain("request", request_id, port, session_scope, conversation_scope, |ctx| {
-            ctx.data.raw_entry = Some(raw_entry.to_string());
-            ctx.information.model = Some("unselected".to_string());
-        });
+        let result = self.run_chain(
+            "request",
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            |ctx| {
+                ctx.data.raw_entry = Some(raw_entry.to_string());
+                ctx.information.model = Some("unselected".to_string());
+            },
+        );
         self.release(request_id);
         result
     }
@@ -1631,16 +1652,23 @@ impl SkeletonRuntime {
         continuation_owner: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain("response", request_id, port, session_scope, conversation_scope, |ctx| {
-            ctx.data.provider_raw = Some(provider_raw.to_string());
-            ctx.information.protocol = Some(entry_protocol.to_string());
-            ctx.control.continuation_owner = Some(continuation_owner.to_string());
-            ctx.control.execution_mode = Some(if continuation_owner == "relay" {
-                "relay".to_string()
-            } else {
-                "direct".to_string()
-            });
-        });
+        let result = self.run_chain(
+            "response",
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            |ctx| {
+                ctx.data.provider_raw = Some(provider_raw.to_string());
+                ctx.information.protocol = Some(entry_protocol.to_string());
+                ctx.control.continuation_owner = Some(continuation_owner.to_string());
+                ctx.control.execution_mode = Some(if continuation_owner == "relay" {
+                    "relay".to_string()
+                } else {
+                    "direct".to_string()
+                });
+            },
+        );
         self.release(request_id);
         result
     }
@@ -1824,14 +1852,16 @@ mod admission_sse_tests {
     #[test]
     fn malformed_data_fails_fast() {
         let frame = "data: {not-json}\n\n";
-        let error = validate_responses_sse_frame(frame.as_bytes()).expect_err("malformed JSON must fail");
+        let error =
+            validate_responses_sse_frame(frame.as_bytes()).expect_err("malformed JSON must fail");
         assert_eq!(error.code, "provider_sse_malformed");
     }
 
     #[test]
     fn frame_without_data_fails_fast() {
         let frame = "event: ping\n\n";
-        let error = validate_responses_sse_frame(frame.as_bytes()).expect_err("frame without data must fail");
+        let error = validate_responses_sse_frame(frame.as_bytes())
+            .expect_err("frame without data must fail");
         assert_eq!(error.code, "provider_sse_missing_data");
     }
 }

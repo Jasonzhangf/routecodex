@@ -923,6 +923,78 @@
       "callee_feature_id": "v4.runtime.independent_admission",
       "path": "crates/routecodex-v4-server/src/lib.rs",
       "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-runtime",
+      "owner": "routecodex-v4-runtime::RequestPluginRuntime",
+      "edge_type": "request_plugin_dispatch",
+      "caller_feature_id": "v4.pipeline.request_plugin_chain",
+      "callee_feature_id": "v4.pipeline.request_plugin_chain",
+      "caller_path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "callee_path": "crates/routecodex-v4-runtime/src/request_plugin_runtime.rs",
+      "caller_symbols": ["handle_responses"],
+      "callee_symbols": ["RequestPluginRuntime::execute_responses"],
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-standard-plugins",
+      "owner": "routecodex-v4-runtime::RequestPluginRuntime",
+      "edge_type": "typed_node_plugin_execution",
+      "caller_feature_id": "v4.pipeline.request_plugin_chain",
+      "callee_feature_id": "v4.plugin.standard_library",
+      "caller_path": "crates/routecodex-v4-runtime/src/request_plugin_runtime.rs",
+      "callee_path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
+      "caller_symbols": ["RequestPluginRuntime::execute_responses"],
+      "callee_symbols": ["compile_standard_plan", "StandardHandleRegistry"],
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-standard-plugins",
+      "to": "routecodex-v4-router",
+      "owner": "routecodex-v4-standard-plugins::routing_handles",
+      "edge_type": "typed_route_control",
+      "caller_feature_id": "v4.pipeline.request_plugin_chain",
+      "callee_feature_id": "v4.pipeline.request_plugin_chain",
+      "caller_path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
+      "callee_path": "crates/routecodex-v4-router/src/lib.rs",
+      "caller_symbols": ["entry_model_admission", "candidate_filter", "target_selection"],
+      "callee_symbols": ["admit_entry_model", "filter_candidates", "select_target"],
+      "status": "active"
+    },
+    {
+      "from": "V4HubReqChatProcess04Governed",
+      "to": "V4Router05RequestClassified",
+      "owner": "routecodex-v4-runtime::RequestPluginRuntime",
+      "edge_type": "data_flow",
+      "caller_feature_id": "v4.pipeline.request_plugin_chain",
+      "callee_feature_id": "v4.pipeline.request_plugin_chain",
+      "resource": "v4.request.normal_payload",
+      "path": "crates/routecodex-v4-runtime/src/request_plugin_runtime.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4Router05RequestClassified",
+      "to": "V4Router06SelectionPlan",
+      "owner": "routecodex-v4-standard-plugins::candidate_filter",
+      "edge_type": "control_flow",
+      "caller_feature_id": "v4.pipeline.request_plugin_chain",
+      "callee_feature_id": "v4.pipeline.request_plugin_chain",
+      "resource": "v4.control.route_facts",
+      "path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "V4Router06SelectionPlan",
+      "to": "V4HubReqOutbound05ProviderSemantic",
+      "owner": "routecodex-v4-standard-plugins::model_replacement",
+      "edge_type": "control_flow",
+      "caller_feature_id": "v4.pipeline.request_plugin_chain",
+      "callee_feature_id": "v4.pipeline.request_plugin_chain",
+      "resource": "v4.control.target_selection",
+      "path": "crates/routecodex-v4-standard-plugins/src/lib.rs",
+      "status": "active"
     }
   ]
 }

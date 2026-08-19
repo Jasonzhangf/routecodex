@@ -75,6 +75,8 @@ const SOURCE_DEPS = [
   'routecodex-v4-plugin-plan',
   'routecodex-v4-cordis-bridge',
   'routecodex-v4-node-container',
+  'routecodex-v4-provider',
+  'routecodex-v4-router',
 ];
 
 const REQUIRED_SOURCE = [
@@ -100,11 +102,18 @@ const REQUIRED_SOURCE = [
 ];
 
 const NODE_PERMISSIONS = new Map([
+  ['V4ServerReqInbound01ClientRaw', {
+    reads: ['v4.request.client_raw'], writes: [],
+  }],
+  ['V4ServerSseIn02FrameBoundary', {
+    reads: ['v4.request.client_raw'], writes: ['v4.request.sse_frame'],
+  }],
   ['V4HubReqInbound03Normalized', {
-    reads: ['v4.request.normal_payload'], writes: [],
+    reads: ['v4.request.sse_frame'], writes: ['v4.request.normal_payload'],
   }],
   ['V4HubReqChatProcess04Governed', {
-    reads: ['v4.request.normal_payload'], writes: ['v4.request.normal_payload'],
+    reads: ['v4.request.normal_payload', 'v4.control.metadata_center'],
+    writes: ['v4.control.metadata_center'],
   }],
   ['V4HubRespChatProcess03Governed', {
     reads: ['v4.response.normal_payload'], writes: ['v4.response.normal_payload'],
@@ -113,10 +122,12 @@ const NODE_PERMISSIONS = new Map([
     reads: ['v4.response.normal_payload'], writes: [],
   }],
   ['V4HubReqOutbound05ProviderSemantic', {
-    reads: ['v4.request.normal_payload'], writes: ['v4.request.provider_semantic'],
+    reads: ['v4.request.normal_payload', 'v4.control.target_selection'],
+    writes: ['v4.request.provider_semantic'],
   }],
   ['V4ProviderReqCompat06Compat', {
-    reads: ['v4.request.provider_semantic'], writes: ['v4.request.provider_wire_payload'],
+    reads: ['v4.request.provider_semantic', 'v4.control.target_selection'],
+    writes: ['v4.request.provider_wire_payload'],
   }],
   ['V4ProviderSseOut07WireBoundary', {
     reads: [
@@ -142,10 +153,12 @@ const NODE_PERMISSIONS = new Map([
     reads: ['v4.control.error_chain'], writes: ['v4.control.error_chain'],
   }],
   ['V4Router05RequestClassified', {
-    reads: [], writes: ['v4.control.route_facts'],
+    reads: ['v4.request.normal_payload', 'v4.control.route_facts', 'v4.config.manifest'],
+    writes: ['v4.control.route_facts'],
   }],
   ['V4Router06SelectionPlan', {
-    reads: ['v4.control.route_facts'], writes: ['v4.control.target_selection'],
+    reads: ['v4.control.route_facts', 'v4.config.manifest'],
+    writes: ['v4.control.target_selection'],
   }],
 ]);
 
@@ -466,8 +479,8 @@ function validate(
     }
 
     const descriptors = parseStandardDescriptors(source);
-    if (descriptors.length !== 19) {
-      failures.push(`${MODULE}: expected 19 parseable standard descriptors, got ${descriptors.length}`);
+    if (descriptors.length !== 16) {
+      failures.push(`${MODULE}: expected 16 parseable standard descriptors, got ${descriptors.length}`);
     }
     const anchors = activeNodeAnchors(nodeGraph);
     const operationsByResource = new Map(
@@ -633,26 +646,26 @@ function runSelfTest() {
     }],
     ['retired node selector reintroduced', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat06Compat",\n        "request_outbound",',
-        '"V4ProviderReqOutbound06WirePayload",\n        "request_outbound",',
+        '"V4ProviderReqCompat06Compat",\n            "request_outbound",',
+        '"V4ProviderReqOutbound06WirePayload",\n            "request_outbound",',
       );
     }],
     ['active node role mismatch reintroduced', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat06Compat",\n        "request_outbound",',
-        '"V4ProviderReqCompat06Compat",\n        "request_chat_process",',
+        '"V4ProviderReqCompat06Compat",\n            "request_outbound",',
+        '"V4ProviderReqCompat06Compat",\n            "request_chat_process",',
       );
     }],
     ['active node position mismatch reintroduced', (state) => {
       state.source = source.replace(
-        '"V4ProviderReqCompat06Compat",\n        "request_outbound",\n        Some(6),',
-        '"V4ProviderReqCompat06Compat",\n        "request_outbound",\n        Some(7),',
+        '"V4ProviderReqCompat06Compat",\n            "request_outbound",\n            Some(6),',
+        '"V4ProviderReqCompat06Compat",\n            "request_outbound",\n            Some(7),',
       );
     }],
     ['provider semantic reversal reintroduced', (state) => {
       state.source = source.replace(
-        'vec!["v4.request.provider_semantic"],\n        vec!["v4.request.provider_wire_payload"],',
-        'vec!["v4.request.provider_semantic"],\n        vec!["v4.request.normal_payload"],',
+        'vec!["v4.request.provider_wire_payload"],',
+        'vec!["v4.request.normal_payload"],',
       );
     }],
     ['node permission broadened', (state) => {

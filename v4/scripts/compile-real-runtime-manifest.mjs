@@ -10,6 +10,8 @@ const source = path.join(root, 'contracts/real-runtime-admission.manifest.json')
 
 const home = process.env.HOME;
 if (!home) throw new Error('HOME is required to resolve provider config handles');
+const listenAddress = process.env.RCCV4_LISTEN;
+if (!listenAddress) throw new Error('RCCV4_LISTEN is required; V4 has no hardcoded listener fallback');
 
 const candidates = [
   {
@@ -18,6 +20,17 @@ const candidates = [
     protocol: 'responses',
     model: 'MiniMax-M3',
     priority: 10,
+    entry_models: ['MiniMax-M3'],
+    execution_mode: 'direct',
+  },
+  {
+    provider_id: 'minimax_responses',
+    config_path: path.join(home, '.rcc/provider/minimax_responses/config.v2.toml'),
+    protocol: 'responses',
+    model: 'MiniMax-M3',
+    priority: 20,
+    entry_models: ['MiniMax-M3-relay'],
+    execution_mode: 'relay',
   },
 ];
 
@@ -26,7 +39,7 @@ const unsigned = {
   schema_version: contract.schema_version,
   manifest_id: contract.manifest_id,
   runtime_identity: contract.runtime_identity,
-  listen_address: process.env.RCCV4_LISTEN ?? '127.0.0.1:17777',
+  listen_address: listenAddress,
   candidates,
 };
 

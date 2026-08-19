@@ -1,10 +1,10 @@
-//! V4 standard plugin library — M5 keyless deterministic baseline.
+//! V4 standard plugin library — deterministic Node 01-07 request chain.
 //!
 //! This crate owns the immutable standard plugin descriptors, deterministic
 //! artifact/contract bytes, catalog registration and typed handle registry
-//! for the V4 NodeContainer bridge. Every plugin is keyless and
-//! behavior-minimal; it never claims real product migration, real provider
-//! semantics or real credentials.
+//! for the V4 NodeContainer bridge. Request plugins own the adjacent protocol,
+//! Chat Process, VR, provider semantic/compat, and wire validation stages;
+//! credentials and transport remain provider-owned.
 //!
 //! Hard boundaries:
 //! - control, error and diagnostic facts travel only in typed side channels;
@@ -22,6 +22,10 @@ use routecodex_v4_plugin_contract::{
     PluginKind, PluginPhase, ResourceAxis, ResourceEntry, ResourceRegistry,
 };
 use routecodex_v4_plugin_plan::{compile_node_plan, AuthoringPlugin, NodePluginPlan};
+use routecodex_v4_provider::{project_provider_compat, validate_provider_wire_payload};
+use routecodex_v4_router::{
+    admit_entry_model, filter_candidates, select_target, ProviderCandidate, SelectedTarget,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -178,6 +182,14 @@ pub fn standard_resource_registry() -> ResourceRegistry {
     ResourceRegistry {
         resources: vec![
             ResourceEntry {
+                resource_id: "v4.request.client_raw".to_string(),
+                axis: ResourceAxis::Data,
+            },
+            ResourceEntry {
+                resource_id: "v4.request.sse_frame".to_string(),
+                axis: ResourceAxis::Data,
+            },
+            ResourceEntry {
                 resource_id: "v4.request.normal_payload".to_string(),
                 axis: ResourceAxis::Data,
             },
@@ -267,6 +279,8 @@ pub fn standard_container_services() -> Vec<String> {
 /// inventory only; plan compilation always uses the exact node-scoped set.
 pub fn standard_allowed_reads() -> Vec<String> {
     vec![
+        "v4.request.client_raw".to_string(),
+        "v4.request.sse_frame".to_string(),
         "v4.request.normal_payload".to_string(),
         "v4.request.provider_semantic".to_string(),
         "v4.request.provider_wire_payload".to_string(),
@@ -292,6 +306,7 @@ pub fn standard_allowed_reads() -> Vec<String> {
 /// permission surface; `compile_standard_plan` derives that from `node_id`.
 pub fn standard_allowed_writes() -> Vec<String> {
     vec![
+        "v4.request.sse_frame".to_string(),
         "v4.request.normal_payload".to_string(),
         "v4.request.provider_semantic".to_string(),
         "v4.request.provider_wire_payload".to_string(),
@@ -310,12 +325,23 @@ pub fn standard_allowed_writes() -> Vec<String> {
 /// cannot read another node's data or a wire payload through the M5 surface.
 pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
     match node_id {
-        "V4HubReqInbound03Normalized" => vec!["v4.request.normal_payload".to_string()],
-        "V4HubReqChatProcess04Governed" => vec!["v4.request.normal_payload".to_string()],
+        "V4ServerReqInbound01ClientRaw" => vec!["v4.request.client_raw".to_string()],
+        "V4ServerSseIn02FrameBoundary" => vec!["v4.request.client_raw".to_string()],
+        "V4HubReqInbound03Normalized" => vec!["v4.request.sse_frame".to_string()],
+        "V4HubReqChatProcess04Governed" => vec![
+            "v4.request.normal_payload".to_string(),
+            "v4.control.metadata_center".to_string(),
+        ],
         "V4HubRespChatProcess03Governed" => vec!["v4.response.normal_payload".to_string()],
         "V4HubRespOutbound04ClientSemantic" => vec!["v4.response.normal_payload".to_string()],
-        "V4HubReqOutbound05ProviderSemantic" => vec!["v4.request.normal_payload".to_string()],
-        "V4ProviderReqCompat06Compat" => vec!["v4.request.provider_semantic".to_string()],
+        "V4HubReqOutbound05ProviderSemantic" => vec![
+            "v4.request.normal_payload".to_string(),
+            "v4.control.target_selection".to_string(),
+        ],
+        "V4ProviderReqCompat06Compat" => vec![
+            "v4.request.provider_semantic".to_string(),
+            "v4.control.target_selection".to_string(),
+        ],
         "V4ProviderSseOut07WireBoundary" => vec![
             "v4.request.provider_wire_payload".to_string(),
             "v4.config.manifest".to_string(),
@@ -325,8 +351,15 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],
         "V4Error06ClientProjected" => vec!["v4.control.error_chain".to_string()],
-        "V4Router05RequestClassified" => Vec::new(),
-        "V4Router06SelectionPlan" => vec!["v4.control.route_facts".to_string()],
+        "V4Router05RequestClassified" => vec![
+            "v4.request.normal_payload".to_string(),
+            "v4.control.route_facts".to_string(),
+            "v4.config.manifest".to_string(),
+        ],
+        "V4Router06SelectionPlan" => vec![
+            "v4.control.route_facts".to_string(),
+            "v4.config.manifest".to_string(),
+        ],
         _ => Vec::new(),
     }
 }
@@ -337,8 +370,10 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
 /// facts never enter a normal data or wire resource.
 pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
     match node_id {
-        "V4HubReqInbound03Normalized" => Vec::new(),
-        "V4HubReqChatProcess04Governed" => vec!["v4.request.normal_payload".to_string()],
+        "V4ServerReqInbound01ClientRaw" => Vec::new(),
+        "V4ServerSseIn02FrameBoundary" => vec!["v4.request.sse_frame".to_string()],
+        "V4HubReqInbound03Normalized" => vec!["v4.request.normal_payload".to_string()],
+        "V4HubReqChatProcess04Governed" => vec!["v4.control.metadata_center".to_string()],
         "V4HubRespChatProcess03Governed" => vec!["v4.response.normal_payload".to_string()],
         "V4HubRespOutbound04ClientSemantic" => Vec::new(),
         "V4HubReqOutbound05ProviderSemantic" => vec!["v4.request.provider_semantic".to_string()],
@@ -366,60 +401,177 @@ pub fn standard_descriptors() -> Vec<NodePluginDescriptor> {
 
 /// All standard plugins registered by immutable plugin id.
 pub fn standard_plugins() -> Vec<StandardPlugin> {
-    let mut codec = plugin(
-        "v4.std.protocol.mock_codec",
-        PluginCategory::Protocol,
-        "V4ProviderReqCompat06Compat",
-        "request_outbound",
-        Some(6),
-        PluginKind::Operator,
-        PluginEffect::Semantic,
-        PluginPhase::Semantic,
-        200,
-        vec!["v4.request.provider_semantic"],
-        vec!["v4.request.provider_wire_payload"],
-    );
-    codec.descriptor.selection_group = Some("provider_wire_codec".to_string());
-    let mut codec_alt = plugin(
-        "v4.std.protocol.mock_codec_alt",
-        PluginCategory::Protocol,
-        "V4ProviderReqCompat06Compat",
-        "request_outbound",
-        Some(6),
-        PluginKind::Operator,
-        PluginEffect::Semantic,
-        PluginPhase::Semantic,
-        200,
-        vec!["v4.request.provider_semantic"],
-        vec!["v4.request.provider_wire_payload"],
-    );
-    codec_alt.descriptor.selection_group = Some("provider_wire_codec".to_string());
-
     vec![
         plugin(
-            "v4.std.contract.input_validate",
-            PluginCategory::Contracts,
-            "V4HubReqInbound03Normalized",
+            "v4.std.protocol.server_input",
+            PluginCategory::Protocol,
+            "V4ServerReqInbound01ClientRaw",
             "request_inbound",
-            Some(3),
+            Some(1),
             PluginKind::Validator,
             PluginEffect::ReadOnly,
             PluginPhase::Admission,
             10,
+            vec!["v4.request.client_raw"],
+            vec![],
+        ),
+        plugin(
+            "v4.std.protocol.sse_in",
+            PluginCategory::Protocol,
+            "V4ServerSseIn02FrameBoundary",
+            "request_inbound",
+            Some(2),
+            PluginKind::Operator,
+            PluginEffect::Semantic,
+            PluginPhase::Semantic,
+            20,
+            vec!["v4.request.client_raw"],
+            vec!["v4.request.sse_frame"],
+        ),
+        plugin(
+            "v4.std.protocol.responses_inbound",
+            PluginCategory::Protocol,
+            "V4HubReqInbound03Normalized",
+            "request_inbound",
+            Some(3),
+            PluginKind::Operator,
+            PluginEffect::Semantic,
+            PluginPhase::Semantic,
+            30,
+            vec!["v4.request.sse_frame"],
             vec!["v4.request.normal_payload"],
+        ),
+        plugin(
+            "v4.std.chat_process.scope_restore",
+            PluginCategory::ChatProcess,
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            Some(4),
+            PluginKind::Control,
+            PluginEffect::ControlOnly,
+            PluginPhase::Control,
+            100,
+            vec!["v4.control.metadata_center"],
+            vec!["v4.control.metadata_center"],
+        ),
+        plugin(
+            "v4.std.chat_process.continuation_restore",
+            PluginCategory::ChatProcess,
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            Some(4),
+            PluginKind::Control,
+            PluginEffect::ControlOnly,
+            PluginPhase::Control,
+            110,
+            vec!["v4.control.metadata_center"],
+            vec!["v4.control.metadata_center"],
+        ),
+        plugin(
+            "v4.std.chat_process.tool_governance",
+            PluginCategory::ChatProcess,
+            "V4HubReqChatProcess04Governed",
+            "request_chat_process",
+            Some(4),
+            PluginKind::Validator,
+            PluginEffect::ReadOnly,
+            PluginPhase::Validation,
+            120,
+            vec!["v4.request.normal_payload"],
+            vec![],
+        ),
+        plugin(
+            "v4.std.routing.entry_model_admission",
+            PluginCategory::Routing,
+            "V4Router05RequestClassified",
+            "request_execution",
+            Some(5),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            200,
+            vec!["v4.request.normal_payload"],
+            vec!["v4.control.route_facts"],
+        ),
+        plugin(
+            "v4.std.routing.candidate_filter",
+            PluginCategory::Routing,
+            "V4Router05RequestClassified",
+            "request_execution",
+            Some(5),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            210,
+            vec!["v4.control.route_facts", "v4.config.manifest"],
+            vec!["v4.control.route_facts"],
+        ),
+        plugin(
+            "v4.std.routing.target_selection",
+            PluginCategory::Routing,
+            "V4Router06SelectionPlan",
+            "request_execution",
+            Some(6),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            220,
+            vec!["v4.control.route_facts", "v4.config.manifest"],
+            vec!["v4.control.target_selection"],
+        ),
+        plugin(
+            "v4.std.routing.model_replacement",
+            PluginCategory::Routing,
+            "V4HubReqOutbound05ProviderSemantic",
+            "request_outbound",
+            Some(5),
+            PluginKind::Operator,
+            PluginEffect::Semantic,
+            PluginPhase::Projection,
+            300,
+            vec!["v4.request.normal_payload", "v4.control.target_selection"],
+            vec!["v4.request.provider_semantic"],
+        ),
+        plugin(
+            "v4.std.provider.compat",
+            PluginCategory::Provider,
+            "V4ProviderReqCompat06Compat",
+            "request_outbound",
+            Some(6),
+            PluginKind::Operator,
+            PluginEffect::Semantic,
+            PluginPhase::Semantic,
+            400,
+            vec![
+                "v4.request.provider_semantic",
+                "v4.control.target_selection",
+            ],
+            vec!["v4.request.provider_wire_payload"],
+        ),
+        plugin(
+            "v4.std.provider.wire_boundary",
+            PluginCategory::Provider,
+            "V4ProviderSseOut07WireBoundary",
+            "request_outbound",
+            Some(7),
+            PluginKind::Validator,
+            PluginEffect::ReadOnly,
+            PluginPhase::Validation,
+            500,
+            vec!["v4.request.provider_wire_payload"],
             vec![],
         ),
         plugin(
             "v4.std.contract.output_validate",
             PluginCategory::Contracts,
-            "V4HubRespOutbound04ClientSemantic",
-            "response_outbound",
-            Some(4),
+            "V4ProviderSseOut07WireBoundary",
+            "request_outbound",
+            Some(7),
             PluginKind::Validator,
             PluginEffect::ReadOnly,
             PluginPhase::Validation,
-            800,
-            vec!["v4.response.normal_payload"],
+            510,
+            vec!["v4.request.provider_wire_payload"],
             vec![],
         ),
         plugin(
@@ -436,33 +588,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             vec![],
         ),
         plugin(
-            "v4.std.diagnostic.timing",
-            PluginCategory::Diagnostic,
-            "V4HubReqChatProcess04Governed",
-            "request_chat_process",
-            Some(4),
-            PluginKind::Observer,
-            PluginEffect::DiagnosticOnly,
-            PluginPhase::Observation,
-            901,
-            vec![],
-            vec![],
-        ),
-        plugin(
-            "v4.std.diagnostic.snapshot_record",
-            PluginCategory::Diagnostic,
-            "V4HubReqChatProcess04Governed",
-            "request_chat_process",
-            Some(4),
-            PluginKind::Snapshot,
-            PluginEffect::DiagnosticOnly,
-            PluginPhase::Observation,
-            902,
-            vec![],
-            vec![],
-        ),
-        plugin(
-            "v4.std.control.scope_consume",
+            "v4.std.control.scope_registry",
             PluginCategory::Control,
             "V4MetadataCenter01ScopeRegistry",
             "control_center",
@@ -473,19 +599,6 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             100,
             vec!["v4.control.metadata_center"],
             vec!["v4.control.metadata_center"],
-        ),
-        plugin(
-            "v4.std.control.payload_cycle_record",
-            PluginCategory::Control,
-            "V4PayloadCycleRegistry",
-            "control_center",
-            Some(0),
-            PluginKind::Control,
-            PluginEffect::ControlOnly,
-            PluginPhase::Control,
-            100,
-            vec!["v4.lifecycle.payload_cycle"],
-            vec!["v4.lifecycle.payload_cycle"],
         ),
         plugin(
             "v4.std.error.typed_intake",
@@ -499,125 +612,6 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             300,
             vec!["v4.control.error_chain"],
             vec!["v4.control.error_chain"],
-        ),
-        plugin(
-            "v4.std.error.projection_adapter",
-            PluginCategory::Error,
-            "V4Error06ClientProjected",
-            "error_projection",
-            Some(6),
-            PluginKind::Operator,
-            PluginEffect::ControlOnly,
-            PluginPhase::Projection,
-            500,
-            vec!["v4.control.error_chain"],
-            vec!["v4.control.error_chain"],
-        ),
-        codec,
-        codec_alt,
-        plugin(
-            "v4.std.chat_process.request_governance",
-            PluginCategory::ChatProcess,
-            "V4HubReqChatProcess04Governed",
-            "request_chat_process",
-            Some(4),
-            PluginKind::Operator,
-            PluginEffect::Semantic,
-            PluginPhase::Semantic,
-            300,
-            vec!["v4.request.normal_payload"],
-            vec!["v4.request.normal_payload"],
-        ),
-        plugin(
-            "v4.std.chat_process.response_governance",
-            PluginCategory::ChatProcess,
-            "V4HubRespChatProcess03Governed",
-            "response_chat_process",
-            Some(3),
-            PluginKind::Operator,
-            PluginEffect::Semantic,
-            PluginPhase::Semantic,
-            300,
-            vec!["v4.response.normal_payload"],
-            vec!["v4.response.normal_payload"],
-        ),
-        plugin(
-            "v4.std.routing.route_facts_producer",
-            PluginCategory::Routing,
-            "V4Router05RequestClassified",
-            "request_execution",
-            Some(5),
-            PluginKind::Operator,
-            PluginEffect::ControlOnly,
-            PluginPhase::Semantic,
-            300,
-            vec![],
-            vec!["v4.control.route_facts"],
-        ),
-        plugin(
-            "v4.std.routing.route_facts_consumer",
-            PluginCategory::Routing,
-            "V4Router06SelectionPlan",
-            "request_execution",
-            Some(6),
-            PluginKind::Operator,
-            PluginEffect::ControlOnly,
-            PluginPhase::Semantic,
-            350,
-            vec!["v4.control.route_facts"],
-            vec!["v4.control.target_selection"],
-        ),
-        plugin(
-            "v4.std.provider.capability_mock",
-            PluginCategory::Provider,
-            "V4ProviderSseOut07WireBoundary",
-            "request_outbound",
-            Some(7),
-            PluginKind::Validator,
-            PluginEffect::ReadOnly,
-            PluginPhase::Semantic,
-            210,
-            vec!["v4.config.manifest"],
-            vec![],
-        ),
-        plugin(
-            "v4.std.provider.auth_handle_mock",
-            PluginCategory::Provider,
-            "V4ProviderSseOut07WireBoundary",
-            "request_outbound",
-            Some(7),
-            PluginKind::Validator,
-            PluginEffect::ReadOnly,
-            PluginPhase::Semantic,
-            220,
-            vec!["v4.secret.provider_auth_handle"],
-            vec![],
-        ),
-        plugin(
-            "v4.std.provider.wire_mock",
-            PluginCategory::Provider,
-            "V4HubReqOutbound05ProviderSemantic",
-            "request_outbound",
-            Some(5),
-            PluginKind::Operator,
-            PluginEffect::Semantic,
-            PluginPhase::Projection,
-            500,
-            vec!["v4.request.normal_payload"],
-            vec!["v4.request.provider_semantic"],
-        ),
-        plugin(
-            "v4.std.provider.transport_mock",
-            PluginCategory::Provider,
-            "V4ProviderSseOut07WireBoundary",
-            "request_outbound",
-            Some(7),
-            PluginKind::Validator,
-            PluginEffect::ReadOnly,
-            PluginPhase::Projection,
-            550,
-            vec!["v4.request.provider_wire_payload"],
-            vec![],
         ),
     ]
 }
@@ -711,32 +705,61 @@ pub fn compile_standard_plan(
     )
 }
 
-struct MockHandle {
+struct NativeHandle {
     execute_fn: fn(&mut ExecCtx<'_>) -> Result<(), String>,
 }
 
-impl PluginHandle for MockHandle {
+impl PluginHandle for NativeHandle {
     fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
         (self.execute_fn)(ctx)
     }
 }
 
-fn validate_input(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let data = ctx.read_data();
-    if !data.is_object() {
-        return Err("input validator requires an object".to_string());
+fn server_input(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    if !ctx.read_data().is_string() {
+        return Err("server input requires raw request bytes encoded as a string".to_string());
     }
-    ctx.emit("node.input_validated", "standard input validator");
+    ctx.emit(
+        "request.node01",
+        "server input accepted without model inspection",
+    );
     Ok(())
 }
 
-fn validate_output(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let data = ctx.read_data();
-    if !data.is_object() {
-        return Err("output validator requires an object".to_string());
+fn sse_in(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let raw = ctx
+        .read_data()
+        .as_str()
+        .ok_or_else(|| "SSE input requires raw text".to_string())?;
+    let json_text = if raw.trim_start().starts_with("data:") {
+        let frames = raw
+            .lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && *line != "[DONE]")
+            .collect::<Vec<_>>();
+        if frames.len() != 1 {
+            return Err("request SSE input must contain exactly one JSON data frame".to_string());
+        }
+        frames[0]
+    } else {
+        raw
+    };
+    let value: Value = serde_json::from_str(json_text)
+        .map_err(|error| format!("request JSON/SSE frame invalid: {error}"))?;
+    ctx.write_data(value).map_err(|error| error.to_string())
+}
+
+fn responses_inbound(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    if !ctx.read_data().is_object() {
+        return Err("Responses inbound requires an object".to_string());
     }
-    ctx.emit("node.output_validated", "standard output validator");
-    Ok(())
+    ctx.emit(
+        "request.node03",
+        "Responses normalized without entry model admission",
+    );
+    ctx.write_data(ctx.read_data().clone())
+        .map_err(|error| error.to_string())
 }
 
 fn debug_observe(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -744,17 +767,7 @@ fn debug_observe(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     Ok(())
 }
 
-fn timing(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    ctx.emit("node.timing", "timing observation emitted");
-    Ok(())
-}
-
-fn snapshot_record(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    ctx.emit("node.snapshot", "snapshot observation emitted");
-    Ok(())
-}
-
-fn scope_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+fn scope_restore(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut metadata = ctx
         .read_control_resource("v4.control.metadata_center")
         .map_err(|error| error.to_string())?
@@ -763,23 +776,40 @@ fn scope_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = metadata
         .as_object_mut()
         .ok_or_else(|| "scope_consume requires typed metadata object".to_string())?;
-    object.insert("scope".to_string(), json!({"consumed": true}));
+    object.insert("scope_restored".to_string(), json!(true));
     ctx.write_control_resource("v4.control.metadata_center", metadata)
         .map_err(|error| error.to_string())
 }
 
-fn payload_cycle_record(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut payload_cycle = ctx
-        .read_control_resource("v4.lifecycle.payload_cycle")
+fn continuation_restore(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let mut metadata = ctx
+        .read_control_resource("v4.control.metadata_center")
         .map_err(|error| error.to_string())?
         .cloned()
         .unwrap_or_else(|| json!({}));
-    let object = payload_cycle
+    let object = metadata
         .as_object_mut()
-        .ok_or_else(|| "payload_cycle_record requires typed cycle object".to_string())?;
-    object.insert("recorded".to_string(), json!(true));
-    ctx.write_control_resource("v4.lifecycle.payload_cycle", payload_cycle)
+        .ok_or_else(|| "continuation restore requires typed metadata object".to_string())?;
+    if let Some(owner) = object.get("continuation_owner").and_then(Value::as_str) {
+        if !matches!(owner, "direct" | "relay") {
+            return Err(format!("invalid continuation owner {owner}"));
+        }
+    }
+    object.insert("continuation_checked".to_string(), json!(true));
+    ctx.write_control_resource("v4.control.metadata_center", metadata)
         .map_err(|error| error.to_string())
+}
+
+fn tool_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    if let Some(tools) = ctx.read_data().get("tools") {
+        let tools = tools
+            .as_array()
+            .ok_or_else(|| "Responses tools must be an array".to_string())?;
+        if tools.iter().any(|tool| !tool.is_object()) {
+            return Err("every Responses tool must be an object".to_string());
+        }
+    }
+    Ok(())
 }
 
 fn error_intake(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -792,108 +822,112 @@ fn error_intake(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .as_object_mut()
         .ok_or_else(|| "error_intake requires typed error object".to_string())?;
     object.insert("stage".to_string(), json!("source_raised"));
-    object.insert("kind".to_string(), json!("keyless_mock"));
+    object.insert("kind".to_string(), json!("typed_source_error"));
     ctx.write_control_resource("v4.control.error_chain", error_chain)
         .map_err(|error| error.to_string())
 }
 
-fn error_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut error_chain = ctx
-        .read_control_resource("v4.control.error_chain")
-        .map_err(|error| error.to_string())?
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let object = error_chain
-        .as_object_mut()
-        .ok_or_else(|| "error_projection requires typed error object".to_string())?;
-    object.insert("error_projection".to_string(), json!({"projected": true}));
-    ctx.write_control_resource("v4.control.error_chain", error_chain)
-        .map_err(|error| error.to_string())
-}
-
-fn protocol_codec(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut data = ctx.read_data().clone();
-    if let Some(object) = data.as_object_mut() {
-        object.insert("codec".to_string(), json!("mock"));
-    }
-    ctx.write_data(data).map_err(|error| error.to_string())
-}
-
-fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut data = ctx.read_data().clone();
-    if let Some(object) = data.as_object_mut() {
-        object.insert("governance".to_string(), json!("request_governance"));
-    }
-    ctx.write_data(data).map_err(|error| error.to_string())
-}
-
-fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut data = ctx.read_data().clone();
-    if let Some(object) = data.as_object_mut() {
-        object.insert("governance".to_string(), json!("response_governance"));
-    }
-    ctx.write_data(data).map_err(|error| error.to_string())
-}
-
-fn route_facts_produce(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    ctx.write_control_resource("v4.control.route_facts", json!({"keyless": true}))
-        .map_err(|error| error.to_string())
-}
-
-fn route_facts_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    if ctx
-        .read_control_resource("v4.control.route_facts")
-        .map_err(|error| error.to_string())?
-        .is_none()
-    {
-        return Err("route facts consumer requires typed route facts".to_string());
-    }
+fn entry_model_admission(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let entry_model = admit_entry_model(ctx.read_data()).map_err(|error| error.to_string())?;
     ctx.write_control_resource(
-        "v4.control.target_selection",
-        json!({"selected": "keyless_mock"}),
+        "v4.control.route_facts",
+        json!({"entry_protocol": "responses", "entry_model": entry_model}),
     )
     .map_err(|error| error.to_string())
 }
 
-fn capability_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    ctx.emit(
-        "node.provider_capability_validated",
-        "keyless provider capability validated",
-    );
-    Ok(())
+fn manifest_candidates(ctx: &mut ExecCtx<'_>) -> Result<Vec<ProviderCandidate>, String> {
+    let manifest = ctx
+        .read_control_resource("v4.config.manifest")
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "compiled config manifest is missing".to_string())?;
+    serde_json::from_value(
+        manifest
+            .get("candidates")
+            .cloned()
+            .ok_or_else(|| "compiled config manifest candidates are missing".to_string())?,
+    )
+    .map_err(|error| format!("compiled candidate set invalid: {error}"))
 }
 
-fn auth_handle_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    ctx.emit(
-        "node.provider_auth_handle_validated",
-        "keyless auth handle shape validated",
-    );
-    Ok(())
+fn candidate_filter(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let candidates = manifest_candidates(ctx)?;
+    let mut route_facts = ctx
+        .read_control_resource("v4.control.route_facts")
+        .map_err(|error| error.to_string())?
+        .cloned()
+        .ok_or_else(|| "candidate filter requires route facts".to_string())?;
+    let requested = route_facts.get("entry_model").and_then(Value::as_str);
+    let eligible = filter_candidates(&candidates, requested)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    route_facts
+        .as_object_mut()
+        .ok_or_else(|| "route facts must be an object".to_string())?
+        .insert("eligible_candidates".to_string(), json!(eligible));
+    ctx.write_control_resource("v4.control.route_facts", route_facts)
+        .map_err(|error| error.to_string())
 }
 
-fn wire_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+fn target_selection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let candidates = manifest_candidates(ctx)?;
+    let route_facts = ctx
+        .read_control_resource("v4.control.route_facts")
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "target selection requires route facts".to_string())?;
+    let requested = route_facts.get("entry_model").and_then(Value::as_str);
+    let target = select_target(&candidates, requested).map_err(|error| error.to_string())?;
+    ctx.write_control_resource(
+        "v4.control.target_selection",
+        serde_json::to_value(target).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn model_replacement(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let target: SelectedTarget = serde_json::from_value(
+        ctx.read_control_resource("v4.control.target_selection")
+            .map_err(|error| error.to_string())?
+            .cloned()
+            .ok_or_else(|| "model replacement requires target selection".to_string())?,
+    )
+    .map_err(|error| format!("target selection invalid: {error}"))?;
     let mut data = ctx.read_data().clone();
-    if let Some(object) = data.as_object_mut() {
-        object.insert("wire".to_string(), json!({"mock": true}));
-    }
+    let object = data
+        .as_object_mut()
+        .ok_or_else(|| "model replacement requires a request object".to_string())?;
+    object.insert("model".to_string(), json!(target.model));
     ctx.write_data(data).map_err(|error| error.to_string())
 }
 
-fn transport_mock(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    if !ctx.read_data().is_object() {
-        return Err("transport validator requires provider wire object".to_string());
-    }
-    ctx.emit(
-        "node.provider_transport_validated",
-        "provider wire transport boundary validated",
-    );
-    Ok(())
+fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let target: SelectedTarget = serde_json::from_value(
+        ctx.read_control_resource("v4.control.target_selection")
+            .map_err(|error| error.to_string())?
+            .cloned()
+            .ok_or_else(|| "provider compat requires target selection".to_string())?,
+    )
+    .map_err(|error| format!("target selection invalid: {error}"))?;
+    let wire = project_provider_compat(
+        ctx.read_data(),
+        "responses",
+        &target.protocol,
+        &target.execution_mode,
+    )
+    .map_err(|error| error.to_string())?;
+    ctx.write_data(wire).map_err(|error| error.to_string())
+}
+
+fn wire_boundary(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    validate_provider_wire_payload(ctx.read_data()).map_err(|error| error.to_string())
 }
 
 /// Registry of typed handles for every standard plugin. One immutable handle
 /// per plugin id; unknown ids fail fast through the bridge.
 pub struct StandardHandleRegistry {
-    handles: HashMap<&'static str, MockHandle>,
+    handles: HashMap<&'static str, NativeHandle>,
 }
 
 impl StandardHandleRegistry {
@@ -901,32 +935,32 @@ impl StandardHandleRegistry {
         let mut handles = HashMap::new();
         for (id, execute_fn) in [
             (
-                "v4.std.contract.input_validate",
-                validate_input as fn(&mut ExecCtx<'_>) -> Result<(), String>,
+                "v4.std.protocol.server_input",
+                server_input as fn(&mut ExecCtx<'_>) -> Result<(), String>,
             ),
-            ("v4.std.contract.output_validate", validate_output),
+            ("v4.std.protocol.sse_in", sse_in),
+            ("v4.std.protocol.responses_inbound", responses_inbound),
+            ("v4.std.contract.output_validate", wire_boundary),
             ("v4.std.diagnostic.debug_observe", debug_observe),
-            ("v4.std.diagnostic.timing", timing),
-            ("v4.std.diagnostic.snapshot_record", snapshot_record),
-            ("v4.std.control.scope_consume", scope_consume),
-            ("v4.std.control.payload_cycle_record", payload_cycle_record),
+            ("v4.std.control.scope_registry", scope_restore),
             ("v4.std.error.typed_intake", error_intake),
-            ("v4.std.error.projection_adapter", error_projection),
-            ("v4.std.protocol.mock_codec", protocol_codec),
-            ("v4.std.protocol.mock_codec_alt", protocol_codec),
-            ("v4.std.chat_process.request_governance", request_governance),
+            ("v4.std.chat_process.scope_restore", scope_restore),
             (
-                "v4.std.chat_process.response_governance",
-                response_governance,
+                "v4.std.chat_process.continuation_restore",
+                continuation_restore,
             ),
-            ("v4.std.routing.route_facts_producer", route_facts_produce),
-            ("v4.std.routing.route_facts_consumer", route_facts_consume),
-            ("v4.std.provider.capability_mock", capability_mock),
-            ("v4.std.provider.auth_handle_mock", auth_handle_mock),
-            ("v4.std.provider.wire_mock", wire_mock),
-            ("v4.std.provider.transport_mock", transport_mock),
+            ("v4.std.chat_process.tool_governance", tool_governance),
+            (
+                "v4.std.routing.entry_model_admission",
+                entry_model_admission,
+            ),
+            ("v4.std.routing.candidate_filter", candidate_filter),
+            ("v4.std.routing.target_selection", target_selection),
+            ("v4.std.routing.model_replacement", model_replacement),
+            ("v4.std.provider.compat", provider_compat),
+            ("v4.std.provider.wire_boundary", wire_boundary),
         ] {
-            handles.insert(id, MockHandle { execute_fn });
+            handles.insert(id, NativeHandle { execute_fn });
         }
         Self { handles }
     }
@@ -999,25 +1033,22 @@ mod tests {
             .map(|plugin| plugin.plugin_id.as_str())
             .collect();
         let mut expected = [
-            "v4.std.contract.input_validate",
             "v4.std.contract.output_validate",
             "v4.std.diagnostic.debug_observe",
-            "v4.std.diagnostic.timing",
-            "v4.std.diagnostic.snapshot_record",
-            "v4.std.control.scope_consume",
-            "v4.std.control.payload_cycle_record",
+            "v4.std.control.scope_registry",
             "v4.std.error.typed_intake",
-            "v4.std.error.projection_adapter",
-            "v4.std.protocol.mock_codec",
-            "v4.std.protocol.mock_codec_alt",
-            "v4.std.chat_process.request_governance",
-            "v4.std.chat_process.response_governance",
-            "v4.std.routing.route_facts_producer",
-            "v4.std.routing.route_facts_consumer",
-            "v4.std.provider.capability_mock",
-            "v4.std.provider.auth_handle_mock",
-            "v4.std.provider.wire_mock",
-            "v4.std.provider.transport_mock",
+            "v4.std.protocol.server_input",
+            "v4.std.protocol.sse_in",
+            "v4.std.protocol.responses_inbound",
+            "v4.std.chat_process.scope_restore",
+            "v4.std.chat_process.continuation_restore",
+            "v4.std.chat_process.tool_governance",
+            "v4.std.routing.entry_model_admission",
+            "v4.std.routing.candidate_filter",
+            "v4.std.routing.target_selection",
+            "v4.std.routing.model_replacement",
+            "v4.std.provider.compat",
+            "v4.std.provider.wire_boundary",
         ];
         actual.sort_unstable();
         expected.sort_unstable();

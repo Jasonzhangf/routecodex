@@ -224,6 +224,7 @@ fn control_resource_key(resource_id: &str) -> Option<&'static str> {
         "v4.control.error_chain" => Some("error_chain"),
         "v4.control.route_facts" => Some("route_facts"),
         "v4.control.target_selection" => Some("target_selection"),
+        "v4.config.manifest" => Some("config_manifest"),
         _ => None,
     }
 }

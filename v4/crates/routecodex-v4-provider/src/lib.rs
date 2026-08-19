@@ -51,10 +51,14 @@ struct AuthSection {
 #[derive(Debug, Clone, Deserialize)]
 struct AuthEntry {
     alias: Option<String>,
+    #[serde(rename = "apiKey")]
+    api_key: Option<String>,
     #[serde(rename = "tokenFile")]
     token_file: Option<String>,
     #[serde(rename = "secretFile")]
     secret_file: Option<String>,
+    #[serde(rename = "secretKey")]
+    secret_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,8 +79,22 @@ pub struct ProviderProfile {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ProviderAuthHandle {
-    TokenFile { path: String, alias: Option<String> },
-    ConfigInline { config_path: String },
+    InlineKey {
+        value: String,
+        alias: Option<String>,
+    },
+    TokenFile {
+        path: String,
+        alias: Option<String>,
+    },
+    SecretFileKey {
+        path: String,
+        key: String,
+        alias: Option<String>,
+    },
+    ConfigInline {
+        config_path: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,6 +179,83 @@ pub struct ProviderTransportError {
     pub status: Option<u16>,
 }
 
+const FORBIDDEN_WIRE_FIELDS: [&str; 10] = [
+    "route_facts",
+    "target_selection",
+    "execution_mode",
+    "provider_id",
+    "config_path",
+    "retry",
+    "health",
+    "debug",
+    "error_chain",
+    "manifest_digest",
+];
+
+/// Provider-owned Node 06 compatibility projection. Direct Responses keeps
+/// the same protocol shape. Relay is admitted only for an explicitly mapped
+/// Responses-to-Responses edge; every other protocol pair fails closed.
+pub fn project_provider_compat(
+    semantic: &Value,
+    entry_protocol: &str,
+    provider_protocol: &str,
+    execution_mode: &str,
+) -> Result<Value, ProviderTransportError> {
+    if !semantic.is_object() {
+        return Err(ProviderTransportError {
+            code: "provider_semantic_invalid".to_string(),
+            message: "provider semantic request must be an object".to_string(),
+            status: None,
+        });
+    }
+    match (execution_mode, entry_protocol, provider_protocol) {
+        ("direct", "responses", "responses") | ("relay", "responses", "responses") => {
+            validate_provider_wire_payload(semantic)?;
+            Ok(semantic.clone())
+        }
+        ("direct", _, _) => Err(ProviderTransportError {
+            code: "provider_direct_protocol_mismatch".to_string(),
+            message: format!(
+                "direct requires identical entry/provider protocol, got {entry_protocol}->{provider_protocol}"
+            ),
+            status: None,
+        }),
+        ("relay", _, _) => Err(ProviderTransportError {
+            code: "provider_compat_unmapped".to_string(),
+            message: format!(
+                "relay compatibility edge {entry_protocol}->{provider_protocol} is not registered"
+            ),
+            status: None,
+        }),
+        (mode, _, _) => Err(ProviderTransportError {
+            code: "provider_execution_mode_invalid".to_string(),
+            message: format!("unsupported execution mode {mode}"),
+            status: None,
+        }),
+    }
+}
+
+/// Node 07 provider wire boundary: validates normal provider data and rejects
+/// RouteCodex control resources instead of silently stripping them.
+pub fn validate_provider_wire_payload(wire: &Value) -> Result<(), ProviderTransportError> {
+    let object = wire.as_object().ok_or_else(|| ProviderTransportError {
+        code: "provider_wire_invalid".to_string(),
+        message: "provider wire request must be an object".to_string(),
+        status: None,
+    })?;
+    if let Some(field) = FORBIDDEN_WIRE_FIELDS
+        .iter()
+        .find(|field| object.contains_key(**field))
+    {
+        return Err(ProviderTransportError {
+            code: "provider_wire_control_leak".to_string(),
+            message: format!("control field {field} reached provider wire boundary"),
+            status: None,
+        });
+    }
+    Ok(())
+}
+
 impl std::fmt::Display for ProviderTransportError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {}", self.code, self.message)
@@ -181,20 +276,44 @@ pub fn load_profile(path: &str) -> Result<ProviderProfile, ProviderTransportErro
         status: None,
     })?;
     let auth = if let Some(entry) = file.provider.auth.entries.first() {
-        let path = entry
-            .token_file
+        if let Some(value) = entry
+            .api_key
             .clone()
-            .or_else(|| entry.secret_file.clone())
-            .ok_or_else(|| ProviderTransportError {
+            .filter(|value| !value.trim().is_empty())
+        {
+            ProviderAuthHandle::InlineKey {
+                value,
+                alias: entry.alias.clone(),
+            }
+        } else if let (Some(path), Some(key)) =
+            (entry.secret_file.clone(), entry.secret_key.clone())
+        {
+            ProviderAuthHandle::SecretFileKey {
+                path,
+                key,
+                alias: entry.alias.clone(),
+            }
+        } else if let Some(path) = entry.token_file.clone() {
+            ProviderAuthHandle::TokenFile {
+                path,
+                alias: entry.alias.clone(),
+            }
+        } else {
+            return Err(ProviderTransportError {
                 code: "provider_auth_handle_missing".to_string(),
-                message: "provider auth entry has no tokenFile or secretFile".to_string(),
+                message: "provider auth entry has no inline key, token file, or secret file key"
+                    .to_string(),
                 status: None,
-            })?;
-        ProviderAuthHandle::TokenFile {
-            path,
-            alias: entry.alias.clone(),
+            });
         }
-    } else if !file.provider.auth.api_key.as_deref().unwrap_or_default().is_empty() {
+    } else if !file
+        .provider
+        .auth
+        .api_key
+        .as_deref()
+        .unwrap_or_default()
+        .is_empty()
+    {
         ProviderAuthHandle::ConfigInline {
             config_path: path.to_string(),
         }
@@ -224,7 +343,10 @@ pub fn load_profile(path: &str) -> Result<ProviderProfile, ProviderTransportErro
     })
 }
 
-pub fn resolve_model(profile: &ProviderProfile, requested: &str) -> Result<String, ProviderTransportError> {
+pub fn resolve_model(
+    profile: &ProviderProfile,
+    requested: &str,
+) -> Result<String, ProviderTransportError> {
     profile
         .models
         .iter()
@@ -232,7 +354,10 @@ pub fn resolve_model(profile: &ProviderProfile, requested: &str) -> Result<Strin
         .map(|model| model.wire_name.clone())
         .ok_or_else(|| ProviderTransportError {
             code: "provider_model_unknown".to_string(),
-            message: format!("model {requested} is not declared by {}", profile.provider_id),
+            message: format!(
+                "model {requested} is not declared by {}",
+                profile.provider_id
+            ),
             status: None,
         })
 }
@@ -248,7 +373,10 @@ pub fn send_responses(
     if profile.protocol != "responses" {
         return Err(ProviderTransportError {
             code: "provider_protocol_unsupported".to_string(),
-            message: format!("provider protocol {} cannot serve Responses", profile.protocol),
+            message: format!(
+                "provider protocol {} cannot serve Responses",
+                profile.protocol
+            ),
             status: None,
         });
     }
@@ -280,16 +408,23 @@ pub fn send_responses(
         message: error.to_string(),
         status: None,
     })?;
-    child.stdin.take().expect("curl stdin configured").write_all(&payload).map_err(|error| ProviderTransportError {
-        code: "provider_transport_write".to_string(),
-        message: error.to_string(),
-        status: None,
-    })?;
-    let output = child.wait_with_output().map_err(|error| ProviderTransportError {
-        code: "provider_transport_wait".to_string(),
-        message: error.to_string(),
-        status: None,
-    })?;
+    child
+        .stdin
+        .take()
+        .expect("curl stdin configured")
+        .write_all(&payload)
+        .map_err(|error| ProviderTransportError {
+            code: "provider_transport_write".to_string(),
+            message: error.to_string(),
+            status: None,
+        })?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_transport_wait".to_string(),
+            message: error.to_string(),
+            status: None,
+        })?;
     if !output.status.success() {
         return Err(ProviderTransportError {
             code: "provider_transport_failed".to_string(),
@@ -310,7 +445,10 @@ pub fn send_responses_streaming(
     if profile.protocol != "responses" {
         return Err(ProviderTransportError {
             code: "provider_protocol_unsupported".to_string(),
-            message: format!("provider protocol {} cannot serve Responses", profile.protocol),
+            message: format!(
+                "provider protocol {} cannot serve Responses",
+                profile.protocol
+            ),
             status: None,
         });
     }
@@ -365,7 +503,9 @@ pub fn send_responses_streaming(
 /// Parse the upstream HTTP header prefix from the provider stream and return
 /// the number of bytes consumed. Only one informational/final response block
 /// may be consumed by a stream; later blocks fail fast.
-fn parse_provider_stream_header(stream: &mut ProviderResponseStream) -> Result<(), ProviderTransportError> {
+fn parse_provider_stream_header(
+    stream: &mut ProviderResponseStream,
+) -> Result<(), ProviderTransportError> {
     let mut head = [0u8; 8192];
     let mut bytes = Vec::new();
     loop {
@@ -425,11 +565,7 @@ fn http_header_at(bytes: &[u8]) -> Option<(usize, u16, String)> {
     };
     let head = std::str::from_utf8(&bytes[..end]).ok()?;
     let first = head.lines().next()?;
-    let status = first
-        .split_whitespace()
-        .nth(1)?
-        .parse::<u16>()
-        .ok()?;
+    let status = first.split_whitespace().nth(1)?.parse::<u16>().ok()?;
     let content_type = head
         .lines()
         .filter_map(|line| line.split_once(':'))
@@ -443,10 +579,26 @@ fn http_header_at(bytes: &[u8]) -> Option<(usize, u16, String)> {
 
 fn materialize_auth(handle: &ProviderAuthHandle) -> Result<String, ProviderTransportError> {
     match handle {
+        ProviderAuthHandle::InlineKey { value, alias } => {
+            if value.trim().is_empty() {
+                return Err(ProviderTransportError {
+                    code: "provider_auth_empty".to_string(),
+                    message: format!(
+                        "provider auth handle {} resolved to an empty secret",
+                        alias.as_deref().unwrap_or("default")
+                    ),
+                    status: None,
+                });
+            }
+            Ok(value.clone())
+        }
         ProviderAuthHandle::TokenFile { path, alias } => {
             let key = std::fs::read_to_string(path).map_err(|error| ProviderTransportError {
                 code: "provider_auth_read".to_string(),
-                message: format!("auth handle {}: {error}", alias.as_deref().unwrap_or("default")),
+                message: format!(
+                    "auth handle {}: {error}",
+                    alias.as_deref().unwrap_or("default")
+                ),
                 status: None,
             })?;
             let key = key.trim().to_string();
@@ -459,42 +611,132 @@ fn materialize_auth(handle: &ProviderAuthHandle) -> Result<String, ProviderTrans
             }
             Ok(key)
         }
+        ProviderAuthHandle::SecretFileKey { path, key, alias } => {
+            let raw = std::fs::read_to_string(path).map_err(|error| ProviderTransportError {
+                code: "provider_auth_read".to_string(),
+                message: format!(
+                    "auth handle {}: {error}",
+                    alias.as_deref().unwrap_or("default")
+                ),
+                status: None,
+            })?;
+            let secrets: toml::Value =
+                toml::from_str(&raw).map_err(|error| ProviderTransportError {
+                    code: "provider_auth_parse".to_string(),
+                    message: format!(
+                        "auth handle {}: {error}",
+                        alias.as_deref().unwrap_or("default")
+                    ),
+                    status: None,
+                })?;
+            let value = key
+                .split('.')
+                .try_fold(&secrets, |value, segment| value.get(segment))
+                .and_then(toml::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| ProviderTransportError {
+                    code: "provider_auth_empty".to_string(),
+                    message: format!(
+                        "provider auth handle {} key {key} is missing or empty",
+                        alias.as_deref().unwrap_or("default")
+                    ),
+                    status: None,
+                })?;
+            Ok(value.to_string())
+        }
         ProviderAuthHandle::ConfigInline { config_path } => {
-            let raw = std::fs::read_to_string(config_path).map_err(|error| ProviderTransportError {
-                code: "provider_config_read".to_string(),
-                message: error.to_string(),
-                status: None,
-            })?;
-            let file: ProviderFile = toml::from_str(&raw).map_err(|error| ProviderTransportError {
-                code: "provider_config_parse".to_string(),
-                message: error.to_string(),
-                status: None,
-            })?;
-            file.provider.auth.api_key.ok_or_else(|| ProviderTransportError {
-                code: "provider_auth_missing".to_string(),
-                message: "provider auth apiKey is missing".to_string(),
-                status: None,
-            })
+            let raw =
+                std::fs::read_to_string(config_path).map_err(|error| ProviderTransportError {
+                    code: "provider_config_read".to_string(),
+                    message: error.to_string(),
+                    status: None,
+                })?;
+            let file: ProviderFile =
+                toml::from_str(&raw).map_err(|error| ProviderTransportError {
+                    code: "provider_config_parse".to_string(),
+                    message: error.to_string(),
+                    status: None,
+                })?;
+            file.provider
+                .auth
+                .api_key
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| ProviderTransportError {
+                    code: "provider_auth_empty".to_string(),
+                    message: "provider auth apiKey is missing or empty".to_string(),
+                    status: None,
+                })
         }
     }
 }
 
 fn parse_curl_response(output: &[u8]) -> Result<ProviderRawResponse, ProviderTransportError> {
     let marker = b"\n__RCCV4_STATUS__:";
-    let marker_start = output.windows(marker.len()).position(|window| window == marker).ok_or_else(|| ProviderTransportError {
-        code: "provider_response_parse".to_string(),
-        message: "curl status marker missing".to_string(),
-        status: None,
-    })?;
+    let marker_start = output
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .ok_or_else(|| ProviderTransportError {
+            code: "provider_response_parse".to_string(),
+            message: "curl status marker missing".to_string(),
+            status: None,
+        })?;
     let body = output[..marker_start].to_vec();
     let metadata = String::from_utf8_lossy(&output[marker_start + 1..]);
-    let status = metadata.lines().find_map(|line| line.strip_prefix("__RCCV4_STATUS__:")?.parse().ok()).ok_or_else(|| ProviderTransportError {
-        code: "provider_response_parse".to_string(),
-        message: "provider status missing".to_string(),
-        status: None,
-    })?;
-    let content_type = metadata.lines().find_map(|line| line.strip_prefix("__RCCV4_TYPE__:")).unwrap_or_default().to_string();
-    Ok(ProviderRawResponse { status, content_type, body })
+    let status = metadata
+        .lines()
+        .find_map(|line| line.strip_prefix("__RCCV4_STATUS__:")?.parse().ok())
+        .ok_or_else(|| ProviderTransportError {
+            code: "provider_response_parse".to_string(),
+            message: "provider status missing".to_string(),
+            status: None,
+        })?;
+    let content_type = metadata
+        .lines()
+        .find_map(|line| line.strip_prefix("__RCCV4_TYPE__:"))
+        .unwrap_or_default()
+        .to_string();
+    Ok(ProviderRawResponse {
+        status,
+        content_type,
+        body,
+    })
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::{materialize_auth, ProviderAuthHandle};
+
+    fn secret_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("rccv4-provider-{name}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn dotted_secret_key_resolves_and_empty_secret_fails() {
+        let path = secret_path("nested-secret.toml");
+        std::fs::write(
+            &path,
+            "[minimax]\nkey1 = \"test-only-secret\"\nempty = \"\"\n",
+        )
+        .expect("test secret fixture writes");
+        let nested = ProviderAuthHandle::SecretFileKey {
+            path: path.display().to_string(),
+            key: "minimax.key1".to_string(),
+            alias: Some("test".to_string()),
+        };
+        assert_eq!(materialize_auth(&nested).unwrap(), "test-only-secret");
+        let empty = ProviderAuthHandle::SecretFileKey {
+            path: path.display().to_string(),
+            key: "minimax.empty".to_string(),
+            alias: Some("test".to_string()),
+        };
+        assert_eq!(
+            materialize_auth(&empty).unwrap_err().code,
+            "provider_auth_empty"
+        );
+        std::fs::remove_file(path).expect("test fixture cleanup");
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,30 +1,31 @@
 # V4 标准插件库（M5）
 
-状态：`contract_bound`，源实现已落地，未接真实生产 NodeContainer 分发。
+状态：`contract_bound`，请求链 Node 01-07 已接真实 `NodeContainer` 分发。
 Owner：`routecodex-v4-standard-plugins`。
 合同：`v4/contracts/plugin-library.contract.json`。
 
 ## 范围
 
-M5 交付 V4 标准插件库的不可变描述符、确定性 artifact/contract 字节、
+标准库交付 V4 插件的不可变描述符、确定性 artifact/contract 字节、
 `PluginCatalog` 注册、per-node `NodePluginPlan` 编译和 typed
-`StandardHandleRegistry`。标准插件全部是 keyless、行为最小化 mock/validator，
-不声称真实产品迁移、真实凭据、真实 provider/client 语义或真实 wire codec。
+`StandardHandleRegistry`。请求链插件执行真实 JSON/SSE inbound、Chat Process
+治理、VR admission/select/model replacement、provider compat 与 wire boundary；
+auth 与 transport 仍由 provider owner 执行，不进入插件 payload。
 
 ## 类别与不可变 ID
 
-标准库按 8 个类别注册 19 个不可变插件 ID：
+标准库按 8 个类别注册 16 个不可变插件 ID：
 
 | 类别 | 插件 ID |
 | --- | --- |
-| contracts | `v4.std.contract.input_validate`, `v4.std.contract.output_validate` |
-| diagnostic | `v4.std.diagnostic.debug_observe`, `v4.std.diagnostic.timing`, `v4.std.diagnostic.snapshot_record` |
-| control | `v4.std.control.scope_consume`, `v4.std.control.payload_cycle_record` |
-| error | `v4.std.error.typed_intake`, `v4.std.error.projection_adapter` |
-| protocol | `v4.std.protocol.mock_codec`, `v4.std.protocol.mock_codec_alt` |
-| chat_process | `v4.std.chat_process.request_governance`, `v4.std.chat_process.response_governance` |
-| routing | `v4.std.routing.route_facts_producer`, `v4.std.routing.route_facts_consumer` |
-| provider | `v4.std.provider.capability_mock`, `v4.std.provider.auth_handle_mock`, `v4.std.provider.wire_mock`, `v4.std.provider.transport_mock` |
+| contracts | `v4.std.contract.output_validate` |
+| diagnostic | `v4.std.diagnostic.debug_observe` |
+| control | `v4.std.control.scope_registry` |
+| error | `v4.std.error.typed_intake` |
+| protocol | `v4.std.protocol.server_input`, `v4.std.protocol.sse_in`, `v4.std.protocol.responses_inbound` |
+| chat_process | `v4.std.chat_process.scope_restore`, `v4.std.chat_process.continuation_restore`, `v4.std.chat_process.tool_governance` |
+| routing | `v4.std.routing.entry_model_admission`, `v4.std.routing.candidate_filter`, `v4.std.routing.target_selection`, `v4.std.routing.model_replacement` |
+| provider | `v4.std.provider.compat`, `v4.std.provider.wire_boundary` |
 
 每个 `StandardPlugin` 都携带：
 
@@ -66,8 +67,8 @@ control/error/diagnostic 资源不进入 normal/provider/client payload。
 - control-only 插件只写 `v4.control.*` / `v4.lifecycle.payload_cycle`；
 - diagnostic-only 插件只 emit diagnostics，不写 data/control；
 - error 插件只写 `v4.control.error_chain`；
-- provider capability/auth/transport mock 只在 provider wire boundary 读取并校验
-  已登记资源，不写 normal data 或 control；
+- provider compat 只消费 provider semantic 与 typed target selection；wire boundary
+  发现控制字段立即 fail-fast，不做 silent strip；
 - 任何控制、error、diagnostic 事实不得进入 `data`，payload 不得重建控制状态。
 
 control carrier 内的 `metadata_center`、`payload_cycle`、`error_chain`、
@@ -87,14 +88,12 @@ M5 四个 gate 已接入 V4 verification map 与 `verify:ci`：
 - `v4_parity_gate_standard_plugins`：合同/注册表/函数 map/源码边界；
 - `v4_parity_gate_standard_plugins_red`：负类自检。
 
-## M8 非目标
+## 边界
 
-以下内容不是 M5 基线能力：
+以下内容不属于标准插件 owner：
 
-- 真实 protocol codec、provider wire/transport、routing/decision 语义；
-- M6 PluginManager candidate pipeline、M7 WebUI 消费；
-- 将 `StandardHandleRegistry` 接入真实生产 NodeContainer 分发；
-- 真实凭据、真实请求/响应 payload 语义或产品迁移。
+- provider auth materialization 与 HTTP transport；
+- 未登记的跨协议 Relay compat；
+- response chain 与 WebUI。
 
-这些能力必须先在后续 milestone 中建立 typed dispatch budget 与真实 provider
-contract 后再落地。
+未登记 compat 明确失败；不得在 handler 或 runtime-bin 补偿。

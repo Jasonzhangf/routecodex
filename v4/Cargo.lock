@@ -142,6 +142,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v4-config"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-base-node",
+ "routecodex-v4-edge",
+ "serde",
+ "sha2",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "routecodex-v4-control"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-base-node",
+]
+
+[[package]]
 name = "routecodex-v4-cordis-bridge"
 version = "0.1.0"
 dependencies = [
@@ -149,6 +168,24 @@ dependencies = [
  "routecodex-v4-plugin-plan",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "routecodex-v4-debug"
+version = "0.1.0"
+
+[[package]]
+name = "routecodex-v4-edge"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-base-node",
+]
+
+[[package]]
+name = "routecodex-v4-error"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-base-node",
 ]
 
 [[package]]
@@ -219,6 +256,39 @@ name = "routecodex-v4-router"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "routecodex-v4-runtime"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-base-node",
+ "routecodex-v4-control",
+ "routecodex-v4-cordis-bridge",
+ "routecodex-v4-error",
+ "routecodex-v4-node-container",
+ "routecodex-v4-plugin-contract",
+ "routecodex-v4-router",
+ "routecodex-v4-skeleton",
+ "routecodex-v4-standard-plugins",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "routecodex-v4-runtime-bin"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v4-base-node",
+ "routecodex-v4-error",
+ "routecodex-v4-provider",
+ "routecodex-v4-router",
+ "routecodex-v4-runtime",
+ "routecodex-v4-server",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -257,6 +327,8 @@ dependencies = [
  "routecodex-v4-plugin-catalog",
  "routecodex-v4-plugin-contract",
  "routecodex-v4-plugin-plan",
+ "routecodex-v4-provider",
+ "routecodex-v4-router",
  "serde",
  "serde_json",
  "sha2",

@@ -655,10 +655,14 @@
     },
     {
       "function_id": "v4.runtime.independent_admission",
-      "owner": "routecodex-v4-governance",
+      "owner": "routecodex-v4-runtime-bin",
       "status": "active",
-      "binding_status": "binding",
-      "entry_symbols": [],
+      "binding_status": "bound",
+      "entry_symbols": [
+        "main",
+        "load_manifest",
+        "handle_responses"
+      ],
       "entry_paths": [
         "contracts/real-runtime-admission.manifest.json",
         "crates/routecodex-v4-runtime-bin/src/main.rs",
@@ -682,9 +686,12 @@
     {
       "function_id": "v4.runtime.binary_cold_start",
       "owner": "routecodex-v4-runtime-bin",
-      "status": "design",
-      "binding_status": "pending",
-      "entry_symbols": [],
+      "status": "active",
+      "binding_status": "bound",
+      "entry_symbols": [
+        "main",
+        "load_manifest"
+      ],
       "entry_paths": [
         "crates/routecodex-v4-runtime-bin/src/main.rs"
       ],
@@ -695,6 +702,45 @@
       "resource_bindings": [
         "v4.runtime.compiled_manifest",
         "v4.runtime.binary_identity"
+      ]
+    },
+    {
+      "function_id": "v4.pipeline.request_plugin_chain",
+      "owner": "routecodex-v4-runtime",
+      "status": "design",
+      "binding_status": "pending",
+      "entry_symbols": [
+        "RequestPluginRuntime",
+        "RequestPluginRuntime::execute_responses",
+        "compile_standard_plan",
+        "StandardHandleRegistry",
+        "admit_entry_model",
+        "filter_candidates",
+        "select_target",
+        "project_provider_compat",
+        "validate_provider_wire_payload"
+      ],
+      "entry_paths": [
+        "crates/routecodex-v4-runtime/src/request_plugin_runtime.rs",
+        "crates/routecodex-v4-standard-plugins/src/lib.rs",
+        "crates/routecodex-v4-router/src/lib.rs",
+        "crates/routecodex-v4-provider/src/lib.rs",
+        "crates/routecodex-v4-runtime-bin/src/main.rs"
+      ],
+      "required_gates": [
+        "v4_request_plugin_chain_l2_regression",
+        "v4_parity_gate_request_plugin_chain",
+        "v4_parity_gate_request_plugin_chain_red",
+        "v4_parity_gate_standard_plugins",
+        "v4_parity_gate_node_graph",
+        "v4_parity_gate_plane_isolation"
+      ],
+      "resource_bindings": [
+        "v4.request.normal_payload",
+        "v4.control.route_facts",
+        "v4.control.target_selection",
+        "v4.request.provider_semantic",
+        "v4.request.provider_wire_payload"
       ]
     }
   ]

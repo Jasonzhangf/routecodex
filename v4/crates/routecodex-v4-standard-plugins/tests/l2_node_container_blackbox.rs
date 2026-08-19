@@ -33,10 +33,10 @@ fn chat_process_plan() -> routecodex_v4_plugin_plan::NodePluginPlan {
         "request",
         4,
         &[
-            "v4.std.chat_process.request_governance",
+            "v4.std.chat_process.scope_restore",
+            "v4.std.chat_process.continuation_restore",
+            "v4.std.chat_process.tool_governance",
             "v4.std.diagnostic.debug_observe",
-            "v4.std.diagnostic.timing",
-            "v4.std.diagnostic.snapshot_record",
         ],
     )
     .expect("chat-process plan compiles")
@@ -71,16 +71,15 @@ fn positive_blackbox_execute_standard_plan_through_node_container() {
             &hash,
             NodeExecutionInput {
                 data: request_data(),
-                control: json!({}),
+                control: json!({"metadata_center": {}}),
             },
             &registry,
         )
         .expect("standard plan executes through typed bridge");
 
-    // Data carries the deterministic governance marker only; control markers
-    // stay in the control side channel.
+    // Node 04 validates data and mutates only the typed control side channel.
     let data = output.data.as_object().expect("data is object");
-    assert_eq!(data["governance"], json!("request_governance"));
+    assert_eq!(data, request_data().as_object().unwrap());
     assert!(data.get("control").is_none(), "control never enters data");
     assert!(
         data.get("metadata_center").is_none(),
@@ -95,10 +94,10 @@ fn positive_blackbox_execute_standard_plan_through_node_container() {
         "diagnostics never enter data"
     );
 
+    assert_eq!(output.control["metadata_center"]["scope_restored"], true);
     assert_eq!(
-        output.control,
-        json!({}),
-        "control side channel stays typed"
+        output.control["metadata_center"]["continuation_checked"],
+        true
     );
 
     let kinds: Vec<&str> = output
@@ -109,14 +108,6 @@ fn positive_blackbox_execute_standard_plan_through_node_container() {
     assert!(
         kinds.iter().any(|kind| *kind == "node.debug_observe"),
         "debug fact present: {kinds:?}"
-    );
-    assert!(
-        kinds.iter().any(|kind| *kind == "node.timing"),
-        "timing fact present: {kinds:?}"
-    );
-    assert!(
-        kinds.iter().any(|kind| *kind == "node.snapshot"),
-        "snapshot fact present: {kinds:?}"
     );
 
     container.drain().expect("no in-flight executions");
@@ -156,7 +147,7 @@ fn positive_error_plugin_writes_typed_error_side_channel_only() {
         .get("error_chain")
         .expect("typed error intake recorded in error chain");
     assert_eq!(chain["stage"], "source_raised");
-    assert_eq!(chain["kind"], "keyless_mock");
+    assert_eq!(chain["kind"], "typed_source_error");
     assert!(
         output
             .data
@@ -172,18 +163,18 @@ fn positive_error_plugin_writes_typed_error_side_channel_only() {
 }
 
 #[test]
-fn positive_response_governance_writes_response_data_only() {
+fn positive_server_input_does_not_inspect_model() {
     let plan = compile_standard_plan(
-        "V4HubRespChatProcess03Governed",
-        "response_chat_process",
-        "response",
-        3,
-        &["v4.std.chat_process.response_governance"],
+        "V4ServerReqInbound01ClientRaw",
+        "request_inbound",
+        "request",
+        1,
+        &["v4.std.protocol.server_input"],
     )
-    .expect("response plan compiles");
+    .expect("server-input plan compiles");
     let hash = plan.plan_hash();
     let mut container = NodeContainer::declare(
-        "V4HubRespChatProcess03Governed",
+        "V4ServerReqInbound01ClientRaw",
         plan.clone(),
         plan_bindings(&plan),
     )
@@ -195,20 +186,15 @@ fn positive_response_governance_writes_response_data_only() {
         .execute_with_plan_hash(
             &hash,
             NodeExecutionInput {
-                data: request_data(),
+                data: json!(r#"{"input":"hello"}"#),
                 control: json!({}),
             },
             &registry,
         )
-        .expect("response governance executes");
+        .expect("server input accepts missing model");
 
-    let data = output.data.as_object().expect("data is object");
-    assert_eq!(data["governance"], json!("response_governance"));
-    assert!(
-        data.get("control").is_none(),
-        "control never enters response data"
-    );
-    assert!(output.diagnostics.is_empty());
+    assert_eq!(output.data, json!(r#"{"input":"hello"}"#));
+    assert_eq!(output.diagnostics[0].kind, "request.node01");
 
     container.drain().unwrap();
     container.dispose().unwrap();
@@ -245,7 +231,7 @@ fn negative_scope_consume_rejects_non_object_control() {
         "control_center",
         "control",
         0,
-        &["v4.std.control.scope_consume"],
+        &["v4.std.control.scope_registry"],
     )
     .expect("scope plan compiles");
     let hash = plan.plan_hash();
@@ -285,7 +271,7 @@ fn positive_scope_consume_records_object_control_carrier() {
         "control_center",
         "control",
         0,
-        &["v4.std.control.scope_consume"],
+        &["v4.std.control.scope_registry"],
     )
     .expect("scope plan compiles");
     let hash = plan.plan_hash();
@@ -311,7 +297,7 @@ fn positive_scope_consume_records_object_control_carrier() {
         )
         .expect("scope carrier executes on typed object control");
     let control = output.control.as_object().expect("control is object");
-    assert_eq!(control["metadata_center"]["scope"]["consumed"], json!(true));
+    assert_eq!(control["metadata_center"]["scope_restored"], json!(true));
     assert_eq!(
         control["error_chain"],
         json!({"stage": "source_raised"}),
@@ -362,7 +348,7 @@ fn negative_error_intake_rejects_non_object_control() {
 
 #[test]
 fn negative_unregistered_handle_fails_fast() {
-    let mut authoring = standard_authoring(&["v4.std.chat_process.request_governance"])
+    let mut authoring = standard_authoring(&["v4.std.chat_process.tool_governance"])
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.plugin_id = "v4.real.product.plugin".to_string();
     let plan = compile_node_plan(
