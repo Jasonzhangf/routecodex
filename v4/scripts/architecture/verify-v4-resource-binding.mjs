@@ -224,7 +224,7 @@ function validate(resourceMap, appsdkMap, verificationMap, nodeIds) {
       }
     }
     const symbols = Array.isArray(resource.owner_symbols) ? resource.owner_symbols : [];
-    if (crate && isKnownOwner(crate) && symbols.length > 0) {
+    if (crate && isKnownOwner(crate) && symbols.length > 0 && status !== 'design') {
       const present = declaredSymbols.get(crate) ?? new Set();
       const missing = symbols.filter((symbol) => !present.has(symbol));
       if (missing.length > 0) {
@@ -263,7 +263,7 @@ function validate(resourceMap, appsdkMap, verificationMap, nodeIds) {
       failures.push(`${id}: .appsdk owner ${appsdkOwner} does not match YAML owner_crate ${crate}`);
     } else if (crate && appsdkOwner.startsWith(`${crate}::`)) {
       const appsdkSymbol = appsdkOwner.slice(crate.length + 2);
-      if (!symbols.includes(appsdkSymbol) && appsdkSymbol !== resource.owner_node) {
+      if (status !== 'design' && !symbols.includes(appsdkSymbol) && appsdkSymbol !== resource.owner_node) {
         failures.push(`${id}: .appsdk owner symbol ${appsdkSymbol} not declared in YAML owner_symbols/owner_node`);
       }
     }

@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "manifest_id": "v4-real-runtime-admission",
+  "status": "active",
+  "owner_feature_id": "v4.runtime.independent_admission",
+  "canonical_docs": [
+    "v4/docs/goals/v4-real-runtime-admission-plan.md",
+    "v4/docs/architecture/v4-real-runtime-admission-review.md"
+  ],
+  "runtime_identity": "rccv4",
+  "binary_package": "routecodex-v4-runtime-bin",
+  "cold_start": {
+    "source": "v4_compiled_manifest",
+    "digest_required": true,
+    "drift": "fail_fast"
+  },
+  "entrypoints": [
+    { "method": "GET", "path": "/health", "mode": "json" },
+    { "method": "GET", "path": "/v1/models", "mode": "json" },
+    { "method": "POST", "path": "/v1/responses", "mode": "json" },
+    { "method": "POST", "path": "/v1/responses", "mode": "sse" }
+  ],
+  "provider_fixtures": [
+    { "source": "~/.rcc/provider/minimax/config.v2.toml", "kind": "real_config", "model": "MiniMax-M3" },
+    { "source": "~/.rcc/provider/minimax_openai/config.v2.toml", "kind": "real_config", "model": "MiniMax-M3-local" },
+    { "source": "~/.rcc/provider/minimax_responses/config.v2.toml", "kind": "real_config", "model": "MiniMax-M3" }
+  ],
+  "fixture_resolution": {
+    "fable": {
+      "source": "~/.rcc/provider/fable",
+      "status": "unavailable_on_current_host",
+      "reason": "the directory is absent; backup filenames are not valid provider fixtures"
+    }
+  },
+  "modules": {
+    "governance": "routecodex-v4-governance",
+    "runtime": "routecodex-v4-runtime",
+    "provider": "routecodex-v4-provider",
+    "protocol_plugins": "routecodex-v4-standard-plugins",
+    "router": "routecodex-v4-router",
+    "server": "routecodex-v4-server"
+  },
+  "mainline": [
+    "compiled_manifest",
+    "server_req_inbound",
+    "hub_req_inbound",
+    "hub_req_chat_process",
+    "router_target_selection",
+    "hub_req_outbound",
+    "provider_wire_build",
+    "provider_transport",
+    "provider_raw_parse",
+    "hub_resp_inbound",
+    "hub_resp_chat_process",
+    "server_resp_outbound"
+  ],
+  "control_plane_forbidden_payload": [
+    "routing",
+    "retry",
+    "health",
+    "scope",
+    "error",
+    "debug",
+    "secret",
+    "manifest_digest"
+  ],
+  "required_gates": [
+    "v4_real_runtime_admission_red",
+    "v4_real_runtime_compiled_manifest",
+    "v4_real_runtime_provider_transport",
+    "v4_real_runtime_server_http",
+    "v4_real_runtime_responses_json",
+    "v4_real_runtime_responses_sse",
+    "v4_real_runtime_v3_isolation"
+  ],
+  "v3_isolation": {
+    "must_not_read": ["v3/**", "~/.rcc/config.v3.toml"],
+    "must_not_call": ["rcc", "rccv3", "routecodex"],
+    "must_not_restart": true,
+    "must_not_modify": true
+  }
+}
