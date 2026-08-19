@@ -3301,18 +3301,20 @@ features:
   owner_modules:
   - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
-  - v3/crates/routecodex-v3-error/src/lib.rs
   design:
   - docs/goals/v3-responses-session-admission-and-sse-keepalive-test-design.md
   - docs/architecture/wiki/v3-responses-session-admission.md
   - docs/architecture/manifests/v3.responses_session_admission.mainline.yml
   required_unit:
-  - Same listener plus same explicit session or conversation rejects the second request
-    with Error01-06 HTTP 409 request_in_flight.
+  - Same listener plus same explicit session or conversation blocks the second request
+    inside the admission owner until the exact active permit releases, then admits it
+    without a client-visible overlap error.
   - Different session on one listener and the same session on different listeners
     remain concurrently admissible.
   - Missing explicit scope does not invent a cross-request key.
   - Response EOF, stream error, and client body drop release only the exact permit.
+  - Permit release wakes every predicate waiter so a waiter for an unrelated active
+    scope cannot strand the waiter whose scope became available.
   required_gates:
   - npm run verify:v3-responses-session-admission
   - npm run test:v3-responses-session-admission

@@ -24,6 +24,14 @@ function forbidMatch(source, pattern, label) {
   if (pattern.test(source)) failures.push(label);
 }
 
+function yamlListEntry(source, marker) {
+  const start = source.indexOf(marker);
+  if (start < 0) return "";
+  const indent = marker.match(/^\s*/u)?.[0] ?? "";
+  const end = source.indexOf(`\n${indent}- `, start + marker.length);
+  return source.slice(start, end < 0 ? source.length : end);
+}
+
 const server = readRequired("v3/crates/routecodex-v3-server/src/lib.rs");
 const serverFrameBuilders = readRequired(
   "v3/crates/routecodex-v3-server/src/frame_builders.rs",
@@ -32,7 +40,6 @@ const serverAll = server + "\n" + serverFrameBuilders;
 const admission = readRequired(
   "v3/crates/routecodex-v3-server/src/session_admission.rs",
 );
-const error = readRequired("v3/crates/routecodex-v3-error/src/lib.rs");
 const config = readRequired("v3/crates/routecodex-v3-config/src/lib.rs");
 const configTypes = readRequired("v3/crates/routecodex-v3-config/src/types.rs");
 const configTests = readRequired(
@@ -50,6 +57,22 @@ const manifest = readRequired(
 );
 const wiki = readRequired(
   "docs/architecture/wiki/v3-responses-session-admission.md",
+);
+const admissionFunctionContract = yamlListEntry(
+  functionMap,
+  "- feature_id: v3.responses_session_inflight_admission",
+);
+const admissionResourceContract = yamlListEntry(
+  resourceMap,
+  "  - resource_id: v3.server.responses_session_admission",
+);
+const admissionMainlineContract = yamlListEntry(
+  mainlineMap,
+  "- chain_id: v3.responses_session_admission",
+);
+const admissionVerificationContract = yamlListEntry(
+  verificationMap,
+  "- feature_id: v3.responses_session_inflight_admission",
 );
 const keepaliveManifest = readRequired(
   "docs/architecture/manifests/v3.sse.http_keepalive.mainline.yml",
@@ -72,8 +95,8 @@ requireMatch(
 );
 requireMatch(
   server,
-  /read_json_payload\(request\)\.await[\s\S]*admit_v3_responses_session_after_json_parse[\s\S]*pending_endpoint_after_responses_admission/,
-  "Responses handler must admit the explicit scope after the canonical JSON parser and before Runtime execution",
+  /read_json_payload\(request\)\.await[\s\S]*admit_v3_responses_session_after_json_parse\([\s\S]*\)\.await[\s\S]*pending_endpoint_after_responses_admission/,
+  "Responses handler must await explicit-scope admission after the canonical JSON parser and before Runtime execution",
 );
 forbidMatch(
   server,
@@ -87,23 +110,33 @@ requireMatch(
 );
 requireMatch(
   admission,
-  /same_present_identity\(&active\.session_id,\s*&scope\.session_id\)[\s\S]*\|\|[\s\S]*same_present_identity\([\s\S]*active\.conversation_id/,
-  "Conflict must match either the explicit session or explicit conversation",
+  /pub\(crate\) async fn admit\([\s\S]*let notified = self\.notify\.notified\(\);[\s\S]*self\.try_admit\(scope\.clone\(\)\)[\s\S]*notified\.await/,
+  "The session admission gate must uniquely own an async predicate wait with lost-wakeup-safe notification ordering",
+);
+requireMatch(
+  server,
+  /\.responses_session_admission\s*\.admit\(V3ResponsesSessionAdmissionScope\s*\{[\s\S]*?\}\)\s*\.await/,
+  "The V3 Server caller must await the gate owner instead of projecting overlap",
+);
+forbidMatch(
+  server,
+  /responses_session_admission\s*\.\s*try_admit|V3HttpBoundaryErrorKind::RequestInFlight/,
+  "The V3 Server caller must not convert admission contention into request_in_flight",
+);
+forbidMatch(
+  admission,
+  /pub\(crate\)\s+fn\s+try_admit/,
+  "Nonblocking admission must not be exported for server callers",
 );
 requireMatch(
   admission,
-  /impl Drop for V3ResponsesSessionAdmissionPermit[\s\S]*\.active[\s\S]*\.remove\(&token\)/,
-  "Permit drop must remove only its exact admission token",
+  /impl Drop for V3ResponsesSessionAdmissionPermit[\s\S]*\.active[\s\S]*\.remove\(&token\)[\s\S]*notify\.notify_waiters\(\)/,
+  "Permit drop must remove only its exact token and wake every predicate waiter",
 );
 requireMatch(
-  error,
-  /V3HttpBoundaryErrorKind::RequestInFlight[\s\S]*V3ErrorSourceKind::RequestConflict,\s*"request_in_flight"/,
-  "Request overlap must enter the standard Error01-06 chain as request_in_flight",
-);
-requireMatch(
-  error,
-  /V3ErrorSourceKind::RequestConflict\s*=>\s*409/,
-  "Request conflict must project HTTP 409",
+  admission,
+  /same_present_identity\(&active\.session_id,\s*&scope\.session_id\)[\s\S]*\|\|[\s\S]*same_present_identity\([\s\S]*active\.conversation_id/,
+  "Waiting contention must match either the explicit session or explicit conversation",
 );
 requireMatch(
   serverAll,
@@ -194,8 +227,13 @@ for (const [source, pattern, label] of [
   ],
   [
     tests,
-    /responses_same_listener_same_session_overlap_is_rejected_before_provider_send/,
-    "Controlled provider overlap blackbox must exist",
+    /responses_same_listener_same_session_waits_for_release_then_returns_ok/,
+    "Controlled provider overlap wait-then-200 blackbox must exist",
+  ],
+  [
+    tests,
+    /responses_same_listener_different_session_remains_concurrent/,
+    "Controlled different-scope concurrency blackbox must exist",
   ],
   [
     tests,
@@ -231,15 +269,27 @@ for (const scriptName of [
     failures.push(`package.json is missing ${scriptName}`);
   }
 }
-if (
-  typeof scripts["test:v3-responses-session-admission"] !== "string" ||
-  !scripts["test:v3-responses-session-admission"].includes(
+const admissionBehaviorGate = scripts["test:v3-responses-session-admission"];
+for (const [testName, diagnostic] of [
+  [
+    "responses_same_listener_same_session_waits_for_release_then_returns_ok",
+    "Admission behavior gate must execute the same-scope wait-then-200 blackbox",
+  ],
+  [
+    "responses_same_listener_different_session_remains_concurrent",
+    "Admission behavior gate must execute the different-scope concurrency blackbox",
+  ],
+  [
     "responses_client_drop_releases_same_session_before_provider_eof",
-  )
-) {
-  failures.push(
     "Admission behavior gate must execute the controlled client-drop HTTP blackbox",
-  );
+  ],
+]) {
+  if (
+    typeof admissionBehaviorGate !== "string" ||
+    !admissionBehaviorGate.includes(testName)
+  ) {
+    failures.push(diagnostic);
+  }
 }
 for (const scriptName of [
   "verify:v3-architecture-docs",
@@ -277,6 +327,16 @@ requireMatch(
   resourceMap,
   /<V3ResponsesSessionAdmissionPermit as Drop>::drop/,
   "Resource map must anchor the real Drop trait implementation symbol",
+);
+requireMatch(
+  `${admissionFunctionContract}\n${admissionResourceContract}\n${admissionMainlineContract}\n${admissionVerificationContract}\n${manifest}\n${wiki}`,
+  /V3ResponsesSessionAdmissionGate::admit/,
+  "Canonical maps and lifecycle docs must bind the async admission owner",
+);
+forbidMatch(
+  `${admissionMainlineContract}\n${admissionVerificationContract}\n${manifest}\n${wiki}`,
+  /request_in_flight|HTTP 409|returns?\s+409|rejects?\s+(?:the\s+)?second request/i,
+  "Canonical admission contracts must not retain the retired HTTP 409 overlap path",
 );
 forbidMatch(
   `${functionMap}\n${resourceMap}`,

@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 59 functional paths, 379 caller edges.
+Generated view: 59 functional paths, 378 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -62,7 +62,7 @@ flowchart TD
   module_v3_server -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_server -->|2 edges / 2 paths| module_v3_config
   module_v3_server -->|3 edges / 2 paths| module_v3_debug
-  module_v3_server -->|4 edges / 3 paths| module_v3_error
+  module_v3_server -->|3 edges / 2 paths| module_v3_error
   module_v3_server -->|4 edges / 4 paths| module_v3_runtime
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
   module_v3_server -->|26 edges / 15 paths| module_v3_server
@@ -100,7 +100,7 @@ flowchart TD
 | v3-server | routecodex-v3-sse | 1 | `v3.sse.http_keepalive_boundary` |
 | v3-server | v3-config | 2 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.models.capability_catalog` |
 | v3-server | v3-debug | 3 | `v3.codex_sample_retention_snap_scope`<br/>`v3.server.startup` |
-| v3-server | v3-error | 4 | `v3.debug_error_foundation.mainline`<br/>`v3.responses_session_admission`<br/>`v3.server.startup` |
+| v3-server | v3-error | 3 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 4 | `v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
 | v3-server | v3-server | 26 | `v3.compaction_request_routing`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
@@ -2077,31 +2077,26 @@ flowchart TD
 
 ## v3.responses_session_admission
 
-The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, rejects overlap through Error01-06 before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.
+The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, waits on overlap before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.
 
 Owner feature: `v3.responses_session_inflight_admission`
 Manifest: `docs/architecture/manifests/v3.responses_session_admission.mainline.yml`
 
 ```mermaid
 flowchart TD
-  subgraph c_50_v3_responses_session_admission_m_v3_error["v3-error"]
-    c_50_v3_responses_session_admission_2["v3-error<br/>project_v3_http_boundary_error<br/><small>routecodex-v3-error/src/lib.rs</small>"]
-  end
   subgraph c_50_v3_responses_session_admission_m_v3_server["v3-server"]
     c_50_v3_responses_session_admission_0["v3-server<br/>admit_v3_responses_session_after_json_parse<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_50_v3_responses_session_admission_1["v3-server<br/>V3ResponsesSessionAdmissionGate::try_admit<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
-    c_50_v3_responses_session_admission_3["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
-    c_50_v3_responses_session_admission_4["v3-server<br/>hold_response_body_admission_permit<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
+    c_50_v3_responses_session_admission_1["v3-server<br/>V3ResponsesSessionAdmissionGate::admit<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
+    c_50_v3_responses_session_admission_2["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
+    c_50_v3_responses_session_admission_3["v3-server<br/>hold_response_body_admission_permit<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
   end
   c_50_v3_responses_session_admission_0 -->|v3-responses-admission-01<br/>V3Server03HttpRequestRaw → V3Server03ResponsesSessionAdmissionBlock| c_50_v3_responses_session_admission_1
-  c_50_v3_responses_session_admission_0 -->|v3-responses-admission-error-02<br/>V3Server03ResponsesSessionAdmissionBlock → V3Error01SourceRaised| c_50_v3_responses_session_admission_2
-  c_50_v3_responses_session_admission_3 -->|v3-responses-admission-release-03<br/>V3Server03ResponsesSessionAdmissionBlock → V3ServerRespOutbound06ClientFrame| c_50_v3_responses_session_admission_4
+  c_50_v3_responses_session_admission_2 -->|v3-responses-admission-release-03<br/>V3Server03ResponsesSessionAdmissionBlock → V3ServerRespOutbound06ClientFrame| c_50_v3_responses_session_admission_3
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-responses-admission-01` | `V3Server03HttpRequestRaw` → `V3Server03ResponsesSessionAdmissionBlock` | anchored | admit_v3_responses_session_after_json_parse<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ResponsesSessionAdmissionGate::try_admit<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.responses_session_inflight_admission` |
-| `v3-responses-admission-error-02` | `V3Server03ResponsesSessionAdmissionBlock` → `V3Error01SourceRaised` | anchored | admit_v3_responses_session_after_json_parse<br/><small>routecodex-v3-server/src/lib.rs</small> | project_v3_http_boundary_error<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.responses_session_inflight_admission` |
+| `v3-responses-admission-01` | `V3Server03HttpRequestRaw` → `V3Server03ResponsesSessionAdmissionBlock` | anchored | admit_v3_responses_session_after_json_parse<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ResponsesSessionAdmissionGate::admit<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.responses_session_inflight_admission` |
 | `v3-responses-admission-release-03` | `V3Server03ResponsesSessionAdmissionBlock` → `V3ServerRespOutbound06ClientFrame` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | hold_response_body_admission_permit<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.responses_session_inflight_admission` |
 
 ## v3.sse.http_keepalive_boundary

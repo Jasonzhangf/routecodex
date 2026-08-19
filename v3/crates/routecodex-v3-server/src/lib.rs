@@ -647,7 +647,7 @@ fn current_epoch_ms() -> u64 {
         .unwrap_or(0)
 }
 
-async fn admit_v3_responses_session(
+async fn admit_v3_responses_session_after_json_parse(
     state: &Arc<V3ListenerState>,
     path: &str,
     request_headers: &HeaderMap,
@@ -756,14 +756,6 @@ async fn pending_endpoint(
         );
         return hold_response_body_request_activity_permit(response, request_activity_permit);
     }
-    let admission_permit = if entry_protocol == "responses" {
-        match admit_v3_responses_session(&state, &path, &request_headers, &Value::Null).await {
-            Ok(permit) => permit,
-            Err(response) => return response,
-        }
-    } else {
-        None
-    };
     let payload = match read_json_payload(request).await {
         Ok(payload) => payload,
         Err(projected) => {
@@ -813,12 +805,18 @@ async fn pending_endpoint(
                 frame,
                 Duration::from_millis(state.server.http_sse_keepalive_ms),
             );
-            let response = match admission_permit {
-                Some(permit) => hold_response_body_admission_permit(response, permit),
-                None => response,
-            };
             return hold_response_body_request_activity_permit(response, request_activity_permit);
         }
+    };
+    let admission_permit = if entry_protocol == "responses" {
+        match admit_v3_responses_session_after_json_parse(&state, &path, &request_headers, &payload)
+            .await
+        {
+            Ok(permit) => permit,
+            Err(response) => return response,
+        }
+    } else {
+        None
     };
     let response = pending_endpoint_after_responses_admission(
         state,

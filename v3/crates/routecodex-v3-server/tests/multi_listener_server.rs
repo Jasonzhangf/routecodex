@@ -2428,7 +2428,7 @@ async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
 }
 
 #[tokio::test]
-async fn responses_same_listener_same_session_overlap_is_rejected_before_provider_send() {
+async fn responses_same_listener_same_session_waits_for_release_then_returns_ok() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, release, shutdown) =
         start_controlled_held_upstream().await;
@@ -2457,23 +2457,114 @@ async fn responses_same_listener_same_session_overlap_is_rejected_before_provide
     });
     captures.recv().await.expect("first provider request");
 
-    let second = client
-        .post(&endpoint)
-        .header("accept", "text/event-stream")
-        .header("session-id", "session-overlap")
-        .header("thread-id", "conversation-overlap")
-        .json(&request)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(second.status(), StatusCode::CONFLICT);
-    assert!(second.text().await.unwrap().contains("request_in_flight"));
+    let second_client = client.clone();
+    let second_endpoint = endpoint.clone();
+    let second_request = request.clone();
+    let mut second_task = tokio::spawn(async move {
+        let response = second_client
+            .post(second_endpoint)
+            .header("accept", "text/event-stream")
+            .header("session-id", "session-overlap")
+            .header("thread-id", "conversation-overlap")
+            .json(&second_request)
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = response.text().await.unwrap();
+        (status, body)
+    });
     assert!(timeout(Duration::from_millis(100), captures.recv())
+        .await
+        .is_err());
+    assert!(timeout(Duration::from_millis(100), &mut second_task)
         .await
         .is_err());
 
     release.add_permits(1);
-    assert_eq!(first_task.await.unwrap().status(), StatusCode::OK);
+    let first = timeout(Duration::from_secs(2), first_task)
+        .await
+        .expect("first response headers must arrive after provider release")
+        .expect("first request task must not panic");
+    assert_eq!(first.status(), StatusCode::OK);
+    first.text().await.unwrap();
+    timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("second provider request must start after the first body releases")
+        .expect("second provider capture must remain open");
+    release.add_permits(1);
+    let (status, body) = timeout(Duration::from_secs(2), second_task)
+        .await
+        .expect("second request must complete after admission release")
+        .expect("second request task must not panic");
+    assert_eq!(status, StatusCode::OK);
+    assert!(!body.contains("request_in_flight"));
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_same_listener_different_session_remains_concurrent() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, release, shutdown) =
+        start_controlled_held_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-concurrency");
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+            .await
+            .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let request = json!({"model":"client-test","input":"held","stream":true});
+
+    let first_client = client.clone();
+    let first_endpoint = endpoint.clone();
+    let first_request = request.clone();
+    let first_task = tokio::spawn(async move {
+        first_client
+            .post(first_endpoint)
+            .header("accept", "text/event-stream")
+            .header("session-id", "session-a")
+            .header("thread-id", "conversation-a")
+            .json(&first_request)
+            .send()
+            .await
+            .unwrap()
+    });
+    captures.recv().await.expect("first provider request");
+
+    let second_client = client.clone();
+    let second_endpoint = endpoint.clone();
+    let second_request = request.clone();
+    let second_task = tokio::spawn(async move {
+        second_client
+            .post(second_endpoint)
+            .header("accept", "text/event-stream")
+            .header("session-id", "session-b")
+            .header("thread-id", "conversation-b")
+            .json(&second_request)
+            .send()
+            .await
+            .unwrap()
+    });
+    timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("different session must reach the provider concurrently")
+        .expect("second provider capture must remain open");
+    release.add_permits(2);
+    let first = timeout(Duration::from_secs(2), first_task)
+        .await
+        .expect("first response headers must arrive after provider release")
+        .expect("first request task must not panic");
+    let second = timeout(Duration::from_secs(2), second_task)
+        .await
+        .expect("different-session response headers must remain concurrent")
+        .expect("different-session task must not panic");
+    assert_eq!(first.status(), StatusCode::OK);
+    assert_eq!(second.status(), StatusCode::OK);
+    first.text().await.unwrap();
+    second.text().await.unwrap();
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");

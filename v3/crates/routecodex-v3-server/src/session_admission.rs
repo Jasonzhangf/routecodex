@@ -108,7 +108,7 @@ impl V3ResponsesSessionAdmissionGate {
         }
     }
 
-    pub(crate) fn try_admit(
+    fn try_admit(
         &self,
         scope: V3ResponsesSessionAdmissionScope,
     ) -> Result<Option<V3ResponsesSessionAdmissionPermit>, ()> {
@@ -150,7 +150,7 @@ impl Drop for V3ResponsesSessionAdmissionPermit {
             .expect("V3 Responses session admission state lock is poisoned")
             .active
             .remove(&token);
-        self.notify.notify_one();
+        self.notify.notify_waiters();
     }
 }
 
@@ -161,6 +161,7 @@ fn same_present_identity(left: &Option<String>, right: &Option<String>) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::time::{timeout, Duration};
 
     fn scope(
         endpoint: &str,
@@ -174,65 +175,95 @@ mod tests {
         }
     }
 
-    #[test]
-    fn same_session_or_conversation_conflicts_until_exact_permit_drop() {
-        let gate = V3ResponsesSessionAdmissionGate::default();
+    #[tokio::test]
+    async fn same_session_or_conversation_waits_until_exact_permit_drop() {
+        let gate = Arc::new(V3ResponsesSessionAdmissionGate::default());
         let first = gate
-            .try_admit(scope(
+            .admit(scope(
                 "/v1/responses",
                 Some("session-a"),
                 Some("conversation-a"),
             ))
-            .unwrap()
+            .await
             .unwrap();
 
-        assert!(gate
-            .try_admit(scope(
-                "/v1/responses",
-                Some("session-a"),
-                Some("conversation-b"),
-            ))
+        let session_wait_gate = Arc::clone(&gate);
+        let mut session_waiter = tokio::spawn(async move {
+            session_wait_gate
+                .admit(scope(
+                    "/v1/responses",
+                    Some("session-a"),
+                    Some("conversation-b"),
+                ))
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(timeout(Duration::from_millis(25), &mut session_waiter)
+            .await
             .is_err());
-        assert!(gate
-            .try_admit(scope(
-                "/v1/responses",
-                Some("session-b"),
-                Some("conversation-a"),
-            ))
-            .is_err());
-        assert!(gate
-            .try_admit(scope(
-                "/v1/responses",
-                Some("session-b"),
-                Some("conversation-b"),
-            ))
-            .is_ok());
 
         drop(first);
-        assert!(gate
-            .try_admit(scope(
+        let session_permit = timeout(Duration::from_secs(1), session_waiter)
+            .await
+            .expect("same-session waiter must resume after exact permit release")
+            .expect("same-session waiter task must not panic")
+            .expect("same-session waiter must receive a permit");
+        drop(session_permit);
+
+        let first = gate
+            .admit(scope(
                 "/v1/responses",
                 Some("session-a"),
                 Some("conversation-a"),
             ))
-            .is_ok());
+            .await
+            .unwrap();
+        let conversation_wait_gate = Arc::clone(&gate);
+        let mut conversation_waiter = tokio::spawn(async move {
+            conversation_wait_gate
+                .admit(scope(
+                    "/v1/responses",
+                    Some("session-b"),
+                    Some("conversation-a"),
+                ))
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(timeout(Duration::from_millis(25), &mut conversation_waiter)
+            .await
+            .is_err());
+
+        drop(first);
+        timeout(Duration::from_secs(1), conversation_waiter)
+            .await
+            .expect("same-conversation waiter must resume after exact permit release")
+            .expect("same-conversation waiter task must not panic")
+            .expect("same-conversation waiter must receive a permit");
     }
 
-    #[test]
-    fn missing_scope_and_different_gate_instances_do_not_cross_lock() {
-        let first_gate = V3ResponsesSessionAdmissionGate::default();
+    #[tokio::test]
+    async fn missing_scope_and_different_scopes_or_gate_instances_do_not_cross_lock() {
+        let first_gate = Arc::new(V3ResponsesSessionAdmissionGate::default());
         let second_gate = V3ResponsesSessionAdmissionGate::default();
 
         assert!(first_gate
-            .try_admit(scope("/v1/responses", None, None))
-            .unwrap()
+            .admit(scope("/v1/responses", None, None))
+            .await
             .is_none());
         let _first = first_gate
-            .try_admit(scope("/v1/responses", Some("session-a"), None))
-            .unwrap()
+            .admit(scope("/v1/responses", Some("session-a"), None))
+            .await
             .unwrap();
+        let different_scope = timeout(
+            Duration::from_millis(100),
+            first_gate.admit(scope("/v1/responses", Some("session-b"), None)),
+        )
+        .await
+        .expect("different scope on one listener must remain concurrent");
+        assert!(different_scope.is_some());
         assert!(second_gate
-            .try_admit(scope("/v1/responses", Some("session-a"), None))
-            .is_ok());
+            .admit(scope("/v1/responses", Some("session-a"), None))
+            .await
+            .is_some());
     }
 }

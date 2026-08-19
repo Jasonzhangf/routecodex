@@ -21,9 +21,9 @@ const copied = [
   "package.json",
   ".github/workflows/test.yml",
   "v3/crates/routecodex-v3-server/src/lib.rs",
+  "v3/crates/routecodex-v3-server/src/frame_builders.rs",
   "v3/crates/routecodex-v3-server/src/session_admission.rs",
   "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
-  "v3/crates/routecodex-v3-error/src/lib.rs",
   "v3/crates/routecodex-v3-config/src/lib.rs",
   "v3/crates/routecodex-v3-config/src/types.rs",
   "v3/crates/routecodex-v3-config/tests/config_v3_contract.rs",
@@ -45,27 +45,34 @@ const cases = [
         "                    || same_present_identity(&active.conversation_id, &scope.conversation_id))",
         ")",
       ),
-    diagnostic: /Conflict must match either the explicit session or explicit conversation/u,
+    diagnostic: /Waiting contention must match either the explicit session or explicit conversation/u,
   },
   {
     name: "permit releases every active request",
     path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
     mutate: (source) => source.replace(".remove(&token);", ".clear();"),
-    diagnostic: /Permit drop must remove only its exact admission token/u,
+    diagnostic: /Permit drop must remove only its exact token and wake every predicate waiter/u,
   },
   {
-    name: "request conflict is downgraded to 400",
-    path: "v3/crates/routecodex-v3-error/src/lib.rs",
+    name: "server caller regains nonblocking admission",
+    path: "v3/crates/routecodex-v3-server/src/lib.rs",
     mutate: (source) =>
       source.replace(
-        "V3ErrorSourceKind::RequestConflict => 409",
-        "V3ErrorSourceKind::RequestConflict => 400",
+        ".admit(V3ResponsesSessionAdmissionScope {",
+        ".try_admit(V3ResponsesSessionAdmissionScope {",
       ),
-    diagnostic: /Request conflict must project HTTP 409/u,
+    diagnostic: /caller must await the gate owner instead of projecting overlap|must not convert admission contention into request_in_flight/u,
+  },
+  {
+    name: "permit release wakes only one unrelated waiter",
+    path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
+    mutate: (source) =>
+      source.replace("self.notify.notify_waiters();", "self.notify.notify_one();"),
+    diagnostic: /wake every predicate waiter/u,
   },
   {
     name: "error SSE receives success keepalive",
-    path: "v3/crates/routecodex-v3-server/src/lib.rs",
+    path: "v3/crates/routecodex-v3-server/src/frame_builders.rs",
     mutate: (source) =>
       source.replaceAll(
         "v3_client_sse_body(stream, None)",
@@ -134,14 +141,44 @@ const cases = [
     diagnostic: /server-owned feature/u,
   },
   {
-    name: "client-drop HTTP blackbox is removed",
+    name: "same-scope wait-then-200 HTTP blackbox is removed",
     path: "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
     mutate: (source) =>
       source.replace(
-        "async fn responses_client_drop_releases_same_session_before_provider_eof()",
-        "async fn removed_responses_client_drop_release_blackbox()",
+        "async fn responses_same_listener_same_session_waits_for_release_then_returns_ok()",
+        "async fn removed_same_scope_wait_then_ok_blackbox()",
       ),
-    diagnostic: /client drop releases admission before provider EOF/u,
+    diagnostic: /wait-then-200 blackbox must exist/u,
+  },
+  {
+    name: "different-scope concurrency HTTP blackbox is removed",
+    path: "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
+    mutate: (source) =>
+      source.replace(
+        "async fn responses_same_listener_different_session_remains_concurrent()",
+        "async fn removed_different_scope_concurrency_blackbox()",
+      ),
+    diagnostic: /different-scope concurrency blackbox must exist/u,
+  },
+  {
+    name: "behavior gate omits the same-scope wait-then-200 blackbox",
+    path: "package.json",
+    mutate: (source) =>
+      source.replace(
+        " && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-server --test multi_listener_server responses_same_listener_same_session_waits_for_release_then_returns_ok -- --exact --nocapture",
+        "",
+      ),
+    diagnostic: /must execute the same-scope wait-then-200 blackbox/u,
+  },
+  {
+    name: "behavior gate omits the different-scope concurrency blackbox",
+    path: "package.json",
+    mutate: (source) =>
+      source.replace(
+        " && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-server --test multi_listener_server responses_same_listener_different_session_remains_concurrent -- --exact --nocapture",
+        "",
+      ),
+    diagnostic: /must execute the different-scope concurrency blackbox/u,
   },
   {
     name: "behavior gate omits the client-drop HTTP blackbox",
@@ -152,6 +189,16 @@ const cases = [
         "",
       ),
     diagnostic: /must execute the controlled client-drop HTTP blackbox/u,
+  },
+  {
+    name: "canonical wiki restores client-visible overlap rejection",
+    path: "docs/architecture/wiki/v3-responses-session-admission.md",
+    mutate: (source) =>
+      source.replace(
+        "does not return an overlap error to the client",
+        "returns HTTP 409 request_in_flight to the client",
+      ),
+    diagnostic: /must not retain the retired HTTP 409 overlap path/u,
   },
 ];
 

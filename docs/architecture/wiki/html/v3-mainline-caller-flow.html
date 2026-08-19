@@ -283,7 +283,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>59 functional paths</span>
-        <span>379 caller edges</span>
+        <span>378 caller edges</span>
       </div>
     </header>
 
@@ -473,7 +473,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>8</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>17</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>293</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>292</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -595,7 +595,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_console_request_count_visibility_mainline"><code>v3.console_request_count_visibility.mainline</code></a><br/>v 3.console_request_count_visibility.mainline</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>1</td><td><code>v3.console_request_count_visibility</code></td><td><code>sha256:77ca1fb4f529…</code></td></tr>
 <tr><td><a href="#chain-v3_console_human_readable_layering_mainline"><code>v3.console_human_readable_layering.mainline</code></a><br/>v 3.console_human_readable_layering.mainline</td><td><span class="status audited_locked">locked by Jason</span></td><td>6</td><td>2</td><td><code>v3.console_human_readable_layering</code></td><td><code>sha256:b0969cb88697…</code></td></tr>
 <tr><td><a href="#chain-v3_runtime_timing_observability_mainline"><code>v3.runtime_timing_observability.mainline</code></a><br/>v 3.runtime_timing_observability.mainline</td><td><span class="status audited_locked">locked by Jason</span></td><td>14</td><td>2</td><td><code>v3.runtime_timing_observability</code></td><td><code>sha256:968849c3f1b4…</code></td></tr>
-<tr><td><a href="#chain-v3_responses_session_admission"><code>v3.responses_session_admission</code></a><br/>v 3.responses_session_admission</td><td><span class="status audited_locked">locked by Jason</span></td><td>3</td><td>4</td><td><code>v3.responses_session_inflight_admission</code></td><td><code>sha256:3b53f2fc2ecb…</code></td></tr>
+<tr><td><a href="#chain-v3_responses_session_admission"><code>v3.responses_session_admission</code></a><br/>v 3.responses_session_admission</td><td><span class="status audited_locked">locked by Jason</span></td><td>2</td><td>3</td><td><code>v3.responses_session_inflight_admission</code></td><td><code>sha256:c5c8a7157115…</code></td></tr>
 <tr><td><a href="#chain-v3_sse_http_keepalive_boundary"><code>v3.sse.http_keepalive_boundary</code></a><br/>v 3.sse.http_keepalive_boundary</td><td><span class="status audited_locked">locked by Jason</span></td><td>1</td><td>3</td><td><code>v3.sse_http_keepalive_boundary</code></td><td><code>sha256:efbfef1b5d98…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_action_gate_mainline"><code>v3.provider_action_gate.mainline</code></a><br/>v 3.provider_action_gate.mainline</td><td><span class="status audited_locked">locked by Jason</span></td><td>49</td><td>3</td><td><code>v3.provider_action_gate</code></td><td><code>sha256:f8acb52362dc…</code></td></tr>
 <tr><td><a href="#chain-v3_build_test_artifact_budget"><code>v3.build_test_artifact_budget</code></a><br/>v 3.build_test_artifact_budget</td><td><span class="status audited_locked">locked by Jason</span></td><td>3</td><td>2</td><td><code>v3.build_test_artifact_budget</code></td><td><code>sha256:243be5703ebf…</code></td></tr>
@@ -687,7 +687,7 @@ flowchart TD
             <span class="chain-id">v 3.responses_session_admission</span>
             <span>V3Server03HttpRequestRaw → V3ServerRespOutbound06ClientFrame</span>
             <span><code>v3.responses_session_admission</code></span>
-            <span>3 edges · 4 resources · v3-error, v3-server</span>
+            <span>2 edges · 3 resources · v3-server</span>
             <span class="status audited_locked">locked by Jason</span>
           </a>
 <a class="branch-card" href="#chain-v3_sse_http_keepalive_boundary">
@@ -3654,15 +3654,15 @@ flowchart TD
       <summary>
         <span class="summary-main">v 3.responses_session_admission</span>
         <span class="summary-sub">V3Server03HttpRequestRaw → V3ServerRespOutbound06ClientFrame</span>
-        <span class="summary-sub">3 edges · <code>v3.responses_session_admission</code> · V3Server03HttpRequestRaw → V3ServerRespOutbound06ClientFrame</span>
+        <span class="summary-sub">2 edges · <code>v3.responses_session_admission</code> · V3Server03HttpRequestRaw → V3ServerRespOutbound06ClientFrame</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, rejects overlap through Error01-06 before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.</p>
+        <p class="chain-summary">The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, waits on overlap before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.responses_session_inflight_admission</code></span>
           <span>audit: <span class="status audited_locked">locked by Jason</span></span>
-          <span>modules: <code>v3-error · v3-server</code></span>
-          <span>resources: <code>4</code></span>
+          <span>modules: <code>v3-server</code></span>
+          <span>resources: <code>3</code></span>
           <span>manifest: <code>docs/architecture/manifests/v3.responses_session_admission.mainline.yml</code></span>
 
         </div>
@@ -3671,20 +3671,17 @@ flowchart TD
 flowchart TD
   n_v3_responses_session_admission_0[&quot;&lt;b&gt;HTTP 原始请求&lt;/b&gt;&lt;br/&gt;server 捕获当前请求；不做 Hub 语义治理&lt;br/&gt;&lt;small&gt;V3Server03HttpRequestRaw&lt;/small&gt;&quot;]
   n_v3_responses_session_admission_1[&quot;&lt;b&gt;Server 03 Responses Session Admission Block&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Server03ResponsesSessionAdmissionBlock&lt;/small&gt;&quot;]
-  n_v3_responses_session_admission_2[&quot;&lt;b&gt;Error source&lt;/b&gt;&lt;br/&gt;错误唯一入口；记录 source/stage/code，不在 Server/provider 本地分叉&lt;br/&gt;&lt;small&gt;V3Error01SourceRaised&lt;/small&gt;&quot;]
-  n_v3_responses_session_admission_3[&quot;&lt;b&gt;Server client frame&lt;/b&gt;&lt;br/&gt;server 发送最终 client frame&lt;br/&gt;&lt;small&gt;V3ServerRespOutbound06ClientFrame&lt;/small&gt;&quot;]
+  n_v3_responses_session_admission_2[&quot;&lt;b&gt;Server client frame&lt;/b&gt;&lt;br/&gt;server 发送最终 client frame&lt;br/&gt;&lt;small&gt;V3ServerRespOutbound06ClientFrame&lt;/small&gt;&quot;]
   n_v3_responses_session_admission_0 --&gt;|v3-responses-admission-01&lt;br/&gt;v3-server → v3-server| n_v3_responses_session_admission_1
-  n_v3_responses_session_admission_1 --&gt;|v3-responses-admission-error-02&lt;br/&gt;v3-server → v3-error| n_v3_responses_session_admission_2
-  n_v3_responses_session_admission_1 --&gt;|v3-responses-admission-release-03&lt;br/&gt;v3-server → v3-server| n_v3_responses_session_admission_3
+  n_v3_responses_session_admission_1 --&gt;|v3-responses-admission-release-03&lt;br/&gt;v3-server → v3-server| n_v3_responses_session_admission_2
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
-  class n_v3_responses_session_admission_0,n_v3_responses_session_admission_1,n_v3_responses_session_admission_2,n_v3_responses_session_admission_3 node;</pre>
+  class n_v3_responses_session_admission_0,n_v3_responses_session_admission_1,n_v3_responses_session_admission_2 node;</pre>
         </div>
         <table>
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
 <tbody>
-<tr><td><code>v3-responses-admission-01</code></td><td><code>V3Server03HttpRequestRaw</code><br/>→ <code>V3Server03ResponsesSessionAdmissionBlock</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.server.validated_http_input</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.server.responses_session_admission</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.server.responses_session_admission</code></div></td><td><code>admit_v3_responses_session_after_json_parse</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>V3ResponsesSessionAdmissionGate::try_admit</code><br/><small>routecodex-v3-server/src/session_admission.rs</small></td></tr>
-<tr><td><code>v3-responses-admission-error-02</code></td><td><code>V3Server03ResponsesSessionAdmissionBlock</code><br/>→ <code>V3Error01SourceRaised</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.server.responses_session_admission</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.error.chain</code></div></td><td><code>admit_v3_responses_session_after_json_parse</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>project_v3_http_boundary_error</code><br/><small>routecodex-v3-error/src/lib.rs</small></td></tr>
+<tr><td><code>v3-responses-admission-01</code></td><td><code>V3Server03HttpRequestRaw</code><br/>→ <code>V3Server03ResponsesSessionAdmissionBlock</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.server.validated_http_input</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.server.responses_session_admission</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.server.responses_session_admission</code></div></td><td><code>admit_v3_responses_session_after_json_parse</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>V3ResponsesSessionAdmissionGate::admit</code><br/><small>routecodex-v3-server/src/session_admission.rs</small></td></tr>
 <tr><td><code>v3-responses-admission-release-03</code></td><td><code>V3Server03ResponsesSessionAdmissionBlock</code><br/>→ <code>V3ServerRespOutbound06ClientFrame</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.server.responses_session_admission</code> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.server.responses_session_admission</code></div></td><td><code>pending_endpoint</code><br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small></td><td><code>hold_response_body_admission_permit</code><br/><small>routecodex-v3-server/src/session_admission.rs</small></td></tr>
 </tbody>
 </table>

@@ -1398,14 +1398,16 @@ resources:
   - resource_id: v3.server.responses_session_admission
     resource_kind: listener_scoped_concurrency_gate
     lifecycle: v3.responses_session_admission
+    owner_feature_id: v3.responses_session_inflight_admission
     owner_crate: routecodex-v3-server
     owner_node: V3Server03ResponsesSessionAdmissionBlock
     identity: [serverId, endpoint, explicitSessionId, explicitConversationId, permitToken]
-    allowed_writers: [V3ResponsesSessionAdmissionGate::try_admit, <V3ResponsesSessionAdmissionPermit as Drop>::drop]
+    allowed_writers: [V3ResponsesSessionAdmissionGate::admit, <V3ResponsesSessionAdmissionPermit as Drop>::drop]
     allowed_readers: [admit_v3_responses_session_after_json_parse, pending_endpoint, hold_response_body_admission_permit]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, provider_action_gate]
     may_enter_provider_body: false
     may_enter_client_body: false
+    contention_policy: wait_on_listener_local_predicate_without_client_error_projection
     release_point: V3ServerRespOutbound06ClientFrameBodyEofErrorOrDrop
     binding_status: anchored
 

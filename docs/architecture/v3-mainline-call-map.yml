@@ -5763,7 +5763,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.responses_session_admission
   owner_feature_id: v3.responses_session_inflight_admission
-  summary: The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, rejects overlap through Error01-06 before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.
+  summary: The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, waits on overlap before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.
   manifest: docs/architecture/manifests/v3.responses_session_admission.mainline.yml
   entry_contract:
     node: V3Server03HttpRequestRaw
@@ -5774,29 +5774,18 @@ chains:
     to_node: V3Server03ResponsesSessionAdmissionBlock
     caller_symbol: admit_v3_responses_session_after_json_parse
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: V3ResponsesSessionAdmissionGate::try_admit
+    callee_symbol: V3ResponsesSessionAdmissionGate::admit
     callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
     status: anchored
     owner_feature_id: v3.responses_session_inflight_admission
+    semantic_contract:
+      - The caller awaits the listener-local predicate after canonical JSON parsing and before Runtime or provider transport.
+      - A matching explicit session or conversation remains inside this edge until the exact active permit drops; no client error is projected.
     resource_flow:
       consumes: [v3.server.validated_http_input]
       produces: [v3.server.responses_session_admission]
       side_channel_reads: []
       side_channel_writes: [v3.server.responses_session_admission]
-  - step_id: v3-responses-admission-error-02
-    from_node: V3Server03ResponsesSessionAdmissionBlock
-    to_node: V3Error01SourceRaised
-    caller_symbol: admit_v3_responses_session_after_json_parse
-    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: project_v3_http_boundary_error
-    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
-    status: anchored
-    owner_feature_id: v3.responses_session_inflight_admission
-    resource_flow:
-      consumes: [v3.server.responses_session_admission]
-      produces: [v3.error.chain]
-      side_channel_reads: []
-      side_channel_writes: [v3.error.chain]
   - step_id: v3-responses-admission-release-03
     from_node: V3Server03ResponsesSessionAdmissionBlock
     to_node: V3ServerRespOutbound06ClientFrame
