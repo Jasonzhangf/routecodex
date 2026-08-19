@@ -444,8 +444,11 @@ impl ScopeRegistry {
         request_id: &str,
         full_input_hash: Option<&str>,
     ) -> Result<ScopeRecord, ScopeError> {
-        if self.bindings.contains_key(&key) {
-            return Err(ScopeError::AlreadyBound);
+        if let Some(binding) = self.bindings.get(&key) {
+            if !binding.released {
+                return Err(ScopeError::AlreadyBound);
+            }
+            self.bindings.remove(&key);
         }
         let full_input_hash = match full_input_hash {
             Some(hash) => Some(hash.to_string()),
@@ -530,6 +533,12 @@ impl ScopeRegistry {
 
     pub fn is_bound(&self, key: &ContinuationKey) -> bool {
         self.bindings.contains_key(key)
+    }
+
+    pub fn is_restored(&self, key: &ContinuationKey) -> bool {
+        self.bindings
+            .get(key)
+            .is_some_and(|binding| binding.restored && !binding.released)
     }
 
     /// Whether any binding exists on the same port/session/conversation trio.
@@ -1319,6 +1328,12 @@ impl NodePlugin for ContinuationCommit {
             .as_deref()
             .map(|payload| format!("sha256:{payload}"))
             .ok_or_else(|| RuntimeFault::new("continuation_commit", "response payload missing"))?;
+        if registries.scope.is_restored(&key) {
+            registries
+                .scope
+                .release(&key, ctx.request_id())
+                .map_err(|error| RuntimeFault::new("continuation_release", error.to_string()))?;
+        }
         registries
             .scope
             .bind(key, ctx.request_id(), Some(&payload_hash))

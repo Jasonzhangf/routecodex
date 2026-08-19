@@ -182,6 +182,71 @@ fn continuation_three_key_save_and_restore_roundtrip() {
 }
 
 #[test]
+fn continuation_checkpoint_rotates_after_same_scope_restore() {
+    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    runtime
+        .execute_provider_response_scoped(
+            "{\"text\":\"first\"}",
+            "r-rotate-save-1",
+            5555,
+            "session-rotate",
+            "conversation-rotate",
+            "responses",
+            "direct",
+        )
+        .expect("first response commits continuation");
+    runtime
+        .execute_request_scoped(
+            "responses:continue",
+            "r-rotate-restore",
+            5555,
+            "session-rotate",
+            "conversation-rotate",
+        )
+        .expect("next request restores continuation");
+    runtime
+        .execute_provider_response_scoped(
+            "{\"text\":\"second\"}",
+            "r-rotate-save-2",
+            5555,
+            "session-rotate",
+            "conversation-rotate",
+            "responses",
+            "direct",
+        )
+        .expect("restored checkpoint rotates to next response truth");
+}
+
+#[test]
+fn red_continuation_checkpoint_cannot_rebind_before_restore() {
+    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    runtime
+        .execute_provider_response_scoped(
+            "{\"text\":\"first\"}",
+            "r-unrestored-save-1",
+            5555,
+            "session-unrestored",
+            "conversation-unrestored",
+            "responses",
+            "direct",
+        )
+        .expect("first response commits continuation");
+    let error = runtime
+        .execute_provider_response_scoped(
+            "{\"text\":\"second\"}",
+            "r-unrestored-save-2",
+            5555,
+            "session-unrestored",
+            "conversation-unrestored",
+            "responses",
+            "direct",
+        )
+        .expect_err("unrestored checkpoint must stay immutable");
+    assert_eq!(error.code, "continuation_commit");
+    assert!(error.message.contains("already bound"));
+}
+
+#[test]
 fn red_direct_relay_cross_continuation_fails() {
     let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
     runtime

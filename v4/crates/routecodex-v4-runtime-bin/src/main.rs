@@ -29,7 +29,7 @@ use routecodex_v4_server::{
 use routecodex_v4_servertool::{build_run_output, ServertoolRunInput};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -382,12 +382,14 @@ fn format_status(state: &str, record: &ManagedInstanceRecord) -> String {
 
 struct PipelineHandler {
     manifest: RuntimeConfigManifest,
-    skeleton: SkeletonRuntime,
+    skeleton: Arc<Mutex<SkeletonRuntime>>,
 }
 
 impl PipelineHandler {
     fn new(manifest: RuntimeConfigManifest) -> Result<Self, String> {
-        let skeleton = SkeletonRuntime::load(SKELETON_PLAN).map_err(|error| error.to_string())?;
+        let skeleton = Arc::new(Mutex::new(
+            SkeletonRuntime::load(SKELETON_PLAN).map_err(|error| error.to_string())?,
+        ));
         Ok(Self { manifest, skeleton })
     }
 }
@@ -440,7 +442,7 @@ fn models_response(manifest: &RuntimeConfigManifest) -> HttpResponse {
 
 fn handle_responses(
     manifest: &RuntimeConfigManifest,
-    skeleton: &SkeletonRuntime,
+    skeleton: &Arc<Mutex<SkeletonRuntime>>,
     request: &HttpRequest,
 ) -> Result<HttpResponse, HttpResponse> {
     let body: serde_json::Value = serde_json::from_slice(&request.body).map_err(|error| {
@@ -451,17 +453,27 @@ fn handle_responses(
         )
     })?;
     let raw_entry = format!("responses:{}", String::from_utf8_lossy(&request.body));
-    let request_continuation_scope = body
-        .get("previous_response_id")
-        .and_then(serde_json::Value::as_str)
+    let session_scope = request
+        .header("x-rccv4-session-id")
         .unwrap_or(&request.request_id);
+    let conversation_scope = request
+        .header("x-rccv4-conversation-id")
+        .unwrap_or(session_scope);
     skeleton
+        .lock()
+        .map_err(|_| {
+            project_fault(
+                request,
+                RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"),
+                500,
+            )
+        })?
         .execute_request_scoped(
             &raw_entry,
             &request.request_id,
             request.port,
-            request_continuation_scope,
-            "",
+            session_scope,
+            conversation_scope,
         )
         .map_err(|fault| project_fault(request, fault, 400))?;
     let model = body
@@ -542,9 +554,14 @@ fn handle_responses(
                 502,
             ));
         }
-        let response_stream =
-            ResponsesSseStream::new(stream, request.request_id.clone(), request.port)
-            .map_err(|fault| project_fault(request, fault, 500))?;
+        let response_stream = ResponsesSseStream::new(
+            stream,
+            Arc::clone(skeleton),
+            request.request_id.clone(),
+            request.port,
+            session_scope.to_string(),
+            conversation_scope.to_string(),
+        );
         return Ok(HttpResponse::streaming(
             status,
             "text/event-stream",
@@ -563,16 +580,6 @@ fn handle_responses(
         .map_err(|fault| project_fault(request, fault, 502))?
     {
         ResponsesProviderPayload::Json(value) => {
-            let response_scope = value
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| {
-                    project_fault(
-                        request,
-                        RuntimeFault::new("provider_response_id", "Responses payload missing id"),
-                        502,
-                    )
-                })?;
             let provider_raw = serde_json::to_string(&value).map_err(|error| {
                 project_fault(
                     request,
@@ -581,12 +588,20 @@ fn handle_responses(
                 )
             })?;
             skeleton
+                .lock()
+                .map_err(|_| {
+                    project_fault(
+                        request,
+                        RuntimeFault::new("response_runtime_lock", "response runtime lock poisoned"),
+                        500,
+                    )
+                })?
                 .execute_provider_response_scoped(
                     &provider_raw,
                     &format!("{}-response", request.request_id),
                     request.port,
-                    response_scope,
-                    "",
+                    session_scope,
+                    conversation_scope,
                     "responses",
                     "direct",
                 )
@@ -603,31 +618,38 @@ fn handle_responses(
 
 struct ResponsesSseStream {
     stream: ProviderResponseStream,
+    skeleton: Arc<Mutex<SkeletonRuntime>>,
     pending: Vec<u8>,
     frame_buffer: Vec<u8>,
     terminal_seen: bool,
     frame_sequence: u64,
     request_id: String,
     port: u16,
-    skeleton: SkeletonRuntime,
+    session_scope: String,
+    conversation_scope: String,
 }
 
 impl ResponsesSseStream {
     fn new(
         stream: ProviderResponseStream,
+        skeleton: Arc<Mutex<SkeletonRuntime>>,
         request_id: String,
         port: u16,
-    ) -> Result<Self, RuntimeFault> {
-        Ok(Self {
+        session_scope: String,
+        conversation_scope: String,
+    ) -> Self {
+        Self {
             stream,
+            skeleton,
             pending: Vec::new(),
             frame_buffer: Vec::new(),
             terminal_seen: false,
             frame_sequence: 0,
             request_id,
             port,
-            skeleton: SkeletonRuntime::load(SKELETON_PLAN)?,
-        })
+            session_scope,
+            conversation_scope,
+        }
     }
 }
 
@@ -676,25 +698,16 @@ impl ResponseStream for ResponsesSseStream {
                             )
                         })?;
                     self.frame_sequence += 1;
-                    let response_scope = event
-                        .get("response")
-                        .and_then(|response| response.get("id"))
-                        .or_else(|| event.get("id"))
-                        .and_then(serde_json::Value::as_str)
-                        .ok_or_else(|| {
-                            std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                "terminal Responses SSE event has no response id",
-                            )
-                        })?;
                     let provider_raw = serde_json::to_string(&event).map_err(io_fault)?;
                     self.skeleton
+                        .lock()
+                        .map_err(|_| std::io::Error::other("response runtime lock poisoned"))?
                         .execute_provider_response_scoped(
                             &provider_raw,
                             &format!("{}-sse-{}", self.request_id, self.frame_sequence),
                             self.port,
-                            response_scope,
-                            "",
+                            &self.session_scope,
+                            &self.conversation_scope,
                             "responses",
                             "direct",
                         )
