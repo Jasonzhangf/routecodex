@@ -284,6 +284,18 @@
     },
     {
       "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-cordis-bridge",
+      "owner": "routecodex-v4-runtime::scope_session_from_control",
+      "edge_type": "symbol_dependency",
+      "symbols": [
+        "ScopeSessionValue",
+        "ScopeSessionOperation"
+      ],
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
       "to": "routecodex-v4-skeleton",
       "owner": "routecodex-v4-build-link",
       "edge_type": "workspace_artifact_link",
@@ -446,7 +458,8 @@
       "edge_type": "data_flow",
       "resource": "v4.response.provider_raw",
       "path": "crates/routecodex-v4-runtime/src/lib.rs",
-      "status": "active"
+      "status": "active",
+      "plugin_binding": "routecodex-v4-standard-plugins::protocol_decode"
     },
     {
       "from": "V4HubRespInbound02Parsed",
@@ -464,7 +477,8 @@
       "edge_type": "data_flow",
       "resource": "v4.response.normal_payload",
       "path": "crates/routecodex-v4-runtime/src/lib.rs",
-      "status": "active"
+      "status": "active",
+      "plugin_binding": "routecodex-v4-standard-plugins::client_semantic_projection"
     },
     {
       "from": "V4HubRespOutbound04ClientSemantic",
@@ -473,7 +487,8 @@
       "edge_type": "data_flow",
       "resource": "v4.response.client_wire_payload",
       "path": "crates/routecodex-v4-runtime/src/lib.rs",
-      "status": "active"
+      "status": "active",
+      "plugin_binding": "routecodex-v4-standard-plugins::sse_frame_boundary"
     },
     {
       "from": "V4ServerSseOut05FrameBoundary",
@@ -482,7 +497,8 @@
       "edge_type": "data_flow",
       "resource": "v4.response.client_wire_payload",
       "path": "crates/routecodex-v4-runtime/src/lib.rs",
-      "status": "active"
+      "status": "active",
+      "plugin_binding": "routecodex-v4-standard-plugins::frame_build"
     },
     {
       "from": "root_v4_dispatcher",

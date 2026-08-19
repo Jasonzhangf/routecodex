@@ -63,10 +63,21 @@ const CONTRACT_SEMANTICS = [
 ];
 
 const GATES = [
+  'v4_continuation_control_plane_l2',
   'v4_standard_plugins_l2_regression',
+  'v4_response_inbound_outbound_l2',
   'v4_standard_plugins_test_consumer',
   'v4_parity_gate_standard_plugins',
   'v4_parity_gate_standard_plugins_red',
+];
+
+const REQUIRED_INTEGRATION_DESCRIPTOR_IDS = [
+  'v4.std.continuation.commit',
+  'v4.std.continuation.release',
+  'v4.std.protocol.response_decode',
+  'v4.std.protocol.response_client_semantic',
+  'v4.std.protocol.response_sse_frame',
+  'v4.std.protocol.response_frame_build',
 ];
 
 const SOURCE_DEPS = [
@@ -97,6 +108,8 @@ const REQUIRED_SOURCE = [
   'pub mod chat_process',
   'pub mod routing',
   'pub mod provider',
+  'pub mod response_inbound',
+  'pub mod response_outbound',
 ];
 
 const NODE_PERMISSIONS = new Map([
@@ -106,11 +119,25 @@ const NODE_PERMISSIONS = new Map([
   ['V4HubReqChatProcess04Governed', {
     reads: ['v4.request.normal_payload'], writes: ['v4.request.normal_payload'],
   }],
+  ['V4HubRespInbound02Parsed', {
+    reads: ['v4.response.provider_raw'], writes: ['v4.response.normal_payload'],
+  }],
   ['V4HubRespChatProcess03Governed', {
     reads: ['v4.response.normal_payload'], writes: ['v4.response.normal_payload'],
   }],
+  ['V4ChatProcess03ContinuationCommit', {
+    reads: ['v4.control.metadata_center'],
+    writes: ['v4.scope.session'],
+  }],
+  ['V4RespContinuationCommitted', {
+    reads: ['v4.control.metadata_center'],
+    writes: ['v4.scope.session'],
+  }],
   ['V4HubRespOutbound04ClientSemantic', {
-    reads: ['v4.response.normal_payload'], writes: [],
+    reads: ['v4.response.normal_payload'], writes: ['v4.response.client_wire_payload'],
+  }],
+  ['V4ServerSseOut05FrameBoundary', {
+    reads: ['v4.response.client_wire_payload'], writes: [],
   }],
   ['V4HubReqOutbound05ProviderSemantic', {
     reads: ['v4.request.normal_payload'], writes: ['v4.request.provider_semantic'],
@@ -127,7 +154,7 @@ const NODE_PERMISSIONS = new Map([
     writes: [],
   }],
   ['V4ServerRespOutbound06ClientFrame', {
-    reads: [], writes: ['v4.response.client_wire_payload'],
+    reads: ['v4.response.client_wire_payload'], writes: ['v4.response.client_wire_payload'],
   }],
   ['V4MetadataCenter01ScopeRegistry', {
     reads: ['v4.control.metadata_center'], writes: ['v4.control.metadata_center'],
@@ -464,10 +491,28 @@ function validate(
     if (/\.write_control\s*\(/.test(source)) {
       failures.push(`${MODULE}: broad control carrier write reintroduced`);
     }
+    for (const token of [
+      'fn scope_value(control: &Value',
+      '.read_control_resource("v4.control.metadata_center")',
+      '.write_control_resource("v4.scope.session"',
+    ]) {
+      if (!source.includes(token)) {
+        failures.push(`${MODULE}: continuation typed-control path missing ${token}`);
+      }
+    }
+    if (/scope_value\s*\(\s*ctx\.read_data\s*\(\s*\)/.test(source)) {
+      failures.push(`${MODULE}: continuation control reconstructed from normal payload`);
+    }
 
     const descriptors = parseStandardDescriptors(source);
-    if (descriptors.length !== 19) {
-      failures.push(`${MODULE}: expected 19 parseable standard descriptors, got ${descriptors.length}`);
+    const descriptorIds = descriptors.map((descriptor) => descriptor.pluginId);
+    if (new Set(descriptorIds).size !== descriptorIds.length) {
+      failures.push(`${MODULE}: parsed standard descriptor ids must be unique`);
+    }
+    for (const requiredId of REQUIRED_INTEGRATION_DESCRIPTOR_IDS) {
+      if (!descriptorIds.includes(requiredId)) {
+        failures.push(`${MODULE}: missing required integration descriptor ${requiredId}`);
+      }
     }
     const anchors = activeNodeAnchors(nodeGraph);
     const operationsByResource = new Map(
@@ -542,7 +587,10 @@ function validate(
         if (!operation) {
           failures.push(`${descriptor.pluginId}: resource operation missing ${resource}`);
         } else if (!actorPermitted(
-          operation.allowed_writers,
+          [
+            ...(operation.allowed_writers ?? []),
+            ...(operation.allowed_bridge_writers ?? []),
+          ],
           descriptor.nodeId,
           anchor.owner,
           operation.owner_node,
@@ -621,6 +669,24 @@ function runSelfTest() {
     }],
     ['broad control carrier access reintroduced', (state) => {
       state.source = `${source}\nfn broad(ctx: &ExecCtx<'_>) { let _ = ctx.read_control(); }`;
+    }],
+    ['continuation payload reconstruction reintroduced', (state) => {
+      state.source = source.replace(
+        'scope_value(&control, "bind")?',
+        'scope_value(ctx.read_data(), "bind")?',
+      );
+    }],
+    ['response integration descriptor removed', (state) => {
+      state.source = source.replace(
+        'let response_decode = plugin(\n        "v4.std.protocol.response_decode",',
+        'let response_decode = plugin(\n        "v4.std.protocol.response_decode.removed",',
+      );
+    }],
+    ['continuation integration descriptor removed', (state) => {
+      state.source = source.replace(
+        'plugin(\n            "v4.std.continuation.commit",',
+        'plugin(\n            "v4.std.continuation.commit.removed",',
+      );
     }],
     ['scoped bridge symbol removed from mainline', (state) => {
       const edge = state.mainline.edges.find(
@@ -731,6 +797,8 @@ const isRedSelfTest = process.argv.includes('--red-self-test');
 if (isRedSelfTest) {
   runSelfTest();
 } else {
+  const source = readSource();
+  const descriptorCount = parseStandardDescriptors(source).length;
   const failures = validate(
     { [CONTRACT_ID]: readJson('contracts/plugin-library.contract.json') },
     readJson('.appsdk/maps/module-registry.json'),
@@ -741,12 +809,14 @@ if (isRedSelfTest) {
     readJson('contracts/node-graph.contract.json'),
     readYaml('docs/architecture/v4-resource-operation-map.yml'),
     readJson('.appsdk/maps/mainline-call-map.json'),
-    readSource(),
+    source,
   );
   if (failures.length > 0) {
     console.error('[v4_parity_gate_standard_plugins] FAIL');
     console.error(failures.join('\n'));
     process.exit(1);
   }
-  console.log('[v4_parity_gate_standard_plugins] OK standard plugin library module bound');
+  console.log(
+    `[v4_parity_gate_standard_plugins] OK standard plugin library module bound descriptors=${descriptorCount} source-derived`,
+  );
 }

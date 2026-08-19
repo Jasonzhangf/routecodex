@@ -189,6 +189,8 @@ resources:
   - V4HubRespOutbound04ClientSemantic
   - V4ServerRespOutbound06ClientFrame
   allowed_readers:
+  - V4ServerSseOut05FrameBoundary
+  - V4ServerRespOutbound06ClientFrame
   - V4ServerFrame
   forbidden_writers:
   - V4ControlMetadataCenter
@@ -273,6 +275,8 @@ resources:
   allowed_readers:
   - V4HubReqChatProcess04Governed
   - V4Router
+  - V4ChatProcess03ContinuationCommit
+  - V4RespContinuationCommitted
   - V4ErrorChain
   - V4StoplessControlState
   - V4ScopeRegistry
@@ -687,6 +691,8 @@ resources:
   owner_node: V4ScopeRegistry
   owner_symbols:
   - ScopeRegistry
+  - bind_scope_via_bridge
+  - release_scope_via_bridge
   identity:
   - requestId
   - pipelineId
@@ -701,6 +707,9 @@ resources:
   allowed_writers:
   - V4ScopeRegistry::bind
   - V4ScopeRegistry::release
+  allowed_bridge_writers:
+  - V4ChatProcess03ContinuationCommit
+  - V4RespContinuationCommitted
   allowed_readers:
   - V4Control01ScopeBoundCarrier
   - V4ControlMetadataCenter

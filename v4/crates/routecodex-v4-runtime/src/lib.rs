@@ -19,6 +19,7 @@
 
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::MetadataCenter;
+use routecodex_v4_cordis_bridge::{ScopeSessionOperation, ScopeSessionValue};
 use routecodex_v4_error::{
     ClientProjection, DecisionAction, ErrorCenter, ErrorChain, ErrorChainError,
     ExecutionDecision, RetryPolicy,
@@ -361,6 +362,7 @@ impl ContinuationKey {
 pub enum ScopeError {
     AlreadyBound,
     NotBound,
+    InvalidBridgeControl,
     OwnerMismatch,
     EntryProtocolMismatch,
     PortMismatch,
@@ -377,14 +379,19 @@ impl fmt::Display for ScopeError {
         let message = match self {
             Self::AlreadyBound => "continuation key already bound",
             Self::NotBound => "continuation key not bound",
+            Self::InvalidBridgeControl => "invalid typed continuation bridge control",
             Self::OwnerMismatch => "continuation owner mismatch (direct/relay cross-continuation)",
-            Self::EntryProtocolMismatch => "entry protocol mismatch (chat/messages hit responses continuation)",
+            Self::EntryProtocolMismatch => {
+                "entry protocol mismatch (chat/messages hit responses continuation)"
+            }
             Self::PortMismatch => "port/group mismatch",
             Self::SessionMismatch => "session scope mismatch",
             Self::ConversationMismatch => "conversation scope mismatch",
             Self::CrossRequestReuse => "cross-request reuse of continuation binding",
             Self::FullInputMissing => "full input missing for continuation restore",
-            Self::ImmutableIntervalViolation => "continuation restored more than once (immutable interval)",
+            Self::ImmutableIntervalViolation => {
+                "continuation restored more than once (immutable interval)"
+            }
             Self::RestoreAfterRelease => "continuation restored after release",
         };
         write!(formatter, "{message}")
@@ -474,16 +481,13 @@ impl ScopeRegistry {
             if full_input_hash.is_none() {
                 return Err(ScopeError::FullInputMissing);
             }
-            self.bindings
-                .get_mut(key)
-                .expect("binding exists")
-                .restored = true;
+            self.bindings.get_mut(key).expect("binding exists").restored = true;
             self.append_record(key.clone(), "restore", request_id);
             return Ok(self.bindings.get(key).expect("binding exists"));
         }
         // Explicit isolation diagnostics: same session trio, different
         // entry/owner dimensions.
-        for (bound_key, binding) in &self.bindings {
+        for bound_key in self.bindings.keys() {
             if bound_key.port == key.port
                 && bound_key.session_scope == key.session_scope
                 && bound_key.conversation_scope == key.conversation_scope
@@ -494,7 +498,28 @@ impl ScopeRegistry {
                 if bound_key.entry_protocol != key.entry_protocol {
                     return Err(ScopeError::EntryProtocolMismatch);
                 }
-                let _ = binding;
+            }
+            if bound_key.entry_protocol == key.entry_protocol
+                && bound_key.continuation_owner == key.continuation_owner
+            {
+                if bound_key.session_scope == key.session_scope
+                    && bound_key.conversation_scope == key.conversation_scope
+                    && bound_key.port != key.port
+                {
+                    return Err(ScopeError::PortMismatch);
+                }
+                if bound_key.port == key.port
+                    && bound_key.conversation_scope == key.conversation_scope
+                    && bound_key.session_scope != key.session_scope
+                {
+                    return Err(ScopeError::SessionMismatch);
+                }
+                if bound_key.port == key.port
+                    && bound_key.session_scope == key.session_scope
+                    && bound_key.conversation_scope != key.conversation_scope
+                {
+                    return Err(ScopeError::ConversationMismatch);
+                }
             }
         }
         Err(ScopeError::NotBound)
@@ -506,10 +531,7 @@ impl ScopeRegistry {
         request_id: &str,
     ) -> Result<ScopeRecord, ScopeError> {
         {
-            let binding = self
-                .bindings
-                .get_mut(key)
-                .ok_or(ScopeError::NotBound)?;
+            let binding = self.bindings.get_mut(key).ok_or(ScopeError::NotBound)?;
             if binding.released {
                 return Err(ScopeError::RestoreAfterRelease);
             }
@@ -525,7 +547,12 @@ impl ScopeRegistry {
     /// Whether any binding exists on the same port/session/conversation trio.
     /// Used to distinguish a fresh turn (no binding at all) from a three-key
     /// isolation violation (binding exists but entry/owner mismatch).
-    pub fn session_trio_bound(&self, port: u16, session_scope: &str, conversation_scope: &str) -> bool {
+    pub fn session_trio_bound(
+        &self,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> bool {
         self.bindings.keys().any(|key| {
             key.port == port
                 && key.session_scope == session_scope
@@ -554,6 +581,56 @@ impl ScopeRegistry {
         self.records.push(record.clone());
         record
     }
+}
+
+fn scope_session_from_control(
+    control: &serde_json::Value,
+    expected_operation: ScopeSessionOperation,
+) -> Result<ScopeSessionValue, ScopeError> {
+    let value = control
+        .get("scope_session")
+        .cloned()
+        .ok_or(ScopeError::NotBound)?;
+    let scope = ScopeSessionValue::parse(&value).map_err(|_| ScopeError::InvalidBridgeControl)?;
+    if scope.operation != expected_operation {
+        return Err(ScopeError::InvalidBridgeControl);
+    }
+    Ok(scope)
+}
+
+pub fn bind_scope_via_bridge(
+    control: &serde_json::Value,
+    registry: &mut ScopeRegistry,
+) -> Result<ScopeRecord, ScopeError> {
+    let scope = scope_session_from_control(control, ScopeSessionOperation::Bind)?;
+    registry.bind(
+        ContinuationKey::new(
+            &scope.entry_protocol,
+            &scope.owner,
+            scope.port,
+            &scope.session_scope,
+            &scope.conversation_scope,
+        ),
+        &scope.request_id,
+        Some(&scope.full_input_hash),
+    )
+}
+
+pub fn release_scope_via_bridge(
+    control: &serde_json::Value,
+    registry: &mut ScopeRegistry,
+) -> Result<ScopeRecord, ScopeError> {
+    let scope = scope_session_from_control(control, ScopeSessionOperation::Release)?;
+    registry.release(
+        &ContinuationKey::new(
+            &scope.entry_protocol,
+            &scope.owner,
+            scope.port,
+            &scope.session_scope,
+            &scope.conversation_scope,
+        ),
+        &scope.request_id,
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -636,10 +713,7 @@ impl PayloadCycleRegistry {
         Ok(cycle)
     }
 
-    pub fn close_success(
-        &mut self,
-        request_id: &str,
-    ) -> Result<&PayloadCycle, PayloadCycleError> {
+    pub fn close_success(&mut self, request_id: &str) -> Result<&PayloadCycle, PayloadCycleError> {
         let cycle = self
             .cycles
             .get_mut(request_id)
@@ -1027,27 +1101,37 @@ impl NodePlugin for ContinuationRestore {
             ctx.session_scope(),
             ctx.conversation_scope(),
         );
-        let full_input = ctx
-            .data
-            .normalized_request
-            .as_deref()
-            .ok_or_else(|| RuntimeFault::new("full_input_missing", "continuation restore requires full input"))?;
+        let full_input = ctx.data.normalized_request.as_deref().ok_or_else(|| {
+            RuntimeFault::new(
+                "full_input_missing",
+                "continuation restore requires full input",
+            )
+        })?;
         if registries.scope.is_bound(&key) {
             registries
                 .scope
-                .restore(&key, ctx.request_id(), Some(&format!("sha256:{full_input}")))
+                .restore(
+                    &key,
+                    ctx.request_id(),
+                    Some(&format!("sha256:{full_input}")),
+                )
                 .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))?;
             ctx.control.continuation_restored = true;
-        } else if registries
-            .scope
-            .session_trio_bound(ctx.port(), ctx.session_scope(), ctx.conversation_scope())
-        {
+        } else if registries.scope.session_trio_bound(
+            ctx.port(),
+            ctx.session_scope(),
+            ctx.conversation_scope(),
+        ) {
             // A continuation exists for this session trio but the requested
             // three keys do not match: fail fast with the exact isolation
             // error instead of silently starting a fresh turn.
             registries
                 .scope
-                .restore(&key, ctx.request_id(), Some(&format!("sha256:{full_input}")))
+                .restore(
+                    &key,
+                    ctx.request_id(),
+                    Some(&format!("sha256:{full_input}")),
+                )
                 .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))?;
             ctx.control.continuation_restored = true;
         }
@@ -1600,10 +1684,17 @@ impl SkeletonRuntime {
         conversation_scope: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain("request", request_id, port, session_scope, conversation_scope, |ctx| {
-            ctx.data.raw_entry = Some(raw_entry.to_string());
-            ctx.information.model = Some("unselected".to_string());
-        });
+        let result = self.run_chain(
+            "request",
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            |ctx| {
+                ctx.data.raw_entry = Some(raw_entry.to_string());
+                ctx.information.model = Some("unselected".to_string());
+            },
+        );
         self.release(request_id);
         result
     }
@@ -1631,16 +1722,23 @@ impl SkeletonRuntime {
         continuation_owner: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain("response", request_id, port, session_scope, conversation_scope, |ctx| {
-            ctx.data.provider_raw = Some(provider_raw.to_string());
-            ctx.information.protocol = Some(entry_protocol.to_string());
-            ctx.control.continuation_owner = Some(continuation_owner.to_string());
-            ctx.control.execution_mode = Some(if continuation_owner == "relay" {
-                "relay".to_string()
-            } else {
-                "direct".to_string()
-            });
-        });
+        let result = self.run_chain(
+            "response",
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            |ctx| {
+                ctx.data.provider_raw = Some(provider_raw.to_string());
+                ctx.information.protocol = Some(entry_protocol.to_string());
+                ctx.control.continuation_owner = Some(continuation_owner.to_string());
+                ctx.control.execution_mode = Some(if continuation_owner == "relay" {
+                    "relay".to_string()
+                } else {
+                    "direct".to_string()
+                });
+            },
+        );
         self.release(request_id);
         result
     }

@@ -34,6 +34,7 @@ import { loadV3Baseline } from './architecture/_v3-baseline.mjs';
 const failures = [];
 const IGNORED_DIRS = new Set([
   'target',
+  'target-wt',
   'build-control',
   'node_modules',
   'active',
@@ -233,7 +234,7 @@ function checkModuleCoverage(registry, files) {
 function checkMainlineEdges(mainlinePath = path.join(v4Root, '.appsdk/maps/mainline-call-map.json')) {
   const out = [];
   const mainline = JSON.parse(fs.readFileSync(mainlinePath, 'utf8'));
-  const allowedOwners = new Set(['appsdk::goal', 'appsdk::lifecycle', 'appsdk::regression_gate', 'appsdk::compiler', 'appsdk::publisher', 'appsdk::freezer', 'appsdk::verifier', 'appsdk::workspace', 'appsdk::init', 'appsdk::verify', 'appsdk::build_domain', 'routecodex-v4-build-link', 'routecodex-v4-edge::validate_edge', 'routecodex-v4-control::metadata_center', 'routecodex-v4-error::error_chain', 'routecodex-v4-base-node::BaseNode', 'routecodex-v4-config::config_node', 'routecodex-v4-config::validate_edges', 'routecodex-v4-config::parse_v4_config_02_from_v4_config_01', 'routecodex-v4-config::validate_v4_config_03_from_v4_config_02', 'routecodex-v4-config::build_v4_config_04_from_v4_config_03', 'routecodex-v4-config::publish_v4_config_05_from_v4_config_04', 'routecodex-v4-runtime::ExecutionContext', 'routecodex-v4-runtime::SkeletonRuntime', 'routecodex-v4-plugin-plan::compile_node_plan', 'routecodex-v4-plugin-catalog::register', 'routecodex-v4-cordis-bridge::compile_node', 'routecodex-v4-cordis-bridge::execute_plan']);
+  const allowedOwners = new Set(['appsdk::goal', 'appsdk::lifecycle', 'appsdk::regression_gate', 'appsdk::compiler', 'appsdk::publisher', 'appsdk::freezer', 'appsdk::verifier', 'appsdk::workspace', 'appsdk::init', 'appsdk::verify', 'appsdk::build_domain', 'routecodex-v4-build-link', 'routecodex-v4-edge::validate_edge', 'routecodex-v4-control::metadata_center', 'routecodex-v4-error::error_chain', 'routecodex-v4-base-node::BaseNode', 'routecodex-v4-config::config_node', 'routecodex-v4-config::validate_edges', 'routecodex-v4-config::parse_v4_config_02_from_v4_config_01', 'routecodex-v4-config::validate_v4_config_03_from_v4_config_02', 'routecodex-v4-config::build_v4_config_04_from_v4_config_03', 'routecodex-v4-config::publish_v4_config_05_from_v4_config_04', 'routecodex-v4-runtime::ExecutionContext', 'routecodex-v4-runtime::SkeletonRuntime', 'routecodex-v4-runtime::scope_session_from_control', 'routecodex-v4-plugin-plan::compile_node_plan', 'routecodex-v4-plugin-catalog::register', 'routecodex-v4-cordis-bridge::compile_node', 'routecodex-v4-cordis-bridge::execute_plan']);
   allowedOwners.add('routecodex-v4-runtime::NodePlugin');
   allowedOwners.add('routecodex-v4-runtime::project_runtime_fault');
   allowedOwners.add('routecodex-v4-runtime-bin::main');
@@ -689,7 +690,7 @@ fs.writeFileSync(
     gates: [
       { gate_id: 'g1', command: 'node scripts/architecture/verify-v4-declared-only.mjs' },
       { gate_id: 'g2', command: 'node scripts/architecture/verify-v4-executed.mjs' },
-      { gate_id: 'g3', command: 'cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control' },
+      { gate_id: 'g3', command: 'cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-cordis-bridge,routecodex-v4-skeleton,routecodex-v4-plugin-contract,routecodex-v4-standard-plugins' },
     ],
   }),
 );

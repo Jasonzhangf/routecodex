@@ -1,4 +1,5 @@
-//! V4 standard plugin library — M5 keyless deterministic baseline.
+//! V4 standard plugin library — M5 baseline plus contract-bound response and
+//! continuation descriptors.
 //!
 //! This crate owns the immutable standard plugin descriptors, deterministic
 //! artifact/contract bytes, catalog registration and typed handle registry
@@ -27,12 +28,15 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 pub mod chat_process;
+pub mod continuation_control;
 pub mod contracts;
 pub mod control;
 pub mod diagnostic;
 pub mod error;
 pub mod protocol;
 pub mod provider;
+pub mod response_inbound;
+pub mod response_outbound;
 pub mod routing;
 
 pub const STANDARD_LIBRARY_VERSION: &str = "0.1.0";
@@ -194,6 +198,14 @@ pub fn standard_resource_registry() -> ResourceRegistry {
                 axis: ResourceAxis::Data,
             },
             ResourceEntry {
+                resource_id: "v4.response.provider_raw".to_string(),
+                axis: ResourceAxis::Data,
+            },
+            ResourceEntry {
+                resource_id: "v4.control.scope_command".to_string(),
+                axis: ResourceAxis::Control,
+            },
+            ResourceEntry {
                 resource_id: "v4.response.client_wire_payload".to_string(),
                 axis: ResourceAxis::Data,
             },
@@ -271,6 +283,7 @@ pub fn standard_allowed_reads() -> Vec<String> {
         "v4.request.provider_semantic".to_string(),
         "v4.request.provider_wire_payload".to_string(),
         "v4.response.normal_payload".to_string(),
+        "v4.control.scope_command".to_string(),
         "v4.response.client_wire_payload".to_string(),
         "v4.control.metadata_center".to_string(),
         "v4.control.route_facts".to_string(),
@@ -296,6 +309,7 @@ pub fn standard_allowed_writes() -> Vec<String> {
         "v4.request.provider_semantic".to_string(),
         "v4.request.provider_wire_payload".to_string(),
         "v4.response.normal_payload".to_string(),
+        "v4.control.scope_command".to_string(),
         "v4.control.metadata_center".to_string(),
         "v4.control.route_facts".to_string(),
         "v4.control.target_selection".to_string(),
@@ -311,9 +325,16 @@ pub fn standard_allowed_writes() -> Vec<String> {
 pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
     match node_id {
         "V4HubReqInbound03Normalized" => vec!["v4.request.normal_payload".to_string()],
-        "V4HubReqChatProcess04Governed" => vec!["v4.request.normal_payload".to_string()],
+        "V4HubReqChatProcess04Governed" => vec![
+            "v4.request.normal_payload".to_string(),
+            "v4.control.metadata_center".to_string(),
+        ],
+        "V4HubRespInbound02Parsed" => vec!["v4.response.provider_raw".to_string()],
         "V4HubRespChatProcess03Governed" => vec!["v4.response.normal_payload".to_string()],
+        "V4ChatProcess03ContinuationCommit" => vec!["v4.control.metadata_center".to_string()],
         "V4HubRespOutbound04ClientSemantic" => vec!["v4.response.normal_payload".to_string()],
+        "V4ServerSseOut05FrameBoundary" => vec!["v4.response.client_wire_payload".to_string()],
+        "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_wire_payload".to_string()],
         "V4HubReqOutbound05ProviderSemantic" => vec!["v4.request.normal_payload".to_string()],
         "V4ProviderReqCompat06Compat" => vec!["v4.request.provider_semantic".to_string()],
         "V4ProviderSseOut07WireBoundary" => vec![
@@ -338,13 +359,19 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
 pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
     match node_id {
         "V4HubReqInbound03Normalized" => Vec::new(),
-        "V4HubReqChatProcess04Governed" => vec!["v4.request.normal_payload".to_string()],
+        "V4HubReqChatProcess04Governed" => vec![
+            "v4.request.normal_payload".to_string(),
+            "v4.control.scope_command".to_string(),
+        ],
+        "V4HubRespInbound02Parsed" => vec!["v4.response.normal_payload".to_string()],
         "V4HubRespChatProcess03Governed" => vec!["v4.response.normal_payload".to_string()],
-        "V4HubRespOutbound04ClientSemantic" => Vec::new(),
+        "V4ChatProcess03ContinuationCommit" => vec!["v4.control.scope_command".to_string()],
+        "V4HubRespOutbound04ClientSemantic" => vec!["v4.response.client_wire_payload".to_string()],
+        "V4ServerSseOut05FrameBoundary" => Vec::new(),
+        "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_wire_payload".to_string()],
         "V4HubReqOutbound05ProviderSemantic" => vec!["v4.request.provider_semantic".to_string()],
         "V4ProviderReqCompat06Compat" => vec!["v4.request.provider_wire_payload".to_string()],
         "V4ProviderSseOut07WireBoundary" => Vec::new(),
-        "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_wire_payload".to_string()],
         "V4MetadataCenter01ScopeRegistry" => vec!["v4.control.metadata_center".to_string()],
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],
@@ -395,7 +422,60 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
     );
     codec_alt.descriptor.selection_group = Some("provider_wire_codec".to_string());
 
-    vec![
+    let response_decode = plugin(
+        "v4.std.protocol.response_decode",
+        PluginCategory::Protocol,
+        "V4HubRespInbound02Parsed",
+        "response_inbound",
+        Some(2),
+        PluginKind::Operator,
+        PluginEffect::Semantic,
+        PluginPhase::Semantic,
+        220,
+        vec!["v4.response.provider_raw"],
+        vec!["v4.response.normal_payload"],
+    );
+    let response_client_semantic = plugin(
+        "v4.std.protocol.response_client_semantic",
+        PluginCategory::Protocol,
+        "V4HubRespOutbound04ClientSemantic",
+        "response_outbound",
+        Some(4),
+        PluginKind::Operator,
+        PluginEffect::Semantic,
+        PluginPhase::Projection,
+        230,
+        vec!["v4.response.normal_payload"],
+        vec!["v4.response.client_wire_payload"],
+    );
+    let response_sse_frame = plugin(
+        "v4.std.protocol.response_sse_frame",
+        PluginCategory::Protocol,
+        "V4ServerSseOut05FrameBoundary",
+        "response_outbound",
+        Some(5),
+        PluginKind::Operator,
+        PluginEffect::ReadOnly,
+        PluginPhase::Projection,
+        240,
+        vec!["v4.response.client_wire_payload"],
+        vec![],
+    );
+    let response_frame_build = plugin(
+        "v4.std.protocol.response_frame_build",
+        PluginCategory::Protocol,
+        "V4ServerRespOutbound06ClientFrame",
+        "response_outbound",
+        Some(6),
+        PluginKind::Operator,
+        PluginEffect::Semantic,
+        PluginPhase::Projection,
+        250,
+        vec!["v4.response.client_wire_payload"],
+        vec!["v4.response.client_wire_payload"],
+    );
+
+    let mut plugins = vec![
         plugin(
             "v4.std.contract.input_validate",
             PluginCategory::Contracts,
@@ -619,7 +699,13 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             vec!["v4.request.provider_wire_payload"],
             vec![],
         ),
-    ]
+        response_decode,
+        response_client_semantic,
+        response_sse_frame,
+        response_frame_build,
+    ];
+    plugins.extend(continuation_control::descriptors());
+    plugins
 }
 
 /// Convert one standard plugin to a catalog entry. The entry is a typed
@@ -925,7 +1011,26 @@ impl StandardHandleRegistry {
             ("v4.std.provider.auth_handle_mock", auth_handle_mock),
             ("v4.std.provider.wire_mock", wire_mock),
             ("v4.std.provider.transport_mock", transport_mock),
+            (
+                "v4.std.protocol.response_decode",
+                response_inbound::protocol_decode,
+            ),
+            (
+                "v4.std.protocol.response_client_semantic",
+                response_outbound::client_semantic_projection,
+            ),
+            (
+                "v4.std.protocol.response_sse_frame",
+                response_outbound::sse_frame_boundary,
+            ),
+            (
+                "v4.std.protocol.response_frame_build",
+                response_outbound::frame_build,
+            ),
         ] {
+            handles.insert(id, MockHandle { execute_fn });
+        }
+        for (id, execute_fn) in continuation_control::handles() {
             handles.insert(id, MockHandle { execute_fn });
         }
         Self { handles }
@@ -994,31 +1099,25 @@ mod tests {
     #[test]
     fn standard_plugin_ids_are_exact_and_immutable() {
         let plugins = standard_plugins();
-        let mut actual: Vec<&str> = plugins
+        let mut actual: Vec<String> = plugins
             .iter()
-            .map(|plugin| plugin.plugin_id.as_str())
+            .map(|plugin| plugin.plugin_id.clone())
             .collect();
-        let mut expected = [
-            "v4.std.contract.input_validate",
-            "v4.std.contract.output_validate",
-            "v4.std.diagnostic.debug_observe",
-            "v4.std.diagnostic.timing",
-            "v4.std.diagnostic.snapshot_record",
-            "v4.std.control.scope_consume",
-            "v4.std.control.payload_cycle_record",
-            "v4.std.error.typed_intake",
-            "v4.std.error.projection_adapter",
-            "v4.std.protocol.mock_codec",
-            "v4.std.protocol.mock_codec_alt",
-            "v4.std.chat_process.request_governance",
-            "v4.std.chat_process.response_governance",
-            "v4.std.routing.route_facts_producer",
-            "v4.std.routing.route_facts_consumer",
-            "v4.std.provider.capability_mock",
-            "v4.std.provider.auth_handle_mock",
-            "v4.std.provider.wire_mock",
-            "v4.std.provider.transport_mock",
-        ];
+        let contract: Value = serde_json::from_str(include_str!(
+            "../../../contracts/plugin-library.contract.json"
+        ))
+        .expect("plugin library contract parses");
+        let mut expected: Vec<String> = contract["plugin_ids"]
+            .as_array()
+            .expect("plugin_ids is an array")
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .expect("plugin id is a string")
+                    .to_string()
+            })
+            .collect();
         actual.sort_unstable();
         expected.sort_unstable();
         assert_eq!(actual, expected);

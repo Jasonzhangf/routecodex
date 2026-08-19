@@ -253,13 +253,19 @@
         "standard_node_allowed_reads",
         "standard_node_allowed_writes",
         "register_standard_library",
-        "compile_standard_plan"
+        "compile_standard_plan",
+        "protocol_decode",
+        "client_semantic_projection",
+        "sse_frame_boundary",
+        "frame_build"
       ],
       "required_gates": [
+        "v4_continuation_control_plane_l2",
         "v4_standard_plugins_l2_regression",
         "v4_standard_plugins_test_consumer",
         "v4_parity_gate_standard_plugins",
-        "v4_parity_gate_standard_plugins_red"
+        "v4_parity_gate_standard_plugins_red",
+        "v4_response_inbound_outbound_l2"
       ]
     },
     {
@@ -283,9 +289,12 @@
         "ExecCtx::read_control_resource",
         "ExecCtx::emit",
         "ExecCtx::write_data",
-        "ExecCtx::write_control_resource"
+        "ExecCtx::write_control_resource",
+        "ScopeSessionValue",
+        "ScopeSessionOperation"
       ],
       "required_gates": [
+        "v4_continuation_control_plane_l2",
         "v4_plugin_bridge_l2_regression",
         "v4_parity_gate_cordis_bridge",
         "v4_parity_gate_cordis_bridge_red"
@@ -306,9 +315,12 @@
         "ExecutionContext::new",
         "ExecutionContext::scope",
         "assert_no_control_leak",
-        "PLUGIN_REGISTRY"
+        "PLUGIN_REGISTRY",
+        "bind_scope_via_bridge",
+        "release_scope_via_bridge"
       ],
       "required_gates": [
+        "v4_continuation_control_plane_l2",
         "v4_runtime_l2_regression",
         "v4_parity_gate_semantic_parity"
       ]

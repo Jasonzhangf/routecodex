@@ -16,6 +16,78 @@ use routecodex_v4_plugin_plan::{compile_node_plan, AuthoringPlugin, NodePluginPl
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeSessionOperation {
+    Bind,
+    Release,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeEntryProtocol {
+    Responses,
+}
+
+impl ScopeEntryProtocol {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Responses => "responses",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeContinuationOwner {
+    Direct,
+    Relay,
+}
+
+impl ScopeContinuationOwner {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::Relay => "relay",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct ScopeSessionCommand {
+    pub entry_protocol: ScopeEntryProtocol,
+    pub continuation_owner: ScopeContinuationOwner,
+    pub pipeline_id: String,
+    pub port: u16,
+    pub session_scope: String,
+    pub conversation_scope: String,
+    pub request_id: String,
+    pub full_input_hash: String,
+    pub operation: ScopeSessionOperation,
+    pub sequence: u64,
+}
+
+impl ScopeSessionCommand {
+    pub fn parse(value: &Value) -> Result<Self, BridgeError> {
+        let parsed: Self = serde_json::from_value(value.clone()).map_err(|error| {
+            BridgeError::Protocol(format!("invalid scope_command control value: {error}"))
+        })?;
+        if parsed.pipeline_id.trim().is_empty()
+            || parsed.session_scope.trim().is_empty()
+            || parsed.conversation_scope.trim().is_empty()
+            || parsed.request_id.trim().is_empty()
+            || parsed.full_input_hash.trim().is_empty()
+            || parsed.port == 0
+        {
+            return Err(BridgeError::Protocol(
+                "invalid scope_command control value: required fields are empty".to_string(),
+            ));
+        }
+        Ok(parsed)
+    }
+}
+
 /// One typed diagnostic fact published by a plugin (side-channel only).
 #[derive(Debug, Clone, Serialize)]
 pub struct DiagnosticFact {
@@ -142,7 +214,13 @@ impl ExecCtx<'_> {
             .control
             .as_object()
             .expect("control object checked before read");
-        Ok(control.get(key))
+        let value = control.get(key);
+        if resource_id == "v4.control.scope_command" {
+            if let Some(value) = value {
+                ScopeSessionCommand::parse(value)?;
+            }
+        }
+        Ok(value)
     }
 
     pub fn emit(&mut self, kind: &str, message: impl Into<String>) {
@@ -196,6 +274,9 @@ impl ExecCtx<'_> {
             .control
             .as_object_mut()
             .expect("control object checked before mutation");
+        if resource_id == "v4.control.scope_command" {
+            ScopeSessionCommand::parse(&value)?;
+        }
         control.insert(key.to_string(), value);
         Ok(())
     }
@@ -224,6 +305,7 @@ fn control_resource_key(resource_id: &str) -> Option<&'static str> {
         "v4.control.error_chain" => Some("error_chain"),
         "v4.control.route_facts" => Some("route_facts"),
         "v4.control.target_selection" => Some("target_selection"),
+        "v4.control.scope_command" => Some("scope_command"),
         _ => None,
     }
 }
@@ -512,5 +594,70 @@ pub fn dispatch(request: &BridgeRequest, registry: Option<&dyn HandleRegistry>) 
                 Err(error) => fail(request_id.clone(), "execute_error", error.to_string()),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn scope_session_command_requires_complete_typed_shape() {
+        let value = ScopeSessionCommand::parse(&json!({
+            "entry_protocol": "responses",
+            "continuation_owner": "direct",
+            "pipeline_id": "pipeline-1",
+            "port": 5555,
+            "session_scope": "session-1",
+            "conversation_scope": "conversation-1",
+            "request_id": "request-1",
+            "full_input_hash": "sha256:full-input",
+            "operation": "bind",
+            "sequence": 1
+        }))
+        .expect("complete scope command parses");
+        assert_eq!(value.continuation_owner, ScopeContinuationOwner::Direct);
+        assert_eq!(value.operation, ScopeSessionOperation::Bind);
+
+        assert!(matches!(
+            ScopeSessionCommand::parse(&json!({
+                "entry_protocol": "responses",
+                "continuation_owner": "direct"
+            })),
+            Err(BridgeError::Protocol(_))
+        ));
+
+        assert!(matches!(
+            ScopeSessionCommand::parse(&json!({
+                "entry_protocol": "responses",
+                "continuation_owner": "direct",
+                "pipeline_id": "pipeline-1",
+                "port": 5555,
+                "session_scope": "session-1",
+                "conversation_scope": "conversation-1",
+                "request_id": "request-1",
+                "full_input_hash": "sha256:full-input",
+                "operation": "replace",
+                "sequence": 1
+            })),
+            Err(BridgeError::Protocol(_))
+        ));
+
+        assert!(matches!(
+            ScopeSessionCommand::parse(&json!({
+                "entry_protocol": "chat",
+                "continuation_owner": "direct",
+                "pipeline_id": "pipeline-1",
+                "port": 5555,
+                "session_scope": "session-1",
+                "conversation_scope": "conversation-1",
+                "request_id": "request-1",
+                "full_input_hash": "sha256:full-input",
+                "operation": "bind",
+                "sequence": 1
+            })),
+            Err(BridgeError::Protocol(_))
+        ));
     }
 }

@@ -6,14 +6,16 @@ use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::{ControlError, ControlSignal, ControlSignalKind, MetadataOperation};
 use routecodex_v4_error::{ErrorChain, ErrorStage};
 use routecodex_v4_runtime::{
-    assert_no_control_leak, execution_binding, project_runtime_fault, select_relay_operator,
-    ContinuationFacts, ContinuationKey, ExecutionBinding, ExecutionContext, NodePluginPlan,
-    PayloadCycleError, PayloadCycleRegistry, PayloadCycleState, RelayOperator, ScopeError,
-    ScopeRegistry, SkeletonRuntime,
+    assert_no_control_leak, bind_scope_via_bridge, execution_binding, project_runtime_fault,
+    release_scope_via_bridge, select_relay_operator, ContinuationFacts, ContinuationKey,
+    ExecutionBinding, ExecutionContext, NodePluginPlan, PayloadCycleError, PayloadCycleRegistry,
+    PayloadCycleState, RelayOperator, ScopeError, ScopeRegistry, SkeletonRuntime,
 };
 use routecodex_v4_skeleton::{
     BindingContract, ChainDefinition, Edge, NodeSlot, PluginBinding, SkeletonPlan,
 };
+use routecodex_v4_standard_plugins::{compile_standard_plan, StandardHandleRegistry};
+use serde_json::json;
 use std::fs;
 
 fn contract_json() -> String {
@@ -34,6 +36,181 @@ fn scope(request_id: &str) -> Scope {
         "session-1",
         "conversation-1",
     )
+}
+
+fn bridge_scope(operation: &str) -> serde_json::Value {
+    json!({
+        "scope_session": {
+            "entry_protocol": "responses",
+            "owner": "direct",
+            "port": 5555,
+            "session_scope": "session-1",
+            "conversation_scope": "conversation-1",
+            "request_id": "request-1",
+            "full_input_hash": "sha256:full-input",
+            "operation": operation,
+            "sequence": 1
+        }
+    })
+}
+
+#[test]
+fn bridge_scope_bind_and_release_reach_registry_truth() {
+    let mut registry = ScopeRegistry::new();
+    let key = ContinuationKey::new("responses", "direct", 5555, "session-1", "conversation-1");
+    let bind = bind_scope_via_bridge(&bridge_scope("bind"), &mut registry)
+        .expect("typed bridge bind reaches ScopeRegistry");
+    assert_eq!(bind.operation, "bind");
+    assert!(registry.is_bound(&key));
+
+    let release = release_scope_via_bridge(&bridge_scope("release"), &mut registry)
+        .expect("typed bridge release reaches ScopeRegistry");
+    assert_eq!(release.operation, "release");
+    assert!(matches!(
+        registry.restore(&key, "request-2", Some("sha256:full-input")),
+        Err(ScopeError::RestoreAfterRelease)
+    ));
+}
+
+#[test]
+fn bridge_scope_missing_or_duplicate_bind_fails_fast() {
+    let mut registry = ScopeRegistry::new();
+    assert!(matches!(
+        bind_scope_via_bridge(&json!({}), &mut registry),
+        Err(ScopeError::NotBound)
+    ));
+    bind_scope_via_bridge(&bridge_scope("bind"), &mut registry).expect("first bind succeeds");
+    assert!(matches!(
+        bind_scope_via_bridge(&bridge_scope("bind"), &mut registry),
+        Err(ScopeError::AlreadyBound)
+    ));
+}
+
+#[test]
+fn bridge_scope_rejects_malformed_operation_and_payload_lookalike() {
+    let mut registry = ScopeRegistry::new();
+    assert!(matches!(
+        bind_scope_via_bridge(&bridge_scope("replace"), &mut registry),
+        Err(ScopeError::InvalidBridgeControl)
+    ));
+    let mut unknown = bridge_scope("bind");
+    unknown["scope_session"]["payload_hint"] = json!(true);
+    assert!(matches!(
+        bind_scope_via_bridge(&unknown, &mut registry),
+        Err(ScopeError::InvalidBridgeControl)
+    ));
+    assert!(matches!(
+        bind_scope_via_bridge(
+            &json!({"normal_payload": bridge_scope("bind")["scope_session"].clone()}),
+            &mut registry,
+        ),
+        Err(ScopeError::NotBound)
+    ));
+}
+
+#[test]
+fn bridge_scope_release_without_bind_fails_fast() {
+    let mut registry = ScopeRegistry::new();
+    assert!(matches!(
+        release_scope_via_bridge(&bridge_scope("release"), &mut registry),
+        Err(ScopeError::NotBound)
+    ));
+}
+
+#[test]
+fn bridge_bound_scope_rejects_all_isolation_mismatches() {
+    let mut registry = ScopeRegistry::new();
+    bind_scope_via_bridge(&bridge_scope("bind"), &mut registry)
+        .expect("typed bind reaches ScopeRegistry");
+
+    let mismatches = [
+        (
+            ContinuationKey::new("responses", "relay", 5555, "session-1", "conversation-1"),
+            ScopeError::OwnerMismatch,
+        ),
+        (
+            ContinuationKey::new("chat", "direct", 5555, "session-1", "conversation-1"),
+            ScopeError::EntryProtocolMismatch,
+        ),
+        (
+            ContinuationKey::new("responses", "direct", 5556, "session-1", "conversation-1"),
+            ScopeError::PortMismatch,
+        ),
+        (
+            ContinuationKey::new("responses", "direct", 5555, "session-2", "conversation-1"),
+            ScopeError::SessionMismatch,
+        ),
+        (
+            ContinuationKey::new("responses", "direct", 5555, "session-1", "conversation-2"),
+            ScopeError::ConversationMismatch,
+        ),
+    ];
+    for (key, expected) in mismatches {
+        let error = registry
+            .restore(&key, "request-2", Some("sha256:full-input"))
+            .expect_err("isolation mismatch must fail");
+        assert_eq!(error, expected);
+    }
+}
+
+#[test]
+fn standard_plugin_cordis_bridge_reaches_scope_registry_owner() {
+    let commit_plan = compile_standard_plan(
+        "V4ChatProcess03ContinuationCommit",
+        "response_continuation",
+        "response",
+        5,
+        &["v4.std.continuation.commit"],
+    )
+    .expect("continuation commit plan compiles");
+    let release_plan = compile_standard_plan(
+        "V4RespContinuationCommitted",
+        "response_continuation",
+        "response",
+        7,
+        &["v4.std.continuation.release"],
+    )
+    .expect("continuation release plan compiles");
+    let metadata = json!({
+        "metadata_center": {
+            "continuation": {
+                "entry_protocol": "responses",
+                "continuation_owner": "direct",
+                "port": 5555,
+                "session_scope": "session-1",
+                "conversation_scope": "conversation-1",
+                "request_id": "response-1",
+                "full_input_hash": "sha256:full-input",
+                "sequence": 7
+            }
+        }
+    });
+    let handles = StandardHandleRegistry::new();
+    let committed = routecodex_v4_cordis_bridge::execute_plan(
+        &commit_plan,
+        routecodex_v4_cordis_bridge::NodeExecutionInput {
+            data: json!({"text": "same-shape"}),
+            control: metadata.clone(),
+        },
+        &handles,
+    )
+    .expect("commit bridge dispatch succeeds");
+    let released = routecodex_v4_cordis_bridge::execute_plan(
+        &release_plan,
+        routecodex_v4_cordis_bridge::NodeExecutionInput {
+            data: json!({"text": "same-shape"}),
+            control: metadata,
+        },
+        &handles,
+    )
+    .expect("release bridge dispatch succeeds");
+    let mut registry = ScopeRegistry::new();
+    let bind = bind_scope_via_bridge(&committed.control, &mut registry)
+        .expect("Cordis commit slot reaches ScopeRegistry::bind");
+    let release = release_scope_via_bridge(&released.control, &mut registry)
+        .expect("Cordis release slot reaches ScopeRegistry::release");
+    assert_eq!(bind.operation, "bind");
+    assert_eq!(release.operation, "release");
 }
 
 fn slot(
@@ -129,25 +306,28 @@ fn responses_entry_classifies_direct_owner() {
 
 #[test]
 fn relay_operator_select_uses_typed_facts_only() {
-    let relay = select_relay_operator(&ContinuationFacts::new(
-        "chat", "hub", "relay", "relay",
-    ))
-    .expect("chat + relay owner selects relay operator");
+    let relay = select_relay_operator(&ContinuationFacts::new("chat", "hub", "relay", "relay"))
+        .expect("chat + relay owner selects relay operator");
     assert_eq!(relay, RelayOperator::Relay);
     let direct = select_relay_operator(&ContinuationFacts::new(
-        "responses", "responses", "direct", "direct",
+        "responses",
+        "responses",
+        "direct",
+        "direct",
     ))
     .expect("responses + direct owner selects direct operator");
     assert_eq!(direct, RelayOperator::Direct);
     let error = select_relay_operator(&ContinuationFacts::new(
-        "responses", "responses", "relay", "relay",
+        "responses",
+        "responses",
+        "relay",
+        "relay",
     ))
     .expect_err("responses entry with relay owner must fail (no typed-facts match)");
     assert_eq!(error.code, "relay_operator_select");
-    let chat_direct = select_relay_operator(&ContinuationFacts::new(
-        "chat", "hub", "direct", "direct",
-    ))
-    .expect_err("chat entry with direct owner must fail (no typed-facts match)");
+    let chat_direct =
+        select_relay_operator(&ContinuationFacts::new("chat", "hub", "direct", "direct"))
+            .expect_err("chat entry with direct owner must fail (no typed-facts match)");
     assert_eq!(chat_direct.code, "relay_operator_select");
 }
 
@@ -309,7 +489,10 @@ fn red_invalid_input_flows_typed_error_path_to_terminal_projection() {
         .execute_request("bad:input", "r-error-1")
         .expect_err("invalid entry protocol must fail the request chain");
     assert_eq!(fault.code, "input_validate");
-    assert_eq!(fault.node_id.as_deref(), Some("V4HubReqInbound03Normalized"));
+    assert_eq!(
+        fault.node_id.as_deref(),
+        Some("V4HubReqInbound03Normalized")
+    );
 
     let projection = project_runtime_fault(&mut chain, fault).expect("fault must project");
     assert_eq!(projection.code, "input_validate");
@@ -522,9 +705,14 @@ fn control_resources_lifecycle_positive_and_red() {
 
     // Observability + timing: diagnostic projections only.
     let mut observability = V4RuntimeObservability::new();
-    observability
-        .accumulator()
-        .record("req-1", "responses", "relay", "rg-1", "cc", "deepseek-v4-flash");
+    observability.accumulator().record(
+        "req-1",
+        "responses",
+        "relay",
+        "rg-1",
+        "cc",
+        "deepseek-v4-flash",
+    );
     assert_eq!(observability.summaries().count(), 1);
     let mut timing = V4RuntimeTimingSummary::new();
     timing.state().record_phase("resp_chatprocess", 42);

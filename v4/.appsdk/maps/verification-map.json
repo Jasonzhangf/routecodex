@@ -6,6 +6,15 @@
   },
   "gates": [
     {
+      "gate_id": "v4_continuation_control_plane_l2",
+      "command": "cargo test -p routecodex-v4-cordis-bridge --manifest-path Cargo.toml --locked && cargo test -p routecodex-v4-standard-plugins --manifest-path Cargo.toml --locked && cargo build --release --manifest-path Cargo.toml --locked -p routecodex-v4-skeleton && cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-cordis-bridge,routecodex-v4-skeleton,routecodex-v4-plugin-contract,routecodex-v4-standard-plugins",
+      "required_for": [
+        "routecodex-v4-runtime:architecture_stable",
+        "routecodex-v4-cordis-bridge:architecture_stable",
+        "routecodex-v4-standard-plugins:architecture_stable"
+      ]
+    },
+    {
       "gate_id": "contract_valid",
       "command": "appsdk verify <project>",
       "required_for": [
@@ -364,7 +373,7 @@
     },
     {
       "gate_id": "v4_runtime_l2_regression",
-      "command": "cargo build --release --manifest-path Cargo.toml --locked -p routecodex-v4-skeleton && cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-skeleton,routecodex-v4-plugin-contract",
+      "command": "cargo build --release --manifest-path Cargo.toml --locked -p routecodex-v4-skeleton && cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-runtime --deps routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control --source-deps routecodex-v4-cordis-bridge,routecodex-v4-skeleton,routecodex-v4-plugin-contract,routecodex-v4-standard-plugins",
       "required_for": [
         "routecodex-v4-runtime:architecture_stable",
         "routecodex-v4-runtime:freeze",
@@ -462,6 +471,13 @@
     {
       "gate_id": "v4_standard_plugins_l2_regression",
       "command": "cargo test -p routecodex-v4-standard-plugins --manifest-path Cargo.toml --locked",
+      "required_for": [
+        "routecodex-v4-standard-plugins:architecture_stable"
+      ]
+    },
+    {
+      "gate_id": "v4_response_inbound_outbound_l2",
+      "command": "cargo test -p routecodex-v4-standard-plugins --manifest-path Cargo.toml --locked --test l2_response_inbound_outbound",
       "required_for": [
         "routecodex-v4-standard-plugins:architecture_stable"
       ]

@@ -250,7 +250,9 @@
         "crates/routecodex-v4-error/**"
       ],
       "verification_gates": [
+        "v4_continuation_control_plane_l2",
         "v4_standard_plugins_l2_regression",
+        "v4_response_inbound_outbound_l2",
         "v4_standard_plugins_test_consumer",
         "v4_parity_gate_standard_plugins",
         "v4_parity_gate_standard_plugins_red"
@@ -269,6 +271,7 @@
         "generated/**"
       ],
       "verification_gates": [
+        "v4_continuation_control_plane_l2",
         "v4_plugin_bridge_l2_regression",
         "v4_parity_gate_cordis_bridge",
         "v4_parity_gate_cordis_bridge_red"
@@ -289,6 +292,7 @@
       "verification_gates": [
         "contract_valid",
         "record_graph",
+        "v4_continuation_control_plane_l2",
         "v4_runtime_l2_regression",
         "v4_parity_gate_execution_binding",
         "v4_parity_gate_execution_binding_red",
