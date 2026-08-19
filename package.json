@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.4588",
+  "version": "0.90.4603",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "bin": {
@@ -83,6 +83,8 @@
     "test:v3-file-size-red-fixtures": "node scripts/tests/v3-file-size-red-fixtures.mjs",
     "verify:v3-module-boundaries": "node scripts/architecture/verify-v3-module-boundaries.mjs",
     "test:v3-source-gate-red-fixtures": "node scripts/tests/v3-source-gate-red-fixtures.mjs",
+    "verify:v3-provider-compat-module-boundary": "node scripts/architecture/verify-v3-provider-compat-module-boundary.mjs",
+    "test:v3-provider-compat-module-boundary-red-fixtures": "node scripts/tests/v3-provider-compat-module-boundary-red-fixtures.mjs",
     "verify:v3-normalization-payload-logic-boundary": "node scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs",
     "test:v3-normalization-payload-logic-boundary-red-fixtures": "node scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs",
     "verify:v3-p6-freeze": "node scripts/architecture/verify-v3-p6-freeze.mjs",
@@ -141,6 +143,7 @@
     "test:v3-relay-hook-resource-red-fixtures": "node scripts/tests/v3-relay-hook-resource-red-fixtures.mjs",
     "test:v3-relay-hook-resources": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --test-threads=1 && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test hub_v1_h1_contract -- --test-threads=1",
     "test:v3-provider-compat-profile-loading": "cargo test -p provider-compat-core --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -- --nocapture",
+    "test:v3-glm-anthropic-request-outbound-compat": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test glm_anthropic_request_outbound_compat -- --nocapture && cargo test -p provider-compat-core --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml glm_anthropic -- --nocapture",
     "test:v3-config-v2-compat-5555": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract config_store_compiles_v2_root_and_provider_toml_for_5555_contract -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract v2_compat_ -- --nocapture",
     "test:v3-h4-remote-continuation": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test h4_remote_continuation_contract -- --nocapture",
     "test:v3-responses-direct-remote-continuation": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config continuation -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config v2_compat -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test responses_direct_remote_continuation_integration -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_server_replays_two_turn -- --nocapture",
@@ -160,7 +163,7 @@
     "verify:v3-resource-relation-edge-lock": "node scripts/architecture/verify-v3-resource-relation-edge-lock.mjs",
     "test:v3-resource-relation-edge-lock-red-fixtures": "node scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs",
     "render:v3-protocol-semantic-field-matrix": "node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs",
-    "test:v3-protocol-conversion-field-parity": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --lib responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test responses_direct_tool_passthrough responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test responses_relay_local_continuation_integration responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test anthropic_relay_runtime_integration anthropic_responses_field_parity -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration openai_chat_same_protocol_field_parity -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test responses_relay_anthropic_provider_wire_integration -- --nocapture",
+    "test:v3-protocol-conversion-field-parity": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --lib responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --lib responses_tool_result_status -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test responses_direct_tool_passthrough responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test responses_relay_local_continuation_integration responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test hub_anthropic_codec_characterization -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test anthropic_relay_runtime_integration -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration openai_chat_same_protocol_field_parity -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test responses_relay_anthropic_provider_wire_integration -- --nocapture",
     "verify:v3-protocol-conversion-field-parity": "node scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs",
     "test:v3-protocol-conversion-field-parity-red-fixtures": "node scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs",
     "verify:v3-protocol-conversion-field-parity-ci": "npm run verify:v3-protocol-conversion-field-parity && npm run test:v3-protocol-conversion-field-parity-red-fixtures && npm run test:v3-protocol-conversion-field-parity",

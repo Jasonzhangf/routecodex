@@ -449,6 +449,14 @@ fn response_message_part_has_client_output(part: &Value) -> Result<bool, String>
         .get("type")
         .and_then(Value::as_str)
         .ok_or_else(|| "provider Responses message content part requires type".to_string())?;
+    // DeepSeek's registered Responses protocol emits reasoning_text inside a
+    // message item before visible output_text. It is valid provider protocol
+    // data but cannot authorize client commit: keeping it precommit lets a
+    // later provider SSE error enter Error01→05 and switch candidates instead
+    // of exposing reasoning bytes or prematurely locking the client stream.
+    if part_type == "reasoning_text" {
+        return Ok(false);
+    }
     let field = match part_type {
         "output_text" => "text",
         "refusal" => "refusal",
@@ -587,6 +595,7 @@ mod provider_sse_json_codec_tests {
             r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"message","status":"in_progress","content":[{"type":"output_text","text":""}]}}"#,
             r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","status":"in_progress","content":[],"summary":[]}}"#,
             r#"{"type":"response.content_part.added","output_index":0,"item_id":"msg_1","content_index":0,"part":{"type":"output_text","text":""}}"#,
+            r#"{"type":"response.content_part.added","output_index":0,"item_id":"msg_1","content_index":0,"part":{"type":"reasoning_text","text":"internal reasoning"}}"#,
         ] {
             assert_eq!(
                 classify_v3_provider_generic_sse_json_data(data)
