@@ -252,6 +252,115 @@ fn responses_protocol_plan_only_accepts_fresh_requests() {
 }
 
 #[test]
+fn responses_direct_scope_distinguishes_paired_history_from_continuation_evidence() {
+    let log_file = test_v3_console_log_file("responses-direct-paired-history-scope");
+    let state = test_v3_listener_state(&log_file, 7777);
+    let headers = HeaderMap::new();
+    let paired_history = V3ResponsesContinuationEntryFacts::project(&json!({
+        "model": "client-test",
+        "input": [
+            {"role": "user", "content": "run tools"},
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{}"
+            },
+            {
+                "type": "function_call_output",
+                "id": "fco_1",
+                "call_id": "call_1",
+                "output": "ok"
+            },
+            {"type": "reasoning", "summary": []},
+            {
+                "type": "function_call",
+                "id": "fc_2",
+                "call_id": "call_2",
+                "name": "exec_command",
+                "arguments": "{}"
+            },
+            {
+                "type": "function_call_output",
+                "id": "fco_2",
+                "call_id": "call_2",
+                "output": "ok"
+            }
+        ]
+    }));
+    assert!(!paired_history.has_unpaired_function_call_output);
+
+    let scope = build_responses_direct_continuation_scope(
+        &headers,
+        "req-paired-history",
+        &state.server,
+        "/v1/responses",
+        &paired_history,
+    )
+    .expect("fully paired inline history is a fresh request, not continuation evidence");
+    assert_eq!(
+        scope,
+        V3ResponsesDirectContinuationScope::responses(
+            "/v1/responses",
+            "request:req-paired-history",
+            "request:req-paired-history",
+            state.server.port,
+            state.server.routing_group.clone(),
+        )
+    );
+
+    let unpaired_output = V3ResponsesContinuationEntryFacts::project(&json!({
+        "model": "client-test",
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_missing",
+            "output": "orphan"
+        }]
+    }));
+    assert!(unpaired_output.has_unpaired_function_call_output);
+    let error = build_responses_direct_continuation_scope(
+        &headers,
+        "req-unpaired-output",
+        &state.server,
+        "/v1/responses",
+        &unpaired_output,
+    )
+    .expect_err("unpaired output must require typed continuation scope");
+    assert!(error.contains("typed session and conversation control headers"));
+
+    let previous_response = V3ResponsesContinuationEntryFacts::project(&json!({
+        "model": "client-test",
+        "previous_response_id": "resp_remote",
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_inline",
+                "name": "exec_command",
+                "arguments": "{}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_inline",
+                "output": "ok"
+            }
+        ]
+    }));
+    assert!(!previous_response.has_unpaired_function_call_output);
+    let error = build_responses_direct_continuation_scope(
+        &headers,
+        "req-previous-response",
+        &state.server,
+        "/v1/responses",
+        &previous_response,
+    )
+    .expect_err("previous_response_id must require typed continuation scope");
+    assert!(error.contains("typed session and conversation control headers"));
+
+    let _ = fs::remove_file(log_file);
+}
+
+#[test]
 fn fresh_responses_preserves_pending_binding_and_wraps_implemented_modes() {
     let fresh = V3ResponsesContinuationEntryFacts::project(&json!({
         "model": "client-test",

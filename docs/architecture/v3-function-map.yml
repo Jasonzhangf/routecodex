@@ -1781,6 +1781,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/responses_continuation_owner.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/scope_metadata.rs
+  - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-target/src/lib.rs
   resource_bindings:
   - v3.continuation.remote_binding
@@ -1813,6 +1815,8 @@ features:
   - V3ResponsesTransportKind
   - ProviderResponsesTransport
   - build_responses_direct_continuation_scope
+  - V3ResponsesContinuationEntryFacts::project
+  - payload_input_has_unpaired_function_call_output
   - V3RemoteContinuationObservation
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
@@ -1830,6 +1834,8 @@ features:
   - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
   - v3/crates/routecodex-v3-target/src/lib.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/scope_metadata.rs
+  - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - docs/goals/v3-responses-direct-remote-continuation-integration-plan.md
   - docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md

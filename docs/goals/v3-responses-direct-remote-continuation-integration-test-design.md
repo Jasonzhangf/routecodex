@@ -65,6 +65,19 @@ conflicting truth is an Error01-06 failure. Provider/auth/control truth is side-
   path is otherwise valid;
 - Error01-06 polarity and provider/client normal-payload isolation.
 
+## Fresh full-history admission matrix
+
+- Positive: a request with no `previous_response_id` and complete inline
+  `function_call` + matching `function_call_output` pairs is a fresh request. Without
+  typed session/conversation headers it receives request-local scope and proceeds to
+  the configured protocol plan.
+- Negative: an unpaired `function_call_output` still requires typed session and
+  conversation headers before provider send.
+- Negative: any non-empty `previous_response_id` still requires typed session and
+  conversation headers even when every inline function output is paired.
+- Payload `client_metadata` remains request data and never constructs continuation
+  control identity in any of these cases.
+
 ## V2 HTTP direct parity correction（2026-07-25）
 
 - V3 direct must match V2 direct HTTP behavior for provider-owned Responses continuation. A

@@ -1611,6 +1611,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/shared.rs
   - v3/crates/routecodex-v3-target/src/lib.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/scope_metadata.rs
+  - v3/crates/routecodex-v3-server/src/tests/mod.rs
   design:
   - docs/goals/v3-responses-direct-remote-continuation-integration-plan.md
   - docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md
@@ -1632,6 +1634,11 @@ features:
     only the matching locator
   - provider and client normal payloads exclude internal scope pin route auth capability
     and owner truth
+  - A fresh full-history request whose every function_call_output is paired by call_id
+    with an inline function_call uses request-local scope and does not require typed
+    continuation headers
+  - An unpaired function_call_output or any previous_response_id remains continuation
+    evidence and requires typed session plus conversation headers before provider send
   - Config accepts continuation route/protocol declarations without treating remote_continuation/tool_outputs
     as model capability; previous_response_id owner resolution picks direct or relay
     before Target, and unknown/ambiguous owner enters Error01-06 instead of default
