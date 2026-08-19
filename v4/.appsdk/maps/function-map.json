@@ -463,6 +463,28 @@
       ]
     },
     {
+      "function_id": "v4.build_link.build_binary",
+      "owner": "routecodex-v4-build-link",
+      "status": "active",
+      "binding_status": "binding",
+      "entry_symbols": [
+        "build_binary",
+        "consumer_package_version",
+        "run_binary_rustc"
+      ],
+      "entry_paths": [
+        "crates/routecodex-v4-build-link/src/main.rs"
+      ],
+      "required_gates": [
+        "v4_active_link_resolver",
+        "v4_infrastructure_contract"
+      ],
+      "resource_bindings": [
+        "v4.build.workspace_artifact_link",
+        "v4.runtime.binary_identity"
+      ]
+    },
+    {
       "function_id": "v4.build.build",
       "owner": "appsdk::build_domain",
       "entry_symbols": [
@@ -800,9 +822,11 @@
       "status": "active",
       "binding_status": "binding",
       "entry_symbols": [
-        "build_run_output",
+        "build_run_projection",
         "ServertoolRunInput",
-        "ServertoolRunOutput"
+        "ServertoolRunOutput",
+        "ServertoolRunControl",
+        "ServertoolRunProjection"
       ],
       "entry_paths": [
         "crates/routecodex-v4-servertool/src/lib.rs"
@@ -812,7 +836,8 @@
         "v4_infrastructure_contract"
       ],
       "resource_bindings": [
-        "v4.servertool.cli_projection"
+        "v4.servertool.cli_projection",
+        "v4.servertool.cli_control"
       ]
     }
   ]

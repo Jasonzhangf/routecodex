@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -22,6 +25,7 @@ function validate(input) {
     'v4.config.runtime_manifest',
     'v4.lifecycle.managed_instance',
     'v4.servertool.cli_projection',
+    'v4.build_link.build_binary',
     'v4.runtime.binary_cold_start',
   ]) {
     if (!functionIds.has(functionId)) failures.push(`function map missing ${functionId}`);
@@ -31,6 +35,7 @@ function validate(input) {
     'v4.lifecycle.instance_state',
     'v4.lifecycle.control_socket',
     'v4.servertool.cli_projection',
+    'v4.servertool.cli_control',
     'v4.runtime.compiled_manifest',
   ]) {
     if (!resourceIds.has(resourceId)) failures.push(`resource map missing ${resourceId}`);
@@ -62,6 +67,28 @@ function validate(input) {
   if (!input.installer.includes("path.join(os.homedir(), '.local/bin')")) failures.push('installer does not own the global rccv4 path');
   if (!input.installer.includes("'/usr/bin/codesign'")) failures.push('installer does not codesign the global Mach-O');
   if (!input.installer.includes('installed hash drift')) failures.push('installer does not verify installed hash identity');
+  if (!input.servertool.includes('ServertoolRunControl')) failures.push('servertool owner lacks typed control side-channel');
+  if (/pub struct ServertoolRunOutput\s*\{[^}]*(?:route_hint|flow_id|session_id|request_id)/.test(input.servertool)) {
+    failures.push('servertool business output contains control fields');
+  }
+  if (!input.buildLink.includes('.env("CARGO_PKG_VERSION", package_version)')) {
+    failures.push('Active binary build does not bind the consumer package version');
+  }
+
+  const gateById = new Map(input.verification.gates.map((entry) => [entry.gate_id, entry]));
+  for (const gateId of [
+    'v4_real_runtime_compiled_manifest',
+    'v4_real_runtime_provider_transport',
+    'v4_real_runtime_server_http',
+  ]) {
+    const command = gateById.get(gateId)?.command ?? '';
+    if (!command.includes('routecodex-v4-build-link -- test-consumer')) {
+      failures.push(`${gateId} does not execute through Active build-link`);
+    }
+  }
+  if (gateById.get('v4_runtime_bin_l2_regression')?.command !== 'node scripts/architecture/verify-v4-infrastructure.mjs') {
+    failures.push('runtime-bin blackbox gate is not bound to the infrastructure verifier');
+  }
 
   const production = [input.cli, input.config, input.lifecycle, input.runtimeBin, input.server].join('\n');
   if (/127\.0\.0\.1:(?:5520|5521|17777)/.test(production)) failures.push('production source hardcodes a listener port');
@@ -82,7 +109,76 @@ const input = {
   server: read('crates/routecodex-v4-server/src/lib.rs'),
   packageJson: read('package.json'),
   installer: read('scripts/install-rccv4.mjs'),
+  servertool: read('crates/routecodex-v4-servertool/src/lib.rs'),
+  buildLink: read('crates/routecodex-v4-build-link/src/main.rs'),
 };
+
+function reservePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve(address.port);
+      });
+    });
+  });
+}
+
+function runBinary(binary, args, options = {}) {
+  const result = spawnSync(binary, args, {
+    cwd: options.cwd,
+    env: options.env,
+    encoding: 'utf8',
+    timeout: 20000,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(`${args.join(' ')} failed: ${result.error?.message ?? result.stderr}`);
+  }
+  return result.stdout;
+}
+
+async function verifyRuntimeBinary() {
+  const binary = path.join(root, 'target/release/rccv4');
+  if (!fs.existsSync(binary)) throw new Error(`runtime binary missing: ${binary}`);
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rccv4-infrastructure-'));
+  const config = path.join(tempRoot, 'config.v4.toml');
+  const stateRoot = path.join(tempRoot, 'state');
+  const port = await reservePort();
+  const env = { ...process.env, RCCV4_STATE_ROOT: stateRoot };
+  let started = false;
+  try {
+    runBinary(binary, ['--version'], { cwd: tempRoot, env });
+    runBinary(binary, ['--help'], { cwd: tempRoot, env });
+    runBinary(binary, [
+      'init', '-c', config,
+      '--provider', 'blackbox-provider',
+      '--base-url', 'https://example.invalid/v1',
+      '--model', 'blackbox-model',
+      '--api-key', 'blackbox-test-only',
+      '--port', String(port),
+    ], { cwd: tempRoot, env });
+    runBinary(binary, ['config', 'check', '-c', config], { cwd: tempRoot, env });
+    const tool = JSON.parse(runBinary(binary, [
+      'servertool', 'run', 'web_search', '--input-json', '{"query":"RouteCodex"}',
+    ], { cwd: tempRoot, env }));
+    for (const field of ['routeHint', 'flowId', 'sessionId', 'requestId']) {
+      if (Object.hasOwn(tool, field)) throw new Error(`servertool output leaked ${field}`);
+    }
+    runBinary(binary, ['start', '-c', config, '--snap'], { cwd: tempRoot, env });
+    started = true;
+    const status = runBinary(binary, ['status', '-c', config], { cwd: tempRoot, env });
+    if (!status.includes('state=running')) throw new Error(`unexpected status: ${status}`);
+    runBinary(binary, ['restart', '-c', config], { cwd: tempRoot, env });
+    runBinary(binary, ['stop', '-c', config], { cwd: tempRoot, env });
+    started = false;
+  } finally {
+    if (started) spawnSync(binary, ['stop', '-c', config], { cwd: tempRoot, env });
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
 
 if (process.argv.includes('--red-self-test')) {
   const mutated = structuredClone(input);
@@ -90,6 +186,24 @@ if (process.argv.includes('--red-self-test')) {
   const failures = validate(mutated);
   if (!failures.includes('runtime-bin retains cwd-relative default manifest')) {
     console.error('[v4_infrastructure] red self-test failed to detect cwd-relative manifest');
+    process.exit(1);
+  }
+  const controlLeak = structuredClone(input);
+  controlLeak.servertool = controlLeak.servertool.replace(
+    'pub struct ServertoolRunOutput {',
+    'pub struct ServertoolRunOutput {\n    pub route_hint: String,',
+  );
+  if (!validate(controlLeak).includes('servertool business output contains control fields')) {
+    console.error('[v4_infrastructure] red self-test failed to detect servertool control leakage');
+    process.exit(1);
+  }
+  const versionLeak = structuredClone(input);
+  versionLeak.buildLink = versionLeak.buildLink.replace(
+    '.env("CARGO_PKG_VERSION", package_version)',
+    '',
+  );
+  if (!validate(versionLeak).includes('Active binary build does not bind the consumer package version')) {
+    console.error('[v4_infrastructure] red self-test failed to detect inherited binary version');
     process.exit(1);
   }
   console.log('[v4_infrastructure] red self-test OK');
@@ -102,4 +216,5 @@ if (failures.length > 0) {
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
+await verifyRuntimeBinary();
 console.log('[v4_infrastructure] PASS');

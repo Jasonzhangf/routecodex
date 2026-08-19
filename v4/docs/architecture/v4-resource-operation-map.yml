@@ -2285,10 +2285,9 @@ resources:
   owner_symbols:
   - ServertoolRunInput
   - ServertoolRunOutput
-  - build_run_output
+  - build_run_projection
   identity:
   - toolName
-  - requestId
   semantic_contract:
     input_object_required: true
     provider_transport: forbidden
@@ -2323,6 +2322,38 @@ resources:
   - V4Cli01CommandIntent
   - V4Lifecycle02ManagedInstance
   - V4Lifecycle03ControlSocket
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.servertool.cli_control
+  axis: control
+  verification_gate:
+  - v4_servertool_l2_regression
+  - v4_infrastructure_contract
+  resource_kind: typed_cli_control_side_channel
+  lifecycle: v4.servertool.cli_projection
+  owner_crate: routecodex-v4-servertool
+  owner_node: V4Servertool01CliProjection
+  owner_symbols:
+  - ServertoolRunControl
+  - ServertoolRunProjection
+  - build_run_projection
+  identity:
+  - flowId
+  - sessionId
+  - requestId
+  semantic_contract:
+    typed_side_channel_only: true
+    provider_transport: forbidden
+    client_projection: forbidden
+  allowed_writers:
+  - routecodex-v4-servertool
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-provider
+  - routecodex-v4-server
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored

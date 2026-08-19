@@ -139,6 +139,44 @@ fn run_rustc(args: &[String]) -> Result<(), ActiveLinkError> {
     Ok(())
 }
 
+fn consumer_package_version(root: &Path, consumer: &str) -> Result<String, ActiveLinkError> {
+    let manifest = root.join("crates").join(consumer).join("Cargo.toml");
+    let text = fs::read_to_string(&manifest).map_err(|error| {
+        ActiveLinkError::ManifestInvalid(format!("read {}: {error}", manifest.display()))
+    })?;
+    let value: toml::Value = toml::from_str(&text).map_err(|error| {
+        ActiveLinkError::ManifestInvalid(format!("parse {}: {error}", manifest.display()))
+    })?;
+    value
+        .get("package")
+        .and_then(|package| package.get("version"))
+        .and_then(toml::Value::as_str)
+        .filter(|version| !version.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            ActiveLinkError::ManifestInvalid(format!(
+                "{} missing non-empty package.version",
+                manifest.display()
+            ))
+        })
+}
+
+fn run_binary_rustc(args: &[String], package_version: &str) -> Result<(), ActiveLinkError> {
+    let output = Command::new("rustc")
+        .args(args)
+        .env("CARGO_PKG_VERSION", package_version)
+        .output()
+        .map_err(|error| ActiveLinkError::LinkFailed(format!("spawn rustc: {error}")))?;
+    if !output.status.success() {
+        return Err(ActiveLinkError::LinkFailed(format!(
+            "rustc failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    Ok(())
+}
+
 /// `-L dependency=<dir>` search arguments for every rlib in the closure.
 /// rustc requires transitive dependency rlibs to be on the search path in
 /// addition to `--extern` for direct crates.
@@ -426,6 +464,7 @@ fn build_binary(
     test_mode: bool,
 ) -> Result<(), ActiveLinkError> {
     let dep_resolutions = resolve_dependencies(root, deps, target)?;
+    let package_version = consumer_package_version(root, consumer)?;
     let src = root.join("crates").join(consumer).join("src/main.rs");
     if !src.is_file() {
         return Err(ActiveLinkError::LinkFailed(format!(
@@ -472,7 +511,7 @@ fn build_binary(
     rustc_args.extend(source_args.iter().cloned());
     rustc_args.push("-o".to_string());
     rustc_args.push(out_override.to_string_lossy().into_owned());
-    run_rustc(&rustc_args)
+    run_binary_rustc(&rustc_args, &package_version)
 }
 
 fn test_consumer(
@@ -758,5 +797,74 @@ fn main() -> ExitCode {
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => fail(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn probe_root(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "routecodex-v4-build-link-{label}-{}-{nonce}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn binary_build_uses_consumer_manifest_version() {
+        let root = probe_root("package-version");
+        let consumer = "version-probe";
+        let consumer_dir = root.join("crates").join(consumer);
+        fs::create_dir_all(consumer_dir.join("src")).expect("create probe source");
+        fs::write(
+            consumer_dir.join("Cargo.toml"),
+            "[package]\nname = \"version-probe\"\nversion = \"9.8.7\"\nedition = \"2021\"\n",
+        )
+        .expect("write probe manifest");
+        fs::write(
+            consumer_dir.join("src/main.rs"),
+            "fn main() { print!(\"{}\", env!(\"CARGO_PKG_VERSION\")); }\n",
+        )
+        .expect("write probe source");
+        let output = root.join("target/version-probe");
+        build_binary(
+            &root,
+            consumer,
+            &[],
+            "unused-target",
+            &output,
+            &ExternalLink::default(),
+            &[],
+            &[],
+        )
+        .expect("build probe binary");
+        let run = Command::new(&output).output().expect("run probe binary");
+        assert!(run.status.success());
+        assert_eq!(String::from_utf8_lossy(&run.stdout), "9.8.7");
+        fs::remove_dir_all(root).expect("remove probe root");
+    }
+
+    #[test]
+    fn binary_build_rejects_missing_consumer_manifest_version() {
+        let root = probe_root("missing-version");
+        let consumer_dir = root.join("crates/version-probe");
+        fs::create_dir_all(&consumer_dir).expect("create probe manifest directory");
+        fs::write(
+            consumer_dir.join("Cargo.toml"),
+            "[package]\nname = \"version-probe\"\nedition = \"2021\"\n",
+        )
+        .expect("write invalid probe manifest");
+        let error = consumer_package_version(&root, "version-probe")
+            .expect_err("missing package version must fail");
+        assert!(error
+            .to_string()
+            .contains("missing non-empty package.version"));
+        fs::remove_dir_all(root).expect("remove probe root");
     }
 }

@@ -76,7 +76,11 @@ fn help_version_config_and_servertool_are_cwd_independent() {
         .expect("servertool");
     assert!(tool.status.success(), "{}", String::from_utf8_lossy(&tool.stderr));
     let value: serde_json::Value = serde_json::from_slice(&tool.stdout).expect("tool JSON");
-    assert_eq!(value["routeHint"], "web_search");
+    assert_eq!(value["toolName"], "web_search");
+    assert!(value.get("routeHint").is_none());
+    assert!(value.get("flowId").is_none());
+    assert!(value.get("sessionId").is_none());
+    assert!(value.get("requestId").is_none());
 }
 
 #[test]

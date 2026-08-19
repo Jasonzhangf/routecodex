@@ -26,7 +26,7 @@ use routecodex_v4_runtime::{
     RuntimeFault, SkeletonRuntime,
 };
 use routecodex_v4_server::{HttpHandler, HttpRequest, HttpResponse, ResponseStream, V4HttpServer};
-use routecodex_v4_servertool::{build_run_output, ServertoolRunInput};
+use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -139,7 +139,7 @@ fn initialize(intent: InitIntent) -> Result<String, String> {
 fn run_servertool(intent: routecodex_v4_cli::ServertoolRunIntent) -> Result<String, String> {
     let input = serde_json::from_str(&intent.input_json)
         .map_err(|error| format!("SERVERTOOL_CLI_INVALID_JSON: {error}"))?;
-    let output = build_run_output(ServertoolRunInput {
+    let projection = build_run_projection(ServertoolRunInput {
         tool_name: intent.tool_name,
         input,
         flow_id: intent.flow,
@@ -147,7 +147,8 @@ fn run_servertool(intent: routecodex_v4_cli::ServertoolRunIntent) -> Result<Stri
         request_id: intent.request_id,
     })
     .map_err(|error| error.to_string())?;
-    serde_json::to_string(&output).map_err(|error| error.to_string())
+    let _control = projection.control;
+    serde_json::to_string(&projection.output).map_err(|error| error.to_string())
 }
 
 fn dispatch_server(command: ServerIntent) -> Result<Option<String>, String> {
