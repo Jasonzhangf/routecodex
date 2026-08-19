@@ -145,6 +145,19 @@ impl V4HttpServer {
                 }
                 Err(error) => return Err(HttpServerError::Accept(error)),
             };
+            // macOS may inherit O_NONBLOCK from the listener onto the accepted
+            // socket. HTTP request reads are intentionally blocking within
+            // this connection owner; otherwise an accept/read race resets a
+            // valid client before its first bytes arrive.
+            stream
+                .set_nonblocking(false)
+                .map_err(HttpServerError::Accept)?;
+            stream
+                .set_read_timeout(Some(Duration::from_secs(30)))
+                .map_err(HttpServerError::Accept)?;
+            stream
+                .set_write_timeout(Some(Duration::from_secs(30)))
+                .map_err(HttpServerError::Accept)?;
             let request_identity = request_ids
                 .next_request_identity(&self.server_id, &local_day)
                 .map_err(|error| HttpServerError::RequestIdentity(error.to_string()))?;
