@@ -585,7 +585,15 @@ impl V3ProviderFailureRuntimeHealth {
                 model_id,
                 reason,
                 now_ms,
-                configured_health_policy_for_failure(manifest, provider_id, provider_type, model_id, status, error_type, message),
+                configured_health_policy_for_failure(
+                    manifest,
+                    provider_id,
+                    provider_type,
+                    model_id,
+                    status,
+                    error_type,
+                    message,
+                ),
             )
             .map_err(|error| error.to_string())
     }
@@ -746,7 +754,11 @@ impl V3ProviderFailureRuntimeHealth {
                 witness,
                 V3ProviderActionProviderScope::new(
                     witness.failure_session_scope(),
-                    v3_relay_provider_candidate_key_parts(&selected.candidate.provider_id, Some(&selected.candidate.auth_alias), Some(&selected.candidate.model_id)),
+                    v3_relay_provider_candidate_key_parts(
+                        &selected.candidate.provider_id,
+                        Some(&selected.candidate.auth_alias),
+                        Some(&selected.candidate.model_id),
+                    ),
                 )?,
             )
             .await
@@ -760,7 +772,11 @@ impl V3ProviderFailureRuntimeHealth {
         self.action_gate
             .wait_for_exact_provider_action(&V3ProviderActionProviderScope::new(
                 failure_session_scope,
-                v3_relay_provider_candidate_key_parts(&selected.candidate.provider_id, Some(&selected.candidate.auth_alias), Some(&selected.candidate.model_id)),
+                v3_relay_provider_candidate_key_parts(
+                    &selected.candidate.provider_id,
+                    Some(&selected.candidate.auth_alias),
+                    Some(&selected.candidate.model_id),
+                ),
             )?)
             .await
     }
@@ -1603,7 +1619,11 @@ pub(crate) fn v3_relay_provider_target_selection_sample(request_id: &str) -> u64
 }
 
 pub(crate) fn v3_relay_provider_candidate_key(candidate: &V3TargetCandidate) -> String {
-    v3_relay_provider_candidate_key_parts(&candidate.provider_id, Some(&candidate.auth_alias), Some(&candidate.model_id))
+    v3_relay_provider_candidate_key_parts(
+        &candidate.provider_id,
+        Some(&candidate.auth_alias),
+        Some(&candidate.model_id),
+    )
 }
 
 pub(crate) fn v3_relay_provider_candidate_key_parts(
