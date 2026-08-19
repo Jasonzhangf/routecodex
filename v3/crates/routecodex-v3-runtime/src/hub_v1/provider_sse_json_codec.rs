@@ -1082,9 +1082,12 @@ mod provider_sse_json_codec_tests {
     #[test]
     fn json_ping_event_is_transport_keepalive() {
         assert_eq!(
-            classify_v3_provider_generic_sse_json_data(r#"{"type":"ping"}"#)
+            classify_v3_provider_sse_json_data(
+                V3HubProviderWireProtocol::Responses,
+                r#"{"type":"ping"}"#,
+            )
                 .expect("JSON ping must remain a keepalive"),
-            None
+            None,
         );
     }
 
