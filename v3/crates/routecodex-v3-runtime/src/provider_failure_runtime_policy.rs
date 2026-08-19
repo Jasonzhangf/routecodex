@@ -873,25 +873,19 @@ impl V3ProviderFailureRuntimeHealth {
         provider_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
-        _error_family: &str,
-        reason: &str,
+        error_family: &str,
+        _reason: &str,
     ) -> Result<(), String> {
-        // post-commit SSE 流失败只在当前 session/key 内记录；不能写 provider
-        // 级共享 cooldown，否则一个断流会污染其他 session 和其他 key。
-        self.record_provider_failure_record(
-            failure_session_scope,
-            provider_id,
-            auth_alias,
-            model_id,
-            Some(reason),
-            v3_relay_provider_policy_now_epoch_ms()?,
-        )?;
+        // Post-commit SSE transport/decode/EOF is retryable transient evidence,
+        // not provider-health evidence. The response has already committed
+        // client bytes, so replay is unsafe; keep this path health-neutral and
+        // do not create provider cooldown/probe state.
         self.record_provider_action_failure_in_scope(
             failure_session_scope,
             provider_id,
             auth_alias,
             model_id,
-            _error_family,
+            error_family,
         )?;
         Ok(())
     }
