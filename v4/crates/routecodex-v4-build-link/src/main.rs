@@ -842,6 +842,7 @@ mod tests {
             &ExternalLink::default(),
             &[],
             &[],
+            false,
         )
         .expect("build probe binary");
         let run = Command::new(&output).output().expect("run probe binary");
