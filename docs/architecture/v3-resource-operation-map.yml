@@ -831,7 +831,7 @@ resources:
     owner_node: V3ProviderFailureSessionScope
     identity: [serverId, routingGroup, sessionId]
     allowed_writers: [V3ProviderFailureSessionScope::new]
-    allowed_readers: [V3Server03HttpRequestRaw, V3Error05RecoveryAdmissionWitness::new, V3ProviderFailureRuntimeHealth::record_provider_failure_record, V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope, V3ProviderFailureRuntimeHealth::session_bound_availability, V3ProviderActionProviderScope::new, V3ProviderSessionAvailabilityReader::availability]
+    allowed_readers: [V3Server03HttpRequestRaw, V3Error05RecoveryAdmissionWitness::new, V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_runtime_typed, V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope, V3ProviderFailureRuntimeHealth::session_bound_availability, V3ProviderActionProviderScope::new, V3ProviderSessionAvailabilityReader::availability]
     forbidden_writers: [routecodex-v3-provider-responses, V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, routecodex-v3-virtual-router, routecodex-v3-target]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -842,7 +842,7 @@ resources:
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStateMutated
     identity: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
-    allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_cross_session_revive]
+    allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_failure_from_runtime_typed, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_cross_session_revive]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderSessionAvailabilityReader::availability, V3ProviderHealthStore::try_acquire_cross_session_revive]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target]
     may_enter_provider_body: false
@@ -1157,7 +1157,7 @@ resources:
     may_enter_client_body: false
     may_enter_metadata_center: true
     may_enter_continuation_state: false
-    binding_status: design
+    binding_status: anchored
     required_gates:
       - npm run verify:v3-resource-map
       - npm run verify:v3-mainline-caller-flow
@@ -1189,7 +1189,7 @@ resources:
     may_enter_client_body: false
     may_enter_metadata_center: false
     may_enter_continuation_state: false
-    binding_status: design
+    binding_status: anchored
     required_gates:
       - npm run verify:v3-resource-map
       - npm run verify:v3-mainline-caller-flow
@@ -1225,7 +1225,7 @@ resources:
     may_enter_client_body: false
     may_enter_metadata_center: false
     may_enter_continuation_state: false
-    binding_status: design
+    binding_status: anchored
     required_gates:
       - npm run verify:v3-resource-map
       - npm run verify:v3-mainline-caller-flow

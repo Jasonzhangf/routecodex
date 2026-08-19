@@ -81,6 +81,7 @@
     "verify:v3-file-size": "node scripts/architecture/verify-v3-file-size.mjs",
     "test:v3-file-size-red-fixtures": "node scripts/tests/v3-file-size-red-fixtures.mjs",
     "verify:v3-module-boundaries": "node scripts/architecture/verify-v3-module-boundaries.mjs",
+    "test:v3-module-boundaries-red-fixtures": "node scripts/tests/v3-module-boundaries-red-fixtures.mjs",
     "test:v3-source-gate-red-fixtures": "node scripts/tests/v3-source-gate-red-fixtures.mjs",
     "verify:v3-normalization-payload-logic-boundary": "node scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs",
     "test:v3-normalization-payload-logic-boundary-red-fixtures": "node scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs",

@@ -601,6 +601,14 @@ pub(crate) fn error_output(
     projected_error_output(projected, node_trace)
 }
 
+pub(crate) fn error_output_from_execution_decision(
+    decision: V3Error05ExecutionDecision,
+    node_trace: Vec<&'static str>,
+) -> V3ResponsesDirectRuntimeOutput {
+    let projected = V3ErrorHandlingCenter::project_terminal(decision);
+    projected_error_output(projected, node_trace)
+}
+
 pub(crate) fn error_output_with_observability(
     source: V3Error01SourceRaised,
     node_trace: Vec<&'static str>,

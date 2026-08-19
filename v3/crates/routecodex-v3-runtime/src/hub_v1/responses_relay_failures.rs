@@ -290,6 +290,26 @@ pub(crate) fn provider_failure_output(
     }
 }
 
+pub(crate) fn provider_failure_decision_output(
+    decision: routecodex_v3_error::V3Error05ExecutionDecision,
+    mut trace: Vec<&'static str>,
+) -> V3ResponsesRelayRuntimeOutput {
+    trace.push("V3Error05ExecutionDecision");
+    let projected = routecodex_v3_error::V3ErrorHandlingCenter::project_terminal(decision);
+    trace.push("V3Error06ClientProjected");
+    V3ResponsesRelayRuntimeOutput {
+        status: projected.status,
+        client_body: V3ResponsesRelayClientBody::Json(projected.body),
+        node_trace: trace,
+        error_chain: Some(projected.chain.to_vec()),
+        observability: None,
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    }
+}
+
 pub(crate) fn error_output(
     source: routecodex_v3_error::V3Error01SourceRaised,
     status: u16,

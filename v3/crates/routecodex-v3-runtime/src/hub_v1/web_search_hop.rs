@@ -35,6 +35,7 @@ use super::{
     build_v3_provider_transport_request_for_protocol, provider_wire_protocol_for_selected_candidate,
 };
 use crate::provider_failure_runtime_policy::{
+    build_v3_relay_provider_error_05_decision,
     resolve_v3_relay_target_outcome, v3_relay_provider_policy_now_epoch_ms,
     V3ProviderFailureRuntimeHealth, V3RelayProviderTargetResolution,
     V3RelayProviderTargetResolutionInput,
@@ -42,8 +43,7 @@ use crate::provider_failure_runtime_policy::{
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{V3ErrorSourceKind, V3ProviderFailureSessionScope};
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload, ResponsesTransport, V3ProviderError,
-    V3ProviderResponseBody,
+    build_v3_provider_12_responses_wire_payload, ResponsesTransport, V3ProviderResponseBody,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -272,8 +272,20 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
                 failure_session_scope,
                 &selected.candidate,
                 Some(&error.to_string()),
-            );
-            return Err(V3ResponsesRelayRuntimeError::Provider(error));
+            )?;
+            return Err(V3ResponsesRelayRuntimeError::ProviderFailureDecision(
+                build_v3_relay_provider_error_05_decision(
+                    &selected,
+                    "V3ProviderReqOutbound09TransportRequest",
+                    502,
+                    Some("provider_transport_error"),
+                    &error.to_string(),
+                    0,
+                    false,
+                    false,
+                    None,
+                ),
+            ));
         }
         Err(_) => {
             let timeout_reason = "web search hop response header timed out".to_string();
@@ -282,31 +294,77 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
                 failure_session_scope,
                 &selected.candidate,
                 Some(&timeout_reason),
-            );
-            return Err(V3ResponsesRelayRuntimeError::Provider(
-                V3ProviderError::Transport {
-                    request_id: request_id.to_string(),
-                    provider_id: selected.candidate.provider_id.clone(),
-                    reason: timeout_reason,
-                },
+            )?;
+            return Err(V3ResponsesRelayRuntimeError::ProviderFailureDecision(
+                build_v3_relay_provider_error_05_decision(
+                    &selected,
+                    "V3ProviderReqOutbound09TransportRequest",
+                    504,
+                    Some("provider_transport_timeout"),
+                    &timeout_reason,
+                    0,
+                    false,
+                    false,
+                    None,
+                ),
             ));
         }
     };
-    // 5. 响应归一化：仅接受 JSON body，提取 message 文本作为 text_result。
+    // 5. response parsing failure is still a provider response failure. Keep
+    // it on Error05 so relay/direct cannot project a generic runtime error.
     let text_result = match provider_raw.into_body() {
         V3ProviderResponseBody::Json(bytes) => {
-            let provider_value: Value = serde_json::from_slice(&bytes)
-                .map_err(V3ResponsesRelayRuntimeError::ProviderJson)?;
-            extract_web_search_text_result(&provider_value).ok_or_else(|| {
-                V3ResponsesRelayRuntimeError::WebSearchResultUnavailable(
-                    "search provider response has no message text".to_string(),
-                )
-            })?
+            let provider_value: Value = match serde_json::from_slice(&bytes) {
+                Ok(value) => value,
+                Err(error) => {
+                    return Err(V3ResponsesRelayRuntimeError::ProviderFailureDecision(
+                        build_v3_relay_provider_error_05_decision(
+                            &selected,
+                            "V3ProviderRespInbound01Raw",
+                            502,
+                            Some("provider_response_json_malformed"),
+                            &error.to_string(),
+                            0,
+                            false,
+                            false,
+                            None,
+                        ),
+                    ));
+                }
+            };
+            match extract_web_search_text_result(&provider_value) {
+                Some(text_result) => text_result,
+                None => {
+                    return Err(V3ResponsesRelayRuntimeError::ProviderFailureDecision(
+                        build_v3_relay_provider_error_05_decision(
+                            &selected,
+                            "V3ProviderRespInbound01Raw",
+                            502,
+                            Some("provider_response_text_missing"),
+                            "search provider response has no message text",
+                            0,
+                            false,
+                            false,
+                            None,
+                        ),
+                    ));
+                }
+            }
         }
         _ => {
-            return Err(V3ResponsesRelayRuntimeError::WebSearchResultUnavailable(
-                "search hop requires a JSON transport response".to_string(),
-            ))
+            return Err(V3ResponsesRelayRuntimeError::ProviderFailureDecision(
+                build_v3_relay_provider_error_05_decision(
+                    &selected,
+                    "V3ProviderRespInbound01Raw",
+                    502,
+                    Some("provider_response_transport_mismatch"),
+                    "search hop requires a JSON transport response",
+                    0,
+                    false,
+                    false,
+                    None,
+                ),
+            ));
         }
     };
     // 6. 状态迁移 SearchResultCaptured，携带归一化结果。
@@ -323,22 +381,26 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
     Ok(captured)
 }
 
-/// 搜索 hop 失败时记录搜索 provider health（冷却），防止持续失败的搜索后端
-/// 反复命中；health 记录失败不改变主错误语义（side-effect，显式忽略）。
+/// Search hop failure health mutation stays behind the typed provider boundary.
 fn record_web_search_hop_failure(
     provider_health: &V3ProviderFailureRuntimeHealth,
     failure_session_scope: &V3ProviderFailureSessionScope,
     candidate: &routecodex_v3_target::V3TargetCandidate,
     reason: Option<&str>,
-) {
-    let _ = provider_health.record_provider_failure_record(
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let now_ms = v3_relay_provider_policy_now_epoch_ms()
+        .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)?;
+    provider_health
+        .record_provider_failure_record_from_runtime_typed(
         failure_session_scope,
         &candidate.provider_id,
         Some(&candidate.auth_alias),
         Some(&candidate.model_id),
         reason,
-        v3_relay_provider_policy_now_epoch_ms().unwrap_or_default(),
-    );
+        now_ms,
+    )
+    .map(|_| ())
+    .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)
 }
 
 /// 把搜索 hop 结果投影到客户端可见的 finalized 响应：追加 hosted

@@ -35714,3 +35714,10 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - node-graph gate 增源码绑定（runtime/skeleton 符号 + skeleton plan 每个 plugin_id 必须在 runtime 静态注册表实现）+ 5 个新 red self-test（30/30）。
 - 验证：`npm run verify:ci` 全绿（red suites=8，admission matrix OK）；`appsdk verify --admission v4` => {ok:true, stage:contract_bound}（AppSDK 0.1.3）；runtime build-consumer 带 plugin-contract source dep 构建 OK；runtime l2 test-consumer 21/21。
 - 未做：真实 Cordis host/NodeContainer（Phase 2 M3+），plugin-catalog 消费方（PluginManager，contract_bound 登记例外）；这些是下一部分目标。
+
+# 2026-08-18 V3 audit closeout
+- 根因：runtime 直接可达 provider health mutation；web_search hop provider transport/response failures 用 runtime error 早返，Relay JSON/SSE/Direct 三入口绕过 Error05。
+- 修复：provider-responses 新增 `V3ProviderFailureRuntimeInput` + `V3ProviderHealthStore::record_failure_from_runtime_typed`；runtime façade、web_search、direct helper 全部改 typed boundary；web_search failures 统一携带 terminal Error05，Relay/Direct 投影 Error06。
+- 门禁：删除/禁止重复 helper compile-surface；module/session cooldown gates、resource/function/mainline maps、wiki HTML 同步；health.rs 拆至 1497 行。
+- 验证：targeted web_search 2/2；runtime lib 464/464；npm build 36/36；provider session red fixtures 26/26；architecture docs/resource/server-tool/module gates PASS。
+- 交付风险：需主树安装、`routecodex restart`、旧 responses/web_search 样本在线复测；DSH Review 待在线证据后执行。

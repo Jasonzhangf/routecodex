@@ -28,6 +28,7 @@ const STEPS = [
   ['test:v3-provider-session-cooldown', 'Session cooldown and cross-session revive behavior'],
   ['test:v3-p5-router-target', 'Priority-first and same-priority weighted Router/Target selection'],
   ['verify:v3-module-boundaries', 'V3 module boundaries (Server cannot build/classify Error)'],
+  ['test:v3-module-boundaries-red-fixtures', 'V3 source ownership and dependency edge mutations are rejected'],
   ['verify:sse-architecture-boundary', 'SSE runtime dispatch remains Rust-owned'],
   ['verify:error-pipeline-contract', 'Provider failures use the shared typed error pipeline'],
   [

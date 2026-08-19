@@ -175,11 +175,8 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
             default_model: "model-x".into(),
             auth: V3ProviderAuthManifest {
                 auth_type: V3ProviderAuthType::ApiKey,
-                selection: V3SelectionPolicy::default(),
                 entries: vec![V3ProviderAuthEntryManifest {
                     alias: "key1".into(),
-                    priority: None,
-                    weight: None,
                     env: Some("PROV_KEY".into()),
                     token_file: None,
                     secret_file: None,
@@ -1026,11 +1023,8 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
             default_model: "MiniMax-M3".into(),
             auth: V3ProviderAuthManifest {
                 auth_type: V3ProviderAuthType::ApiKey,
-                selection: V3SelectionPolicy::default(),
                 entries: vec![V3ProviderAuthEntryManifest {
                     alias: "key1".into(),
-                    priority: None,
-                    weight: None,
                     env: Some("MM_KEY".into()),
                     token_file: None,
                     secret_file: None,

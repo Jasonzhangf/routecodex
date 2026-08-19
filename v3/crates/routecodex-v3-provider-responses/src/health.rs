@@ -2,6 +2,7 @@ use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ProviderDispositionStepManifest,
 };
 use routecodex_v3_error::{V3ErrorActionScope, V3ProviderFailureSessionScope};
+use crate::health_runtime_boundary::V3ProviderFailurePolicy;
 use crate::provider_global_health::V3ProviderGlobalSubscriptionHealthStore;
 use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key, V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState,
@@ -32,23 +33,6 @@ pub struct V3ProviderConcurrencyState {
     pub provider_id: String,
     pub in_flight: u32,
     pub limit: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct V3ProviderFailurePolicy {
-    pub failure_threshold: u32,
-    pub cooldown_ms: u64,
-    pub until_restart: bool,
-}
-
-impl Default for V3ProviderFailurePolicy {
-    fn default() -> Self {
-        Self {
-            failure_threshold: 3,
-            cooldown_ms: 900_000,
-            until_restart: false,
-        }
-    }
 }
 
 /// 瞬态失败（SSE 流内/挂起）耗尽 3 次尝试后的 session 级短期绕行时长：

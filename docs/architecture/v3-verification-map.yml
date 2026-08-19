@@ -100,6 +100,7 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
+  - npm run test:v3-module-boundaries-red-fixtures
   - npm run verify:v3-rust-only
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
@@ -2820,6 +2821,7 @@ features:
   - npm run verify:v3-mainline-caller-flow
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
+  - npm run test:v3-module-boundaries-red-fixtures
   - npm run verify:v3-rust-only
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-cargo-fmt
@@ -2963,6 +2965,7 @@ features:
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/shared/response_id_policy.rs
   design:
   - docs/goals/v3-god-file-decomposition-plan.md
   - docs/architecture/wiki/v3-module-decomposition-sop.md
@@ -3048,7 +3051,7 @@ features:
     forbidden_claim: Correct local provider-request model does not prove an upstream
       provider did not remap that model internally.
 - feature_id: v3.web_search_servertool_state_machine
-  status: design
+  status: active
   change_risk: high
   owner_kind: rust_v3_chatprocess_servertool_state_machine
   owner_scope: web_search route activation, provider search execution mode, ServerTool
@@ -3516,6 +3519,7 @@ features:
     CLI; hooks only at fixed Req04/Resp03 governance nodes; data plane logic-free.'
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/common/feature_flags.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   design:
   - docs/design/v3-servertool-center-skeleton.md

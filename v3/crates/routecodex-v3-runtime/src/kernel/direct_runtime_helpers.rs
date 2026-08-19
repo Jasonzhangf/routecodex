@@ -90,7 +90,7 @@ fn record_v3_direct_provider_failure_record(
     now_epoch_ms: u64,
 ) -> Result<V3ProviderFailureRecord, V3Error01SourceRaised> {
     provider_health
-        .record_provider_failure_record(
+        .record_provider_failure_record_from_runtime_typed(
             failure_session_scope,
             &selected.candidate.provider_id,
             Some(&selected.candidate.auth_alias),

@@ -54,7 +54,7 @@ async fn direct_kernel_revalidates_preplanned_target_against_session_alternative
 
     for offset in 0..3 {
         provider_health
-            .record_provider_failure_record(
+            .record_provider_failure_record_from_runtime_typed(
                 &session,
                 "first",
                 Some("key"),

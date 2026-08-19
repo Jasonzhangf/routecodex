@@ -13,7 +13,7 @@ use routecodex_v3_provider_responses::{
     build_v3_provider_global_probe_request, ReqwestResponsesTransport, ResponsesTransport,
     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderAvailabilityProjection,
     V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailurePolicy,
-    V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
+    V3ProviderFailureRecord, V3ProviderFailureRuntimeInput, V3ProviderGlobalSubscriptionDecision,
     V3ProviderGlobalSubscriptionHealthStore, V3ProviderGlobalSubscriptionPolicy,
     V3ProviderHealthStore, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
@@ -484,7 +484,7 @@ impl V3ProviderFailureRuntimeHealth {
         Ok(())
     }
 
-    pub(crate) fn record_provider_failure_record(
+    pub(crate) fn record_provider_failure_record_from_runtime_typed(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
@@ -494,14 +494,14 @@ impl V3ProviderFailureRuntimeHealth {
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, String> {
         self.store
-            .record_provider_failure_in_session(
-                failure_session_scope,
-                provider_id,
-                auth_alias,
-                model_id,
-                reason,
+            .record_failure_from_runtime_typed(V3ProviderFailureRuntimeInput {
+                failure_session_scope: failure_session_scope.clone(),
+                provider_id: provider_id.to_string(),
+                auth_alias: auth_alias.map(ToOwned::to_owned),
+                model_id: model_id.map(ToOwned::to_owned),
+                reason: reason.map(ToOwned::to_owned),
                 now_ms,
-            )
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -1450,7 +1450,7 @@ fn find_matching_provider_error_policy<'manifest>(
         })
 }
 
-fn build_v3_relay_provider_error_05_decision(
+pub(crate) fn build_v3_relay_provider_error_05_decision(
     selected: &V3Target10ConcreteProviderSelected,
     source_stage: &'static str,
     status: u16,

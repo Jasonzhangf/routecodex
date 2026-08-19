@@ -104,6 +104,7 @@ pub use responses_relay_dry_run::{
 use responses_relay_failures::{
     allowed_execution_modes_for_relay_server, error_output,
     is_v3_responses_provider_response_failure, provider_failure_output, provider_http_failure,
+    provider_failure_decision_output,
     provider_request_relay_failure, provider_response_hook_failure,
     provider_response_stream_failure, provider_response_stream_relay_failure,
     provider_runtime_failure, provider_semantic_failure, server_routing_group,

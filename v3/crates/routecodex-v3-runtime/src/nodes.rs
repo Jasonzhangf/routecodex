@@ -259,11 +259,9 @@ pub fn build_v3_router_request_facts_for_entry(
     )
 }
 
-/// relay 目标解析（provider_failure_runtime_policy）使用的 facts 构建：
-/// 携带 manifest，使 Mode B（web_search_execution_mode=metadata_center_local_search）
-/// 的 web_search 声明贡献路由能力。真实故障 20260808：无 manifest 的
-/// `build_v3_router_request_facts_for_entry` 使 Mode B 判定失效 → web_search
-/// pool 不命中 → 落 default。
+/// relay 目标解析（provider_failure_runtime_policy）使用的 facts 构建。
+/// Manifest 只供相邻运行时阶段解析候选能力；工具声明本身不是当前轮
+/// web_search route activation evidence。
 pub(crate) fn build_v3_router_request_facts_for_entry_with_manifest(
     body: &Value,
     entry_protocol: &str,
@@ -286,16 +284,12 @@ fn build_v3_router_request_facts_for_entry_with_control(
     entry_protocol: &str,
     longcontext_threshold_tokens: Option<u64>,
     stopless_followup: bool,
-    manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
+    _manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
     let input_tokens = estimate_v3_routing_input_tokens(body);
     let active_turn = build_v3_current_turn_route_facts(body);
     let has_image_attachment = active_turn.has_current_turn_image;
-    // 客户端显式声明 websearch 工具（function/custom 名为 websearch/web_search）
-    // 是 typed current-turn 路由事实：候选 Mode B pool 必须据此命中，禁止依赖
-    // 请求文本意图推断（r4 typed facts 设计：不扫描 payload 文本重建控制）。
-    let declares_web_search_tool = request_declares_v3_web_search_tool(body, manifest);
     let route_facts = V3CurrentTurnRouteFacts {
         reached_long_context: longcontext_threshold_tokens
             .is_some_and(|threshold| input_tokens >= threshold),
@@ -303,8 +297,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
         latest_message_from_user: active_turn.latest_message_from_user,
         stopless_followup,
         has_current_turn_tool_output: active_turn.has_current_turn_tool_output,
-        has_current_turn_web_search: active_turn.has_current_turn_web_search
-            || declares_web_search_tool,
+        has_current_turn_web_search: active_turn.has_current_turn_web_search,
         last_assistant_tool_category: active_turn
             .last_assistant_tool
             .as_ref()
@@ -324,9 +317,6 @@ fn build_v3_router_request_facts_for_entry_with_control(
     }
     if request_declares_v3_client_tool_surface(body) {
         capabilities.insert("tools".to_string());
-    }
-    if declares_web_search_tool {
-        capabilities.insert("web_search".to_string());
     }
     routecodex_v3_virtual_router::V3RouterRequestFacts {
         entry_protocol: entry_protocol.to_string(),
@@ -358,87 +348,6 @@ fn request_declares_v3_client_tool_surface(body: &Value) -> bool {
                             .is_some_and(|tools| tools.iter().any(is_v3_client_tool_declaration))
                 })
             })
-}
-
-/// 客户端显式声明 websearch 工具：typed 当前轮路由事实，驱动 VR 命中候选 Mode B pool。
-///
-/// 两种形状按不同契约判定：
-/// - function/custom 名为 websearch/web_search/web-search：无条件贡献 web_search
-///   能力（fixlist item 1 验收：请求 model 非 Mode B（forwarder）但声明 websearch
-///   工具时，VR 必须因 web_search 意图路由到 Mode B pool，再由候选 mode 在投影
-///   层 fail-fast——Mode B 判定按 selected 候选 model 而非请求 model）。
-/// - 标准 `{"type":"web_search"}` / `{"type":"web_search_preview"}` /
-///   `{"type":"web_search_20250305","name":"web_search"}`：仅当请求 model 配置
-///   Mode B 时贡献（v2-parity：非 Mode B 模型的原生 hosted 搜索由 provider 直接
-///   处理，声明不改变路由）。
-fn request_declares_v3_web_search_tool(
-    body: &Value,
-    manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
-) -> bool {
-    let declares = |tools: &Value, predicate: fn(&Value) -> bool| {
-        tools
-            .as_array()
-            .is_some_and(|tools| tools.iter().any(predicate))
-    };
-    let declares_anywhere = |predicate: fn(&Value) -> bool| {
-        body.get("tools").is_some_and(|tools| declares(tools, predicate))
-            || body
-                .get("input")
-                .and_then(Value::as_array)
-                .is_some_and(|items| {
-                    items.iter().any(|item| {
-                        item.get("type").and_then(Value::as_str) == Some("additional_tools")
-                            && item.get("tools").is_some_and(|tools| declares(tools, predicate))
-                    })
-                })
-    };
-    // function/custom 命名 websearch 工具：无条件贡献（fixlist item 1）。
-    if declares_anywhere(is_v3_web_search_function_tool_declaration) {
-        return true;
-    }
-    // 标准形状：请求 model 必须配置 Mode B 才贡献（v2-parity）。
-    let Some(manifest) = manifest else {
-        return false;
-    };
-    let Some(model) = body
-        .get("model")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return false;
-    };
-    let mode =
-        crate::hub_v1::web_search_hop::resolve_web_search_mode_and_backend(manifest, model).0;
-    mode.is_metadata_center_local_search()
-        && declares_anywhere(is_v3_web_search_standard_declaration)
-}
-
-fn is_v3_web_search_function_tool_declaration(tool: &Value) -> bool {
-    let kind = tool
-        .get("type")
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_ascii_lowercase())
-        .unwrap_or_default();
-    if !matches!(kind.as_str(), "function" | "custom" | "") {
-        return false;
-    }
-    let name = tool
-        .pointer("/function/name")
-        .or_else(|| tool.get("name"))
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_ascii_lowercase())
-        .unwrap_or_default();
-    matches!(name.as_str(), "websearch" | "web_search" | "web-search")
-}
-
-fn is_v3_web_search_standard_declaration(tool: &Value) -> bool {
-    let kind = tool
-        .get("type")
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_ascii_lowercase())
-        .unwrap_or_default();
-    matches!(kind.as_str(), "web_search" | "web_search_preview" | "web_search_20250305")
 }
 
 fn is_v3_client_tool_declaration(tool: &Value) -> bool {
@@ -628,9 +537,9 @@ mod tests {
     use super::{
         build_v3_chat_req_04_standardized_from_v3_server_03,
         build_v3_req_04_standardized_responses_from_v3_server_03,
-        build_v3_router_request_facts_for_entry, build_v3_router_request_facts_for_entry_with_control,
-        build_v3_router_request_facts_from_v3_req_04_chat,
-        build_v3_server_03_http_request_raw,
+        build_v3_router_request_facts_for_entry,
+        build_v3_router_request_facts_for_entry_with_control,
+        build_v3_router_request_facts_from_v3_req_04_chat, build_v3_server_03_http_request_raw,
     };
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use routecodex_v3_error::V3ProviderFailureSessionScope;
@@ -1071,17 +980,13 @@ mod tests {
     }
 
     #[test]
-    fn v3_routing_facts_canonical_web_search_tool_declaration_contributes_capability() {
-        // canonical（responses → chat）的 tools 数组含标准 `{"type":"web_search"}`
-        // 声明（responses web_search item 转换形状）+ Mode B 请求 model 时
-        // 必须产生 web_search 能力——真实路由的 facts 在 canonical 上构建
-        // （kernel/foundation 传 req04 的 canonical payload），仅检测原始 input
-        // part 或 function/custom websearch 名都会漏检 → web_search pool 不命中、
-        // 落 default（真实故障 20260808）。
+    fn v3_routing_facts_canonical_web_search_tool_declaration_alone_stays_idle() {
+        // 工具声明只是可用 surface，不是当前轮搜索意图；即使请求 model 的
+        // compiled mode 是 Mode B，也不得仅凭声明激活 web_search route。
         let manifest = manifest_mode_b_websearch_for_routing_facts();
         let request = json!({
             "model": "MiniMax-M3",
-            "messages": [{"role": "user", "content": "search routecodex"}],
+            "messages": [{"role": "user", "content": "continue the implementation"}],
             "tools": [{"type": "web_search"}]
         });
         let facts = build_v3_router_request_facts_for_entry_with_control(
@@ -1092,23 +997,19 @@ mod tests {
             Some(&manifest),
         );
         assert!(
-            facts.capabilities.contains("web_search"),
-            "canonical web_search tool declaration must contribute web_search capability: {:?}",
+            !facts.capabilities.contains("web_search"),
+            "canonical web_search declaration alone must stay route-inactive: {:?}",
             facts.capabilities
         );
     }
 
     #[test]
-    fn v3_routing_facts_anthropic_hosted_web_search_20250305_declaration_contributes_capability() {
-        // anthropic hosted server tool 风格声明（`{"type":"web_search_20250305",
-        // "name":"web_search"}`，MiniMax/Anthropic hosted web_search）与 responses
-        // 标准 `{"type":"web_search"}` 是两种 web search capability 形状，都必须
-        // 贡献 web_search 路由能力（声明决定路由）——否则 anthropic 入口的 hosted
-        // web_search 声明不命中 web_search 池、落 default（真实故障风险）。
+    fn v3_routing_facts_anthropic_hosted_web_search_declaration_alone_stays_idle() {
+        // Anthropic hosted server-tool 声明同样不是当前轮执行证据。
         let manifest = manifest_mode_b_websearch_for_routing_facts();
         let request = json!({
             "model": "MiniMax-M3",
-            "messages": [{"role": "user", "content": "search routecodex"}],
+            "messages": [{"role": "user", "content": "continue the implementation"}],
             "tools": [{"type": "web_search_20250305", "name": "web_search"}]
         });
         let facts = build_v3_router_request_facts_for_entry_with_control(
@@ -1119,8 +1020,8 @@ mod tests {
             Some(&manifest),
         );
         assert!(
-            facts.capabilities.contains("web_search"),
-            "anthropic hosted web_search_20250305 declaration must contribute web_search capability: {:?}",
+            !facts.capabilities.contains("web_search"),
+            "anthropic hosted declaration alone must stay route-inactive: {:?}",
             facts.capabilities
         );
     }

@@ -108,8 +108,8 @@ const cases = [
     path: "docs/architecture/v3-resource-operation-map.yml",
     mutate: (source) =>
       source.replace(
-        "allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_cross_session_revive]",
-        "allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record, V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session]",
+        "allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_failure_from_runtime_typed, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_cross_session_revive]",
+        "allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_runtime_typed, V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session]",
       ),
     diagnostic: /Resource map provider health writers must name only session-scoped|Resource map must not register Runtime wrappers/u,
   },
@@ -128,7 +128,7 @@ const cases = [
     path: "docs/architecture/v3-mainline-call-map.yml",
     mutate: (source) =>
       source.replaceAll(
-        "callee_symbol: V3ProviderHealthStore::record_provider_failure_in_session",
+        "callee_symbol: V3ProviderHealthStore::record_failure_from_runtime_typed",
         "callee_symbol: V3ProviderHealthStore::record_provider_failure",
       ),
     diagnostic: /Mainline map v3-de-14 must bind|Mainline map must not point/u,

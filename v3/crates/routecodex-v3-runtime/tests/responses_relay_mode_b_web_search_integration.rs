@@ -71,12 +71,16 @@ impl ResponsesTransport for WebSearchToolCallTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        let next = self
-            .responses
-            .lock()
-            .unwrap()
-            .pop_front()
-            .expect("mode B web_search transport response queue must be non-empty");
+        let next = match self.responses.lock().unwrap().pop_front() {
+            Some(next) => next,
+            None => {
+                return Err(V3ProviderError::Transport {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    reason: "mode B web_search backend unavailable".to_string(),
+                })
+            }
+        };
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id().to_string(),
             request.provider_id().to_string(),
@@ -90,39 +94,12 @@ impl ResponsesTransport for WebSearchToolCallTransport {
     }
 }
 
-#[tokio::test]
-async fn responses_entry_mode_b_web_search_call_must_not_return_bare_function_call() {
-    // 红测：provider 返回 websearch tool call 时，响应不得以裸
-    // function_call(websearch) 返回客户端（Mode B 同轮拦截必须生效）。
+async fn run_mode_b_web_search(
+    responses: Vec<Value>,
+) -> routecodex_v3_runtime::V3ResponsesRelayRuntimeOutput {
     let manifest = manifest_mode_b_websearch();
     let transport = WebSearchToolCallTransport {
-        responses: Mutex::new(VecDeque::from([
-            // 主请求：provider 返回 websearch tool call
-            json!({
-                "id": "msg_mm_ws_1",
-                "type": "message",
-                "role": "assistant",
-                "model": "MiniMax-M3",
-                "content": [
-                    {"type": "tool_use", "id": "call_ws_1", "name": "web_search",
-                     "input": {"query": "routecodex"}}
-                ],
-                "stop_reason": "tool_use",
-                "usage": {"input_tokens": 11, "output_tokens": 5}
-            }),
-            // 本地搜索 hop 响应（web_search_backend=MiniMax-M3 的搜索结果）
-            json!({
-                "id": "msg_mm_hop_1",
-                "type": "message",
-                "role": "assistant",
-                "model": "MiniMax-M3",
-                "content": [
-                    {"type": "text", "text": "RouteCodex 是协议路由代理。"}
-                ],
-                "stop_reason": "end_turn",
-                "usage": {"input_tokens": 8, "output_tokens": 12}
-            }),
-        ])),
+        responses: Mutex::new(responses.into()),
     };
     let stopless_control = V3ResponsesRelayStoplessControlState::default();
     let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
@@ -134,7 +111,7 @@ async fn responses_entry_mode_b_web_search_call_must_not_return_bare_function_ca
         "controlled",
     );
 
-    let result = execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control(
+    execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -157,11 +134,44 @@ async fn responses_entry_mode_b_web_search_call_must_not_return_bare_function_ca
         &transport,
         &provider_health,
         &stopless_control,
-        scope.clone(),
+        scope,
     )
-    .await;
+    .await
+    .expect("responses relay runtime must return a projected output")
+}
 
-    let output = result.expect("responses relay runtime must not fail");
+#[tokio::test]
+async fn responses_entry_mode_b_web_search_call_must_not_return_bare_function_call() {
+    // 红测：provider 返回 websearch tool call 时，响应不得以裸
+    // function_call(websearch) 返回客户端（Mode B 同轮拦截必须生效）。
+    let output = run_mode_b_web_search(vec![
+        // 主请求：provider 返回 websearch tool call
+        json!({
+            "id": "msg_mm_ws_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "MiniMax-M3",
+            "content": [
+                {"type": "tool_use", "id": "call_ws_1", "name": "web_search",
+                 "input": {"query": "routecodex"}}
+            ],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 11, "output_tokens": 5}
+        }),
+        // 本地搜索 hop 响应（web_search_backend=MiniMax-M3 的搜索结果）
+        json!({
+            "id": "msg_mm_hop_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "MiniMax-M3",
+            "content": [
+                {"type": "text", "text": "RouteCodex 是协议路由代理。"}
+            ],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 8, "output_tokens": 12}
+        }),
+    ])
+    .await;
     let body = match output.client_body {
         V3ResponsesRelayClientBody::Json(value) => value,
         _ => panic!("expected JSON relay output"),
@@ -177,5 +187,42 @@ async fn responses_entry_mode_b_web_search_call_must_not_return_bare_function_ca
             ("function_call", "websearch"),
             "Mode B web_search tool call must be intercepted, not returned as bare requires_action: {item}"
         );
+    }
+}
+
+#[tokio::test]
+async fn responses_entry_mode_b_web_search_provider_failure_projects_error05_to_error06() {
+    let output = run_mode_b_web_search(vec![json!({
+        "id": "msg_mm_ws_failure_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "MiniMax-M3",
+        "content": [{
+            "type": "tool_use",
+            "id": "call_ws_failure_1",
+            "name": "web_search",
+            "input": {"query": "routecodex"}
+        }],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 11, "output_tokens": 5}
+    })])
+    .await;
+
+    assert_eq!(output.status, 502);
+    assert!(output
+        .node_trace
+        .contains(&"V3Error05ExecutionDecision"));
+    assert!(output.node_trace.contains(&"V3Error06ClientProjected"));
+    assert!(output.error_chain.is_some());
+    match output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(
+                body.get("error")
+                    .and_then(|error| error.get("code"))
+                    .and_then(Value::as_str),
+                Some("provider_transport_error")
+            );
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON error projection"),
     }
 }

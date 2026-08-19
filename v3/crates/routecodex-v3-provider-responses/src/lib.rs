@@ -1,4 +1,5 @@
 mod error;
+mod health_runtime_boundary;
 mod provider_cooldown_probe;
 pub mod probe;
 pub mod provider_global_health;
@@ -18,9 +19,10 @@ pub use provider_global_health::{
 };
 pub use health::{
     V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
-    V3ProviderAvailabilityRegistry, V3ProviderFailureRecord,
-    V3ProviderFailurePolicy, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
+    V3ProviderAvailabilityRegistry, V3ProviderFailureRecord, V3ProviderHealthStore,
+    V3ProviderSessionAvailabilityReader,
 };
+pub use health_runtime_boundary::{V3ProviderFailurePolicy, V3ProviderFailureRuntimeInput};
 pub use raw_response::{
     V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseBodyKind,
     V3ProviderResponseHeader, V3ProviderSseStream,

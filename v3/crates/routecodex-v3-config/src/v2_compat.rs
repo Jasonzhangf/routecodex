@@ -525,17 +525,72 @@ fn compile_v2_auth(
     _source_hash: String,
     auth: V2ProviderAuthConfig,
 ) -> Result<V3ProviderAuthAuthoringConfig, V3ConfigError> {
-    let entries = if let Some(entries) = auth.entries {
-        entries
-    } else {
-        vec![V2ProviderAuthEntry {
+    let V2ProviderAuthConfig {
+        api_key,
+        env,
+        token_file,
+        secret_file,
+        entries,
+    } = auth;
+    let inline_handle_count = usize::from(api_key.is_some())
+        + usize::from(env.is_some())
+        + usize::from(token_file.is_some());
+    let entries = match (entries, secret_file) {
+        (Some(_), Some(_)) => {
+            return Err(validation(format!(
+                "v2 provider {provider_id} auth cannot combine entries with secretFile auto discovery"
+            )));
+        }
+        (Some(entries), None) => {
+            if inline_handle_count != 0 {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth cannot combine entries with apiKey, env, or tokenFile"
+                )));
+            }
+            entries
+        }
+        (None, Some(secret_file)) => {
+            if inline_handle_count != 0 {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth secretFile cannot combine with apiKey, env, or tokenFile"
+                )));
+            }
+            let secret_file = secret_file.trim();
+            if secret_file.is_empty() {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth secretFile is empty"
+                )));
+            }
+            let content = fs::read_to_string(secret_file).map_err(|error| {
+                validation(format!(
+                    "v2 provider {provider_id} auth secretFile {secret_file} is unreadable: {error}"
+                ))
+            })?;
+            crate::discover_v3_secret_file_auth_handles(&content, provider_id)
+                .map_err(|error| {
+                    validation(format!(
+                        "v2 provider {provider_id} auth secretFile discovery failed: {error}"
+                    ))
+                })?
+                .into_iter()
+                .map(|(alias, secret_key)| V2ProviderAuthEntry {
+                    alias: Some(alias),
+                    api_key: None,
+                    env: None,
+                    token_file: None,
+                    secret_file: Some(secret_file.to_string()),
+                    secret_key: Some(secret_key),
+                })
+                .collect()
+        }
+        (None, None) => vec![V2ProviderAuthEntry {
             alias: Some("key1".to_string()),
-            api_key: auth.api_key,
-            env: auth.env,
-            token_file: auth.token_file,
+            api_key,
+            env,
+            token_file,
             secret_file: None,
             secret_key: None,
-        }]
+        }],
     };
     let mut v3_entries = Vec::new();
     for entry in entries {
@@ -837,6 +892,7 @@ pub struct V2ProviderAuthConfig {
     pub api_key: Option<String>,
     pub env: Option<String>,
     pub token_file: Option<String>,
+    pub secret_file: Option<String>,
     pub entries: Option<Vec<V2ProviderAuthEntry>>,
 }
 
@@ -949,10 +1005,7 @@ web_search_backend = "MiniMax-M3"
             "snake_case web_search_execution_mode must parse (found {:?})",
             parsed.web_search_execution_mode()
         );
-        assert_eq!(
-            parsed.web_search_backend.as_deref(),
-            Some("MiniMax-M3")
-        );
+        assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
     }
 
     #[test]
@@ -965,7 +1018,10 @@ webSearchBackend = "MiniMax-M3"
 "#,
         )
         .expect("parse");
-        assert_eq!(parsed.web_search_execution_mode().as_str(), "metadata_center_local_search");
+        assert_eq!(
+            parsed.web_search_execution_mode().as_str(),
+            "metadata_center_local_search"
+        );
         assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
     }
 
@@ -997,7 +1053,11 @@ apiKey = "test-key"
 "#,
         )
         .expect("parse");
-        assert_eq!(parsed.provider.timeout, Some(900_000), "snake_case timeout must parse");
+        assert_eq!(
+            parsed.provider.timeout,
+            Some(900_000),
+            "snake_case timeout must parse"
+        );
 
         // (2) 端到点：临时 provider 目录 → compile_v2_provider_directory →
         //      manifest request_timeout_ms == 900_000
@@ -1033,11 +1093,9 @@ apiKey = "test-key"
 
         let mut referenced_models: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         referenced_models.insert("test-provider".to_string(), BTreeSet::new());
-        let (providers, _sources) =
-            compile_v2_provider_directory(&tmp, &referenced_models).expect("compile v2 provider dir");
-        let authoring = providers
-            .get("test-provider")
-            .expect("provider compiled");
+        let (providers, _sources) = compile_v2_provider_directory(&tmp, &referenced_models)
+            .expect("compile v2 provider dir");
+        let authoring = providers.get("test-provider").expect("provider compiled");
         assert_eq!(
             authoring.request_timeout_ms, 900_000,
             "V2→V3 end-to-end: timeout=900_000 must land in request_timeout_ms (was silently dropped)"
@@ -1122,17 +1180,14 @@ apiKey = "test-key"
 "#,
             )
             .expect("write");
-        let (providers_default, _sources_default) = compile_v2_provider_directory(
-            &tmp_default,
-            &referenced_models,
-        )
-        .expect("compile v2 provider dir (absent timeout)");
+        let (providers_default, _sources_default) =
+            compile_v2_provider_directory(&tmp_default, &referenced_models)
+                .expect("compile v2 provider dir (absent timeout)");
         let authoring_default = providers_default
             .get("test-provider")
             .expect("provider compiled");
         assert_eq!(
-            authoring_default.request_timeout_ms,
-            DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+            authoring_default.request_timeout_ms, DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
             "absent timeout must fall back to DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS (300_000)"
         );
         std::fs::remove_dir_all(&tmp_default).ok();
@@ -1156,7 +1211,11 @@ apiKey = "test-key"
 "#,
         )
         .expect("parse");
-        assert_eq!(parsed.provider.timeout, Some(900_000), "snake_case timeout must parse");
+        assert_eq!(
+            parsed.provider.timeout,
+            Some(900_000),
+            "snake_case timeout must parse"
+        );
 
         let absent: V2ProviderConfigFile = toml::from_str(
             r#"
@@ -1175,7 +1234,10 @@ apiKey = "test-key"
 "#,
         )
         .expect("parse");
-        assert_eq!(absent.provider.timeout, None, "absent timeout must be None (default applies later)");
+        assert_eq!(
+            absent.provider.timeout, None,
+            "absent timeout must be None (default applies later)"
+        );
     }
 
     #[test]
@@ -1251,6 +1313,7 @@ capabilities = ["text", "reasoning", "tools"]
                     api_key: None,
                     env: Some("GEN_PROVIDER_KEY".into()),
                     token_file: None,
+                    secret_file: None,
                     entries: None,
                 },
                 responses: None,
@@ -1267,10 +1330,108 @@ capabilities = ["text", "reasoning", "tools"]
             },
         };
         let generated = generate_v2_provider_config_file(&config).expect("generate");
-        assert!(generated.contains("providerId = \"gen-provider\""), "{generated}");
-        assert!(generated.contains("baseURL = \"https://api.example.com/v1\""), "{generated}");
+        assert!(
+            generated.contains("providerId = \"gen-provider\""),
+            "{generated}"
+        );
+        assert!(
+            generated.contains("baseURL = \"https://api.example.com/v1\""),
+            "{generated}"
+        );
         assert!(generated.contains("type = \"anthropic\""), "{generated}");
         assert!(generated.contains("maxInFlight = 2"), "{generated}");
-        assert!(generated.contains("env = \"GEN_PROVIDER_KEY\""), "{generated}");
+        assert!(
+            generated.contains("env = \"GEN_PROVIDER_KEY\""),
+            "{generated}"
+        );
+    }
+
+    #[test]
+    fn provider_auth_root_secret_file_roundtrip_preserves_authoring() {
+        let parsed = parse_v2_provider_config_file(
+            r#"
+version = "2.0.0"
+providerId = "secret-provider"
+
+[provider]
+id = "secret-provider"
+type = "responses"
+baseURL = "https://example.com/v1"
+defaultModel = "model-a"
+
+[provider.auth]
+secretFile = "/tmp/secret-provider.conf"
+"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            parsed.provider.auth.secret_file.as_deref(),
+            Some("/tmp/secret-provider.conf")
+        );
+
+        let generated = generate_v2_provider_config_file(&parsed).expect("generate");
+        let reparsed = parse_v2_provider_config_file(&generated).expect("reparse");
+        assert_eq!(
+            reparsed.provider.auth.secret_file.as_deref(),
+            Some("/tmp/secret-provider.conf")
+        );
+    }
+
+    #[test]
+    fn provider_auth_root_secret_file_discovers_only_provider_scoped_handles() {
+        let secret_file = std::env::temp_dir().join(format!(
+            "rccv3-secret-discovery-{}-{}.conf",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &secret_file,
+            "opencode-go.key1 = one\nopencode-go.key3 = three\nother.key1 = hidden\n",
+        )
+        .expect("write secret file");
+        let compiled = compile_v2_auth(
+            std::path::Path::new("."),
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: None,
+                env: None,
+                token_file: None,
+                secret_file: Some(secret_file.display().to_string()),
+                entries: None,
+            },
+        )
+        .expect("compile discovered handles");
+        assert_eq!(
+            compiled
+                .entries
+                .iter()
+                .map(|entry| entry.alias.as_str())
+                .collect::<Vec<_>>(),
+            vec!["key1", "key3"]
+        );
+        assert!(compiled
+            .entries
+            .iter()
+            .all(|entry| entry.secret_file.as_deref()
+                == Some(secret_file.to_string_lossy().as_ref())));
+
+        let conflicting = compile_v2_auth(
+            std::path::Path::new("."),
+            "opencode-go",
+            "source".to_string(),
+            V2ProviderAuthConfig {
+                api_key: Some("inline".to_string()),
+                env: None,
+                token_file: None,
+                secret_file: Some(secret_file.display().to_string()),
+                entries: None,
+            },
+        );
+        assert!(conflicting.is_err());
+        std::fs::remove_file(secret_file).expect("remove secret file");
     }
 }

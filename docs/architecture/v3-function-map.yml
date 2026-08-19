@@ -67,6 +67,7 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
+  - npm run test:v3-module-boundaries-red-fixtures
   - npm run verify:v3-rust-only
   - npm run verify:function-map-compile-gate
   - npm run verify:v3-cargo-fmt
@@ -339,13 +340,14 @@ features:
   - build_v3_error_04_target_exhaustion_decision_with_provider_availability
   - build_v3_error_05_execution_decision_from_v3_error_04
   - build_v3_error_06_client_projected_from_v3_error_05
-  - V3ProviderFailureRuntimeHealth::record_provider_failure_record
+  - V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_runtime_typed
   - V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy
   - V3ProviderFailureRuntimeHealth::record_provider_transient_bypass_in_session
   - V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
   - V3ProviderFailureRuntimeHealth::session_bound_availability
   - V3ProviderSessionAvailabilityReader::availability
   - V3ProviderHealthStore::record_provider_failure_in_session
+  - V3ProviderHealthStore::record_failure_from_runtime_typed
   - V3ProviderHealthStore::record_provider_success_in_session
   - V3ProviderHealthStore::availability
   - V3ProviderHealthStore::availability_for_session
@@ -945,6 +947,9 @@ features:
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
     owner_boundary: shared enums/value types used by multiple nodes; no node-local
       builders/parsers
+  - file: v3/crates/routecodex-v3-runtime/src/hub_v1/common/feature_flags.rs
+    owner_boundary: typed Config05 feature reads shared by Hub nodes; no payload construction
+      or control-state reconstruction
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/side_channel.rs
     owner_boundary: side-channel lookup helpers only; no normal request/response payload
       construction
@@ -3402,6 +3407,7 @@ features:
   owner_files:
   - docs/design/v3-servertool-center-skeleton.md
   - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/common/feature_flags.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
@@ -3428,6 +3434,7 @@ features:
   - V3ServerToolName
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/common/feature_flags.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
@@ -3532,6 +3539,7 @@ features:
   - npm run verify:v3-mainline-caller-flow
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
+  - npm run test:v3-module-boundaries-red-fixtures
   - npm run verify:v3-rust-only
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-cargo-fmt
@@ -3724,6 +3732,7 @@ features:
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/shared/response_id_policy.rs
   - scripts/architecture/verify-v3-file-size.mjs
   - scripts/tests/v3-file-size-red-fixtures.mjs
   - config/v3-file-size-policy.json
@@ -3928,7 +3937,7 @@ features:
   - git diff --check
   runtime_status: source_pending_live_replay
 - feature_id: v3.web_search_servertool_state_machine
-  status: design
+  status: active
   owner_crates:
   - routecodex-v3-config
   - routecodex-v3-runtime
@@ -3953,9 +3962,11 @@ features:
   - V3WebSearchCenterState
   - V3WebSearchCenterPhase
   - apply_v3_web_search_request_hook_at_req04
-  - apply_v3_web_search_tool_call_hook_at_resp03
-  - V3WebSearchDispatcher
-  - V3WebSearchBackendBindingCompiled
+  - apply_v3_tool_call_servertool_hook_at_resp03
+  - resolve_web_search_mode_and_backend
+  - execute_local_web_search_hop
+  - project_web_search_result_into_finalized
+  - apply_v3_responses_relay_web_search_control_completion
   mainline_bindings:
   - v3-web-search-sm-01
   - v3-web-search-sm-02
@@ -3989,7 +4000,7 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:servertool-rust-only
   - npm run build:v3-cli
-  runtime_status: design_only_not_implemented
+  runtime_status: source_active_live_verification_required
 - feature_id: v3.console_request_count_visibility
   status: active
   owner_crate: routecodex-v3-server

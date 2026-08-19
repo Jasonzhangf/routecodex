@@ -1,5 +1,64 @@
 version: 1
 status: active
+source_edge_scope: cargo_and_rust_imports
+source_call_edge_registry: docs/architecture/v3-mainline-call-map.yml
+source_modules:
+  - module_id: crate.routecodex-v3-admin
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-admin
+    allowed_dependencies: [routecodex-v3-config, routecodex-v3-config-mgmt]
+  - module_id: crate.routecodex-v3-cli
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-cli
+    allowed_dependencies: [routecodex-v3-config, routecodex-v3-config-mgmt, routecodex-v3-lifecycle, routecodex-v3-server]
+  - module_id: crate.routecodex-v3-config
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-config
+    allowed_dependencies: []
+  - module_id: crate.routecodex-v3-config-mgmt
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-config-mgmt
+    allowed_dependencies: [routecodex-v3-config]
+  - module_id: crate.routecodex-v3-debug
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-debug
+    allowed_dependencies: [routecodex-v3-config]
+  - module_id: crate.routecodex-v3-error
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-error
+    allowed_dependencies: [routecodex-v3-debug]
+  - module_id: crate.routecodex-v3-lifecycle
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-lifecycle
+    allowed_dependencies: [routecodex-v3-config, routecodex-v3-server]
+  - module_id: crate.routecodex-v3-provider-responses
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-provider-responses
+    allowed_dependencies: [routecodex-v3-config, routecodex-v3-error, routecodex-v3-sse]
+  - module_id: crate.routecodex-v3-route-classifier
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-route-classifier
+    allowed_dependencies: []
+  - module_id: crate.routecodex-v3-runtime
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-runtime
+    allowed_dependencies: [routecodex-v3-config, routecodex-v3-debug, routecodex-v3-error, routecodex-v3-provider-responses, routecodex-v3-route-classifier, routecodex-v3-sse, routecodex-v3-target, routecodex-v3-virtual-router]
+  - module_id: crate.routecodex-v3-server
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-server
+    allowed_dependencies: [routecodex-v3-config, routecodex-v3-debug, routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-sse]
+  - module_id: crate.routecodex-v3-sse
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-sse
+    allowed_dependencies: []
+  - module_id: crate.routecodex-v3-target
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-target
+    allowed_dependencies: [routecodex-v3-config, routecodex-v3-provider-responses, routecodex-v3-virtual-router]
+  - module_id: crate.routecodex-v3-virtual-router
+    owner_feature_id: v3.module_decomposition
+    owned_path: v3/crates/routecodex-v3-virtual-router
+    allowed_dependencies: [routecodex-v3-config, routecodex-v3-route-classifier]
 modules:
   - module_id: v3-global-binary-install
     owner_feature_id: v3.global_binary_install

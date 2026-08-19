@@ -106,8 +106,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:3a62cd4e24df96130d7a9892f027608a4c10bd32e404481e18aa5896330849f2
-    last_manual_authorization_id: auth-20260731-v3-de18-failure-session-scope-lock-refresh
+    fingerprint: sha256:3eeb5e6682a0348189881fa27944babba12c98cf3cc8b1fabc4f20e857080f1a
+    last_manual_authorization_id: auth-20260818-v3-error05-health-writer-and-web-search-closeout
   - item_id: chain:v3.sse.transport_boundary
     chain_id: v3.sse.transport_boundary
     status: audited_locked
@@ -697,3 +697,10 @@ manual_authorizations:
     reason: "Jason asked to inspect production/current/existing V3 config after locking the unified provider error contract and fill missing config support; adding provider error policy manifest resource changes the locked config.compile resource flow only."
     fingerprint_before: sha256:7a2f68829c5b4f2a6eb33ac605f1f27b79cdf0e1c0e54ea27f26662fa859a193
     fingerprint_after: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d
+  - authorization_id: auth-20260818-v3-error05-health-writer-and-web-search-closeout
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-08-18T14:00:00-07:00'
+    reason: "Jason instructed continuing repair of the audited V3 runtime findings. This refresh records the typed provider-health runtime boundary: V3ProviderFailureRuntimeHealth now submits V3ProviderFailureRuntimeInput to V3ProviderHealthStore::record_failure_from_runtime_typed, and web_search transport/response failures enter typed Error05 before Relay/Direct Error06 projection. Error01-06 topology, owner feature, and resource isolation remain unchanged."
+    fingerprint_before: sha256:3a62cd4e24df96130d7a9892f027608a4c10bd32e404481e18aa5896330849f2
+    fingerprint_after: sha256:3eeb5e6682a0348189881fa27944babba12c98cf3cc8b1fabc4f20e857080f1a

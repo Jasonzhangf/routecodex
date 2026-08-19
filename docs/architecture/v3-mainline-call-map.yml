@@ -2202,10 +2202,10 @@ chains:
   - step_id: v3-de-12
     from_node: V3Error03TargetLocalAction
     to_node: V3ProviderHealthStateMutated
-    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_runtime_typed
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderHealthStore::record_provider_failure_in_session
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    callee_symbol: V3ProviderHealthStore::record_failure_from_runtime_typed
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health_runtime_boundary.rs
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes:
@@ -2238,10 +2238,10 @@ chains:
   - step_id: v3-de-14
     from_node: V3Transport13ResponsesHttpRequest
     to_node: V3ProviderHealthStateMutated
-    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_runtime_typed
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderHealthStore::record_provider_failure_in_session
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    callee_symbol: V3ProviderHealthStore::record_failure_from_runtime_typed
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health_runtime_boundary.rs
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes:
@@ -5156,17 +5156,17 @@ chains:
       side_channel_writes: []
 - chain_id: v3.web_search_servertool_state_machine
   owner_feature_id: v3.web_search_servertool_state_machine
-  status: design
+  status: active
   summary: web_search route activates only from current-turn evidence; ServerTool state manager owns search-only dispatch, follow-up marker, and paired tool-result injection; provider compat owns only provider wire shape.
   manifest: docs/goals/v3-web-search-servertool-state-machine-proposal.md
   edges:
   - step_id: v3-web-search-sm-01
     from_node: HubReqChatProcess03Governed
     to_node: V3WebSearch01RouteEvidenceClassified
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: build_v3_router_request_facts_for_entry_with_control
+    caller_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+    callee_symbol: build_v3_current_turn_route_facts
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/lib.rs
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5176,14 +5176,14 @@ chains:
       side_channel_reads: []
       side_channel_writes:
       - v3.servertool.state_machine_control
-    status: binding_pending
+    status: anchored
   - step_id: v3-web-search-sm-02
     from_node: V3WebSearch01RouteEvidenceClassified
     to_node: VrRoute04SelectedTarget
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: resolve_v3_relay_target_outcome
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3VirtualRouter::resolve_route_pool_plan
+    callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5194,14 +5194,14 @@ chains:
       - v3.servertool.state_machine_control
       - v3.web_search.execution_mode
       side_channel_writes: []
-    status: binding_pending
+    status: anchored
   - step_id: v3-web-search-sm-03
     from_node: HubRespChatProcess03Governed
     to_node: V3ServerToolState01ControlScope
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: govern_v3_hub_relay_response
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    callee_symbol: apply_v3_tool_call_servertool_hook_at_resp03
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5213,14 +5213,14 @@ chains:
       - v3.servertool.state_machine_control
       side_channel_writes:
       - v3.servertool.state_machine_control
-    status: binding_pending
+    status: anchored
   - step_id: v3-web-search-sm-04
     from_node: V3ServerToolState01ControlScope
     to_node: V3WebSearch02SearchDispatchPrepared
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: intercept_local_web_search_call
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: V3WebSearchCenterState::transition_to
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5234,14 +5234,14 @@ chains:
       - v3.web_search.execution_mode
       - v3.web_search.backend_binding
       side_channel_writes: []
-    status: binding_pending
+    status: anchored
   - step_id: v3-web-search-sm-05
     from_node: V3WebSearch02SearchDispatchPrepared
     to_node: ProviderReqOutbound06WirePayload
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: execute_local_web_search_hop
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
+    callee_symbol: build_v3_provider_transport_request_for_protocol
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5250,14 +5250,14 @@ chains:
       - v3.hub.provider_wire_payload
       side_channel_reads: []
       side_channel_writes: []
-    status: binding_pending
+    status: anchored
   - step_id: v3-web-search-sm-06
     from_node: HubRespChatProcess03Governed
     to_node: V3WebSearch03SearchResultCaptured
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: execute_local_web_search_hop
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
+    callee_symbol: V3WebSearchCenterState::with_normalized_result
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5269,14 +5269,14 @@ chains:
       - v3.servertool.state_machine_control
       side_channel_writes:
       - v3.servertool.state_machine_control
-    status: binding_pending
+    status: anchored
   - step_id: v3-web-search-sm-07
     from_node: V3WebSearch03SearchResultCaptured
     to_node: HubRespOutbound04ClientSemantic
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: project_web_search_result_into_finalized
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5286,14 +5286,14 @@ chains:
       side_channel_reads:
       - v3.servertool.state_machine_control
       side_channel_writes: []
-    status: binding_pending
+    status: anchored
   - step_id: v3-web-search-sm-08
     from_node: HubReqChatProcess03Governed
     to_node: V3WebSearch04ToolResultInjected
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    callee_symbol: apply_v3_responses_relay_web_search_control_completion
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5304,7 +5304,7 @@ chains:
       side_channel_reads:
       - v3.servertool.state_machine_control
       side_channel_writes: []
-    status: binding_pending
+    status: anchored
 - chain_id: v3.console_request_count_visibility.mainline
   owner_feature_id: v3.console_request_count_visibility
   summary: One aggregate-owned request counter handle is shared by every listener, and one atomic V3 request identity allocation carries total and local-day counts into both human request and terminal response headlines.

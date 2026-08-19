@@ -2,7 +2,10 @@ use axum::body::Body;
 use axum::http::Response;
 use futures_util::{stream, StreamExt};
 use std::collections::BTreeMap;
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+};
 use tokio::sync::Notify;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,13 +24,11 @@ struct V3ResponsesSessionAdmissionState {
 #[derive(Debug, Default)]
 pub(crate) struct V3ResponsesSessionAdmissionGate {
     state: Arc<Mutex<V3ResponsesSessionAdmissionState>>,
-    notify: Arc<Notify>,
 }
 
 #[derive(Debug)]
 pub(crate) struct V3ResponsesSessionAdmissionPermit {
     state: Arc<Mutex<V3ResponsesSessionAdmissionState>>,
-    notify: Arc<Notify>,
     token: Option<u64>,
 }
 
@@ -45,7 +46,9 @@ pub(crate) struct V3ServerRequestActivityPermit {
 impl V3ServerRequestActivityGate {
     pub(crate) fn admit(self: &Arc<Self>) -> V3ServerRequestActivityPermit {
         self.active.fetch_add(1, Ordering::AcqRel);
-        V3ServerRequestActivityPermit { gate: Arc::clone(self) }
+        V3ServerRequestActivityPermit {
+            gate: Arc::clone(self),
+        }
     }
 
     pub(crate) async fn wait_for_quiescence(&self) {
@@ -74,9 +77,7 @@ pub(crate) fn hold_response_body_request_activity_permit(
     let stream = Box::pin(body.into_data_stream());
     let body = Body::from_stream(stream::unfold(
         (stream, permit),
-        |(mut stream, permit)| async move {
-            stream.next().await.map(|item| (item, (stream, permit)))
-        },
+        |(mut stream, permit)| async move { stream.next().await.map(|item| (item, (stream, permit))) },
     ));
     Response::from_parts(parts, body)
 }
@@ -95,19 +96,6 @@ pub(crate) fn hold_response_body_admission_permit(
 }
 
 impl V3ResponsesSessionAdmissionGate {
-    pub(crate) async fn admit(
-        &self,
-        scope: V3ResponsesSessionAdmissionScope,
-    ) -> Option<V3ResponsesSessionAdmissionPermit> {
-        loop {
-            let notified = self.notify.notified();
-            match self.try_admit(scope.clone()) {
-                Ok(permit) => return permit,
-                Err(()) => notified.await,
-            }
-        }
-    }
-
     pub(crate) fn try_admit(
         &self,
         scope: V3ResponsesSessionAdmissionScope,
@@ -134,7 +122,6 @@ impl V3ResponsesSessionAdmissionGate {
         state.active.insert(token, scope);
         Ok(Some(V3ResponsesSessionAdmissionPermit {
             state: Arc::clone(&self.state),
-            notify: Arc::clone(&self.notify),
             token: Some(token),
         }))
     }
@@ -150,7 +137,6 @@ impl Drop for V3ResponsesSessionAdmissionPermit {
             .expect("V3 Responses session admission state lock is poisoned")
             .active
             .remove(&token);
-        self.notify.notify_one();
     }
 }
 

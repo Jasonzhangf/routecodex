@@ -1,6 +1,7 @@
 use super::*;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use routecodex_v3_error::V3Error05ExecutionDecision;
 
 pub type V3ResponsesRelayClientStream =
     Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
@@ -1076,6 +1077,8 @@ pub enum V3ResponsesRelayRuntimeError {
     ProviderWireEncoding(String),
     #[error("V3 Responses Relay provider health failed: {0}")]
     ProviderHealth(String),
+    #[error("V3 Responses Relay web_search provider failure decision: {0:?}")]
+    ProviderFailureDecision(V3Error05ExecutionDecision),
     #[error("V3 Responses Relay JSON provider body is malformed: {0}")]
     ProviderJson(#[from] serde_json::Error),
     #[error("web_search Mode B requires exactly one backend binding at runtime: {0}")]

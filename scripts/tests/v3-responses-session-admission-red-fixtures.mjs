@@ -21,6 +21,7 @@ const copied = [
   "package.json",
   ".github/workflows/test.yml",
   "v3/crates/routecodex-v3-server/src/lib.rs",
+  "v3/crates/routecodex-v3-server/src/frame_builders.rs",
   "v3/crates/routecodex-v3-server/src/session_admission.rs",
   "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
   "v3/crates/routecodex-v3-error/src/lib.rs",
@@ -65,7 +66,7 @@ const cases = [
   },
   {
     name: "error SSE receives success keepalive",
-    path: "v3/crates/routecodex-v3-server/src/lib.rs",
+    path: "v3/crates/routecodex-v3-server/src/frame_builders.rs",
     mutate: (source) =>
       source.replaceAll(
         "v3_client_sse_body(stream, None)",

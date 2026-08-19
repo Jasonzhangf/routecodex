@@ -144,7 +144,7 @@ fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_al
     for provider_id in ["first", "second"] {
         for offset in 0..3 {
             health
-                .record_provider_failure_record(
+                .record_provider_failure_record_from_runtime_typed(
                     &session,
                     provider_id,
                     Some("key1"),

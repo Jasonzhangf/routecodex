@@ -847,7 +847,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     {
                         web_search_state
                     } else {
-                        execute_local_web_search_hop(
+                        match execute_local_web_search_hop(
                             manifest,
                             &input.server_id,
                             &input.failure_session_scope,
@@ -857,7 +857,14 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             transport,
                             &input.request_id,
                         )
-                        .await?
+                        .await
+                        {
+                            Ok(captured) => captured,
+                            Err(V3ResponsesRelayRuntimeError::ProviderFailureDecision(decision)) => {
+                                return Ok(provider_failure_decision_output(decision, trace));
+                            }
+                            Err(error) => return Err(error),
+                        }
                     };
                     project_web_search_result_into_finalized(
                         &mut finalized_provider_value,
@@ -1176,7 +1183,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     {
                         web_search_state
                     } else {
-                        execute_local_web_search_hop(
+                        match execute_local_web_search_hop(
                             manifest,
                             &input.server_id,
                             &input.failure_session_scope,
@@ -1186,7 +1193,14 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             transport,
                             &input.request_id,
                         )
-                        .await?
+                        .await
+                        {
+                            Ok(captured) => captured,
+                            Err(V3ResponsesRelayRuntimeError::ProviderFailureDecision(decision)) => {
+                                return Ok(provider_failure_decision_output(decision, trace));
+                            }
+                            Err(error) => return Err(error),
+                        }
                     };
                     project_web_search_result_into_finalized(
                         &mut finalized_provider_value,

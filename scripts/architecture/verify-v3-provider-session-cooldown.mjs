@@ -193,7 +193,7 @@ requireMatch(
 );
 forbidMatch(
   source.resourceMap,
-  /allowed_writers:\s*\[[^\]]*V3ProviderFailureRuntimeHealth::record_provider_failure_record[^\]]*\]/u,
+  /allowed_writers:\s*\[[^\]]*V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_runtime_typed[^\]]*\]/u,
   "Resource map must not register Runtime wrappers as provider health state writers",
 );
 forbidMatch(
@@ -260,7 +260,7 @@ requireBlockLine(
 );
 requireBlockLine(
   failureSessionScopeResource,
-  /allowed_readers:\s*\[[^\]]*V3Error05RecoveryAdmissionWitness::new[^\]]*V3ProviderFailureRuntimeHealth::record_provider_failure_record[^\]]*V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope[^\]]*V3ProviderFailureRuntimeHealth::session_bound_availability[^\]]*V3ProviderActionProviderScope::new[^\]]*V3ProviderSessionAvailabilityReader::availability[^\]]*\]/u,
+  /allowed_readers:\s*\[[^\]]*V3Error05RecoveryAdmissionWitness::new[^\]]*V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_runtime_typed[^\]]*V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope[^\]]*V3ProviderFailureRuntimeHealth::session_bound_availability[^\]]*V3ProviderActionProviderScope::new[^\]]*V3ProviderSessionAvailabilityReader::availability[^\]]*\]/u,
   "Resource map failure session scope readers must be the typed runtime/error/action/availability consumers",
 );
 forbidBlockLine(
@@ -286,7 +286,7 @@ requireBlockLine(
 );
 requireMatch(
   source.functionMap,
-  /feature_id:\s*v3\.debug_error_foundation[\s\S]*V3ProviderFailureRuntimeHealth::record_provider_failure_record[\s\S]*V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope[\s\S]*V3ProviderFailureRuntimeHealth::session_bound_availability[\s\S]*V3ProviderSessionAvailabilityReader::availability[\s\S]*V3ProviderHealthStore::record_provider_failure_in_session[\s\S]*V3ProviderHealthStore::record_provider_success_in_session[\s\S]*V3ProviderHealthStore::availability_for_session[\s\S]*V3ProviderHealthStore::try_acquire_cross_session_revive[\s\S]*build_v3_provider_failure_session_scope_for_request/u,
+  /feature_id:\s*v3\.debug_error_foundation[\s\S]*V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_runtime_typed[\s\S]*V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope[\s\S]*V3ProviderFailureRuntimeHealth::session_bound_availability[\s\S]*V3ProviderSessionAvailabilityReader::availability[\s\S]*V3ProviderHealthStore::record_provider_failure_in_session[\s\S]*V3ProviderHealthStore::record_provider_success_in_session[\s\S]*V3ProviderHealthStore::availability_for_session[\s\S]*V3ProviderHealthStore::try_acquire_cross_session_revive[\s\S]*build_v3_provider_failure_session_scope_for_request/u,
   "Function map must bind the session health owner, scoped availability, revive admission, and request scope builder",
 );
 forbidMatch(
@@ -301,7 +301,7 @@ requireMatch(
 );
 requireMatch(
   source.mainlineMap,
-  /step_id:\s*v3-de-14[\s\S]*caller_symbol:\s*V3ProviderFailureRuntimeHealth::record_provider_failure_record[\s\S]*callee_symbol:\s*V3ProviderHealthStore::record_provider_failure_in_session/u,
+  /step_id:\s*v3-de-14[\s\S]*caller_symbol:\s*V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_runtime_typed[\s\S]*callee_symbol:\s*V3ProviderHealthStore::record_failure_from_runtime_typed/u,
   "Mainline map v3-de-14 must bind typed failure recording to the session-scoped health store",
 );
 requireMatch(
@@ -546,7 +546,7 @@ forbidMatch(
 );
 const failurePolicyBody = source.policy.slice(
   source.policy.indexOf("pub(crate) async fn run_v3_relay_provider_failure_policy("),
-  source.policy.indexOf("\nfn build_v3_relay_provider_error_05_decision(", source.policy.indexOf("pub(crate) async fn run_v3_relay_provider_failure_policy(")),
+  source.policy.indexOf("\npub(crate) fn build_v3_relay_provider_error_05_decision(", source.policy.indexOf("pub(crate) async fn run_v3_relay_provider_failure_policy(")),
 );
 forbidMatch(
   failurePolicyBody,

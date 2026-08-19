@@ -17,7 +17,6 @@ flowchart TD
   module_docs["docs"]
   module_docs__manifest["docs::manifest"]
   module_llmswitch_core["llmswitch-core"]
-  module_pending["pending"]
   module_routecodex_v3_route_classifier["routecodex-v3-route-classifier"]
   module_routecodex_v3_sse["routecodex-v3-sse"]
   module_scripts["scripts"]
@@ -32,7 +31,6 @@ flowchart TD
   module_v3_server["v3-server"]
   module_v3_target["v3-target"]
   module_v3_virtual_router["v3-virtual-router"]
-  module_pending -->|8 edges / 1 paths| module_pending
   module_routecodex_v3_route_classifier -->|1 edges / 1 paths| module_routecodex_v3_route_classifier
   module_routecodex_v3_sse -->|2 edges / 1 paths| module_routecodex_v3_sse
   module_scripts -->|2 edges / 1 paths| module_docs
@@ -50,15 +48,15 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime__hub_v1 -->|5 edges / 5 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|28 edges / 4 paths| module_v3_runtime
-  module_v3_runtime__hub_v1 -->|127 edges / 20 paths| module_v3_runtime__hub_v1
-  module_v3_runtime -->|2 edges / 2 paths| module_routecodex_v3_route_classifier
+  module_v3_runtime__hub_v1 -->|133 edges / 21 paths| module_v3_runtime__hub_v1
+  module_v3_runtime -->|3 edges / 3 paths| module_routecodex_v3_route_classifier
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|4 edges / 2 paths| module_v3_error
   module_v3_runtime -->|9 edges / 5 paths| module_v3_provider_responses
   module_v3_runtime -->|49 edges / 10 paths| module_v3_runtime
   module_v3_runtime -->|42 edges / 10 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|4 edges / 2 paths| module_v3_target
-  module_v3_runtime -->|3 edges / 1 paths| module_v3_virtual_router
+  module_v3_runtime -->|4 edges / 2 paths| module_v3_virtual_router
   module_v3_server -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_server -->|2 edges / 2 paths| module_v3_config
   module_v3_server -->|3 edges / 2 paths| module_v3_debug
@@ -70,7 +68,6 @@ flowchart TD
 
 | From module | To module | Edges | Functional paths |
 | --- | --- | ---: | --- |
-| pending | pending | 8 | `v3.web_search_servertool_state_machine` |
 | routecodex-v3-route-classifier | routecodex-v3-route-classifier | 1 | `vr.current_turn_typed_route_facts` |
 | routecodex-v3-sse | routecodex-v3-sse | 2 | `v3.sse.transport_boundary` |
 | scripts | docs | 2 | `v3.live_provider_compat.parity` |
@@ -88,15 +85,15 @@ flowchart TD
 | v3-runtime::hub_v1 | routecodex-v3-sse | 1 | `v3.sse.protocol_codec_projection_boundary` |
 | v3-runtime::hub_v1 | v3-provider-responses | 5 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
 | v3-runtime::hub_v1 | v3-runtime | 28 | `v3.provider_action_gate.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime::hub_v1 | v3-runtime::hub_v1 | 127 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.anthropic_relay.local_continuation`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.servertool_hook_skeleton_lifecycle`<br/>`v3.sse.protocol_codec_projection_boundary` |
-| v3-runtime | routecodex-v3-route-classifier | 2 | `v3.route_classifier.facts_classification`<br/>`vr.current_turn_typed_route_facts` |
+| v3-runtime::hub_v1 | v3-runtime::hub_v1 | 133 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.anthropic_relay.local_continuation`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.servertool_hook_skeleton_lifecycle`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.web_search_servertool_state_machine` |
+| v3-runtime | routecodex-v3-route-classifier | 3 | `v3.route_classifier.facts_classification`<br/>`v3.web_search_servertool_state_machine`<br/>`vr.current_turn_typed_route_facts` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 4 | `v3.debug_error_foundation.mainline`<br/>`v3.hub_relay.response_failure_entry` |
 | v3-runtime | v3-provider-responses | 9 | `v3.debug_error_foundation.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime | v3-runtime | 49 | `v3.console_human_readable_layering.mainline`<br/>`v3.direct_stopless_metadata_center`<br/>`v3.provider_action_gate.mainline`<br/>`v3.responses_continuation.remote_contract_store`<br/>`v3.responses_continuation.remote_locator_codec`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.target.session_global_selection` |
 | v3-runtime | v3-runtime::hub_v1 | 42 | `v3.direct_stopless_metadata_center`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.runtime_timing_observability.mainline` |
 | v3-runtime | v3-target | 4 | `v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
-| v3-runtime | v3-virtual-router | 3 | `v3.responses_direct.required_mainline` |
+| v3-runtime | v3-virtual-router | 4 | `v3.responses_direct.required_mainline`<br/>`v3.web_search_servertool_state_machine` |
 | v3-server | routecodex-v3-sse | 1 | `v3.sse.http_keepalive_boundary` |
 | v3-server | v3-config | 2 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.models.capability_catalog` |
 | v3-server | v3-debug | 3 | `v3.codex_sample_retention_snap_scope`<br/>`v3.server.startup` |
@@ -117,16 +114,7 @@ flowchart TD
 
 ### Binding-pending edges
 
-| chain_id | step_id | from_node | to_node |
-| --- | --- | --- | --- |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-01 | HubReqChatProcess03Governed | V3WebSearch01RouteEvidenceClassified |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-02 | V3WebSearch01RouteEvidenceClassified | VrRoute04SelectedTarget |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-03 | HubRespChatProcess03Governed | V3ServerToolState01ControlScope |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-04 | V3ServerToolState01ControlScope | V3WebSearch02SearchDispatchPrepared |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-05 | V3WebSearch02SearchDispatchPrepared | ProviderReqOutbound06WirePayload |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-06 | HubRespChatProcess03Governed | V3WebSearch03SearchResultCaptured |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-07 | V3WebSearch03SearchResultCaptured | HubRespOutbound04ClientSemantic |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-08 | HubReqChatProcess03Governed | V3WebSearch04ToolResultInjected |
+- none
 
 ### Missing caller/callee fields
 
@@ -870,7 +858,7 @@ flowchart TD
     c_20_v3_debug_error_foundation_mainline_26["v3-error<br/>V3ProviderFailureSessionScope::new<br/><small>routecodex-v3-error/src/lib.rs</small>"]
   end
   subgraph c_20_v3_debug_error_foundation_mainline_m_v3_provider_responses["v3-provider-responses"]
-    c_20_v3_debug_error_foundation_mainline_17["v3-provider-responses<br/>V3ProviderHealthStore::record_provider_failure_in_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
+    c_20_v3_debug_error_foundation_mainline_17["v3-provider-responses<br/>V3ProviderHealthStore::record_failure_from_runtime_typed<br/><small>routecodex-v3-provider-responses/src/health_runtime_boundary.rs</small>"]
     c_20_v3_debug_error_foundation_mainline_18["v3-provider-responses<br/>V3ProviderSessionAvailabilityReader::availability<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
     c_20_v3_debug_error_foundation_mainline_19["v3-provider-responses<br/>V3ProviderHealthStore::availability_for_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
     c_20_v3_debug_error_foundation_mainline_21["v3-provider-responses<br/>V3ProviderHealthStore::record_provider_success_in_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
@@ -879,7 +867,7 @@ flowchart TD
     c_20_v3_debug_error_foundation_mainline_0["v3-runtime<br/>execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
     c_20_v3_debug_error_foundation_mainline_4["v3-runtime<br/>build_pending_projection<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
     c_20_v3_debug_error_foundation_mainline_13["v3-runtime<br/>execute_v3_responses_direct_dry_run_runtime<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
-    c_20_v3_debug_error_foundation_mainline_16["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_failure_record<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_20_v3_debug_error_foundation_mainline_16["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_runtime_typed<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_20_v3_debug_error_foundation_mainline_20["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_20_v3_debug_error_foundation_mainline_22["v3-runtime<br/>build_v3_provider_error_source<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
   end
@@ -919,9 +907,9 @@ flowchart TD
 | `v3-de-09` | `V3Error05ExecutionDecision` → `V3Error06ClientProjected` | anchored | V3ErrorHandlingCenter::handle<br/><small>routecodex-v3-error/src/lib.rs</small> | build_v3_error_06_client_projected_from_v3_error_05<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-10` | `V3DryRunFixture` → `V3DryRunNoNetworkTerminalEffect` | anchored | execute_v3_responses_direct_dry_run_runtime<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | V3DebugRuntime::build_dry_run_execution_plan<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-11` | `V3DebugTraceContextStarted` → `V3DebugSnapshotSessionRegistered` | anchored | execute_v3_responses_direct_dry_run_runtime<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | V3DebugRuntime::start_snapshot_session<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
-| `v3-de-12` | `V3Error03TargetLocalAction` → `V3ProviderHealthStateMutated` | anchored | V3ProviderFailureRuntimeHealth::record_provider_failure_record<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::record_provider_failure_in_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-12` | `V3Error03TargetLocalAction` → `V3ProviderHealthStateMutated` | anchored | V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_runtime_typed<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::record_failure_from_runtime_typed<br/><small>routecodex-v3-provider-responses/src/health_runtime_boundary.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-13` | `V3ProviderHealthStateMutated` → `V3ProviderAvailabilityProjected` | anchored | V3ProviderSessionAvailabilityReader::availability<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | V3ProviderHealthStore::availability_for_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.debug_error_foundation` |
-| `v3-de-14` | `V3Transport13ResponsesHttpRequest` → `V3ProviderHealthStateMutated` | anchored | V3ProviderFailureRuntimeHealth::record_provider_failure_record<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::record_provider_failure_in_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-14` | `V3Transport13ResponsesHttpRequest` → `V3ProviderHealthStateMutated` | anchored | V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_runtime_typed<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::record_failure_from_runtime_typed<br/><small>routecodex-v3-provider-responses/src/health_runtime_boundary.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-15` | `V3ProviderResp14Raw` → `V3ProviderHealthStateMutated` | anchored | V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::record_provider_success_in_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-16` | `V3ProviderError` → `V3Error01SourceRaised` | anchored | build_v3_provider_error_source<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-17` | `V3ProviderError` → `V3Error01SourceRaised` | anchored | build_v3_provider_error_source<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | build_v3_error_01_source_raised_internal<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
@@ -1913,29 +1901,49 @@ Manifest: `docs/goals/v3-web-search-servertool-state-machine-proposal.md`
 
 ```mermaid
 flowchart TD
-  subgraph c_46_v3_web_search_servertool_state_machine_m_pending["pending"]
-    c_46_v3_web_search_servertool_state_machine_0["pending<br/>pending<br/><small>pending</small>"]
+  subgraph c_46_v3_web_search_servertool_state_machine_m_routecodex_v3_route_classifier["routecodex-v3-route-classifier"]
+    c_46_v3_web_search_servertool_state_machine_1["routecodex-v3-route-classifier<br/>build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/lib.rs</small>"]
   end
-  c_46_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-01<br/>HubReqChatProcess03Governed → V3WebSearch01RouteEvidenceClassified| c_46_v3_web_search_servertool_state_machine_0
-  c_46_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-02<br/>V3WebSearch01RouteEvidenceClassified → VrRoute04SelectedTarget| c_46_v3_web_search_servertool_state_machine_0
-  c_46_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-03<br/>HubRespChatProcess03Governed → V3ServerToolState01ControlScope| c_46_v3_web_search_servertool_state_machine_0
-  c_46_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-04<br/>V3ServerToolState01ControlScope → V3WebSearch02SearchDispatchPrepared| c_46_v3_web_search_servertool_state_machine_0
-  c_46_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-05<br/>V3WebSearch02SearchDispatchPrepared → ProviderReqOutbound06WirePayload| c_46_v3_web_search_servertool_state_machine_0
-  c_46_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-06<br/>HubRespChatProcess03Governed → V3WebSearch03SearchResultCaptured| c_46_v3_web_search_servertool_state_machine_0
-  c_46_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-07<br/>V3WebSearch03SearchResultCaptured → HubRespOutbound04ClientSemantic| c_46_v3_web_search_servertool_state_machine_0
-  c_46_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-08<br/>HubReqChatProcess03Governed → V3WebSearch04ToolResultInjected| c_46_v3_web_search_servertool_state_machine_0
+  subgraph c_46_v3_web_search_servertool_state_machine_m_v3_runtime["v3-runtime"]
+    c_46_v3_web_search_servertool_state_machine_0["v3-runtime<br/>build_v3_router_request_facts_for_entry_with_control<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
+    c_46_v3_web_search_servertool_state_machine_2["v3-runtime<br/>resolve_v3_relay_target_outcome<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+  end
+  subgraph c_46_v3_web_search_servertool_state_machine_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
+    c_46_v3_web_search_servertool_state_machine_4["v3-runtime::hub_v1<br/>govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
+    c_46_v3_web_search_servertool_state_machine_5["v3-runtime::hub_v1<br/>apply_v3_tool_call_servertool_hook_at_resp03<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small>"]
+    c_46_v3_web_search_servertool_state_machine_6["v3-runtime::hub_v1<br/>intercept_local_web_search_call<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small>"]
+    c_46_v3_web_search_servertool_state_machine_7["v3-runtime::hub_v1<br/>V3WebSearchCenterState::transition_to<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small>"]
+    c_46_v3_web_search_servertool_state_machine_8["v3-runtime::hub_v1<br/>execute_local_web_search_hop<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small>"]
+    c_46_v3_web_search_servertool_state_machine_9["v3-runtime::hub_v1<br/>build_v3_provider_transport_request_for_protocol<br/><small>routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs</small>"]
+    c_46_v3_web_search_servertool_state_machine_10["v3-runtime::hub_v1<br/>V3WebSearchCenterState::with_normalized_result<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small>"]
+    c_46_v3_web_search_servertool_state_machine_11["v3-runtime::hub_v1<br/>project_web_search_result_into_finalized<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small>"]
+    c_46_v3_web_search_servertool_state_machine_12["v3-runtime::hub_v1<br/>build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small>"]
+    c_46_v3_web_search_servertool_state_machine_13["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
+    c_46_v3_web_search_servertool_state_machine_14["v3-runtime::hub_v1<br/>apply_v3_responses_relay_web_search_control_completion<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small>"]
+  end
+  subgraph c_46_v3_web_search_servertool_state_machine_m_v3_virtual_router["v3-virtual-router"]
+    c_46_v3_web_search_servertool_state_machine_3["v3-virtual-router<br/>V3VirtualRouter::resolve_route_pool_plan<br/><small>routecodex-v3-virtual-router/src/lib.rs</small>"]
+  end
+  c_46_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-01<br/>HubReqChatProcess03Governed → V3WebSearch01RouteEvidenceClassified| c_46_v3_web_search_servertool_state_machine_1
+  c_46_v3_web_search_servertool_state_machine_2 -->|v3-web-search-sm-02<br/>V3WebSearch01RouteEvidenceClassified → VrRoute04SelectedTarget| c_46_v3_web_search_servertool_state_machine_3
+  c_46_v3_web_search_servertool_state_machine_4 -->|v3-web-search-sm-03<br/>HubRespChatProcess03Governed → V3ServerToolState01ControlScope| c_46_v3_web_search_servertool_state_machine_5
+  c_46_v3_web_search_servertool_state_machine_6 -->|v3-web-search-sm-04<br/>V3ServerToolState01ControlScope → V3WebSearch02SearchDispatchPrepared| c_46_v3_web_search_servertool_state_machine_7
+  c_46_v3_web_search_servertool_state_machine_8 -->|v3-web-search-sm-05<br/>V3WebSearch02SearchDispatchPrepared → ProviderReqOutbound06WirePayload| c_46_v3_web_search_servertool_state_machine_9
+  c_46_v3_web_search_servertool_state_machine_8 -->|v3-web-search-sm-06<br/>HubRespChatProcess03Governed → V3WebSearch03SearchResultCaptured| c_46_v3_web_search_servertool_state_machine_10
+  c_46_v3_web_search_servertool_state_machine_11 -->|v3-web-search-sm-07<br/>V3WebSearch03SearchResultCaptured → HubRespOutbound04ClientSemantic| c_46_v3_web_search_servertool_state_machine_12
+  c_46_v3_web_search_servertool_state_machine_13 -->|v3-web-search-sm-08<br/>HubReqChatProcess03Governed → V3WebSearch04ToolResultInjected| c_46_v3_web_search_servertool_state_machine_14
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-web-search-sm-01` | `HubReqChatProcess03Governed` → `V3WebSearch01RouteEvidenceClassified` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-02` | `V3WebSearch01RouteEvidenceClassified` → `VrRoute04SelectedTarget` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-03` | `HubRespChatProcess03Governed` → `V3ServerToolState01ControlScope` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-04` | `V3ServerToolState01ControlScope` → `V3WebSearch02SearchDispatchPrepared` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-05` | `V3WebSearch02SearchDispatchPrepared` → `ProviderReqOutbound06WirePayload` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-06` | `HubRespChatProcess03Governed` → `V3WebSearch03SearchResultCaptured` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-07` | `V3WebSearch03SearchResultCaptured` → `HubRespOutbound04ClientSemantic` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-08` | `HubReqChatProcess03Governed` → `V3WebSearch04ToolResultInjected` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-01` | `HubReqChatProcess03Governed` → `V3WebSearch01RouteEvidenceClassified` | anchored | build_v3_router_request_facts_for_entry_with_control<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | build_v3_current_turn_route_facts<br/><small>routecodex-v3-route-classifier/src/lib.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-02` | `V3WebSearch01RouteEvidenceClassified` → `VrRoute04SelectedTarget` | anchored | resolve_v3_relay_target_outcome<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3VirtualRouter::resolve_route_pool_plan<br/><small>routecodex-v3-virtual-router/src/lib.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-03` | `HubRespChatProcess03Governed` → `V3ServerToolState01ControlScope` | anchored | govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | apply_v3_tool_call_servertool_hook_at_resp03<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-04` | `V3ServerToolState01ControlScope` → `V3WebSearch02SearchDispatchPrepared` | anchored | intercept_local_web_search_call<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | V3WebSearchCenterState::transition_to<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-05` | `V3WebSearch02SearchDispatchPrepared` → `ProviderReqOutbound06WirePayload` | anchored | execute_local_web_search_hop<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | build_v3_provider_transport_request_for_protocol<br/><small>routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-06` | `HubRespChatProcess03Governed` → `V3WebSearch03SearchResultCaptured` | anchored | execute_local_web_search_hop<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | V3WebSearchCenterState::with_normalized_result<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-07` | `V3WebSearch03SearchResultCaptured` → `HubRespOutbound04ClientSemantic` | anchored | project_web_search_result_into_finalized<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-08` | `HubReqChatProcess03Governed` → `V3WebSearch04ToolResultInjected` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | apply_v3_responses_relay_web_search_control_completion<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | `v3.web_search_servertool_state_machine` |
 
 ## v3.console_request_count_visibility.mainline
 

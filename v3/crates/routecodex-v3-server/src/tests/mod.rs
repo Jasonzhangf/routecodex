@@ -1071,7 +1071,10 @@ fn observability_prefix_keeps_full_provider_and_key_without_truncation() {
         prefix.contains("default:opencode-go[key2].deepseek-v4-flash"),
         "provider and key must remain fully visible in the response prefix: {prefix}"
     );
-    assert!(!prefix.contains("..."), "provider/key must not truncate: {prefix}");
+    assert!(
+        !prefix.contains("..."),
+        "provider/key must not truncate: {prefix}"
+    );
 }
 
 #[test]

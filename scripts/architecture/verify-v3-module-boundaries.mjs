@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import YAML from 'yaml';
 
 const failures = [];
 
@@ -21,8 +22,143 @@ function files(dir, out = []) {
   return out;
 }
 
+const moduleRegistryPath = 'docs/architecture/v3-build-tool-module-registry.yml';
+const moduleRegistry = YAML.parse(readFileSync(moduleRegistryPath, 'utf8'));
+const sourceModules = moduleRegistry?.source_modules;
+if (moduleRegistry?.status !== 'active' || !Array.isArray(sourceModules) || sourceModules.length === 0) {
+  failures.push('V3 module registry must be active and declare source_modules');
+}
+if (moduleRegistry?.source_edge_scope !== 'cargo_and_rust_imports') {
+  failures.push('V3 module registry must declare cargo_and_rust_imports edge scope');
+}
+if (moduleRegistry?.source_call_edge_registry !== 'docs/architecture/v3-mainline-call-map.yml') {
+  failures.push('V3 module registry must bind source calls to the canonical mainline call map');
+}
+
+const sourceOwnership = new Map();
+for (const module of sourceModules ?? []) {
+  if (!module?.module_id || !module?.owner_feature_id || !module?.owned_path) {
+    failures.push('Every V3 source module requires module_id, owner_feature_id, and owned_path');
+    continue;
+  }
+  if (!existsSync(module.owned_path) || !statSync(module.owned_path).isDirectory()) {
+    failures.push(`V3 source module owned_path must be an existing directory: ${module.owned_path}`);
+  }
+  if (module.owned_path.startsWith('v4/')) {
+    failures.push(`V4 path is forbidden in the V3 source module registry: ${module.owned_path}`);
+  }
+  if (!Array.isArray(module.allowed_dependencies)) {
+    failures.push(`V3 source module must declare allowed_dependencies: ${module.module_id}`);
+  }
+}
+
+const registeredV3SourceFiles = files('v3/crates').filter(
+  (path) => path.endsWith('.rs') || path.endsWith('/Cargo.toml'),
+);
+for (const sourcePath of registeredV3SourceFiles) {
+  const owners = (sourceModules ?? []).filter(
+    (module) => sourcePath === `${module.owned_path}/Cargo.toml` || sourcePath.startsWith(`${module.owned_path}/`),
+  );
+  if (owners.length !== 1) {
+    failures.push(
+      `V3 source file must have exactly one module owner: ${sourcePath} (${owners.map((owner) => owner.module_id).join(', ') || 'none'})`,
+    );
+    continue;
+  }
+  sourceOwnership.set(sourcePath, owners[0].module_id);
+}
+
+const registeredPackageNames = new Set(
+  (sourceModules ?? []).flatMap((module) => {
+    const cargoPath = `${module.owned_path}/Cargo.toml`;
+    if (!existsSync(cargoPath)) return [];
+    const packageName = readFileSync(cargoPath, 'utf8').match(
+      /^name\s*=\s*"(routecodex-v3-[a-z0-9-]+)"/mu,
+    )?.[1];
+    return packageName ? [packageName] : [];
+  }),
+);
+
+for (const module of sourceModules ?? []) {
+  if (!module?.owned_path || !existsSync(`${module.owned_path}/Cargo.toml`)) continue;
+  const cargo = readFileSync(`${module.owned_path}/Cargo.toml`, 'utf8');
+  const packageName = cargo.match(/^name\s*=\s*"(routecodex-v3-[a-z0-9-]+)"/mu)?.[1];
+  const actualCargoDependencies = new Set(
+    [...cargo.matchAll(/^(routecodex-v3-[a-z0-9-]+)\s*=\s*/gmu)].map((match) => match[1]),
+  );
+  const allowedDependencies = new Set(module.allowed_dependencies ?? []);
+  for (const dependency of actualCargoDependencies) {
+    if (!allowedDependencies.has(dependency)) {
+      failures.push(`V3 source module has undeclared Cargo edge: ${packageName} -> ${dependency}`);
+    }
+  }
+  for (const dependency of allowedDependencies) {
+    if (!actualCargoDependencies.has(dependency)) {
+      failures.push(`V3 source module declares a nonexistent Cargo edge: ${packageName} -> ${dependency}`);
+    }
+  }
+  for (const sourcePath of registeredV3SourceFiles.filter(
+    (path) => path.startsWith(`${module.owned_path}/`) && path.endsWith('.rs'),
+  )) {
+    const source = readFileSync(sourcePath, 'utf8');
+    const importedCrates = new Set(
+      [...source.matchAll(/\b(routecodex_v3_[a-z0-9_]+)\b/gu)].map((match) =>
+        match[1].replaceAll('_', '-'),
+      ),
+    );
+    for (const dependency of importedCrates) {
+      if (!registeredPackageNames.has(dependency)) continue;
+      if (dependency !== packageName && !allowedDependencies.has(dependency)) {
+        failures.push(`V3 source module has undeclared Rust import edge: ${sourcePath} -> ${dependency}`);
+      }
+    }
+  }
+}
+
+if (!/feature_id:\s*v3\.module_decomposition\b/u.test(
+  readFileSync('docs/architecture/v3-function-map.yml', 'utf8'),
+)) {
+  failures.push('V3 source module registry owner feature must exist in the function map');
+}
+
 function fail(message) {
   failures.push(message);
+}
+
+const providerFailurePolicyDir = 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy';
+const forbiddenProviderFailureHelper = `${providerFailurePolicyDir}/provider_failure_routing_helpers.rs`;
+if (existsSync(forbiddenProviderFailureHelper)) {
+  fail('provider failure policy duplicate helper must not re-enter the compile surface: ' + forbiddenProviderFailureHelper);
+}
+
+const webSearchFunctionMap = readFileSync('docs/architecture/v3-function-map.yml', 'utf8');
+const webSearchMainlineMap = readFileSync('docs/architecture/v3-mainline-call-map.yml', 'utf8');
+const webSearchResourceMap = readFileSync('docs/architecture/v3-resource-operation-map.yml', 'utf8');
+const webSearchFeatureBlock = webSearchFunctionMap.match(
+  /- feature_id: v3\.web_search_servertool_state_machine[\s\S]*?(?=\n- feature_id:|$)/,
+)?.[0] ?? '';
+const webSearchChainBlock = webSearchMainlineMap.match(
+  /- chain_id: v3\.web_search_servertool_state_machine[\s\S]*?(?=\n- chain_id:|$)/,
+)?.[0] ?? '';
+if (!/status: active/.test(webSearchFeatureBlock)
+    || !/runtime_status: source_active_live_verification_required/.test(webSearchFeatureBlock)) {
+  fail('web_search feature map must describe active source with live verification still required');
+}
+if (!/status: active/.test(webSearchChainBlock) || /binding_pending|caller_symbol: pending|callee_symbol: pending/.test(webSearchChainBlock)) {
+  fail('web_search mainline must bind every active edge to real source symbols');
+}
+for (const resourceId of [
+  'v3.servertool.state_machine_control',
+  'v3.web_search.execution_mode',
+  'v3.web_search.backend_binding',
+]) {
+  const escaped = resourceId.replaceAll('.', '\\.');
+  const block = webSearchResourceMap.match(
+    new RegExp(`- resource_id: ${escaped}[\\s\\S]*?(?=\\n  - resource_id:|$)`),
+  )?.[0] ?? '';
+  if (!/binding_status: anchored/.test(block)) {
+    fail(`active web_search resource must be anchored: ${resourceId}`);
+  }
 }
 
 const all = files('v3');
@@ -94,6 +230,10 @@ for (const path of all) {
   if (!isTest && !isProviderOwner && !isProviderHealthRuntimeBoundary
       && /V3ProviderHealthStore/.test(text)) {
     fail('Provider health store must remain opaque outside Provider and its Runtime boundary: ' + path);
+  }
+  if (!isTest && path.includes('routecodex-v3-runtime/src/')
+      && /\.record_provider_failure_record\s*\(/.test(text)) {
+    fail('Runtime provider health mutation must use record_provider_failure_record_from_runtime_typed: ' + path);
   }
   if (!isTest && isProviderOwner
       && (/\b(?:cc|asxs)\b/.test(productionText)
@@ -221,6 +361,9 @@ if (!/pub responses_process: Option<String>/.test(targetSource)
 }
 
 const runtimeNodesSource = read('v3/crates/routecodex-v3-runtime/src/nodes.rs');
+if (/request_declares_v3_web_search_tool|declares_web_search_tool/.test(runtimeNodesSource)) {
+  fail('web_search tool declaration alone must not reconstruct current-turn route activation');
+}
 if (/V3RouteClassifierMetadata|route_classifier_metadata|\/metadata\/runtime_control|\/metadata\/hasImageAttachment/.test(runtimeNodesSource)) {
   fail('V3 Runtime cannot derive routing or MetadataCenter control from client payload metadata');
 }

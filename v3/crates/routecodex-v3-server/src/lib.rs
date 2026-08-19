@@ -117,8 +117,8 @@ use routecodex_v3_sse::{
 };
 use serde_json::{json, Map, Value};
 use session_admission::{
-    hold_response_body_admission_permit, V3ResponsesSessionAdmissionGate,
-    hold_response_body_request_activity_permit, V3ResponsesSessionAdmissionPermit,
+    hold_response_body_admission_permit, hold_response_body_request_activity_permit,
+    V3ResponsesSessionAdmissionGate, V3ResponsesSessionAdmissionPermit,
     V3ResponsesSessionAdmissionScope, V3ServerRequestActivityGate,
 };
 use std::collections::BTreeSet;
@@ -643,7 +643,7 @@ fn current_epoch_ms() -> u64 {
         .unwrap_or(0)
 }
 
-async fn admit_v3_responses_session(
+fn admit_v3_responses_session_after_json_parse(
     state: &Arc<V3ListenerState>,
     path: &str,
     request_headers: &HeaderMap,
@@ -669,14 +669,33 @@ async fn admit_v3_responses_session(
             );
         }
     };
-    let permit = state
-        .responses_session_admission
-        .admit(V3ResponsesSessionAdmissionScope {
+    let permit = match state.responses_session_admission.try_admit(
+        V3ResponsesSessionAdmissionScope {
             endpoint: "/v1/responses".to_string(),
             session_id,
             conversation_id,
-        })
-        .await;
+        },
+    ) {
+        Ok(permit) => permit,
+        Err(()) => {
+            let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
+                Ok(request_id) => request_id,
+                Err(response) => return Err(*response),
+            };
+            return Err(error_output_response_for_responses_request_with_project_path(
+                &state.server,
+                path,
+                &request_id,
+                project_http_input_error(
+                    V3HttpBoundaryErrorKind::RequestInFlight,
+                    "another /v1/responses request is still active for this listener session or conversation",
+                ),
+                request_headers,
+                Some(payload),
+                resolve_v3_console_project_path(request_headers, payload).as_deref(),
+            ));
+        }
+    };
     Ok(permit)
 }
 
@@ -737,14 +756,6 @@ async fn pending_endpoint(
         );
         return hold_response_body_request_activity_permit(response, request_activity_permit);
     }
-    let admission_permit = if entry_protocol == "responses" {
-        match admit_v3_responses_session(&state, &path, &request_headers, &Value::Null).await {
-            Ok(permit) => permit,
-            Err(response) => return response,
-        }
-    } else {
-        None
-    };
     let payload = match read_json_payload(request).await {
         Ok(payload) => payload,
         Err(projected) => {
@@ -794,12 +805,17 @@ async fn pending_endpoint(
                 frame,
                 Duration::from_millis(state.server.http_sse_keepalive_ms),
             );
-            let response = match admission_permit {
-                Some(permit) => hold_response_body_admission_permit(response, permit),
-                None => response,
-            };
             return hold_response_body_request_activity_permit(response, request_activity_permit);
         }
+    };
+    let admission_permit = if entry_protocol == "responses" {
+        match admit_v3_responses_session_after_json_parse(&state, &path, &request_headers, &payload)
+        {
+            Ok(permit) => permit,
+            Err(response) => return response,
+        }
+    } else {
+        None
     };
     let response = pending_endpoint_after_responses_admission(
         state,

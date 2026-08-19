@@ -1121,7 +1121,7 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
 
     for offset in 0..3 {
         provider_health
-            .record_provider_failure_record(
+            .record_provider_failure_record_from_runtime_typed(
                 &session_a,
                 "first",
                 Some("key"),
@@ -1827,7 +1827,7 @@ async fn pinned_unavailable_provider_consumes_error05_gate_before_terminal_relea
 
     for failure_at in 2_000..2_003 {
         provider_health
-            .record_provider_failure_record(
+            .record_provider_failure_record_from_runtime_typed(
                 &V3ProviderFailureSessionScope::new(
                     "test",
                     gate_routing_group,

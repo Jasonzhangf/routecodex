@@ -1238,6 +1238,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             .await
                             {
                                 Ok(captured) => captured,
+                                Err(crate::hub_v1::V3ResponsesRelayRuntimeError::ProviderFailureDecision(
+                                    decision,
+                                )) => {
+                                    trace.push("V3Error05ExecutionDecision");
+                                    return error_output_from_execution_decision(decision, trace);
+                                }
                                 Err(error) => {
                                     return error_output(
                                         runtime_source(

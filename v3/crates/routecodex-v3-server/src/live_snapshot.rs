@@ -51,10 +51,7 @@ impl V3LiveSnapSseRecorderCore {
         });
         if let Some(observability) = self.observability.as_ref() {
             if let Some(object) = payload.as_object_mut() {
-                object.insert(
-                    "observability".to_string(),
-                    observability.clone(),
-                );
+                object.insert("observability".to_string(), observability.clone());
             }
         }
         if let Some(finalized_response) = self.finalized_response.as_ref() {
@@ -186,7 +183,10 @@ impl V3LiveSnapClientResponseSseRecorder {
         }
     }
 
-    pub(crate) fn wrap(&self, stream: V3ResponsesRelayClientStream) -> V3ResponsesRelayClientStream {
+    pub(crate) fn wrap(
+        &self,
+        stream: V3ResponsesRelayClientStream,
+    ) -> V3ResponsesRelayClientStream {
         Box::pin(V3LiveSnapRecordedStream {
             inner: stream,
             recorder: self.core.clone(),
@@ -455,17 +455,15 @@ pub(crate) fn capture_v3_openai_chat_relay_response(
             endpoint,
             request_id,
             "error.json",
-            &state
-                .debug
-                .project_payload_verbatim(json!({
-                    "object": "routecodex.v3.error_evidence",
-                    "stage": "error",
-                    "status": output.status,
-                    "request_id": request_id,
-                    "endpoint": endpoint,
-                    "node_trace": output.node_trace.clone(),
-                    "error_chain": output.error_chain.clone(),
-                })),
+            &state.debug.project_payload_verbatim(json!({
+                "object": "routecodex.v3.error_evidence",
+                "stage": "error",
+                "status": output.status,
+                "request_id": request_id,
+                "endpoint": endpoint,
+                "node_trace": output.node_trace.clone(),
+                "error_chain": output.error_chain.clone(),
+            })),
             (output.status >= 400).then_some(output.status),
         );
     }
@@ -602,9 +600,7 @@ pub(crate) fn capture_v3_responses_relay_provider_snapshots(
                 .debug
                 .should_capture_snapshot_stage("provider-request")
         {
-            let provider_request = state
-                .debug
-                .project_payload_verbatim(provider_request);
+            let provider_request = state.debug.project_payload_verbatim(provider_request);
             let result = if force_error_evidence {
                 persist_v3_error_evidence_payload(
                     state,
@@ -639,9 +635,7 @@ pub(crate) fn capture_v3_responses_relay_provider_snapshots(
                 .debug
                 .should_capture_snapshot_stage("provider-response")
         {
-            let provider_response = state
-                .debug
-                .project_payload_verbatim(provider_response);
+            let provider_response = state.debug.project_payload_verbatim(provider_response);
             let result = if force_error_evidence {
                 persist_v3_error_evidence_payload(
                     state,
@@ -895,9 +889,7 @@ pub(crate) fn capture_v3_foundation_runtime_response(
         if !v3_codex_sample_scope_allows(state, execution_mode) {
             return None;
         }
-        let payload = state
-            .debug
-            .project_payload_verbatim(output.body.clone());
+        let payload = state.debug.project_payload_verbatim(output.body.clone());
         if let Err(error) = persist_v3_codex_sample_payload(
             state,
             entry_protocol,
@@ -943,7 +935,9 @@ pub(crate) fn capture_v3_foundation_runtime_response(
     None
 }
 
-pub(crate) fn project_v3_runtime_observability_debug(observability: &V3RuntimeObservability) -> Value {
+pub(crate) fn project_v3_runtime_observability_debug(
+    observability: &V3RuntimeObservability,
+) -> Value {
     json!({
         "routing_group_id": observability.routing_group_id,
         "pool_id": observability.pool_id,
@@ -1107,7 +1101,9 @@ pub(crate) fn relay_error_body_for_console(body: &V3ResponsesRelayClientBody) ->
     }
 }
 
-pub(crate) fn openai_chat_error_body_for_console(body: &V3OpenAiChatRelayClientBody) -> Option<&Value> {
+pub(crate) fn openai_chat_error_body_for_console(
+    body: &V3OpenAiChatRelayClientBody,
+) -> Option<&Value> {
     match body {
         V3OpenAiChatRelayClientBody::Json(value) => Some(value),
         V3OpenAiChatRelayClientBody::Sse(_) => None,
