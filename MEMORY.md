@@ -5574,3 +5574,11 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
   参数：`inject` 对 host 容器服务 + 节点内插件 `services_provided` 联合校验
   （15 tests）；`playground/**` 归 routecodex-v4-governance 模块。
 Tags: #v4 #cordis #node-container #plugin #isolation #experiment
+
+## 2026-08-19 V4 响应链 Node 01-06 最终闭环
+- 生产分支 `codex/v4-infrastructure-final-integration-20260819` 在 `955dbc1a160dc8e61dac7992b41dfe30600f8576` 完成响应链自审修复；Node 01-06 的真实 SSE/JSON 路径由 Rust `routecodex-v4-runtime` 执行，runtime-bin 只写已生成的 client frame，不再拥有 SSE 业务 framing。
+- 自审发现并修复四类真问题：CRLF/截断尾帧 silent EOF；Relay SSE 工具终态与 arguments delta 丢失；SSE frame owner 下沉错误；continuation 控制资源用伪 `sha256:` 前缀镜像业务 payload。continuation 现在只保存固定长度真实 SHA-256 digest，基础设施 gate 有反向 payload-leak 自测。
+- Relay Node 04 投影把 Responses function call 转为非流式 Chat tool call（不携带流式 `index`），并把 `input_tokens/output_tokens` 映射为 `prompt_tokens/completion_tokens`；SSE tool delta 保留 `output_index`。
+- Active-link 是 workspace 外 runtime/runtime-bin 的唯一有效验证入口：runtime 35/35、runtime-bin 8/8。最终 `verify:ci` 通过 22 gates、14 consumers、16 red suites；全局安装 hash `eb34ab9ef8a92a1679556ecd341a4a7f0201d16b1b53c78fefc3ae0e9a1ff1e5`、codesign valid；仅用 `rccv4 restart` 原 PID 39149 exec 重启后状态 running，真实 Direct JSON/SSE、Responses continuation、Relay JSON/SSE、错误请求 replay 8/8。
+- Jason 明确取消外部 review；最终结论来自提交范围本地架构/协议自审和全栈证据，自审无剩余 P0/P1。以后不得把 runtime crate 的普通 workspace `cargo test` 失败/未纳入误当验证结果，必须执行 verification-map 登记的 Active build-link 真源。
+Tags: #v4 #response-chain #sse #continuation #relay #direct #active-link #self-review
