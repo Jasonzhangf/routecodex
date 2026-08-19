@@ -120,10 +120,13 @@ test('behaviorally locks direct command aliases to one binary without fallback',
   const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-v3-shim-test-'));
   const binaryPath = path.join(shimDir, 'rccv3');
   const shimScriptPath = path.resolve('scripts/ensure-cli-command-shim.mjs');
-  const sourceBinaryPath = path.resolve('dist/bin/rccv3');
   try {
-    fs.copyFileSync(sourceBinaryPath, binaryPath);
-    fs.chmodSync(binaryPath, 0o755);
+    fs.symlinkSync(process.execPath, binaryPath);
+    const expectedVersion = spawnSync(binaryPath, ['--version'], {
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    assert.equal(expectedVersion.status, 0);
     const install = spawnSync(process.execPath, [shimScriptPath], {
       cwd: root,
       env: { ...process.env, ROUTECODEX_SHIM_DIR: shimDir },
@@ -141,7 +144,7 @@ test('behaviorally locks direct command aliases to one binary without fallback',
         timeout: 30_000,
       });
       assert.equal(result.status, 0);
-      assert.ok(result.stdout.includes('rccv3 '));
+      assert.equal(result.stdout, expectedVersion.stdout);
     }
     fs.unlinkSync(binaryPath);
     const missing = spawnSync(path.join(shimDir, 'routecodex'), ['--version'], {
