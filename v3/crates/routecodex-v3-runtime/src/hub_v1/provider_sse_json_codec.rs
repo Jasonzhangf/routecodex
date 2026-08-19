@@ -162,6 +162,50 @@ pub(crate) fn classify_v3_provider_generic_sse_json_data(
     Ok(Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream))
 }
 
+/// Classify a complete JSON body received on an SSE-intent response.  The
+/// normal JSON-for-SSE compatibility path remains opaque; only an explicit
+/// provider error envelope is classified here so every protocol runtime shares
+/// one semantic error decision.
+pub(crate) fn classify_v3_provider_json_error_body(
+    data: &str,
+) -> Result<Option<V3ProviderResponsesJsonFrameOutcome>, String> {
+    let value = serde_json::from_str::<Value>(data).map_err(|error| error.to_string())?;
+    let has_error_shape = value.get("error").is_some()
+        || value
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| {
+                matches!(
+                    kind,
+                    "error"
+                        | "response.error"
+                        | "response.failed"
+                        | "response.cancelled"
+                        | "response.canceled"
+                )
+            });
+    if !has_error_shape {
+        return Ok(None);
+    }
+    if let Some(error) = value.get("error").and_then(Value::as_object) {
+        return Ok(Some(V3ProviderResponsesJsonFrameOutcome::Failure {
+            code: error
+                .get("code")
+                .or_else(|| error.get("type"))
+                .and_then(Value::as_str)
+                .unwrap_or("provider_response_sse_error")
+                .to_string(),
+            message: error
+                .get("message")
+                .or_else(|| error.get("detail"))
+                .and_then(Value::as_str)
+                .unwrap_or("provider emitted a JSON error body")
+                .to_string(),
+        }));
+    }
+    classify_v3_provider_generic_sse_json_data(data)
+}
+
 /// Provider SSE keepalive/settlement JSON（无内容语义，Direct/Relay 对称跳过）：
 /// `{"type":"ping"}`、`{"ping":...}`、`{"choices":[],"cost":"0"}` 或空对象。
 /// 这些帧只保活 transport，不产生 output/tool/usage 语义；真 malformed JSON

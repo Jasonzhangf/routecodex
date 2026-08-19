@@ -1,8 +1,8 @@
-use crate::direct_response_hooks::{V3DirectResponseCompatBlock, V3DirectResponseCompatPlan};
 use crate::hub_v1::{
-    classify_v3_provider_generic_sse_json_data, collect_v3_provider_sse_json_data,
-    is_v3_provider_sse_keepalive_text, parse_v3_provider_sse_json_data,
-    v3_feature_enabled_for_server, V3ProviderResponsesJsonFrameOutcome, V3RuntimeStreamObservation,
+    classify_v3_provider_generic_sse_json_data, classify_v3_provider_json_error_body,
+    collect_v3_provider_sse_json_data, is_v3_provider_sse_keepalive_text,
+    parse_v3_provider_sse_json_data, v3_feature_enabled_for_server,
+    V3ProviderResponsesJsonFrameOutcome, V3RuntimeStreamObservation,
 };
 use crate::nodes::{V3ClientBody, V3ClientSseStream, V3Resp15ClientPayload};
 use futures_util::{stream, StreamExt};
@@ -103,7 +103,6 @@ pub struct V3ProviderResponseProjection {
     pub client_payload: V3Resp15ClientPayload,
     pub remote_continuation: V3RemoteContinuationObservation,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
-    pub compat_plan: V3DirectResponseCompatPlan,
 }
 
 /// 客户端响应 id 剥离开关：开启后把返回给客户端的 Responses body 中
@@ -160,17 +159,8 @@ pub(crate) fn strip_v3_response_id_from_json_body(body: &mut serde_json::Value) 
     changed
 }
 
-pub(crate) async fn project_provider_raw_to_client_payload_with_plan(
+pub(crate) async fn project_provider_raw_to_client_payload(
     raw: V3ProviderResp14Raw,
-    plan: &V3DirectResponseCompatPlan,
-) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
-    project_provider_raw_to_client_payload_inner(raw, plan).await
-}
-
-
-async fn project_provider_raw_to_client_payload_inner(
-    raw: V3ProviderResp14Raw,
-    compat_plan: &V3DirectResponseCompatPlan,
 ) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
     let provider_id = raw.provider_id().to_string();
     if raw.status() >= 400 {
@@ -197,9 +187,7 @@ async fn project_provider_raw_to_client_payload_inner(
     let status = if status == 201 { 200 } else { status };
     // 响应侧能力回射按 target 声明并编译出的 compatibility profile 门控，
     // 不按 provider_id 部署身份分支（与请求侧 wire 层同一契约）。
-    let deepseek_console_go =
-        compat_plan.has_block(V3DirectResponseCompatBlock::DeepseekConsoleGoResponseShape);
-    let thinking_tags = compat_plan.has_block(V3DirectResponseCompatBlock::ThinkingTags);
+    let compatibility_profile = raw.compatibility_profile().map(ToOwned::to_owned);
     let sse_first_frame_timeout_ms = raw.sse_first_frame_timeout_ms();
     let content_type = raw
         .header_text("content-type")
@@ -227,16 +215,14 @@ async fn project_provider_raw_to_client_payload_inner(
     {
         match provider_body {
             V3ProviderResponseBody::Sse(stream) => {
-                process_direct_sse_stream(
-                    &provider_id,
-                    stream,
-                    sse_first_frame_timeout_ms,
-                    thinking_tags,
-                    deepseek_console_go,
-                )
-                .await?
+                project_sse_stream(&provider_id, stream, sse_first_frame_timeout_ms).await?
             }
             V3ProviderResponseBody::Json(body_bytes) => {
+                if let Some(error) =
+                    classify_v3_sse_intent_json_error_body(&provider_id, status, &body_bytes)?
+                {
+                    return Err(error);
+                }
                 let observation = observe_sse_remote_continuation_bytes(&provider_id, &body_bytes)?;
                 (V3ClientBody::Bytes(body_bytes), observation, None)
             }
@@ -277,11 +263,16 @@ async fn project_provider_raw_to_client_payload_inner(
                     },
                 )
             })?;
-        if thinking_tags {
-            parsed = provider_compat_core::apply_cc_sol_response_compat(parsed);
-        }
-        if deepseek_console_go {
+        // DeepSeek Console Go responses 网关响应侧回射：上游以 function_call 返回
+        // 映射过的 function 工具（exec_command/web_search/reasoningStop 等），客户端
+        // 声明的是 custom 工具形态——必须在进入客户端前回射为 custom_tool_call，
+        // 否则客户端不执行调用、下一轮历史缺 output（孤儿 call）触发上游 400。
+        // 请求侧对应映射见 responses:deepseek-console-go compat。
+        if compatibility_profile.as_deref() == Some("responses:deepseek-console-go") {
             parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
+        }
+        if compatibility_profile.as_deref() == Some("responses:thinking-tags") {
+            apply_v3_direct_thinking_tag_json_compat(&mut parsed);
         }
         let observation = observe_json_remote_continuation(&provider_id, status, &parsed)?;
         (V3ClientBody::Json(parsed), observation, None)
@@ -311,19 +302,77 @@ async fn project_provider_raw_to_client_payload_inner(
         },
         remote_continuation,
         stream_observation,
-        compat_plan: compat_plan.clone(),
     })
 }
 
-/// Sole direct-provider SSE entry. Every direct SSE response must pass through
-/// this lifecycle: initial guard, client projection, frame observation,
-/// provider-error classification, and compatibility mapping.
-async fn process_direct_sse_stream(
+/// SSE-intent providers occasionally return a JSON error body while retaining
+/// `text/event-stream`.  That body must enter Error01 before it is projected as
+/// a successful 200 byte stream; otherwise the client sees a silent success.
+/// Valid non-error JSON responses remain byte-preserved for the registered
+/// JSON-for-SSE compatibility path.
+fn classify_v3_sse_intent_json_error_body(
+    provider_id: &str,
+    status: u16,
+    body: &[u8],
+) -> Result<Option<V3Error01SourceRaised>, V3Error01SourceRaised> {
+    let outcome =
+        classify_v3_provider_json_error_body(std::str::from_utf8(body).map_err(|error| {
+            build_v3_error_01_source_raised_external(
+                V3ErrorSourceKind::ProviderFailure,
+                "V3ProviderResp14Raw",
+                "provider_response_sse_event_invalid",
+                error.to_string(),
+                V3ExternalErrorLink {
+                    kind: V3ExternalErrorKind::Provider,
+                    status: Some(status),
+                    code: Some("PROVIDER_RESPONSE_SSE_EVENT_INVALID".to_string()),
+                    provider_id: Some(provider_id.to_string()),
+                    upstream_request_id: None,
+                    message: Some(error.to_string()),
+                },
+            )
+        })?)
+        .map_err(|message| {
+            build_v3_error_01_source_raised_external(
+                V3ErrorSourceKind::ProviderFailure,
+                "V3ProviderResp14Raw",
+                "provider_response_sse_event_invalid",
+                message.clone(),
+                V3ExternalErrorLink {
+                    kind: V3ExternalErrorKind::Provider,
+                    status: Some(status),
+                    code: Some("PROVIDER_RESPONSE_SSE_EVENT_INVALID".to_string()),
+                    provider_id: Some(provider_id.to_string()),
+                    upstream_request_id: None,
+                    message: Some(message),
+                },
+            )
+        })?;
+    let Some(V3ProviderResponsesJsonFrameOutcome::Failure { code, message }) = outcome else {
+        return Ok(None);
+    };
+    Ok(Some(build_v3_error_01_source_raised_external(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        code.clone(),
+        message.clone(),
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(status),
+            code: Some(code),
+            provider_id: Some(provider_id.to_string()),
+            upstream_request_id: None,
+            message: Some(message),
+        },
+    )))
+}
+
+include!("shared_direct_thinking_compat.rs");
+
+async fn project_sse_stream(
     provider_id: &str,
     stream: V3ProviderSseStream,
     sse_first_frame_timeout_ms: Option<u64>,
-    thinking_tags: bool,
-    deepseek_console_go: bool,
 ) -> Result<
     (
         V3ClientBody,
@@ -332,16 +381,9 @@ async fn process_direct_sse_stream(
     ),
     V3Error01SourceRaised,
 > {
-    let compatibility_profile = thinking_tags
-        .then_some("responses:thinking-tags")
-        .or_else(|| deepseek_console_go.then_some("responses:deepseek-console-go"));
-    let stream = guard_initial_direct_sse_provider_failure(
-        provider_id,
-        stream,
-        sse_first_frame_timeout_ms,
-        compatibility_profile,
-    )
-    .await?;
+    let stream =
+        guard_initial_direct_sse_provider_failure(provider_id, stream, sse_first_frame_timeout_ms)
+            .await?;
     let observation_state = V3SseRemoteContinuationObservationState::default();
     let usage_observation = V3RuntimeStreamObservation::default();
     let client_stream = observed_sse_client_stream(
@@ -349,7 +391,6 @@ async fn process_direct_sse_stream(
         stream,
         observation_state.clone(),
         usage_observation.clone(),
-        compatibility_profile,
     );
     Ok((
         V3ClientBody::Sse(client_stream),
@@ -364,25 +405,18 @@ async fn guard_initial_direct_sse_provider_failure(
     provider_id: &str,
     stream: V3ProviderSseStream,
     sse_first_frame_timeout_ms: Option<u64>,
-    compatibility_profile: Option<&str>,
 ) -> Result<V3ProviderSseStream, V3Error01SourceRaised> {
     let first_event_timeout = sse_first_frame_timeout_ms
         .map(std::time::Duration::from_millis)
         .unwrap_or(V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT);
-    guard_initial_direct_sse_provider_failure_with_timeout(
-        provider_id,
-        stream,
-        first_event_timeout,
-        compatibility_profile,
-    )
-    .await
+    guard_initial_direct_sse_provider_failure_with_timeout(provider_id, stream, first_event_timeout)
+        .await
 }
 
 async fn guard_initial_direct_sse_provider_failure_with_timeout(
     provider_id: &str,
     mut stream: V3ProviderSseStream,
     first_event_timeout: std::time::Duration,
-    compatibility_profile: Option<&str>,
 ) -> Result<V3ProviderSseStream, V3Error01SourceRaised> {
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut buffered = Vec::<Vec<u8>>::new();
@@ -441,11 +475,8 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
             .map_err(|error| sse_transport_source(provider_id, error))?;
         let mut should_start_client_stream = false;
         for frame in frames {
-            if direct_sse_frame_provider_failure_source(
-                provider_id,
-                frame.frame().fields(),
-                compatibility_profile,
-            )? == DirectSseInitialFrameAction::StartClientStream
+            if direct_sse_frame_provider_failure_source(provider_id, frame.frame().fields())?
+                == DirectSseInitialFrameAction::StartClientStream
             {
                 should_start_client_stream = true;
             }
@@ -461,25 +492,15 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
 fn direct_sse_frame_provider_failure_source(
     provider_id: &str,
     fields: &[SseField],
-    compatibility_profile: Option<&str>,
 ) -> Result<DirectSseInitialFrameAction, V3Error01SourceRaised> {
     let data = collect_v3_provider_sse_json_data(fields);
-    let parsed = match classify_v3_provider_generic_sse_json_data(&data) {
-        Ok(parsed) => parsed,
-        Err(message) if compatibility_profile.is_some_and(is_cc_sol_thinking_tags_profile) => {
-            // cc-sol occasionally emits an untyped envelope before its first
-            // Responses event. Preserve it for the client and let the stream
-            // continue; all other providers remain fail-fast.
-            return Ok(DirectSseInitialFrameAction::StartClientStream);
-        }
-        Err(message) => {
-            return Err(build_v3_provider_sse_json_error(
-                provider_id,
-                "provider_response_sse_event_invalid",
-                message,
-            ));
-        }
-    };
+    let parsed = classify_v3_provider_generic_sse_json_data(&data).map_err(|message| {
+        build_v3_provider_sse_json_error(
+            provider_id,
+            "provider_response_sse_event_invalid",
+            message,
+        )
+    })?;
     let Some(outcome) = parsed else {
         return Ok(DirectSseInitialFrameAction::ContinueBuffering);
     };
@@ -529,7 +550,6 @@ fn observed_sse_client_stream(
     stream: V3ProviderSseStream,
     observation_state: V3SseRemoteContinuationObservationState,
     usage_observation: V3RuntimeStreamObservation,
-    compatibility_profile: Option<&str>,
 ) -> V3ClientSseStream {
     observed_sse_client_stream_with_timeout(
         provider_id,
@@ -537,7 +557,6 @@ fn observed_sse_client_stream(
         observation_state,
         usage_observation,
         V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT,
-        compatibility_profile,
     )
 }
 
@@ -547,7 +566,6 @@ fn observed_sse_client_stream_with_timeout(
     observation_state: V3SseRemoteContinuationObservationState,
     usage_observation: V3RuntimeStreamObservation,
     frame_interval_timeout: std::time::Duration,
-    compatibility_profile: Option<&str>,
 ) -> V3ClientSseStream {
     struct ObservedState {
         stream: V3ProviderSseStream,
@@ -559,8 +577,6 @@ fn observed_sse_client_stream_with_timeout(
         done: bool,
         terminal_observed: bool,
         semantic_deadline: tokio::time::Instant,
-        compatibility_profile: Option<String>,
-        compatibility_buffer: Vec<u8>,
     }
 
     Box::pin(stream::unfold(
@@ -574,8 +590,6 @@ fn observed_sse_client_stream_with_timeout(
             done: false,
             terminal_observed: false,
             semantic_deadline: tokio::time::Instant::now() + frame_interval_timeout,
-            compatibility_profile: compatibility_profile.map(ToOwned::to_owned),
-            compatibility_buffer: Vec::new(),
         },
         move |mut state| async move {
             if state.done {
@@ -616,25 +630,6 @@ fn observed_sse_client_stream_with_timeout(
                     // 非语义帧）都刷新帧间隔 deadline，避免"活着但语义安静"
                     // 的流被误杀；只有完全无字节的挂起流才超时。
                     state.semantic_deadline = tokio::time::Instant::now() + frame_interval_timeout;
-                    let client_chunk = if state.compatibility_profile.as_deref()
-                        == Some("responses:deepseek-console-go")
-                    {
-                        apply_deepseek_console_go_sse_chunk_buffered(
-                            &mut state.compatibility_buffer,
-                            &chunk,
-                        )
-                    } else if state
-                        .compatibility_profile
-                        .as_deref()
-                        .is_some_and(is_cc_sol_thinking_tags_profile)
-                    {
-                        apply_cc_sol_thinking_tags_to_sse_chunk_buffered(
-                            &mut state.compatibility_buffer,
-                            &chunk,
-                        )
-                    } else {
-                        chunk.clone()
-                    };
                     let result = observe_sse_remote_continuation_chunk(
                         &state.provider_id,
                         &chunk,
@@ -642,10 +637,6 @@ fn observed_sse_client_stream_with_timeout(
                         &mut state.response_id_candidate,
                         &state.observation_state,
                         &state.usage_observation,
-                        state
-                            .compatibility_profile
-                            .as_deref()
-                            .is_some_and(is_cc_sol_thinking_tags_profile),
                     );
                     let result = match result {
                         Ok((terminal, semantic)) => {
@@ -665,31 +656,13 @@ fn observed_sse_client_stream_with_timeout(
                     if result.is_err() {
                         state.done = true;
                     }
-                    Some((result.map(|_| client_chunk), state))
+                    Some((result, state))
                 }
                 Some(Err(error)) => {
                     state.done = true;
                     Some((Err(provider_body_source(error)), state))
                 }
                 None => {
-                    let buffered_client_chunk = if state
-                        .compatibility_profile
-                        .as_deref()
-                        .is_some_and(is_cc_sol_thinking_tags_profile)
-                    {
-                        let buffered = std::mem::take(&mut state.compatibility_buffer);
-                        if buffered.is_empty() {
-                            None
-                        } else {
-                            Some(apply_cc_sol_thinking_tags_to_sse_chunk(&buffered))
-                        }
-                    } else {
-                        None
-                    };
-                    if let Some(client_chunk) = buffered_client_chunk {
-                        state.done = true;
-                        return Some((Ok(client_chunk), state));
-                    }
                     let decoder = std::mem::replace(
                         &mut state.decoder,
                         SseIncrementalDecoder::new(SseTransportLimits::default()),
@@ -710,105 +683,6 @@ fn observed_sse_client_stream_with_timeout(
     ))
 }
 
-fn apply_cc_sol_thinking_tags_to_sse_chunk(chunk: &[u8]) -> Vec<u8> {
-    let Ok(text) = std::str::from_utf8(chunk) else {
-        return chunk.to_vec();
-    };
-    let mut output = String::with_capacity(text.len());
-    for line in text.split_inclusive('\n') {
-        let Some(data) = line.strip_prefix("data:") else {
-            output.push_str(line);
-            continue;
-        };
-        let data = data.strip_prefix(' ').unwrap_or(data);
-        let data = data.trim_end_matches(['\r', '\n']);
-        let Ok(payload) = serde_json::from_str::<serde_json::Value>(data) else {
-            output.push_str(line);
-            continue;
-        };
-        let payload = provider_compat_core::apply_cc_sol_response_compat(payload);
-        let encoded = match serde_json::to_string(&payload) {
-            Ok(encoded) => encoded,
-            Err(_) => {
-                output.push_str(line);
-                continue;
-            }
-        };
-        output.push_str("data:");
-        if line.strip_prefix("data: ").is_some() {
-            output.push(' ');
-        }
-        output.push_str(&encoded);
-        if line.ends_with('\n') {
-            output.push('\n');
-        }
-    }
-    output.into_bytes()
-}
-
-fn apply_cc_sol_thinking_tags_to_sse_chunk_buffered(buffer: &mut Vec<u8>, chunk: &[u8]) -> Vec<u8> {
-    buffer.extend_from_slice(chunk);
-    let mut output = Vec::new();
-    while let Some(end) = buffer.windows(2).position(|window| window == b"\n\n") {
-        let frame_end = end + 2;
-        let frame: Vec<u8> = buffer.drain(..frame_end).collect();
-        output.extend(apply_cc_sol_thinking_tags_to_sse_chunk(&frame));
-    }
-    output
-}
-
-fn is_cc_sol_thinking_tags_profile(profile: &str) -> bool {
-    matches!(profile.trim(), "responses:thinking-tags" | "responses:cc")
-}
-
-fn apply_deepseek_console_go_sse_chunk_buffered(buffer: &mut Vec<u8>, chunk: &[u8]) -> Vec<u8> {
-    buffer.extend_from_slice(chunk);
-    let mut output = Vec::new();
-    while let Some(end) = buffer.windows(2).position(|window| window == b"\n\n") {
-        let frame_end = end + 2;
-        let frame: Vec<u8> = buffer.drain(..frame_end).collect();
-        output.extend(apply_deepseek_console_go_sse_chunk(&frame));
-    }
-    output
-}
-
-fn apply_deepseek_console_go_sse_chunk(frame: &[u8]) -> Vec<u8> {
-    let text = String::from_utf8_lossy(frame);
-    let mut output = String::new();
-    for line in text.split_inclusive('\n') {
-        let Some(data) = line.strip_prefix("data:") else {
-            output.push_str(line);
-            continue;
-        };
-        let newline = data.ends_with('\n');
-        let value = data.trim().trim_end_matches('\n');
-        let Ok(mut payload) = serde_json::from_str::<serde_json::Value>(value) else {
-            output.push_str(line);
-            continue;
-        };
-        let Some(item) = payload.get("item").cloned() else {
-            output.push_str(line);
-            continue;
-        };
-        let compatible = provider_compat_core::apply_deepseek_console_go_response_compat(
-            serde_json::json!({"output": [item]}),
-        );
-        let Some(item) = compatible.get("output").and_then(|items| items.get(0)) else {
-            output.push_str(line);
-            continue;
-        };
-        if let Some(object) = payload.as_object_mut() {
-            object.insert("item".to_string(), item.clone());
-        }
-        output.push_str("data:");
-        output.push_str(&serde_json::to_string(&payload).unwrap_or_else(|_| value.to_string()));
-        if newline {
-            output.push('\n');
-        }
-    }
-    output.into_bytes()
-}
-
 fn observe_sse_remote_continuation_chunk(
     provider_id: &str,
     chunk: &[u8],
@@ -816,7 +690,6 @@ fn observe_sse_remote_continuation_chunk(
     response_id_candidate: &mut Option<String>,
     observation_state: &V3SseRemoteContinuationObservationState,
     usage_observation: &V3RuntimeStreamObservation,
-    allow_cc_sol_untyped: bool,
 ) -> Result<(bool, bool), V3Error01SourceRaised> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
@@ -834,7 +707,6 @@ fn observe_sse_remote_continuation_chunk(
         let data = collect_v3_provider_sse_json_data(fields);
         let classification = match classify_v3_provider_generic_sse_json_data(&data) {
             Ok(classification) => classification,
-            Err(_message) if allow_cc_sol_untyped => None,
             Err(message) => {
                 return Err(build_v3_error_01_source_raised(
                     V3ErrorSourceKind::ProviderFailure,
@@ -1146,30 +1018,6 @@ fn sse_transport_source(provider_id: &str, error: SseTransportError) -> V3Error0
 }
 
 #[cfg(test)]
-async fn project_provider_raw_to_client_payload(
-    raw: V3ProviderResp14Raw,
-) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
-    let profile = raw.compatibility_profile();
-    let capabilities = if profile.is_some_and(|value| {
-        is_cc_sol_thinking_tags_profile(value) || value == "responses:deepseek-console-go"
-    }) {
-        ["reasoning"].as_slice()
-    } else {
-        ["text"].as_slice()
-    };
-    let plan = crate::direct_response_hooks::compile_direct_response_compat_plan(
-        crate::direct_response_hooks::V3DirectResponseCompatFacts {
-            provider_protocol: crate::hub_v1::V3HubProviderWireProtocol::Responses,
-            canonical_model_id: "test-model",
-            model_capabilities: capabilities,
-            compatibility_profile: profile,
-        },
-    )
-    .expect("test raw compatibility profile must compile");
-    project_provider_raw_to_client_payload_with_plan(raw, &plan).await
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use routecodex_v3_provider_responses::V3ProviderResponseHeader;
@@ -1186,6 +1034,7 @@ mod tests {
         .await;
         assert!(result.is_err());
     }
+
     #[tokio::test]
     async fn direct_sse_response_failed_projects_provider_error_before_client_stream() {
         let raw = V3ProviderResp14Raw::from_sse(
@@ -1208,6 +1057,31 @@ mod tests {
         assert_eq!(error.source_stage, "V3ProviderResp14Raw");
         assert_eq!(error.code, "HTTP_429");
         assert!(error.message.contains("provider quota exceeded"));
+    }
+
+    #[tokio::test]
+    async fn direct_sse_intent_json_error_does_not_project_as_success_bytes() {
+        let raw = V3ProviderResp14Raw::from_json(
+            "req",
+            "provider",
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            br#"{"error":{"code":"upstream_bad_request","message":"invalid request"}}"#.to_vec(),
+        );
+
+        let error = project_provider_raw_to_client_payload(raw)
+            .await
+            .expect_err("SSE-intent JSON error must enter provider failure chain");
+        assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(error.source_stage, "V3ProviderResp14Raw");
+        assert_eq!(error.code, "upstream_bad_request");
+        assert_eq!(
+            error.external_error.as_ref().and_then(|link| link.status),
+            Some(200)
+        );
     }
 
     #[tokio::test]
@@ -1377,7 +1251,6 @@ mod tests {
             V3SseRemoteContinuationObservationState::default(),
             V3RuntimeStreamObservation::default(),
             std::time::Duration::from_millis(20),
-            None,
         );
         let first = stream
             .next()
@@ -1458,7 +1331,6 @@ mod tests {
             Box::pin(stream),
             observation_state,
             usage_observation.clone(),
-            None,
         );
         while client_stream.next().await.is_some() {}
 
@@ -1486,7 +1358,6 @@ mod tests {
             "hung-provider",
             hung,
             std::time::Duration::from_millis(50),
-            None,
         )
         .await;
         let Err(error) = result else {
@@ -1521,7 +1392,6 @@ mod tests {
             "prompt-provider",
             stream,
             std::time::Duration::from_secs(5),
-            None,
         )
         .await
         .expect("prompt provider must not time out");
@@ -1574,54 +1444,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_json_cc_sol_thinking_tags_follow_compatibility_profile() {
+    async fn direct_json_deepseek_console_go_compat_requires_profile_not_provider_id() {
+        // 反向：provider_id 是 opencode-go 但 raw 未携带
+        // responses:deepseek-console-go profile 时不得做响应回射——
+        // 能力按配置声明的 compatibility profile 门控，不按部署身份分支。
         let raw = V3ProviderResp14Raw::from_json(
             "req",
-            "cc-sol",
+            "opencode-go",
             200,
             vec![V3ProviderResponseHeader {
                 name: "content-type".to_string(),
                 value: b"application/json".to_vec(),
             }],
-            br#"{"id":"resp_1","output":[{"type":"message","text":"<thinking>plan</thinking>answer"}],"tail":"<thinking>open"}"#.to_vec(),
-        )
-        .with_compatibility_profile(Some("responses:thinking-tags".to_string()));
+            br#"{"id":"resp_1","output":[{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":"{\"input\":\"ls -la\"}"}]}"#
+                .to_vec(),
+        );
         let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
-        let V3ClientBody::Json(body) = projection.client_payload.body else {
+        let V3ClientBody::Json(body) = &projection.client_payload.body else {
             panic!("expected JSON client body");
         };
-        assert_eq!(body["output"][0]["text"], "answer");
-        assert_eq!(body["output"][0]["reasoning_content"], "plan");
-        assert_eq!(body["tail"], "open");
-        assert!(!body.to_string().contains("<thinking>"));
-    }
-
-    #[test]
-    fn direct_sse_cc_sol_compat_accepts_compact_data_prefix() {
-        let chunk = b"data:{\"text\":\"<thinking>plan</thinking>answer\"}\n\n";
-        let projected = apply_cc_sol_thinking_tags_to_sse_chunk(chunk);
-        let text = String::from_utf8(projected).expect("utf8 SSE chunk");
-        assert!(text.starts_with("data:{"));
-        assert!(text.contains("\"text\":\"answer\""));
-        assert!(text.contains("\"reasoning_content\":\"plan\""));
-        assert!(!text.contains("<thinking>"));
-    }
-
-    #[test]
-    fn direct_sse_cc_sol_compat_buffers_split_event() {
-        let mut buffer = Vec::new();
-        assert!(apply_cc_sol_thinking_tags_to_sse_chunk_buffered(
-            &mut buffer,
-            b"data:{\"text\":\"<thinking>plan"
-        )
-        .is_empty());
-        let projected = apply_cc_sol_thinking_tags_to_sse_chunk_buffered(
-            &mut buffer,
-            b"</thinking>answer\"}\n\n",
+        assert_eq!(
+            body["output"][0]["type"], "function_call",
+            "no profile must keep function_call untouched: {body}"
         );
-        let text = String::from_utf8(projected).expect("utf8 SSE chunk");
-        assert!(!text.contains("<thinking>"));
-        assert!(text.contains("\"reasoning_content\":\"plan\""));
     }
 
+    #[tokio::test]
+    async fn direct_json_deepseek_console_go_compat_follows_compatibility_profile() {
+        // 正向：provider_id 不是 opencode-go，但声明了
+        // responses:deepseek-console-go profile，function_call 必须回射为
+        // custom_tool_call（客户端声明的 custom 工具形态）。
+        let raw = V3ProviderResp14Raw::from_json(
+            "req",
+            "ds-provider",
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_1","output":[{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":"{\"input\":\"ls -la\"}"}]}"#
+                .to_vec(),
+        )
+        .with_compatibility_profile(Some("responses:deepseek-console-go".to_string()));
+        let projection = project_provider_raw_to_client_payload(raw).await.unwrap();
+        let V3ClientBody::Json(body) = &projection.client_payload.body else {
+            panic!("expected JSON client body");
+        };
+        assert_eq!(
+            body["output"][0]["type"], "custom_tool_call",
+            "profile compat must rewrite function_call: {body}"
+        );
+        assert_eq!(body["output"][0]["input"], "ls -la");
+        assert!(body["output"][0].get("arguments").is_none());
+    }
 }
