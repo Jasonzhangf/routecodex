@@ -1,0 +1,46 @@
+lifecycle_id: v3.global_binary_install.interruption
+owner_feature_id: v3.global_binary_install
+entrypoint:
+  node_id: V3InstallOwnedCargoTargetCreated
+  call_map_chain_id: v3.global_binary_install.interruption
+nodes:
+  - V3InstallOwnedCargoTargetCreated
+  - V3InstallOwnedCommandGroupActive
+  - V3InstallOwnedCommandGroupSignalled
+  - V3InstallOwnedCommandGroupExited
+  - V3InstallOwnedCargoTargetReleased
+edges:
+  - step_id: v3-install-interrupt-01
+    from_node: V3InstallOwnedCargoTargetCreated
+    to_node: V3InstallOwnedCommandGroupActive
+    owner_symbol: runInterruptibleCommand
+    owner_file: scripts/install-v3-cli.mjs
+    status: anchored
+  - step_id: v3-install-interrupt-02
+    from_node: V3InstallOwnedCommandGroupActive
+    to_node: V3InstallOwnedCommandGroupSignalled
+    owner_symbol: signalOwnedProcessTree
+    owner_file: scripts/install-v3-cli.mjs
+    status: anchored
+  - step_id: v3-install-interrupt-03
+    from_node: V3InstallOwnedCommandGroupSignalled
+    to_node: V3InstallOwnedCommandGroupExited
+    owner_symbol: waitForOwnedProcessTreeExit
+    owner_file: scripts/install-v3-cli.mjs
+    status: anchored
+  - step_id: v3-install-interrupt-04
+    from_node: V3InstallOwnedCommandGroupExited
+    to_node: V3InstallOwnedCargoTargetReleased
+    owner_symbol: cleanupOwnedCargoTarget
+    owner_file: scripts/install-v3-cli.mjs
+    status: anchored
+invariants:
+  - Unix child commands are spawned into one installer-owned process group.
+  - Interruption signals only the exact negative process-group id.
+  - The process group must be absent before the owned Cargo target is released.
+  - Windows rejects before command spawn until a Job Object owner is implemented.
+verification_gates:
+  - npm run test:install-v3-target-cleanup
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow

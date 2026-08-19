@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +9,24 @@ import {
   runInterruptibleCommand,
   withOwnedV3CargoTarget,
 } from '../../scripts/install-v3-cli.mjs';
+
+async function waitForFile(filePath, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!fs.existsSync(filePath)) {
+    if (Date.now() >= deadline) {
+      throw new Error(`timed out waiting for ${filePath}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+function processGroupId(pid) {
+  const result = spawnSync('ps', ['-o', 'pgid=', '-p', String(pid)], {
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return Number.parseInt(result.stdout.trim(), 10);
+}
 
 test('removes an internally owned Cargo target after success', async () => {
   let targetDir;
@@ -67,6 +85,29 @@ test('missing child command rejects once without invalid process-group wait', as
   assert.equal(build.activeChild, null);
 });
 
+test('does not spawn a command after interruption is already observed', async () => {
+  const marker = path.join(os.tmpdir(), `routecodex-v3-pre-spawn-${process.pid}`);
+  const build = {
+    activeChild: null,
+    activeChildRootPid: null,
+    interruptedSignal: 'SIGTERM',
+    interruptedPids: [],
+  };
+
+  await assert.rejects(
+    () => runInterruptibleCommand(
+      process.execPath,
+      ['-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'spawned')`],
+      { stdio: 'ignore' },
+      build,
+      'pre-interrupted child',
+    ),
+    /V3 install interrupted by SIGTERM/,
+  );
+
+  assert.equal(fs.existsSync(marker), false);
+});
+
 for (const [signal, expectedCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   test(`stops the command tree before removing an owned target after ${signal}`, async () => {
     const modulePath = new URL('../../scripts/install-v3-cli.mjs', import.meta.url).href;
@@ -74,7 +115,20 @@ for (const [signal, expectedCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
       os.tmpdir(),
       `routecodex-v3-descendant-${process.pid}-${signal}`,
     );
+    const readyMarker = path.join(
+      os.tmpdir(),
+      `routecodex-v3-descendant-ready-${process.pid}-${signal}`,
+    );
     const descendantSource = `
+      const { spawnSync } = require('node:child_process');
+      const pgid = Number.parseInt(
+        spawnSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).stdout.trim(),
+        10,
+      );
+      require('node:fs').writeFileSync(
+        process.env.DESCENDANT_READY_MARKER,
+        JSON.stringify({ pid: process.pid, pgid, rootPid: Number(process.env.OWNED_ROOT_PID) }),
+      );
       setTimeout(() => {
         require('node:fs').writeFileSync(process.env.DESCENDANT_MARKER, 'still-running');
       }, 300);
@@ -84,7 +138,10 @@ for (const [signal, expectedCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
       require('node:child_process').spawn(
         process.execPath,
         ['-e', ${JSON.stringify(descendantSource)}],
-        { env: process.env, stdio: 'ignore' },
+        {
+          env: { ...process.env, OWNED_ROOT_PID: String(process.pid) },
+          stdio: 'ignore',
+        },
       );
       setTimeout(() => {}, 30000);
     `;
@@ -97,7 +154,11 @@ for (const [signal, expectedCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
             process.execPath,
             ['-e', ${JSON.stringify(childSource)}],
             {
-              env: { ...process.env, DESCENDANT_MARKER: ${JSON.stringify(descendantMarker)} },
+              env: {
+                ...process.env,
+                DESCENDANT_MARKER: ${JSON.stringify(descendantMarker)},
+                DESCENDANT_READY_MARKER: ${JSON.stringify(readyMarker)},
+              },
               stdio: 'ignore',
             },
             build,
@@ -117,6 +178,11 @@ for (const [signal, expectedCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
     });
 
     assert.equal(fs.existsSync(targetDir), true);
+    await waitForFile(readyMarker);
+    const ready = JSON.parse(fs.readFileSync(readyMarker, 'utf8'));
+    assert.equal(ready.rootPid > 0, true);
+    assert.equal(ready.pid > 0, true);
+    assert.equal(ready.pgid, processGroupId(ready.rootPid));
     installer.kill(signal);
     const exitCode = await new Promise((resolve) => {
       installer.once('close', resolve);
@@ -126,5 +192,6 @@ for (const [signal, expectedCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
     assert.equal(fs.existsSync(targetDir), false);
     await new Promise((resolve) => setTimeout(resolve, 400));
     assert.equal(fs.existsSync(descendantMarker), false);
+    fs.rmSync(readyMarker, { force: true });
   });
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -67,9 +67,18 @@ class InstallInterruptedError extends Error {
 }
 
 export function runInterruptibleCommand(command, args, options, build, label) {
+  if (build.interruptedSignal) {
+    return Promise.reject(new InstallInterruptedError(build.interruptedSignal));
+  }
+  if (process.platform === 'win32') {
+    return Promise.reject(new Error(
+      `${label} cannot start: Windows install command ownership requires a Job Object`,
+    ));
+  }
   return new Promise((resolve, reject) => {
     let spawnFailed = false;
-    const child = spawn(command, args, options);
+    const spawnOptions = { ...options, detached: true };
+    const child = spawn(command, args, spawnOptions);
     build.activeChildRootPid = child.pid;
     build.activeChild = child;
     child.once('error', (error) => {
@@ -109,51 +118,19 @@ function processExists(pid) {
   }
 }
 
-function collectOwnedProcessTreePids(rootPid) {
-  if (!Number.isInteger(rootPid) || rootPid <= 0 || process.platform === 'win32') {
-    return Number.isInteger(rootPid) && rootPid > 0 ? [rootPid] : [];
-  }
-  const result = spawnSync('ps', ['-A', '-o', 'pid=', '-o', 'ppid='], {
-    encoding: 'utf8',
-  });
-  if (result.status !== 0 || result.error) {
-    return [rootPid];
-  }
-  const childrenByParent = new Map();
-  for (const line of result.stdout.split('\n')) {
-    const [pidText, ppidText] = line.trim().split(/\s+/);
-    const pid = Number.parseInt(pidText, 10);
-    const ppid = Number.parseInt(ppidText, 10);
-    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) {
-      continue;
-    }
-    const children = childrenByParent.get(ppid) ?? [];
-    children.push(pid);
-    childrenByParent.set(ppid, children);
-  }
-  const ordered = [];
-  const visit = (pid) => {
-    for (const childPid of childrenByParent.get(pid) ?? []) {
-      visit(childPid);
-    }
-    ordered.push(pid);
-  };
-  visit(rootPid);
-  return ordered;
-}
-
 function signalOwnedProcessTree(rootPid, signal) {
-  const pids = collectOwnedProcessTreePids(rootPid);
-  for (const pid of pids) {
-    try {
-      process.kill(pid, signal);
-    } catch (error) {
-      if (error?.code !== 'ESRCH') {
-        throw error;
-      }
+  if (process.platform === 'win32') {
+    throw new Error('Windows install command ownership requires a Job Object');
+  }
+  const processGroupPid = -rootPid;
+  try {
+    process.kill(processGroupPid, signal);
+  } catch (error) {
+    if (error?.code !== 'ESRCH' || processExists(rootPid)) {
+      throw error;
     }
   }
-  return pids;
+  return [processGroupPid];
 }
 
 async function waitForOwnedProcessTreeExit(pids) {
