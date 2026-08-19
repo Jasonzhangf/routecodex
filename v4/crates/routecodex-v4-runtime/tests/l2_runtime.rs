@@ -17,8 +17,12 @@ use routecodex_v4_skeleton::{
 use std::fs;
 
 fn contract_json() -> String {
-    let path = std::env::var("RUNTIME_CONTRACT_PATH")
-        .unwrap_or_else(|_| "contracts/skeleton-plan.contract.json".to_string());
+    let path = std::env::var("RUNTIME_CONTRACT_PATH").unwrap_or_else(|_| {
+        format!(
+            "{}/../../contracts/skeleton-plan.contract.json",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    });
     fs::read_to_string(&path).expect("skeleton plan contract must be readable from v4 root")
 }
 
@@ -91,7 +95,7 @@ fn positive_request_chain_produces_wire_and_stable_binding() {
         .provider_wire
         .as_deref()
         .expect("provider wire produced");
-    assert!(wire.starts_with("wire:semantic:mock-provider:normalized:chat:r-request-1"));
+    assert!(wire.starts_with("wire:semantic:unselected:normalized:chat:r-request-1"));
     assert_eq!(
         report.binding,
         execution_binding(plan),
@@ -152,7 +156,7 @@ fn continuation_three_key_save_and_restore_roundtrip() {
     let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
     // Response chat process commit saves the three-key binding.
     let response = runtime
-        .execute_mock_response_scoped(
+        .execute_provider_response_scoped(
             "{\"text\":\"ok\"}",
             "r-save-1",
             5555,
@@ -181,7 +185,7 @@ fn continuation_three_key_save_and_restore_roundtrip() {
 fn red_direct_relay_cross_continuation_fails() {
     let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
     runtime
-        .execute_mock_response_scoped(
+        .execute_provider_response_scoped(
             "{\"text\":\"ok\"}",
             "r-cross-save",
             5555,
@@ -280,11 +284,11 @@ fn payload_cycle_error_terminal_and_double_close_red() {
 }
 
 #[test]
-fn positive_mock_response_chain_projects_client_frame() {
+fn positive_provider_response_chain_projects_client_frame() {
     let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
     let report = runtime
-        .execute_mock_response("{\"text\":\"ok\"}", "r-response-1")
-        .expect("mock response chain runs");
+        .execute_provider_response("{\"text\":\"ok\"}", "r-response-1")
+        .expect("provider response chain runs");
     let frame = report
         .client_frame
         .as_deref()

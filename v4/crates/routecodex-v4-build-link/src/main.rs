@@ -7,6 +7,7 @@
 //!   verify-index    re-derive and compare the on-disk Active index
 //!   build-consumer  build a consumer lib via resolver-emitted rustc flags
 //!   test-consumer   build and run a consumer regression via rustc flags
+//!   build-binary    build a binary with Active and explicit source artifacts
 
 use routecodex_v4_build_link::resolver::assert_outside_active;
 use routecodex_v4_build_link::resolver::{
@@ -354,6 +355,8 @@ fn build_consumer(
     ];
     rustc_args.extend(extern_args(&dep_resolutions));
     rustc_args.extend(dependency_search_args(&dep_resolutions));
+    rustc_args.push("-L".to_string());
+    rustc_args.push(format!("dependency={}", root.join("target/release/deps").display()));
     rustc_args.extend(external.extern_args.iter().cloned());
     rustc_args.extend(external.search_args.iter().cloned());
     rustc_args.extend(source_args.iter().cloned());
@@ -361,6 +364,94 @@ fn build_consumer(
     rustc_args.push(out.to_str().unwrap_or("").to_string());
     run_rustc(&rustc_args)?;
     Ok(out)
+}
+
+fn parse_rlib_deps(args: &[String]) -> Result<Vec<(String, PathBuf)>, ActiveLinkError> {
+    let mut deps = Vec::new();
+    for (index, arg) in args.iter().enumerate() {
+        if arg != "--rlib-deps" {
+            continue;
+        }
+        let value = args.get(index + 1).ok_or_else(|| {
+            ActiveLinkError::LinkFailed("missing value for --rlib-deps".to_string())
+        })?;
+        for item in value.split(',') {
+            let (name, path) = item.split_once('=').ok_or_else(|| {
+                ActiveLinkError::LinkFailed(format!(
+                    "invalid --rlib-deps entry {item:?}; expected crate=path"
+                ))
+            })?;
+            if name.is_empty() || path.is_empty() {
+                return Err(ActiveLinkError::LinkFailed(
+                    "--rlib-deps crate and path must be non-empty".to_string(),
+                ));
+            }
+            let path = PathBuf::from(path);
+            if !path.is_file() {
+                return Err(ActiveLinkError::LinkFailed(format!(
+                    "--rlib-deps artifact missing: {}",
+                    path.display()
+                )));
+            }
+            deps.push((name.replace('-', "_"), path));
+        }
+    }
+    deps.sort_by(|left, right| left.0.cmp(&right.0));
+    deps.dedup_by(|left, right| left.0 == right.0);
+    Ok(deps)
+}
+
+fn build_binary(
+    root: &Path,
+    consumer: &str,
+    deps: &[String],
+    target: &str,
+    out_override: &Path,
+    external: &ExternalLink,
+    source_args: &[String],
+    rlib_deps: &[(String, PathBuf)],
+) -> Result<(), ActiveLinkError> {
+    let dep_resolutions = resolve_dependencies(root, deps, target)?;
+    let src = root.join("crates").join(consumer).join("src/main.rs");
+    if !src.is_file() {
+        return Err(ActiveLinkError::LinkFailed(format!(
+            "binary source {} missing",
+            src.display()
+        )));
+    }
+    assert_outside_active(root, out_override)?;
+    if let Some(parent) = out_override.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            ActiveLinkError::LinkFailed(format!("create {}: {e}", parent.display()))
+        })?;
+    }
+    let mut rustc_args = vec![
+        "--edition".to_string(),
+        "2021".to_string(),
+        "--crate-name".to_string(),
+        crate_name(consumer),
+        "--crate-type".to_string(),
+        "bin".to_string(),
+        src.to_string_lossy().into_owned(),
+    ];
+    rustc_args.extend(extern_args(&dep_resolutions));
+    rustc_args.extend(dependency_search_args(&dep_resolutions));
+    for (name, path) in rlib_deps {
+        rustc_args.push("--extern".to_string());
+        rustc_args.push(format!("{name}={}", path.display()));
+        if let Some(parent) = path.parent() {
+            rustc_args.push("-L".to_string());
+            rustc_args.push(format!("dependency={}", parent.display()));
+        }
+    }
+    rustc_args.push("-L".to_string());
+    rustc_args.push(format!("dependency={}", root.join("target/release/deps").display()));
+    rustc_args.extend(external.extern_args.iter().cloned());
+    rustc_args.extend(external.search_args.iter().cloned());
+    rustc_args.extend(source_args.iter().cloned());
+    rustc_args.push("-o".to_string());
+    rustc_args.push(out_override.to_string_lossy().into_owned());
+    run_rustc(&rustc_args)
 }
 
 fn test_consumer(
@@ -433,7 +524,7 @@ fn test_consumer(
 
 fn run(args: &[String]) -> Result<(), ActiveLinkError> {
     let Some(command) = args.first() else {
-        eprintln!("usage: routecodex-v4-build-link <resolve|emit-link-flags|gen-index|verify-index|build-consumer|test-consumer> ...");
+        eprintln!("usage: routecodex-v4-build-link <resolve|emit-link-flags|gen-index|verify-index|build-consumer|test-consumer|build-binary> ...");
         return Err(ActiveLinkError::IdentityMissing("no subcommand".into()));
     };
     match command.as_str() {
@@ -538,6 +629,33 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
             let frozen = frozen_module_ids(&root)?;
             let source_args = source_dep_link_args_all(&root, &source_deps, &frozen)?;
             test_consumer(&root, &consumer, &deps, &target, &source_args)
+        }
+        "build-binary" => {
+            let root = root_from(args).map_err(ActiveLinkError::ManifestInvalid)?;
+            let target = target_from(args)?;
+            let consumer =
+                arg_value(args, "--consumer").map_err(ActiveLinkError::IdentityMissing)?;
+            let deps = arg_value(args, "--deps").map_err(ActiveLinkError::IdentityMissing)?;
+            let deps = deps.split(',').map(str::to_string).collect::<Vec<_>>();
+            let out = PathBuf::from(arg_value(args, "--out").map_err(ActiveLinkError::IdentityMissing)?);
+            let source_deps = parse_source_deps(args).map_err(ActiveLinkError::LinkFailed)?;
+            let frozen = frozen_module_ids(&root)?;
+            let source_args = source_dep_link_args_all(&root, &source_deps, &frozen)?;
+            let rlib_deps = parse_rlib_deps(args)?;
+            let external_crates = parse_external_deps(&root.join("crates").join(&consumer))?;
+            let external = build_external_deps(&root, &external_crates)?;
+            build_binary(
+                &root,
+                &consumer,
+                &deps,
+                &target,
+                &out,
+                &external,
+                &source_args,
+                &rlib_deps,
+            )?;
+            println!("{consumer} binary built via Active link surface: {}", out.display());
+            Ok(())
         }
         _ => {
             eprintln!("unknown command {command:?}");

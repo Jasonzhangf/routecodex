@@ -5,5 +5,6 @@
  */
 import { run } from './_common.mjs';
 
+run('node scripts/compile-real-runtime-manifest.mjs');
 run('cargo build --release --manifest-path Cargo.toml --locked');
 console.log('[v4 build] OK cargo workspace release build (locked)');
