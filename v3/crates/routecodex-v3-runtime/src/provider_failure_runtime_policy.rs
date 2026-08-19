@@ -976,7 +976,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     // 瞬态失败第 3 次尝试后：写 session 级短期绕行（30s），同 session 后续
     // 请求绕开该 provider，避免 health-neutral 导致反复命中；不触发 15 分钟
     // 冷却，超时自动恢复。
-    if status == 400 || (transient && retries_done >= V3_TRANSIENT_RETRY_BUDGET) {
+    if transient && retries_done >= V3_TRANSIENT_RETRY_BUDGET {
         context
             .provider_health
             .record_provider_transient_bypass_in_session(
@@ -991,11 +991,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     }
     let is_request_local_compat_failure = source_stage == "ProviderReqCompat06ProviderCompat"
         || error_type.as_deref() == Some("provider_request_compat_error")
-        // HTTP 400 is a request/provider-compatibility rejection (for example
-        // context-window or wire-shape limits), not an account-health signal.
-        // Keep it health-neutral so all keys do not enter cooldown for the
-        // same request-shaped failure.
-        || status == 400
         // 瞬态失败第 3 次尝试后：health-neutral 切 provider/terminal
         // （复用 request-local 的 synthetic health record + request-local
         // recovery witness，不写 provider health store）。
@@ -1213,11 +1208,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             .same_candidate_retries
             .entry(candidate_key.clone())
             .or_insert(0);
-        // 400/InvalidRequest（客户端请求错误，如 context window 超限）重试结果
-        // 必然相同：同一 provider 不重试。与普通分支(874-877)对齐——default floor
-        // 分支同样拦截 400，避免 asxs-grok 等 default 池成员 400 被同 provider
-        // 重试多次才 terminal。
-        if *retries_done >= configured_same_candidate_retries || status == 400 {
+        if *retries_done >= configured_same_candidate_retries {
             let decision = build_v3_relay_provider_error_05_decision(
                 &selected,
                 source_stage,
@@ -1302,12 +1293,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         .same_candidate_retries
         .entry(candidate_key.clone())
         .or_insert(0);
-    if health_record.state != "cooldown"
-        && *retries_done < configured_same_candidate_retries
-        // 400 客户端请求错误（如 context window 超限）重试结果必然相同：
-        // 同一 provider 不重试，直接 reselect 到下一个候选。
-        && status != 400
-    {
+    if health_record.state != "cooldown" && *retries_done < configured_same_candidate_retries {
         *retries_done = retries_done.saturating_add(1);
         state.trace.push("V3TargetLocalRetried");
         let failure_record = context
