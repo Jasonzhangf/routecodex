@@ -811,6 +811,11 @@ impl<S: ProviderSseSource> ResponseStream for ResponsesSseStream<S> {
                 }
             };
             if count == 0 {
+                if !self.frame_buffer.is_empty() {
+                    self.frame_buffer.clear();
+                    self.queue_error("incomplete provider SSE frame at end of stream");
+                    continue;
+                }
                 if !self.terminal_seen {
                     self.queue_error(
                         "provider SSE ended before response.completed or response.failed",
@@ -855,10 +860,19 @@ fn sse_event(frame: &[u8]) -> Result<Option<&str>, RuntimeFault> {
 }
 
 fn find_frame_end(bytes: &[u8]) -> Option<usize> {
-    bytes
+    let lf = bytes
         .windows(2)
         .position(|window| window == b"\n\n")
-        .map(|position| position + 2)
+        .map(|position| position + 2);
+    let crlf = bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|position| position + 4);
+    match (lf, crlf) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(end), None) | (None, Some(end)) => Some(end),
+        (None, None) => None,
+    }
 }
 
 fn project_fault(request: &HttpRequest, fault: RuntimeFault, status: u16) -> HttpResponse {
@@ -980,6 +994,39 @@ mod tests {
         assert!(text.contains("ended before response.completed or response.failed"));
         let mut closed = Vec::new();
         assert!(!stream.next_chunk(&mut closed).expect("stream must close"));
+    }
+
+    #[test]
+    fn truncated_tail_after_terminal_emits_explicit_error_event() {
+        let terminal = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"abc\"}}\n\n";
+        let mut bytes = terminal.to_vec();
+        bytes.extend_from_slice(b"event: response.output_text.delta\ndata: {\"type\":");
+        let mut stream = stream(vec![Ok(bytes)]);
+        let mut terminal_chunk = Vec::new();
+        assert!(stream
+            .next_chunk(&mut terminal_chunk)
+            .expect("terminal frame must project"));
+        assert!(String::from_utf8(terminal_chunk)
+            .expect("terminal frame must be UTF-8")
+            .contains("event: response.completed"));
+        let mut error_chunk = Vec::new();
+        assert!(stream
+            .next_chunk(&mut error_chunk)
+            .expect("truncated tail error must emit"));
+        let text = String::from_utf8(error_chunk).expect("error event must be UTF-8");
+        assert!(text.starts_with("event: error\ndata: "));
+        assert!(text.contains("incomplete provider SSE frame"));
+    }
+
+    #[test]
+    fn crlf_terminal_frame_is_accepted_and_rebuilt() {
+        let frame = b"event: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"abc\"}}\r\n\r\n";
+        let mut stream = stream(vec![Ok(frame.to_vec())]);
+        let mut chunk = Vec::new();
+        assert!(stream.next_chunk(&mut chunk).expect("CRLF frame must project"));
+        let text = String::from_utf8(chunk).expect("projected frame must be UTF-8");
+        assert!(text.contains("event: response.completed"));
+        assert!(!text.contains("event: error"));
     }
 
     #[test]
