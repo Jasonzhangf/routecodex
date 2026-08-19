@@ -1632,6 +1632,192 @@ async fn provider_sse_failure_event_reselects_before_client_stream() {
 }
 
 #[tokio::test]
+async fn provider_empty_completed_sse_reselects_before_client_stream() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct EmptyCompletedThenSucceeds {
+        sends: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ResponsesTransport for EmptyCompletedThenSucceeds {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            if self.sends.fetch_add(1, Ordering::SeqCst) < 3 {
+                assert_eq!(request.provider_id(), "first");
+                return Ok(V3ProviderResp14Raw::from_sse(
+                    request.request_id().to_string(),
+                    request.provider_id().to_string(),
+                    200,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"text/event-stream".to_vec(),
+                    }],
+                    Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(
+                        concat!(
+                            "event: response.created\n",
+                            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_empty\",\"status\":\"in_progress\"}}\n\n",
+                            "event: response.output_item.added\n",
+                            "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n",
+                            "event: response.completed\n",
+                            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty\",\"status\":\"completed\",\"output\":[]}}\n\n",
+                            "data: [DONE]\n\n"
+                        )
+                        .as_bytes()
+                        .to_vec(),
+                    )])),
+                ));
+            }
+
+            assert_eq!(request.provider_id(), "second");
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(
+                    concat!(
+                        "event: response.output_text.delta\n",
+                        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
+                        "event: response.completed\n",
+                        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_second\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n",
+                        "data: [DONE]\n\n"
+                    )
+                    .as_bytes()
+                    .to_vec(),
+                )])),
+            ))
+        }
+    }
+
+    let transport = EmptyCompletedThenSucceeds {
+        sends: AtomicUsize::new(0),
+    };
+    let routing_group = "provider_empty_completed_reselection";
+    let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req",
+        "exec",
+        json!({"model":"client-model","input":"hello","stream":true}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(
+        transport.sends.load(Ordering::SeqCst),
+        4,
+        "empty completed SSE must use the existing retry/reselect path: {output:?}"
+    );
+    assert!(output.node_trace.contains(&"V3DirectTransientRetrySame"));
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
+        panic!("second provider success must remain SSE");
+    };
+    let mut text = String::new();
+    while let Some(chunk) = stream.next().await {
+        text.push_str(&String::from_utf8_lossy(
+            &chunk.expect("valid second-provider SSE"),
+        ));
+    }
+    assert!(text.contains("\"delta\":\"ok\""), "{text}");
+    assert!(
+        !text.contains("resp_empty"),
+        "failed provider bytes must remain precommit: {text}"
+    );
+}
+
+#[tokio::test]
+async fn provider_empty_completed_sse_exhaustion_projects_error_chain() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct AlwaysEmptyCompleted {
+        sends: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ResponsesTransport for AlwaysEmptyCompleted {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            self.sends.fetch_add(1, Ordering::SeqCst);
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(
+                    concat!(
+                        "event: response.created\n",
+                        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_empty\",\"status\":\"in_progress\"}}\n\n",
+                        "event: response.completed\n",
+                        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty\",\"status\":\"completed\",\"output\":[]}}\n\n",
+                        "data: [DONE]\n\n"
+                    )
+                    .as_bytes()
+                    .to_vec(),
+                )])),
+            ))
+        }
+    }
+
+    let transport = AlwaysEmptyCompleted {
+        sends: AtomicUsize::new(0),
+    };
+    let routing_group = "provider_empty_completed_exhaustion";
+    let manifest = scoped_test_manifest(test_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req-empty-exhausted",
+        "exec-empty-exhausted",
+        json!({"model":"client-model","input":"hello","stream":true}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(transport.sends.load(Ordering::SeqCst), 3, "{output:?}");
+    assert_eq!(output.client_payload.status, 502, "{output:?}");
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+    );
+    let V3ClientBody::Json(body) = output.client_payload.body else {
+        panic!("exhausted empty completed response must project typed JSON error");
+    };
+    assert_eq!(body["error"]["code"], "provider_response_sse_empty");
+}
+
+#[tokio::test]
 async fn direct_sse_deepseek_console_go_compat_follows_compatibility_profile() {
     // 正向：provider_id 不是 opencode-go，但 manifest 声明了
     // responses:deepseek-console-go profile，SSE 帧内 function_call 必须回射为
