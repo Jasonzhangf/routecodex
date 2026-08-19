@@ -416,6 +416,54 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn deepseek_thinking_compat_applies_to_both_supported_wire_protocols() {
+        for provider_type in ["responses", "openai_chat"] {
+            let mut selected = target();
+            selected.provider_id = "opencode-go".into();
+            selected.provider_type = provider_type.into();
+            selected.canonical_model_id = "deepseek-v4-flash".into();
+            selected.wire_model = "deepseek-v4-flash".into();
+            let wire = build_v3_provider_12_responses_wire_payload(
+                "req-deepseek-protocol-matrix",
+                selected,
+                json!({
+                    "model": "deepseek-v4-flash",
+                    "input": "continue",
+                    "reasoning": {"effort": "high"},
+                    "tool_choice": "required",
+                    "tools": [{"type": "function", "name": "reasoningStop"}]
+                }),
+            )
+            .expect("DeepSeek thinking compat must cover every supported wire protocol");
+            assert!(
+                wire.body().get("tool_choice").is_none(),
+                "provider_type={provider_type} must omit incompatible tool_choice"
+            );
+        }
+    }
+
+    #[test]
+    fn deepseek_compat_does_not_strip_tool_choice_outside_thinking_mode() {
+        let mut selected = target();
+        selected.provider_id = "opencode-go".into();
+        selected.provider_type = "responses".into();
+        selected.canonical_model_id = "deepseek-v4-flash".into();
+        selected.wire_model = "deepseek-v4-flash".into();
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-deepseek-non-thinking",
+            selected,
+            json!({
+                "model": "deepseek-v4-flash",
+                "input": "continue",
+                "tool_choice": "required",
+                "tools": [{"type": "function", "name": "reasoningStop"}]
+            }),
+        )
+        .expect("non-thinking DeepSeek request must remain valid");
+        assert_eq!(wire.body().get("tool_choice"), Some(&json!("required")));
+    }
+
     fn target() -> V3ResponsesProviderTarget {
         V3ResponsesProviderTarget {
             provider_id: "neutral-provider".into(),
