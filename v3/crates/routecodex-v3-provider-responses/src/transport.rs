@@ -377,7 +377,7 @@ fn v3_transport_13_request(
 pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
     wire: V3Provider12ResponsesWirePayload,
 ) -> Result<V3Transport13ResponsesRequest, V3ProviderError> {
-    let (request_id, target, stream_intent, body) = wire.into_parts();
+    let (request_id, target, stream_intent, endpoint, body) = wire.into_parts();
     let provider_id = target.provider_id;
     let request_timeout_ms = target.request_timeout_ms;
     let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
@@ -386,7 +386,11 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
     match target.responses_transport {
         V3ResponsesTransportKind::Http => {
             let mut body = body;
-            let mut url_text = format!("{}/responses", target.base_url.trim_end_matches('/'));
+            let suffix = match endpoint {
+                crate::V3ResponsesRequestEndpoint::Responses => "responses",
+                crate::V3ResponsesRequestEndpoint::Compact => "responses/compact",
+            };
+            let mut url_text = format!("{}/{suffix}", target.base_url.trim_end_matches('/'));
             if let Some(response_id) = extract_http_submit_tool_outputs_response_id(&mut body) {
                 url_text = build_http_submit_tool_outputs_url(
                     &request_id,
@@ -419,6 +423,13 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
             Ok(request)
         }
         V3ResponsesTransportKind::WebsocketV2 => {
+            if endpoint == crate::V3ResponsesRequestEndpoint::Compact {
+                return Err(V3ProviderError::WebSocketTransport {
+                    request_id,
+                    provider_id,
+                    reason: "responses compact requires HTTP transport".to_string(),
+                });
+            }
             let url =
                 target
                     .websocket_v2_url

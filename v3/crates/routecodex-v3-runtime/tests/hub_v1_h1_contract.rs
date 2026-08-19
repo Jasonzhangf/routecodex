@@ -64,7 +64,10 @@ fn published_manifest() -> V3Config05ManifestPublished {
             entry_protocol_bindings: vec![
                 V3EntryProtocolBindingManifest {
                     entry_protocol: "responses".to_string(),
-                    endpoint_patterns: vec!["/v1/responses".to_string()],
+                    endpoint_patterns: vec![
+                        "/v1/responses".to_string(),
+                        "/v1/responses/compact".to_string(),
+                    ],
                     execution_mode: V3EntryProtocolExecutionMode::Direct,
                     protocol_profile_owner: "v3.entry_protocol_registry_contract".to_string(),
                     implemented: true,

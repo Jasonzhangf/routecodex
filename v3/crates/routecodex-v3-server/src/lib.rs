@@ -1,3 +1,4 @@
+mod compaction_request;
 mod console;
 mod endpoint_handlers;
 mod executors;
@@ -10,6 +11,7 @@ mod scope_metadata;
 mod session_admission;
 mod websocket;
 
+use compaction_request::classify_v3_request_purpose;
 use console::*;
 use endpoint_handlers::{
     allocate_v3_console_request_id, allocate_v3_console_request_identity,
@@ -65,6 +67,7 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_runtime::{
     build_v3_provider_global_probe_target, build_v3_server_03_http_request_raw,
+    build_v3_server_03_http_request_raw_with_purpose,
     execute_v3_anthropic_relay_dry_run_runtime_with_client_headers,
     execute_v3_anthropic_relay_runtime_with_default_transport,
     execute_v3_anthropic_relay_runtime_with_default_transport_and_client_headers,
@@ -95,8 +98,8 @@ use routecodex_v3_runtime::{
     V3ChatDirectCodec, V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput,
     V3FoundationRuntimeOutput, V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput,
     V3GeminiRelayRuntimeOutput, V3OpenAiChatClientStream, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
-    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3RequestPurpose,
+    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayDryRunOutcome, V3ResponsesRelayLocalContinuationScope,
@@ -475,6 +478,7 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
             "/v1/responses",
             post(pending_endpoint).get(responses_websocket_endpoint),
         )
+        .route("/v1/responses/compact", post(pending_endpoint))
         .route("/v1/messages", post(pending_endpoint))
         .route("/v1/chat/completions", post(pending_endpoint))
         .route(
@@ -672,7 +676,7 @@ async fn admit_v3_responses_session(
     let permit = state
         .responses_session_admission
         .admit(V3ResponsesSessionAdmissionScope {
-            endpoint: "/v1/responses".to_string(),
+            endpoint: path.to_string(),
             session_id,
             conversation_id,
         })
@@ -713,6 +717,21 @@ async fn pending_endpoint(
     let entry_protocol = binding.entry_protocol.clone();
     let execution_mode = binding.execution_mode;
     let pending_owner_symbol = binding.pending_owner_symbol.clone();
+    let request_purpose = match classify_v3_request_purpose(&path, &request_headers) {
+        Ok(request_purpose) => request_purpose,
+        Err(message) => {
+            let request_id = match allocate_v3_console_request_id(&state, &path, None) {
+                Ok(request_id) => request_id,
+                Err(response) => return *response,
+            };
+            return error_output_response_for_server(
+                &state.server,
+                &path,
+                &request_id,
+                project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+            );
+        }
+    };
     if !state
         .server
         .endpoints
@@ -810,6 +829,7 @@ async fn pending_endpoint(
         entry_protocol,
         execution_mode,
         pending_owner_symbol,
+        request_purpose,
         payload,
     )
     .await;

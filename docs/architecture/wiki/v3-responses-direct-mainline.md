@@ -7,6 +7,7 @@
 This is the human review surface for the RouteCodex V3 Rust foundation and first business lifecycle. The order is Config -> Server -> Debug -> Error/Provider health -> Virtual Router/Target -> Responses direct Pipeline/Provider.
 
 Virtual Router classification consumes typed `V3RouterRequestFacts`; pool-match planning and the non-empty default floor remain inside the Router owner before the one opaque target hit.
+Registered compaction requests use one Server03 ingress classifier. Exact Codex `/v1/responses/compact`, DSH `x-deepseek-harness-compact: 1`, and OpenCode/Reasonix `x-routecodex-request-purpose: compaction` projections become one typed request-purpose fact. The `compact` route is evaluated before direct-model and every ordinary route signal; no prompt or payload-text inspection is allowed.
 After `V3Target10ConcreteProviderSelected`, Runtime immediately evaluates `V3Execution11ProtocolDecision`: selected Responses providers with `provider.responses.process=chat` must leave Direct and enter Hub Relay, other same entry/provider protocol may enter Direct, protocol mismatch with Relay allowed must leave Direct and enter Hub Relay, and mismatch without Relay fails before provider send.
 
 Canonical documents:

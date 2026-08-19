@@ -88,3 +88,47 @@ modules:
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
+
+  - module_id: v3-compaction-request-routing
+    owner_feature_id: v3.compaction_request_routing
+    owned_paths:
+      - v3/crates/routecodex-v3-server/src/compaction_request.rs
+      - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+      - v3/crates/routecodex-v3-server/src/executors.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+      - v3/crates/routecodex-v3-runtime/src/nodes.rs
+      - v3/crates/routecodex-v3-runtime/src/hooks.rs
+      - v3/crates/routecodex-v3-route-classifier/src/route.rs
+      - v3/crates/routecodex-v3-virtual-router/src/lib.rs
+      - v3/crates/routecodex-v3-provider-responses/src/wire.rs
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+      - v3/crates/routecodex-v3-config/src/defaults.rs
+      - v3/crates/routecodex-v3-config/src/entry_protocol_validation.rs
+    allowed_dependencies:
+      - routecodex-v3-config
+      - routecodex-v3-provider-responses
+      - routecodex-v3-route-classifier
+      - routecodex-v3-runtime
+      - routecodex-v3-server
+      - routecodex-v3-virtual-router
+    forbidden_paths:
+      - src
+      - sharedmodule
+      - MetadataCenter
+      - request.normal_payload.purpose
+    allowed_edges:
+      - V3Server03HttpRequestRaw -> V3Req04StandardizedResponses
+      - V3Req04StandardizedResponses -> V3Router05RequestClassified
+      - V3Router05RequestClassified -> V3Router06RoutePoolResolved
+      - V3Provider12ResponsesWirePayload -> V3Transport13ResponsesRequest
+    resources:
+      - v3.request.compaction_purpose
+      - v3.route.request_facts
+      - v3.route.selection_plan
+    required_gates:
+      - npm run test:v3-compaction-request-routing
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-cargo-fmt

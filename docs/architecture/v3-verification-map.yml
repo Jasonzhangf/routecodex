@@ -1848,7 +1848,7 @@ features:
     forbidden_claim: Do not claim Responses Direct, Anthropic continuation, Provider
       WebSocket, live config, install, restart, release, or production cutover.
 - feature_id: v3.sse_protocol_codec_projection_boundary
-  status: design
+  status: source_controlled_live_verification_required
   change_risk: critical
   owner_kind: rust_v3_protocol_codec_boundary
   owner_scope: Provider/client SSE semantics in adjacent protocol codecs; opaque
@@ -3699,3 +3699,38 @@ features:
     live_cutover: required
     global_install_restart: required
     forbidden_claim: Do not claim hourly probe or provider-global recovery from state-only tests; live runtime evidence is required.
+
+- feature_id: v3.compaction_request_routing
+  status: design
+  change_risk: critical
+  owner_kind: rust_project_v3_request_routing
+  owner_modules:
+  - v3/crates/routecodex-v3-server
+  - v3/crates/routecodex-v3-runtime
+  - v3/crates/routecodex-v3-route-classifier
+  - v3/crates/routecodex-v3-virtual-router
+  - v3/crates/routecodex-v3-provider-responses
+  test_design:
+  - docs/goals/v3-compaction-request-routing-test-design.md
+  required_contract:
+  - One ingress classifier owns every registered compact endpoint/header projection.
+  - Only exact whitelist projections can produce the typed compaction purpose.
+  - Compact routing precedes direct model and every ordinary route signal.
+  - Native Codex compact preserves `/responses/compact`; auxiliary compact preserves its normal provider endpoint.
+  - Request purpose never enters normal provider/client payloads or MetadataCenter.
+  required_gates:
+  - npm run test:v3-compaction-request-routing
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-virtual-router
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses transport::tests -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib compaction -- --nocapture
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-architecture-docs
+  - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server
+  - git diff --check
+  completion_rule:
+    source: Positive and negative routing/transport tests plus architecture gates pass.
+    runtime: Installed managed V3 replays native compact, auxiliary compact, and ordinary control requests with matching sample evidence.
+    forbidden_claim: Do not claim compact routing from classifier-only tests or without upstream endpoint evidence.

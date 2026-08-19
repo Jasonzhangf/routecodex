@@ -158,6 +158,24 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.request.compaction_purpose
+    resource_kind: typed_control_fact
+    lifecycle: v3.compaction_request_routing
+    owner_crate: routecodex-v3-server
+    owner_node: V3Server03HttpRequestRaw
+    identity: [requestId, entryEndpoint, registeredProjection, requestPurpose]
+    semantic_contract:
+      unified_entry: classify_v3_request_purpose
+      whitelist: [/v1/responses/compact, x-deepseek-harness-compact=1, x-routecodex-request-purpose=compaction]
+      purpose_kinds: [conversation, auxiliary_compaction, native_compaction]
+      priority: compact precedes direct-model and every ordinary route signal
+      payload_boundary: request purpose is a typed side-channel fact and never enters normal request/response payloads
+    allowed_writers: [classify_v3_request_purpose]
+    allowed_readers: [V3Req04StandardizedResponses, V3Req04StandardizedChat, build_v3_router_request_facts_from_v3_req_04]
+    forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.request.normal_payload
     resource_kind: normal_payload
     lifecycle: v3.responses_direct.mainline

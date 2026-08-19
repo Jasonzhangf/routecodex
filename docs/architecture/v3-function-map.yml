@@ -2156,7 +2156,7 @@ features:
   - live provider compatibility
   - global install restart and production cutover
 - feature_id: v3.sse_protocol_codec_projection_boundary
-  status: design
+  status: active
   summary: Provider/client SSE protocol semantics stay in adjacent typed codecs;
     V3 SSE transport remains opaque framing and lifecycle only.
   owner_kind: rust_ssot
@@ -4645,4 +4645,60 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-architecture-docs
+  runtime_status: source_controlled_live_verification_required
+
+- feature_id: v3.compaction_request_routing
+  status: design
+  owner_kind: rust_project_v3_request_routing
+  owner_crates:
+  - routecodex-v3-server
+  - routecodex-v3-runtime
+  - routecodex-v3-route-classifier
+  - routecodex-v3-virtual-router
+  - routecodex-v3-provider-responses
+  resource_bindings:
+  - v3.request.compaction_purpose
+  - v3.route.request_facts
+  - v3.route.selection_plan
+  entry_symbols:
+  - classify_v3_request_purpose
+  - build_v3_router_request_facts_from_v3_req_04
+  - classify_route
+  - V3VirtualRouter::resolve_route_pool_plan
+  - build_v3_transport_13_responses_request_from_v3_provider_12
+  allowed_paths:
+  - v3/crates/routecodex-v3-server/src
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-route-classifier/src
+  - v3/crates/routecodex-v3-virtual-router/src
+  - v3/crates/routecodex-v3-provider-responses/src/wire.rs
+  - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+  - v3/crates/routecodex-v3-config/src
+  - v3/crates/routecodex-v3-cli/tests
+  - v3/crates/routecodex-v3-server/tests
+  - v3/crates/routecodex-v3-runtime/tests
+  - v3/crates/routecodex-v3-virtual-router/tests
+  - v3/tests/support
+  - package.json
+  - scripts/architecture/verify-v3-architecture-ci.mjs
+  - .github/workflows/test.yml
+  - docs/architecture
+  - docs/goals/v3-compaction-request-routing-test-design.md
+  forbidden_paths:
+  - src
+  - sharedmodule
+  - MetadataCenter
+  - request payload purpose markers
+  required_gates:
+  - npm run test:v3-compaction-request-routing
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-virtual-router
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses transport::tests -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib compaction -- --nocapture
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-architecture-docs
+  - git diff --check
   runtime_status: source_controlled_live_verification_required

@@ -6998,6 +6998,7 @@ chains:
       produces: [v3.provider.global_subscription_health]
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
+
   - step_id: v3-provider-global-probe-02
     from_node: V3ServerAggregateLifecycle
     to_node: V3ProviderGlobalProbeExecution
@@ -7040,3 +7041,50 @@ chains:
       produces: [v3.provider.global_subscription_health]
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
+
+- chain_id: v3.compaction_request_routing
+  owner_feature_id: v3.compaction_request_routing
+  summary: Registered endpoint/header projections converge at one ingress classifier, become a typed request-purpose fact, and select the compact pool before direct-model and ordinary route signals.
+  edges:
+  - step_id: v3-compact-route-01
+    from_node: V3Server03HttpRequestRaw
+    to_node: V3Req04StandardizedResponses
+    caller_symbol: pending_endpoint
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: classify_v3_request_purpose
+    callee_file: v3/crates/routecodex-v3-server/src/compaction_request.rs
+    status: bound
+    owner_feature_id: v3.compaction_request_routing
+    resource_flow:
+      consumes: [v3.request.protocol_context]
+      produces: [v3.request.compaction_purpose]
+      side_channel_reads: []
+      side_channel_writes: [v3.request.compaction_purpose]
+  - step_id: v3-compact-route-02
+    from_node: V3Req04StandardizedResponses
+    to_node: V3Router05RequestClassified
+    caller_symbol: build_v3_router_request_facts_from_v3_req_04
+    caller_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+    callee_symbol: classify_route
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/route.rs
+    status: bound
+    owner_feature_id: v3.compaction_request_routing
+    resource_flow:
+      consumes: [v3.request.compaction_purpose]
+      produces: [v3.route.request_facts]
+      side_channel_reads: [v3.request.compaction_purpose]
+      side_channel_writes: [v3.route.request_facts]
+  - step_id: v3-compact-route-03
+    from_node: V3Router05RequestClassified
+    to_node: V3Router06RoutePoolResolved
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: V3VirtualRouter::resolve_route_pool_plan
+    callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    status: bound
+    owner_feature_id: v3.compaction_request_routing
+    resource_flow:
+      consumes: [v3.route.request_facts]
+      produces: [v3.route.selection_plan]
+      side_channel_reads: [v3.route.request_facts]
+      side_channel_writes: [v3.route.selection_plan]

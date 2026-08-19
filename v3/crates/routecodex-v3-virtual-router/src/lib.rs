@@ -196,8 +196,11 @@ impl V3VirtualRouter {
         manifest: &V3Config05ManifestPublished,
         classified: V3Router05RequestClassified,
     ) -> Result<V3Router06RoutePoolResolved, V3VirtualRouterError> {
-        if let Some(direct) = resolve_v3_direct_model_plan(manifest, &classified) {
-            return direct;
+        let is_compaction = classified.facts.route_classification.route_name == "compact";
+        if !is_compaction {
+            if let Some(direct) = resolve_v3_direct_model_plan(manifest, &classified) {
+                return direct;
+            }
         }
         let group = manifest
             .route_groups
@@ -229,23 +232,25 @@ impl V3VirtualRouter {
 
         let mut tiers = Vec::new();
         let mut selected_pool_ids = BTreeSet::new();
-        if let Some(client_model) = classified.facts.client_model.as_deref() {
-            if let Some(pool) = select_best_matching_pool(
-                &classified.routing_group_id,
-                &group.pools,
-                &classified.facts,
-                None,
-                |pool_id, rule| {
-                    !pool_has_route_signal(pool_id, rule)
-                        && rule.models.iter().any(|model| model == client_model)
-                },
-            )? {
-                append_route_pool_tier(
+        if !is_compaction {
+            if let Some(client_model) = classified.facts.client_model.as_deref() {
+                if let Some(pool) = select_best_matching_pool(
                     &classified.routing_group_id,
-                    pool,
-                    &mut selected_pool_ids,
-                    &mut tiers,
-                )?;
+                    &group.pools,
+                    &classified.facts,
+                    None,
+                    |pool_id, rule| {
+                        !pool_has_route_signal(pool_id, rule)
+                            && rule.models.iter().any(|model| model == client_model)
+                    },
+                )? {
+                    append_route_pool_tier(
+                        &classified.routing_group_id,
+                        pool,
+                        &mut selected_pool_ids,
+                        &mut tiers,
+                    )?;
+                }
             }
         }
         // candidates（请求意图）驱动能力池：web_search 优先级最高（gpt 这类
@@ -809,7 +814,7 @@ fn protocol_from_endpoint(endpoint: &str) -> String {
         return "gemini".to_string();
     }
     match endpoint {
-        "/v1/responses" | "responses" => "responses".to_string(),
+        "/v1/responses" | "/v1/responses/compact" | "responses" => "responses".to_string(),
         "/v1/messages" | "anthropic" => "anthropic".to_string(),
         "/v1beta/models" | "gemini" => "gemini".to_string(),
         "/v1/chat/completions" | "openai_chat" => "openai_chat".to_string(),

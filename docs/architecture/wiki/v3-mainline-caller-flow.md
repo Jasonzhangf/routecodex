@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 58 functional paths, 376 caller edges.
+Generated view: 59 functional paths, 379 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -51,21 +51,21 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|5 edges / 5 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|28 edges / 4 paths| module_v3_runtime
   module_v3_runtime__hub_v1 -->|127 edges / 20 paths| module_v3_runtime__hub_v1
-  module_v3_runtime -->|2 edges / 2 paths| module_routecodex_v3_route_classifier
+  module_v3_runtime -->|3 edges / 3 paths| module_routecodex_v3_route_classifier
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|4 edges / 2 paths| module_v3_error
   module_v3_runtime -->|9 edges / 5 paths| module_v3_provider_responses
   module_v3_runtime -->|49 edges / 10 paths| module_v3_runtime
   module_v3_runtime -->|42 edges / 10 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|4 edges / 2 paths| module_v3_target
-  module_v3_runtime -->|3 edges / 1 paths| module_v3_virtual_router
+  module_v3_runtime -->|4 edges / 2 paths| module_v3_virtual_router
   module_v3_server -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_server -->|2 edges / 2 paths| module_v3_config
   module_v3_server -->|3 edges / 2 paths| module_v3_debug
   module_v3_server -->|4 edges / 3 paths| module_v3_error
   module_v3_server -->|4 edges / 4 paths| module_v3_runtime
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
-  module_v3_server -->|25 edges / 14 paths| module_v3_server
+  module_v3_server -->|26 edges / 15 paths| module_v3_server
 ```
 
 | From module | To module | Edges | Functional paths |
@@ -89,21 +89,21 @@ flowchart TD
 | v3-runtime::hub_v1 | v3-provider-responses | 5 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
 | v3-runtime::hub_v1 | v3-runtime | 28 | `v3.provider_action_gate.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | v3-runtime::hub_v1 | 127 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.anthropic_relay.local_continuation`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.servertool_hook_skeleton_lifecycle`<br/>`v3.sse.protocol_codec_projection_boundary` |
-| v3-runtime | routecodex-v3-route-classifier | 2 | `v3.route_classifier.facts_classification`<br/>`vr.current_turn_typed_route_facts` |
+| v3-runtime | routecodex-v3-route-classifier | 3 | `v3.compaction_request_routing`<br/>`v3.route_classifier.facts_classification`<br/>`vr.current_turn_typed_route_facts` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 4 | `v3.debug_error_foundation.mainline`<br/>`v3.hub_relay.response_failure_entry` |
 | v3-runtime | v3-provider-responses | 9 | `v3.debug_error_foundation.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime | v3-runtime | 49 | `v3.console_human_readable_layering.mainline`<br/>`v3.direct_stopless_metadata_center`<br/>`v3.provider_action_gate.mainline`<br/>`v3.responses_continuation.remote_contract_store`<br/>`v3.responses_continuation.remote_locator_codec`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.target.session_global_selection` |
 | v3-runtime | v3-runtime::hub_v1 | 42 | `v3.direct_stopless_metadata_center`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.runtime_timing_observability.mainline` |
 | v3-runtime | v3-target | 4 | `v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
-| v3-runtime | v3-virtual-router | 3 | `v3.responses_direct.required_mainline` |
+| v3-runtime | v3-virtual-router | 4 | `v3.compaction_request_routing`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | routecodex-v3-sse | 1 | `v3.sse.http_keepalive_boundary` |
 | v3-server | v3-config | 2 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.models.capability_catalog` |
 | v3-server | v3-debug | 3 | `v3.codex_sample_retention_snap_scope`<br/>`v3.server.startup` |
 | v3-server | v3-error | 4 | `v3.debug_error_foundation.mainline`<br/>`v3.responses_session_admission`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 4 | `v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
-| v3-server | v3-server | 25 | `v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3-server | v3-server | 26 | `v3.compaction_request_routing`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 
 ## Auto audit /补救清单
 
@@ -2416,3 +2416,36 @@ flowchart TD
 | `v3-provider-global-probe-02` | `V3ServerAggregateLifecycle` → `V3ProviderGlobalProbeExecution` | anchored | spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small> | probe_v3_provider_global_target<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-03` | `V3ProviderGlobalSubscriptionFailureObservation` → `V3ProviderGlobalSubscriptionHealthStore` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-04` | `V3ProviderGlobalSubscriptionFailureObservation` → `V3ProviderGlobalSubscriptionHealthStore` | anchored | V3ProviderFailureRuntimeHealth::record_provider_global_subscription_failure<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response<br/><small>routecodex-v3-provider-responses/src/provider_global_health.rs</small> | `v3.provider_global_subscription_probe` |
+
+## v3.compaction_request_routing
+
+Registered endpoint/header projections converge at one ingress classifier, become a typed request-purpose fact, and select the compact pool before direct-model and ordinary route signals.
+
+Owner feature: `v3.compaction_request_routing`
+
+```mermaid
+flowchart TD
+  subgraph c_58_v3_compaction_request_routing_m_routecodex_v3_route_classifier["routecodex-v3-route-classifier"]
+    c_58_v3_compaction_request_routing_3["routecodex-v3-route-classifier<br/>classify_route<br/><small>routecodex-v3-route-classifier/src/route.rs</small>"]
+  end
+  subgraph c_58_v3_compaction_request_routing_m_v3_runtime["v3-runtime"]
+    c_58_v3_compaction_request_routing_2["v3-runtime<br/>build_v3_router_request_facts_from_v3_req_04<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
+    c_58_v3_compaction_request_routing_4["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
+  end
+  subgraph c_58_v3_compaction_request_routing_m_v3_server["v3-server"]
+    c_58_v3_compaction_request_routing_0["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_58_v3_compaction_request_routing_1["v3-server<br/>classify_v3_request_purpose<br/><small>routecodex-v3-server/src/compaction_request.rs</small>"]
+  end
+  subgraph c_58_v3_compaction_request_routing_m_v3_virtual_router["v3-virtual-router"]
+    c_58_v3_compaction_request_routing_5["v3-virtual-router<br/>V3VirtualRouter::resolve_route_pool_plan<br/><small>routecodex-v3-virtual-router/src/lib.rs</small>"]
+  end
+  c_58_v3_compaction_request_routing_0 -->|v3-compact-route-01<br/>V3Server03HttpRequestRaw → V3Req04StandardizedResponses| c_58_v3_compaction_request_routing_1
+  c_58_v3_compaction_request_routing_2 -->|v3-compact-route-02<br/>V3Req04StandardizedResponses → V3Router05RequestClassified| c_58_v3_compaction_request_routing_3
+  c_58_v3_compaction_request_routing_4 -->|v3-compact-route-03<br/>V3Router05RequestClassified → V3Router06RoutePoolResolved| c_58_v3_compaction_request_routing_5
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-compact-route-01` | `V3Server03HttpRequestRaw` → `V3Req04StandardizedResponses` | bound | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | classify_v3_request_purpose<br/><small>routecodex-v3-server/src/compaction_request.rs</small> | `v3.compaction_request_routing` |
+| `v3-compact-route-02` | `V3Req04StandardizedResponses` → `V3Router05RequestClassified` | bound | build_v3_router_request_facts_from_v3_req_04<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | classify_route<br/><small>routecodex-v3-route-classifier/src/route.rs</small> | `v3.compaction_request_routing` |
+| `v3-compact-route-03` | `V3Router05RequestClassified` → `V3Router06RoutePoolResolved` | bound | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3VirtualRouter::resolve_route_pool_plan<br/><small>routecodex-v3-virtual-router/src/lib.rs</small> | `v3.compaction_request_routing` |
