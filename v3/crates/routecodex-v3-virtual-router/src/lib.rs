@@ -518,13 +518,8 @@ where
                 return None;
             }
             let rule = pool.match_rule.as_ref()?;
-        (pool_matches(rule, facts, route_signal)
-                && candidate_matches(pool_id, rule))
-                .then_some((
-                rule.precedence,
-                pool_id.as_str(),
-                pool,
-            ))
+            (pool_matches(rule, facts, route_signal) && candidate_matches(pool_id, rule))
+                .then_some((rule.precedence, pool_id.as_str(), pool))
         })
         .collect::<Vec<_>>();
     matches.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(right.1)));

@@ -107,30 +107,25 @@ fn matching_facts() -> V3RouterRequestFacts {
 fn classified_route_hits_pool_without_reclassifying_as_capability() {
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
-    manifest
-        .route_groups
-        .get_mut("g")
-        .unwrap()
-        .pools
-        .insert(
-            "thinking".into(),
-            V3RoutePoolManifest {
-                id: "thinking".into(),
-                selection: V3SelectionPolicy {
-                    strategy: V3SelectionStrategy::Priority,
-                },
-                match_rule: Some(V3RoutePoolMatchManifest {
-                    precedence: 2,
-                    entry_protocol: Some("responses".into()),
-                    models: Vec::new(),
-                    required_capabilities: vec!["thinking".into()],
-                    min_input_tokens: None,
-                    max_input_tokens: None,
-                }),
-                features: BTreeMap::new(),
-                targets: vec![target("thinking-target", 1, 1)],
+    manifest.route_groups.get_mut("g").unwrap().pools.insert(
+        "thinking".into(),
+        V3RoutePoolManifest {
+            id: "thinking".into(),
+            selection: V3SelectionPolicy {
+                strategy: V3SelectionStrategy::Priority,
             },
-        );
+            match_rule: Some(V3RoutePoolMatchManifest {
+                precedence: 2,
+                entry_protocol: Some("responses".into()),
+                models: Vec::new(),
+                required_capabilities: vec!["thinking".into()],
+                min_input_tokens: None,
+                max_input_tokens: None,
+            }),
+            features: BTreeMap::new(),
+            targets: vec![target("thinking-target", 1, 1)],
+        },
+    );
     let classified = router
         .classify_request_with_facts(
             &manifest,
