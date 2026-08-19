@@ -47,6 +47,13 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
     mut stream: V3ProviderSseStream,
     first_event_timeout: std::time::Duration,
 ) -> Result<V3ProviderSseStream, V3Error01SourceRaised> {
+    // Provider SSE failures are never client SSE events. This guard must keep
+    // transport/body/codec/empty-terminal failures before Resp15 commit and
+    // raise Error01 so the existing Error02→05 policy can select another
+    // candidate/default target. Only total pool exhaustion may reach Error06
+    // and become the final client HTTP 502. Moving any branch below this guard
+    // or compensating in Server/SSE framing would either expose an intermediate
+    // provider failure or silently bypass provider switching.
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut buffered = Vec::<Vec<u8>>::new();
     loop {
