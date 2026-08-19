@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>61 functional paths</span>
-        <span>385 caller edges</span>
+        <span>63 functional paths</span>
+        <span>387 caller edges</span>
       </div>
     </header>
 
@@ -471,7 +471,7 @@ flowchart TD
 <tr><td>Forbidden source registered direct response edges</td><td><strong>none</strong></td></tr>
 <tr><td>Invalid aggregate wrapper edges</td><td><strong>none</strong></td></tr>
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
-<tr><td>Binding-pending edges</td><td><strong>8</strong></td></tr>
+<tr><td>Binding-pending edges</td><td><strong>10</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>17</strong></td></tr>
 <tr><td>live-bound source edges</td><td><strong>298</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
@@ -491,6 +491,8 @@ flowchart TD
         <table>
 <thead><tr><th>chain_id</th><th>step_id</th><th>from_node</th><th>to_node</th></tr></thead>
 <tbody>
+<tr><td><code>v3.global_binary_install</code></td><td><code>v3-install-01</code></td><td><code>V3Install01SourceVersionResolved</code></td><td><code>V3Install02RustBinaryBuilt</code></td></tr>
+<tr><td><code>v3.build.dependency_projection</code></td><td><code>v3-dependency-projection-01</code></td><td><code>V3DependencyManifestTruth</code></td><td><code>V3DependencyLockProjection</code></td></tr>
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-01</code></td><td><code>HubReqChatProcess03Governed</code></td><td><code>V3WebSearch01RouteEvidenceClassified</code></td></tr>
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-02</code></td><td><code>V3WebSearch01RouteEvidenceClassified</code></td><td><code>VrRoute04SelectedTarget</code></td></tr>
 <tr><td><code>v3.web_search_servertool_state_machine</code></td><td><code>v3-web-search-sm-03</code></td><td><code>HubRespChatProcess03Governed</code></td><td><code>V3ServerToolState01ControlScope</code></td></tr>
@@ -506,6 +508,8 @@ flowchart TD
       <table>
 <thead><tr><th>chain_id</th><th>step_id</th><th>review class</th><th>why it is not runtime/live closure</th></tr></thead>
 <tbody>
+<tr><td><code>v3.global_binary_install</code></td><td><code>v3-install-01</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.build.dependency_projection</code></td><td><code>v3-dependency-projection-01</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
 <tr><td><code>v3.hub_pipeline.v1.request</code></td><td><code>v3-hub-req-01</code></td><td><span class="status typed-test-only">typed-test-only</span></td><td>typed skeleton/builder contract; does not prove live runtime closure</td></tr>
 <tr><td><code>v3.hub_pipeline.v1.request</code></td><td><code>v3-hub-req-02</code></td><td><span class="status typed-test-only">typed-test-only</span></td><td>typed skeleton/builder contract; does not prove live runtime closure</td></tr>
 <tr><td><code>v3.hub_pipeline.v1.request</code></td><td><code>v3-hub-req-03</code></td><td><span class="status typed-test-only">typed-test-only</span></td><td>typed skeleton/builder contract; does not prove live runtime closure</td></tr>
@@ -546,6 +550,8 @@ flowchart TD
 <thead><tr><th>Audit item</th><th>State</th><th>Edges</th><th>Resources</th><th>Owner</th><th>Current fingerprint</th></tr></thead>
 <tbody>
 <tr><td><a href="#chain-v3_global_binary_install"><code>v3.global_binary_install</code></a><br/>v 3.global_binary_install</td><td><span class="status audited_locked">locked by Jason</span></td><td>3</td><td>1</td><td><code>v3.global_binary_install</code></td><td><code>sha256:79d09d5fde29…</code></td></tr>
+<tr><td><a href="#chain-v3_global_binary_install_version_projection"><code>v3.global_binary_install.version_projection</code></a><br/>v 3.global_binary_install.version_projection</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>1</td><td><code>v3.global_binary_install</code></td><td><code>sha256:5443b66e395b…</code></td></tr>
+<tr><td><a href="#chain-v3_build_dependency_projection"><code>v3.build.dependency_projection</code></a><br/>v 3.build.dependency_projection</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>1</td><td><code>v3.build.dependency_projection</code></td><td><code>sha256:846f8d109740…</code></td></tr>
 <tr><td><a href="#chain-v3_target_session_global_selection"><code>v3.target.session_global_selection</code></a><br/>v 3.target.session_global_selection</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>4</td><td><code>v3.virtual_router_target_interpreter</code></td><td><code>sha256:d3464c14e382…</code></td></tr>
 <tr><td><a href="#chain-v3_codex_sample_retention_snap_scope"><code>v3.codex_sample_retention_snap_scope</code></a><br/>v 3.codex_sample_retention_snap_scope</td><td><span class="status audited_locked">locked by Jason</span></td><td>2</td><td>3</td><td><code>v3.codex_sample_retention_snap_scope</code></td><td><code>sha256:cbd2d5a36500…</code></td></tr>
 <tr><td><a href="#chain-v3_server_managed_lifecycle"><code>v3.server.managed_lifecycle</code></a><br/>v 3.server.managed_lifecycle</td><td><span class="status audited_locked">locked by Jason</span></td><td>8</td><td>9</td><td><code>v3.managed_server_lifecycle</code></td><td><code>sha256:b887fb4f3208…</code></td></tr>
@@ -621,6 +627,20 @@ flowchart TD
             <span><code>v3.global_binary_install</code></span>
             <span>3 edges · 1 resources · scripts</span>
             <span class="status audited_locked">locked by Jason</span>
+          </a>
+<a class="branch-card" href="#chain-v3_global_binary_install_version_projection">
+            <span class="chain-id">v 3.global_binary_install.version_projection</span>
+            <span>V3Install00VersionTruthAuthoring → V3Install01SourceVersionResolved</span>
+            <span><code>v3.global_binary_install.version_projection</code></span>
+            <span>1 edges · 1 resources · scripts</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_build_dependency_projection">
+            <span class="chain-id">v 3.build.dependency_projection</span>
+            <span>V3DependencyManifestTruth → V3DependencyLockProjection</span>
+            <span><code>v3.build.dependency_projection</code></span>
+            <span>1 edges · 1 resources · v3/Cargo.lock, v3/Cargo.toml</span>
+            <span class="status pending_review">pending review</span>
           </a>
 <a class="branch-card" href="#chain-v3_target_session_global_selection">
             <span class="chain-id">v 3.target.session_global_selection</span>
@@ -1100,7 +1120,7 @@ flowchart TD
           <span>modules: <code>scripts</code></span>
           <span>resources: <code>1</code></span>
 
-
+          <span class="pending-pill">1 binding pending</span>
         </div>
         <div class="diagram-shell">
           <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
@@ -1114,12 +1134,13 @@ flowchart TD
   n_v3_global_binary_install_2 --&gt;|v3-install-03&lt;br/&gt;scripts → scripts| n_v3_global_binary_install_3
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
-  class n_v3_global_binary_install_0,n_v3_global_binary_install_1,n_v3_global_binary_install_2,n_v3_global_binary_install_3 node;</pre>
+  class n_v3_global_binary_install_0,n_v3_global_binary_install_1,n_v3_global_binary_install_2,n_v3_global_binary_install_3 node;
+  class n_v3_global_binary_install_0,n_v3_global_binary_install_1 pending;</pre>
         </div>
         <table>
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
 <tbody>
-<tr><td><code>v3-install-01</code></td><td><code>V3Install01SourceVersionResolved</code><br/>→ <code>V3Install02RustBinaryBuilt</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.global_binary_install</code></div></td><td><code>buildV3Cli</code><br/><small>scripts/install-v3-cli.mjs</small></td><td><code>runInterruptibleCommand</code><br/><small>scripts/install-v3-cli.mjs</small></td></tr>
+<tr><td><code>v3-install-01</code></td><td><code>V3Install01SourceVersionResolved</code><br/>→ <code>V3Install02RustBinaryBuilt</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.global_binary_install</code></div></td><td><code>buildV3Cli</code><br/><small>scripts/install-v3-cli.mjs</small></td><td><code>runInterruptibleCommand</code><br/><small>scripts/install-v3-cli.mjs</small></td></tr>
 <tr><td><code>v3-install-02</code></td><td><code>V3Install02RustBinaryBuilt</code><br/>→ <code>V3Install03DirectBinaryPublished</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.global_binary_install</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.global_binary_install</code></div></td><td><code>main</code><br/><small>scripts/install-v3-cli.mjs</small></td><td><code>copyExecutableAtomic</code><br/><small>scripts/install-v3-cli.mjs</small></td></tr>
 <tr><td><code>v3-install-03</code></td><td><code>V3Install03DirectBinaryPublished</code><br/>→ <code>V3Install04CommandAliasesPublished</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.global_binary_install</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.global_binary_install</code></div></td><td><code>main</code><br/><small>scripts/ensure-cli-command-shim.mjs</small></td><td><code>installDirectNativeCommand</code><br/><small>scripts/ensure-cli-command-shim.mjs</small></td></tr>
 </tbody>
@@ -1128,7 +1149,80 @@ flowchart TD
     </details>
 
 
-    <details class="branch-detail" id="chain-v3_target_session_global_selection" open>
+    <details class="branch-detail" id="chain-v3_global_binary_install_version_projection" open>
+      <summary>
+        <span class="summary-main">v 3.global_binary_install.version_projection</span>
+        <span class="summary-sub">V3Install00VersionTruthAuthoring → V3Install01SourceVersionResolved</span>
+        <span class="summary-sub">1 edges · <code>v3.global_binary_install.version_projection</code> · V3Install00VersionTruthAuthoring → V3Install01SourceVersionResolved</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">package.json is the single authoring truth and gen-build-info.mjs mechanically projects package-lock.json and src/build-info.ts before install-v3-cli reads the version into ROUTECODEX_BUILD_VERSION.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.global_binary_install</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>scripts</code></span>
+          <span>resources: <code>1</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_global_binary_install_version_projection_0[&quot;&lt;b&gt;Install 00 Version Truth Authoring&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Install00VersionTruthAuthoring&lt;/small&gt;&quot;]
+  n_v3_global_binary_install_version_projection_1[&quot;&lt;b&gt;Install 01 Source Version Resolved&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Install01SourceVersionResolved&lt;/small&gt;&quot;]
+  n_v3_global_binary_install_version_projection_0 --&gt;|v3-install-version-projection-01&lt;br/&gt;scripts → scripts| n_v3_global_binary_install_version_projection_1
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_global_binary_install_version_projection_0,n_v3_global_binary_install_version_projection_1 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-install-version-projection-01</code></td><td><code>V3Install00VersionTruthAuthoring</code><br/>→ <code>V3Install01SourceVersionResolved</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.build.version_projection</code></div></td><td><code>buildV3Cli</code><br/><small>scripts/install-v3-cli.mjs</small></td><td><code>generateBuildInfo</code><br/><small>scripts/gen-build-info.mjs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_build_dependency_projection" >
+      <summary>
+        <span class="summary-main">v 3.build.dependency_projection</span>
+        <span class="summary-sub">V3DependencyManifestTruth → V3DependencyLockProjection</span>
+        <span class="summary-sub">1 edges · <code>v3.build.dependency_projection</code> · V3DependencyManifestTruth → V3DependencyLockProjection</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Cargo workspace manifests are the semantic dependency truth and v3/Cargo.lock is the deterministic machine-readable projection produced by locked Cargo metadata/build/check commands.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.build.dependency_projection</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>v3/Cargo.lock · v3/Cargo.toml</code></span>
+          <span>resources: <code>1</code></span>
+
+          <span class="pending-pill">1 binding pending</span>
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_build_dependency_projection_0[&quot;&lt;b&gt;Dependency Manifest Truth&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3DependencyManifestTruth&lt;/small&gt;&quot;]
+  n_v3_build_dependency_projection_1[&quot;&lt;b&gt;Dependency Lock Projection&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3DependencyLockProjection&lt;/small&gt;&quot;]
+  n_v3_build_dependency_projection_0 --&gt;|v3-dependency-projection-01&lt;br/&gt;v3/Cargo.toml → v3/Cargo.lock| n_v3_build_dependency_projection_1
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_build_dependency_projection_0,n_v3_build_dependency_projection_1 node;
+  class n_v3_build_dependency_projection_0,n_v3_build_dependency_projection_1 pending;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-dependency-projection-01</code></td><td><code>V3DependencyManifestTruth</code><br/>→ <code>V3DependencyLockProjection</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.build.dependency_projection</code></div></td><td><code>cargo_workspace_manifest</code><br/><small>v3/Cargo.toml</small></td><td><code>cargo_locked_projection</code><br/><small>v3/Cargo.lock</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_target_session_global_selection" >
       <summary>
         <span class="summary-main">v 3.target.session_global_selection</span>
         <span class="summary-sub">V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected</span>

@@ -18,6 +18,7 @@ const globalInstall = read('scripts/install-global.sh');
 const releaseInstall = read('scripts/install-release.sh');
 const installV3Script = read('scripts/install-v3-cli.mjs');
 const v3ConfigSource = read('v3/crates/routecodex-v3-config/src/lib.rs');
+const genBuildInfo = read('scripts/gen-build-info.mjs');
 
 test('publishes the V3 Rust binary as the default generated command surface', () => {
   assert.deepEqual(packageJson.bin, {
@@ -42,6 +43,7 @@ test('publishes the V3 Rust binary as the default generated command surface', ()
     'tests/scripts/v3-cli-distribution.spec.mjs',
   ));
   assert.ok(packageJson.scripts['build:v3-cli'].includes('npm run test:v3-cli-distribution'));
+  assert.ok(packageJson.scripts['build:v3-cli'].includes('cargo +stable build --locked --manifest-path v3/Cargo.toml -p routecodex-v3-cli'));
 });
 
 test('installs, shims, and verifies rcc/rccv3 globally through the V3-only default path', () => {
@@ -82,6 +84,12 @@ test('installs, shims, and verifies rcc/rccv3 globally through the V3-only defau
   assert.ok(!installV3Cli.includes('ROUTECODEX_V3_INSTALL_BIN_DIR'));
   assert.ok(!installV3Cli.includes('RCC_V3_INSTALL_BIN_DIR'));
   assert.ok(installV3Cli.includes('env.ROUTECODEX_BUILD_VERSION = readPackageVersion()'));
+  assert.ok(installV3Cli.includes("'build',\n    '--locked'"));
+  assert.ok(copyScript.includes("'build',\n  '--locked'"));
+  assert.ok(genBuildInfo.includes('export function generateBuildInfo()'));
+  assert.ok(genBuildInfo.includes('const version = typeof pkg?.version === \'string\' ? pkg.version : \'0.0.0\''));
+  assert.ok(!genBuildInfo.includes('ROUTECODEX_SKIP_AUTO_BUMP'));
+  assert.ok(!genBuildInfo.includes('bumpPatchVersion'));
   assert.ok(globalInstall.includes('local retired_install="$HOME/.rcc/install"'));
   assert.ok(globalInstall.includes('rm -rf "$retired_install"'));
   assert.ok(v3ConfigSource.includes('option_env!("ROUTECODEX_BUILD_VERSION")'));

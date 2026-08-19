@@ -13,7 +13,8 @@ chains:
     caller_file: scripts/install-v3-cli.mjs
     callee_symbol: runInterruptibleCommand
     callee_file: scripts/install-v3-cli.mjs
-    status: anchored
+    status: binding_pending
+    binding_pending: true
     owner_feature_id: v3.global_binary_install
     semantic_contract:
       - buildV3Cli passes ROUTECODEX_BUILD_VERSION into the Cargo invocation through runInterruptibleCommand.
@@ -57,6 +58,52 @@ chains:
     resource_flow:
       consumes: [v3.global_binary_install]
       produces: [v3.global_binary_install]
+      side_channel_reads: []
+      side_channel_writes: []
+- chain_id: v3.global_binary_install.version_projection
+  owner_feature_id: v3.global_binary_install
+  summary: package.json is the single authoring truth and gen-build-info.mjs mechanically projects package-lock.json and src/build-info.ts before install-v3-cli reads the version into ROUTECODEX_BUILD_VERSION.
+  edges:
+  - step_id: v3-install-version-projection-01
+    from_node: V3Install00VersionTruthAuthoring
+    to_node: V3Install01SourceVersionResolved
+    caller_symbol: buildV3Cli
+    caller_file: scripts/install-v3-cli.mjs
+    callee_symbol: generateBuildInfo
+    callee_file: scripts/gen-build-info.mjs
+    status: anchored
+    owner_feature_id: v3.global_binary_install
+    semantic_contract:
+      - package.json is the single authoring truth for the RouteCodex build version.
+      - package-lock.json root and package-root entries are mechanically projected from package.json.
+      - src/build-info.ts is the generated TypeScript projection consumed by the source build; it is never hand-edited.
+      - install-v3-cli invokes the generator before reading the package version into ROUTECODEX_BUILD_VERSION.
+    resource_flow:
+      consumes: []
+      produces: [v3.build.version_projection]
+      side_channel_reads: []
+      side_channel_writes: []
+- chain_id: v3.build.dependency_projection
+  owner_feature_id: v3.build.dependency_projection
+  summary: Cargo workspace manifests are the semantic dependency truth and v3/Cargo.lock is the deterministic machine-readable projection produced by locked Cargo metadata/build/check commands.
+  edges:
+  - step_id: v3-dependency-projection-01
+    from_node: V3DependencyManifestTruth
+    to_node: V3DependencyLockProjection
+    caller_symbol: cargo_workspace_manifest
+    caller_file: v3/Cargo.toml
+    callee_symbol: cargo_locked_projection
+    callee_file: v3/Cargo.lock
+    status: binding_pending
+    binding_pending: true
+    owner_feature_id: v3.build.dependency_projection
+    semantic_contract:
+      - Every V3 workspace crate, including routecodex-v3-admin, declares its dependency truth in its Cargo.toml.
+      - v3/Cargo.lock is updated only by Cargo under the workspace lock contract and is verified with --locked.
+      - No runtime, install, or architecture change may edit v3/Cargo.lock directly as a semantic change.
+    resource_flow:
+      consumes: []
+      produces: [v3.build.dependency_projection]
       side_channel_reads: []
       side_channel_writes: []
 - chain_id: v3.target.session_global_selection

@@ -211,6 +211,7 @@ async function buildV3Cli(build) {
   env.ROUTECODEX_BUILD_VERSION = readPackageVersion();
   await runInterruptibleCommand('cargo', [
     'build',
+    '--locked',
     '--manifest-path',
     manifestPath,
     '-p',

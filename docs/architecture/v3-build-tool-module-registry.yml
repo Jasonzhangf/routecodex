@@ -5,6 +5,8 @@ modules:
     owner_feature_id: v3.module_boundary_verifier
     owned_paths:
       - scripts/architecture/verify-v3-module-boundaries.mjs
+      - docs/architecture/v3-build-tool-module-registry.yml
+      - docs/architecture/wiki/v3-mainline-caller-flow.md
     allowed_dependencies:
       - node:fs
       - node:path
@@ -84,11 +86,16 @@ modules:
       - scripts/install-v3-cli.mjs
       - scripts/ensure-cli-command-shim.mjs
       - scripts/install-global.sh
+      - scripts/gen-build-info.mjs
+      - scripts/copy-v3-cli-bin.mjs
+      - package.json
+      - package-lock.json
       - tests/scripts/v3-cli-distribution.spec.mjs
       - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
       - v3/crates/routecodex-v3-config/src/lib.rs
       - docs/goals/v3-install-interrupt-process-group-test-design.md
       - docs/architecture/manifests/v3.global_binary_install.interruption.mainline.yml
+      - src/build-info.ts
     allowed_dependencies:
       - v3/crates/routecodex-v3-cli
       - dist/bin/rccv3
@@ -96,7 +103,6 @@ modules:
       - node:child_process
       - node:fs
     forbidden_paths:
-      - src
       - sharedmodule
       - ~/.rcc/install
       - request.normal_payload
@@ -107,20 +113,22 @@ modules:
       - V3InstallOwnedCommandGroupActive -> V3InstallOwnedCommandGroupSignalled
       - V3InstallOwnedCommandGroupSignalled -> V3InstallOwnedCommandGroupExited
       - V3InstallOwnedCommandGroupExited -> V3InstallOwnedCargoTargetReleased
+      - V3Install00VersionTruthAuthoring -> V3Install01SourceVersionResolved
     resources:
       - v3.global_binary_install
       - v3.install.command_process_group
       - v3.install.owned_cargo_target
+      - v3.build.version_projection
     required_gates:
       - npm run test:v3-cli-distribution
       - npm run test:install-v3-target-cleanup
       - npm run verify:v3-resource-map
       - npm run verify:v3-module-boundaries
+      - cargo +stable check --locked --manifest-path v3/Cargo.toml
 
   - module_id: v3-build-test-artifact-budget
     owner_feature_id: v3.build_test_artifact_budget
     owned_paths:
-      - v3/Cargo.toml
       - scripts/run-v3-cargo-test.mjs
       - scripts/cargo-test-artifact-runner.mjs
       - scripts/architecture/verify-v3-build-test-artifact-budget.mjs
@@ -142,6 +150,39 @@ modules:
     required_gates:
       - npm run verify:v3-build-test-artifact-budget
       - npm run test:v3-build-test-artifact-budget-red-fixtures
+
+  - module_id: v3-cargo-dependency-projection
+    owner_feature_id: v3.build.dependency_projection
+    owned_paths:
+      - v3/Cargo.toml
+      - v3/Cargo.lock
+      - scripts/architecture/verify-v3-dependency-projection.mjs
+      - scripts/tests/v3-dependency-projection-red-fixtures.mjs
+      - v3/crates/routecodex-v3-admin/Cargo.toml
+      - docs/architecture/manifests/v3.build.dependency_projection.mainline.yml
+    allowed_dependencies:
+      - cargo
+      - v3/Cargo.toml
+      - node:child_process
+      - node:fs
+      - node:os
+      - node:path
+      - yaml
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - ~/.rcc
+    allowed_edges:
+      - V3DependencyManifestTruth -> V3DependencyLockProjection
+    resources:
+      - v3.build.dependency_projection
+    required_gates:
+      - cargo +stable check --locked --manifest-path v3/Cargo.toml
+      - npm run verify:v3-cargo-lock
+      - npm run verify:v3-dependency-projection
+      - npm run test:v3-dependency-projection-red-fixtures
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
 
   - module_id: v3-debug-error-foundation
     owner_feature_id: v3.debug_error_foundation

@@ -1566,3 +1566,37 @@ resources:
     may_enter_metadata_center: false
     binding_status: anchored
     required_gates: [npm run test:install-v3-target-cleanup, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]
+
+  - resource_id: v3.build.version_projection
+    resource_kind: deterministic_build_metadata
+    lifecycle: v3.global_binary_install.version_projection
+    owner_feature_id: v3.global_binary_install
+    owner_crate: routecodex-v3-config
+    owner_module: v3-global-binary-install
+    owner_node: V3Install00VersionTruthAuthoring
+    identity: [packageVersion, lockRootVersion, buildInfoVersion]
+    allowed_writers: [scripts/gen-build-info.mjs]
+    allowed_readers: [scripts/install-v3-cli.mjs, scripts/copy-v3-cli-bin.mjs, scripts/ensure-cli-command-shim.mjs, routecodex-v3-config]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm run test:v3-cli-distribution, npm run test:install-v3-target-cleanup, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]
+
+  - resource_id: v3.build.dependency_projection
+    resource_kind: cargo_workspace_lockfile
+    lifecycle: v3.build.dependency_projection
+    owner_feature_id: v3.build.dependency_projection
+    owner_crate: routecodex-v3-admin
+    owner_module: v3-cargo-dependency-projection
+    owner_node: V3DependencyLockProjection
+    identity: [workspaceManifest, lockVersion, crateManifestDigest]
+    allowed_writers: [cargo]
+    allowed_readers: [cargo, scripts/install-v3-cli.mjs, scripts/run-v3-cargo-test.mjs]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [cargo +stable check --locked --manifest-path v3/Cargo.toml, npm run verify:v3-cargo-lock, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]

@@ -44,8 +44,9 @@ features:
   status: source_active_live_verification_required
   change_risk: high
   owner_kind: build_and_runtime_install_control
-  owner_scope: Direct publication of the self-contained Rust V3 binary and its local
-    command aliases.
+  owner_scope: Version projection from package.json through package-lock.json and
+    src/build-info.ts, then direct publication of the self-contained Rust V3 binary
+    and its local command aliases.
   owner_modules:
   - v3-global-binary-install
   contract:
@@ -55,6 +56,8 @@ features:
   required_positive:
   - Installed rccv3 path is ~/.local/bin/rccv3 and reports the embedded RouteCodex
     build version.
+  - package.json, package-lock.json, and src/build-info.ts stay synchronized after
+    a release install and are never hand-edited as three independent surfaces.
   - routecodex and rcc execute the same installed binary.
   - Aggregate restart and every configured listener health endpoint succeed after
     installation.
@@ -75,10 +78,43 @@ features:
   - npm run test:install-v3-target-cleanup
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
+  - cargo +stable check --locked --manifest-path v3/Cargo.toml
+  - npm run verify:v3-dependency-projection
+  - npm run test:v3-dependency-projection-red-fixtures
   completion_rule:
     source: Distribution and owned-target tests plus architecture gates pass.
     runtime: Direct global install, aggregate restart, all-listener health, command
       path, version, and absence of ~/.rcc/install are verified.
+- feature_id: v3.build.dependency_projection
+  status: source_active
+  change_risk: medium
+  owner_kind: cargo_workspace_dependency_projection
+  owner_scope: Workspace Cargo manifests are the semantic dependency truth; v3/Cargo.lock
+    is the deterministic generated projection verified under Cargo's --locked contract.
+  owner_modules:
+  - v3-cargo-dependency-projection
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - cargo +stable check --locked --manifest-path v3/Cargo.toml resolves the checked-in
+    lockfile against all workspace manifests.
+  - routecodex-v3-admin manifests and lock entries are owned by one registered projection.
+  required_negative:
+  - Runtime, server, provider, and install code do not hand-write dependency lock state.
+  - v3/Cargo.lock never enters request, response, provider wire, MetadataCenter, or
+    Error payloads.
+  required_gates:
+  - cargo +stable check --locked --manifest-path v3/Cargo.toml
+  - npm run verify:v3-cargo-lock
+  - npm run verify:v3-dependency-projection
+  - npm run test:v3-dependency-projection-red-fixtures
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  completion_rule:
+    source: Locked Cargo check and registry/resource/module gates pass.
+    runtime: No live install or replay is required for the pure dependency projection.
 - feature_id: v3.managed_server_lifecycle
   status: source_controlled_and_live_5555_release_rollover_verified
   change_risk: high
