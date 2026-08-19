@@ -10705,7 +10705,7 @@ outbound_projection_contract:
       target_protocol: openai_chat
       status: consumed_by_transform
       fields:
-        - request.client_metadata[session_id|thread_id|turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
+        - request.client_metadata[root_turn_id|session_id|thread_id|turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
     - source_protocol: responses
       target_protocol: openai_chat
       status: target_unsupported
@@ -10751,7 +10751,7 @@ outbound_projection_contract:
       status: consumed_by_transform
       fields:
         - request.metadata[non_user_id] -> response.metadata before RespChatProcess
-        - request.client_metadata[session_id|thread_id|turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
+        - request.client_metadata[root_turn_id|session_id|thread_id|turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
         - request.prompt_cache_key[non_empty_string] -> local cache hint only
         - request.reasoning.summary[auto|concise|detailed] -> local response-shaping policy only
         - request.reasoning.generate_summary[auto|concise|detailed] -> local response-shaping policy only

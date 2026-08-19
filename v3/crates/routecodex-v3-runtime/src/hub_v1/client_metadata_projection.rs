@@ -6,6 +6,7 @@ const REGISTERED_CLIENT_LOCAL_METADATA_KEYS: &[&str] = &[
     "turn_id",
     "forked_from_thread_id",
     "parent_turn_id",
+    "root_turn_id",
     "x-codex-installation-id",
     "x-codex-turn-metadata",
     "x-codex-window-id",
@@ -44,6 +45,18 @@ mod tests {
         assert!(
             paths.is_empty(),
             "Codex client-local metadata keys must be registered (silent projection, not fail-fast): {paths:?}"
+        );
+    }
+
+    #[test]
+    fn codex_root_turn_id_is_registered_client_local_metadata() {
+        let metadata = json!({
+            "root_turn_id": "01a01a18-7c4b-7411-8d6b-07edd690529a"
+        });
+        let paths = unsupported_client_metadata_paths(metadata.as_object().unwrap());
+        assert!(
+            paths.is_empty(),
+            "Codex root_turn_id is local request context and must not be projected to provider wire: {paths:?}"
         );
     }
 
