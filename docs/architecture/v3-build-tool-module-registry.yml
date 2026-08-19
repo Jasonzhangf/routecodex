@@ -50,3 +50,41 @@ modules:
     required_gates:
       - npm run verify:v3-build-test-artifact-budget
       - npm run test:v3-build-test-artifact-budget-red-fixtures
+
+  - module_id: v3-debug-error-foundation
+    owner_feature_id: v3.debug_error_foundation
+    owned_paths:
+      - v3/crates/routecodex-v3-error/src
+    allowed_dependencies:
+      - v3/crates/routecodex-v3-error
+      - v3/crates/routecodex-v3-debug
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-server
+      - docs/architecture
+    forbidden_paths:
+      - request.normal_payload
+      - provider.wire_payload
+      - response.client_payload
+      - ~/.rcc
+    allowed_edges:
+      - Error01SourceRaised -> Error02Classified
+      - Error02Classified -> Error03TargetLocalAction
+      - Error03TargetLocalAction -> Error04TargetExhaustionDecision
+      - Error04TargetExhaustionDecision -> Error05ExecutionDecision
+      - Error05ExecutionDecision -> Error06ClientProjected
+    resources:
+      - v3.error.source
+      - v3.error.classified
+      - v3.error.action_plan
+      - v3.error.exhaustion_decision
+      - v3.error.execution_decision
+      - v3.error.client_projection
+    required_gates:
+      - npm run test:v3-error-contract
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
