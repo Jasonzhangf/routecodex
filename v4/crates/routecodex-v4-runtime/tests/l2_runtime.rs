@@ -558,13 +558,49 @@ fn relay_json_projects_responses_to_chat_semantic() {
         )
         .expect("relay JSON must traverse response nodes");
     let frame: serde_json::Value = serde_json::from_str(
-        report.client_frame.as_deref().expect("chat frame must exist"),
+        report
+            .client_frame
+            .as_deref()
+            .expect("chat frame must exist"),
     )
     .expect("chat frame must be JSON");
     assert_eq!(frame["object"], "chat.completion");
     assert_eq!(frame["choices"][0]["message"]["content"], "hello");
     assert!(report.continuation_committed);
     assert_eq!(report.continuation_owner.as_deref(), Some("relay"));
+}
+
+#[test]
+fn relay_json_projects_tool_calls_and_usage_to_chat_contract() {
+    let runtime = SkeletonRuntime::load(&contract_json()).expect("contract plan must load");
+    let report = runtime
+        .execute_provider_response_scoped(
+            "{\"id\":\"resp_tool\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"{}\"}],\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18}}",
+            "r-relay-json-tool",
+            5555,
+            "session-relay-json-tool",
+            "conversation-relay-json-tool",
+            "chat",
+            "relay",
+        )
+        .expect("relay JSON tool response must traverse response nodes");
+    let frame: serde_json::Value = serde_json::from_str(
+        report
+            .client_frame
+            .as_deref()
+            .expect("chat frame must exist"),
+    )
+    .expect("chat frame must be JSON");
+    let tool = &frame["choices"][0]["message"]["tool_calls"][0];
+    assert_eq!(tool["id"], "call_1");
+    assert_eq!(tool["function"]["name"], "lookup");
+    assert!(tool.get("index").is_none());
+    assert_eq!(frame["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(frame["usage"]["prompt_tokens"], 11);
+    assert_eq!(frame["usage"]["completion_tokens"], 7);
+    assert_eq!(frame["usage"]["total_tokens"], 18);
+    assert!(frame["usage"].get("input_tokens").is_none());
+    assert!(frame["usage"].get("output_tokens").is_none());
 }
 
 #[test]
@@ -581,7 +617,12 @@ fn relay_sse_delta_projects_responses_event_to_chat_chunk() {
             "none",
         )
         .expect("relay SSE delta must traverse response nodes");
-    let frame = first_sse_data_json(report.client_frame.as_deref().expect("chat chunk must exist"));
+    let frame = first_sse_data_json(
+        report
+            .client_frame
+            .as_deref()
+            .expect("chat chunk must exist"),
+    );
     assert_eq!(frame["object"], "chat.completion.chunk");
     assert_eq!(frame["choices"][0]["delta"]["content"], "hi");
 }
@@ -600,7 +641,12 @@ fn relay_sse_function_arguments_delta_is_preserved() {
             "none",
         )
         .expect("relay SSE tool arguments must traverse response nodes");
-    let frame = first_sse_data_json(report.client_frame.as_deref().expect("chat chunk must exist"));
+    let frame = first_sse_data_json(
+        report
+            .client_frame
+            .as_deref()
+            .expect("chat chunk must exist"),
+    );
     assert_eq!(frame["choices"][0]["delta"]["tool_calls"][0]["index"], 1);
     assert_eq!(
         frame["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
@@ -622,7 +668,12 @@ fn relay_sse_tool_terminal_projects_tool_calls_finish_reason() {
             "relay",
         )
         .expect("relay SSE tool terminal must traverse response nodes");
-    let frame = first_sse_data_json(report.client_frame.as_deref().expect("chat chunk must exist"));
+    let frame = first_sse_data_json(
+        report
+            .client_frame
+            .as_deref()
+            .expect("chat chunk must exist"),
+    );
     assert_eq!(frame["choices"][0]["finish_reason"], "tool_calls");
 }
 

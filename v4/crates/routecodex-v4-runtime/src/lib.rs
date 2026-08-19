@@ -1586,10 +1586,8 @@ fn responses_tool_calls(value: &Value) -> Vec<Value> {
         .into_iter()
         .flatten()
         .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
-        .enumerate()
-        .map(|(index, item)| {
+        .map(|item| {
             serde_json::json!({
-                "index": index,
                 "id": item.get("call_id").or_else(|| item.get("id")).cloned().unwrap_or(Value::Null),
                 "type": "function",
                 "function": {
@@ -1599,6 +1597,25 @@ fn responses_tool_calls(value: &Value) -> Vec<Value> {
             })
         })
         .collect()
+}
+
+fn project_responses_usage_to_chat(value: &Value) -> Value {
+    let Some(usage) = value.get("usage").and_then(Value::as_object) else {
+        return Value::Null;
+    };
+    let mut projected = serde_json::Map::new();
+    for (source, target) in [
+        ("input_tokens", "prompt_tokens"),
+        ("output_tokens", "completion_tokens"),
+        ("total_tokens", "total_tokens"),
+        ("input_tokens_details", "prompt_tokens_details"),
+        ("output_tokens_details", "completion_tokens_details"),
+    ] {
+        if let Some(field) = usage.get(source) {
+            projected.insert(target.to_string(), field.clone());
+        }
+    }
+    Value::Object(projected)
 }
 
 fn project_responses_json_to_chat(value: &Value) -> Value {
@@ -1614,7 +1631,7 @@ fn project_responses_json_to_chat(value: &Value) -> Value {
             .expect("chat message is an object")
             .insert("tool_calls".to_string(), Value::Array(tool_calls.clone()));
     }
-    let usage = value.get("usage").cloned().unwrap_or(Value::Null);
+    let usage = project_responses_usage_to_chat(value);
     serde_json::json!({
         "id": value.get("id").cloned().unwrap_or_else(|| Value::String(String::new())),
         "object": "chat.completion",
