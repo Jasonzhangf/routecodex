@@ -382,7 +382,7 @@
     },
     {
       "gate_id": "v4_router_l2_regression",
-      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-router --deps routecodex-v4-base-node",
+      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-router --deps routecodex-v4-base-node,routecodex-v4-edge --rlib-deps routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib",
       "required_for": [
         "routecodex-v4-router:architecture_stable",
         "routecodex-v4-router:freeze",
