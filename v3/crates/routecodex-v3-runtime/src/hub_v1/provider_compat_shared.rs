@@ -164,12 +164,13 @@ pub(crate) fn is_v3_retain_response_cipher(target_plan_len: usize, model_id: &st
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     #[test]
     fn opencode_deepseek_reasoning_passthrough_backfills_empty_assistant_reasoning_content() {
         let mut body = json!({
             "model": "deepseek-v4-flash",
+            "reasoning_effort": "high",
             "messages": [
                 {"role": "user", "content": "hi"},
                 {"role": "assistant", "content": "first answer"},
@@ -179,7 +180,7 @@ mod tests {
         assert!(is_v3_deepseek_reasoning_target("deepseek-v4-flash"));
         assert!(!is_v3_deepseek_reasoning_target("gpt-5.6-sol"));
 
-        apply_v3_opencode_deepseek_reasoning_passthrough(&mut body);
+        provider_compat_core::apply_deepseek_v4_request_compat(&mut body);
 
         let messages = body["messages"].as_array().unwrap();
         // 非 assistant 消息不补
