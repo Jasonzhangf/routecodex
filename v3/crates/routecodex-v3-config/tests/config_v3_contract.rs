@@ -336,6 +336,12 @@ targets = [
     let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
         .expect("explicit web-search execution modes must compile");
 
+    // server.test omits endpoints, so every registered entry protocol is enabled by default.
+    assert_eq!(
+        manifest.servers["test"].endpoints,
+        ["responses", "anthropic", "gemini", "openai_chat"]
+    );
+
     assert_eq!(
         manifest.providers["native"].models["gpt-native"]
             .web_search_execution_mode
