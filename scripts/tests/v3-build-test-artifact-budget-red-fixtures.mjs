@@ -11,6 +11,7 @@ import {
   currentProcessIdentity,
   enforceV3DebugBudget,
   lockOwnerMatchesProcess,
+  parseV3BuilderProcessLine,
   releaseOwnedTestArtifacts,
   verifyV3DebugBudget,
 } from '../run-v3-cargo-test.mjs';
@@ -32,6 +33,23 @@ assert.equal(
   ),
   false,
   'PID reuse must not preserve a stale lock',
+);
+assert.equal(
+  parseV3BuilderProcessLine(
+    '25339 sh sh -c npm run verify && cargo build --manifest-path v3/Cargo.toml',
+  ),
+  null,
+  'a parent shell that only mentions cargo is not an active Cargo builder',
+);
+assert.deepEqual(
+  parseV3BuilderProcessLine(
+    '25340 cargo cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli',
+  ),
+  {
+    pid: 25340,
+    command: 'cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli',
+  },
+  'the actual Cargo executable remains an active builder candidate',
 );
 const previousPath = process.env.PATH;
 try {
@@ -156,6 +174,13 @@ const mutations = [
         'function isBareWorkspaceCargoBuildOrTest(command)',
         'function isBareWorkspaceCargoBuildOrTestDisabled(command)',
       ),
+    },
+  },
+  {
+    name: 'builder scan drops executable identity',
+    sources: {
+      ...sources,
+      wrapper: sources.wrapper.replace("'pid=,comm=,command='", "'pid=,command='"),
     },
   },
   {

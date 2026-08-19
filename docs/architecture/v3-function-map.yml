@@ -4353,6 +4353,7 @@ features:
   - runV3CargoTest
   - releaseOwnedTestArtifacts
   - verifyV3DebugBudget
+  - parseV3BuilderProcessLine
   allowed_paths:
   - .cargo/config.toml
   - v3/Cargo.toml
