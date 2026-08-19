@@ -372,9 +372,20 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
                             // 复用 runtime typed 投影（Error01-06 链），禁止
                             // handler 手拼错误帧旁路错误链。
                             let projected = project_v3_openai_chat_relay_runtime_failure(error);
-                            let V3OpenAiChatRelayClientBody::Json(body) = projected.client_body
-                            else {
-                                return;
+                            let body = match projected.client_body {
+                                V3OpenAiChatRelayClientBody::Json(body) => body,
+                                // Error06 is normally JSON for this endpoint. Keep the
+                                // already-accepted SSE connection explicit even if a
+                                // future projector accidentally returns a stream shape;
+                                // dropping the task here turns a provider/runtime error
+                                // into a silent EOF and makes the client reconnect storm.
+                                V3OpenAiChatRelayClientBody::Sse(_) => json!({
+                                    "error": {
+                                        "message": "V3 relay runtime failure projected with an invalid SSE error shape",
+                                        "type": "routecodex_error",
+                                        "code": "V3_ERROR06_INVALID_SSE_ERROR_SHAPE"
+                                    }
+                                }),
                             };
                             let bytes = serde_json::to_vec(&body).unwrap_or_default();
                             let mut frame = Vec::with_capacity(bytes.len() + 8);
