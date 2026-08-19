@@ -7,7 +7,7 @@ const root = process.cwd();
 const failures = [];
 const requiredProtocols = ['responses', 'anthropic', 'openai_chat', 'gemini'];
 const expectedEndpointPatterns = new Map([
-  ['responses', ['/v1/responses']],
+  ['responses', ['/v1/responses', '/v1/responses/compact']],
   ['anthropic', ['/v1/messages']],
   ['openai_chat', ['/v1/chat/completions']],
   ['gemini', ['/v1beta/models/:model/generateContent']],

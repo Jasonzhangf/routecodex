@@ -30,7 +30,7 @@ flowchart TD
 
 | Entry protocol | Endpoint pattern | Execution mode | Implementation status | Owner |
 | --- | --- | --- | --- | --- |
-| responses | `/v1/responses` | relay | implemented | `execute_v3_responses_relay_runtime_with_default_transport` |
+| responses | `/v1/responses`, `/v1/responses/compact` | direct | implemented | `execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation` |
 | anthropic | `/v1/messages` | relay | implemented | `execute_v3_anthropic_relay_runtime_with_default_transport` |
 | openai_chat | `/v1/chat/completions` | relay | implemented | `execute_v3_openai_chat_relay_runtime_with_default_transport` |
 | gemini | `/v1beta/models/:model/generateContent` | relay | implemented | `execute_v3_gemini_relay_runtime_with_default_transport` |
@@ -46,7 +46,7 @@ flowchart TD
 
 ## Review Checklist
 
-- Every exposed `/v1/*` or `/v1beta/*` business endpoint has exactly one binding.
+- Every exposed `/v1/*` or `/v1beta/*` business endpoint has exactly one binding, including native `/v1/responses/compact`.
 - Config allowed protocols, manifest declarations, and Server endpoint exposure are equal.
 - Server has no `endpoint_protocol()` duplicate registry and no raw path runtime bypass.
 - Responses Direct is the V2/default `/v1/responses` projection and is bound to `v3.responses_direct_mvp_architecture`; Responses Relay remains an explicit controlled binding for `v3.hub_relay_runtime_closeout`, not the default projection.

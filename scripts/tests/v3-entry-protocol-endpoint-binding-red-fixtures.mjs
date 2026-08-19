@@ -17,6 +17,7 @@ const copied = [
   'docs/architecture/wiki/html/v3-entry-protocol-endpoint-binding.html',
   'scripts/architecture/architecture-wiki-lib.mjs',
   'v3/crates/routecodex-v3-server/src/lib.rs',
+  'v3/crates/routecodex-v3-server/src/scope_metadata.rs',
   'v3/crates/routecodex-v3-config/src/validate.rs',
   'v3/crates/routecodex-v3-config/src/types.rs',
 ];
@@ -49,7 +50,7 @@ const cases = [
   {
     name: 'remove source verifier gate from feature map',
     path: 'docs/architecture/v3-function-map.yml',
-    mutate: (source) => source.replace('      - npm run verify:v3-entry-protocol-endpoint-binding\n', ''),
+    mutate: (source) => source.replace('  - npm run verify:v3-entry-protocol-endpoint-binding\n', ''),
     diagnostic: /feature missing required gate npm run verify:v3-entry-protocol-endpoint-binding/u,
   },
   {
@@ -84,7 +85,7 @@ const cases = [
   },
   {
     name: 'override fresh pending Responses binding with Relay',
-    path: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    path: 'v3/crates/routecodex-v3-server/src/scope_metadata.rs',
     mutate: (source) => source.replace(
       'V3EntryProtocolExecutionMode::PendingNotImplemented => configured_mode,',
       'V3EntryProtocolExecutionMode::PendingNotImplemented => V3EntryProtocolExecutionMode::Relay,',
