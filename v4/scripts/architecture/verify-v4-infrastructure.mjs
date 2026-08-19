@@ -57,6 +57,15 @@ function validate(input) {
   if (!input.runtimeBin.includes('routecodex_v4_cli')) failures.push('runtime-bin does not dispatch typed CLI intents');
   if (!input.runtimeBin.includes('routecodex_v4_lifecycle')) failures.push('runtime-bin does not delegate managed lifecycle');
   if (!input.runtimeBin.includes('routecodex_v4_servertool')) failures.push('runtime-bin does not delegate servertool projection');
+  if (
+    input.runtime.includes('format!("sha256:{payload}")')
+    || input.runtime.includes('format!("sha256:{full_input}")')
+  ) {
+    failures.push('runtime control digest embeds business payload');
+  }
+  if (!input.runtime.includes('Sha256::digest(value.as_bytes())')) {
+    failures.push('runtime control digest lacks SHA-256 owner');
+  }
   if (input.runtimeBin.includes('DEFAULT_MANIFEST')) failures.push('runtime-bin retains cwd-relative default manifest');
   if (input.runtimeBin.includes('AdmissionHandler')) failures.push('runtime-bin retains admission handler bypass');
   if (!input.config.includes('RuntimeConfigManifest')) failures.push('config owner lacks operational runtime manifest');
@@ -106,6 +115,7 @@ const input = {
   config: read('crates/routecodex-v4-config/src/lib.rs'),
   lifecycle: fs.existsSync(path.join(root, 'crates/routecodex-v4-lifecycle/src/lib.rs')) ? read('crates/routecodex-v4-lifecycle/src/lib.rs') : '',
   runtimeBin: read('crates/routecodex-v4-runtime-bin/src/main.rs'),
+  runtime: read('crates/routecodex-v4-runtime/src/lib.rs'),
   server: read('crates/routecodex-v4-server/src/lib.rs'),
   packageJson: read('package.json'),
   installer: read('scripts/install-rccv4.mjs'),
@@ -223,6 +233,15 @@ if (process.argv.includes('--red-self-test')) {
   ).command = 'cargo test -p routecodex-v4-runtime-bin --test l2_cli_blackbox';
   if (!validate(invalidRuntimeGate).includes('runtime-bin blackbox gate does not execute through Active build-link')) {
     console.error('[v4_infrastructure] red self-test failed to detect bypassed runtime-bin gate');
+    process.exit(1);
+  }
+  const payloadDigestLeak = structuredClone(input);
+  payloadDigestLeak.runtime = payloadDigestLeak.runtime.replace(
+    '.map(sha256_control_digest)',
+    '.map(|payload| format!("sha256:{payload}"))',
+  );
+  if (!validate(payloadDigestLeak).includes('runtime control digest embeds business payload')) {
+    console.error('[v4_infrastructure] red self-test failed to detect business payload in control digest');
     process.exit(1);
   }
   console.log('[v4_infrastructure] red self-test OK');

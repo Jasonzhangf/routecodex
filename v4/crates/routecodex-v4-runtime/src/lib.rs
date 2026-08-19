@@ -28,6 +28,7 @@ use routecodex_v4_error::{
 };
 use routecodex_v4_skeleton::SkeletonPlan;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -40,6 +41,10 @@ pub use control_resources::*;
 // (v4/contracts/node-plugin.contract.json kinds). The runtime never defines a
 // second plugin-kind taxonomy; it only re-exports the contract type.
 pub use routecodex_v4_plugin_contract::PluginKind;
+
+fn sha256_control_digest(value: &str) -> String {
+    format!("sha256:{:x}", Sha256::digest(value.as_bytes()))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponsesWireRequest {
@@ -1124,14 +1129,11 @@ impl NodePlugin for ContinuationRestore {
                 "continuation restore requires full input",
             )
         })?;
+        let full_input_hash = sha256_control_digest(full_input);
         if registries.scope.is_bound(&key) {
             registries
                 .scope
-                .restore(
-                    &key,
-                    ctx.request_id(),
-                    Some(&format!("sha256:{full_input}")),
-                )
+                .restore(&key, ctx.request_id(), Some(&full_input_hash))
                 .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))?;
             ctx.control.continuation_restored = true;
         } else if registries.scope.session_trio_bound(
@@ -1144,11 +1146,7 @@ impl NodePlugin for ContinuationRestore {
             // error instead of silently starting a fresh turn.
             registries
                 .scope
-                .restore(
-                    &key,
-                    ctx.request_id(),
-                    Some(&format!("sha256:{full_input}")),
-                )
+                .restore(&key, ctx.request_id(), Some(&full_input_hash))
                 .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))?;
             ctx.control.continuation_restored = true;
         }
@@ -1297,10 +1295,7 @@ impl NodePlugin for FrameParse {
                 .map(str::trim_start)
                 .filter(|data| !data.is_empty() && *data != "[DONE]")
                 .ok_or_else(|| {
-                    RuntimeFault::new(
-                        "frame_parse",
-                        "provider SSE frame has no JSON data payload",
-                    )
+                    RuntimeFault::new("frame_parse", "provider SSE frame has no JSON data payload")
                 })?
         } else {
             raw
@@ -1323,9 +1318,11 @@ impl NodePlugin for JsonParse {
         ctx: &mut ExecutionContext,
         _registries: &mut RuntimeRegistries<'_>,
     ) -> Result<(), RuntimeFault> {
-        let payload = ctx.data.provider_frame_payload.as_deref().ok_or_else(|| {
-            RuntimeFault::new("json_parse", "provider frame payload missing")
-        })?;
+        let payload = ctx
+            .data
+            .provider_frame_payload
+            .as_deref()
+            .ok_or_else(|| RuntimeFault::new("json_parse", "provider frame payload missing"))?;
         let parsed: serde_json::Value = serde_json::from_str(payload).map_err(|error| {
             RuntimeFault::new("json_parse", format!("malformed provider JSON: {error}"))
         })?;
@@ -1362,11 +1359,9 @@ impl NodePlugin for ProtocolDecode {
         ctx: &mut ExecutionContext,
         _registries: &mut RuntimeRegistries<'_>,
     ) -> Result<(), RuntimeFault> {
-        let payload = ctx
-            .data
-            .provider_frame_payload
-            .as_deref()
-            .ok_or_else(|| RuntimeFault::new("protocol_decode", "provider frame payload missing"))?;
+        let payload = ctx.data.provider_frame_payload.as_deref().ok_or_else(|| {
+            RuntimeFault::new("protocol_decode", "provider frame payload missing")
+        })?;
         ctx.data.parsed_response = Some(payload.to_string());
         Ok(())
     }
@@ -1510,7 +1505,7 @@ impl NodePlugin for ContinuationCommit {
             .data
             .parsed_response
             .as_deref()
-            .map(|payload| format!("sha256:{payload}"))
+            .map(sha256_control_digest)
             .ok_or_else(|| RuntimeFault::new("continuation_commit", "response payload missing"))?;
         let control_key = format!("continuation.commit:{}", ctx.request_id());
         ctx.control
@@ -1541,9 +1536,8 @@ impl NodePlugin for ContinuationCommit {
                 sequence: 1,
             };
             let control = serde_json::json!({"scope_command": release});
-            release_scope_via_bridge(&control, registries.scope).map_err(|error| {
-                RuntimeFault::new("continuation_release", error.to_string())
-            })?;
+            release_scope_via_bridge(&control, registries.scope)
+                .map_err(|error| RuntimeFault::new("continuation_release", error.to_string()))?;
         }
         let bind = ScopeSessionCommand {
             entry_protocol,
@@ -1636,7 +1630,10 @@ fn project_responses_json_to_chat(value: &Value) -> Value {
 }
 
 fn project_responses_event_to_chat(value: &Value) -> Value {
-    let event_type = value.get("type").and_then(Value::as_str).unwrap_or_default();
+    let event_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let response = value.get("response").unwrap_or(value);
     let mut delta = serde_json::Map::new();
     let mut finish_reason = Value::Null;
@@ -1763,19 +1760,18 @@ impl NodePlugin for SseFrame {
         ctx: &mut ExecutionContext,
         _registries: &mut RuntimeRegistries<'_>,
     ) -> Result<(), RuntimeFault> {
-        let semantic = ctx.data.client_semantic.as_deref().ok_or_else(|| {
-            RuntimeFault::new("sse_frame", "client semantic response missing")
-        })?;
+        let semantic =
+            ctx.data.client_semantic.as_deref().ok_or_else(|| {
+                RuntimeFault::new("sse_frame", "client semantic response missing")
+            })?;
         let provider_raw = ctx
             .data
             .provider_raw
             .as_deref()
             .ok_or_else(|| RuntimeFault::new("sse_frame", "provider raw missing"))?;
-        let is_sse = provider_raw.lines().any(|line| {
-            line.strip_suffix('\r')
-                .unwrap_or(line)
-                .starts_with("data:")
-        });
+        let is_sse = provider_raw
+            .lines()
+            .any(|line| line.strip_suffix('\r').unwrap_or(line).starts_with("data:"));
         if !is_sse {
             ctx.data.client_sse_frame = Some(semantic.to_string());
             return Ok(());
@@ -1798,9 +1794,7 @@ impl NodePlugin for SseFrame {
         frame.push_str("data: ");
         frame.push_str(semantic);
         frame.push_str("\n\n");
-        if protocol == "chat"
-            && ctx.control.continuation_owner.as_deref() == Some("relay")
-        {
+        if protocol == "chat" && ctx.control.continuation_owner.as_deref() == Some("relay") {
             frame.push_str("data: [DONE]\n\n");
         }
         ctx.data.client_sse_frame = Some(frame);
