@@ -27,12 +27,14 @@ pub enum ScopeSessionOperation {
 #[serde(rename_all = "snake_case")]
 pub enum ScopeEntryProtocol {
     Responses,
+    Chat,
 }
 
 impl ScopeEntryProtocol {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Responses => "responses",
+            Self::Chat => "chat",
         }
     }
 }
@@ -646,7 +648,7 @@ mod tests {
 
         assert!(matches!(
             ScopeSessionCommand::parse(&json!({
-                "entry_protocol": "chat",
+                "entry_protocol": "anthropic",
                 "continuation_owner": "direct",
                 "pipeline_id": "pipeline-1",
                 "port": 5555,
@@ -659,5 +661,21 @@ mod tests {
             })),
             Err(BridgeError::Protocol(_))
         ));
+
+        let relay = ScopeSessionCommand::parse(&json!({
+            "entry_protocol": "chat",
+            "continuation_owner": "relay",
+            "pipeline_id": "pipeline-1",
+            "port": 5555,
+            "session_scope": "session-1",
+            "conversation_scope": "conversation-1",
+            "request_id": "request-1",
+            "full_input_hash": "sha256:full-input",
+            "operation": "bind",
+            "sequence": 1
+        }))
+        .expect("chat relay scope command parses");
+        assert_eq!(relay.entry_protocol, ScopeEntryProtocol::Chat);
+        assert_eq!(relay.continuation_owner, ScopeContinuationOwner::Relay);
     }
 }

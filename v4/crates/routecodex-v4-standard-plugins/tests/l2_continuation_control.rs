@@ -1,5 +1,5 @@
 use routecodex_v4_cordis_bridge::{
-    execute_plan, NodeExecutionInput, ScopeSessionOperation, ScopeSessionValue,
+    execute_plan, NodeExecutionInput, ScopeSessionCommand, ScopeSessionOperation,
 };
 use routecodex_v4_standard_plugins::{compile_standard_plan, StandardHandleRegistry};
 use serde_json::{json, Value};
@@ -10,6 +10,7 @@ fn metadata_control() -> Value {
             "continuation": {
                 "entry_protocol": "responses",
                 "continuation_owner": "direct",
+                "pipeline_id": "pipeline-1",
                 "port": 5555,
                 "session_scope": "session-1",
                 "conversation_scope": "conversation-1",
@@ -24,10 +25,10 @@ fn metadata_control() -> Value {
 #[test]
 fn continuation_commit_reads_typed_control_and_preserves_response_data() {
     let plan = compile_standard_plan(
-        "V4ChatProcess03ContinuationCommit",
-        "response_continuation",
+        "V4HubRespChatProcess03Governed",
+        "response_chat_process",
         "response",
-        5,
+        3,
         &["v4.std.continuation.commit"],
     )
     .expect("commit plan compiles");
@@ -43,10 +44,10 @@ fn continuation_commit_reads_typed_control_and_preserves_response_data() {
     .expect("typed continuation commit executes");
 
     assert_eq!(output.data, data);
-    let scope = ScopeSessionValue::parse(
+    let scope = ScopeSessionCommand::parse(
         output
             .control
-            .get("scope_session")
+            .get("scope_command")
             .expect("scope session slot written"),
     )
     .expect("bridge slot is typed");
@@ -57,10 +58,10 @@ fn continuation_commit_reads_typed_control_and_preserves_response_data() {
 #[test]
 fn continuation_release_reads_typed_control_and_writes_only_scope_slot() {
     let plan = compile_standard_plan(
-        "V4RespContinuationCommitted",
-        "response_continuation",
+        "V4HubRespChatProcess03Governed",
+        "response_chat_process",
         "response",
-        7,
+        3,
         &["v4.std.continuation.release"],
     )
     .expect("release plan compiles");
@@ -74,10 +75,10 @@ fn continuation_release_reads_typed_control_and_writes_only_scope_slot() {
     )
     .expect("typed continuation release executes");
 
-    let scope = ScopeSessionValue::parse(
+    let scope = ScopeSessionCommand::parse(
         output
             .control
-            .get("scope_session")
+            .get("scope_command")
             .expect("scope session slot written"),
     )
     .expect("bridge slot is typed");
@@ -87,10 +88,10 @@ fn continuation_release_reads_typed_control_and_writes_only_scope_slot() {
 #[test]
 fn payload_lookalike_without_metadata_control_fails_fast() {
     let plan = compile_standard_plan(
-        "V4ChatProcess03ContinuationCommit",
-        "response_continuation",
+        "V4HubRespChatProcess03Governed",
+        "response_chat_process",
         "response",
-        5,
+        3,
         &["v4.std.continuation.commit"],
     )
     .expect("commit plan compiles");
@@ -119,10 +120,10 @@ fn payload_lookalike_without_metadata_control_fails_fast() {
 #[test]
 fn malformed_typed_control_fails_fast_without_scope_slot() {
     let plan = compile_standard_plan(
-        "V4ChatProcess03ContinuationCommit",
-        "response_continuation",
+        "V4HubRespChatProcess03Governed",
+        "response_chat_process",
         "response",
-        5,
+        3,
         &["v4.std.continuation.commit"],
     )
     .expect("commit plan compiles");

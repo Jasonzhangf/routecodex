@@ -194,7 +194,14 @@ pub fn load_profile(path: &str) -> Result<ProviderProfile, ProviderTransportErro
             path,
             alias: entry.alias.clone(),
         }
-    } else if !file.provider.auth.api_key.as_deref().unwrap_or_default().is_empty() {
+    } else if !file
+        .provider
+        .auth
+        .api_key
+        .as_deref()
+        .unwrap_or_default()
+        .is_empty()
+    {
         ProviderAuthHandle::ConfigInline {
             config_path: path.to_string(),
         }
@@ -224,7 +231,10 @@ pub fn load_profile(path: &str) -> Result<ProviderProfile, ProviderTransportErro
     })
 }
 
-pub fn resolve_model(profile: &ProviderProfile, requested: &str) -> Result<String, ProviderTransportError> {
+pub fn resolve_model(
+    profile: &ProviderProfile,
+    requested: &str,
+) -> Result<String, ProviderTransportError> {
     profile
         .models
         .iter()
@@ -232,7 +242,10 @@ pub fn resolve_model(profile: &ProviderProfile, requested: &str) -> Result<Strin
         .map(|model| model.wire_name.clone())
         .ok_or_else(|| ProviderTransportError {
             code: "provider_model_unknown".to_string(),
-            message: format!("model {requested} is not declared by {}", profile.provider_id),
+            message: format!(
+                "model {requested} is not declared by {}",
+                profile.provider_id
+            ),
             status: None,
         })
 }
@@ -248,7 +261,10 @@ pub fn send_responses(
     if profile.protocol != "responses" {
         return Err(ProviderTransportError {
             code: "provider_protocol_unsupported".to_string(),
-            message: format!("provider protocol {} cannot serve Responses", profile.protocol),
+            message: format!(
+                "provider protocol {} cannot serve Responses",
+                profile.protocol
+            ),
             status: None,
         });
     }
@@ -280,16 +296,23 @@ pub fn send_responses(
         message: error.to_string(),
         status: None,
     })?;
-    child.stdin.take().expect("curl stdin configured").write_all(&payload).map_err(|error| ProviderTransportError {
-        code: "provider_transport_write".to_string(),
-        message: error.to_string(),
-        status: None,
-    })?;
-    let output = child.wait_with_output().map_err(|error| ProviderTransportError {
-        code: "provider_transport_wait".to_string(),
-        message: error.to_string(),
-        status: None,
-    })?;
+    child
+        .stdin
+        .take()
+        .expect("curl stdin configured")
+        .write_all(&payload)
+        .map_err(|error| ProviderTransportError {
+            code: "provider_transport_write".to_string(),
+            message: error.to_string(),
+            status: None,
+        })?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| ProviderTransportError {
+            code: "provider_transport_wait".to_string(),
+            message: error.to_string(),
+            status: None,
+        })?;
     if !output.status.success() {
         return Err(ProviderTransportError {
             code: "provider_transport_failed".to_string(),
@@ -310,7 +333,10 @@ pub fn send_responses_streaming(
     if profile.protocol != "responses" {
         return Err(ProviderTransportError {
             code: "provider_protocol_unsupported".to_string(),
-            message: format!("provider protocol {} cannot serve Responses", profile.protocol),
+            message: format!(
+                "provider protocol {} cannot serve Responses",
+                profile.protocol
+            ),
             status: None,
         });
     }
@@ -365,7 +391,9 @@ pub fn send_responses_streaming(
 /// Parse the upstream HTTP header prefix from the provider stream and return
 /// the number of bytes consumed. Only one informational/final response block
 /// may be consumed by a stream; later blocks fail fast.
-fn parse_provider_stream_header(stream: &mut ProviderResponseStream) -> Result<(), ProviderTransportError> {
+fn parse_provider_stream_header(
+    stream: &mut ProviderResponseStream,
+) -> Result<(), ProviderTransportError> {
     let mut head = [0u8; 8192];
     let mut bytes = Vec::new();
     loop {
@@ -425,11 +453,7 @@ fn http_header_at(bytes: &[u8]) -> Option<(usize, u16, String)> {
     };
     let head = std::str::from_utf8(&bytes[..end]).ok()?;
     let first = head.lines().next()?;
-    let status = first
-        .split_whitespace()
-        .nth(1)?
-        .parse::<u16>()
-        .ok()?;
+    let status = first.split_whitespace().nth(1)?.parse::<u16>().ok()?;
     let content_type = head
         .lines()
         .filter_map(|line| line.split_once(':'))
@@ -446,7 +470,10 @@ fn materialize_auth(handle: &ProviderAuthHandle) -> Result<String, ProviderTrans
         ProviderAuthHandle::TokenFile { path, alias } => {
             let key = std::fs::read_to_string(path).map_err(|error| ProviderTransportError {
                 code: "provider_auth_read".to_string(),
-                message: format!("auth handle {}: {error}", alias.as_deref().unwrap_or("default")),
+                message: format!(
+                    "auth handle {}: {error}",
+                    alias.as_deref().unwrap_or("default")
+                ),
                 status: None,
             })?;
             let key = key.trim().to_string();
@@ -460,41 +487,60 @@ fn materialize_auth(handle: &ProviderAuthHandle) -> Result<String, ProviderTrans
             Ok(key)
         }
         ProviderAuthHandle::ConfigInline { config_path } => {
-            let raw = std::fs::read_to_string(config_path).map_err(|error| ProviderTransportError {
-                code: "provider_config_read".to_string(),
-                message: error.to_string(),
-                status: None,
-            })?;
-            let file: ProviderFile = toml::from_str(&raw).map_err(|error| ProviderTransportError {
-                code: "provider_config_parse".to_string(),
-                message: error.to_string(),
-                status: None,
-            })?;
-            file.provider.auth.api_key.ok_or_else(|| ProviderTransportError {
-                code: "provider_auth_missing".to_string(),
-                message: "provider auth apiKey is missing".to_string(),
-                status: None,
-            })
+            let raw =
+                std::fs::read_to_string(config_path).map_err(|error| ProviderTransportError {
+                    code: "provider_config_read".to_string(),
+                    message: error.to_string(),
+                    status: None,
+                })?;
+            let file: ProviderFile =
+                toml::from_str(&raw).map_err(|error| ProviderTransportError {
+                    code: "provider_config_parse".to_string(),
+                    message: error.to_string(),
+                    status: None,
+                })?;
+            file.provider
+                .auth
+                .api_key
+                .ok_or_else(|| ProviderTransportError {
+                    code: "provider_auth_missing".to_string(),
+                    message: "provider auth apiKey is missing".to_string(),
+                    status: None,
+                })
         }
     }
 }
 
 fn parse_curl_response(output: &[u8]) -> Result<ProviderRawResponse, ProviderTransportError> {
     let marker = b"\n__RCCV4_STATUS__:";
-    let marker_start = output.windows(marker.len()).position(|window| window == marker).ok_or_else(|| ProviderTransportError {
-        code: "provider_response_parse".to_string(),
-        message: "curl status marker missing".to_string(),
-        status: None,
-    })?;
+    let marker_start = output
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .ok_or_else(|| ProviderTransportError {
+            code: "provider_response_parse".to_string(),
+            message: "curl status marker missing".to_string(),
+            status: None,
+        })?;
     let body = output[..marker_start].to_vec();
     let metadata = String::from_utf8_lossy(&output[marker_start + 1..]);
-    let status = metadata.lines().find_map(|line| line.strip_prefix("__RCCV4_STATUS__:")?.parse().ok()).ok_or_else(|| ProviderTransportError {
-        code: "provider_response_parse".to_string(),
-        message: "provider status missing".to_string(),
-        status: None,
-    })?;
-    let content_type = metadata.lines().find_map(|line| line.strip_prefix("__RCCV4_TYPE__:")).unwrap_or_default().to_string();
-    Ok(ProviderRawResponse { status, content_type, body })
+    let status = metadata
+        .lines()
+        .find_map(|line| line.strip_prefix("__RCCV4_STATUS__:")?.parse().ok())
+        .ok_or_else(|| ProviderTransportError {
+            code: "provider_response_parse".to_string(),
+            message: "provider status missing".to_string(),
+            status: None,
+        })?;
+    let content_type = metadata
+        .lines()
+        .find_map(|line| line.strip_prefix("__RCCV4_TYPE__:"))
+        .unwrap_or_default()
+        .to_string();
+    Ok(ProviderRawResponse {
+        status,
+        content_type,
+        body,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

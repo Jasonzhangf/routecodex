@@ -35,7 +35,8 @@ claims real product semantics.
 | control | `v4.std.control.scope_consume`, `v4.std.control.payload_cycle_record` | control / control_only | metadata-center owner, payload-cycle owner |
 | error | `v4.std.error.typed_intake`, `v4.std.error.projection_adapter` | operator / control_only | error_source, error_projection |
 | protocol | `v4.std.protocol.mock_codec`, `v4.std.protocol.mock_codec_alt` | operator / semantic (selection group) | request_outbound |
-| chat-process | `v4.std.chat_process.request_governance`, `v4.std.chat_process.response_governance`, `v4.std.chat_process.tool_harvest`, `v4.std.chat_process.continuation_commit` | operator / semantic + control | request_chat_process, response_chat_process |
+| chat-process | `v4.std.chat_process.request_governance`, `v4.std.chat_process.response_governance`, `v4.std.chat_process.tool_harvest` | operator / validator / observer | request_chat_process, response_chat_process |
+| continuation | `v4.std.continuation.commit`, `v4.std.continuation.release` | typed control-only | response_chat_process |
 | routing | `v4.std.routing.route_facts_producer`, `v4.std.routing.route_facts_consumer` | operator / control_only | request classification, selection plan |
 | provider | `v4.std.provider.capability_mock`, `v4.std.provider.auth_handle_mock`, `v4.std.provider.wire_mock`, `v4.std.provider.transport_mock` | validator/read-only or operator/semantic | Hub provider-semantic projection, provider wire boundary |
 

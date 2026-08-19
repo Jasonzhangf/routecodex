@@ -1,6 +1,5 @@
 use routecodex_v4_cordis_bridge::{
-    ExecCtx, ScopeContinuationOwner, ScopeEntryProtocol, ScopeSessionCommand,
-    ScopeSessionOperation,
+    ExecCtx, ScopeContinuationOwner, ScopeEntryProtocol, ScopeSessionCommand, ScopeSessionOperation,
 };
 use routecodex_v4_plugin_contract::{PluginEffect, PluginKind, PluginPhase};
 use serde::Deserialize;
@@ -30,9 +29,9 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
         plugin(
             "v4.std.continuation.commit",
             PluginCategory::Control,
-            "V4ChatProcess03ContinuationCommit",
-            "response_continuation",
-            Some(5),
+            "V4HubRespChatProcess03Governed",
+            "response_chat_process",
+            Some(3),
             PluginKind::Control,
             PluginEffect::ControlOnly,
             PluginPhase::Control,
@@ -43,9 +42,9 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
         plugin(
             "v4.std.continuation.release",
             PluginCategory::Control,
-            "V4HubReqChatProcess04Governed",
-            "request_chat_process",
-            Some(4),
+            "V4HubRespChatProcess03Governed",
+            "response_chat_process",
+            Some(3),
             PluginKind::Control,
             PluginEffect::ControlOnly,
             PluginPhase::Control,
@@ -56,10 +55,7 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
     ]
 }
 
-fn scope_command(
-    control: &Value,
-    operation: ScopeSessionOperation,
-) -> Result<Value, String> {
+fn scope_command(control: &Value, operation: ScopeSessionOperation) -> Result<Value, String> {
     let scope = control
         .get("continuation")
         .ok_or_else(|| "metadata_center.continuation control is required".to_string())?;

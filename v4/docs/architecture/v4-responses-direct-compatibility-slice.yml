@@ -110,7 +110,7 @@ surfaces:
         v4_checkpoint: {node_id: V4ProviderSseIn01FrameBoundary, semantic: provider_raw}
         v4_resource: v4.response.provider_raw
         verification_gates: [v4_parity_gate_semantic_parity, v4_runtime_l2_regression]
-        evidence: "implemented: routecodex-v4-runtime RawParse (response chain, runtime test-consumer 12)"
+        evidence: "implemented: routecodex-v4-runtime FrameParse/JsonParse (response chain, runtime test-consumer)"
         diff_status: equivalent
       - v3_stage: response.normalize
         v3_resource: v3.hub.response_semantic

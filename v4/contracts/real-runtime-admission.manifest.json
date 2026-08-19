@@ -18,7 +18,9 @@
     { "method": "GET", "path": "/health", "mode": "json" },
     { "method": "GET", "path": "/v1/models", "mode": "json" },
     { "method": "POST", "path": "/v1/responses", "mode": "json" },
-    { "method": "POST", "path": "/v1/responses", "mode": "sse" }
+    { "method": "POST", "path": "/v1/responses", "mode": "sse" },
+    { "method": "POST", "path": "/v1/chat/completions", "mode": "json" },
+    { "method": "POST", "path": "/v1/chat/completions", "mode": "sse" }
   ],
   "provider_fixtures": [
     { "source": "~/.rcc/provider/minimax/config.v2.toml", "kind": "real_config", "model": "MiniMax-M3" },

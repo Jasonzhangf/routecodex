@@ -128,6 +128,22 @@
       "status": "active"
     },
     {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-error",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
       "from": "routecodex-v4-edge",
       "to": "routecodex-v4-base-node",
       "owner": "routecodex-v4-edge::validate_edge",
@@ -288,7 +304,7 @@
       "owner": "routecodex-v4-runtime::scope_session_from_control",
       "edge_type": "symbol_dependency",
       "symbols": [
-        "ScopeSessionValue",
+        "ScopeSessionCommand",
         "ScopeSessionOperation"
       ],
       "path": "crates/routecodex-v4-runtime/src/lib.rs",

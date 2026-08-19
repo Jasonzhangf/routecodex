@@ -64,7 +64,10 @@ impl HttpResponse {
 
     pub fn error(status: u16, message: impl Into<String>) -> Self {
         let body = serde_json::json!({ "error": { "message": message.into() } });
-        Self::json(status, serde_json::to_vec(&body).expect("error response is serializable"))
+        Self::json(
+            status,
+            serde_json::to_vec(&body).expect("error response is serializable"),
+        )
     }
 
     pub fn streaming(
@@ -110,10 +113,7 @@ impl std::error::Error for HttpServerError {}
 pub fn serve<H: HttpHandler>(listen_address: &str, handler: &mut H) -> Result<(), HttpServerError> {
     let listener = TcpListener::bind(listen_address).map_err(HttpServerError::Bind)?;
     let server_id = listen_address.to_string();
-    let port = listener
-        .local_addr()
-        .map_err(HttpServerError::Bind)?
-        .port();
+    let port = listener.local_addr().map_err(HttpServerError::Bind)?.port();
     let local_day = local_day();
     let mut request_ids = V4RequestIdCounter::new();
     for incoming in listener.incoming() {
@@ -155,7 +155,9 @@ fn serve_connection<H: HttpHandler>(
 ) -> Result<(), ConnectionError> {
     let request = match read_request(&mut stream) {
         Ok(request) => request,
-        Err(ConnectionError::ClientDisconnected) => return Err(ConnectionError::ClientDisconnected),
+        Err(ConnectionError::ClientDisconnected) => {
+            return Err(ConnectionError::ClientDisconnected)
+        }
         Err(ConnectionError::Request(error)) => {
             write_response(&mut stream, HttpResponse::error(400, error))?;
             return Ok(());
@@ -185,11 +187,14 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, ConnectionError> 
             break position;
         }
         if bytes.len() > MAX_HEADER_BYTES {
-            return Err(ConnectionError::Request("HTTP headers too large".to_string()));
+            return Err(ConnectionError::Request(
+                "HTTP headers too large".to_string(),
+            ));
         }
     };
-    let head = std::str::from_utf8(&bytes[..header_end])
-        .map_err(|error| ConnectionError::Request(format!("HTTP headers are not UTF-8: {error}")))?;
+    let head = std::str::from_utf8(&bytes[..header_end]).map_err(|error| {
+        ConnectionError::Request(format!("HTTP headers are not UTF-8: {error}"))
+    })?;
     let mut lines = head.lines();
     let request_line = lines
         .next()
@@ -260,7 +265,10 @@ fn local_day() -> String {
 }
 
 fn map_read_error(error: io::Error) -> ConnectionError {
-    if matches!(error.kind(), io::ErrorKind::ConnectionReset | io::ErrorKind::UnexpectedEof) {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::ConnectionReset | io::ErrorKind::UnexpectedEof
+    ) {
         ConnectionError::ClientDisconnected
     } else {
         ConnectionError::Io(error)
@@ -287,18 +295,17 @@ fn write_response(stream: &mut TcpStream, response: HttpResponse) -> Result<(), 
     };
     let head = format!(
         "HTTP/1.1 {} {}\r\ncontent-type: {}\r\n{}{}connection: close\r\n\r\n",
-        response.status,
-        reason,
-        response.content_type,
-        length,
-        transfer,
+        response.status, reason, response.content_type, length, transfer,
     );
     stream.write_all(head.as_bytes()).map_err(map_write_error)?;
     if let Some(mut response_stream) = response.stream {
         let mut chunk = Vec::with_capacity(8192);
         loop {
             chunk.clear();
-            if !response_stream.next_chunk(&mut chunk).map_err(map_write_error)? {
+            if !response_stream
+                .next_chunk(&mut chunk)
+                .map_err(map_write_error)?
+            {
                 break;
             }
             if chunk.is_empty() {
@@ -319,7 +326,10 @@ fn write_response(stream: &mut TcpStream, response: HttpResponse) -> Result<(), 
 }
 
 fn map_write_error(error: io::Error) -> ConnectionError {
-    if matches!(error.kind(), io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset) {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
+    ) {
         ConnectionError::ClientDisconnected
     } else {
         ConnectionError::Io(error)

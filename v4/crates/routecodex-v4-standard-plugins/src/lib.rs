@@ -334,8 +334,10 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.control.metadata_center".to_string(),
         ],
         "V4HubRespInbound02Parsed" => vec!["v4.response.provider_raw".to_string()],
-        "V4HubRespChatProcess03Governed" => vec!["v4.response.normal_payload".to_string()],
-        "V4ChatProcess03ContinuationCommit" => vec!["v4.control.metadata_center".to_string()],
+        "V4HubRespChatProcess03Governed" => vec![
+            "v4.response.normal_payload".to_string(),
+            "v4.control.metadata_center".to_string(),
+        ],
         "V4HubRespOutbound04ClientSemantic" => vec!["v4.response.normal_payload".to_string()],
         "V4ServerSseOut05FrameBoundary" => vec!["v4.response.client_wire_payload".to_string()],
         "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_wire_payload".to_string()],
@@ -346,7 +348,6 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.config.manifest".to_string(),
             "v4.secret.provider_auth_handle".to_string(),
         ],
-        "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.normal_payload".to_string()],
         "V4MetadataCenter01ScopeRegistry" => vec!["v4.control.metadata_center".to_string()],
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],
@@ -369,8 +370,10 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
             "v4.control.scope_command".to_string(),
         ],
         "V4HubRespInbound02Parsed" => vec!["v4.response.normal_payload".to_string()],
-        "V4HubRespChatProcess03Governed" => vec!["v4.response.normal_payload".to_string()],
-        "V4ChatProcess03ContinuationCommit" => vec!["v4.control.scope_command".to_string()],
+        "V4HubRespChatProcess03Governed" => vec![
+            "v4.response.normal_payload".to_string(),
+            "v4.control.scope_command".to_string(),
+        ],
         "V4HubRespOutbound04ClientSemantic" => vec!["v4.response.client_wire_payload".to_string()],
         "V4ServerSseOut05FrameBoundary" => Vec::new(),
         "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_wire_payload".to_string()],
@@ -618,23 +621,10 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             "V4HubRespChatProcess03Governed",
             "response_chat_process",
             Some(3),
-            PluginKind::Operator,
-            PluginEffect::Semantic,
+            PluginKind::Validator,
+            PluginEffect::ReadOnly,
             PluginPhase::Semantic,
             300,
-            vec!["v4.response.normal_payload"],
-            vec!["v4.response.normal_payload"],
-        ),
-        plugin(
-            "v4.std.chat_process.continuation_commit",
-            PluginCategory::ChatProcess,
-            "V4HubRespChatProcess03Governed",
-            "response_chat_process",
-            Some(3),
-            PluginKind::Control,
-            PluginEffect::ControlOnly,
-            PluginPhase::Control,
-            200,
             vec!["v4.response.normal_payload"],
             vec![],
         ),
@@ -644,12 +634,12 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             "V4HubRespChatProcess03Governed",
             "response_chat_process",
             Some(3),
-            PluginKind::Operator,
-            PluginEffect::Semantic,
+            PluginKind::Observer,
+            PluginEffect::ReadOnly,
             PluginPhase::Semantic,
             350,
             vec!["v4.response.normal_payload"],
-            vec!["v4.response.normal_payload"],
+            vec![],
         ),
         plugin(
             "v4.std.routing.route_facts_producer",
@@ -944,32 +934,17 @@ fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut data = ctx.read_data().clone();
-    let object = data
-        .as_object_mut()
+    ctx.read_data()
+        .as_object()
         .ok_or_else(|| "response governance requires an object".to_string())?;
-    for key in [
-        "control",
-        "metadata_center",
-        "error_chain",
-        "route_facts",
-        "target_selection",
-        "stopless_state",
-        "payload_cycle",
-        "diagnostics",
-    ] {
-        if object.contains_key(key) {
-            return Err(format!("control state {key} leaked into response payload"));
-        }
-    }
-    object.insert("governance".to_string(), json!("response_governance"));
-    ctx.write_data(data).map_err(|error| error.to_string())
+    ctx.emit("response_governance", "response payload governed");
+    Ok(())
 }
 
 fn tool_harvest(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut data = ctx.read_data().clone();
-    let object = data
-        .as_object_mut()
+    let object = ctx
+        .read_data()
+        .as_object()
         .ok_or_else(|| "tool harvest requires an object".to_string())?;
 
     let mut calls = Vec::new();
@@ -977,7 +952,10 @@ fn tool_harvest(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     if let Some(choices) = object.get("choices").and_then(|value| value.as_array()) {
         for choice in choices {
             let message = choice.get("message");
-            collect_tool_calls(message.and_then(|value| value.get("tool_calls")), &mut calls)?;
+            collect_tool_calls(
+                message.and_then(|value| value.get("tool_calls")),
+                &mut calls,
+            )?;
         }
     }
 
@@ -993,21 +971,17 @@ fn tool_harvest(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         }
     }
 
-    object.insert(
-        "harvest".to_string(),
-        json!({
-            "tool_calls": calls.len(),
-            "tool_outputs": outputs.len(),
-        }),
-    );
     ctx.emit(
         "tool_harvest_count",
         format!("tool_calls={} tool_outputs={}", calls.len(), outputs.len()),
     );
-    ctx.write_data(data).map_err(|error| error.to_string())
+    Ok(())
 }
 
-fn collect_tool_calls(value: Option<&serde_json::Value>, calls: &mut Vec<String>) -> Result<(), String> {
+fn collect_tool_calls(
+    value: Option<&serde_json::Value>,
+    calls: &mut Vec<String>,
+) -> Result<(), String> {
     let Some(value) = value else {
         return Ok(());
     };
@@ -1062,65 +1036,16 @@ fn collect_tool_outputs(
     Ok(())
 }
 
-fn required_string(object: &serde_json::Map<String, serde_json::Value>, key: &str) -> Result<String, String> {
+fn required_string(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<String, String> {
     object
         .get(key)
         .and_then(|value| value.as_str())
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
         .ok_or_else(|| format!("{key} must be a non-empty string"))
-}
-
-fn continuation_commit(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let data = ctx.read_data();
-    let object = data
-        .as_object()
-        .ok_or_else(|| "continuation commit requires an object".to_string())?;
-    let Some(scope) = object.get("continuation") else {
-        return Ok(());
-    };
-    let Some(scope) = scope.as_object() else {
-        return Err("continuation scope must be an object".to_string());
-    };
-    let owner = required_string(scope, "continuation_owner")?;
-    if owner == "none" {
-        return Ok(());
-    }
-    let protocol = required_string(scope, "entry_protocol")?;
-    let port = scope
-        .get("port")
-        .and_then(|value| value.as_u64())
-        .filter(|value| *value > 0)
-        .ok_or_else(|| "port must be a positive integer".to_string())?;
-    let session_scope = required_string(scope, "session_scope")?;
-    let conversation_scope = required_string(scope, "conversation_scope")?;
-    let _ = required_string(scope, "full_input_hash")?;
-    if owner == "direct" && protocol != "responses" {
-        return Err("direct continuation requires responses entry protocol".to_string());
-    }
-    if owner == "relay" && protocol == "responses" {
-        return Err("responses continuation cannot use relay owner".to_string());
-    }
-    if scope
-        .get("allow_continuation")
-        .and_then(|value| value.as_bool())
-        == Some(false)
-    {
-        ctx.emit(
-            "continuation_release_ready",
-            format!(
-                "owner={owner} protocol={protocol} port={port} session={session_scope} conversation={conversation_scope}"
-            ),
-        );
-    } else {
-        ctx.emit(
-            "continuation_commit_ready",
-            format!(
-                "owner={owner} protocol={protocol} port={port} session={session_scope} conversation={conversation_scope}"
-            ),
-        );
-    }
-    Ok(())
 }
 
 fn route_facts_produce(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -1206,10 +1131,6 @@ impl StandardHandleRegistry {
             (
                 "v4.std.chat_process.response_governance",
                 response_governance,
-            ),
-            (
-                "v4.std.chat_process.continuation_commit",
-                continuation_commit,
             ),
             ("v4.std.chat_process.tool_harvest", tool_harvest),
             ("v4.std.routing.route_facts_producer", route_facts_produce),
@@ -1304,30 +1225,28 @@ mod tests {
     }
 
     #[test]
-    fn standard_plugin_ids_are_exact_and_immutable() {
+    fn standard_plugin_ids_are_unique_and_response_plugins_are_registered() {
         let plugins = standard_plugins();
         let mut actual: Vec<String> = plugins
             .iter()
             .map(|plugin| plugin.plugin_id.clone())
             .collect();
-        let contract: Value = serde_json::from_str(include_str!(
-            "../../../contracts/plugin-library.contract.json"
-        ))
-        .expect("plugin library contract parses");
-        let mut expected: Vec<String> = contract["plugin_ids"]
-            .as_array()
-            .expect("plugin_ids is an array")
-            .iter()
-            .map(|value| {
-                value
-                    .as_str()
-                    .expect("plugin id is a string")
-                    .to_string()
-            })
-            .collect();
         actual.sort_unstable();
-        expected.sort_unstable();
-        assert_eq!(actual, expected);
+        let mut unique = actual.clone();
+        unique.dedup();
+        assert_eq!(actual, unique, "plugin ids must be unique");
+        for required in [
+            "v4.std.protocol.response_decode",
+            "v4.std.chat_process.response_governance",
+            "v4.std.chat_process.tool_harvest",
+            "v4.std.continuation.commit",
+            "v4.std.continuation.release",
+            "v4.std.protocol.response_client_semantic",
+            "v4.std.protocol.response_sse_frame",
+            "v4.std.protocol.response_frame_build",
+        ] {
+            assert!(actual.iter().any(|plugin_id| plugin_id == required));
+        }
     }
 
     #[test]

@@ -290,7 +290,7 @@
         "ExecCtx::emit",
         "ExecCtx::write_data",
         "ExecCtx::write_control_resource",
-        "ScopeSessionValue",
+        "ScopeSessionCommand",
         "ScopeSessionOperation"
       ],
       "required_gates": [
@@ -307,6 +307,7 @@
         "SkeletonRuntime::load",
         "SkeletonRuntime::execute_request",
         "SkeletonRuntime::execute_provider_response",
+        "SkeletonRuntime::execute_provider_response_scoped",
         "SkeletonRuntime::execute_chain",
         "SkeletonRuntime::claim",
         "SkeletonRuntime::release",
@@ -315,6 +316,16 @@
         "ExecutionContext::new",
         "ExecutionContext::scope",
         "assert_no_control_leak",
+        "project_chat_request_to_responses",
+        "FrameParse",
+        "JsonParse",
+        "ProtocolDecode",
+        "ResponseGovernance",
+        "ToolHarvest",
+        "ContinuationCommit",
+        "ClientSemanticProjection",
+        "SseFrame",
+        "FrameBuild",
         "PLUGIN_REGISTRY",
         "bind_scope_via_bridge",
         "release_scope_via_bridge"

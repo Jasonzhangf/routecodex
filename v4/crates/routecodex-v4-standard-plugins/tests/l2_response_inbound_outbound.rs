@@ -136,33 +136,35 @@ fn negative_non_object_provider_raw_fails_fast() {
 }
 
 #[test]
-fn negative_control_key_in_provider_raw_is_rejected_not_stripped() {
-    let error = execute(
+fn protocol_named_metadata_in_provider_raw_stays_business_data() {
+    let output = execute(
         "V4HubRespInbound02Parsed",
         "response_inbound",
         2,
         "v4.std.protocol.response_decode",
         json!(r#"{"id":"resp-1","metadata_center":{"route":"internal"}}"#),
     )
-    .expect_err("control data in provider response fails at inbound owner");
-    let message = error.to_string();
-    assert!(
-        message.contains("metadata_center"),
-        "typed error names the leak: {message}"
+    .expect("provider protocol data remains in the data plane");
+    assert_eq!(
+        output.data["parsed_response"]["metadata_center"]["route"],
+        "internal"
     );
+    assert_eq!(output.control, json!({}));
 }
 
 #[test]
-fn negative_control_key_in_client_semantic_is_rejected_not_stripped() {
-    let error = execute(
+fn protocol_named_error_data_does_not_write_control() {
+    let output = execute(
         "V4HubRespOutbound04ClientSemantic",
         "response_outbound",
         4,
         "v4.std.protocol.response_client_semantic",
-        json!({"parsed_response":{"id":"resp-1"},"error_chain":{"stage":3}}),
+        json!({"parsed_response":{"id":"resp-1","error_chain":{"stage":3}}}),
     )
-    .expect_err("outbound owner rejects control leakage");
-    assert!(error.to_string().contains("error_chain"));
+    .expect("client semantic projection preserves business data");
+    assert_eq!(output.data["client_semantic"]["id"], "resp-1");
+    assert_eq!(output.data["client_semantic"]["error_chain"]["stage"], 3);
+    assert_eq!(output.control, json!({}));
 }
 
 #[test]

@@ -8,21 +8,21 @@ Owner：`routecodex-v4-standard-plugins`。
 
 M5 交付 V4 标准插件库的不可变描述符、确定性 artifact/contract 字节、
 `PluginCatalog` 注册、per-node `NodePluginPlan` 编译和 typed
-`StandardHandleRegistry`。标准插件全部是 keyless、行为最小化 mock/validator，
-不声称真实产品迁移、真实凭据、真实 provider/client 语义或真实 wire codec。
+`StandardHandleRegistry`。响应链插件已迁移为真实相邻协议投影和 typed
+continuation 控制；其余未迁移类别仍保持 keyless 最小 validator/mock。
 
 ## 类别与不可变 ID
 
-标准库按 8 个类别注册 21 个不可变插件 ID：
+标准库按 8 个类别注册不可变插件 ID：
 
 | 类别 | 插件 ID |
 | --- | --- |
 | contracts | `v4.std.contract.input_validate`, `v4.std.contract.output_validate` |
 | diagnostic | `v4.std.diagnostic.debug_observe`, `v4.std.diagnostic.timing`, `v4.std.diagnostic.snapshot_record` |
-| control | `v4.std.control.scope_consume`, `v4.std.control.payload_cycle_record` |
+| control | `v4.std.control.scope_consume`, `v4.std.control.payload_cycle_record`, `v4.std.continuation.commit`, `v4.std.continuation.release` |
 | error | `v4.std.error.typed_intake`, `v4.std.error.projection_adapter` |
 | protocol | `v4.std.protocol.mock_codec`, `v4.std.protocol.mock_codec_alt` |
-| chat_process | `v4.std.chat_process.request_governance`, `v4.std.chat_process.response_governance`, `v4.std.chat_process.tool_harvest`, `v4.std.chat_process.continuation_commit` |
+| chat_process | `v4.std.chat_process.request_governance`, `v4.std.chat_process.response_governance`, `v4.std.chat_process.tool_harvest` |
 | routing | `v4.std.routing.route_facts_producer`, `v4.std.routing.route_facts_consumer` |
 | provider | `v4.std.provider.capability_mock`, `v4.std.provider.auth_handle_mock`, `v4.std.provider.wire_mock`, `v4.std.provider.transport_mock` |
 

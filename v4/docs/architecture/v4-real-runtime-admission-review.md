@@ -18,6 +18,8 @@ Required client entrypoints:
 | GET | `/v1/models` | JSON |
 | POST | `/v1/responses` | JSON |
 | POST | `/v1/responses` | SSE |
+| POST | `/v1/chat/completions` | JSON relay from Responses upstream |
+| POST | `/v1/chat/completions` | SSE relay from Responses upstream |
 
 ## Mainline
 

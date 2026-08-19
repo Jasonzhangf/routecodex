@@ -103,6 +103,27 @@
     },
     {
       "consumer": "routecodex-v4-runtime",
+      "dependency": "routecodex-v4-base-node",
+      "mode": "active_artifact",
+      "status": "migrated",
+      "manifest_path": "crates/routecodex-v4-runtime/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime",
+      "dependency": "routecodex-v4-control",
+      "mode": "active_artifact",
+      "status": "migrated",
+      "manifest_path": "crates/routecodex-v4-runtime/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime",
+      "dependency": "routecodex-v4-error",
+      "mode": "active_artifact",
+      "status": "migrated",
+      "manifest_path": "crates/routecodex-v4-runtime/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime",
       "dependency": "routecodex-v4-plugin-contract",
       "mode": "source_path",
       "status": "transitional",
@@ -240,6 +261,48 @@
       "mode": "source_path",
       "status": "transitional",
       "manifest_path": "crates/routecodex-v4-standard-plugins/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime-bin",
+      "dependency": "routecodex-v4-base-node",
+      "mode": "active_artifact",
+      "status": "migrated",
+      "manifest_path": "crates/routecodex-v4-runtime-bin/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime-bin",
+      "dependency": "routecodex-v4-error",
+      "mode": "active_artifact",
+      "status": "migrated",
+      "manifest_path": "crates/routecodex-v4-runtime-bin/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime-bin",
+      "dependency": "routecodex-v4-provider",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-runtime-bin/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime-bin",
+      "dependency": "routecodex-v4-router",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-runtime-bin/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime-bin",
+      "dependency": "routecodex-v4-runtime",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-runtime-bin/Cargo.toml"
+    },
+    {
+      "consumer": "routecodex-v4-runtime-bin",
+      "dependency": "routecodex-v4-server",
+      "mode": "source_path",
+      "status": "transitional",
+      "manifest_path": "crates/routecodex-v4-runtime-bin/Cargo.toml"
     }
   ],
   "forbidden_path_roots": [

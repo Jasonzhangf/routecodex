@@ -15,7 +15,7 @@
   },
   "manifest_hash": "sha256:pending-config-v2-manifest",
   "plan_epoch": 1,
-  "plan_hash": "sha256:02c73573a1a3302c8b825d12660357147616266942dc48e4b85e5996271f867b",
+  "plan_hash": "sha256:a8340466a8ae8e48c01745c51722b27be140f0e47185866b66d10a4d38391086",
   "chains": [
     {
       "chain_id": "request",
@@ -69,7 +69,8 @@
       "chain_id": "response",
       "nodes": [
         {"node_id": "V4ProviderSseIn01FrameBoundary", "chain": "response", "position": 1, "role_id": "response_inbound", "terminal": false, "kernel": true, "plugins": [
-          {"plugin_id": "raw_parse", "effects": ["semantic"]}
+          {"plugin_id": "frame_parse", "effects": ["semantic"]},
+          {"plugin_id": "json_parse", "effects": ["semantic"]}
         ]},
         {"node_id": "V4HubRespInbound02Parsed", "chain": "response", "position": 2, "role_id": "response_inbound", "terminal": false, "kernel": false, "plugins": [
           {"plugin_id": "protocol_decode", "effects": ["semantic"]}
@@ -82,7 +83,9 @@
         {"node_id": "V4HubRespOutbound04ClientSemantic", "chain": "response", "position": 4, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": [
           {"plugin_id": "client_semantic_projection", "effects": ["semantic"]}
         ]},
-        {"node_id": "V4ServerSseOut05FrameBoundary", "chain": "response", "position": 5, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": []},
+        {"node_id": "V4ServerSseOut05FrameBoundary", "chain": "response", "position": 5, "role_id": "response_outbound", "terminal": false, "kernel": false, "plugins": [
+          {"plugin_id": "sse_frame", "effects": ["semantic"]}
+        ]},
         {"node_id": "V4ServerRespOutbound06ClientFrame", "chain": "response", "position": 6, "role_id": "response_outbound", "terminal": true, "kernel": false, "plugins": [
           {"plugin_id": "frame_build", "effects": ["semantic"]}
         ]}
@@ -95,11 +98,9 @@
         {"from": "V4ServerSseOut05FrameBoundary", "to": "V4ServerRespOutbound06ClientFrame", "direction": "forward"}
       ],
       "checkpoints": [
-        {"node_id": "V4ProviderSseIn01FrameBoundary", "semantic": "provider_raw", "owner": "routecodex-v4-runtime::RawParse"},
+        {"node_id": "V4ProviderSseIn01FrameBoundary", "semantic": "provider_frame_json", "owner": "routecodex-v4-runtime::FrameParse"},
         {"node_id": "V4HubRespInbound02Parsed", "semantic": "parsed_response", "owner": "routecodex-v4-runtime::ProtocolDecode"},
-        {"node_id": "V4HubRespChatProcess03Governed", "semantic": "governed_response", "owner": "routecodex-v4-runtime::ResponseGovernance"},
-        {"node_id": "V4RespContinuationCommitted", "semantic": "continuation_truth", "owner": "routecodex-v4-runtime::ContinuationCommit"},
-        {"node_id": "V4ChatProcess03ContinuationCommit", "semantic": "continuation_saved", "owner": "routecodex-v4-runtime::ContinuationCommit"},
+        {"node_id": "V4HubRespChatProcess03Governed", "semantic": "governed_response_and_continuation_committed", "owner": "routecodex-v4-runtime::ResponseGovernance"},
         {"node_id": "V4HubRespOutbound04ClientSemantic", "semantic": "client_semantic", "owner": "routecodex-v4-runtime::ClientSemanticProjection"},
         {"node_id": "V4ServerSseOut05FrameBoundary", "semantic": "client_sse_frame", "owner": "routecodex-v4-server::V4ServerSseOut05FrameBoundary"},
         {"node_id": "V4ServerRespOutbound06ClientFrame", "semantic": "client_frame", "owner": "routecodex-v4-runtime::FrameBuild"}

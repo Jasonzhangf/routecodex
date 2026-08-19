@@ -71,6 +71,8 @@ function validateContract(input) {
     'GET /v1/models json',
     'POST /v1/responses json',
     'POST /v1/responses sse',
+    'POST /v1/chat/completions json',
+    'POST /v1/chat/completions sse',
   ]);
   const entrypoints = new Set((input.admission.entrypoints ?? []).map(
     (entry) => `${entry.method} ${entry.path} ${entry.mode}`,
@@ -208,6 +210,7 @@ console.log(`[v4_real_runtime_admission] compiled manifest OK: ${COMPILED_MANIFE
 // Live HTTP tests
 let passed = 0;
 let failed = 0;
+let directResponseId;
 
 try {
   const health = await httpGet(RCCV4_HOST, '/health');
@@ -244,13 +247,14 @@ try {
     model: ADMISSION_MODEL,
     input: [{ role: 'user', content: 'say hi in 3 words' }],
   };
-  const jsonResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, {}, 60000);
+  const jsonResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'x-rccv4-session-id': 'admission-direct' }, 60000);
   if (jsonResp.status !== 200) throw new Error(`responses JSON status ${jsonResp.status}, body=${jsonResp.body.substring(0, 200)}`);
   const jsonBody = JSON.parse(jsonResp.body);
   if (!jsonBody.id || !jsonBody.object) throw new Error('responses JSON missing id/object fields');
   if (jsonBody.object !== 'response') throw new Error(`unexpected object type: ${jsonBody.object}`);
   // Real upstream response has a hash-like id (minimax produces 32-hex)
   if (!/^[0-9a-f]{32}$/.test(jsonBody.id)) throw new Error(`response id not hex32: ${jsonBody.id}`);
+  directResponseId = jsonBody.id;
   console.log(`[v4_real_runtime_admission] POST /v1/responses JSON OK: id=${jsonBody.id}`);
   passed++;
 } catch (e) {
@@ -259,26 +263,77 @@ try {
 }
 
 try {
+  if (!directResponseId) throw new Error('first direct response id unavailable');
+  const continuation = await httpPost(RCCV4_HOST, '/v1/responses', {
+    model: ADMISSION_MODEL,
+    previous_response_id: directResponseId,
+    input: [{ role: 'user', content: 'now say bye in 3 words' }],
+  }, { 'x-rccv4-session-id': 'admission-direct' }, 60000);
+  if (continuation.status !== 200) throw new Error(`continuation status ${continuation.status}, body=${continuation.body.substring(0, 200)}`);
+  const body = JSON.parse(continuation.body);
+  if (!body.id || body.id === directResponseId) throw new Error('continuation did not produce a new response id');
+  console.log(`[v4_real_runtime_admission] Responses continuation OK: previous=${directResponseId} next=${body.id}`);
+  passed++;
+} catch (e) {
+  console.error(`[v4_real_runtime_admission] Responses continuation FAIL: ${e.message}`);
+  failed++;
+}
+
+try {
   // POST /v1/responses SSE: provider streams through compiled candidate. Accept SSE header.
   const requestBody = {
     model: ADMISSION_MODEL,
     input: [{ role: 'user', content: 'count 1,2,3' }],
+    stream: true,
   };
   const sseResp = await httpPost(RCCV4_HOST, '/v1/responses', requestBody, { 'Accept': 'text/event-stream' }, 60000);
   if (sseResp.status !== 200) throw new Error(`responses SSE status ${sseResp.status}, body=${sseResp.body.substring(0, 200)}`);
-  // Server may return JSON-wrapped terminal (provider_response config) or actual SSE
   const body = sseResp.body;
-  const hasEvent = body.includes('event:') || body.includes('data:');
   const hasResponseId = body.includes('response_id') || /"id"\s*:\s*"[0-9a-f]{32}"/.test(body);
   if (!hasResponseId) throw new Error('SSE response has no recognizable response_id');
-  // Pass either true SSE frame OR JSON terminal carrying real upstream response
   const isSseFrame = body.includes('event:') && body.includes('data:');
-  const isJsonTerminal = /"id"\s*:\s*"[0-9a-f]{32}"/.test(body) && (body.includes('response.completed') || body.includes('"status":"completed"'));
-  if (!isSseFrame && !isJsonTerminal) throw new Error('SSE response has no event/data markers and no JSON terminal');
-  console.log(`[v4_real_runtime_admission] POST /v1/responses SSE OK: frame=${isSseFrame}, json_terminal=${isJsonTerminal}, len=${body.length}`);
+  if (!isSseFrame || !body.includes('response.completed')) {
+    throw new Error('Responses SSE lacks event/data frames or terminal response.completed');
+  }
+  console.log(`[v4_real_runtime_admission] POST /v1/responses SSE OK: len=${body.length}`);
   passed++;
 } catch (e) {
   console.error(`[v4_real_runtime_admission] POST /v1/responses SSE FAIL: ${e.message}`);
+  failed++;
+}
+
+try {
+  const relay = await httpPost(RCCV4_HOST, '/v1/chat/completions', {
+    model: ADMISSION_MODEL,
+    messages: [{ role: 'user', content: 'say relay ok' }],
+  }, { 'x-rccv4-session-id': 'admission-relay-json' }, 60000);
+  if (relay.status !== 200) throw new Error(`relay JSON status ${relay.status}, body=${relay.body.substring(0, 200)}`);
+  const body = JSON.parse(relay.body);
+  if (body.object !== 'chat.completion' || !Array.isArray(body.choices)) {
+    throw new Error('relay JSON is not a chat completion');
+  }
+  console.log(`[v4_real_runtime_admission] Chat relay JSON OK: id=${body.id}`);
+  passed++;
+} catch (e) {
+  console.error(`[v4_real_runtime_admission] Chat relay JSON FAIL: ${e.message}`);
+  failed++;
+}
+
+try {
+  const relay = await httpPost(RCCV4_HOST, '/v1/chat/completions', {
+    model: ADMISSION_MODEL,
+    messages: [{ role: 'user', content: 'count 1,2,3' }],
+    stream: true,
+  }, { 'x-rccv4-session-id': 'admission-relay-sse' }, 60000);
+  if (relay.status !== 200) throw new Error(`relay SSE status ${relay.status}, body=${relay.body.substring(0, 200)}`);
+  if (!relay.body.includes('"object":"chat.completion.chunk"') || !relay.body.includes('data: [DONE]')) {
+    throw new Error('relay SSE lacks chat chunks or terminal [DONE]');
+  }
+  if (relay.body.includes('event: response.')) throw new Error('provider Responses event leaked into chat SSE');
+  console.log(`[v4_real_runtime_admission] Chat relay SSE OK: len=${relay.body.length}`);
+  passed++;
+} catch (e) {
+  console.error(`[v4_real_runtime_admission] Chat relay SSE FAIL: ${e.message}`);
   failed++;
 }
 

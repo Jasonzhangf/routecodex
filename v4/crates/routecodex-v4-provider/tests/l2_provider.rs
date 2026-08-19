@@ -8,14 +8,28 @@ use routecodex_v4_provider::{
 fn session_scoped_availability_positive_and_red() {
     let mut registry = V4Availability01SessionScoped::new();
     registry
-        .record("srv-1", "rg-1", "session-a", "provider-1", AvailabilityState::Healthy, 0)
+        .record(
+            "srv-1",
+            "rg-1",
+            "session-a",
+            "provider-1",
+            AvailabilityState::Healthy,
+            0,
+        )
         .expect("record must succeed");
     let record: &AvailabilityRecord = registry
         .get("srv-1", "rg-1", "session-a", "provider-1")
         .expect("session record must exist");
     assert_eq!(record.state, AvailabilityState::Healthy);
     registry
-        .record("srv-1", "rg-1", "session-a", "provider-1", AvailabilityState::Unavailable, 3)
+        .record(
+            "srv-1",
+            "rg-1",
+            "session-a",
+            "provider-1",
+            AvailabilityState::Unavailable,
+            3,
+        )
         .expect("same-session update must replace the record");
     assert_eq!(
         registry
@@ -25,6 +39,8 @@ fn session_scoped_availability_positive_and_red() {
         3
     );
     // Different session must never observe the other session's availability.
-    assert!(registry.get("srv-1", "rg-1", "session-b", "provider-1").is_none());
+    assert!(registry
+        .get("srv-1", "rg-1", "session-b", "provider-1")
+        .is_none());
     assert_eq!(registry.records().count(), 1);
 }

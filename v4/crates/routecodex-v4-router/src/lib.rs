@@ -37,7 +37,9 @@ impl std::fmt::Display for TargetSelectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyCandidates => write!(f, "compiled provider candidate set is empty"),
-            Self::ModelUnavailable(model) => write!(f, "no compiled provider candidate supports model {model}"),
+            Self::ModelUnavailable(model) => {
+                write!(f, "no compiled provider candidate supports model {model}")
+            }
         }
     }
 }
@@ -128,7 +130,12 @@ impl V4Router08LivePolicyOverride {
         Ok(())
     }
 
-    pub fn current(&self, server_id: &str, route_group_id: &str, scope_key: &str) -> Option<&LivePolicyOverride> {
+    pub fn current(
+        &self,
+        server_id: &str,
+        route_group_id: &str,
+        scope_key: &str,
+    ) -> Option<&LivePolicyOverride> {
         self.history.iter().rev().find(|entry| {
             entry.server_id == server_id
                 && entry.route_group_id == route_group_id

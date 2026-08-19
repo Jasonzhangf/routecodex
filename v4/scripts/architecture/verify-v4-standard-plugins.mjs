@@ -117,21 +117,15 @@ const NODE_PERMISSIONS = new Map([
     reads: ['v4.request.normal_payload'], writes: [],
   }],
   ['V4HubReqChatProcess04Governed', {
-    reads: ['v4.request.normal_payload'], writes: ['v4.request.normal_payload'],
+    reads: ['v4.request.normal_payload', 'v4.control.metadata_center'],
+    writes: ['v4.request.normal_payload', 'v4.control.scope_command'],
   }],
   ['V4HubRespInbound02Parsed', {
     reads: ['v4.response.provider_raw'], writes: ['v4.response.normal_payload'],
   }],
   ['V4HubRespChatProcess03Governed', {
-    reads: ['v4.response.normal_payload'], writes: ['v4.response.normal_payload'],
-  }],
-  ['V4ChatProcess03ContinuationCommit', {
-    reads: ['v4.control.metadata_center'],
-    writes: ['v4.scope.session'],
-  }],
-  ['V4RespContinuationCommitted', {
-    reads: ['v4.control.metadata_center'],
-    writes: ['v4.scope.session'],
+    reads: ['v4.response.normal_payload', 'v4.control.metadata_center'],
+    writes: ['v4.response.normal_payload', 'v4.control.scope_command'],
   }],
   ['V4HubRespOutbound04ClientSemantic', {
     reads: ['v4.response.normal_payload'], writes: ['v4.response.client_wire_payload'],
@@ -492,15 +486,15 @@ function validate(
       failures.push(`${MODULE}: broad control carrier write reintroduced`);
     }
     for (const token of [
-      'fn scope_value(control: &Value',
+      'fn scope_command(control: &Value',
       '.read_control_resource("v4.control.metadata_center")',
-      '.write_control_resource("v4.scope.session"',
+      '.write_control_resource("v4.control.scope_command"',
     ]) {
       if (!source.includes(token)) {
         failures.push(`${MODULE}: continuation typed-control path missing ${token}`);
       }
     }
-    if (/scope_value\s*\(\s*ctx\.read_data\s*\(\s*\)/.test(source)) {
+    if (/scope_command\s*\(\s*ctx\.read_data\s*\(\s*\)/.test(source)) {
       failures.push(`${MODULE}: continuation control reconstructed from normal payload`);
     }
 
@@ -672,8 +666,8 @@ function runSelfTest() {
     }],
     ['continuation payload reconstruction reintroduced', (state) => {
       state.source = source.replace(
-        'scope_value(&control, "bind")?',
-        'scope_value(ctx.read_data(), "bind")?',
+        'scope_command(&control, ScopeSessionOperation::Bind)?',
+        'scope_command(ctx.read_data(), ScopeSessionOperation::Bind)?',
       );
     }],
     ['response integration descriptor removed', (state) => {

@@ -125,7 +125,8 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4ProviderSseIn01FrameBoundary
   owner_symbols:
-  - RawParse
+  - FrameParse
+  - JsonParse
   identity:
   - requestId
   - providerId
@@ -177,6 +178,8 @@ resources:
   owner_crate: routecodex-v4-runtime
   owner_node: V4HubRespOutbound04ClientSemantic
   owner_symbols:
+  - ClientSemanticProjection
+  - SseFrame
   - FrameBuild
   identity:
   - requestId
@@ -274,9 +277,8 @@ resources:
   - V4MetadataCenter01ScopeRegistry::release
   allowed_readers:
   - V4HubReqChatProcess04Governed
+  - V4HubRespChatProcess03Governed
   - V4Router
-  - V4ChatProcess03ContinuationCommit
-  - V4RespContinuationCommitted
   - V4ErrorChain
   - V4StoplessControlState
   - V4ScopeRegistry
@@ -289,6 +291,39 @@ resources:
   - V4ProviderReqCompat06Compat
   - V4HubRespOutbound04ClientSemantic
   - V4DebugSnapshotRestore
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.scope_command
+  axis: control
+  verification_gate:
+  - v4_continuation_control_plane_l2
+  - v4_parity_gate_standard_plugins
+  resource_kind: typed_scope_command
+  lifecycle: v4.control.scope
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4ScopeRegistry
+  owner_symbols:
+  - bind_scope_via_bridge
+  - release_scope_via_bridge
+  identity:
+  - entryProtocol
+  - continuationOwner
+  - pipelineId
+  - port
+  - sessionScope
+  - conversationScope
+  - requestId
+  semantic_contract:
+    typed_command_only: true
+    payload_reconstruction: forbidden
+  allowed_writers:
+  - V4HubRespChatProcess03Governed
+  allowed_readers:
+  - V4ScopeRegistry
+  forbidden_writers:
+  - V4HubRespOutbound04ClientSemantic
+  - V4ServerFrame
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored
@@ -708,8 +743,7 @@ resources:
   - V4ScopeRegistry::bind
   - V4ScopeRegistry::release
   allowed_bridge_writers:
-  - V4ChatProcess03ContinuationCommit
-  - V4RespContinuationCommitted
+  - V4HubRespChatProcess03Governed
   allowed_readers:
   - V4Control01ScopeBoundCarrier
   - V4ControlMetadataCenter
