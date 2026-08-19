@@ -1474,7 +1474,9 @@ targets = [{ kind = "provider_model", provider = "fallback", model = "MiniMax-M3
             },
         )
         .unwrap();
-    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "thinking");
     let target = V3TargetInterpreter::default();
