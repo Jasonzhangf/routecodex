@@ -1333,6 +1333,19 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 }
             }
         }
+        wrap_v3_direct_sse_provider_stream_for_outcome(
+            &mut response_projection.client_payload.body,
+            provider_health.clone(),
+            &direct_failure_session_scope,
+            &policy,
+            provider_health_neutral,
+            &mut provider_action_permit,
+            runtime_timing.clone(),
+            response_projection
+                .stream_observation
+                .clone()
+                .unwrap_or_default(),
+        );
         if let V3RemoteContinuationObservation::Streaming { state } =
             &response_projection.remote_continuation
         {
