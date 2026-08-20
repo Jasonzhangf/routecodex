@@ -150,6 +150,7 @@ fn test_plan_http_request(
     execution_id: &str,
 ) -> V3Server03HttpRequestRaw {
     V3Server03HttpRequestRaw {
+        request_purpose: V3RequestPurpose::Conversation,
         server_id: "test".to_string(),
         failure_session_scope: test_failure_session_scope(routing_group),
         request_id: request_id.to_string(),
@@ -167,6 +168,7 @@ fn test_responses_raw(
     body: serde_json::Value,
 ) -> V3Server03HttpRequestRaw {
     V3Server03HttpRequestRaw {
+        request_purpose: V3RequestPurpose::Conversation,
         server_id: "test".to_string(),
         failure_session_scope: test_failure_session_scope(routing_group),
         request_id: request_id.to_string(),
@@ -995,6 +997,7 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
     let output = execute_v3_responses_direct_runtime_kernel(
         &test_manifest(),
         V3Server03HttpRequestRaw {
+            request_purpose: V3RequestPurpose::Conversation,
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("test"),
             request_id: "req-control-leak".to_string(),
@@ -1113,6 +1116,7 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
     let plan_a = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
         V3Server03HttpRequestRaw {
+            request_purpose: V3RequestPurpose::Conversation,
             server_id: "test".to_string(),
             failure_session_scope: session_a,
             request_id: "req-plan-session-a".to_string(),
@@ -1144,6 +1148,7 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
     let plan_b = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
         V3Server03HttpRequestRaw {
+            request_purpose: V3RequestPurpose::Conversation,
             server_id: "test".to_string(),
             failure_session_scope: session_b,
             request_id: "req-plan-session-b".to_string(),
@@ -1781,6 +1786,7 @@ async fn pinned_unavailable_provider_consumes_error05_gate_before_terminal_relea
         .with_provider_health(provider_health),
         &manifest,
         V3Server03HttpRequestRaw {
+            request_purpose: V3RequestPurpose::Conversation,
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("test"),
             request_id: "req-pinned-unavailable-retry".to_string(),

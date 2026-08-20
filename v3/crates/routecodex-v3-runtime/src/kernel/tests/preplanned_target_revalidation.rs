@@ -38,6 +38,7 @@ async fn direct_kernel_revalidates_preplanned_target_against_session_alternative
     let plan = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
         V3Server03HttpRequestRaw {
+            request_purpose: V3RequestPurpose::Conversation,
             server_id: "test".to_string(),
             failure_session_scope: session.clone(),
             request_id: "req-preplanned-race".to_string(),
@@ -75,6 +76,7 @@ async fn direct_kernel_revalidates_preplanned_target_against_session_alternative
             .with_initial_plan(&plan),
         &manifest,
         V3Server03HttpRequestRaw {
+            request_purpose: V3RequestPurpose::Conversation,
             server_id: "test".to_string(),
             failure_session_scope: session,
             request_id: "req-preplanned-race".to_string(),

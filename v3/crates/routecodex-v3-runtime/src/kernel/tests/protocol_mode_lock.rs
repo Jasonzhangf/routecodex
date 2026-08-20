@@ -29,6 +29,7 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
     let routing_group = "cross_protocol_reselection";
     let manifest = scoped_test_manifest(mixed_protocol_reselection_manifest(), routing_group);
     let raw = V3Server03HttpRequestRaw {
+        request_purpose: V3RequestPurpose::Conversation,
         server_id: "test".to_string(),
         failure_session_scope: test_failure_session_scope(routing_group),
         request_id: "req".to_string(),
@@ -157,6 +158,7 @@ fn relay_only_same_protocol_responses_is_planned_as_hub_relay() {
         .expect("execution policy")
         .allowed_modes = vec!["relay".to_string()];
     let raw = V3Server03HttpRequestRaw {
+        request_purpose: V3RequestPurpose::Conversation,
         server_id: "test".to_string(),
         failure_session_scope: test_failure_session_scope("default"),
         request_id: "req-relay-only".to_string(),
@@ -186,6 +188,7 @@ fn same_protocol_without_direct_or_relay_fails_explicitly() {
     let plan = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
         V3Server03HttpRequestRaw {
+            request_purpose: V3RequestPurpose::Conversation,
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("default"),
             request_id: "req-no-mode".to_string(),
@@ -215,6 +218,7 @@ fn protocol_mismatch_is_decided_before_same_protocol_process_policy() {
     let plan = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
         V3Server03HttpRequestRaw {
+            request_purpose: V3RequestPurpose::Conversation,
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("default"),
             request_id: "req-protocol-first".to_string(),

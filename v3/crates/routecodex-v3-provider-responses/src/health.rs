@@ -769,9 +769,15 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        state.provider_cooldown_probes.remove(&key);
+        let completion = state
+            .provider_cooldown_probes
+            .remove(&key)
+            .map(|probe_state| probe_state.completion);
         state.auth_key_cooldowns.remove(&key);
         state.auth_key_consecutive_failures.remove(&key);
+        if let Some(completion) = completion {
+            completion.send_replace(true);
+        }
         Ok(())
     }
 
@@ -792,9 +798,9 @@ impl V3ProviderHealthStore {
             return Ok(());
         };
         probe_state.probe_in_flight = false;
-        probe_state.next_probe_at_ms = Some(
-            now_ms.saturating_add(probe_state.probe_interval_ms.max(1)),
-        );
+        probe_state.next_probe_at_ms =
+            Some(now_ms.saturating_add(probe_state.probe_interval_ms.max(1)));
+        probe_state.completion.send_replace(true);
         Ok(())
     }
 
