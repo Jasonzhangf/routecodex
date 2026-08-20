@@ -1736,6 +1736,47 @@ resources:
     binding_status: anchored
     required_gates: [npm --prefix v3 run pack:dev, npm --prefix v3 run pack:npm]
 
+  - resource_id: v3.route.policy_observations
+    resource_kind: side_channel
+    lifecycle: v3.route_policy.condition_evaluation
+    owner_feature_id: v3.route_policy_condition_evaluation
+    owner_crate: routecodex-v3-route-classifier
+    owner_node: V3RouteHistoryWindow
+    identity: [serverId, routeGroupId, sessionId, conversationId]
+    semantic_contract:
+      turn_unit: request_plus_response
+      current_turn_included: true
+      user_input_reset: true
+      search_ratio: search_pool_hit_turns_over_observed_turns
+      tool_error_unit: one_error_turn_per_turn
+      provider_failures_counted: false
+    allowed_writers: [V3RouteHistoryWindow::record_turn]
+    allowed_readers: [evaluate_v3_route_policies]
+    forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload, continuation, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.route.policy_action
+    resource_kind: side_channel
+    lifecycle: v3.route_policy.condition_evaluation
+    owner_feature_id: v3.route_policy_condition_evaluation
+    owner_crate: routecodex-v3-route-classifier
+    owner_node: V3RoutePolicyAction
+    identity: [policyId, routePool]
+    semantic_contract:
+      route_pool_only: true
+      provider_model_fields: forbidden
+      vr_reentry: forbidden
+    allowed_writers: [evaluate_v3_route_policies]
+    allowed_readers: [V3VirtualRouter::classify_request_with_facts]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload, continuation, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
   - resource_id: v3.build.assembled_binary
     resource_kind: assembled_release_candidate
     lifecycle: v3.build.independent_domain

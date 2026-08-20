@@ -7147,6 +7147,39 @@ chains:
       produces: [v3.error.classified]
       side_channel_reads: [v3.error.source]
       side_channel_writes: [v3.error.classified]
+
+- chain_id: v3.route_policy.condition_evaluation
+  owner_feature_id: v3.route_policy_condition_evaluation
+  summary: Typed turn observations are projected into a bounded history window and evaluated into a route-pool-only policy action before Virtual Router selection.
+  edges:
+  - step_id: v3-route-policy-01
+    from_node: V3RouteTurnObservation
+    to_node: V3RouteHistoryWindow
+    caller_symbol: V3RouteHistoryWindow::record_turn
+    caller_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+    callee_symbol: V3RouteHistoryWindow::facts
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+    status: source_controlled
+    owner_feature_id: v3.route_policy_condition_evaluation
+    resource_flow:
+      consumes: [v3.route.current_turn_facts]
+      produces: [v3.route.policy_observations]
+      side_channel_reads: []
+      side_channel_writes: [v3.route.policy_observations]
+  - step_id: v3-route-policy-02
+    from_node: V3RouteHistoryWindow
+    to_node: V3RoutePolicyAction
+    caller_symbol: evaluate_v3_route_policies
+    caller_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+    callee_symbol: V3RoutePolicyAction
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+    status: source_controlled
+    owner_feature_id: v3.route_policy_condition_evaluation
+    resource_flow:
+      consumes: [v3.route.policy_observations]
+      produces: [v3.route.policy_action]
+      side_channel_reads: [v3.route.policy_observations]
+      side_channel_writes: [v3.route.policy_action]
   - step_id: v3-provider-global-probe-relay-error-source
     from_node: V3HubRespChatProcess03Governed
     to_node: V3Error01SourceRaised

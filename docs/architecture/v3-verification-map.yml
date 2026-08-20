@@ -3060,3 +3060,38 @@ features:
     live_cutover: required
     global_install_restart: required
     forbidden_claim: Source tests alone do not prove GLM Replay live behavior; installed failing-shape and positive-control replay plus DSH Review are mandatory.
+
+- feature_id: v3.route_policy_condition_evaluation
+  status: source_controlled_runtime_pending_live_replay
+  change_risk: high
+  owner_kind: rust_v3_route_policy_condition_evaluation
+  owner_modules:
+  - routecodex-v3-route-classifier
+  design:
+  - docs/goals/v3-route-policy-condition-evaluation-design.md
+  - docs/goals/v3-route-policy-condition-evaluation-plan.md
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - Current turn is included in the bounded history window.
+  - New user input resets prior task tool statistics.
+  - Search pool ratio reaches the 8/10 boundary.
+  - One turn with multiple tool errors counts once.
+  - Compact action selects independent compact route pool.
+  required_negative:
+  - Provider failure does not enter tool execution error facts.
+  - Route policy action cannot carry provider/model fields.
+  - Same-precedence policy ambiguity fails explicitly.
+  - Control facts do not enter normal payload, protocol metadata, or continuation.
+  required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_boundary:
+    source_controlled: true
+    live_cutover: required
+    global_install_restart: required
+    forbidden_claim: Focused classifier tests do not prove runtime wiring, installed routing, live replay, or DSH Review.

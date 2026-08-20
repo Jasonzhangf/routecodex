@@ -4854,3 +4854,37 @@ features:
   - npm run test:v3-workspace
   - git diff --check
   runtime_status: implementation_in_progress
+
+- feature_id: v3.route_policy_condition_evaluation
+  status: source_controlled_runtime_pending_live_replay
+  owner_crate: routecodex-v3-route-classifier
+  owner_files:
+  - v3/crates/routecodex-v3-route-classifier/src/policy.rs
+  - v3/crates/routecodex-v3-route-classifier/src/lib.rs
+  resource_bindings:
+  - v3.route.policy_observations
+  - v3.route.policy_action
+  entry_symbols:
+  - V3RouteHistoryWindow::record_turn
+  - V3RouteHistoryWindow::facts
+  - evaluate_v3_route_policies
+  allowed_paths:
+  - v3/crates/routecodex-v3-route-classifier/src/policy.rs
+  - v3/crates/routecodex-v3-route-classifier/src/lib.rs
+  - v3/crates/routecodex-v3-route-classifier/src/tests.rs
+  - docs/architecture
+  - docs/goals/v3-route-policy-condition-evaluation-design.md
+  - docs/goals/v3-route-policy-condition-evaluation-plan.md
+  forbidden_paths:
+  - v3/crates/routecodex-v3-server
+  - v3/crates/routecodex-v3-provider-responses
+  - request.normal_payload
+  - response.client_payload
+  - MetadataCenter
+  required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  migration_target: rust
+  runtime_status: source_controlled_runtime_pending_live_replay
