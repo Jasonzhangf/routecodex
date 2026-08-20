@@ -4746,6 +4746,7 @@ features:
   - V3ProviderGlobalSubscriptionHealthStore::try_acquire_probe
   - V3ProviderFailureRuntimeHealth::record_provider_global_cooldown_failure
   - V3ProviderFailureRuntimeHealth::run_due_global_subscription_probes
+  - V3ProviderFailureRuntimeHealth::run_due_persistent_cooldown_probes
   - probe_v3_provider_global_target
   - spawn_v3_server_aggregate
   allowed_paths:

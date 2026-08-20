@@ -7134,6 +7134,21 @@ chains:
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
 
+  - step_id: v3-provider-global-probe-02-persistent
+    from_node: V3ServerAggregateLifecycle
+    to_node: V3ProviderGlobalProbeExecution
+    caller_symbol: spawn_v3_server_aggregate
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_persistent_cooldown_probes
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health, v3.config.published_manifest]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health, v3.config.published_manifest]
+      side_channel_writes: [v3.provider.global_subscription_health]
+
   - step_id: v3-provider-global-probe-03
     from_node: V3Error02Classified
     to_node: V3ProviderGlobalSubscriptionHealthStore
