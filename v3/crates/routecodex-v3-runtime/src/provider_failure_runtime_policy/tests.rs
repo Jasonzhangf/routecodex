@@ -172,6 +172,7 @@ fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
         for index in 0..2 {
             let record = health
                 .record_provider_failure_record_with_policy(
+                    None,
                     &manifest,
                     &session,
                     "primary",
@@ -179,6 +180,7 @@ fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
                     Some("key1"),
                     Some("gpt-test"),
                     Some("account failure"),
+                    "V3ProviderRespInbound01Raw",
                     status,
                     Some("provider_http_error"),
                     "account failure",
@@ -203,6 +205,7 @@ fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
     for index in 0..3 {
         let record = other_health
             .record_provider_failure_record_with_policy(
+                None,
                 &manifest,
                 &session,
                 "primary",
@@ -210,6 +213,7 @@ fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
                 Some("key1"),
                 Some("gpt-test"),
                 Some("ordinary failure"),
+                "V3ProviderRespInbound01Raw",
                 500,
                 Some("provider_http_error"),
                 "ordinary failure",
@@ -276,6 +280,7 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         for attempt in 0..threshold {
             health
                 .record_provider_failure_record_with_policy(
+                    None,
                     &manifest,
                     &scope,
                     "first",
@@ -310,6 +315,7 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     .expect("failure session scope");
     health
         .record_provider_failure_record_with_policy(
+            None,
             &manifest,
             &scope,
             "first",
@@ -1120,6 +1126,7 @@ targets = [
         200,
         Some("wrapped_provider_error".to_string()),
         "compressed message no longer contains configured keyword".to_string(),
+        None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,

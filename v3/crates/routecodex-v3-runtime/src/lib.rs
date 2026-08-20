@@ -10,12 +10,14 @@ pub mod protocol_tables;
 mod provider_action_gate;
 mod provider_error_policy_matching;
 mod provider_failure_runtime_helpers;
+mod provider_failure_global_probe;
 mod provider_failure_runtime_policy;
 pub mod remote_continuation;
 pub mod responses_continuation_owner;
 mod runtime_timing;
 mod selected_provider_model_binding;
 mod shared;
+mod shared_direct_thinking_compat;
 mod token_estimation;
 
 pub use diagnostics::{project_v3_virtual_router_dry_run, project_v3_virtual_router_status};

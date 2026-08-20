@@ -1289,7 +1289,11 @@ mod tests {
 }
 mod subscription;
 
-pub use subscription::V3ProviderErrorFingerprint;
+pub use subscription::{
+    build_v3_provider_global_error_fingerprint,
+    build_v3_provider_global_error_fingerprint_from_classified,
+    build_v3_provider_global_failure_policy, V3ProviderErrorFingerprint,
+};
 
 /// Provider compat payload boundary violation: provider request or response
 /// payload carried a top-level RouteCodex control-like field (`semantics`,

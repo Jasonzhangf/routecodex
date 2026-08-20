@@ -1,7 +1,7 @@
 use super::*;
 use crate::hub_v1::{
-    classify_v3_provider_sse_json_data, collect_v3_provider_sse_json_data,
-    V3HubProviderWireProtocol, V3ProviderResponsesJsonFrameOutcome,
+    classify_v3_provider_generic_sse_json_data, collect_v3_provider_sse_json_data,
+    V3ProviderResponsesJsonFrameOutcome,
 };
 pub(super) struct V3DirectSseProviderOutcome {
     pub(super) provider_health: V3ProviderFailureRuntimeHealth,
@@ -43,16 +43,14 @@ impl V3DirectSseProviderOutcome {
         fields: &[SseField],
     ) -> Result<(), V3Error01SourceRaised> {
         let data = collect_v3_provider_sse_json_data(fields);
-        let parsed =
-            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
-                .map_err(|message| {
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::ProviderFailure,
-                        "V3ProviderResp14Raw",
-                        "provider_response_sse_event_invalid",
-                        message,
-                    )
-                })?;
+        let parsed = classify_v3_provider_generic_sse_json_data(&data).map_err(|message| {
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::ProviderFailure,
+                "V3ProviderResp14Raw",
+                "provider_response_sse_event_invalid",
+                message,
+            )
+        })?;
         let Some(outcome) = parsed else {
             if data.trim() == "[DONE]" {
                 self.seen_done = true;
@@ -68,8 +66,7 @@ impl V3DirectSseProviderOutcome {
                     message,
                 ));
             }
-            V3ProviderResponsesJsonFrameOutcome::Terminal
-            | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput => self.terminal = true,
+            V3ProviderResponsesJsonFrameOutcome::Terminal => self.terminal = true,
             V3ProviderResponsesJsonFrameOutcome::ContinueBuffering => {}
             V3ProviderResponsesJsonFrameOutcome::StartClientStream => {}
         }
@@ -127,12 +124,29 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream(
     runtime_timing: V3RuntimeTimingState,
     stream_observation: V3RuntimeStreamObservation,
 ) -> V3ClientSseStream {
+    wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
+        source,
+        provider_outcome,
+        runtime_timing,
+        stream_observation,
+        None,
+    )
+}
+
+pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
+    source: V3ClientSseStream,
+    provider_outcome: V3DirectSseProviderOutcome,
+    runtime_timing: V3RuntimeTimingState,
+    stream_observation: V3RuntimeStreamObservation,
+    route_policy_terminal_commit: Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>,
+) -> V3ClientSseStream {
     struct StreamState {
         source: V3ClientSseStream,
         decoder: SseIncrementalDecoder,
         provider_outcome: V3DirectSseProviderOutcome,
         runtime_timing: V3RuntimeTimingState,
         stream_observation: V3RuntimeStreamObservation,
+        route_policy_terminal_commit: Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>,
         done: bool,
     }
 
@@ -143,6 +157,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream(
             provider_outcome,
             runtime_timing,
             stream_observation,
+            route_policy_terminal_commit,
             done: false,
         },
         |mut state| async move {
@@ -226,12 +241,6 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream(
                             state,
                         ));
                     }
-                    if let Err(error) = state.runtime_timing.finish_external_if_active() {
-                        return Some((
-                            Err(runtime_source("V3RuntimeTimingExternal", error)),
-                            state,
-                        ));
-                    }
                     let timing = match state.runtime_timing.finish_runtime() {
                         Ok(timing) => timing,
                         Err(error) => {
@@ -242,7 +251,17 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream(
                         }
                     };
                     match state.stream_observation.record_timing(timing) {
-                        Ok(()) => None,
+                        Ok(()) => match state
+                            .route_policy_terminal_commit
+                            .as_ref()
+                            .map(|commit| commit())
+                        {
+                            Some(Err(error)) => Some((
+                                Err(runtime_source("V3Router06RoutePoolResolved", error)),
+                                state,
+                            )),
+                            _ => None,
+                        },
                         Err(error) => {
                             Some((Err(runtime_source("V3RuntimeTimingTerminal", error)), state))
                         }

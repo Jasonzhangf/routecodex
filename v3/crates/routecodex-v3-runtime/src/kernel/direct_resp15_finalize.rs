@@ -95,7 +95,7 @@ fn wrap_v3_direct_sse_provider_stream_for_outcome(
 ) {
     let body = std::mem::replace(client_body, V3ClientBody::Bytes(Vec::new()));
     *client_body = match body {
-        V3ClientBody::Sse(stream) => V3ClientBody::Sse(wrap_direct_sse_provider_outcome_stream(
+        V3ClientBody::Sse(stream) => V3ClientBody::Sse(wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
             stream,
             V3DirectSseProviderOutcome {
                 provider_health,

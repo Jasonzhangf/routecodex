@@ -117,7 +117,7 @@ fn configured_health_policy_for_failure(
     });
     let cooldown_scope = policy.path.iter().find_map(|step| match step {
         V3ProviderDispositionStepManifest::Cooldown {
-            scope: V3ErrorActionScope::AuthKey { .. },
+            scope: V3ProviderErrorActionScope::AuthKey,
             ..
         } => Some(V3ProviderFailureCooldownScope::AuthKey),
         V3ProviderDispositionStepManifest::Cooldown { .. } => {

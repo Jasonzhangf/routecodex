@@ -39,3 +39,56 @@ impl V3ProviderErrorFingerprint {
         Ok(fingerprint)
     }
 }
+
+pub fn build_v3_provider_global_error_fingerprint(
+    status: u16,
+) -> Result<Option<V3ProviderErrorFingerprint>, String> {
+    let (class, normalized_status) = match status {
+        401 | 403 => ("account_auth", 401),
+        429 => ("recoverable_upstream", 429),
+        500..=599 => ("recoverable_upstream", 500),
+        _ => return Ok(None),
+    };
+    V3ProviderErrorFingerprint::new(class, class, normalized_status, class).map(Some)
+}
+
+pub fn build_v3_provider_global_failure_policy(
+    status: u16,
+) -> Option<V3ProviderGlobalFailurePolicy> {
+    match status {
+        401 | 403 => Some(V3ProviderGlobalFailurePolicy {
+            failure_threshold: 2,
+            cooldown_ms: 60 * 60_000,
+            probe_interval_ms: 60 * 60_000,
+        }),
+        429 | 500..=599 => Some(V3ProviderGlobalFailurePolicy {
+            failure_threshold: 3,
+            cooldown_ms: 15 * 60_000,
+            probe_interval_ms: 15 * 60_000,
+        }),
+        _ => None,
+    }
+}
+
+pub fn build_v3_provider_global_error_fingerprint_from_classified(
+    classified: &V3Error02Classified,
+) -> Result<Option<V3ProviderErrorFingerprint>, String> {
+    let Some(status) = classified
+        .source
+        .external_error
+        .as_ref()
+        .and_then(|error| error.status)
+    else {
+        return Ok(None);
+    };
+    if let Some(signature) = classified.provider_global_semantic_signature.as_deref() {
+        return V3ProviderErrorFingerprint::new(
+            "provider_semantic",
+            classified.source.code.clone(),
+            status,
+            signature,
+        )
+        .map(Some);
+    }
+    build_v3_provider_global_error_fingerprint(status)
+}
