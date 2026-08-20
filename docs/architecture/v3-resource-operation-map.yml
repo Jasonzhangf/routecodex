@@ -1750,8 +1750,8 @@ resources:
       search_ratio: search_pool_hit_turns_over_observed_turns
       tool_error_unit: one_error_turn_per_turn
       provider_failures_counted: false
-    allowed_writers: [V3RouteHistoryWindow::record_turn]
-    allowed_readers: [evaluate_v3_route_policies]
+    allowed_writers: [V3RouteHistoryWindow::record_turn, V3RoutePolicyRuntimeState::commit_request]
+    allowed_readers: [evaluate_v3_route_policies, V3RoutePolicyRuntimeState::evaluate_request]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload, continuation, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1770,7 +1770,7 @@ resources:
       provider_model_fields: forbidden
       vr_reentry: forbidden
     allowed_writers: [evaluate_v3_route_policies]
-    allowed_readers: [V3VirtualRouter::classify_request_with_facts]
+    allowed_readers: [V3RoutePolicyRuntimeState::evaluate_request, V3VirtualRouter::resolve_route_pool_plan]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload, continuation, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false
