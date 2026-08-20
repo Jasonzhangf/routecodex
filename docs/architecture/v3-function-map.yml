@@ -4927,3 +4927,36 @@ features:
   - git diff --check
   migration_target: rust
   runtime_status: source_controlled_runtime_pending_live_replay
+
+- feature_id: v3.server_internal_observability_projection
+  status: source_controlled_runtime_pending_live_replay
+  owner_crate: routecodex-v3-server
+  owner_files:
+  - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  resource_bindings:
+  - v3.server.internal_observability_projection
+  entry_symbols:
+  - V3WebuiObservability::record
+  - V3WebuiObservability::snapshot
+  - V3WebuiObservability::since
+  - V3ObsSinceResult
+  - emit_v3_request_console_observation
+  allowed_paths:
+  - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  - provider.wire_payload
+  - continuation
+  - protocol.metadata
+  required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
+  - npm run verify:v3-resource-map
+  - git diff --check
+  runtime_status: source_controlled_runtime_pending_live_replay

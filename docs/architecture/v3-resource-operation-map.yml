@@ -1777,6 +1777,28 @@ resources:
     may_enter_metadata_center: false
     binding_status: source_controlled
 
+  - resource_id: v3.server.internal_observability_projection
+    resource_kind: diagnostic_side_channel
+    lifecycle: v3.server.console_projection
+    owner_feature_id: v3.server_internal_observability_projection
+    owner_crate: routecodex-v3-server
+    owner_node: V3WebuiObservability
+    identity: [port, requestKey, sequence]
+    semantic_contract:
+      public_http_api: retired
+      request_rows_max: 2048
+      terminal_tombstones_max: 4096
+      evicted_terminal_replay: explicit_resync_required
+      control_state_in_payload: forbidden
+    allowed_writers: [emit_v3_request_console_observation]
+    allowed_readers: [V3WebuiObservability::snapshot, V3WebuiObservability::since]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests, npm run verify:v3-resource-map]
+
   - resource_id: v3.build.assembled_binary
     resource_kind: assembled_release_candidate
     lifecycle: v3.build.independent_domain

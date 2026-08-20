@@ -3104,3 +3104,32 @@ features:
     live_cutover: required
     global_install_restart: required
     forbidden_claim: Focused classifier tests do not prove runtime wiring, installed routing, live replay, or DSH Review.
+
+- feature_id: v3.server_internal_observability_projection
+  status: source_controlled_runtime_pending_live_replay
+  owner_kind: rust_v3_bounded_internal_observability_projection
+  owner_scope: Server owns bounded typed diagnostic projection state; no public observability API is registered on ordinary listeners.
+  unit:
+  - v3/crates/routecodex-v3-server/src/webui_observability.rs
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - Terminal rows remain bounded at 2048.
+  - Terminal tombstones remain bounded at 4096.
+  - Repeated terminal events do not duplicate statistics or tombstones.
+  - Evicted terminal replay returns an explicit resync_required result and does not recreate a row.
+  required_negative:
+  - Projection state does not enter provider/client payload, protocol metadata, continuation, or history.
+  - Ordinary listeners do not expose /api/observability snapshot, stats, or events routes.
+  required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
+  - npm run verify:v3-resource-map
+  - npm run verify-architecture-mainline-call-map
+  - git diff --check
+  completion_boundary:
+    source_controlled: true
+    live_cutover: required
+    global_install_restart: required
+    forbidden_claim: Focused projection tests do not prove installed listener route behavior or live runtime consistency.

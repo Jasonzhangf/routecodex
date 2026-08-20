@@ -120,6 +120,13 @@ pub(crate) struct V3ObsSnapshot {
     pub stats: V3ObsStats,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct V3ObsSinceResult {
+    pub next_cursor: u64,
+    pub events: Vec<V3ObsEvent>,
+    pub resync_required: bool,
+}
+
 /// Shared projection store + monotonic event log + broadcast.
 #[derive(Debug, Clone)]
 pub(crate) struct V3WebuiObservability {
@@ -133,6 +140,7 @@ struct V3WebuiObservabilityInner {
     terminal_order: VecDeque<String>,
     terminal_keys: BTreeSet<String>,
     terminal_key_order: VecDeque<String>,
+    resync_after_sequence: Option<u64>,
     events: std::collections::VecDeque<V3ObsEvent>,
     stats: V3ObsStats,
     active: std::collections::BTreeSet<String>,
@@ -186,6 +194,12 @@ impl V3WebuiObservability {
             && !inner.requests.contains_key(request_key)
             && inner.terminal_keys.contains(request_key)
         {
+            inner.resync_after_sequence = Some(
+                inner
+                    .resync_after_sequence
+                    .unwrap_or(0)
+                    .max(sequence),
+            );
             return Ok(sequence);
         }
 
@@ -306,7 +320,7 @@ impl V3WebuiObservability {
     }
 
     /// Incremental delta since a cursor; rejects stale events (sequence <= cursor).
-    pub(crate) fn since(&self, cursor: u64) -> Result<(u64, Vec<V3ObsEvent>), String> {
+    pub(crate) fn since(&self, cursor: u64) -> Result<V3ObsSinceResult, String> {
         let inner = self
             .inner
             .lock()
@@ -318,7 +332,13 @@ impl V3WebuiObservability {
             .cloned()
             .collect::<Vec<_>>();
         let next_cursor = self.next_sequence.load(Ordering::Relaxed).saturating_sub(1);
-        Ok((next_cursor, events))
+        Ok(V3ObsSinceResult {
+            next_cursor,
+            events,
+            resync_required: inner
+                .resync_after_sequence
+                .is_some_and(|sequence| cursor < sequence),
+        })
     }
 }
 
@@ -398,11 +418,12 @@ mod tests {
         let s2 = o.record(V3ObsEventType::Completed, &k, scope(5555), meta("r4")).unwrap();
         assert!(s2 > s1, "monotonic sequence");
         // replay since before start returns both; since after terminal returns none
-        let (c0, ev0) = o.since(0).unwrap();
-        assert_eq!(ev0.len(), 2);
-        let (c1, ev1) = o.since(c0).unwrap();
-        assert!(ev1.is_empty(), "stale events rejected past cursor");
-        let _ = c1;
+        let first = o.since(0).unwrap();
+        assert_eq!(first.events.len(), 2);
+        assert!(!first.resync_required);
+        let second = o.since(first.next_cursor).unwrap();
+        assert!(second.events.is_empty(), "stale events rejected past cursor");
+        assert!(!second.resync_required);
     }
 
     #[test]
@@ -410,9 +431,9 @@ mod tests {
         let o = V3WebuiObservability::new();
         let k = build_v3_obs_request_key(4444, "r5");
         o.record(V3ObsEventType::Started, &k, scope(4444), meta("r5")).unwrap();
-        let (_, ev) = o.since(0).unwrap();
-        assert_eq!(ev[0].scope.port, 4444);
-        assert_eq!(ev[0].scope.workdir.as_deref(), Some("/w"));
+        let result = o.since(0).unwrap();
+        assert_eq!(result.events[0].scope.port, 4444);
+        assert_eq!(result.events[0].scope.workdir.as_deref(), Some("/w"));
     }
 
     #[test]
@@ -486,5 +507,8 @@ mod tests {
         let snapshot = o.snapshot(0).unwrap();
         assert!(!snapshot.requests.contains_key(&first_key));
         assert_eq!(snapshot.stats.success, 2049);
+        let replay = o.since(0).unwrap();
+        assert!(replay.resync_required);
+        assert!(replay.events.iter().all(|event| event.request_key != first_key));
     }
 }
