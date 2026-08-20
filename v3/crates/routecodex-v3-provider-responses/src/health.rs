@@ -380,6 +380,7 @@ impl V3ProviderHealthStore {
                         reason: record_reason
                             .clone()
                             .unwrap_or_else(|| "provider_auth_key_failures".to_string()),
+                        original_cooldown_until_ms: cooldown_until_ms,
                         until_ms: cooldown_until_ms,
                         next_probe_at_ms: None,
                         probe_in_flight: false,
