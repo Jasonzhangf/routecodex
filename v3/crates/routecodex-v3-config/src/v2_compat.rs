@@ -532,7 +532,7 @@ fn compile_v2_auth(
         token_file,
         secret_file,
         entries,
-        selection: _,
+        selection,
     } = auth;
     let inline_handle_count = usize::from(api_key.is_some())
         + usize::from(env.is_some())
@@ -696,7 +696,7 @@ fn compile_v2_auth(
     }
     Ok(V3ProviderAuthAuthoringConfig {
         auth_type: V3ProviderAuthType::ApiKey,
-        selection: V3SelectionPolicy::default(),
+        selection: selection.unwrap_or_default(),
         entries: v3_entries,
     })
 }
@@ -1381,6 +1381,7 @@ capabilities = ["text", "reasoning", "tools"]
                     token_file: None,
                     secret_file: None,
                     entries: None,
+                    selection: None,
                 },
                 responses: None,
                 concurrency: Some(V2ProviderConcurrencyConfig {
@@ -1440,6 +1441,7 @@ capabilities = ["text", "reasoning", "tools"]
                 token_file: None,
                 secret_file: Some(key_file.clone()),
                 entries: None,
+                selection: None,
             },
         )
         .expect("auto discover key file");
@@ -1471,6 +1473,7 @@ capabilities = ["text", "reasoning", "tools"]
                 token_file: None,
                 secret_file: Some(key_file.clone()),
                 entries: None,
+                selection: None,
             },
         )
         .expect("auto discover single key");
@@ -1492,6 +1495,7 @@ capabilities = ["text", "reasoning", "tools"]
                 token_file: None,
                 secret_file: Some("keys.conf".to_string()),
                 entries: Some(Vec::new()),
+                selection: None,
             },
         )
         .expect_err("entries plus secretFile must fail");

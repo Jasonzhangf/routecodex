@@ -848,10 +848,15 @@ fn compile_provider_request_cleanup(
     Ok(V3ProviderRequestCleanupAuthoringConfig { historical_fields })
 }
 
-fn compile_auth(
+pub(crate) fn compile_auth(
     provider_id: &str,
     authoring: V3ProviderAuthAuthoringConfig,
 ) -> Result<V3ProviderAuthManifest, V3ConfigError> {
+    if matches!(authoring.selection.strategy, V3SelectionStrategy::RoundRobin) {
+        return Err(validation(format!(
+            "provider {provider_id} auth only supports priority or weighted selection"
+        )));
+    }
     if authoring.entries.is_empty() {
         return Err(validation(format!(
             "provider {provider_id} auth entries are empty"
@@ -860,6 +865,18 @@ fn compile_auth(
     let mut aliases = BTreeSet::new();
     let mut entries = Vec::new();
     for entry in authoring.entries {
+        if entry.priority.is_some_and(|priority| priority < 0) {
+            return Err(validation(format!(
+                "provider {provider_id} auth {} priority cannot be negative",
+                entry.alias
+            )));
+        }
+        if entry.weight.is_some_and(|weight| weight == 0) {
+            return Err(validation(format!(
+                "provider {provider_id} auth {} weight must be positive",
+                entry.alias
+            )));
+        }
         require_id("auth alias", &entry.alias)?;
         if !aliases.insert(entry.alias.clone()) {
             return Err(validation(format!(
@@ -1566,7 +1583,7 @@ fn validate_auth_alias_ref(
     Ok(())
 }
 
-fn compile_debug(authoring: V3DebugAuthoringConfig) -> Result<V3DebugManifest, V3ConfigError> {
+pub(crate) fn compile_debug(authoring: V3DebugAuthoringConfig) -> Result<V3DebugManifest, V3ConfigError> {
     if authoring
         .log_file
         .as_deref()
@@ -1654,6 +1671,7 @@ mod secret_file_compile_tests {
     fn authoring_with(entry: V3ProviderAuthEntryAuthoringConfig) -> V3ProviderAuthAuthoringConfig {
         V3ProviderAuthAuthoringConfig {
             auth_type: V3ProviderAuthType::ApiKey,
+            selection: V3SelectionPolicy::default(),
             entries: vec![entry],
         }
     }
@@ -1675,6 +1693,8 @@ mod secret_file_compile_tests {
                 api_key: None,
                 secret_file: Some(file_str.clone()),
                 secret_key: Some("opencode-go.key1".to_string()),
+                priority: None,
+                weight: None,
             }),
         )
         .unwrap();
@@ -1696,6 +1716,8 @@ mod secret_file_compile_tests {
                 api_key: None,
                 secret_file: Some(file_str),
                 secret_key: Some("missing.key".to_string()),
+                priority: None,
+                weight: None,
             }),
         )
         .unwrap_err();
@@ -1713,6 +1735,8 @@ mod secret_file_compile_tests {
                 api_key: None,
                 secret_file: Some("x".to_string()),
                 secret_key: None,
+                priority: None,
+                weight: None,
             }),
         )
         .unwrap_err();
