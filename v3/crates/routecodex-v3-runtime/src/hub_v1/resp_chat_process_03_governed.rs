@@ -122,6 +122,7 @@ pub struct V3HubRelayResponseHookProfile {
     /// Codex 客户端（客户端用自己的密文重建 reasoning 历史）；其余情况 Resp03 一律剥离。
     /// 默认 false（剥离），响应侧只消费该结果，不重复判定。
     retain_response_cipher: bool,
+    tool_thinking: bool,
 }
 
 impl V3HubRelayResponseHookProfile {
@@ -142,6 +143,7 @@ impl V3HubRelayResponseHookProfile {
             stopless_transition_request_id: None,
             stopless_transition_updated_at: None,
             retain_response_cipher: false,
+            tool_thinking: false,
         }
     }
 
@@ -185,6 +187,15 @@ impl V3HubRelayResponseHookProfile {
 
     pub fn retain_response_cipher(&self) -> bool {
         self.retain_response_cipher
+    }
+
+    pub fn with_tool_thinking_enabled(mut self, enabled: bool) -> Self {
+        self.tool_thinking = enabled;
+        self
+    }
+
+    pub fn tool_thinking_enabled(&self) -> bool {
+        self.tool_thinking
     }
 
     pub fn web_search_center_state(&self) -> Option<&V3WebSearchCenterState> {
@@ -356,7 +367,9 @@ fn govern_v3_hub_relay_response(
     // retain_response_cipher 标记——仅 gpt 单 provider 保留，其余一律剥离。
     let input =
         strip_v3_resp03_encrypted_reasoning_content(input, profile.retain_response_cipher());
-    let input = harvest_v3_think_blocks_at_resp03(input);
+    let mut input = harvest_v3_think_blocks_at_resp03(input);
+    let payload = Arc::make_mut(&mut input.previous.previous.payload.0);
+    map_v3_toolreason_to_reasoning_content_at_resp03(payload, profile.tool_thinking_enabled());
     let input = complete_or_repair_v3_resp03_tool_frames(input);
     let _identified_servertool_tool = super::servertool_hooks::inspect_v3_servertool_response_tool(
         input.provider_payload().as_ref(),
@@ -1070,6 +1083,183 @@ fn append_v3_resp03_openai_chat_reasoning_content(
     if !joined.is_empty() {
         message.insert("reasoning_content".to_string(), Value::String(joined));
     }
+}
+
+pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03(payload: &mut Value, enabled: bool) {
+    if !enabled {
+        return;
+    }
+    if let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) {
+        for choice in choices {
+            let Some(message) = choice.get_mut("message").and_then(Value::as_object_mut) else {
+                continue;
+            };
+            let tool_names = message
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .map(|calls| {
+                    calls
+                        .iter()
+                        .filter_map(|call| {
+                            call.pointer("/function/name")
+                                .and_then(Value::as_str)
+                                .or_else(|| call.get("name").and_then(Value::as_str))
+                                .map(str::to_owned)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            map_toolreason_in_text_object(message, &tool_names);
+        }
+    }
+    if let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) {
+        let tool_name = output
+            .iter()
+            .find_map(|item| {
+                if !matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some("function_call" | "tool_call" | "custom_tool_call")
+                ) {
+                    return None;
+                }
+                item.get("name")
+                    .and_then(Value::as_str)
+                    .or_else(|| item.pointer("/function/name").and_then(Value::as_str))
+            })
+            .map(str::to_owned);
+        for item in output {
+            if item.get("type").and_then(Value::as_str) == Some("message") {
+                let mut mapped_reason = None;
+                if let Some(parts) = item.get_mut("content").and_then(Value::as_array_mut) {
+                    for part in parts {
+                        if let Some(text) =
+                            part.get("text").and_then(Value::as_str).map(str::to_owned)
+                        {
+                            let (visible, reason) = extract_toolreason(&text);
+                            if let Some(object) = part.as_object_mut() {
+                                object.insert("text".to_string(), Value::String(visible));
+                            }
+                            if let (Some(tool_name), Some(reason)) = (tool_name.as_deref(), reason)
+                            {
+                                if !tool_name.trim().is_empty() && !reason.trim().is_empty() {
+                                    mapped_reason = Some(format!(
+                                        "调用工具 {}，因为 {}",
+                                        tool_name.trim(),
+                                        reason.trim()
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(reason) = mapped_reason {
+                    if let Some(object) = item.as_object_mut() {
+                        object.insert("reasoning_content".to_string(), Value::String(reason));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(content) = payload.get_mut("content").and_then(Value::as_array_mut) {
+        let tool_names = content
+            .iter()
+            .filter(|part| {
+                matches!(
+                    part.get("type").and_then(Value::as_str),
+                    Some("tool_use" | "tool_call" | "function_call")
+                )
+            })
+            .filter_map(|part| part.get("name").and_then(Value::as_str).map(str::to_owned))
+            .collect::<Vec<_>>();
+        let mut reasons = Vec::new();
+        for part in content {
+            if part.get("type").and_then(Value::as_str) != Some("text") {
+                continue;
+            }
+            let Some(text) = part.get("text").and_then(Value::as_str).map(str::to_owned) else {
+                continue;
+            };
+            let (visible, mut part_reasons) = extract_toolreasons(&text);
+            if let Some(object) = part.as_object_mut() {
+                object.insert("text".to_string(), Value::String(visible));
+            }
+            reasons.append(&mut part_reasons);
+        }
+        if !reasons.is_empty() && !tool_names.is_empty() {
+            let mapped = reasons
+                .into_iter()
+                .zip(tool_names)
+                .map(|(reason, name)| format!("调用工具 {name}，因为 {reason}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            payload["reasoning_content"] = Value::String(mapped);
+        }
+    }
+}
+
+fn map_toolreason_in_text_object(message: &mut Map<String, Value>, tool_names: &[String]) {
+    let Some(content) = message
+        .get("content")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    else {
+        return;
+    };
+    let (visible, reasons) = extract_toolreasons(&content);
+    message.insert("content".to_string(), Value::String(visible));
+    let Some(reason) = reasons.first() else {
+        return;
+    };
+    if tool_names.is_empty() {
+        return;
+    }
+    if reason.is_empty() {
+        return;
+    }
+    let mut existing = message
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    for (index, reason) in reasons.into_iter().enumerate() {
+        let Some(tool_name) = tool_names.get(index).map(String::as_str) else {
+            break;
+        };
+        if !existing.is_empty() {
+            existing.push('\n');
+        }
+        existing.push_str(&format!("调用工具 {tool_name}，因为 {reason}"));
+    }
+    message.insert("reasoning_content".to_string(), Value::String(existing));
+}
+
+fn extract_toolreason(text: &str) -> (String, Option<String>) {
+    let (visible, reasons) = extract_toolreasons(text);
+    (visible, reasons.into_iter().next())
+}
+
+fn extract_toolreasons(text: &str) -> (String, Vec<String>) {
+    let mut visible = String::with_capacity(text.len());
+    let mut reasons = Vec::new();
+    let mut remaining = text;
+    loop {
+        let Some(start) = remaining.find("<toolreason>") else {
+            visible.push_str(remaining);
+            break;
+        };
+        visible.push_str(&remaining[..start]);
+        let rest = &remaining[start + "<toolreason>".len()..];
+        let Some(end) = rest.find("</toolreason>") else {
+            break;
+        };
+        let reason = rest[..end].trim();
+        if !reason.is_empty() {
+            reasons.push(reason.to_string());
+        }
+        remaining = &rest[end + "</toolreason>".len()..];
+    }
+    (visible, reasons)
 }
 
 fn harvest_v3_gemini_think_blocks(payload: &mut Value) -> bool {

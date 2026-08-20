@@ -4,6 +4,98 @@
 use super::*;
 
 #[test]
+fn resp03_toolreason_maps_to_visible_reasoning_content_and_is_removed_from_text() {
+    let mut payload = json!({
+        "choices":[{"message":{
+            "role":"assistant",
+            "content":"<toolreason>Need inspect the file.</toolreason>",
+            "tool_calls":[{"id":"call_1","type":"function","function":{"name":"exec","arguments":"{}"}}]
+        }}]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    let message = &payload["choices"][0]["message"];
+    assert_eq!(
+        message["reasoning_content"],
+        "调用工具 exec，因为 Need inspect the file."
+    );
+    assert_eq!(message["content"], "");
+    assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
+fn resp03_incomplete_toolreason_is_removed_without_guessing_reason() {
+    let mut payload = json!({
+        "choices":[{"message":{
+            "role":"assistant",
+            "content":"before <toolreason>Need inspect",
+            "tool_calls":[{"id":"call_1","type":"function","function":{"name":"exec","arguments":"{\"cmd\":\"cat secret\"}"}}]
+        }}]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    let message = &payload["choices"][0]["message"];
+    assert_eq!(message.get("reasoning_content"), None);
+    assert_eq!(message["content"], "before ");
+    assert!(!payload.to_string().contains("toolreason"));
+    assert!(payload.to_string().contains("cat secret"));
+}
+
+#[test]
+fn resp03_multiple_toolreasons_pair_by_tool_call_order_and_strip_duplicates() {
+    let mut payload = json!({
+        "choices":[{"message":{
+            "role":"assistant",
+            "content":"<toolreason>Inspect file.</toolreason><toolreason>Run test.</toolreason><toolreason>duplicate.</toolreason>",
+            "tool_calls":[
+                {"id":"call_1","type":"function","function":{"name":"cat","arguments":"{}"}},
+                {"id":"call_2","type":"function","function":{"name":"test","arguments":"{}"}}
+            ]
+        }}]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    let message = &payload["choices"][0]["message"];
+    assert_eq!(
+        message["reasoning_content"],
+        "调用工具 cat，因为 Inspect file.\n调用工具 test，因为 Run test."
+    );
+    assert_eq!(message["content"], "");
+    assert!(!payload.to_string().contains("toolreason"));
+    assert!(!payload.to_string().contains("duplicate."));
+}
+
+#[test]
+fn resp03_toolreason_without_tool_call_is_hard_stripped_without_reasoning_guess() {
+    let mut payload = json!({
+        "choices":[{"message":{
+            "role":"assistant",
+            "content":"<toolreason>Do something.</toolreason>"
+        }}]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    let message = &payload["choices"][0]["message"];
+    assert_eq!(message["content"], "");
+    assert_eq!(message.get("reasoning_content"), None);
+    assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
+fn resp03_anthropic_text_toolreason_maps_against_tool_use() {
+    let mut payload = json!({
+        "role":"assistant",
+        "content":[
+            {"type":"text","text":"<toolreason>Need lookup.</toolreason>"},
+            {"type":"tool_use","id":"tool_1","name":"lookup","input":{}}
+        ]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    assert_eq!(
+        payload["reasoning_content"],
+        "调用工具 lookup，因为 Need lookup."
+    );
+    assert_eq!(payload["content"][0]["text"], "");
+    assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
 fn responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details() {
     for reason in ["max_output_tokens", "content_filter"] {
         let governance = build_v3_responses_resp03_protocol_governance(&json!({

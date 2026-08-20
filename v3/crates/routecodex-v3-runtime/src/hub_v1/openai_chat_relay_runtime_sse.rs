@@ -4,6 +4,7 @@ fn project_sse_event_payload(
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<&V3WebSearchCenterState>,
     retain_response_cipher: bool,
+    tool_thinking_enabled: bool,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
     let mut trace = Vec::new();
     project_json_response(
@@ -16,6 +17,7 @@ fn project_sse_event_payload(
         web_search_execution_mode,
         web_search_center_state,
         retain_response_cipher,
+        tool_thinking_enabled,
     )
 }
 
@@ -27,6 +29,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
+    tool_thinking_enabled: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3OpenAiChatClientStream {
     use futures_util::StreamExt;
@@ -50,7 +53,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
             retain_response_cipher,
             provider_outcome,
         ),
-        |(
+        move |(
             mut provider,
             mut decoder,
             mut transducer,
@@ -234,6 +237,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                         web_search_execution_mode,
                                         web_search_center_state.as_ref(),
                                         retain_response_cipher,
+                                        tool_thinking_enabled,
                                     )
                                     .map_err(|error| match error {
                                         V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {

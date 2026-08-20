@@ -159,6 +159,7 @@ pub enum V3HubServertoolRequestProfile {
         stopless_transition_request_id: Option<String>,
         stopless_transition_updated_at: Option<u64>,
         web_search_execution_mode: Option<routecodex_v3_config::V3WebSearchExecutionMode>,
+        tool_thinking: bool,
     },
     RequiredFailure(&'static str),
 }
@@ -174,6 +175,7 @@ impl V3HubServertoolRequestProfile {
             stopless_transition_request_id: None,
             stopless_transition_updated_at: None,
             web_search_execution_mode: None,
+            tool_thinking: false,
         }
     }
     pub fn stopless_reasoning_stop() -> Self {
@@ -184,6 +186,7 @@ impl V3HubServertoolRequestProfile {
             stopless_transition_request_id: None,
             stopless_transition_updated_at: None,
             web_search_execution_mode: None,
+            tool_thinking: false,
         }
     }
     pub fn with_web_search_execution_mode(
@@ -198,6 +201,21 @@ impl V3HubServertoolRequestProfile {
             *web_search_execution_mode = Some(mode);
         }
         self
+    }
+    pub fn with_tool_thinking_enabled(mut self, enabled: bool) -> Self {
+        if let Self::Enabled { tool_thinking, .. } = &mut self {
+            *tool_thinking = enabled;
+        }
+        self
+    }
+    pub fn tool_thinking_enabled(&self) -> bool {
+        matches!(
+            self,
+            Self::Enabled {
+                tool_thinking: true,
+                ..
+            }
+        )
     }
     pub fn web_search_execution_mode(
         &self,
@@ -355,6 +373,7 @@ pub struct V3HubRelayRequestOutcome {
     events: Vec<V3HubRelayRequestHookEvent>,
     stopless_state: Option<V3StoplessCenterState>,
     web_search_state: Option<V3WebSearchCenterState>,
+    tool_thinking_enabled: bool,
 }
 impl V3HubRelayRequestOutcome {
     pub fn payload(&self) -> &Value {
@@ -387,6 +406,9 @@ impl V3HubRelayRequestOutcome {
     }
     pub fn web_search_state(&self) -> Option<&V3WebSearchCenterState> {
         self.web_search_state.as_ref()
+    }
+    pub fn tool_thinking_enabled(&self) -> bool {
+        self.tool_thinking_enabled
     }
     pub fn into_governed(self) -> V3HubReqChatProcess04Governed {
         self.governed
@@ -490,6 +512,7 @@ impl V3HubRelayRequestHooks {
             profile.web_search_execution_mode().is_some_and(
                 routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search,
             ),
+            profile.tool_thinking_enabled(),
             profile.stopless_center_state(),
             profile.stopless_transition_request_id(),
             profile.stopless_transition_updated_at(),
@@ -522,6 +545,7 @@ impl V3HubRelayRequestHooks {
             events,
             stopless_state,
             web_search_state,
+            tool_thinking_enabled: profile.tool_thinking_enabled(),
         })
     }
 }

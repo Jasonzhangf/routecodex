@@ -19,6 +19,7 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     /// 请求侧 VR 路由决策算好的"保留响应密文"标记（仅 gpt 模型 + 单一 provider
     /// 候选时为 true），响应侧 Resp03 只消费此结果，不重复判定。
     pub(crate) retain_response_cipher: bool,
+    pub(crate) tool_thinking_enabled: bool,
 }
 
 pub(crate) fn run_json_response_hooks(
@@ -69,6 +70,7 @@ pub(crate) fn run_json_response_hooks(
         input.transition_updated_at,
         input.web_search_execution_mode,
         input.retain_response_cipher,
+        input.tool_thinking_enabled,
     );
     let response_hook_profile = match input.web_search_center_state {
         Some(state) => response_hook_profile.with_web_search_center_state(state),
@@ -130,13 +132,20 @@ pub(crate) fn responses_relay_request_hook_profile(
     transition_updated_at: u64,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
 ) -> V3HubServertoolRequestProfile {
+    let tool_thinking_enabled = manifest
+        .features
+        .get("tool_thinking")
+        .copied()
+        .unwrap_or(false);
     let base = if web_search_execution_mode.is_metadata_center_local_search() {
         // Mode B：Req04 需在工具面含标准 web_search 声明时激活 websearch
         // ServerTool 实例（LocalToolSurfaceActive），供 Resp03 同轮拦截。
         V3HubServertoolRequestProfile::enabled(["servertool.request"])
             .with_web_search_execution_mode(web_search_execution_mode)
+            .with_tool_thinking_enabled(tool_thinking_enabled)
     } else {
         V3HubServertoolRequestProfile::disabled()
+            .with_tool_thinking_enabled(tool_thinking_enabled)
     };
     if !v3_stopless_center_enabled_for_server(manifest, server_id)
         || !stopless_control_has_client_session_scope
@@ -144,7 +153,8 @@ pub(crate) fn responses_relay_request_hook_profile(
         return base;
     }
     let mut profile = V3HubServertoolRequestProfile::stopless_reasoning_stop()
-        .with_stopless_transition_context(transition_request_id, transition_updated_at);
+        .with_stopless_transition_context(transition_request_id, transition_updated_at)
+        .with_tool_thinking_enabled(tool_thinking_enabled);
     if web_search_execution_mode.is_metadata_center_local_search() {
         profile = profile.with_web_search_execution_mode(web_search_execution_mode);
     }
@@ -163,6 +173,7 @@ pub(crate) fn responses_relay_response_hook_profile(
     transition_updated_at: u64,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     retain_response_cipher: bool,
+    tool_thinking_enabled: bool,
 ) -> V3HubRelayResponseHookProfile {
     let profile = if web_search_execution_mode
         == routecodex_v3_config::V3WebSearchExecutionMode::NativeRemoteSearchToolMix
@@ -173,11 +184,13 @@ pub(crate) fn responses_relay_response_hook_profile(
         V3HubRelayResponseHookProfile::empty()
             .with_web_search_execution_mode(web_search_execution_mode)
             .with_retain_response_cipher(retain_response_cipher)
+            .with_tool_thinking_enabled(tool_thinking_enabled)
     } else {
         // 未声明 web_search 执行模式的兼容路径：保持既有 exec_command 投影。
         V3HubRelayResponseHookProfile::empty()
             .with_servertool_name("web_search")
             .with_retain_response_cipher(retain_response_cipher)
+            .with_tool_thinking_enabled(tool_thinking_enabled)
     };
     if !v3_stopless_center_enabled_for_server(manifest, server_id)
         || !stopless_control_has_client_session_scope

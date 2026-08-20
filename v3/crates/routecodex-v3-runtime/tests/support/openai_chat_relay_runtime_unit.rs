@@ -62,6 +62,7 @@ mod tests {
             V3WebSearchExecutionMode::None,
             None,
             false,
+            false,
             outcome,
         );
         let mut chunks = Vec::new();
@@ -97,6 +98,7 @@ mod tests {
             V3WebSearchExecutionMode::None,
             None,
             false,
+            false,
             outcome,
         );
         let mut saw_error = false;
@@ -126,6 +128,7 @@ mod tests {
             None,
             V3WebSearchExecutionMode::None,
             None,
+            false,
             false,
             outcome,
         );
@@ -169,6 +172,7 @@ mod tests {
             None,
             V3WebSearchExecutionMode::None,
             None,
+            false,
             false,
             outcome,
         );

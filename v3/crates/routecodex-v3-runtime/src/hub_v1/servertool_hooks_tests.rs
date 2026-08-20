@@ -9,6 +9,48 @@ use crate::hub_v1::stopless_injection::{
 };
 use serde_json::json;
 
+#[test]
+fn req04_tool_thinking_appends_detailed_guidance_only_to_legal_tool_descriptions() {
+    let mut payload = json!({
+        "tools": [
+            {"type":"function","name":"exec","description":"run command","parameters":{"type":"object"}},
+            {"type":"reasoningStop","name":"reasoningStop","description":"internal"}
+        ],
+        "instructions":"client instructions"
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject");
+    let description = payload["tools"][0]["description"].as_str().unwrap();
+    assert!(description.contains("<toolreason>动机</toolreason>"));
+    assert!(description.contains("每个工具调用只输出一个 toolreason"));
+    assert_eq!(payload["tools"][1]["description"], "internal");
+    assert_eq!(payload["instructions"], "client instructions");
+}
+
+#[test]
+fn req04_tool_thinking_disabled_is_payload_identity() {
+    let mut payload = json!({"tools":[{"type":"function","name":"exec","description":"run"}]});
+    let before = payload.clone();
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, false)
+        .expect("disabled tool-thinking must be a no-op");
+    assert_eq!(payload, before);
+}
+
+#[test]
+fn req04_tool_thinking_supports_gemini_function_declaration_surface() {
+    let mut payload = json!({
+        "tools":[{"function_declarations":[{"name":"lookup","description":"find data"}]}]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must cover Gemini declarations");
+    assert!(
+        payload["tools"][0]["function_declarations"][0]["description"]
+            .as_str()
+            .unwrap()
+            .contains("<toolreason>动机</toolreason>")
+    );
+}
+
 const CMD_ARGS: &str = "{\"cmd\":\"routecodex hook run reasoningStop\"}";
 
 fn response_call(id: &str, args: &str) -> Value {

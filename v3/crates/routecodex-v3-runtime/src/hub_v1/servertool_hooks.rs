@@ -15,6 +15,89 @@ use std::sync::Arc;
 
 const STOPLESS_CALL_ID: &str = "call_stopless_reasoning";
 const STOPLESS_CLI_COMMAND: &str = "routecodex hook run reasoningStop";
+
+pub(crate) const V3_TOOL_THINKING_GUIDANCE: &str = r#"调用工具前，先输出一个工具调用动机，格式必须是：
+<toolreason>动机</toolreason>
+
+格式规则：
+- 只输出调用该工具的直接动机。
+- 使用简洁、直接的短句；类似 caveman 风格。
+- 每个工具调用只输出一个 toolreason。
+- toolreason 必须位于对应工具调用附近。
+- 不输出计划、步骤、推理过程、工具结果或任务总结。
+- 不重复工具参数，不复制用户原文。
+- 不输出 RouteCodex、Proxy、hook、注入、过滤、客户端或内部策略信息。
+- 不在 toolreason 外增加工具调用说明。
+- 没有明确动机时，仍只给最短、事实性的动机；不要编造结果。"#;
+
+pub(crate) fn inject_v3_tool_thinking_guidance_at_req04(
+    payload: &mut Value,
+    current_payload_start: usize,
+    enabled: bool,
+) -> Result<(), V3HubRelayRequestError> {
+    if !enabled {
+        return Ok(());
+    }
+    if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
+        if current_payload_start > messages.len() {
+            return Err(V3HubRelayRequestError::CurrentPayloadBoundaryInvalid {
+                start: current_payload_start,
+                len: messages.len(),
+            });
+        }
+    }
+    if let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) {
+        inject_tool_thinking_into_tools(tools);
+    }
+    if let Some(tools) = payload
+        .pointer_mut("/additional_tools/tools")
+        .and_then(Value::as_array_mut)
+    {
+        inject_tool_thinking_into_tools(tools);
+    }
+    Ok(())
+}
+
+fn inject_tool_thinking_into_tools(tools: &mut Vec<Value>) {
+    for tool in tools {
+        if let Some(declarations) = tool
+            .get_mut("function_declarations")
+            .and_then(Value::as_array_mut)
+        {
+            inject_tool_thinking_into_tools(declarations);
+            continue;
+        }
+        let name = tool
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| tool.pointer("/function/name").and_then(Value::as_str))
+            .unwrap_or_default()
+            .trim();
+        if name.is_empty()
+            || matches!(
+                name,
+                "reasoningStop" | "noop" | "web_search" | "web_search_preview"
+            )
+        {
+            continue;
+        }
+        let description = if tool.get("function").is_some() {
+            tool.pointer_mut("/function/description")
+        } else {
+            tool.get_mut("description")
+        };
+        let Some(description) = description else {
+            continue;
+        };
+        let Some(existing) = description.as_str() else {
+            continue;
+        };
+        if existing.contains("<toolreason>动机</toolreason>") {
+            continue;
+        }
+        *description = Value::String(format!("{existing}\n\n{V3_TOOL_THINKING_GUIDANCE}"));
+    }
+}
 pub(crate) fn is_v3_stopless_internal_call_id(call_id: &str) -> bool {
     call_id == STOPLESS_CALL_ID
 }
@@ -69,6 +152,7 @@ pub(crate) fn govern_v3_servertool_request_at_req04(
     events: &mut Vec<V3HubRelayRequestHookEvent>,
     stopless_enabled: bool,
     web_search_mode_b: bool,
+    tool_thinking_enabled: bool,
     stopless_center_state: Option<&V3StoplessCenterState>,
     transition_request_id: Option<&str>,
     transition_updated_at: Option<u64>,
@@ -118,6 +202,11 @@ pub(crate) fn govern_v3_servertool_request_at_req04(
     } else {
         None
     };
+    inject_v3_tool_thinking_guidance_at_req04(
+        payload,
+        current_payload_start,
+        tool_thinking_enabled,
+    )?;
     Ok((stopless_state, web_search_state))
 }
 

@@ -536,15 +536,23 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         } else {
             V3HubContinuationLookup::new(None, base_hub_scope)
         };
-        let request_hook_profile =
-            if request_web_search_execution_mode.is_metadata_center_local_search() {
-                // Mode B：Req04 需在工具面含标准 web_search 声明时激活 websearch
-                // ServerTool 实例（LocalToolSurfaceActive），供 Resp03 同轮拦截。
-                V3HubServertoolRequestProfile::enabled(["servertool.request"])
-                    .with_web_search_execution_mode(request_web_search_execution_mode)
-            } else {
-                V3HubServertoolRequestProfile::disabled()
-            };
+        let tool_thinking_enabled = manifest
+            .features
+            .get("tool_thinking")
+            .copied()
+            .unwrap_or(false);
+        let request_hook_profile = if request_web_search_execution_mode
+            .is_metadata_center_local_search()
+            || tool_thinking_enabled
+        {
+            // Mode B：Req04 需在工具面含标准 web_search 声明时激活 websearch
+            // ServerTool 实例（LocalToolSurfaceActive），供 Resp03 同轮拦截。
+            V3HubServertoolRequestProfile::enabled(["servertool.request"])
+                .with_web_search_execution_mode(request_web_search_execution_mode)
+                .with_tool_thinking_enabled(tool_thinking_enabled)
+        } else {
+            V3HubServertoolRequestProfile::disabled()
+        };
         compile_v3_hub_relay_request_hooks().run_from_normalized(
             req02,
             &lookup,
@@ -554,7 +562,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
     let request_web_search_state = request_outcome.web_search_state().cloned();
-    let mut response_hook_profile = response_hook_profile;
+    let mut response_hook_profile = response_hook_profile.with_tool_thinking_enabled(
+        manifest
+            .features
+            .get("tool_thinking")
+            .copied()
+            .unwrap_or(false),
+    );
     if request_web_search_execution_mode.is_metadata_center_local_search() {
         response_hook_profile =
             response_hook_profile.with_web_search_execution_mode(request_web_search_execution_mode);

@@ -173,6 +173,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             .map_err(|error| {
                 V3ResponsesRelayRuntimeError::ProviderWireEncoding(error.to_string())
             })?;
+    let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
     let req04 = request_outcome.into_governed();
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
@@ -806,6 +807,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         provider_id: Some(&selected_target_provider_id),
                         provider_protocol: hook_provider_protocol,
                         provider_response_transport_intent: V3HubTransportIntent::Json,
+                        tool_thinking_enabled: request_tool_thinking_enabled,
                         compatibility_profile: selected.candidate.compatibility_profile.as_deref(),
                         web_search_execution_mode: selected.candidate.web_search_execution_mode,
                         web_search_center_state: request_web_search_state,
@@ -1131,6 +1133,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         provider_id: Some(&selected_target_provider_id),
                         provider_protocol: hook_provider_protocol,
                         provider_response_transport_intent: V3HubTransportIntent::Sse,
+                        tool_thinking_enabled: request_tool_thinking_enabled,
                         compatibility_profile: selected.candidate.compatibility_profile.as_deref(),
                         web_search_execution_mode: selected.candidate.web_search_execution_mode,
                         // web_search 与 stopless 解耦：当前轮拦截直接使用 Req04

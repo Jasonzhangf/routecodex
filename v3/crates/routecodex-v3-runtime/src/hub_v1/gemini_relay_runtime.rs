@@ -1,4 +1,5 @@
 use super::*;
+use super::{provider_compat_boundary_source, V3ProviderCompatErrorClassification};
 use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
     v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
@@ -8,7 +9,6 @@ use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
 };
-use super::{provider_compat_boundary_source, V3ProviderCompatErrorClassification};
 use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_parts_with_timeout,
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderError, V3ProviderRequestHeader,
@@ -225,10 +225,22 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
     }
 
     fn request_hook_profile(
-        _manifest: &V3Config05ManifestPublished,
+        manifest: &V3Config05ManifestPublished,
         _payload: &Value,
     ) -> Result<V3HubServertoolRequestProfile, V3RelayCoreError> {
-        Ok(V3HubServertoolRequestProfile::disabled())
+        let enabled = manifest
+            .features
+            .get("tool_thinking")
+            .copied()
+            .unwrap_or(false);
+        if enabled {
+            Ok(
+                V3HubServertoolRequestProfile::enabled(["servertool.request"])
+                    .with_tool_thinking_enabled(true),
+            )
+        } else {
+            Ok(V3HubServertoolRequestProfile::disabled())
+        }
     }
 
     fn provider_http_failure(
@@ -277,6 +289,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         _web_search_execution_mode: V3WebSearchExecutionMode,
         _web_search_state: Option<&V3WebSearchCenterState>,
         retain_response_cipher: bool,
+        tool_thinking_enabled: bool,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response(
             provider_value,
@@ -284,6 +297,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             trace,
             compatibility_profile,
             retain_response_cipher,
+            tool_thinking_enabled,
         )
         .map_err(|error| V3RelayCoreError::Target(error.to_string()))
     }
@@ -315,12 +329,14 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         _web_search_execution_mode: V3WebSearchExecutionMode,
         _web_search_state: Option<V3WebSearchCenterState>,
         _retain_response_cipher: bool,
+        tool_thinking_enabled: bool,
         outcome: V3GeminiSseProviderOutcome,
     ) -> Result<V3GeminiRelayClientStream, V3RelayCoreError> {
         Ok(project_sse_stream(
             provider,
             compatibility_profile,
             _retain_response_cipher,
+            tool_thinking_enabled,
             outcome,
         ))
     }
@@ -420,10 +436,7 @@ pub fn project_v3_gemini_relay_runtime_failure(
         ),
         V3GeminiRelayRuntimeError::ProviderCompat(error) => match error.classification() {
             V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
-                super::provider_compat_boundary_source(
-                    "ProviderRespCompat02ProviderCompat",
-                    &error,
-                )
+                super::provider_compat_boundary_source("ProviderRespCompat02ProviderCompat", &error)
             }
             V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -456,6 +469,7 @@ fn project_json_response(
     trace: &mut Vec<&'static str>,
     compatibility_profile: Option<&str>,
     retain_response_cipher: bool,
+    tool_thinking_enabled: bool,
 ) -> Result<Value, V3GeminiRelayRuntimeError> {
     validate_v3_gemini_provider_response_payload(
         &provider_value,
@@ -480,7 +494,9 @@ fn project_json_response(
     trace.push("V3HubRespInbound02Normalized");
     let resp03 = hooks.govern(
         resp02,
-        &V3HubRelayResponseHookProfile::empty().with_retain_response_cipher(retain_response_cipher),
+        &V3HubRelayResponseHookProfile::empty()
+            .with_retain_response_cipher(retain_response_cipher)
+            .with_tool_thinking_enabled(tool_thinking_enabled),
     )?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
@@ -502,6 +518,7 @@ struct V3GeminiSseState {
     compatibility_profile: Option<String>,
     /// 请求侧 VR 路由决策算好的"保留响应密文"标记，SSE 帧级 Resp03 消费。
     retain_response_cipher: bool,
+    tool_thinking_enabled: bool,
     provider_outcome: V3GeminiSseProviderOutcome,
 }
 
@@ -555,6 +572,7 @@ fn project_sse_stream(
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     compatibility_profile: Option<String>,
     retain_response_cipher: bool,
+    tool_thinking_enabled: bool,
     provider_outcome: V3GeminiSseProviderOutcome,
 ) -> V3GeminiRelayClientStream {
     use futures_util::StreamExt;
@@ -568,6 +586,7 @@ fn project_sse_stream(
         done: false,
         compatibility_profile,
         retain_response_cipher,
+        tool_thinking_enabled,
         provider_outcome,
     };
     Box::pin(futures_util::stream::unfold(
@@ -662,6 +681,7 @@ fn enqueue_sse_client_chunks(
             payload,
             state.compatibility_profile.as_deref(),
             state.retain_response_cipher,
+            state.tool_thinking_enabled,
         )?;
         state.terminal = gemini_payload_has_terminal_finish_reason(&client_payload)?;
         state
@@ -675,6 +695,7 @@ fn project_sse_event_payload(
     payload: Value,
     compatibility_profile: Option<&str>,
     retain_response_cipher: bool,
+    tool_thinking_enabled: bool,
 ) -> Result<Value, String> {
     let mut trace = Vec::new();
     project_json_response(
@@ -683,6 +704,7 @@ fn project_sse_event_payload(
         &mut trace,
         compatibility_profile,
         retain_response_cipher,
+        tool_thinking_enabled,
     )
     .map_err(|error| error.to_string())
 }

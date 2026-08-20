@@ -51,6 +51,9 @@ pub(crate) fn build_resource_registry(
     features
         .entry("stopless_center".to_string())
         .or_insert(true);
+    features
+        .entry("tool_thinking".to_string())
+        .or_insert(false);
 
     Ok(V3Config04ResourceRegistryBuilt {
         version: authoring.version,

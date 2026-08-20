@@ -245,6 +245,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         web_search_execution_mode: V3WebSearchExecutionMode,
         web_search_state: Option<&V3WebSearchCenterState>,
         retain_response_cipher: bool,
+        tool_thinking_enabled: bool,
     ) -> Result<Value, V3RelayCoreError>;
     /// 构建 SSE provider outcome。
     fn build_sse_outcome(
@@ -266,6 +267,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         web_search_execution_mode: V3WebSearchExecutionMode,
         web_search_state: Option<V3WebSearchCenterState>,
         retain_response_cipher: bool,
+        tool_thinking_enabled: bool,
         outcome: Self::SseOutcome,
     ) -> Result<Self::SseStream, V3RelayCoreError>;
     /// 组装 JSON 成功输出（observability 由骨架统一构建，codec 只负责写入
@@ -358,6 +360,7 @@ where
     trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
     let request_web_search_state = request_outcome.web_search_state().cloned();
+    let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
     let req04 = request_outcome.into_governed();
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
@@ -658,6 +661,7 @@ where
                     selected.candidate.web_search_execution_mode,
                     request_web_search_state.as_ref(),
                     retain_response_cipher,
+                    request_tool_thinking_enabled,
                 ) {
                     Ok(client_response) => client_response,
                     // 治理层拦截但入口无投影路径：非 provider 失败，禁止进入失败
@@ -784,6 +788,7 @@ where
                     selected.candidate.web_search_execution_mode,
                     request_web_search_state.clone(),
                     retain_response_cipher,
+                    request_tool_thinking_enabled,
                     C::build_sse_outcome(
                         &provider_health,
                         &failure_session_scope,

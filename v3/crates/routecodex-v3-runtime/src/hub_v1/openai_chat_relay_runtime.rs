@@ -219,10 +219,7 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
         ),
         V3OpenAiChatRelayRuntimeError::ProviderCompat(error) => match error.classification() {
             V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
-                super::provider_compat_boundary_source(
-                    "ProviderRespCompat02ProviderCompat",
-                    &error,
-                )
+                super::provider_compat_boundary_source("ProviderRespCompat02ProviderCompat", &error)
             }
             V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -251,6 +248,7 @@ fn project_json_response(
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<&V3WebSearchCenterState>,
     retain_response_cipher: bool,
+    tool_thinking_enabled: bool,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
     // SSE 流式帧 / JSON 兜底：候选 Mode B 时，payload 内出现**本地** websearch
     // function tool call 必须 fail-fast（禁止静默透传——内部工具无客户端投影）。
@@ -325,7 +323,8 @@ fn project_json_response(
     let hooks = compile_v3_hub_relay_response_hooks();
     let mut response_profile = V3HubRelayResponseHookProfile::empty()
         .with_web_search_execution_mode(web_search_execution_mode)
-        .with_retain_response_cipher(retain_response_cipher);
+        .with_retain_response_cipher(retain_response_cipher)
+        .with_tool_thinking_enabled(tool_thinking_enabled);
     if let Some(state) = web_search_center_state {
         response_profile = response_profile.with_web_search_center_state(state.clone());
     }
@@ -377,6 +376,7 @@ struct V3OpenAiChatSseState {
     /// 治理层拒绝（web_search Mode B 无投影路径）typed 标志：这是 RouteCodex
     /// 控制面决策，不是 provider 流错误，禁止写 provider-health。
     governance_rejected: bool,
+    tool_thinking_enabled: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 }
 
@@ -432,6 +432,7 @@ fn project_sse_stream(
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
+    tool_thinking_enabled: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3OpenAiChatClientStream {
     use futures_util::StreamExt;
@@ -448,6 +449,7 @@ fn project_sse_stream(
         web_search_execution_mode,
         web_search_center_state,
         retain_response_cipher,
+        tool_thinking_enabled,
         governance_rejected: false,
         provider_outcome,
     };
@@ -620,6 +622,7 @@ fn enqueue_sse_client_chunks(
             state.web_search_execution_mode,
             state.web_search_center_state.as_ref(),
             state.retain_response_cipher,
+            state.tool_thinking_enabled,
         )
         .map_err(|error| match error {
             // 治理层拒绝（web_search Mode B 无投影路径）：不是 provider 流
@@ -667,6 +670,7 @@ fn project_responses_sse_as_openai_chat_stream(
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
+    tool_thinking_enabled: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3OpenAiChatClientStream {
     use futures_util::StreamExt;
@@ -684,9 +688,10 @@ fn project_responses_sse_as_openai_chat_stream(
             false,
             compatibility_profile,
             web_search_execution_mode,
-            web_search_center_state,
-            retain_response_cipher,
-            provider_outcome,
+        web_search_center_state,
+        retain_response_cipher,
+        tool_thinking_enabled,
+        provider_outcome,
         ),
         |(
             mut provider,
@@ -699,6 +704,7 @@ fn project_responses_sse_as_openai_chat_stream(
             web_search_execution_mode,
             web_search_center_state,
             retain_response_cipher,
+            tool_thinking_enabled,
             mut provider_outcome,
         )| async move {
             loop {
@@ -714,9 +720,10 @@ fn project_responses_sse_as_openai_chat_stream(
                             finished,
                             compatibility_profile,
                             web_search_execution_mode,
-                            web_search_center_state,
-                            retain_response_cipher,
-                            provider_outcome,
+            web_search_center_state,
+            retain_response_cipher,
+            tool_thinking_enabled,
+            provider_outcome,
                         ),
                     ));
                 }
@@ -750,6 +757,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                 web_search_execution_mode,
                                 web_search_center_state,
                                 retain_response_cipher,
+                                tool_thinking_enabled,
                                 provider_outcome,
                             ),
                         ));
@@ -770,6 +778,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                 web_search_execution_mode,
                                 web_search_center_state,
                                 retain_response_cipher,
+                                tool_thinking_enabled,
                                 provider_outcome,
                             ),
                         )),
@@ -827,6 +836,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                 web_search_execution_mode,
                                 web_search_center_state.as_ref(),
                                 retain_response_cipher,
+                                tool_thinking_enabled,
                             )
                             .map_err(|error| match error {
                                 V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
@@ -870,6 +880,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                     web_search_execution_mode,
                                     web_search_center_state,
                                     retain_response_cipher,
+                                    tool_thinking_enabled,
                                     provider_outcome,
                                 ),
                             ));
@@ -891,6 +902,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                     web_search_execution_mode,
                                     web_search_center_state,
                                     retain_response_cipher,
+                                    tool_thinking_enabled,
                                     provider_outcome,
                                 ),
                             ));
@@ -909,6 +921,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                 web_search_execution_mode,
                                 web_search_center_state,
                                 retain_response_cipher,
+                                tool_thinking_enabled,
                                 provider_outcome,
                             ),
                         ));
@@ -1030,10 +1043,18 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             Some(model) => resolve_web_search_mode_and_backend(manifest, model).0,
             None => routecodex_v3_config::V3WebSearchExecutionMode::None,
         };
-        if request_web_search_execution_mode.is_metadata_center_local_search() {
+        let tool_thinking_enabled = manifest
+            .features
+            .get("tool_thinking")
+            .copied()
+            .unwrap_or(false);
+        if request_web_search_execution_mode.is_metadata_center_local_search()
+            || tool_thinking_enabled
+        {
             Ok(
                 V3HubServertoolRequestProfile::enabled(["servertool.request"])
-                    .with_web_search_execution_mode(request_web_search_execution_mode),
+                    .with_web_search_execution_mode(request_web_search_execution_mode)
+                    .with_tool_thinking_enabled(tool_thinking_enabled),
             )
         } else {
             Ok(V3HubServertoolRequestProfile::disabled())
@@ -1112,6 +1133,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         web_search_execution_mode: V3WebSearchExecutionMode,
         web_search_state: Option<&V3WebSearchCenterState>,
         retain_response_cipher: bool,
+        tool_thinking_enabled: bool,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response(
             provider_value,
@@ -1123,6 +1145,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             web_search_execution_mode,
             web_search_state,
             retain_response_cipher,
+            tool_thinking_enabled,
         )
         .map_err(|error| match error {
             V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
@@ -1161,6 +1184,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         web_search_execution_mode: V3WebSearchExecutionMode,
         web_search_state: Option<V3WebSearchCenterState>,
         _retain_response_cipher: bool,
+        tool_thinking_enabled: bool,
         outcome: V3OpenAiChatSseProviderOutcome,
     ) -> Result<V3OpenAiChatClientStream, V3RelayCoreError> {
         if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
@@ -1170,6 +1194,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
                 web_search_execution_mode,
                 web_search_state,
                 _retain_response_cipher,
+                tool_thinking_enabled,
                 outcome,
             ));
         }
@@ -1184,6 +1209,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
                 web_search_execution_mode,
                 web_search_state,
                 _retain_response_cipher,
+                tool_thinking_enabled,
                 outcome,
             ));
         }
@@ -1197,6 +1223,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             web_search_execution_mode,
             web_search_state,
             _retain_response_cipher,
+            tool_thinking_enabled,
             outcome,
         ))
     }
