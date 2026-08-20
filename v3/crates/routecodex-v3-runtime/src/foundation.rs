@@ -11,7 +11,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityReader, V3ProviderAvailabilityRegistry,
 };
-use routecodex_v3_target::V3TargetInterpreter;
+use routecodex_v3_target::{V3AvailabilitySchedulingAdapter, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -98,6 +98,10 @@ pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
             )
         }
     };
+    let deterministic_sample =
+        crate::provider_failure_runtime_policy::v3_relay_provider_target_selection_sample(
+            &standardized.protocol_context.request_id,
+        );
     if let Err(error) = debug.record_node_event(
         &scope,
         "V3Req04StandardizedResponses",
@@ -166,7 +170,7 @@ pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
     ) {
         return project_v3_debug_failure("V3Target08KindClassified", error);
     }
-    let expanded = match target.expand_candidates(manifest, kind, 0) {
+    let expanded = match target.expand_candidates(manifest, kind, deterministic_sample) {
         Ok(node) => node,
         Err(error) => {
             return project_p5_failure(
@@ -179,7 +183,8 @@ pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
     if let Err(error) = debug.record_node_event(&scope, "V3Target09CandidateSetExpanded", "expanded", Some(json!({"candidate_count": expanded.candidates.len(), "route_target_index": expanded.route.target_index}))) {
         return project_v3_debug_failure("V3Target09CandidateSetExpanded", error);
     }
-    match target.select_available(expanded, availability, 0) {
+    let scheduling = V3AvailabilitySchedulingAdapter::new(availability);
+    match target.select_available_with_health(expanded, &scheduling, 0, deterministic_sample) {
         Ok(selected) => {
             for candidate in &selected.unavailable_candidates {
                 if let Err(error) = debug.record_node_event(

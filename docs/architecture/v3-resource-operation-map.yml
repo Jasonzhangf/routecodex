@@ -961,7 +961,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     required_gates: [provider_global_cooldown_persistence_contract, provider_global_probe_startup_contract]
-    binding_status: design
+    binding_status: source_controlled
   - resource_id: v3.provider.availability_projection
     resource_kind: side_channel
     lifecycle: v3.debug_error_foundation.mainline
@@ -1203,7 +1203,7 @@ resources:
     forbidden_readers: [routecodex-v3-sse, routecodex-v3-server]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: design
+    binding_status: source_controlled
 
   - resource_id: v3.request.selected_provider_model_bound
     resource_kind: provider_semantic_projection
@@ -1735,6 +1735,92 @@ resources:
     may_enter_metadata_center: false
     binding_status: anchored
     required_gates: [npm --prefix v3 run pack:dev, npm --prefix v3 run pack:npm]
+
+  - resource_id: v3.provider.failure_action
+    resource_kind: side_channel
+    lifecycle: v3.provider_key_health_scoring.mainline
+    owner_feature_id: v3.provider_key_health_scoring
+    owner_crate: routecodex-v3-error
+    owner_node: V3ProviderFailureAction
+    identity: [sourceStage, providerId, authAlias, modelId, failureClass, recoveryKind, scope]
+    semantic_contract:
+      classification_first: true
+      provider_health_mutation: forbidden
+      normal_payload: forbidden
+      client_payload: forbidden
+    allowed_writers: [build_v3_provider_failure_action_from_v3_error_02]
+    allowed_readers: [V3ProviderFailureRuntimeHealth::record_provider_key_failure_action]
+    forbidden_writers: [routecodex-v3-provider-responses, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-target, routecodex-v3-virtual-router, request.normal_payload, response.client_payload, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.provider.key_health_state
+    resource_kind: side_channel
+    lifecycle: v3.provider_key_health_scoring.mainline
+    owner_feature_id: v3.provider_key_health_scoring
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3ProviderKeyHealthStore
+    identity: [providerId, authAlias, scope, scoreGeneration]
+    semantic_contract:
+      key_granularity: providerId+authAlias
+      model_id: probe_and_projection_wire_model_only
+      cooldown_precedes_score: true
+      score_range: 0..1000
+      failure_and_success_streaks_persisted: true
+      normal_payload: forbidden
+      client_payload: forbidden
+    allowed_writers: [V3ProviderKeyHealthStore::record_provider_failure_action, V3ProviderKeyHealthStore::record_provider_success, V3ProviderKeyHealthStore::complete_probe_success, V3ProviderKeyHealthStore::complete_probe_failure, V3ProviderKeyHealthStore::complete_probe_success_at_generation]
+    allowed_readers: [V3ProviderKeyHealthStore::scheduling_projection, V3ProviderKeyHealthStore::provider_key_health_probe_keys, V3ProviderKeyHealthStore::acquire_provider_key_health_probe, V3ProviderSchedulingReader]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-target, routecodex-v3-virtual-router, request.normal_payload, response.client_payload, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.provider.key_health_probe
+    resource_kind: side_channel
+    lifecycle: v3.provider_key_health_scoring.mainline
+    owner_feature_id: v3.provider_key_health_scoring
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3ProviderKeyHealthProbePermit
+    identity: [providerId, authAlias, scoreGeneration]
+    semantic_contract:
+      single_flight: true
+      stale_generation_rejected: true
+      probe_wire_model: projection_only
+      normal_payload: forbidden
+      client_payload: forbidden
+    allowed_writers: [V3ProviderKeyHealthStore::acquire_provider_key_health_probe]
+    allowed_readers: [V3ProviderFailureRuntimeHealth::run_due_provider_key_health_probes]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-target, routecodex-v3-virtual-router, request.normal_payload, response.client_payload, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.provider.scheduling_projection
+    resource_kind: side_channel
+    lifecycle: v3.provider_key_health_scoring.mainline
+    owner_feature_id: v3.provider_key_health_scoring
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3ProviderSchedulingProjection
+    identity: [providerId, authAlias, modelId, priority, scoreGeneration]
+    semantic_contract:
+      priority_first: true
+      score_scope: equal_priority_bucket_only
+      health_identity: providerId+authAlias
+      blocked_key_selectable: false
+      normal_payload: forbidden
+      client_payload: forbidden
+    allowed_writers: [V3ProviderKeyHealthStore::scheduling_projection]
+    allowed_readers: [V3TargetInterpreter::select_available_with_health]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, request.normal_payload, response.client_payload, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
 
   - resource_id: v3.route.policy_observations
     resource_kind: side_channel

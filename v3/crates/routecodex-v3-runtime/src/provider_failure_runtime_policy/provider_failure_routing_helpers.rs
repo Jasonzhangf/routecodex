@@ -200,6 +200,7 @@ pub(crate) fn resolve_v3_relay_target_outcome(
         &session_availability,
         input.request_local_excluded_candidates,
         input.now_ms,
+        input.deterministic_sample,
     ) {
         Ok(selected) => V3RelayProviderTargetResolution::Selected(selected),
         Err(exhausted) => V3RelayProviderTargetResolution::Exhausted {

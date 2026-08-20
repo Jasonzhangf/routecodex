@@ -1229,6 +1229,7 @@ dependencies = [
  "routecodex-v3-sse",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite",

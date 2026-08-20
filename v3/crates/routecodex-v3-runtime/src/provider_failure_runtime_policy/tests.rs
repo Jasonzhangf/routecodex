@@ -527,6 +527,10 @@ fn post_commit_sse_failures_never_cool_provider_or_block_fresh_session() {
         "fresh-session",
     )
     .expect("fresh session scope");
+    let before =
+        routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
+            &health, "primary", "key1", "gpt-test", 1, 1, 2_000_000,
+        );
 
     for _ in 0..3 {
         health
@@ -563,6 +567,11 @@ fn post_commit_sse_failures_never_cool_provider_or_block_fresh_session() {
             .is_empty(),
         "SSE transient failures must not create provider cooldown probe state"
     );
+    let after = routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
+        &health, "primary", "key1", "gpt-test", 1, 1, 2_000_000,
+    );
+    assert_eq!(after.available, before.available);
+    assert_eq!(after.effective_weight_milli, before.effective_weight_milli);
 }
 
 #[tokio::test]

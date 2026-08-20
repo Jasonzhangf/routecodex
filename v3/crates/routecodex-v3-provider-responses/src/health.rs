@@ -181,7 +181,8 @@ struct V3ProviderHealthState {
     failure_policies: BTreeMap<String, V3ProviderFailurePolicy>,
     consecutive_failures: BTreeMap<V3ProviderFailureSessionKey, V3ProviderConsecutiveFailure>,
     cooldowns: BTreeMap<V3ProviderFailureSessionKey, V3ProviderCooldown>,
-    auth_key_consecutive_failures: BTreeMap<V3ProviderCooldownProbeKey, V3ProviderConsecutiveFailure>,
+    auth_key_consecutive_failures:
+        BTreeMap<V3ProviderCooldownProbeKey, V3ProviderConsecutiveFailure>,
     auth_key_cooldowns: BTreeMap<V3ProviderCooldownProbeKey, V3ProviderCooldown>,
     provider_cooldown_probes: BTreeMap<V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState>,
     quotas: BTreeMap<String, V3ProviderQuotaState>,
@@ -288,6 +289,7 @@ impl V3ProviderHealthStore {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_provider_failure_in_session_with_policy(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
@@ -605,13 +607,7 @@ impl V3ProviderHealthStore {
         let cooldown_until_ms =
             (!policy.until_restart).then(|| now_ms.saturating_add(policy.cooldown_ms.max(1)));
         if let Some(until_ms) = cooldown_until_ms {
-            upsert_provider_cooldown_probe(
-                &mut state,
-                provider_id,
-                auth_alias,
-                model_id,
-                until_ms,
-            );
+            upsert_provider_cooldown_probe(&mut state, provider_id, auth_alias, model_id, until_ms);
         }
         Ok(())
     }
@@ -647,6 +643,7 @@ impl V3ProviderHealthStore {
 
     /// provider 级冷却中、冷却已到期且 probe 到期的 provider 列表
     /// （(provider_id, auth_alias, model_id)）。由后台 probe 循环消费。
+    #[allow(clippy::type_complexity)]
     pub fn provider_cooldown_probe_keys_due(
         &self,
         now_ms: u64,
@@ -1153,9 +1150,9 @@ fn remove_expired_session_state(state: &mut V3ProviderHealthState, now_ms: u64) 
             .saturating_add(SESSION_STATE_IDLE_TTL_MS)
             > now_ms
     });
-    state.auth_key_consecutive_failures.retain(|_, failure| {
-        failure.last_failure_at_ms.saturating_add(60 * 60_000) > now_ms
-    });
+    state
+        .auth_key_consecutive_failures
+        .retain(|_, failure| failure.last_failure_at_ms.saturating_add(60 * 60_000) > now_ms);
 }
 
 fn availability_scope_keys(
@@ -1375,7 +1372,10 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                     100 + index as u64,
                 )
                 .unwrap();
-            assert_eq!(record.state, if index == 2 { "cooldown" } else { "healthy" });
+            assert_eq!(
+                record.state,
+                if index == 2 { "cooldown" } else { "healthy" }
+            );
             assert_eq!(
                 record.failure_count,
                 if index == 3 { 1 } else { (index + 1) as u32 }
@@ -1444,49 +1444,53 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                 Some("gpt-5.5".to_string()),
             )]
         );
-        assert!(!store
-            .availability_for_session(
-                &session("session-a"),
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                102,
-            )
-            .available);
-        assert!(!store
-            .availability_for_session(
-                &session("session-c"),
-                "provider-a",
-                Some("key-a"),
-                Some("other-model"),
-                102,
-            )
-            .available);
-        assert!(store
-            .availability_for_session(
-                &session("session-c"),
-                "provider-a",
-                Some("key-b"),
-                Some("gpt-5.5"),
-                102,
-            )
-            .available);
+        assert!(
+            !store
+                .availability_for_session(
+                    &session("session-a"),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("gpt-5.5"),
+                    102,
+                )
+                .available
+        );
+        assert!(
+            !store
+                .availability_for_session(
+                    &session("session-c"),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("other-model"),
+                    102,
+                )
+                .available
+        );
+        assert!(
+            store
+                .availability_for_session(
+                    &session("session-c"),
+                    "provider-a",
+                    Some("key-b"),
+                    Some("gpt-5.5"),
+                    102,
+                )
+                .available
+        );
         store
-            .complete_provider_cooldown_probe_success(
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-            )
+            .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("gpt-5.5"))
             .unwrap();
-        assert!(store
-            .availability_for_session(
-                &session("session-a"),
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                3_600_102,
-            )
-            .available);
+        assert!(
+            store
+                .availability_for_session(
+                    &session("session-a"),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("gpt-5.5"),
+                    3_600_102,
+                )
+                .available
+        );
     }
 
     #[test]
@@ -1727,7 +1731,10 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                 )
                 .unwrap();
             assert_eq!(record.state, "healthy");
-            assert_eq!(record.failure_count, if index == 0 { 1 } else { index as u32 });
+            assert_eq!(
+                record.failure_count,
+                if index == 0 { 1 } else { index as u32 }
+            );
         }
         for (key, available) in [("key-a", true), ("key-b", true)] {
             assert_eq!(

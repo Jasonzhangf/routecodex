@@ -3,6 +3,7 @@ mod error;
 pub mod global_cooldown;
 #[cfg_attr(not(test), allow(dead_code))]
 mod health;
+pub mod key_health;
 pub mod probe;
 mod provider_cooldown_probe;
 pub mod provider_global_health;
@@ -18,8 +19,11 @@ pub use global_cooldown::{
 pub use health::{
     V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
     V3ProviderAvailabilityRegistry, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
-    V3ProviderFailureRecord,
-    V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
+    V3ProviderFailureRecord, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
+};
+pub use key_health::{
+    V3ProviderKeyHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
+    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
 };
 pub use probe::build_v3_provider_global_probe_request;
 pub use provider_global_health::{
@@ -30,6 +34,9 @@ pub use provider_global_health::{
 pub use raw_response::{
     V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseBodyKind,
     V3ProviderResponseHeader, V3ProviderSseStream,
+};
+pub use routecodex_v3_error::{
+    V3ProviderFailureAction, V3ProviderHealthScope, V3ProviderRecoveryKind,
 };
 pub use transport::{
     build_v3_anthropic_provider_request_header,

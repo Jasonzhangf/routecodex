@@ -144,6 +144,9 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                 &provider_health,
                 &failed_candidates,
                 now_epoch_ms,
+                crate::provider_failure_runtime_policy::v3_relay_provider_target_selection_sample(
+                    C::request_id(&standardized),
+                ),
                 allow_exhaustion_rescue_probe,
             )
             .await
@@ -627,24 +630,21 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             }
         }
         let provider_status = provider_raw.status();
-        let response_projection_context = match crate::kernel::v3_direct_protocol_codec::build_direct_response_compat_context(
-            C::policy_target(&policy),
-        ) {
-            Ok(context) => context,
-            Err(error) => {
-                return error_output(
-                    runtime_source("V3DirectResp14ProviderCompat", error),
-                    trace,
-                    &crate::hooks::register_responses_direct_hooks(),
-                )
-            }
-        };
-        let response_projection = match C::run_response_projection(
-            provider_raw,
-            response_projection_context,
-        )
-        .await
-        {
+        let response_projection_context =
+            match crate::kernel::v3_direct_protocol_codec::build_direct_response_compat_context(
+                C::policy_target(&policy),
+            ) {
+                Ok(context) => context,
+                Err(error) => {
+                    return error_output(
+                        runtime_source("V3DirectResp14ProviderCompat", error),
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    )
+                }
+            };
+        let response_projection =
+            match C::run_response_projection(provider_raw, response_projection_context).await {
                 Ok(projection) => projection,
                 Err(source) => {
                     if let Err(error) = runtime_timing.finish_external() {
@@ -769,19 +769,17 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                 &crate::hooks::register_responses_direct_hooks(),
             );
         }
-        let policies = match crate::route_policy::compile_route_policies(
-            manifest,
-            &route_policy_group_id,
-        ) {
-            Ok(policies) => policies,
-            Err(error) => {
-                return error_output(
-                    runtime_source("V3Router06RoutePoolResolved", error),
-                    trace,
-                    &crate::hooks::register_responses_direct_hooks(),
-                )
-            }
-        };
+        let policies =
+            match crate::route_policy::compile_route_policies(manifest, &route_policy_group_id) {
+                Ok(policies) => policies,
+                Err(error) => {
+                    return error_output(
+                        runtime_source("V3Router06RoutePoolResolved", error),
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    )
+                }
+            };
         if let Err(error) = route_policy_state.commit_request(
             &route_policy_scope,
             C::request_id(&standardized),

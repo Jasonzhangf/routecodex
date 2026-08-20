@@ -12,7 +12,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
             return Err(protocol_plan_failure(
                 runtime_source("V3Req04StandardizedResponses", error),
                 trace,
-            ))
+            ));
         }
     };
     trace.push("V3Req04StandardizedResponses");
@@ -65,10 +65,18 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     let route_policy_scope = crate::route_policy::V3RoutePolicyScope::without_conversation(
         &standardized.protocol_context.server_id,
         &classified.routing_group_id,
-        standardized.protocol_context.failure_session_scope.session_id(),
+        standardized
+            .protocol_context
+            .failure_session_scope
+            .session_id(),
         &standardized.protocol_context.server_id,
     )
-    .with_conversation(standardized.protocol_context.failure_session_scope.session_id());
+    .with_conversation(
+        standardized
+            .protocol_context
+            .failure_session_scope
+            .session_id(),
+    );
     let route_policy_observation = crate::route_policy::observe_route_turn(
         &standardized.body,
         &classified.facts.route_classification.route_name,
@@ -93,7 +101,11 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         Ok(value) => value,
         Err(error) => {
             return Err(protocol_plan_failure(
-                crate::shared::v3_route_plan_error_source("V3Router06RoutePoolResolved", "v3_route_target_runtime_failure", error),
+                crate::shared::v3_route_plan_error_source(
+                    "V3Router06RoutePoolResolved",
+                    "v3_route_target_runtime_failure",
+                    error,
+                ),
                 trace,
             ))
         }
@@ -109,9 +121,13 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         }
     };
     trace.push("V3Router07OpaqueTargetHitOnce");
+    let deterministic_sample =
+        crate::provider_failure_runtime_policy::v3_relay_provider_target_selection_sample(
+            &standardized.protocol_context.request_id,
+        );
     let kind = target.classify_kind(hit);
     trace.push("V3Target08KindClassified");
-    let expanded = match target.expand_candidates(manifest, kind, 0) {
+    let expanded = match target.expand_candidates(manifest, kind, deterministic_sample) {
         Ok(value) => value,
         Err(error) => {
             return Err(protocol_plan_failure(
@@ -131,6 +147,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         &provider_health,
         &BTreeSet::new(),
         now_epoch_ms,
+        deterministic_sample,
     ) {
         Ok(value) => value,
         Err(error) => {

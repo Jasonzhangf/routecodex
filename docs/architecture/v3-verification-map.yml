@@ -3130,7 +3130,57 @@ features:
     - docs/architecture/evidence/v3-route-policy-condition-evaluation-live.json
     dsh_review: 'VERDICT: PASS (v3-route-policy-condition-20260820-final-review-12)'
 
-- feature_id: v3.server_internal_observability_projection
+ - feature_id: v3.provider_key_health_scoring
+   status: source_controlled_runtime_pending_live_replay
+   change_risk: critical
+   owner_kind: rust_v3_provider_key_health_scoring
+   owner_modules:
+   - routecodex-v3-error
+   - routecodex-v3-provider-responses
+   - routecodex-v3-target
+   - routecodex-v3-runtime
+   - routecodex-v3-server
+   design:
+   - docs/design/v3-provider-health-scoring-cooldown-design.md
+   - docs/goals/v3-provider-health-scoring-cooldown-plan.md
+   contract:
+   - docs/architecture/v3-resource-operation-map.yml
+   - docs/architecture/v3-function-map.yml
+   - docs/architecture/v3-mainline-call-map.yml
+   - docs/architecture/manifests/v3.provider_key_health_scoring.mainline.yml
+   required_positive:
+   - classified provider failure creates exactly one typed provider failure action at the error owner
+   - classified irrecoverable failure creates scoped global cooldown
+   - recoverable failures one and two lower score without cooldown
+   - recoverable failure three creates cooldown
+   - success increases key score and clears failure streak
+   - restart retains cooldown and startup probe is required before readmission
+   - probe success clears cooldown and applies recovery floor
+   - equal-priority selection favors higher-score keys
+   required_negative:
+   - health-neutral event does not mutate score, streak, or cooldown
+   - lower-priority high-score key cannot preempt higher-priority key
+   - cooldown key cannot be selected by score
+   - stale generation probe result cannot clear newer cooldown
+   - score/cooldown/probe never enter provider or client payload
+   - Target cannot mutate health and Virtual Router cannot read or mutate score
+   required_gates:
+   - npm run test:v3-provider-health-contract
+   - npm run test:v3-p5-router-target
+   - npm run build:v3-cli
+   - npm run verify:v3-resource-map
+   - npm run verify:v3-module-boundaries
+   - npm run verify:v3-architecture-docs
+   - npm run verify:v3-cargo-fmt
+   - npm run test:v3-workspace
+   - git diff --check
+   completion_boundary:
+     source_controlled: true
+     live_cutover: required
+     global_install_restart: required
+     dsh_review: required_after_live_evidence
+
+ - feature_id: v3.server_internal_observability_projection
   status: source_active_live_verified
   owner_kind: rust_v3_bounded_internal_observability_projection
   owner_scope: Server owns bounded typed diagnostic projection state; no public observability API is registered on ordinary listeners.

@@ -330,6 +330,7 @@ owners:
   - v3.hub.provider_wire_payload
   - v3.response.provider_raw
   - v3.hub.response_semantic
+  - v3.provider_compat.profile_application
   canonical_types:
   - AdapterContext
   - ReqOutboundCompatInput
@@ -340,8 +341,6 @@ owners:
   - run_req_outbound_stage3_compat
   - run_resp_inbound_stage3_compat
   - apply_request_compat
-  resource_bindings:
-  - v3.provider_compat.profile_application
   mainline_bindings:
   - v3-model-bind-04
   - v3-provider-compat-request-01

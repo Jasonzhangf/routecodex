@@ -17,8 +17,8 @@ use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecove
 use crate::provider_failure_runtime_policy::{
     build_v3_transient_failure_record, build_v3_transient_recovery_witness,
     select_v3_expanded_target_with_exhaustion_rescue, select_v3_target_with_session_then_global,
-    v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
-    V3TargetSelectionAfterRescue, V3_TRANSIENT_RETRY_BUDGET,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    V3ProviderFailureRuntimeHealth, V3TargetSelectionAfterRescue, V3_TRANSIENT_RETRY_BUDGET,
 };
 use crate::remote_continuation::{
     V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,
@@ -57,8 +57,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 mod direct_sse_provider_outcome;
 use direct_sse_provider_outcome::{
-    wrap_direct_sse_provider_outcome_stream, wrap_direct_sse_provider_outcome_stream_with_terminal_commit,
-    V3DirectSseProviderOutcome,
+    wrap_direct_sse_provider_outcome_stream,
+    wrap_direct_sse_provider_outcome_stream_with_terminal_commit, V3DirectSseProviderOutcome,
 };
 mod direct_runtime_helpers_stream;
 mod v3_direct_protocol_codec;
@@ -499,6 +499,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             &provider_health,
                             &failed_candidates,
                             now_epoch_ms,
+                            v3_relay_provider_target_selection_sample(
+                                &standardized.protocol_context.request_id,
+                            ),
                             allow_exhaustion_rescue_probe,
                         )
                         .await

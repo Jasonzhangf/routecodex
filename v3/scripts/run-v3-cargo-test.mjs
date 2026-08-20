@@ -170,7 +170,7 @@ export function verifyV3DebugBudget({
 }
 
 function activeV3BuilderCommands() {
-  const result = spawnSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
+  const result = spawnSync('ps', ['-axo', 'pid=,ucomm=,command='], { encoding: 'utf8' });
   if (result.error || result.status !== 0) {
     throw new Error(`unable to inspect active V3 builders: ${result.error?.message ?? result.stderr ?? `exit ${result.status}`}`);
   }
@@ -183,12 +183,20 @@ function activeV3BuilderCommands() {
     .filter((line) => builderCommandUsesOwnedV3Domain(line));
 }
 
-export function builderCommandUsesOwnedV3Domain(line, cwdReader = currentProcessCwd) {
-  const match = line.match(/^(\d+)\s+(.+)$/u);
-  if (!match) return false;
+export function parseV3BuilderProcessLine(line) {
+  const match = line.match(/^(\d+)\s+(\S+)(?:\s+(.+))?$/u);
+  if (!match) return null;
   const pid = Number(match[1]);
-  const command = match[2];
-  if (!/(?:^|\s)(?:\S*\/)?(?:cargo|rustc)(?:\s|$)/u.test(command)) return false;
+  const executable = basename(match[2]);
+  if (executable !== 'cargo' && executable !== 'rustc') return null;
+  const command = match[3] ? `${match[2]} ${match[3]}` : match[2];
+  return { pid, executable, command };
+}
+
+export function builderCommandUsesOwnedV3Domain(line, cwdReader = currentProcessCwd) {
+  const process = parseV3BuilderProcessLine(line);
+  if (!process) return false;
+  const { pid, command } = process;
   if (command.includes(manifestPath) || command.includes(targetDir)) return true;
   const looksLikeV3Builder = command.includes('v3/Cargo.toml')
     || command.includes(`${sep}v3${sep}target${sep}`)

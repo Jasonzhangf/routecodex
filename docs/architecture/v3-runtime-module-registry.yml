@@ -2,6 +2,10 @@ version: 1
 status: active
 source_root: v3/crates
 modules:
+  - module_id: v3.admin
+    owner_feature_id: v3.config_server_full_function
+    owned_paths:
+      - v3/crates/routecodex-v3-admin/**
   - module_id: v3.provider_compat_core
     owner_feature_id: v3.provider_compat_profile_loading
     owned_paths:

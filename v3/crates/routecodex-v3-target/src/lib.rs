@@ -4,7 +4,7 @@ use routecodex_v3_config::{
     V3RouteGroupManifest, V3RoutePoolManifest, V3RoutePoolTargetManifest, V3RouteTargetKind,
     V3SelectionStrategy, V3WebSearchExecutionMode,
 };
-use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
+use routecodex_v3_provider_responses::{V3ProviderAvailabilityReader, V3ProviderSchedulingReader};
 use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTargetHitOnce};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -44,6 +44,8 @@ pub struct V3TargetCandidate {
     pub secret_key: Option<String>,
     pub api_key: Option<String>,
     pub required_capabilities: Vec<String>,
+    pub priority: i32,
+    pub weight: u32,
     pub pool_ids: Vec<String>,
     pub default_pool_member: bool,
     pub path: Vec<String>,
@@ -106,6 +108,47 @@ pub struct V3TargetInterpreter {
     cursors: Arc<Mutex<BTreeMap<String, usize>>>,
 }
 
+/// Adapts legacy availability-only callers to the canonical health-aware
+/// selector without creating a second selection algorithm.
+pub struct V3AvailabilitySchedulingAdapter<'a, R> {
+    availability: &'a R,
+}
+
+impl<'a, R: V3ProviderAvailabilityReader> V3AvailabilitySchedulingAdapter<'a, R> {
+    pub fn new(availability: &'a R) -> Self {
+        Self { availability }
+    }
+}
+
+impl<R: V3ProviderAvailabilityReader> V3ProviderSchedulingReader
+    for V3AvailabilitySchedulingAdapter<'_, R>
+{
+    fn scheduling_projection(
+        &self,
+        provider_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+        priority: i32,
+        base_weight: u32,
+        now_ms: u64,
+    ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+        let availability =
+            self.availability
+                .availability(provider_id, Some(auth_alias), Some(model_id), now_ms);
+        let mut projection = routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
+            provider_id,
+            auth_alias,
+            model_id,
+            priority,
+            1_000,
+            base_weight,
+        );
+        projection.available = availability.available;
+        projection.blocked_scopes = availability.blocked_scopes;
+        projection
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct V3TargetExpansionScope {
     path: Vec<String>,
@@ -114,16 +157,6 @@ struct V3TargetExpansionScope {
     required_capabilities: Vec<String>,
     requested_model_filter: Option<String>,
     visible_model_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum V3TargetContextAdmission {
-    Normal,
-    NearLimit,
-    Exceeded {
-        input_tokens: u64,
-        max_context_tokens: u64,
-    },
 }
 
 impl V3TargetInterpreter {
@@ -139,6 +172,8 @@ impl V3TargetInterpreter {
             Some(provider_id),
             Some(model_id),
             Some(auth_alias),
+            0,
+            1,
             0,
             V3TargetExpansionScope {
                 path: vec!["continuation:exact_pin".to_string()],
@@ -184,6 +219,8 @@ impl V3TargetInterpreter {
                     Some(provider_id),
                     Some(model_id),
                     None,
+                    0,
+                    1,
                     deterministic_sample,
                     V3TargetExpansionScope {
                         path: vec![format!("direct:{provider_id}.{model_id}")],
@@ -268,79 +305,84 @@ impl V3TargetInterpreter {
         })
     }
 
-    pub fn select_available<R: V3ProviderAvailabilityReader>(
+    pub fn select_available_with_health<R: V3ProviderSchedulingReader>(
         &self,
         expanded: V3Target09CandidateSetExpanded,
-        availability: &R,
+        scheduling: &R,
         now_ms: u64,
+        deterministic_sample: u64,
     ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
         let mut unavailable = Vec::new();
-        // An explicit `provider.model` pin is diagnostic intent (V2 semantics):
-        // health cooldowns are reported but never veto the pinned provider.
-        // Explicit exclusions still block via the exhaustion path below.
+        let mut eligible = Vec::new();
+        let mut near_limit_eligible = Vec::new();
         let direct_route = expanded.route.pool_id == "direct";
         let default_pool_route = expanded.route.pool_id == "default";
         let mut direct_fallback: Option<(usize, V3TargetCandidate)> = None;
         let mut default_floor_fallback: Option<(usize, V3TargetCandidate)> = None;
+        let mut saw_non_context_candidate = false;
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
                     "{}:{}:{}:capability_mismatch",
                     candidate.provider_id, candidate.auth_alias, candidate.model_id
                 ));
+                saw_non_context_candidate = true;
+                continue;
             }
-            let context_exceeded = if let Some(reason) =
+            let mut near_limit = false;
+            if let Some(reason) =
                 context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
             {
                 unavailable.push(reason);
-                if !direct_route && !(default_pool_route && candidate.default_pool_member) {
+                if !(default_pool_route && candidate.default_pool_member) {
                     continue;
                 }
-                true
+            } else if let Some(reason) =
+                context_window_near_limit_reason(expanded.route.request_input_tokens, candidate)
+            {
+                unavailable.push(reason);
+                saw_non_context_candidate = true;
+                near_limit = true;
             } else {
-                false
-            };
-            let projection = availability.availability(
+                saw_non_context_candidate = true;
+            }
+            let projection = scheduling.scheduling_projection(
                 &candidate.provider_id,
-                Some(&candidate.auth_alias),
-                Some(&candidate.model_id),
+                &candidate.auth_alias,
+                &candidate.model_id,
+                candidate.priority,
+                candidate.weight,
                 now_ms,
             );
             if projection.available {
-                if context_exceeded {
+                if context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
+                    .is_some()
+                {
+                    if default_floor_fallback.is_none() {
+                        default_floor_fallback = Some((index, candidate.clone()));
+                    }
                     if direct_route && direct_fallback.is_none() {
                         direct_fallback = Some((index, candidate.clone()));
                     }
-                    if default_pool_route
-                        && candidate.default_pool_member
-                        && default_floor_fallback.is_none()
-                    {
-                        default_floor_fallback = Some((index, candidate.clone()));
-                    }
                     continue;
                 }
-                return Ok(V3Target10ConcreteProviderSelected {
-                    route: expanded.route,
-                    candidate: candidate.clone(),
-                    unavailable_candidates: unavailable,
-                    attempts: index + 1,
-                    default_floor_protected: false,
-                });
+                if near_limit {
+                    near_limit_eligible.push((index, candidate, projection));
+                } else {
+                    eligible.push((index, candidate, projection));
+                }
+            } else {
+                unavailable.push(format_candidate_scheduling_unavailable(
+                    candidate,
+                    &projection,
+                ));
+                if direct_route && direct_fallback.is_none() && projection.blocked_scopes.is_empty()
+                {
+                    direct_fallback = Some((index, candidate.clone()));
+                }
             }
-            if direct_route
-                && direct_fallback.is_none()
-                && !projection
-                    .blocked_scopes
-                    .iter()
-                    .any(|scope| scope == "request_local_provider_failure")
-            {
-                direct_fallback = Some((index, candidate.clone()));
-            }
-            unavailable.push(format_candidate_availability_unavailable(
-                candidate,
-                &projection,
-            ));
         }
+
         if let Some((index, candidate)) = direct_fallback {
             return Ok(V3Target10ConcreteProviderSelected {
                 route: expanded.route,
@@ -350,19 +392,99 @@ impl V3TargetInterpreter {
                 default_floor_protected: false,
             });
         }
-        if let Some((index, candidate)) = default_floor_fallback {
-            return Ok(V3Target10ConcreteProviderSelected {
-                route: expanded.route,
-                candidate,
-                unavailable_candidates: unavailable,
-                attempts: index + 1,
-                default_floor_protected: true,
-            });
+        if eligible.is_empty() {
+            eligible = near_limit_eligible;
         }
-        Err(V3TargetExhaustion {
-            route: Box::new(expanded.route),
-            attempted_candidates: unavailable,
+        let Some(min_priority) = eligible
+            .iter()
+            .map(|(_, _, projection)| projection.priority)
+            .min()
+        else {
+            if !direct_route && (saw_non_context_candidate || expanded.candidates.len() == 1) {
+                if let Some((index, candidate)) = default_floor_fallback {
+                    return Ok(V3Target10ConcreteProviderSelected {
+                        route: expanded.route,
+                        candidate,
+                        unavailable_candidates: unavailable,
+                        attempts: index + 1,
+                        default_floor_protected: true,
+                    });
+                }
+            }
+            return Err(V3TargetExhaustion {
+                route: Box::new(expanded.route),
+                attempted_candidates: unavailable,
+            });
+        };
+        let mut tier = eligible
+            .into_iter()
+            .filter(|(_, _, projection)| projection.priority == min_priority)
+            .collect::<Vec<_>>();
+        let total_weight = tier
+            .iter()
+            .map(|(_, _, projection)| projection.effective_weight_milli)
+            .sum::<u64>();
+        let mut point = deterministic_sample % total_weight.max(1);
+        let mut chosen = 0;
+        for (tier_index, (_, _, projection)) in tier.iter().enumerate() {
+            if point < projection.effective_weight_milli {
+                chosen = tier_index;
+                break;
+            }
+            point = point.saturating_sub(projection.effective_weight_milli);
+        }
+        let (index, candidate, _) = tier.swap_remove(chosen);
+        Ok(V3Target10ConcreteProviderSelected {
+            route: expanded.route,
+            candidate: candidate.clone(),
+            unavailable_candidates: unavailable,
+            attempts: index + 1,
+            default_floor_protected: false,
         })
+    }
+
+    pub fn select_available<R: V3ProviderAvailabilityReader>(
+        &self,
+        expanded: V3Target09CandidateSetExpanded,
+        availability: &R,
+        now_ms: u64,
+    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+        let scheduling = V3AvailabilitySchedulingAdapter::new(availability);
+        let normalize = |candidates: &mut Vec<String>| {
+            for unavailable in candidates {
+                if let Some(candidate) = expanded.candidates.iter().find(|candidate| {
+                    format!(
+                        "{}:{}:{}:health_cooldown",
+                        candidate.provider_id, candidate.auth_alias, candidate.model_id
+                    ) == *unavailable
+                }) {
+                    let projection = availability.availability(
+                        &candidate.provider_id,
+                        Some(&candidate.auth_alias),
+                        Some(&candidate.model_id),
+                        now_ms,
+                    );
+                    *unavailable =
+                        format_candidate_availability_unavailable(candidate, &projection);
+                }
+            }
+        };
+        let deterministic_sample = legacy_selection_sample(&expanded);
+        match self.select_available_with_health(
+            expanded.clone(),
+            &scheduling,
+            now_ms,
+            deterministic_sample,
+        ) {
+            Ok(mut selected) => {
+                normalize(&mut selected.unavailable_candidates);
+                Ok(selected)
+            }
+            Err(mut exhausted) => {
+                normalize(&mut exhausted.attempted_candidates);
+                Err(exhausted)
+            }
+        }
     }
 
     fn expand_route_target(
@@ -379,6 +501,8 @@ impl V3TargetInterpreter {
                 target.provider.as_deref(),
                 target.model.as_deref(),
                 target.key.as_deref(),
+                target.priority.unwrap_or(0),
+                target.weight.unwrap_or(1),
                 sample,
                 scope,
             ),
@@ -443,6 +567,8 @@ impl V3TargetInterpreter {
                     target.provider.as_deref(),
                     target.model.as_deref().or(Some(forwarder.model.as_str())),
                     target.key.as_deref(),
+                    target.priority.unwrap_or(0),
+                    target.weight.unwrap_or(1),
                     sample.wrapping_add(index as u64),
                     scope.clone(),
                 ),
@@ -476,6 +602,8 @@ impl V3TargetInterpreter {
         provider_id: Option<&str>,
         model_id: Option<&str>,
         key: Option<&str>,
+        priority: i32,
+        weight: u32,
         sample: u64,
         mut scope: V3TargetExpansionScope,
     ) -> Result<Vec<V3TargetCandidate>, V3TargetError> {
@@ -568,6 +696,8 @@ impl V3TargetInterpreter {
                 secret_key: entry.secret_key.clone(),
                 api_key: entry.api_key.clone(),
                 required_capabilities: scope.required_capabilities.clone(),
+                priority,
+                weight: weight.max(1),
                 pool_ids: scope.pool_ids.clone(),
                 default_pool_member: scope.default_pool_member,
                 path: scope.path.clone(),
@@ -621,30 +751,6 @@ impl V3TargetInterpreter {
         }
         order
     }
-}
-
-fn candidate_context_admission(
-    candidate: &V3TargetCandidate,
-    request_input_tokens: u64,
-) -> V3TargetContextAdmission {
-    let Some(max_context_tokens) = candidate.max_context_tokens else {
-        return V3TargetContextAdmission::Normal;
-    };
-    let scaled_input_tokens = ((u128::from(request_input_tokens)
-        * u128::from(candidate.context_token_estimate_scale_bps)
-        + 9_999)
-        / 10_000)
-        .min(u128::from(u64::MAX)) as u64;
-    if scaled_input_tokens > max_context_tokens {
-        return V3TargetContextAdmission::Exceeded {
-            input_tokens: scaled_input_tokens,
-            max_context_tokens,
-        };
-    }
-    if u128::from(scaled_input_tokens) * 100 >= u128::from(max_context_tokens) * 90 {
-        return V3TargetContextAdmission::NearLimit;
-    }
-    V3TargetContextAdmission::Normal
 }
 
 fn selected_route_required_capabilities(
@@ -833,21 +939,66 @@ fn candidate_satisfies_required_capabilities(candidate: &V3TargetCandidate) -> b
         .all(|required| candidate_has_required_capability(&candidate.model_capabilities, required))
 }
 
+fn legacy_selection_sample(expanded: &V3Target09CandidateSetExpanded) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for value in [
+        expanded.route.server_id.as_str(),
+        expanded.route.routing_group_id.as_str(),
+        expanded.route.pool_id.as_str(),
+    ] {
+        for byte in value.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    hash
+}
+
 fn context_window_exceeded_reason(
     request_input_tokens: u64,
     candidate: &V3TargetCandidate,
 ) -> Option<String> {
     let max_context_tokens = candidate.max_context_tokens?;
-    (request_input_tokens > max_context_tokens).then(|| {
+    let scaled_input_tokens = ((u128::from(request_input_tokens)
+        * u128::from(candidate.context_token_estimate_scale_bps)
+        + 9_999)
+        / 10_000)
+        .min(u128::from(u64::MAX)) as u64;
+    (scaled_input_tokens > max_context_tokens).then(|| {
         format!(
             "{}:{}:{}:context_window_exceeded(input_tokens={},max_context_tokens={})",
             candidate.provider_id,
             candidate.auth_alias,
             candidate.model_id,
-            request_input_tokens,
+            scaled_input_tokens,
             max_context_tokens
         )
     })
+}
+
+fn context_window_near_limit_reason(
+    request_input_tokens: u64,
+    candidate: &V3TargetCandidate,
+) -> Option<String> {
+    let max_context_tokens = candidate.max_context_tokens?;
+    let scaled_input_tokens = scaled_context_input_tokens(candidate, request_input_tokens);
+    (u128::from(scaled_input_tokens) * 100 >= u128::from(max_context_tokens) * 90).then(|| {
+        format!(
+            "{}:{}:{}:context_window_near_limit(input_tokens={},max_context_tokens={})",
+            candidate.provider_id,
+            candidate.auth_alias,
+            candidate.model_id,
+            scaled_input_tokens,
+            max_context_tokens
+        )
+    })
+}
+
+fn scaled_context_input_tokens(candidate: &V3TargetCandidate, request_input_tokens: u64) -> u64 {
+    ((u128::from(request_input_tokens) * u128::from(candidate.context_token_estimate_scale_bps)
+        + 9_999)
+        / 10_000)
+        .min(u128::from(u64::MAX)) as u64
 }
 
 fn candidate_has_required_capability(capabilities: &[String], required: &str) -> bool {
@@ -869,6 +1020,24 @@ fn format_candidate_availability_unavailable(
     );
     if projection.blocked_scopes.is_empty() {
         return key;
+    }
+    format!(
+        "{}:availability({})",
+        key,
+        projection.blocked_scopes.join("|")
+    )
+}
+
+fn format_candidate_scheduling_unavailable(
+    candidate: &V3TargetCandidate,
+    projection: &routecodex_v3_provider_responses::V3ProviderSchedulingProjection,
+) -> String {
+    let key = format!(
+        "{}:{}:{}",
+        candidate.provider_id, candidate.auth_alias, candidate.model_id
+    );
+    if projection.blocked_scopes.is_empty() {
+        return format!("{key}:health_cooldown");
     }
     format!(
         "{}:availability({})",

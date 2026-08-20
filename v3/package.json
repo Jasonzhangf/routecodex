@@ -150,7 +150,7 @@
     "test:v3-direct-protocol-plan-session-cooldown": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib direct_protocol_plan_uses_session_bound_cooldown_before_initial_target -- --nocapture",
     "test:v3-responses-process-execution-decision": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib responses_provider_process_ -- --nocapture",
     "test:v3-error-contract": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --test error_chain_contract -- --nocapture",
-    "test:v3-provider-health-contract": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses health::tests -- --nocapture",
+    "test:v3-provider-health-contract": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses health::tests -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_key_health_contract -- --nocapture",
     "test:v3-provider-adaptive-concurrency": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses adaptive_concurrency -- --test-threads=1",
     "test:v3-p5-server-blackbox": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server -- --nocapture",
     "test:v3-vr-full-function-cli": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test vr_full_function_controlled_replay -- --nocapture",

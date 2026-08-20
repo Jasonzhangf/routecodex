@@ -313,6 +313,10 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/provider_error_policy_matching.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
+  - v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
@@ -4959,6 +4963,75 @@ features:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib route_policy::tests
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
+  - git diff --check
+  migration_target: rust
+  runtime_status: source_controlled_runtime_pending_live_replay
+
+- feature_id: v3.provider_key_health_scoring
+  status: source_controlled_runtime_pending_live_replay
+  change_risk: critical
+  owner_kind: rust_v3_provider_key_health_scoring
+  owner_scope: Provider-owned key score, failure/success streak, typed recovery action application, persisted cooldown/probe recovery, and Target same-priority scheduling projection.
+  owner_crates:
+  - routecodex-v3-error
+  - routecodex-v3-provider-responses
+  - routecodex-v3-target
+  - routecodex-v3-runtime
+  owner_files:
+  - v3/crates/routecodex-v3-error/src/lib.rs
+  - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+  - v3/crates/routecodex-v3-provider-responses/src/lib.rs
+  - v3/crates/routecodex-v3-target/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  resource_bindings:
+  - v3.provider.failure_action
+  - v3.provider.key_health_state
+  - v3.provider.scheduling_projection
+  entry_symbols:
+  - build_v3_provider_failure_action_from_v3_error_02
+  - V3ProviderKeyHealthStore::record_provider_failure_action
+  - V3ProviderKeyHealthStore::record_provider_success
+  - V3ProviderKeyHealthStore::complete_probe_success
+  - V3ProviderKeyHealthStore::complete_probe_failure
+  - V3ProviderKeyHealthStore::complete_probe_success_at_generation
+  - V3ProviderKeyHealthStore::provider_key_health_probe_keys
+  - V3ProviderKeyHealthStore::acquire_provider_key_health_probe
+  - V3ProviderKeyHealthStore::new_persistent
+  - V3ProviderKeyHealthStore::load_persistent
+  - V3ProviderKeyHealthStore::persist
+  - V3ProviderKeyHealthStore::scheduling_projection
+  - V3ProviderSchedulingReader
+  - V3TargetInterpreter::select_available_with_health
+  - V3ProviderFailureRuntimeHealth::record_provider_key_failure_action
+  - V3ProviderFailureRuntimeHealth::run_due_provider_key_health_probes
+  allowed_paths:
+  - v3/crates/routecodex-v3-error/src/lib.rs
+  - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+  - v3/crates/routecodex-v3-provider-responses/src/lib.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/**
+  - v3/crates/routecodex-v3-target/src/lib.rs
+  - v3/crates/routecodex-v3-target/src/tests/**
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - docs/architecture
+  - docs/design/v3-provider-health-scoring-cooldown-design.md
+  - docs/goals/v3-provider-health-scoring-cooldown-plan.md
+  forbidden_paths:
+  - v3/crates/routecodex-v3-virtual-router/src/lib.rs
+  - request.normal_payload
+  - response.client_payload
+  - protocol.metadata
+  required_gates:
+  - npm run test:v3-provider-health-contract
+  - npm run test:v3-p5-router-target
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-cargo-fmt
   - git diff --check
   migration_target: rust
   runtime_status: source_controlled_runtime_pending_live_replay

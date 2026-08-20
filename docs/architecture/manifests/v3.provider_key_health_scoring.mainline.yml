@@ -1,0 +1,42 @@
+lifecycle_id: v3.provider_key_health_scoring
+entrypoint: V3Error03RuntimeClassified
+return_path: V3Target10ConcreteProviderSelected
+owner_feature: v3.provider_key_health_scoring
+canonical_docs:
+  - docs/design/v3-provider-health-scoring-cooldown-design.md
+  - docs/goals/v3-provider-health-scoring-cooldown-plan.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+verification_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test provider_key_health_contract
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-architecture-docs
+nodes:
+  - id: V3Error03RuntimeClassified
+    owner: routecodex-v3-error
+  - id: V3ProviderFailureAction
+    owner: routecodex-v3-error
+  - id: V3ProviderKeyHealthState
+    owner: routecodex-v3-provider-responses
+  - id: V3ProviderKeyHealthProbePermit
+    owner: routecodex-v3-provider-responses
+  - id: V3ProviderSchedulingProjection
+    owner: routecodex-v3-provider-responses
+  - id: V3Target10ConcreteProviderSelected
+    owner: routecodex-v3-target
+edges:
+  - from: V3Error03RuntimeClassified
+    to: V3ProviderFailureAction
+  - from: V3ProviderFailureAction
+    to: V3ProviderKeyHealthState
+  - from: V3ProviderKeyHealthState
+    to: V3ProviderSchedulingProjection
+  - from: V3ProviderKeyHealthState
+    to: V3ProviderKeyHealthProbePermit
+  - from: V3ProviderKeyHealthProbePermit
+    to: V3ProviderKeyHealthState
+  - from: V3ProviderSchedulingProjection
+    to: V3Target10ConcreteProviderSelected

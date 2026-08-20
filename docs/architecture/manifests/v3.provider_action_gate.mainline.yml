@@ -323,7 +323,7 @@ edges:
     to: V3ProviderActionSuccessObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: wrap_direct_sse_provider_outcome_stream
+    caller_symbol: wrap_direct_sse_provider_outcome_stream_with_terminal_commit
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
     callee_symbol: V3DirectSseProviderOutcome::record_success
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
@@ -341,7 +341,7 @@ edges:
     to: V3ProviderActionFailureObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: wrap_direct_sse_provider_outcome_stream
+    caller_symbol: wrap_direct_sse_provider_outcome_stream_with_terminal_commit
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
     callee_symbol: V3DirectSseProviderOutcome::record_failure
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
@@ -458,7 +458,7 @@ edges:
     to: V3ProviderResponsesEventCodec
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: wrap_direct_sse_provider_outcome_stream
+    caller_symbol: wrap_direct_sse_provider_outcome_stream_with_terminal_commit
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
     callee_symbol: V3DirectSseProviderOutcome::observe_chunk
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
