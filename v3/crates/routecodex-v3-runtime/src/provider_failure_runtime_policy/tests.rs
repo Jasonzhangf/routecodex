@@ -227,11 +227,15 @@ fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
 #[test]
 fn classified_probe_intervals_keep_auth_key_and_recoverable_cadences_distinct() {
     assert_eq!(
-        routecodex_v3_config::internal::v3_provider_probe_interval_ms(true),
+        routecodex_v3_config::internal::v3_provider_probe_interval_ms(
+            routecodex_v3_config::internal::V3ProviderProbeIntervalScope::AuthKey,
+        ),
         60 * 60_000
     );
     assert_eq!(
-        routecodex_v3_config::internal::v3_provider_probe_interval_ms(false),
+        routecodex_v3_config::internal::v3_provider_probe_interval_ms(
+            routecodex_v3_config::internal::V3ProviderProbeIntervalScope::Recoverable,
+        ),
         15 * 60_000
     );
 }

@@ -5,7 +5,8 @@
 
 /// provider 级冷却的复活探针间隔：冷却到期后，后台每 15 分钟对冷却中的
 /// provider 发一次最小 ping，通过才恢复（业务请求在冷却期间永不命中）。
-pub const V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS: u64 = 15 * 60_000;
+pub const V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS: u64 =
+    routecodex_v3_config::internal::V3_RECOVERABLE_PROBE_INTERVAL_MS;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct V3ProviderCooldownProbeKey {

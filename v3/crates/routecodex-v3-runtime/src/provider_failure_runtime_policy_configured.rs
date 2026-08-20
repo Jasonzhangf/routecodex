@@ -132,7 +132,7 @@ fn configured_health_policy_for_failure(
         failure_threshold: threshold,
         cooldown_ms: cooldown_ms.unwrap_or(1),
         probe_interval_ms: routecodex_v3_config::internal::v3_provider_probe_interval_ms(
-            cooldown_scope == V3ProviderFailureCooldownScope::AuthKey,
+            routecodex_v3_config::internal::V3ProviderProbeIntervalScope::AuthKey,
         ),
         until_restart,
         cooldown_scope,

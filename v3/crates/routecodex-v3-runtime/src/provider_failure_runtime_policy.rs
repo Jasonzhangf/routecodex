@@ -1,6 +1,6 @@
 use routecodex_v3_config::internal::classify_v3_internal_provider_error;
 use routecodex_v3_config::internal::{
-    v3_internal_error_handling, v3_provider_probe_interval_ms,
+    v3_provider_probe_interval_ms, V3ProviderProbeIntervalScope,
 };
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ProviderDispositionStepManifest,
@@ -581,7 +581,7 @@ impl V3ProviderFailureRuntimeHealth {
                         auth_alias.as_deref(),
                         model_id.as_deref(),
                         now_ms,
-                        v3_provider_probe_interval_ms(true),
+                        v3_provider_probe_interval_ms(V3ProviderProbeIntervalScope::AuthKey),
                     )?;
                     return Err(format!(
                         "startup provider cooldown probe failed for {provider_id}: {error}"
@@ -635,7 +635,7 @@ impl V3ProviderFailureRuntimeHealth {
                         auth_alias.as_deref(),
                         model_id.as_deref(),
                         now_ms,
-                        v3_provider_probe_interval_ms(true),
+                        v3_provider_probe_interval_ms(V3ProviderProbeIntervalScope::AuthKey),
                     )?;
                     probe_errors.push(format!(
                         "persistent provider probe failed for {provider_id}: {error}"
@@ -697,7 +697,7 @@ impl V3ProviderFailureRuntimeHealth {
                         permit.auth_alias(),
                         permit.model_id(),
                         now_ms,
-                        v3_provider_probe_interval_ms(false),
+                        v3_provider_probe_interval_ms(V3ProviderProbeIntervalScope::Recoverable),
                     )?;
                     probe_errors.push(format!(
                         "persistent provider key probe failed for {}:{}:{}: {error}",
