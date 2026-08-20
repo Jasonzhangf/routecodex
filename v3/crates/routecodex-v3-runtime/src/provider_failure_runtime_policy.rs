@@ -475,12 +475,19 @@ impl V3ProviderFailureRuntimeHealth {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
+        probe_interval_ms: u64,
     ) -> Result<(), String> {
         let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) else {
             return Ok(());
         };
         self.key_health
-            .complete_probe_failure(provider_id, auth_alias, model_id, now_ms, 60_000)
+            .complete_probe_failure(
+                provider_id,
+                auth_alias,
+                model_id,
+                now_ms,
+                probe_interval_ms,
+            )
             .map(|_| ())
     }
 
@@ -571,6 +578,9 @@ impl V3ProviderFailureRuntimeHealth {
                         auth_alias.as_deref(),
                         model_id.as_deref(),
                         now_ms,
+                        self.store
+                            .configured_failure_policy(&provider_id)
+                            .probe_interval_ms,
                     )?;
                     return Err(format!(
                         "startup provider cooldown probe failed for {provider_id}: {error}"
@@ -624,6 +634,9 @@ impl V3ProviderFailureRuntimeHealth {
                         auth_alias.as_deref(),
                         model_id.as_deref(),
                         now_ms,
+                        self.store
+                            .configured_failure_policy(&provider_id)
+                            .probe_interval_ms,
                     )?;
                     probe_errors.push(format!(
                         "persistent provider probe failed for {provider_id}: {error}"
@@ -685,7 +698,9 @@ impl V3ProviderFailureRuntimeHealth {
                         permit.auth_alias(),
                         permit.model_id(),
                         now_ms,
-                        60_000,
+                        self.store
+                            .configured_failure_policy(&provider_id)
+                            .probe_interval_ms,
                     )?;
                     probe_errors.push(format!(
                         "persistent provider key probe failed for {}:{}:{}: {error}",
@@ -768,7 +783,13 @@ impl V3ProviderFailureRuntimeHealth {
             &classified,
             now_ms,
         )?;
-        let action = build_v3_provider_failure_action_from_v3_error_02(&classified);
+        let mut action = build_v3_provider_failure_action_from_v3_error_02(&classified);
+        if action.recovery == V3ProviderRecoveryKind::RecoverableCounted {
+            action.cooldown_ms = self
+                .store
+                .configured_failure_policy(provider_id)
+                .cooldown_ms;
+        }
         self.record_provider_key_failure_action(
             provider_id,
             auth_alias,

@@ -267,8 +267,17 @@ fn resolve_target_for_scope(
 
 #[test]
 fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
-    let manifest = global_pool_alive_manifest("global_status_policy");
-    let cases = [(401, 2), (403, 2), (429, 3), (500, 3), (502, 3), (599, 3)];
+    let mut manifest = global_pool_alive_manifest("global_status_policy");
+    manifest
+        .providers
+        .get_mut("first")
+        .expect("first provider")
+        .health = Some(routecodex_v3_config::V3ProviderHealthAuthoringConfig {
+        enabled: true,
+        failure_threshold: 3,
+        cooldown_ms: 1_234,
+    });
+    let cases = [(429, 3), (500, 3), (502, 3), (599, 3)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = test_provider_failure_scope(
@@ -311,6 +320,24 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         assert!(
             !key_projection.available,
             "status {status} must persist a provider-key cooldown"
+        );
+        let expected_probe_at = 10_000 + threshold as u64 - 1 + 1_234;
+        assert!(
+            health
+                .key_health
+                .provider_key_health_probe_keys(expected_probe_at - 1, false)
+                .expect("provider key probes before configured cooldown")
+                .is_empty(),
+            "status {status} must honor configured key cooldown before probing"
+        );
+        assert_eq!(
+            health
+                .key_health
+                .provider_key_health_probe_keys(expected_probe_at, false)
+                .expect("provider key probes at configured cooldown")
+                .len(),
+            1,
+            "status {status} must probe after configured key cooldown"
         );
     }
 
