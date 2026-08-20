@@ -1769,7 +1769,7 @@ resources:
       route_pool_only: true
       provider_model_fields: forbidden
       vr_reentry: forbidden
-    allowed_writers: [evaluate_v3_route_policies]
+    allowed_writers: [evaluate_v3_route_policies, V3RoutePolicyRuntimeState::evaluate_request]
     allowed_readers: [V3RoutePolicyRuntimeState::evaluate_request, V3VirtualRouter::resolve_route_pool_plan]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload, continuation, protocol.metadata]
     may_enter_provider_body: false

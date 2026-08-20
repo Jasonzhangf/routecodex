@@ -7194,6 +7194,34 @@ chains:
       produces: [v3.route.policy_action]
       side_channel_reads: [v3.route.policy_action]
       side_channel_writes: []
+  - step_id: v3-route-policy-04
+    from_node: V3Router05RequestClassified
+    to_node: V3Router06RoutePoolResolved
+    caller_symbol: plan_v3_responses_protocol_execution_with_provider_health
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+    callee_symbol: V3VirtualRouter::resolve_route_pool_plan
+    callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    status: source_controlled
+    owner_feature_id: v3.route_policy_condition_evaluation
+    resource_flow:
+      consumes: [v3.route.policy_action]
+      produces: [v3.route.policy_action]
+      side_channel_reads: [v3.route.policy_action]
+      side_channel_writes: []
+  - step_id: v3-route-policy-05
+    from_node: V3Router05RequestClassified
+    to_node: V3RouteHistoryWindow
+    caller_symbol: V3RoutePolicyRuntimeState::commit_request
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    callee_symbol: V3RouteHistoryWindow::record_turn
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+    status: source_controlled
+    owner_feature_id: v3.route_policy_condition_evaluation
+    resource_flow:
+      consumes: [v3.route.current_turn_facts]
+      produces: [v3.route.policy_observations]
+      side_channel_reads: []
+      side_channel_writes: [v3.route.policy_observations]
   - step_id: v3-provider-global-probe-relay-error-source
     from_node: V3HubRespChatProcess03Governed
     to_node: V3Error01SourceRaised

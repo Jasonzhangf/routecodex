@@ -4869,6 +4869,12 @@ features:
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - v3/crates/routecodex-v3-route-classifier/src/policy.rs
   - v3/crates/routecodex-v3-route-classifier/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/src/route_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_resp15_finalize.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-virtual-router/src/lib.rs
   - v3/crates/routecodex-v3-virtual-router/src/tests/mod.rs
   resource_bindings:
@@ -4878,6 +4884,15 @@ features:
   - V3RouteHistoryWindow::record_turn
   - V3RouteHistoryWindow::facts
   - evaluate_v3_route_policies
+  - V3RoutePolicyRuntimeState::evaluate_request
+  - V3RoutePolicyRuntimeState::commit_request
+  - V3RoutePolicyRuntimeState::discard_request
+  - observe_route_turn
+  - compile_route_policies
+  - execute_v3_responses_direct_runtime_kernel_core
+  - plan_v3_responses_protocol_execution_with_provider_health
+  - execute_v3_direct_runtime_kernel_core
+  - V3VirtualRouter::resolve_route_pool_plan
   allowed_paths:
   - v3/crates/routecodex-v3-config/src/types.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
@@ -4886,6 +4901,12 @@ features:
   - v3/crates/routecodex-v3-route-classifier/src/lib.rs
   - v3/crates/routecodex-v3-route-classifier/src/tests.rs
   - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  - v3/crates/routecodex-v3-runtime/src/route_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_resp15_finalize.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-virtual-router/src/lib.rs
   - v3/crates/routecodex-v3-virtual-router/src/tests/mod.rs
   - docs/architecture
@@ -4899,6 +4920,7 @@ features:
   - MetadataCenter
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib route_policy::tests
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check

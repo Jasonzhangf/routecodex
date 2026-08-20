@@ -3082,6 +3082,8 @@ features:
   - New user input resets prior task tool statistics.
   - Search pool ratio reaches the 8/10 boundary.
   - One turn with multiple tool errors counts once.
+  - Runtime commits a completed request once and discards an incomplete request without polluting history.
+  - Provider failure-shaped response content is excluded from tool execution error facts.
   - Compact action selects independent compact route pool.
   required_negative:
   - Provider failure does not enter tool execution error facts.
@@ -3092,6 +3094,7 @@ features:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --test config_v3_contract
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib route_policy::tests
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-virtual-router
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
