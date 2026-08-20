@@ -52,6 +52,7 @@ const paths = {
   verificationMap: 'docs/architecture/v3-verification-map.yml',
   resourceMap: 'docs/architecture/v3-resource-operation-map.yml',
   packageJson: 'package.json',
+  v3PackageJson: 'v3/package.json',
   v3ArchitectureCi: 'scripts/architecture/verify-v3-architecture-ci.mjs',
   matrixReview: 'docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
   fieldMatrix: V3_PROTOCOL_SEMANTIC_FIELD_MATRIX_PATH,
@@ -744,7 +745,7 @@ for (const phrase of [
   '--lib responses_openai_chat_field_parity',
   '--test responses_direct_tool_passthrough responses_openai_chat_field_parity',
   '--test responses_relay_local_continuation_integration responses_openai_chat_field_parity',
-]) requireText(text.packageJson, 'package.json::test:v3-protocol-conversion-field-parity', phrase);
+]) requireText(`${text.packageJson}\n${text.v3PackageJson}`, 'package.json + v3/package.json::test:v3-protocol-conversion-field-parity', phrase);
 
 const unpairedMalformedOpenAiChatTest = functionSlice(
   text.responsesTests,
