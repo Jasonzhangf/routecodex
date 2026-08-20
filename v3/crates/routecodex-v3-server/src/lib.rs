@@ -10,7 +10,6 @@ mod scope_metadata;
 mod session_admission;
 mod websocket;
 mod webui_observability;
-mod webui_observability_endpoints;
 
 use webui_observability::V3WebuiObservability;
 use console::*;
@@ -481,18 +480,6 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         .route(
             "/_routecodex/diagnostics/virtual-router/dry-run",
             post(virtual_router_dry_run),
-        )
-        .route(
-            "/api/observability/snapshot",
-            get(webui_observability_endpoints::observability_snapshot),
-        )
-        .route(
-            "/api/observability/stats",
-            get(webui_observability_endpoints::observability_stats),
-        )
-        .route(
-            "/api/observability/events",
-            get(webui_observability_endpoints::observability_events),
         )
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(path_not_found)

@@ -36010,3 +36010,8 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - Repaired origin/main V3 runtime module/signature drift required for route-policy compilation; cargo check passes. Full runtime lib test currently reports 481 passed / 12 failed, with failures concentrated in pre-existing provider policy fixture/health behavior and one cooldown selection assertion; route-classifier and virtual-router suites pass.
 - Added runtime route-policy lifecycle tests: completed request commits current turn once, discarded request does not pollute history, provider failure-shaped content is excluded from tool-error facts, compact observation selects independent compact pool.
 - Bound runtime route-policy owner files, entry symbols, mainline edges, resource action writer, and verification gates in architecture maps.
+
+2026-08-20 DSH review repair
+- Origin/main server baseline was restored in `f509e2b70`: registered the existing typed WebUI observability store module, fixed console emission context initialization, and aligned startup provider-global probe invocation with the current runtime owner.
+- Installed binary hash after the first complete install/restart was `e54f4cc1c1988a6abf6cfae5d584c1e8d8174742b0820ae1e98f789739ab91ec`; all configured listener health endpoints returned build `0.90.4574`, manifest 3.
+- DSH review `v3-route-policy-condition-20260820-final-review` returned VERDICT: FAIL. It identified unauthenticated WebUI observability exposure, cross-listener shared observability, an internal cursor race, and an unregistered startup probe symbol. The observability HTTP routes were removed from ordinary listeners; the startup symbol and mainline/function map were synchronized. New install/restart/replay/review evidence is required.
