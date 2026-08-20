@@ -148,7 +148,7 @@ surfaces:
         v3_resource: v3.response.client_payload
         v4_container: {family: ResponseChainNode, role: response_outbound}
         v4_checkpoint: {node_id: V4ServerRespOutbound06ClientFrame, semantic: client_frame}
-        v4_resource: v4.response.client_wire_payload
+        v4_resource: v4.response.client_frame
         verification_gates: [v4_parity_gate_plane_isolation, v4_runtime_l2_regression]
         evidence: "implemented: routecodex-v4-runtime FrameBuild + control-leak red test (response chain, runtime test-consumer 12)"
         diff_status: equivalent

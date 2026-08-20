@@ -54,8 +54,11 @@ standard_plugins()
 派生精确权限，调用方不能扩大读写面。请求 outbound 只允许
 `normal_payload -> provider_semantic -> provider_wire_payload` 相邻前向转换；
 control/error/diagnostic 资源不进入 normal/provider/client payload。响应链严格按
-`provider_raw -> normal_payload -> client_wire_payload -> client frame` 相邻流动；
+`provider_raw -> normal_payload -> client_wire_payload -> client_object` 相邻流动；
 `V4ServerSseOut05FrameBoundary` 只验证 wire payload，不重建或修补响应。
+`client_object` 是标准库 keyless frame object；canonical runtime terminal
+resource 仍是 `v4.response.client_frame`，由 `routecodex-v4-runtime::FrameBuild`
+唯一 owner 写出。
 
 ## Side-channel 边界
 

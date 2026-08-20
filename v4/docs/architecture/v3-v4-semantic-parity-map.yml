@@ -144,7 +144,7 @@ chains:
       container: {family: ResponseChainNode, role: response_outbound}
       plugins: [frame_build]
       checkpoint: {node_id: V4ServerRespOutbound06ClientFrame, semantic: client_frame}
-      resource: v4.response.client_wire_payload
+      resource: v4.response.client_frame
       verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
       checkpoint_evidence: "implemented: routecodex-v4-runtime FrameBuild + control-leak red test (response chain, runtime test-consumer 9)"
   error:

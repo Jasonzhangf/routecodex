@@ -134,7 +134,7 @@ const NODE_PERMISSIONS = new Map([
     writes: [],
   }],
   ['V4ServerRespOutbound06ClientFrame', {
-    reads: ['v4.response.client_wire_payload'], writes: ['v4.response.client_frame'],
+    reads: ['v4.response.client_wire_payload'], writes: ['v4.response.client_object'],
   }],
   ['V4MetadataCenter01ScopeRegistry', {
     reads: ['v4.control.metadata_center'], writes: ['v4.control.metadata_center'],

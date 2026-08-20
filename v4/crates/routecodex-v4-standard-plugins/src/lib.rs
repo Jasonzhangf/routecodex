@@ -204,7 +204,7 @@ pub fn standard_resource_registry() -> ResourceRegistry {
                 axis: ResourceAxis::Data,
             },
             ResourceEntry {
-                resource_id: "v4.response.client_frame".to_string(),
+                resource_id: "v4.response.client_object".to_string(),
                 axis: ResourceAxis::Data,
             },
             ResourceEntry {
@@ -308,7 +308,7 @@ pub fn standard_allowed_writes() -> Vec<String> {
         "v4.request.provider_wire_payload".to_string(),
         "v4.response.normal_payload".to_string(),
         "v4.response.client_wire_payload".to_string(),
-        "v4.response.client_frame".to_string(),
+        "v4.response.client_object".to_string(),
         "v4.control.metadata_center".to_string(),
         "v4.control.route_facts".to_string(),
         "v4.control.target_selection".to_string(),
@@ -365,7 +365,7 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
         "V4HubReqOutbound05ProviderSemantic" => vec!["v4.request.provider_semantic".to_string()],
         "V4ProviderReqCompat06Compat" => vec!["v4.request.provider_wire_payload".to_string()],
         "V4ProviderSseOut07WireBoundary" => Vec::new(),
-        "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_frame".to_string()],
+        "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_object".to_string()],
         "V4MetadataCenter01ScopeRegistry" => vec!["v4.control.metadata_center".to_string()],
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],

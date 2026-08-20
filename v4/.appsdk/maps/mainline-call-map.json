@@ -467,7 +467,7 @@
       "to": "V4ServerRespOutbound06ClientFrame",
       "owner": "routecodex-v4-runtime::SkeletonRuntime",
       "edge_type": "data_flow",
-      "resource": "v4.response.client_wire_payload",
+      "resource": "v4.response.client_frame",
       "path": "crates/routecodex-v4-runtime/src/lib.rs",
       "status": "active"
     },
