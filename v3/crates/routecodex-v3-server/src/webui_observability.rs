@@ -9,7 +9,7 @@
 // projects already-typed observability data. No fallback; cursor/sequence
 // errors are explicit.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -131,6 +131,8 @@ pub(crate) struct V3WebuiObservability {
 struct V3WebuiObservabilityInner {
     requests: BTreeMap<String, V3ObsRequestRow>,
     terminal_order: VecDeque<String>,
+    terminal_keys: BTreeSet<String>,
+    terminal_key_order: VecDeque<String>,
     events: std::collections::VecDeque<V3ObsEvent>,
     stats: V3ObsStats,
     active: std::collections::BTreeSet<String>,
@@ -176,6 +178,16 @@ impl V3WebuiObservability {
             .map_err(|_| "v3 webui observability state is poisoned".to_string())?;
 
         let event_type_str = event_type.as_str().to_string();
+        let is_terminal = matches!(
+            event_type,
+            V3ObsEventType::Completed | V3ObsEventType::Failed | V3ObsEventType::Cancelled
+        );
+        if is_terminal
+            && !inner.requests.contains_key(request_key)
+            && inner.terminal_keys.contains(request_key)
+        {
+            return Ok(sequence);
+        }
 
         let mut row = inner
             .requests
@@ -200,6 +212,8 @@ impl V3WebuiObservability {
                 inner.active.remove(request_key);
                 if !was_terminal {
                     inner.terminal_order.push_back(request_key.to_string());
+                    inner.terminal_keys.insert(request_key.to_string());
+                    inner.terminal_key_order.push_back(request_key.to_string());
                     inner.stats.success += 1;
                 }
                 inner.stats.active = inner.active.len() as u64;
@@ -210,6 +224,8 @@ impl V3WebuiObservability {
                 inner.active.remove(request_key);
                 if !was_terminal {
                     inner.terminal_order.push_back(request_key.to_string());
+                    inner.terminal_keys.insert(request_key.to_string());
+                    inner.terminal_key_order.push_back(request_key.to_string());
                     inner.stats.error += 1;
                 }
                 inner.stats.active = inner.active.len() as u64;
@@ -220,6 +236,8 @@ impl V3WebuiObservability {
                 inner.active.remove(request_key);
                 if !was_terminal {
                     inner.terminal_order.push_back(request_key.to_string());
+                    inner.terminal_keys.insert(request_key.to_string());
+                    inner.terminal_key_order.push_back(request_key.to_string());
                     inner.stats.cancelled += 1;
                 }
                 inner.stats.active = inner.active.len() as u64;
@@ -248,6 +266,12 @@ impl V3WebuiObservability {
             if !inner.active.contains(&eviction_key) {
                 inner.requests.remove(&eviction_key);
             }
+        }
+        while inner.terminal_key_order.len() > 4096 {
+            let Some(tombstone_key) = inner.terminal_key_order.pop_front() else {
+                break;
+            };
+            inner.terminal_keys.remove(&tombstone_key);
         }
         inner.events.push_back(V3ObsEvent {
             request_key: request_key.to_string(),
@@ -442,5 +466,25 @@ mod tests {
         let snapshot = o.snapshot(0).unwrap();
         assert_eq!(snapshot.requests.len(), 1);
         assert_eq!(snapshot.stats.success, 1);
+    }
+
+    #[test]
+    fn evicted_terminal_replay_is_ignored() {
+        let o = V3WebuiObservability::new();
+        let first_id = "evicted-terminal";
+        let first_key = build_v3_obs_request_key(5555, first_id);
+        o.record(V3ObsEventType::Started, &first_key, scope(5555), meta(first_id)).unwrap();
+        o.record(V3ObsEventType::Completed, &first_key, scope(5555), meta(first_id)).unwrap();
+        for index in 0..2048 {
+            let request_id = format!("eviction-fill-{index}");
+            let key = build_v3_obs_request_key(5555, &request_id);
+            o.record(V3ObsEventType::Started, &key, scope(5555), meta(&request_id)).unwrap();
+            o.record(V3ObsEventType::Completed, &key, scope(5555), meta(&request_id)).unwrap();
+        }
+        assert!(!o.snapshot(0).unwrap().requests.contains_key(&first_key));
+        o.record(V3ObsEventType::Completed, &first_key, scope(5555), meta(first_id)).unwrap();
+        let snapshot = o.snapshot(0).unwrap();
+        assert!(!snapshot.requests.contains_key(&first_key));
+        assert_eq!(snapshot.stats.success, 2049);
     }
 }
