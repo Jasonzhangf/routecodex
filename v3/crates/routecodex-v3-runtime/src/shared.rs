@@ -21,6 +21,10 @@ use routecodex_v3_virtual_router::V3VirtualRouterError;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+pub(crate) use crate::shared_direct_thinking_compat::{
+    apply_v3_direct_thinking_tag_json_compat, project_v3_thinking_tag_text,
+};
+
 /// Direct SSE 帧间超时：provider 返回 200 但首个或后续语义事件挂起时 fail-fast
 /// （默认 60s，明显短于 provider 请求总超时，避免客户端无限等待/EOF 且无日志）。
 /// 超时归一化为 transport Error01 进入错误链（reselect / Error06 终态投影），

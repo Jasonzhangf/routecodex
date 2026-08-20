@@ -1,5 +1,4 @@
 use super::*;
-use super::{provider_compat_boundary_source, V3ProviderCompatErrorClassification};
 use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
     v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,

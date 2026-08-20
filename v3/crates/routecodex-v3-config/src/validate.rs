@@ -941,6 +941,8 @@ fn compile_auth(
         }
         entries.push(V3ProviderAuthEntryManifest {
             alias: entry.alias,
+            priority: entry.priority,
+            weight: entry.weight,
             env: entry.env,
             token_file: entry.token_file,
             secret_file: entry.secret_file,
@@ -950,6 +952,7 @@ fn compile_auth(
     }
     Ok(V3ProviderAuthManifest {
         auth_type: authoring.auth_type,
+        selection: authoring.selection.clone(),
         entries,
     })
 }
@@ -1192,6 +1195,42 @@ fn compile_route_groups(
                     "route group {group_id} default pool is empty"
                 )));
             }
+            let mut route_object_ids = BTreeSet::new();
+            for (pool_id, pool) in &group.pools {
+                if let Some(route_object) = pool.route_object.as_deref() {
+                    require_id("route object", route_object)?;
+                    if pool_id == "default" {
+                        return Err(validation(format!(
+                            "route group {group_id} default pool cannot bind a route object"
+                        )));
+                    }
+                    if !route_object_ids.insert(route_object) {
+                        return Err(validation(format!(
+                            "route group {group_id} duplicate route object {route_object}"
+                        )));
+                    }
+                }
+            }
+            if let Some(compact_route_object) = group.compact_route_object.as_deref() {
+                require_id("compact route object", compact_route_object)?;
+                let compact_pool = group.pools.get("compact").ok_or_else(|| {
+                    validation(format!(
+                        "route group {group_id} compact route object requires compact pool"
+                    ))
+                })?;
+                if compact_pool.route_object.as_deref() != Some(compact_route_object) {
+                    return Err(validation(format!(
+                        "route group {group_id} compact route object {compact_route_object} must bind compact pool"
+                    )));
+                }
+            }
+            let compact_route_object = group.compact_route_object.clone();
+            let route_policies = compile_route_policies(
+                &group_id,
+                &group.route_policies,
+                &group.pools,
+                compact_route_object.as_deref(),
+            )?;
             let pools = group
                 .pools
                 .into_iter()
@@ -1269,6 +1308,7 @@ fn compile_route_groups(
                         V3RoutePoolManifest {
                             id: pool_id,
                             selection: pool.selection,
+                            route_object: pool.route_object,
                             match_rule,
                             targets,
                             features: pool.features,
@@ -1281,9 +1321,95 @@ fn compile_route_groups(
                 V3RouteGroupManifest {
                     id: group_id,
                     pools,
+                    compact_route_object,
+                    route_policies,
                     features: group.features,
                 },
             ))
+        })
+        .collect()
+}
+
+fn compile_route_policies(
+    group_id: &str,
+    policies: &[V3RoutePolicyAuthoringConfig],
+    pools: &BTreeMap<String, V3RoutePoolAuthoringConfig>,
+    compact_route_object: Option<&str>,
+) -> Result<Vec<V3RoutePolicyManifest>, V3ConfigError> {
+    let compact_pool_id = compact_route_object.and_then(|route_object| {
+        pools.iter().find_map(|(pool_id, pool)| {
+            (pool.route_object.as_deref() == Some(route_object)).then_some(pool_id.as_str())
+        })
+    });
+    let mut policy_ids = BTreeSet::new();
+    policies
+        .iter()
+        .map(|policy| {
+            require_id("route policy", &policy.id)?;
+            if !policy_ids.insert(policy.id.as_str()) {
+                return Err(validation(format!(
+                    "route group {group_id} duplicate route policy {}",
+                    policy.id
+                )));
+            }
+            let route_pool = policy.action.select_route_pool.trim();
+            if route_pool.is_empty() || !pools.contains_key(route_pool) {
+                return Err(validation(format!(
+                    "route group {group_id} route policy {} references unknown route pool {}",
+                    policy.id, policy.action.select_route_pool
+                )));
+            }
+            let condition = match &policy.condition {
+                V3RouteConditionAuthoringConfig::CurrentCompaction => {
+                    if compact_pool_id != Some(route_pool) {
+                        return Err(validation(format!(
+                            "route group {group_id} compaction policy {} must select compact pool",
+                            policy.id
+                        )));
+                    }
+                    V3RouteConditionManifest::CurrentCompaction
+                }
+                V3RouteConditionAuthoringConfig::SearchPoolTurnRatioAtLeast {
+                    window_turns,
+                    numerator,
+                    denominator,
+                } => {
+                    if *window_turns == 0 || *denominator == 0 || numerator > denominator {
+                        return Err(validation(format!(
+                            "route group {group_id} route policy {} has invalid search ratio",
+                            policy.id
+                        )));
+                    }
+                    V3RouteConditionManifest::SearchPoolTurnRatioAtLeast {
+                        window_turns: *window_turns,
+                        numerator: *numerator,
+                        denominator: *denominator,
+                    }
+                }
+                V3RouteConditionAuthoringConfig::ToolExecutionErrorTurnsAtLeast {
+                    window_turns,
+                    count,
+                } => {
+                    if *window_turns == 0 || *count > *window_turns {
+                        return Err(validation(format!(
+                            "route group {group_id} route policy {} has invalid tool error window",
+                            policy.id
+                        )));
+                    }
+                    V3RouteConditionManifest::ToolExecutionErrorTurnsAtLeast {
+                        window_turns: *window_turns,
+                        count: *count,
+                    }
+                }
+            };
+            Ok(V3RoutePolicyManifest {
+                id: policy.id.clone(),
+                precedence: policy.precedence,
+                condition,
+                action: V3RouteActionManifest {
+                    select_route_pool: route_pool.to_string(),
+                },
+            })
         })
         .collect()
 }

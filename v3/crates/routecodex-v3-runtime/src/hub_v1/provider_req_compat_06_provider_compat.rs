@@ -67,6 +67,18 @@ fn apply_v3_provider_req_compat(
     )
 }
 
+pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> bool {
+    payload
+        .get("reasoning_effort")
+        .or_else(|| {
+            payload
+                .get("reasoning")
+                .and_then(Value::as_object)
+                .and_then(|reasoning| reasoning.get("effort"))
+        })
+        .is_some()
+}
+
 pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     mut payload: Value,
     selected: &routecodex_v3_target::V3TargetCandidate,
@@ -127,13 +139,15 @@ fn project_reasoning_effort_for_selected_target(
         .as_str()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| V3ProviderCompatError {
-            stage: "request_reasoning_effort_projection",
-            profile: selected
-                .compatibility_profile
-                .clone()
-                .unwrap_or_else(|| "protocol-default".to_string()),
-            reason: format!("non_empty_string_required path={effort_path}"),
+        .ok_or_else(|| {
+            V3ProviderCompatError::other(
+                "request_reasoning_effort_projection",
+                selected
+                    .compatibility_profile
+                    .clone()
+                    .unwrap_or_else(|| "protocol-default".to_string()),
+                format!("non_empty_string_required path={effort_path}"),
+            )
         })?
         .to_ascii_lowercase();
 

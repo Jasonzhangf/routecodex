@@ -221,6 +221,7 @@ pub fn build_v3_router_request_facts_from_v3_req_04_chat(
             &standardized.protocol_context.server_id,
         ),
         false,
+        is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
         Some(manifest),
     )
 }
@@ -237,6 +238,7 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
             &standardized.protocol_context.server_id,
         ),
         false,
+        is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
         Some(manifest),
     )
 }
@@ -254,6 +256,7 @@ pub fn build_v3_router_request_facts_for_entry(
         &normalized,
         entry_protocol,
         longcontext_threshold_tokens,
+        false,
         false,
         None,
     )
@@ -277,6 +280,7 @@ pub(crate) fn build_v3_router_request_facts_for_entry_with_manifest(
         entry_protocol,
         longcontext_threshold_tokens,
         false,
+        false,
         Some(manifest),
     )
 }
@@ -286,6 +290,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
     entry_protocol: &str,
     longcontext_threshold_tokens: Option<u64>,
     stopless_followup: bool,
+        is_compaction: bool,
     manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
@@ -299,10 +304,13 @@ fn build_v3_router_request_facts_for_entry_with_control(
     let route_facts = V3CurrentTurnRouteFacts {
         reached_long_context: longcontext_threshold_tokens
             .is_some_and(|threshold| input_tokens >= threshold),
+        is_compaction: is_compaction || active_turn.is_compaction,
         has_image_attachment,
         latest_message_from_user: active_turn.latest_message_from_user,
         stopless_followup,
         has_current_turn_tool_output: active_turn.has_current_turn_tool_output,
+        has_current_turn_tool_execution_error: active_turn
+            .has_current_turn_tool_execution_error,
         has_current_turn_web_search: active_turn.has_current_turn_web_search
             || declares_web_search_tool,
         last_assistant_tool_category: active_turn
@@ -340,6 +348,14 @@ fn build_v3_router_request_facts_for_entry_with_control(
         input_tokens,
         route_classification,
     }
+}
+
+fn is_v3_compaction_endpoint(endpoint: &str) -> bool {
+    endpoint
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .is_some_and(|segment| segment.eq_ignore_ascii_case("compact"))
 }
 
 fn request_declares_v3_client_tool_surface(body: &Value) -> bool {
@@ -1095,6 +1111,7 @@ mod tests {
             "responses",
             TEST_LONGCONTEXT_THRESHOLD_TOKENS,
             false,
+            false,
             Some(&manifest),
         );
         assert!(
@@ -1122,6 +1139,7 @@ mod tests {
             "responses",
             TEST_LONGCONTEXT_THRESHOLD_TOKENS,
             false,
+            false,
             Some(&manifest),
         );
         assert!(
@@ -1145,6 +1163,7 @@ mod tests {
             &request,
             "responses",
             TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+            false,
             false,
             Some(&manifest),
         );

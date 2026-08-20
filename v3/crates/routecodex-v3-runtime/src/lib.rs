@@ -13,6 +13,7 @@ mod provider_failure_runtime_helpers;
 mod provider_failure_global_probe;
 mod provider_failure_runtime_policy;
 pub mod remote_continuation;
+pub mod route_policy;
 pub mod responses_continuation_owner;
 mod runtime_timing;
 mod selected_provider_model_binding;
@@ -56,5 +57,6 @@ pub use provider_failure_runtime_policy::{
     build_v3_provider_global_probe_target, probe_v3_provider_global_target,
 };
 pub use remote_continuation::*;
+pub use route_policy::*;
 pub use responses_continuation_owner::*;
 pub use runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};

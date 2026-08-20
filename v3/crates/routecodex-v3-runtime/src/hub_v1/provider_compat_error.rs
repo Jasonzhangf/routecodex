@@ -60,7 +60,7 @@ pub fn provider_compat_boundary_source(
     error: &V3ProviderCompatError,
 ) -> routecodex_v3_error::V3Error01SourceRaised {
     let field = extract_v3_provider_compat_boundary_field(&error.reason)
-        .unwrap_or_else(|| "control_like_top_level_field".to_string());
+        .unwrap_or("control_like_top_level_field");
     routecodex_v3_error::raise_v3_provider_compat_payload_boundary_violation(
         source_stage,
         field,
@@ -68,12 +68,20 @@ pub fn provider_compat_boundary_source(
     )
 }
 
-pub fn extract_v3_provider_compat_boundary_field(reason: &str) -> Option<String> {
+pub fn extract_v3_provider_compat_boundary_field(reason: &str) -> Option<&'static str> {
     let marker = "ProviderCompatPayloadBoundaryViolation field=";
     let start = reason.find(marker)? + marker.len();
     let rest = &reason[start..];
     let end = rest
         .find(|c: char| c.is_whitespace() || c == '\0')
         .unwrap_or(rest.len());
-    Some(rest[..end].to_string())
+    Some(match &rest[..end] {
+        "metadata" => "metadata",
+        "client_metadata" => "client_metadata",
+        "context" => "context",
+        "routing" => "routing",
+        "continuation" => "continuation",
+        "provider" => "provider",
+        _ => "control_like_top_level_field",
+    })
 }

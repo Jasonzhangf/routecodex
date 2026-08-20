@@ -1736,6 +1736,71 @@ resources:
     binding_status: anchored
     required_gates: [npm --prefix v3 run pack:dev, npm --prefix v3 run pack:npm]
 
+  - resource_id: v3.route.policy_observations
+    resource_kind: side_channel
+    lifecycle: v3.route_policy.condition_evaluation
+    owner_feature_id: v3.route_policy_condition_evaluation
+    owner_crate: routecodex-v3-route-classifier
+    owner_node: V3RouteHistoryWindow
+    identity: [serverId, routeGroupId, sessionId, conversationId]
+    semantic_contract:
+      turn_unit: request_plus_response
+      current_turn_included: true
+      user_input_reset: true
+      search_ratio: search_pool_hit_turns_over_observed_turns
+      tool_error_unit: one_error_turn_per_turn
+      provider_failures_counted: false
+    allowed_writers: [V3RouteHistoryWindow::record_turn, V3RoutePolicyRuntimeState::commit_request]
+    allowed_readers: [evaluate_v3_route_policies, V3RoutePolicyRuntimeState::evaluate_request]
+    forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload, continuation, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.route.policy_action
+    resource_kind: side_channel
+    lifecycle: v3.route_policy.condition_evaluation
+    owner_feature_id: v3.route_policy_condition_evaluation
+    owner_crate: routecodex-v3-route-classifier
+    owner_node: V3RoutePolicyAction
+    identity: [policyId, routePool]
+    semantic_contract:
+      route_pool_only: true
+      provider_model_fields: forbidden
+      vr_reentry: forbidden
+    allowed_writers: [evaluate_v3_route_policies, V3RoutePolicyRuntimeState::evaluate_request]
+    allowed_readers: [V3RoutePolicyRuntimeState::evaluate_request, V3VirtualRouter::resolve_route_pool_plan]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload, continuation, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.server.internal_observability_projection
+    resource_kind: diagnostic_side_channel
+    lifecycle: v3.server.console_projection
+    owner_feature_id: v3.server_internal_observability_projection
+    owner_crate: routecodex-v3-server
+    owner_node: V3WebuiObservability
+    identity: [port, requestKey, sequence]
+    semantic_contract:
+      public_http_api: retired
+      request_rows_max: 2048
+      terminal_tombstones_max: 4096
+      evicted_terminal_replay: explicit_resync_required
+      event_log_cursor_gap: explicit_resync_required
+      sequence_overflow: explicit_error
+      control_state_in_payload: forbidden
+    allowed_writers: [emit_v3_request_console_observation]
+    allowed_readers: [V3WebuiObservability::snapshot, V3WebuiObservability::since]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests, npm run verify:v3-resource-map]
+
   - resource_id: v3.build.assembled_binary
     resource_kind: assembled_release_candidate
     lifecycle: v3.build.independent_domain

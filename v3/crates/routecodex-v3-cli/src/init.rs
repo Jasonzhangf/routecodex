@@ -383,6 +383,7 @@ fn build_minimal_authoring(
             selection: V3SelectionPolicy {
                 strategy: V3SelectionStrategy::Priority,
             },
+            route_object: None,
             match_rule: None,
             targets,
             features: BTreeMap::new(),
@@ -392,6 +393,8 @@ fn build_minimal_authoring(
         server_id.clone(),
         routecodex_v3_config::V3RouteGroupAuthoringConfig {
             pools,
+            compact_route_object: None,
+            route_policies: Vec::new(),
             features: BTreeMap::new(),
         },
     );

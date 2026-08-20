@@ -321,6 +321,7 @@ fn compile_v2_route_groups(
                     route_id.clone(),
                     V3RoutePoolAuthoringConfig {
                         selection: V3SelectionPolicy { strategy },
+                        route_object: None,
                         match_rule,
                         targets,
                         features: BTreeMap::new(),
@@ -336,6 +337,8 @@ fn compile_v2_route_groups(
                 group_id.clone(),
                 V3RouteGroupAuthoringConfig {
                     pools,
+                    compact_route_object: None,
+                    route_policies: Vec::new(),
                     features: BTreeMap::new(),
                 },
             ))
@@ -610,6 +613,8 @@ fn compile_v2_auth(
         if let Some(env) = entry.env {
             v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
                 alias,
+                priority: None,
+                weight: None,
                 env: Some(env),
                 token_file: None,
                 api_key: None,
@@ -638,6 +643,8 @@ fn compile_v2_auth(
             }
             v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
                 alias,
+                priority: None,
+                weight: None,
                 env: None,
                 token_file: None,
                 api_key: None,
@@ -655,6 +662,8 @@ fn compile_v2_auth(
             }
             v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
                 alias,
+                priority: None,
+                weight: None,
                 env: None,
                 token_file: Some(token_file.to_string()),
                 api_key: None,
@@ -675,6 +684,8 @@ fn compile_v2_auth(
         }
         v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
             alias,
+            priority: None,
+            weight: None,
             env: None,
             token_file: None,
             api_key: Some(api_key),
@@ -684,6 +695,7 @@ fn compile_v2_auth(
     }
     Ok(V3ProviderAuthAuthoringConfig {
         auth_type: V3ProviderAuthType::ApiKey,
+        selection: V3SelectionPolicy::default(),
         entries: v3_entries,
     })
 }
@@ -715,7 +727,7 @@ fn compile_v2_provider_models(
                         .max_context_tokens
                         .or(model.context_window)
                         .or(model.max_context),
-                    context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
+                    context_token_estimate_scale_bps: 10_000,
                     features: model.features,
                 },
             )

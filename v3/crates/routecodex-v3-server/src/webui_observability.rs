@@ -9,8 +9,7 @@
 // projects already-typed observability data. No fallback; cursor/sequence
 // errors are explicit.
 
-use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -120,16 +119,28 @@ pub(crate) struct V3ObsSnapshot {
     pub stats: V3ObsStats,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct V3ObsSinceResult {
+    pub next_cursor: u64,
+    pub events: Vec<V3ObsEvent>,
+    pub resync_required: bool,
+}
+
 /// Shared projection store + monotonic event log + broadcast.
 #[derive(Debug, Clone)]
 pub(crate) struct V3WebuiObservability {
     inner: Arc<std::sync::Mutex<V3WebuiObservabilityInner>>,
-    next_sequence: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct V3WebuiObservabilityInner {
+    next_sequence: u64,
     requests: BTreeMap<String, V3ObsRequestRow>,
+    terminal_order: VecDeque<String>,
+    terminal_keys: BTreeSet<String>,
+    terminal_key_order: VecDeque<String>,
+    resync_after_sequence: Option<u64>,
+    oldest_retained_sequence: Option<u64>,
     events: std::collections::VecDeque<V3ObsEvent>,
     stats: V3ObsStats,
     active: std::collections::BTreeSet<String>,
@@ -145,8 +156,6 @@ impl V3WebuiObservability {
     pub(crate) fn new() -> Self {
         Self {
             inner: Arc::new(std::sync::Mutex::new(V3WebuiObservabilityInner::default())),
-            next_sequence: Arc::new(AtomicU64::new(1)),
-            // NOTE: broadcast channel added at endpoint-wiring step.
         }
     }
 
@@ -166,15 +175,35 @@ impl V3WebuiObservability {
         scope: V3ObsScope,
         meta: V3ObsRequestMeta,
     ) -> Result<u64, String> {
-        let sequence = self.next_sequence.fetch_add(1, Ordering::Relaxed);
         let now = Self::now_ms();
 
         let mut inner = self
             .inner
             .lock()
             .map_err(|_| "v3 webui observability state is poisoned".to_string())?;
+        let sequence = inner
+            .next_sequence
+            .checked_add(1)
+            .ok_or_else(|| "v3 webui observability sequence exhausted".to_string())?;
+        inner.next_sequence = sequence;
 
         let event_type_str = event_type.as_str().to_string();
+        let is_terminal = matches!(
+            event_type,
+            V3ObsEventType::Completed | V3ObsEventType::Failed | V3ObsEventType::Cancelled
+        );
+        if is_terminal
+            && !inner.requests.contains_key(request_key)
+            && inner.terminal_keys.contains(request_key)
+        {
+            inner.resync_after_sequence = Some(
+                inner
+                    .resync_after_sequence
+                    .unwrap_or(0)
+                    .max(sequence),
+            );
+            return Ok(sequence);
+        }
 
         let mut row = inner
             .requests
@@ -188,6 +217,7 @@ impl V3WebuiObservability {
         if row.started_epoch_ms == 0 {
             row.started_epoch_ms = now;
         }
+        let was_terminal = row.result.is_some();
         // maintain attempt/switch counters and terminal result
         match event_type {
             V3ObsEventType::ProviderAttemptStarted => row.attempts += 1,
@@ -196,21 +226,36 @@ impl V3WebuiObservability {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
                 row.result = Some("success".to_string());
                 inner.active.remove(request_key);
-                inner.stats.success += 1;
+                if !was_terminal {
+                    inner.terminal_order.push_back(request_key.to_string());
+                    inner.terminal_keys.insert(request_key.to_string());
+                    inner.terminal_key_order.push_back(request_key.to_string());
+                    inner.stats.success += 1;
+                }
                 inner.stats.active = inner.active.len() as u64;
             }
             V3ObsEventType::Failed => {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
                 row.result = Some("error".to_string());
                 inner.active.remove(request_key);
-                inner.stats.error += 1;
+                if !was_terminal {
+                    inner.terminal_order.push_back(request_key.to_string());
+                    inner.terminal_keys.insert(request_key.to_string());
+                    inner.terminal_key_order.push_back(request_key.to_string());
+                    inner.stats.error += 1;
+                }
                 inner.stats.active = inner.active.len() as u64;
             }
             V3ObsEventType::Cancelled => {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
                 row.result = Some("cancelled".to_string());
                 inner.active.remove(request_key);
-                inner.stats.cancelled += 1;
+                if !was_terminal {
+                    inner.terminal_order.push_back(request_key.to_string());
+                    inner.terminal_keys.insert(request_key.to_string());
+                    inner.terminal_key_order.push_back(request_key.to_string());
+                    inner.stats.cancelled += 1;
+                }
                 inner.stats.active = inner.active.len() as u64;
             }
             V3ObsEventType::Started => {
@@ -230,6 +275,20 @@ impl V3WebuiObservability {
 
         let stats_snapshot = inner.stats.clone();
         inner.requests.insert(request_key.to_string(), row.clone());
+        while inner.requests.len() > 2048 {
+            let Some(eviction_key) = inner.terminal_order.pop_front() else {
+                break;
+            };
+            if !inner.active.contains(&eviction_key) {
+                inner.requests.remove(&eviction_key);
+            }
+        }
+        while inner.terminal_key_order.len() > 4096 {
+            let Some(tombstone_key) = inner.terminal_key_order.pop_front() else {
+                break;
+            };
+            inner.terminal_keys.remove(&tombstone_key);
+        }
         inner.events.push_back(V3ObsEvent {
             request_key: request_key.to_string(),
             sequence,
@@ -240,6 +299,7 @@ impl V3WebuiObservability {
         });
         if inner.events.len() > 2048 {
             inner.events.pop_front();
+            inner.oldest_retained_sequence = inner.events.front().map(|event| event.sequence);
         }
         // stats snapshot derived from the same typed projection
         inner.stats = stats_snapshot;
@@ -256,14 +316,14 @@ impl V3WebuiObservability {
         let requests = inner.requests.clone();
         let stats = inner.stats.clone();
         Ok(V3ObsSnapshot {
-            cursor: self.next_sequence.load(Ordering::Relaxed).saturating_sub(1),
+            cursor: inner.next_sequence,
             requests,
             stats,
         })
     }
 
     /// Incremental delta since a cursor; rejects stale events (sequence <= cursor).
-    pub(crate) fn since(&self, cursor: u64) -> Result<(u64, Vec<V3ObsEvent>), String> {
+    pub(crate) fn since(&self, cursor: u64) -> Result<V3ObsSinceResult, String> {
         let inner = self
             .inner
             .lock()
@@ -274,8 +334,15 @@ impl V3WebuiObservability {
             .filter(|event| event.sequence > cursor)
             .cloned()
             .collect::<Vec<_>>();
-        let next_cursor = self.next_sequence.load(Ordering::Relaxed).saturating_sub(1);
-        Ok((next_cursor, events))
+        let next_cursor = inner.next_sequence;
+        Ok(V3ObsSinceResult {
+            next_cursor,
+            events,
+            resync_required: inner.resync_after_sequence.is_some_and(|sequence| cursor < sequence)
+                || inner
+                    .oldest_retained_sequence
+                    .is_some_and(|sequence| cursor.saturating_add(1) < sequence),
+        })
     }
 }
 
@@ -355,11 +422,12 @@ mod tests {
         let s2 = o.record(V3ObsEventType::Completed, &k, scope(5555), meta("r4")).unwrap();
         assert!(s2 > s1, "monotonic sequence");
         // replay since before start returns both; since after terminal returns none
-        let (c0, ev0) = o.since(0).unwrap();
-        assert_eq!(ev0.len(), 2);
-        let (c1, ev1) = o.since(c0).unwrap();
-        assert!(ev1.is_empty(), "stale events rejected past cursor");
-        let _ = c1;
+        let first = o.since(0).unwrap();
+        assert_eq!(first.events.len(), 2);
+        assert!(!first.resync_required);
+        let second = o.since(first.next_cursor).unwrap();
+        assert!(second.events.is_empty(), "stale events rejected past cursor");
+        assert!(!second.resync_required);
     }
 
     #[test]
@@ -367,9 +435,9 @@ mod tests {
         let o = V3WebuiObservability::new();
         let k = build_v3_obs_request_key(4444, "r5");
         o.record(V3ObsEventType::Started, &k, scope(4444), meta("r5")).unwrap();
-        let (_, ev) = o.since(0).unwrap();
-        assert_eq!(ev[0].scope.port, 4444);
-        assert_eq!(ev[0].scope.workdir.as_deref(), Some("/w"));
+        let result = o.since(0).unwrap();
+        assert_eq!(result.events[0].scope.port, 4444);
+        assert_eq!(result.events[0].scope.workdir.as_deref(), Some("/w"));
     }
 
     #[test]
@@ -395,5 +463,123 @@ mod tests {
         );
         assert_eq!(row_a.result.as_deref(), Some("success"));
         assert_eq!(row_b.result.as_deref(), Some("success"));
+    }
+
+    #[test]
+    fn terminal_rows_are_bounded() {
+        let o = V3WebuiObservability::new();
+        for index in 0..2050 {
+            let request_id = format!("bounded-{index}");
+            let key = build_v3_obs_request_key(5555, &request_id);
+            o.record(V3ObsEventType::Started, &key, scope(5555), meta(&request_id)).unwrap();
+            o.record(V3ObsEventType::Completed, &key, scope(5555), meta(&request_id)).unwrap();
+        }
+        let snapshot = o.snapshot(0).unwrap();
+        assert!(snapshot.requests.len() <= 2048);
+        assert!(!snapshot.requests.contains_key("5555:bounded-0"));
+    }
+
+    #[test]
+    fn repeated_terminal_events_do_not_grow_terminal_queue() {
+        let o = V3WebuiObservability::new();
+        let request_id = "repeated-terminal";
+        let key = build_v3_obs_request_key(5555, request_id);
+        o.record(V3ObsEventType::Started, &key, scope(5555), meta(request_id)).unwrap();
+        for _ in 0..10_000 {
+            o.record(V3ObsEventType::Completed, &key, scope(5555), meta(request_id)).unwrap();
+        }
+        let snapshot = o.snapshot(0).unwrap();
+        assert_eq!(snapshot.requests.len(), 1);
+        assert_eq!(snapshot.stats.success, 1);
+    }
+
+    #[test]
+    fn evicted_terminal_replay_is_ignored() {
+        let o = V3WebuiObservability::new();
+        let first_id = "evicted-terminal";
+        let first_key = build_v3_obs_request_key(5555, first_id);
+        o.record(V3ObsEventType::Started, &first_key, scope(5555), meta(first_id)).unwrap();
+        o.record(V3ObsEventType::Completed, &first_key, scope(5555), meta(first_id)).unwrap();
+        for index in 0..2048 {
+            let request_id = format!("eviction-fill-{index}");
+            let key = build_v3_obs_request_key(5555, &request_id);
+            o.record(V3ObsEventType::Started, &key, scope(5555), meta(&request_id)).unwrap();
+            o.record(V3ObsEventType::Completed, &key, scope(5555), meta(&request_id)).unwrap();
+        }
+        assert!(!o.snapshot(0).unwrap().requests.contains_key(&first_key));
+        o.record(V3ObsEventType::Completed, &first_key, scope(5555), meta(first_id)).unwrap();
+        let snapshot = o.snapshot(0).unwrap();
+        assert!(!snapshot.requests.contains_key(&first_key));
+        assert_eq!(snapshot.stats.success, 2049);
+        let replay = o.since(0).unwrap();
+        assert!(replay.resync_required);
+        assert!(replay.events.iter().all(|event| event.request_key != first_key));
+    }
+
+    #[test]
+    fn event_log_eviction_requires_resync() {
+        let o = V3WebuiObservability::new();
+        for index in 0..1100 {
+            let request_id = format!("event-window-{index}");
+            let key = build_v3_obs_request_key(5555, &request_id);
+            o.record(V3ObsEventType::Started, &key, scope(5555), meta(&request_id)).unwrap();
+            o.record(V3ObsEventType::RouteSelected, &key, scope(5555), meta(&request_id)).unwrap();
+        }
+        let stale = o.since(0).unwrap();
+        assert!(stale.resync_required);
+        assert_eq!(stale.events.len(), 2048);
+        let current = o.since(stale.next_cursor).unwrap();
+        assert!(!current.resync_required);
+        assert!(current.events.is_empty());
+    }
+
+    #[test]
+    fn concurrent_records_commit_contiguous_sequences() {
+        let observability = V3WebuiObservability::new();
+        let mut handles = Vec::new();
+        for worker in 0..8 {
+            let worker_observability = observability.clone();
+            handles.push(std::thread::spawn(move || {
+                for index in 0..128 {
+                    let request_id = format!("concurrent-{worker}-{index}");
+                    let key = build_v3_obs_request_key(5555, &request_id);
+                    worker_observability
+                        .record(V3ObsEventType::Started, &key, scope(5555), meta(&request_id))
+                        .unwrap();
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        let result = observability.since(0).unwrap();
+        assert_eq!(result.events.len(), 1024);
+        assert!(!result.resync_required);
+        for (index, event) in result.events.iter().enumerate() {
+            assert_eq!(event.sequence, (index + 1) as u64);
+        }
+    }
+
+    #[test]
+    fn sequence_exhaustion_fails_explicitly() {
+        let observability = V3WebuiObservability::new();
+        observability.inner.lock().unwrap().next_sequence = u64::MAX - 1;
+        let key = build_v3_obs_request_key(5555, "last-sequence");
+        assert_eq!(
+            observability
+                .record(V3ObsEventType::Started, &key, scope(5555), meta("last-sequence"))
+                .unwrap(),
+            u64::MAX
+        );
+        let exhausted = observability.record(
+            V3ObsEventType::Started,
+            "5555:after-exhaustion",
+            scope(5555),
+            meta("after-exhaustion"),
+        );
+        assert_eq!(
+            exhausted.unwrap_err(),
+            "v3 webui observability sequence exhausted"
+        );
     }
 }

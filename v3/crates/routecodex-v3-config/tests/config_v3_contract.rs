@@ -415,6 +415,99 @@ targets = [
 }
 
 #[test]
+fn context_token_estimate_scale_defaults_to_10000_and_rejects_out_of_range_values() {
+    let source = r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+
+[providers.default_scale]
+type = "responses"
+base_url = "http://default.invalid/v1"
+default_model = "default-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "DEFAULT_KEY" }] }
+[providers.default_scale.models.default-model]
+capabilities = ["text"]
+
+[providers.low_scale]
+type = "responses"
+base_url = "http://low.invalid/v1"
+default_model = "low-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "LOW_KEY" }] }
+[providers.low_scale.models.low-model]
+capabilities = ["text"]
+context_token_estimate_scale_bps = 10000
+
+[providers.high_scale]
+type = "responses"
+base_url = "http://high.invalid/v1"
+default_model = "high-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "HIGH_KEY" }] }
+[providers.high_scale.models.high-model]
+capabilities = ["text"]
+context_token_estimate_scale_bps = 100000
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "default_scale", model = "default-model", priority = 1 },
+  { kind = "provider_model", provider = "low_scale", model = "low-model", priority = 2 },
+  { kind = "provider_model", provider = "high_scale", model = "high-model", priority = 3 }
+]
+"#;
+
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect("valid scale and omitted default must compile");
+    assert_eq!(
+        manifest.providers["default_scale"].models["default-model"]
+            .context_token_estimate_scale_bps,
+        10_000
+    );
+    assert_eq!(
+        manifest.providers["low_scale"].models["low-model"].context_token_estimate_scale_bps,
+        10000
+    );
+
+    let low_only = source.replace(
+        "[providers.high_scale]\ntype = \"responses\"\nbase_url = \"http://high.invalid/v1\"\ndefault_model = \"high-model\"\nauth = { type = \"api_key\", entries = [{ alias = \"key\", env = \"HIGH_KEY\" }] }\n[providers.high_scale.models.high-model]\ncapabilities = [\"text\"]\ncontext_token_estimate_scale_bps = 100001\n",
+        "",
+    );
+    let low_only = low_only.replace(
+        "context_token_estimate_scale_bps = 10000",
+        "context_token_estimate_scale_bps = 9999",
+    );
+    let low_error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&low_only).unwrap())
+        .expect_err("scale below 10000 must fail config compilation");
+    assert!(
+        low_error
+            .to_string()
+            .contains("context_token_estimate_scale_bps must be between 10000 and 100000"),
+        "unexpected low-scale error: {low_error}"
+    );
+
+    let high_only = source.replace(
+        "[providers.low_scale]\ntype = \"responses\"\nbase_url = \"http://low.invalid/v1\"\ndefault_model = \"low-model\"\nauth = { type = \"api_key\", entries = [{ alias = \"key\", env = \"LOW_KEY\" }] }\n[providers.low_scale.models.low-model]\ncapabilities = [\"text\"]\ncontext_token_estimate_scale_bps = 9999\n",
+        "",
+    );
+    let high_only = high_only.replace(
+        "context_token_estimate_scale_bps = 100000",
+        "context_token_estimate_scale_bps = 100001",
+    );
+    let high_error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&high_only).unwrap())
+            .expect_err("scale above 100000 must fail config compilation");
+    assert!(
+        high_error
+            .to_string()
+            .contains("context_token_estimate_scale_bps must be between 10000 and 100000"),
+        "unexpected high-scale error: {high_error}"
+    );
+}
+
+#[test]
 fn metadata_center_local_search_requires_exactly_one_backend_binding() {
     let source = r#"
 version = 3
@@ -699,6 +792,38 @@ fn requires_default_pool_for_every_route_group() {
     let authoring = parse_v3_config_02_authoring(&invalid).unwrap();
     let error = compile_v3_config_05_manifest(authoring).unwrap_err();
     assert!(error.to_string().contains("must define default pool"));
+}
+
+#[test]
+fn route_object_binding_compiles_and_compact_pool_stays_independent() {
+    let configured = FULL_CONFIG
+        .replace(
+            "[route_groups.primary.pools.default]\nselection",
+            "[route_groups.primary]\ncompact_route_object = \"compact-default\"\n\n[route_groups.primary.pools.default]\nselection",
+        )
+        .replace(
+            "[route_groups.primary.pools.search]\nselection",
+            "[route_groups.primary.pools.compact]\nroute_object = \"compact-default\"\nselection = { strategy = \"priority\" }\nmatch = { precedence = 5, entry_protocol = \"responses\" }\ntargets = [{ kind = \"provider_model\", provider = \"cc\", model = \"gpt-5.5\", priority = 1 }]\n\n[route_groups.primary.pools.search]\nselection",
+        )
+        .replace(
+            "[route_groups.secondary.pools.default]",
+            "[[route_groups.primary.route_policies]]\nid = \"compact-purpose\"\nprecedence = 10\ncondition = { kind = \"current_compaction\" }\naction = { select_route_pool = \"compact\" }\n\n[route_groups.secondary.pools.default]",
+        );
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&configured).unwrap())
+        .expect("compact route object must compile to the independent compact pool");
+    let group = &manifest.route_groups["primary"];
+    assert_eq!(group.compact_route_object.as_deref(), Some("compact-default"));
+    assert_eq!(
+        group.pools["compact"].route_object.as_deref(),
+        Some("compact-default")
+    );
+    assert_eq!(group.route_pool_for_object("compact-default"), Some("compact"));
+    assert_eq!(group.compact_route_pool(), Some("compact"));
+    assert_eq!(group.route_policies[0].id, "compact-purpose");
+    assert_eq!(
+        group.route_policies[0].action.select_route_pool,
+        "compact"
+    );
 }
 
 #[test]
@@ -2644,41 +2769,4 @@ targets = [{ kind = "provider_model", provider = "cc", model = "gpt-test", prior
         None,
         "v3-native provider cc must stay passthrough unless it declares a profile explicitly"
     );
-}
-
-fn compile_model_scale(scale: Option<u64>) -> Result<u64, String> {
-    let scale_line = scale
-        .map(|value| format!("context_token_estimate_scale_bps = {value}\n"))
-        .unwrap_or_default();
-    let source = format!(
-        r#"
-version = 3
-[servers.s]
-bind = "127.0.0.1"
-port = 1
-routing_group = "g"
-[providers.p]
-type = "responses"
-base_url = "http://p.invalid/v1"
-default_model = "m"
-auth = {{ type = "api_key", entries = [{{ alias = "key", env = "SCALE_KEY" }}] }}
-[providers.p.models.m]
-capabilities = ["text"]
-{scale_line}[route_groups.g.pools.default]
-selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "key", priority = 1 }}]
-"#
-    );
-    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap())
-        .map_err(|error| error.to_string())?;
-    Ok(manifest.providers["p"].models["m"].context_token_estimate_scale_bps)
-}
-
-#[test]
-fn context_token_estimate_scale_defaults_to_10000_and_rejects_out_of_range_values() {
-    assert_eq!(compile_model_scale(None).unwrap(), 10_000);
-    assert_eq!(compile_model_scale(Some(10_000)).unwrap(), 10_000);
-    assert_eq!(compile_model_scale(Some(100_000)).unwrap(), 100_000);
-    assert!(compile_model_scale(Some(9_999)).is_err());
-    assert!(compile_model_scale(Some(100_001)).is_err());
 }

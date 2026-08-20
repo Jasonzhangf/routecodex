@@ -92,6 +92,7 @@ fn wrap_v3_direct_sse_provider_stream_for_outcome(
     provider_action_permit: &mut Option<V3ProviderActionPermit>,
     runtime_timing: V3RuntimeTimingState,
     stream_observation: V3RuntimeStreamObservation,
+    route_policy_terminal_commit: Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>,
 ) {
     let body = std::mem::replace(client_body, V3ClientBody::Bytes(Vec::new()));
     *client_body = match body {
@@ -111,6 +112,7 @@ fn wrap_v3_direct_sse_provider_stream_for_outcome(
             },
             runtime_timing,
             stream_observation,
+            route_policy_terminal_commit,
         )),
         other => other,
     };

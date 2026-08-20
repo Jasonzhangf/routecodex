@@ -44,6 +44,51 @@ fn active_turn_uses_actual_tool_calls_and_ignores_history() {
 }
 
 #[test]
+fn typed_tool_result_error_enters_current_turn_observation() {
+    let request = json!({
+        "input": [
+            {"type":"message","role":"user","content":"run it"},
+            {"type":"function_call","name":"exec_command","call_id":"call","arguments":{"cmd":"ls"}},
+            {"type":"function_call_output","call_id":"call","is_error":true,"output":"permission denied"}
+        ]
+    });
+    let signals = build_v3_current_turn_route_facts(&request);
+    assert!(signals.has_current_turn_tool_output);
+    assert!(signals.has_current_turn_tool_execution_error);
+
+    let provider_error = json!({
+        "error": {"code":"provider_failure","message":"upstream failed"}
+    });
+    let signals = build_v3_current_turn_route_facts(&json!({
+        "input": [
+            {"type":"message","role":"user","content":"run it"},
+            {"type":"function_call_output","call_id":"call","output":provider_error}
+        ]
+    }));
+    assert!(!signals.has_current_turn_tool_execution_error);
+}
+
+#[test]
+fn compaction_is_a_typed_route_signal() {
+    let signals = build_v3_current_turn_route_facts(&json!({
+        "input": [
+            {"type":"message","role":"user","content":"compact"},
+            {"type":"compaction","encrypted_content":"opaque"}
+        ]
+    }));
+    assert!(signals.is_compaction);
+
+    let facts = V3CurrentTurnRouteFacts {
+        is_compaction: true,
+        latest_message_from_user: true,
+        ..Default::default()
+    };
+    let classification = classify_route(&facts);
+    assert_eq!(classification.route_name, "compact");
+    assert_eq!(classification.candidates.first().map(String::as_str), Some("compact"));
+}
+
+#[test]
 fn chat_historical_web_search_does_not_activate_current_turn() {
     let request = json!({
         "messages": [

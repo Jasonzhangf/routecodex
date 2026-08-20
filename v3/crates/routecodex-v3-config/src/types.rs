@@ -781,7 +781,41 @@ pub struct V3ForwarderTargetAuthoringConfig {
 pub struct V3RouteGroupAuthoringConfig {
     pub pools: BTreeMap<String, V3RoutePoolAuthoringConfig>,
     #[serde(default)]
+    pub compact_route_object: Option<String>,
+    #[serde(default)]
+    pub route_policies: Vec<V3RoutePolicyAuthoringConfig>,
+    #[serde(default)]
     pub features: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3RoutePolicyAuthoringConfig {
+    pub id: String,
+    pub precedence: i32,
+    pub condition: V3RouteConditionAuthoringConfig,
+    pub action: V3RouteActionAuthoringConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum V3RouteConditionAuthoringConfig {
+    CurrentCompaction,
+    SearchPoolTurnRatioAtLeast {
+        window_turns: usize,
+        numerator: usize,
+        denominator: usize,
+    },
+    ToolExecutionErrorTurnsAtLeast {
+        window_turns: usize,
+        count: usize,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3RouteActionAuthoringConfig {
+    pub select_route_pool: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -789,6 +823,8 @@ pub struct V3RouteGroupAuthoringConfig {
 pub struct V3RoutePoolAuthoringConfig {
     #[serde(default)]
     pub selection: V3SelectionPolicy,
+    #[serde(default)]
+    pub route_object: Option<String>,
     #[serde(default, rename = "match")]
     pub match_rule: Option<V3RoutePoolMatchAuthoringConfig>,
     pub targets: Vec<V3RoutePoolTargetAuthoringConfig>,
@@ -1288,16 +1324,60 @@ pub struct V3ClientErrorProjectionManifest {
 pub struct V3RouteGroupManifest {
     pub id: String,
     pub pools: BTreeMap<String, V3RoutePoolManifest>,
+    pub compact_route_object: Option<String>,
+    pub route_policies: Vec<V3RoutePolicyManifest>,
     pub features: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3RoutePolicyManifest {
+    pub id: String,
+    pub precedence: i32,
+    pub condition: V3RouteConditionManifest,
+    pub action: V3RouteActionManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V3RouteConditionManifest {
+    CurrentCompaction,
+    SearchPoolTurnRatioAtLeast {
+        window_turns: usize,
+        numerator: usize,
+        denominator: usize,
+    },
+    ToolExecutionErrorTurnsAtLeast {
+        window_turns: usize,
+        count: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3RouteActionManifest {
+    pub select_route_pool: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3RoutePoolManifest {
     pub id: String,
     pub selection: V3SelectionPolicy,
+    pub route_object: Option<String>,
     pub match_rule: Option<V3RoutePoolMatchManifest>,
     pub targets: Vec<V3RoutePoolTargetManifest>,
     pub features: BTreeMap<String, bool>,
+}
+
+impl V3RouteGroupManifest {
+    pub fn route_pool_for_object(&self, route_object: &str) -> Option<&str> {
+        self.pools.values().find_map(|pool| {
+            (pool.route_object.as_deref() == Some(route_object)).then_some(pool.id.as_str())
+        })
+    }
+
+    pub fn compact_route_pool(&self) -> Option<&str> {
+        self.compact_route_object
+            .as_deref()
+            .and_then(|route_object| self.route_pool_for_object(route_object))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

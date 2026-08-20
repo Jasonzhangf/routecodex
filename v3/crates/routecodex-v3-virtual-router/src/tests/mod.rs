@@ -56,6 +56,8 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
             "g".into(),
             V3RouteGroupManifest {
                 id: "g".into(),
+                compact_route_object: None,
+                route_policies: Vec::new(),
                 features: BTreeMap::new(),
                 pools: BTreeMap::from([
                     (
@@ -65,6 +67,7 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
                             selection: V3SelectionPolicy {
                                 strategy: strategy.clone(),
                             },
+                            route_object: None,
                             match_rule: None,
                             features: BTreeMap::new(),
                             targets: vec![target("a", 2, 1), target("b", 1, 3)],
@@ -75,6 +78,7 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
                         V3RoutePoolManifest {
                             id: "tools".into(),
                             selection: V3SelectionPolicy { strategy },
+                            route_object: None,
                             match_rule: Some(V3RoutePoolMatchManifest {
                                 precedence: 10,
                                 entry_protocol: Some("responses".into()),
@@ -114,6 +118,7 @@ fn classified_route_hits_pool_without_reclassifying_as_capability() {
             selection: V3SelectionPolicy {
                 strategy: V3SelectionStrategy::Priority,
             },
+            route_object: None,
             match_rule: Some(V3RoutePoolMatchManifest {
                 precedence: 2,
                 entry_protocol: Some("responses".into()),
@@ -252,6 +257,67 @@ fn direct_provider_model_short_circuits_pool_matching() {
             "client model must be rewritten to the bare canonical id"
         );
     }
+}
+
+#[test]
+fn compact_route_signal_uses_configured_independent_route_object_pool() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    let group = manifest.route_groups.get_mut("g").unwrap();
+    group.compact_route_object = Some("compact-default".into());
+    group.pools.insert(
+        "compact".into(),
+        V3RoutePoolManifest {
+            id: "compact".into(),
+            selection: V3SelectionPolicy {
+                strategy: V3SelectionStrategy::Priority,
+            },
+            route_object: Some("compact-default".into()),
+            match_rule: None,
+            features: BTreeMap::new(),
+            targets: vec![target("compact-target", 1, 1)],
+        },
+    );
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 1,
+                route_classification: test_route("compact", &["compact"]),
+            },
+        )
+        .unwrap();
+    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "compact");
+    assert_eq!(hit.target_plan.len(), 1);
+}
+
+#[test]
+fn route_policy_pool_action_is_consumed_as_one_explicit_pool() {
+    let router = V3VirtualRouter::default();
+    let manifest = manifest(V3SelectionStrategy::Priority);
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            matching_facts(),
+        )
+        .unwrap();
+    let classified = V3VirtualRouter::with_route_policy_pool(
+        classified,
+        Some("tools".to_string()),
+    );
+    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "tools");
+    assert_eq!(hit.target_plan.len(), 2);
 }
 
 #[test]
@@ -457,6 +523,7 @@ fn add_match_pool(
             selection: V3SelectionPolicy {
                 strategy: V3SelectionStrategy::Priority,
             },
+            route_object: None,
             match_rule: Some(V3RoutePoolMatchManifest {
                 precedence,
                 entry_protocol: Some("responses".into()),
@@ -487,6 +554,7 @@ fn add_model_match_pool(
             selection: V3SelectionPolicy {
                 strategy: V3SelectionStrategy::Priority,
             },
+            route_object: None,
             match_rule: Some(V3RoutePoolMatchManifest {
                 precedence,
                 entry_protocol: Some("responses".into()),

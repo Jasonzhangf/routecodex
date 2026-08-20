@@ -77,6 +77,7 @@ supportsStreaming = true
         selection: V3SelectionPolicy {
             strategy: V3SelectionStrategy::Priority,
         },
+        route_object: None,
         match_rule: None,
         targets: vec![V3RoutePoolTargetAuthoringConfig {
             kind: V3RouteTargetKind::ProviderModel,
@@ -92,6 +93,8 @@ supportsStreaming = true
     let _ = &mut pool;
     let mut groups = routecodex_v3_config::V3RouteGroupAuthoringConfig {
         pools: BTreeMap::new(),
+        compact_route_object: None,
+        route_policies: Vec::new(),
         features: BTreeMap::new(),
     };
     groups.pools.insert("default".into(), pool);
