@@ -188,6 +188,35 @@ resources:
     error_projection_only: V4Error06ClientProjected
   allowed_writers:
   - V4HubRespOutbound04ClientSemantic
+  allowed_readers:
+  - V4ServerSseOut05FrameBoundary
+  - V4ServerRespOutbound06ClientFrame
+  - V4ServerFrame
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4DebugSnapshotLedger
+  - V4ProviderReqCompat06Compat
+  may_enter_provider_body: false
+  may_enter_client_body: true
+  binding_status: anchored
+- resource_id: v4.response.client_frame
+  axis: data
+  verification_gate:
+  - v4_parity_gate_plane_isolation
+  - v4_parity_gate_standard_plugins
+  resource_kind: client_frame
+  lifecycle: v4.pipeline.mainline
+  owner_crate: routecodex-v4-runtime
+  owner_node: V4ServerRespOutbound06ClientFrame
+  owner_symbols:
+  - FrameBuild
+  identity:
+  - requestId
+  - endpoint
+  semantic_contract:
+    control_fields_forbidden: true
+    error_projection_only: V4Error06ClientProjected
+  allowed_writers:
   - V4ServerRespOutbound06ClientFrame
   allowed_readers:
   - V4ServerSseOut05FrameBoundary
@@ -197,6 +226,7 @@ resources:
   - V4ControlMetadataCenter
   - V4DebugSnapshotLedger
   - V4ProviderReqCompat06Compat
+  - V4HubRespOutbound04ClientSemantic
   may_enter_provider_body: false
   may_enter_client_body: true
   binding_status: anchored
@@ -1781,6 +1811,30 @@ resources:
   forbidden_writers:
   - V4AdminCommand
   - V4NodeContainer
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.cli.standard_library_projection
+  axis: information
+  verification_gate:
+  - v4_parity_gate_cli_plugin
+  resource_kind: readonly_projection
+  lifecycle: v4.plugin.cli_inspector
+  owner_crate: routecodex-v4-cli-plugin
+  owner_node: V4CliStandardLibraryProjection
+  owner_symbols:
+  - run
+  identity:
+  - plugin_id
+  - resource_id
+  - node_id
+  allowed_writers:
+  - routecodex-v4-cli-plugin
+  allowed_readers:
+  - appsdk::verify
+  forbidden_writers:
+  - V4NodeContainer
+  - routecodex-v4-runtime
   may_enter_provider_body: false
   may_enter_client_body: false
   binding_status: anchored

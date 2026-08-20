@@ -276,7 +276,10 @@
         "Command::Categories"
       ],
       "entry_paths": [
-        "crates/routecodex-v4-cli-plugin/src/main.rs"
+        "crates/routecodex-v4-cli-plugin/src/lib.rs"
+      ],
+      "resource_bindings": [
+        "v4.cli.standard_library_projection"
       ],
       "required_gates": [
         "v4_cli_plugin_l2_regression",

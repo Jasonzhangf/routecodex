@@ -4,8 +4,7 @@
   "status": "contract_bound",
   "owner_feature_id": "v4.plugin.cli_inspector",
   "canonical_docs": [
-    "v4/docs/architecture/v4-standard-plugin-library.md",
-    "v4/docs/goals/v4-standard-plugin-library-test-design.md"
+    "v4/docs/architecture/v4-cli-plugin.md"
   ],
   "scope": "Read-only CLI projection of the registered V4 standard plugin library.",
   "commands": [

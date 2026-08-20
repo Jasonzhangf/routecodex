@@ -14,24 +14,28 @@ use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, Stand
 
 const PLUGIN_ID: &str = "v4.std.response.protocol_decode";
 
-fn control_keys() -> &'static [&'static str] {
+pub(crate) fn control_keys() -> &'static [&'static str] {
     &[
         "control",
+        "metadata_center",
         "error_chain",
         "route_facts",
         "target_selection",
         "payload_cycle",
+        "stopless_state",
+        "side_channel",
+        "record_ledger",
         "debug",
         "diagnostics",
         "snapshot",
     ]
 }
 
-fn reject_control_fields(object: &serde_json::Map<String, Value>) -> Result<(), String> {
+pub(crate) fn reject_control_fields(object: &serde_json::Map<String, Value>) -> Result<(), String> {
     for key in control_keys() {
         if object.contains_key(*key) {
             return Err(format!(
-                "protocol_decode rejects control/debug field {key} in provider response"
+                "rejects control/debug field {key} in response data"
             ));
         }
     }

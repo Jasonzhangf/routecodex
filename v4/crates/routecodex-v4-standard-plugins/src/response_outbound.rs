@@ -9,6 +9,7 @@
 use routecodex_v4_cordis_bridge::ExecCtx;
 use serde_json::{json, Value};
 
+use super::response_inbound::reject_control_fields;
 use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, StandardPlugin};
 
 const CLIENT_SEMANTIC_ID: &str = "v4.std.response.client_semantic_projection";
@@ -53,7 +54,7 @@ pub(crate) fn response_outbound_descriptors() -> Vec<StandardPlugin> {
             PluginPhase::Projection,
             400,
             vec!["v4.response.client_wire_payload"],
-            vec!["v4.response.client_wire_payload"],
+            vec!["v4.response.client_frame"],
         ),
     ]
 }
@@ -68,6 +69,7 @@ fn client_semantic_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .and_then(Value::as_str)
         .ok_or_else(|| "client_semantic_projection requires string requestId".to_string())?;
 
+    reject_control_fields(governed)?;
     let mut semantic = governed.clone();
     semantic.remove("providerId");
     semantic.remove("statusCode");
@@ -89,6 +91,7 @@ fn frame_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .ok_or_else(|| "frame_build requires string requestId".to_string())?;
     let mut response = semantic.clone();
     response.remove("requestId");
+    reject_control_fields(&response)?;
     let frame = json!({
         "kind": "client_frame",
         "requestId": request_id,
@@ -99,8 +102,13 @@ fn frame_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 
 fn sse_frame_boundary(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let data = ctx.read_data();
-    data.as_object()
+    let wire = data
+        .as_object()
         .ok_or_else(|| "sse_frame_boundary requires an object client wire payload".to_string())?;
+    reject_control_fields(wire)?;
+    wire.get("requestId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "sse_frame_boundary requires string requestId".to_string())?;
     Ok(())
 }
 

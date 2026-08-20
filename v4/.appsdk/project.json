@@ -1636,19 +1636,14 @@
     {
       "active_artifact": "active/lib/routecodex-v4-cli-plugin/**",
       "artifact_paths": [
-        "cli-plugin.contract.json"
+        "bin/rccv4-plugin"
       ],
       "build": {
         "args": [
-          "build",
-          "--release",
-          "--manifest-path",
-          "Cargo.toml",
-          "-p",
-          "routecodex-v4-cli-plugin",
-          "--locked"
+          "-c",
+          "cargo build --release --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && mkdir -p generated/modules/routecodex-v4-cli-plugin/bin && cp target/release/rccv4-plugin generated/modules/routecodex-v4-cli-plugin/bin/rccv4-plugin"
         ],
-        "program": "cargo",
+        "program": "sh",
         "working_directory": "."
       },
       "contract_paths": [
@@ -1659,7 +1654,7 @@
         "routecodex-v4-standard-plugins"
       ],
       "generated_outputs": [
-        "generated/cli-plugin/**"
+        "generated/modules/routecodex-v4-cli-plugin/**"
       ],
       "module_id": "routecodex-v4-cli-plugin",
       "owned_paths": [
@@ -1669,22 +1664,21 @@
         "allow_skipped": false,
         "command": {
           "args": [
-            "test",
-            "--manifest-path",
-            "Cargo.toml",
-            "-p",
-            "routecodex-v4-cli-plugin",
-            "--locked"
+            "-c",
+            "cargo test --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && cargo build --release --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && node scripts/test-cli-plugin.mjs"
           ],
-          "program": "cargo",
+          "program": "sh",
           "working_directory": "."
         },
         "input_paths": [
           "crates/routecodex-v4-cli-plugin/Cargo.toml",
           "crates/routecodex-v4-cli-plugin/src/main.rs",
-          "contracts/cli-plugin.contract.json"
+          "contracts/cli-plugin.contract.json",
+          "docs/architecture/v4-cli-plugin.md",
+          "scripts/test-cli-plugin.mjs",
+          "crates/routecodex-v4-cli-plugin/src/lib.rs"
         ],
-        "minimum_test_count": 4,
+        "minimum_test_count": 13,
         "ordinary_mode_after_freeze": "disabled",
         "reenable_on": [
           "source_change",

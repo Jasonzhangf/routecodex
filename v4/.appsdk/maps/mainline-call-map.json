@@ -842,22 +842,6 @@
       "status": "active"
     },
     {
-      "from": "routecodex-v4-cli-plugin",
-      "to": "routecodex-v4-standard-plugins",
-      "owner": "routecodex-v4-cli-plugin::run",
-      "edge_type": "readonly_projection",
-      "symbols": [
-        "standard_plugins",
-        "standard_resource_registry",
-        "standard_allowed_reads",
-        "standard_allowed_writes",
-        "standard_node_allowed_reads",
-        "standard_node_allowed_writes"
-      ],
-      "path": "crates/routecodex-v4-cli-plugin/src/main.rs",
-      "status": "active"
-    },
-    {
       "from": "routecodex-v4-runtime",
       "to": "routecodex-v4-runtime",
       "owner": "routecodex-v4-runtime::execute_mock_transport_slice",
@@ -906,6 +890,7 @@
       "to": "routecodex-v4-standard-plugins",
       "owner": "routecodex-v4-cli-plugin::run",
       "edge_type": "readonly_projection",
+      "resource": "v4.cli.standard_library_projection",
       "symbols": [
         "standard_plugins",
         "standard_resource_registry",
@@ -914,7 +899,7 @@
         "standard_node_allowed_reads",
         "standard_node_allowed_writes"
       ],
-      "path": "crates/routecodex-v4-cli-plugin/src/main.rs",
+      "path": "crates/routecodex-v4-cli-plugin/src/lib.rs",
       "status": "active"
     }
   ]

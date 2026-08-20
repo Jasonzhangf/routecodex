@@ -204,6 +204,10 @@ pub fn standard_resource_registry() -> ResourceRegistry {
                 axis: ResourceAxis::Data,
             },
             ResourceEntry {
+                resource_id: "v4.response.client_frame".to_string(),
+                axis: ResourceAxis::Data,
+            },
+            ResourceEntry {
                 resource_id: "v4.control.metadata_center".to_string(),
                 axis: ResourceAxis::Control,
             },
@@ -304,6 +308,7 @@ pub fn standard_allowed_writes() -> Vec<String> {
         "v4.request.provider_wire_payload".to_string(),
         "v4.response.normal_payload".to_string(),
         "v4.response.client_wire_payload".to_string(),
+        "v4.response.client_frame".to_string(),
         "v4.control.metadata_center".to_string(),
         "v4.control.route_facts".to_string(),
         "v4.control.target_selection".to_string(),
@@ -351,13 +356,16 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
         "V4HubReqInbound03Normalized" => Vec::new(),
         "V4HubReqChatProcess04Governed" => vec!["v4.request.normal_payload".to_string()],
         "V4HubRespInbound02Parsed" => vec!["v4.response.normal_payload".to_string()],
-        "V4HubRespChatProcess03Governed" => vec!["v4.response.normal_payload".to_string()],
+        "V4HubRespChatProcess03Governed" => vec![
+            "v4.response.normal_payload".to_string(),
+            "v4.control.metadata_center".to_string(),
+        ],
         "V4HubRespOutbound04ClientSemantic" => vec!["v4.response.client_wire_payload".to_string()],
         "V4ServerSseOut05FrameBoundary" => Vec::new(),
         "V4HubReqOutbound05ProviderSemantic" => vec!["v4.request.provider_semantic".to_string()],
         "V4ProviderReqCompat06Compat" => vec!["v4.request.provider_wire_payload".to_string()],
         "V4ProviderSseOut07WireBoundary" => Vec::new(),
-        "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_wire_payload".to_string()],
+        "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_frame".to_string()],
         "V4MetadataCenter01ScopeRegistry" => vec!["v4.control.metadata_center".to_string()],
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],
@@ -553,7 +561,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginPhase::Semantic,
             300,
             vec!["v4.response.normal_payload"],
-            vec!["v4.response.normal_payload"],
+            vec!["v4.response.normal_payload", "v4.control.metadata_center"],
         ),
         plugin(
             "v4.std.routing.route_facts_producer",
@@ -855,7 +863,12 @@ fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     if let Some(object) = data.as_object_mut() {
         object.insert("governance".to_string(), json!("response_governance"));
     }
-    ctx.write_data(data).map_err(|error| error.to_string())
+    ctx.write_data(data).map_err(|error| error.to_string())?;
+    ctx.write_control_resource(
+        "v4.control.metadata_center",
+        json!({"governance_applied": "response_governance"}),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn route_facts_produce(ctx: &mut ExecCtx<'_>) -> Result<(), String> {

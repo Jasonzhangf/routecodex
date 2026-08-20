@@ -64,4 +64,5 @@ export const CONSUMER_REGRESSIONS = [
   ['routecodex-v4-admin', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-manager,routecodex-v4-runtime-inspector,routecodex-v4-plugin-contract,routecodex-v4-plugin-plan'],
   ['routecodex-v4-node-container', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-cordis-bridge,routecodex-v4-plugin-plan'],
   ['routecodex-v4-standard-plugins', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container'],
+  ['routecodex-v4-cli-plugin', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-standard-plugins'],
 ];

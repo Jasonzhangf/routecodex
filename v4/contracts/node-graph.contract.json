@@ -3,7 +3,7 @@
   "contract_id": "v4-node-graph",
   "status": "active",
   "owner_feature_id": "v4.node_graph",
-  "graph_hash": "sha256:9e301cc45fcc7255c9ec980db37a5c0c71a6ded656a3483c0bcd1382145d58f6",
+  "graph_hash": "sha256:98d3fcd2af5f3a026c46d0376e47947116a8172d70781197add414b24b91c6c1",
   "canonical_docs": [
     "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
@@ -1643,6 +1643,13 @@
       "role_id": "control_ledger",
       "scope": "typed admin command DTO",
       "owner": "routecodex-v4-admin"
+    },
+    {
+      "node_id": "V4CliStandardLibraryProjection",
+      "family": "ControlCenterNode",
+      "role_id": "control_center",
+      "scope": "read-only standard plugin library CLI projection",
+      "owner": "routecodex-v4-cli-plugin"
     },
     {
       "node_id": "V4NodeContainer",

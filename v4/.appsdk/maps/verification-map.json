@@ -489,7 +489,7 @@
     },
     {
       "gate_id": "v4_cli_plugin_l2_regression",
-      "command": "cargo test --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked",
+      "command": "sh -c 'cargo test --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && cargo build --release --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && node scripts/test-cli-plugin.mjs'",
       "required_for": [
         "routecodex-v4-cli-plugin:architecture_stable"
       ]
@@ -504,6 +504,13 @@
     {
       "gate_id": "v4_parity_gate_cli_plugin_red",
       "command": "node scripts/architecture/verify-v4-cli-plugin.mjs --red-self-test",
+      "required_for": [
+        "routecodex-v4-cli-plugin:architecture_stable"
+      ]
+    },
+    {
+      "gate_id": "v4_cli_plugin_test_consumer",
+      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-cli-plugin --deps routecodex-v4-base-node --source-deps routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-standard-plugins",
       "required_for": [
         "routecodex-v4-cli-plugin:architecture_stable"
       ]

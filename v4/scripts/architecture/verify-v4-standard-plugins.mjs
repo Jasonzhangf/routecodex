@@ -110,7 +110,8 @@ const NODE_PERMISSIONS = new Map([
     reads: ['v4.response.provider_raw'], writes: ['v4.response.normal_payload'],
   }],
   ['V4HubRespChatProcess03Governed', {
-    reads: ['v4.response.normal_payload'], writes: ['v4.response.normal_payload'],
+    reads: ['v4.response.normal_payload'],
+    writes: ['v4.response.normal_payload', 'v4.control.metadata_center'],
   }],
   ['V4HubRespOutbound04ClientSemantic', {
     reads: ['v4.response.normal_payload'], writes: ['v4.response.client_wire_payload'],
@@ -133,7 +134,7 @@ const NODE_PERMISSIONS = new Map([
     writes: [],
   }],
   ['V4ServerRespOutbound06ClientFrame', {
-    reads: ['v4.response.client_wire_payload'], writes: ['v4.response.client_wire_payload'],
+    reads: ['v4.response.client_wire_payload'], writes: ['v4.response.client_frame'],
   }],
   ['V4MetadataCenter01ScopeRegistry', {
     reads: ['v4.control.metadata_center'], writes: ['v4.control.metadata_center'],
@@ -155,20 +156,24 @@ const NODE_PERMISSIONS = new Map([
   }],
 ]);
 
-const PLUGIN_DESCRIPTOR_RE = /plugin\(\s*"([^"]+)"\s*,\s*PluginCategory::[A-Za-z]+\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*Some\((\d+)\)\s*,[\s\S]*?vec!\[([^\]]*)\]\s*,\s*vec!\[([^\]]*)\]\s*,\s*\)/g;
+const PLUGIN_DESCRIPTOR_RE = /plugin\(\s*(?:"([^"]+)"|([A-Z][A-Z0-9_]*))\s*,\s*PluginCategory::[A-Za-z]+\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*Some\((\d+)\)\s*,[\s\S]*?vec!\[([^\]]*)\]\s*,\s*vec!\[([^\]]*)\]\s*,\s*\)/g;
 
 function parseStringVector(source) {
   return [...source.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
 }
 
 function parseStandardDescriptors(source) {
+  const constants = new Map(
+    [...source.matchAll(/const\s+([A-Z][A-Z0-9_]*)\s*:\s*&str\s*=\s*"([^"]+)"/g)]
+      .map((match) => [match[1], match[2]]),
+  );
   return [...source.matchAll(PLUGIN_DESCRIPTOR_RE)].map((match) => ({
-    pluginId: match[1],
-    nodeId: match[2],
-    roleId: match[3],
-    position: Number(match[4]),
-    reads: parseStringVector(match[5]),
-    writes: parseStringVector(match[6]),
+    pluginId: match[1] ?? constants.get(match[2]) ?? `__unresolved:${match[2]}`,
+    nodeId: match[3],
+    roleId: match[4],
+    position: Number(match[5]),
+    reads: parseStringVector(match[6]),
+    writes: parseStringVector(match[7]),
   }));
 }
 
@@ -472,8 +477,17 @@ function validate(
     }
 
     const descriptors = parseStandardDescriptors(source);
-    if (descriptors.length !== 20) {
-      failures.push(`${MODULE}: expected 20 parseable standard descriptors, got ${descriptors.length}`);
+    const activeDescriptors = descriptors.filter(
+      (descriptor) => !descriptor.pluginId.startsWith('v4.std.test.'),
+    );
+    const testDescriptors = descriptors.filter(
+      (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
+    );
+    if (activeDescriptors.length !== 23) {
+      failures.push(`${MODULE}: expected 23 active standard descriptors, got ${activeDescriptors.length}`);
+    }
+    if (testDescriptors.length !== 0) {
+      failures.push(`${MODULE}: unexpected test-only response descriptors`);
     }
     const anchors = activeNodeAnchors(nodeGraph);
     const operationsByResource = new Map(
@@ -501,7 +515,7 @@ function validate(
         }
       }
     }
-    for (const descriptor of descriptors) {
+    for (const descriptor of activeDescriptors) {
       const anchor = anchors.get(descriptor.nodeId);
       if (!anchor) {
         failures.push(`${descriptor.pluginId}: unknown active node ${descriptor.nodeId}`);

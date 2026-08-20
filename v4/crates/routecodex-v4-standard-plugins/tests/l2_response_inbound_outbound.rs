@@ -119,6 +119,32 @@ fn positive_protocol_decode_builds_parsed_response() {
 }
 
 #[test]
+fn positive_nested_business_keys_are_preserved() {
+    let mut raw = provider_raw();
+    raw["data"]["output"] = json!([
+        {
+            "type": "function_call",
+            "name": "search",
+            "arguments": {
+                "query": "routecodex",
+                "debug": true,
+                "metadata_center": {"enabled": false}
+            }
+        }
+    ]);
+    let parsed = execute(
+        "V4HubRespInbound02Parsed",
+        "response_inbound",
+        "response",
+        2,
+        "v4.std.response.protocol_decode",
+        raw,
+    )
+    .expect("nested business keys are not control leakage");
+    assert_eq!(parsed["output"][0]["arguments"]["debug"], json!(true));
+}
+
+#[test]
 fn positive_client_semantic_projection_preserves_response_semantics() {
     let semantic = execute(
         "V4HubRespOutbound04ClientSemantic",
@@ -421,4 +447,246 @@ fn negative_non_adjacent_response_node_selector_rejected() {
             | PlanError::NodeSelectorPositionMismatch { .. }
             | PlanError::NodeRoleMismatch { .. }
     ));
+}
+
+#[test]
+fn negative_outbound_rejects_hostile_control_fields() {
+    for data in [
+        json!({
+            "requestId": "req-response-1",
+            "id": "resp-1",
+            "output": [{"type": "text", "text": "hello"}],
+            "control": {"route": "internal"}
+        }),
+        json!({
+            "requestId": "req-response-1",
+            "id": "resp-1",
+            "output": [{"type": "text", "text": "hello"}],
+            "metadata_center": {"key": "internal"}
+        }),
+        json!({
+            "requestId": "req-response-1",
+            "id": "resp-1",
+            "output": [{"type": "text", "text": "hello"}],
+            "error_chain": {"stage": "ErrorErr03"}
+        }),
+        json!({
+            "requestId": "req-response-1",
+            "id": "resp-1",
+            "output": [{"type": "text", "text": "hello"}],
+            "route_facts": {"provider": "internal"}
+        }),
+        json!({
+            "requestId": "req-response-1",
+            "id": "resp-1",
+            "output": [{"type": "text", "text": "hello"}],
+            "snapshot": {"debug": true}
+        }),
+    ] {
+        let error = execute(
+            "V4HubRespOutbound04ClientSemantic",
+            "response_outbound",
+            "response",
+            4,
+            "v4.std.response.client_semantic_projection",
+            data,
+        )
+        .expect_err("hostile control fields must fail fast");
+        assert!(matches!(
+            error,
+            NodeContainerError::Bridge(BridgeError::HandleError { .. })
+        ));
+    }
+}
+
+#[test]
+fn positive_inbound_preserves_output_business_fields() {
+    let mut raw = provider_raw();
+    raw["data"]["output"] = json!([
+        {
+            "type": "text",
+            "text": "hello",
+            "control": {"route": "internal"}
+        }
+    ]);
+    let parsed = execute(
+        "V4HubRespInbound02Parsed",
+        "response_inbound",
+        "response",
+        2,
+        "v4.std.response.protocol_decode",
+        raw,
+    )
+    .expect("nested business fields in output items are preserved");
+    assert_eq!(parsed["output"][0]["control"]["route"], json!("internal"));
+}
+
+#[test]
+fn negative_frame_boundary_rejects_malformed_wire() {
+    let plan = compile_standard_plan(
+        "V4ServerSseOut05FrameBoundary",
+        "response_outbound",
+        "response",
+        5,
+        &["v4.std.response.sse_frame_boundary"],
+    )
+    .expect("plan compiles");
+    let hash = plan.plan_hash();
+    for data in [json!({}), json!({"requestId": 1, "response": {}})] {
+        let mut container = NodeContainer::declare(
+            "V4ServerSseOut05FrameBoundary",
+            plan.clone(),
+            plan_bindings(&plan),
+        )
+        .expect("binding passes");
+        container = publish_container(container);
+        let registry = StandardHandleRegistry::new();
+        let error = container
+            .execute_with_plan_hash(
+                &hash,
+                NodeExecutionInput {
+                    data,
+                    control: json!({}),
+                },
+                &registry,
+            )
+            .expect_err("malformed wire must fail fast");
+        assert!(matches!(
+            error,
+            NodeContainerError::Bridge(BridgeError::HandleError { .. })
+        ));
+        container.drain().unwrap();
+        container.dispose().unwrap();
+    }
+}
+
+#[test]
+fn positive_frame_boundary_accepts_generic_client_wire_shapes() {
+    let plan = compile_standard_plan(
+        "V4ServerSseOut05FrameBoundary",
+        "response_outbound",
+        "response",
+        5,
+        &["v4.std.response.sse_frame_boundary"],
+    )
+    .expect("plan compiles");
+    let hash = plan.plan_hash();
+    for data in [
+        json!({
+            "requestId": "req-chat-1",
+            "choices": [{"message": {"role": "assistant", "content": "hello"}}]
+        }),
+        json!({
+            "requestId": "req-gemini-1",
+            "candidates": [{"content": {"parts": [{"text": "hello"}]}}]
+        }),
+    ] {
+        let mut container = NodeContainer::declare(
+            "V4ServerSseOut05FrameBoundary",
+            plan.clone(),
+            plan_bindings(&plan),
+        )
+        .expect("binding passes");
+        container = publish_container(container);
+        let registry = StandardHandleRegistry::new();
+        container
+            .execute_with_plan_hash(
+                &hash,
+                NodeExecutionInput {
+                    data,
+                    control: json!({}),
+                },
+                &registry,
+            )
+            .expect("generic client wire shape must pass transport boundary");
+        container.drain().unwrap();
+        container.dispose().unwrap();
+    }
+}
+
+#[test]
+fn positive_outbound_preserves_nested_business_keys() {
+    let data = json!({
+        "requestId": "req-response-nested",
+        "id": "resp-nested",
+        "output": [{
+            "type": "text",
+            "text": "hello",
+            "metadata_center": {
+                "scope": "internal",
+                "children": [
+                    {"route_facts": {"provider": "internal"}}
+                ]
+            }
+        }]
+    });
+    let parsed = execute(
+        "V4HubRespOutbound04ClientSemantic",
+        "response_outbound",
+        "response",
+        4,
+        "v4.std.response.client_semantic_projection",
+        data,
+    )
+    .expect("nested business keys are not control leakage");
+    assert_eq!(
+        parsed["output"][0]["metadata_center"]["scope"],
+        json!("internal")
+    );
+}
+
+#[test]
+fn positive_outbound_preserves_nested_trace_business_fields() {
+    let data = json!({
+        "requestId": "req-response-frame-nested",
+        "id": "resp-frame-nested",
+        "output": [{"type": "text", "text": "hello"}],
+        "trace": {
+            "nested": {
+                "error_chain": {
+                    "stage": "ErrorErr03RuntimeClassified"
+                },
+                "diagnostics": {"reason": "leak"}
+            }
+        }
+    });
+    let parsed = execute(
+        "V4HubRespOutbound04ClientSemantic",
+        "response_outbound",
+        "response",
+        4,
+        "v4.std.response.client_semantic_projection",
+        data,
+    )
+    .expect("nested business fields are not control leakage");
+    assert_eq!(
+        parsed["trace"]["nested"]["error_chain"]["stage"],
+        json!("ErrorErr03RuntimeClassified")
+    );
+}
+
+#[test]
+fn positive_outbound_preserves_deep_client_payload() {
+    let data = json!({
+        "requestId": "req-response-deep-payload",
+        "id": "resp-deep-payload",
+        "output": [{
+            "type": "message",
+            "content": [
+                {"type": "text", "text": "hello"},
+                {"type": "tool_use", "name": "search", "input": {"query": "openai"}}
+            ]
+        }]
+    });
+    let parsed = execute(
+        "V4HubRespOutbound04ClientSemantic",
+        "response_outbound",
+        "response",
+        4,
+        "v4.std.response.client_semantic_projection",
+        data,
+    )
+    .expect("non-control deep client payload must survive recursion");
+    assert_eq!(parsed["id"], json!("resp-deep-payload"));
+    assert_eq!(parsed["output"][0]["content"][1]["name"], json!("search"));
 }

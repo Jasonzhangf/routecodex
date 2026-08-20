@@ -174,7 +174,7 @@ fn positive_error_plugin_writes_typed_error_side_channel_only() {
 }
 
 #[test]
-fn positive_response_governance_writes_response_data_only() {
+fn positive_response_governance_writes_governed_data_and_control() {
     let plan = compile_standard_plan(
         "V4HubRespChatProcess03Governed",
         "response_chat_process",
@@ -205,11 +205,16 @@ fn positive_response_governance_writes_response_data_only() {
         .expect("response governance executes");
 
     let data = output.data.as_object().expect("data is object");
-    assert_eq!(data["governance"], json!("response_governance"));
+    let control = output.control.as_object().expect("control is object");
+    assert_eq!(
+        control["metadata_center"]["governance_applied"],
+        json!("response_governance")
+    );
     assert!(
         data.get("control").is_none(),
         "control never enters response data"
     );
+    assert_eq!(data["governance"], json!("response_governance"));
     assert!(output.diagnostics.is_empty());
 
     container.drain().unwrap();
