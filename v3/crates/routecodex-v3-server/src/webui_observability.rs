@@ -10,7 +10,6 @@
 // errors are explicit.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -131,11 +130,11 @@ pub(crate) struct V3ObsSinceResult {
 #[derive(Debug, Clone)]
 pub(crate) struct V3WebuiObservability {
     inner: Arc<std::sync::Mutex<V3WebuiObservabilityInner>>,
-    next_sequence: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct V3WebuiObservabilityInner {
+    next_sequence: u64,
     requests: BTreeMap<String, V3ObsRequestRow>,
     terminal_order: VecDeque<String>,
     terminal_keys: BTreeSet<String>,
@@ -155,10 +154,10 @@ impl Default for V3WebuiObservability {
 
 impl V3WebuiObservability {
     pub(crate) fn new() -> Self {
+        let mut inner = V3WebuiObservabilityInner::default();
+        inner.next_sequence = 1;
         Self {
-            inner: Arc::new(std::sync::Mutex::new(V3WebuiObservabilityInner::default())),
-            next_sequence: Arc::new(AtomicU64::new(1)),
-            // NOTE: broadcast channel added at endpoint-wiring step.
+            inner: Arc::new(std::sync::Mutex::new(inner)),
         }
     }
 
@@ -178,13 +177,14 @@ impl V3WebuiObservability {
         scope: V3ObsScope,
         meta: V3ObsRequestMeta,
     ) -> Result<u64, String> {
-        let sequence = self.next_sequence.fetch_add(1, Ordering::Relaxed);
         let now = Self::now_ms();
 
         let mut inner = self
             .inner
             .lock()
             .map_err(|_| "v3 webui observability state is poisoned".to_string())?;
+        let sequence = inner.next_sequence;
+        inner.next_sequence = inner.next_sequence.saturating_add(1);
 
         let event_type_str = event_type.as_str().to_string();
         let is_terminal = matches!(
@@ -315,7 +315,7 @@ impl V3WebuiObservability {
         let requests = inner.requests.clone();
         let stats = inner.stats.clone();
         Ok(V3ObsSnapshot {
-            cursor: self.next_sequence.load(Ordering::Relaxed).saturating_sub(1),
+            cursor: inner.next_sequence.saturating_sub(1),
             requests,
             stats,
         })
@@ -333,7 +333,7 @@ impl V3WebuiObservability {
             .filter(|event| event.sequence > cursor)
             .cloned()
             .collect::<Vec<_>>();
-        let next_cursor = self.next_sequence.load(Ordering::Relaxed).saturating_sub(1);
+        let next_cursor = inner.next_sequence.saturating_sub(1);
         Ok(V3ObsSinceResult {
             next_cursor,
             events,
@@ -530,5 +530,32 @@ mod tests {
         let current = o.since(stale.next_cursor).unwrap();
         assert!(!current.resync_required);
         assert!(current.events.is_empty());
+    }
+
+    #[test]
+    fn concurrent_records_commit_contiguous_sequences() {
+        let observability = V3WebuiObservability::new();
+        let mut handles = Vec::new();
+        for worker in 0..8 {
+            let worker_observability = observability.clone();
+            handles.push(std::thread::spawn(move || {
+                for index in 0..128 {
+                    let request_id = format!("concurrent-{worker}-{index}");
+                    let key = build_v3_obs_request_key(5555, &request_id);
+                    worker_observability
+                        .record(V3ObsEventType::Started, &key, scope(5555), meta(&request_id))
+                        .unwrap();
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        let result = observability.since(0).unwrap();
+        assert_eq!(result.events.len(), 1024);
+        assert!(!result.resync_required);
+        for (index, event) in result.events.iter().enumerate() {
+            assert_eq!(event.sequence, (index + 1) as u64);
+        }
     }
 }
