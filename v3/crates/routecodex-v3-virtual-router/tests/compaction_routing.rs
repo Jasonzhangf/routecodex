@@ -70,6 +70,7 @@ fn manifest() -> V3Config05ManifestPublished {
                         thinking: None,
                         max_tokens: None,
                         max_context_tokens: None,
+                        context_token_estimate_scale_bps: 10_000,
                         features: BTreeMap::new(),
                     },
                 )]),
@@ -106,6 +107,8 @@ fn manifest() -> V3Config05ManifestPublished {
             "g".into(),
             V3RouteGroupManifest {
                 id: "g".into(),
+                compact_route_object: Some("compact".into()),
+                route_policies: Vec::new(),
                 features: BTreeMap::new(),
                 pools: BTreeMap::from([
                     (
@@ -113,6 +116,7 @@ fn manifest() -> V3Config05ManifestPublished {
                         V3RoutePoolManifest {
                             id: "default".into(),
                             selection: V3SelectionPolicy::default(),
+                            route_object: None,
                             match_rule: None,
                             features: BTreeMap::new(),
                             targets: vec![target("default-target")],
@@ -123,6 +127,7 @@ fn manifest() -> V3Config05ManifestPublished {
                         V3RoutePoolManifest {
                             id: "compact".into(),
                             selection: V3SelectionPolicy::default(),
+                            route_object: Some("compact".into()),
                             match_rule: Some(V3RoutePoolMatchManifest {
                                 precedence: 0,
                                 entry_protocol: Some("responses".into()),
