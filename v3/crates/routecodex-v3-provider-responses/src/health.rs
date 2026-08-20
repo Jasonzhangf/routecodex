@@ -379,7 +379,6 @@ impl V3ProviderHealthStore {
                         reason: record_reason
                             .clone()
                             .unwrap_or_else(|| "provider_auth_key_failures".to_string()),
-                        original_cooldown_until_ms: cooldown_until_ms,
                         until_ms: cooldown_until_ms,
                         next_probe_at_ms: None,
                         probe_in_flight: false,
@@ -826,7 +825,6 @@ impl V3ProviderHealthStore {
         if cooldown.until_ms.is_some_and(|until_ms| until_ms > now_ms) {
             return Ok(false);
         }
-        let _original_cooldown_until_ms = cooldown.original_cooldown_until_ms;
         state.cooldowns.remove(&key);
         state.consecutive_failures.remove(&key);
         Ok(true)
@@ -1224,12 +1222,18 @@ fn upsert_provider_cooldown_probe_with_interval(
     // 单飞锁，否则会并发启动第二个 probe。
     let existing = state
         .provider_cooldown_probes
-        .get(&provider_cooldown_probe_key(
-            provider_id,
-            auth_alias,
-            model_id,
-        ))
-        .is_some_and(|probe_state| probe_state.probe_in_flight);
+        .get(&provider_cooldown_probe_key(provider_id, auth_alias, model_id))
+        .map(|probe_state| {
+            (
+                probe_state.probe_in_flight,
+                probe_state.rescue_probe_attempted,
+                probe_state.completion.clone(),
+            )
+        });
+    let (probe_in_flight, rescue_probe_attempted, completion) = existing.unwrap_or_else(|| {
+        let (completion, _) = tokio::sync::watch::channel(false);
+        (false, false, completion)
+    });
     state.provider_cooldown_probes.insert(
         provider_cooldown_probe_key(provider_id, auth_alias, model_id),
         V3ProviderCooldownProbeState {
