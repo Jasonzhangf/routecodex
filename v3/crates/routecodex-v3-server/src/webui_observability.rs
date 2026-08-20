@@ -9,7 +9,7 @@
 // projects already-typed observability data. No fallback; cursor/sequence
 // errors are explicit.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -130,6 +130,7 @@ pub(crate) struct V3WebuiObservability {
 #[derive(Debug, Clone, Default)]
 struct V3WebuiObservabilityInner {
     requests: BTreeMap<String, V3ObsRequestRow>,
+    terminal_order: VecDeque<String>,
     events: std::collections::VecDeque<V3ObsEvent>,
     stats: V3ObsStats,
     active: std::collections::BTreeSet<String>,
@@ -196,6 +197,7 @@ impl V3WebuiObservability {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
                 row.result = Some("success".to_string());
                 inner.active.remove(request_key);
+                inner.terminal_order.push_back(request_key.to_string());
                 inner.stats.success += 1;
                 inner.stats.active = inner.active.len() as u64;
             }
@@ -203,6 +205,7 @@ impl V3WebuiObservability {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
                 row.result = Some("error".to_string());
                 inner.active.remove(request_key);
+                inner.terminal_order.push_back(request_key.to_string());
                 inner.stats.error += 1;
                 inner.stats.active = inner.active.len() as u64;
             }
@@ -210,6 +213,7 @@ impl V3WebuiObservability {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
                 row.result = Some("cancelled".to_string());
                 inner.active.remove(request_key);
+                inner.terminal_order.push_back(request_key.to_string());
                 inner.stats.cancelled += 1;
                 inner.stats.active = inner.active.len() as u64;
             }
@@ -230,6 +234,14 @@ impl V3WebuiObservability {
 
         let stats_snapshot = inner.stats.clone();
         inner.requests.insert(request_key.to_string(), row.clone());
+        while inner.requests.len() > 2048 {
+            let Some(eviction_key) = inner.terminal_order.pop_front() else {
+                break;
+            };
+            if !inner.active.contains(&eviction_key) {
+                inner.requests.remove(&eviction_key);
+            }
+        }
         inner.events.push_back(V3ObsEvent {
             request_key: request_key.to_string(),
             sequence,
@@ -395,5 +407,19 @@ mod tests {
         );
         assert_eq!(row_a.result.as_deref(), Some("success"));
         assert_eq!(row_b.result.as_deref(), Some("success"));
+    }
+
+    #[test]
+    fn terminal_rows_are_bounded() {
+        let o = V3WebuiObservability::new();
+        for index in 0..2050 {
+            let request_id = format!("bounded-{index}");
+            let key = build_v3_obs_request_key(5555, &request_id);
+            o.record(V3ObsEventType::Started, &key, scope(5555), meta(&request_id)).unwrap();
+            o.record(V3ObsEventType::Completed, &key, scope(5555), meta(&request_id)).unwrap();
+        }
+        let snapshot = o.snapshot(0).unwrap();
+        assert!(snapshot.requests.len() <= 2048);
+        assert!(!snapshot.requests.contains_key("5555:bounded-0"));
     }
 }
