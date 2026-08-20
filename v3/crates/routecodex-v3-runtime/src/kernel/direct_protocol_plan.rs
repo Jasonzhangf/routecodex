@@ -382,7 +382,7 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
             execution_id,
             method: fixture.method.clone(),
             path: fixture.path.clone(),
-            request_purpose: crate::V3RequestPurpose::Conversation,
+            request_purpose: crate::nodes::V3RequestPurpose::Conversation,
             body: fixture.request_payload.clone(),
         },
         crate::register_responses_direct_hooks(),

@@ -5,7 +5,7 @@ pub(crate) struct V3ThinkingTagTextProjection {
     pub(crate) tag_observed: bool,
 }
 
-pub(crate) fn project_v3_thinking_tag_text(text: &str) -> V3ThinkingTagTextProjection {
+pub(super) fn project_v3_thinking_tag_text(text: &str) -> V3ThinkingTagTextProjection {
     const OPEN: &str = "<thinking>";
     const CLOSE: &str = "</thinking>";
     let mut projection = V3ThinkingTagTextProjection::default();
@@ -37,7 +37,7 @@ pub(crate) fn project_v3_thinking_tag_text(text: &str) -> V3ThinkingTagTextProje
     projection
 }
 
-pub(crate) fn apply_v3_direct_thinking_tag_json_compat(payload: &mut serde_json::Value) -> bool {
+pub(super) fn apply_v3_direct_thinking_tag_json_compat(payload: &mut serde_json::Value) -> bool {
     let output = if payload.get("output").is_some() {
         payload
             .get_mut("output")

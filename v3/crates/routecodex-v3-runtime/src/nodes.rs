@@ -19,7 +19,21 @@ pub struct V3Server03HttpRequestRaw {
     pub execution_id: String,
     pub method: String,
     pub path: String,
+    pub request_purpose: V3RequestPurpose,
     pub body: Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3RequestPurpose {
+    Conversation,
+    AuxiliaryCompaction,
+    NativeCompaction,
+}
+
+impl V3RequestPurpose {
+    pub fn is_compaction(self) -> bool {
+        matches!(self, Self::AuxiliaryCompaction | Self::NativeCompaction)
+    }
 }
 
 pub fn build_v3_server_03_http_request_raw(
@@ -31,6 +45,28 @@ pub fn build_v3_server_03_http_request_raw(
     path: String,
     body: Value,
 ) -> V3Server03HttpRequestRaw {
+    build_v3_server_03_http_request_raw_with_purpose(
+        server_id,
+        failure_session_scope,
+        request_id,
+        execution_id,
+        method,
+        path,
+        V3RequestPurpose::Conversation,
+        body,
+    )
+}
+
+pub fn build_v3_server_03_http_request_raw_with_purpose(
+    server_id: String,
+    failure_session_scope: V3ProviderFailureSessionScope,
+    request_id: String,
+    execution_id: String,
+    method: String,
+    path: String,
+    request_purpose: V3RequestPurpose,
+    body: Value,
+) -> V3Server03HttpRequestRaw {
     V3Server03HttpRequestRaw {
         server_id,
         failure_session_scope,
@@ -38,6 +74,7 @@ pub fn build_v3_server_03_http_request_raw(
         execution_id,
         method,
         path,
+        request_purpose,
         body,
     }
 }

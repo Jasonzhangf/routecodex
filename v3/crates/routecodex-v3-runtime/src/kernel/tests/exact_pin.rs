@@ -67,7 +67,6 @@ async fn missing_exact_pin_is_provider_availability_error05_without_router_reent
             execution_id: "exec-missing-exact-pin".to_string(),
             method: "POST".to_string(),
             path: "/v1/responses".to_string(),
-            request_purpose: crate::V3RequestPurpose::Conversation,
             body: json!({
                 "model":"client-model",
                 "previous_response_id":"resp_missing_exact_pin",
@@ -178,7 +177,6 @@ async fn exact_pin_capability_revision_mismatch_stays_out_of_provider_failure_ga
             execution_id: "exec-revision-mismatch".to_string(),
             method: "POST".to_string(),
             path: "/v1/responses".to_string(),
-            request_purpose: crate::V3RequestPurpose::Conversation,
             body: json!({
                 "model":"client-model",
                 "previous_response_id":"resp_revision_mismatch",

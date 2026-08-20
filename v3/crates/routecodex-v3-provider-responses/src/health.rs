@@ -381,6 +381,7 @@ impl V3ProviderHealthStore {
                             .clone()
                             .unwrap_or_else(|| "provider_auth_key_failures".to_string()),
                         until_ms: cooldown_until_ms,
+                        original_cooldown_until_ms: cooldown_until_ms,
                         next_probe_at_ms: None,
                         probe_in_flight: false,
                     },
@@ -571,14 +572,6 @@ impl V3ProviderHealthStore {
         let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
         if !state.auth_key_cooldowns.contains_key(&auth_key) {
             state.auth_key_consecutive_failures.remove(&auth_key);
-        }
-        let probe_key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
-        if state
-            .provider_cooldown_probes
-            .get(&probe_key)
-            .is_some_and(|probe| probe.blocked_until_ms.is_none_or(|until| until <= _now_ms))
-        {
-            state.provider_cooldown_probes.remove(&probe_key);
         }
         Ok(())
     }
