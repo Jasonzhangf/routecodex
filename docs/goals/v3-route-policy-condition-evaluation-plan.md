@@ -82,16 +82,16 @@ typed observations
 10. 历史窗口包含当前轮；没有历史窗口时只看当前轮，不跨用户任务读取旧历史。
 11. 首版不实现 live reload。
 
-仍需在编码前由实现者按上述决策落成可执行合同的细节：
+实现合同默认值（已按 Jason 的补充说明固化，不再作为阻塞决策）：
 
-- 10-turn 窗口中，用户 reset 后从新用户 turn 重新累计；当前轮包含在窗口内；
-- “工具池分流比例”的具体计数单位，是工具池命中 turn 数 / 十轮，还是工具池调用次数 / 十轮；
-- ls 按搜索行为纳入 search pool；不新增独立 search-like pool；
-- 工具执行结果的错误去重粒度：一次工具调用、一次请求内任一工具错误，或一整个 turn 任一工具错误；
-- thinking/coding 主模型池的 precedence：历史 search 触发时默认选 thinking，coding 仅在配置条件命中时选 coding；Compact 独立 pool 优先；
-- trigger consume 时点、expiry、scope 与 missing observation 行为。
-
-这些是实现合同细化，不再重新打开 Jason 已锁定的八项核心决策。
+- turn 以一次请求加对应响应为单位；新用户输入在新 turn 开始前清零该会话的工具统计；当前 turn 写入窗口并参与计算；窗口不足时只用当前可见 turn，不读取旧用户任务。
+- search pool 比例按“命中 search pool 的 turn 数 / 观察窗口 turn 数”计算；十轮窗口的 80% 边界为 8/10，条件使用 `>= 80%`。
+- `grep`、`rg`、`git grep`、`ls` 等注册为搜索行为的命令归入 search pool；不新增独立 search-like pool。命令是否搜索按工具分类器的 typed 结果判断，不扫描自由文本。
+- 一个 turn 内只要出现一次工具执行结果错误，就计为一个 error turn；同一 turn 多个错误不重复计数。provider failure、provider intermediate failure 和 reroute 后 provider success 不写入该窗口。
+- Compact route pool 具有独立优先级；其余主模型 pool 只允许 `thinking` 与 `coding`。历史 search/error 干预默认选择 `thinking`；`coding` 只能由显式 policy action 选择。
+- trigger 在 route action 已生成、VR 首次消费前后形成一个不可重复的 typed handoff；同一 scope、同一 generation 只消费一次。缺少观察事实按“未满足条件”处理，不静默猜测。
+- trigger scope 固定为 `port/server + routing_group + session + conversation`；用户 reset 只清理当前会话统计，不跨 scope 复用历史或 trigger。
+- 首版策略在启动时从 authoring config 编译为 deterministic manifest；没有 live reload。配置错误、未知字段、缺失 route pool、冲突 precedence 均 fail-fast。
 
 ## 5. 技术方案与文件清单
 

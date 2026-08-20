@@ -422,7 +422,7 @@ window_turns: 10
 condition:
   all:
     - history_window.observed_turns >= 10
-    - history_window.search_pool_turn_ratio > 0.80
+    - history_window.search_pool_turn_ratio >= 0.80
 action:
   select_route_pool: thinking
 trigger:
@@ -430,7 +430,7 @@ trigger:
   scope: session/conversation
 ```
 
-工具池分流比例的语义已锁定为 search pool 分流比例。具体计数单位需在 Stage 0 产出合同中固定；不得回退为 provider failure 或原始命令文本统计。
+工具池分流比例按“命中 search pool 的 turn 数 / 观察窗口 turn 数”计算；十轮窗口的 80% 边界为 8/10，条件使用 `>= 80%`。不得回退为 provider failure 或原始命令文本统计。
 
 新用户输入会 reset 工具池分流统计为 0；窗口不能跨用户任务拼接。历史窗口包含当前轮。
 
@@ -474,7 +474,7 @@ trigger:
 
 只统计工具调用的执行结果。provider failure、provider intermediate failure、reroute 后 provider success 均不进入此错误窗口。
 
-工具错误的去重粒度必须在 Stage 0 合同中锁定，候选是“一次 turn 任一工具错误计一次”。
+一个 turn 内只要出现一次工具执行结果错误，就计为一个 error turn；同一 turn 多个错误不重复计数。
 
 ### 9.3 主模型 route pool
 
@@ -891,24 +891,22 @@ Map 状态必须区分：
 
 必须确认：
 
-1. 10 轮 eligible turn 定义；
-2. 80% 分母；
-3. search-like 分类表；
-4. repeated search signature 定义；
-5. 5 轮错误事件计数单位；
-6. provider 中间失败是否计数；
-7. tool execution error 是否计数；
-8. trigger consume 时点；
-9. trigger expiry / cooldown；
-10. session vs conversation scope；
-11. Compact route object 默认绑定；
-12. Compact 与 continuation owner 冲突处理；
-13. policy precedence；
-14. missing observation 行为；
-15. route object 与 pool 引用关系；
-16. live reload 已排除在首版之外；首版只消费启动时 compiled manifest。
+1. 10 轮 eligible turn 定义：请求加响应为一轮，当前轮包含在窗口；新用户输入 reset 当前任务统计；
+2. 80% 分母：观察窗口 turn 数，十轮边界为 8/10；
+3. search 分类表：注册 search tool category、grep、rg、git grep、ls 等搜索命令，统一进入 search pool；
+4. repeated search 不另设 pool，按 typed search-pool 命中 turn 统计；
+5. 5 轮错误计数：任一工具执行错误的 turn 计一次，同 turn 去重；
+6. provider failure、中间失败、reroute 后 provider success 不计入；
+7. trigger 在 route action 生成并交给 VR 的单次 handoff 中消费，同 scope/generation 只一次；
+8. trigger scope：port/server + routing group + session + conversation；
+9. Compact 默认绑定独立 `compact` route pool，优先级独立于 thinking/coding；
+10. Compact 与 continuation owner 冲突时保留 continuation owner 硬约束并显式失败，不跨 owner 补偿；
+11. policy precedence 由 deterministic manifest 固化，同级冲突 fail-fast；
+12. missing observation 按条件未满足处理，不猜测、不扫描自由文本；
+13. route object 只绑定已存在 route pool，不携带 provider/model；
+14. live reload 已排除在首版之外；首版只消费启动时 compiled manifest。
 
-任一项未锁定，只能停留在 Stage 0/设计，不得写 runtime。
+以上合同已锁定，可以进入 Stage 1 runtime 实现；未完成的仅是实现与验证证据，不再停留在设计阻塞。
 
 ## 17. 当前结论
 
