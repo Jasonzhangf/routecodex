@@ -1292,7 +1292,12 @@ mod subscription;
 pub use subscription::{
     build_v3_provider_global_error_fingerprint,
     build_v3_provider_global_error_fingerprint_from_classified,
-    build_v3_provider_global_failure_policy, V3ProviderErrorFingerprint,
+    build_v3_provider_failure_action_from_v3_error_02,
+    build_v3_provider_global_failure_policy,
+    V3ProviderErrorFingerprint,
+    V3ProviderFailureAction,
+    V3ProviderHealthScope,
+    V3ProviderRecoveryKind,
 };
 
 /// Provider compat payload boundary violation: provider request or response
