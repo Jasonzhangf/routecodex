@@ -3103,6 +3103,12 @@ features:
     source_controlled: true
     live_cutover: required
     global_install_restart: required
+    live_evidence:
+    - .agent-collab/runs/20260820T053056Z-Macstudio-56195-routepolicy/evidence.jsonl
+    - installed_binary_sha256: ca08fb5b26e5db1b9320383b80886f4c033f2436583e441eeb29e4cf93d4b35a
+    - aggregate_instance: v3-b471504442d1075ffc56
+    - listeners: [10000, 7777, 4444]
+    - old_sample_replay: http_200_response_completed
     forbidden_claim: Focused classifier tests do not prove runtime wiring, installed routing, live replay, or DSH Review.
 
 - feature_id: v3.server_internal_observability_projection
@@ -3134,4 +3140,10 @@ features:
     source_controlled: true
     live_cutover: required
     global_install_restart: required
+    live_evidence:
+    - .agent-collab/runs/20260820T053056Z-Macstudio-56195-routepolicy/evidence.jsonl
+    - installed_binary_sha256: ca08fb5b26e5db1b9320383b80886f4c033f2436583e441eeb29e4cf93d4b35a
+    - aggregate_instance: v3-b471504442d1075ffc56
+    - listeners: [10000, 7777, 4444]
+    - old_sample_replay: http_200_response_completed
     forbidden_claim: Focused projection tests do not prove installed listener route behavior or live runtime consistency.
