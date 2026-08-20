@@ -173,7 +173,6 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
 }
 
 pub const V3_RECOVERABLE_PROBE_INTERVAL_MS: u64 = 15 * 60_000;
-pub const V3_UNRECOVERABLE_PROBE_INTERVAL_MS: u64 = 60 * 60_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3ProviderProbeIntervalScope {

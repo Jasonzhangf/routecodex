@@ -149,6 +149,7 @@ features:
   - v3/crates/routecodex-v3-config/src/types.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - v3/crates/routecodex-v3-config/src/defaults.rs
+  - v3/crates/routecodex-v3-config/src/internal.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-config/src/v2_compat.rs
   resource_bindings:
@@ -178,6 +179,7 @@ features:
   - validate_v3_config_03_schema_from_v3_config_02
   - build_v3_config_04_resource_registry_from_v3_config_03
   - publish_v3_config_05_manifest_from_v3_config_04
+  - v3_provider_probe_interval_ms
   - compile_error
   - default_hub_v1_authoring
   - default_server_execution
@@ -386,7 +388,6 @@ features:
   - V3ProviderHealthStore::record_provider_failure_in_session
   - V3ProviderHealthStore::record_provider_success_in_session
   - V3ProviderHealthStore::configured_failure_policy
-  - v3_provider_probe_interval_ms
   - V3ProviderHealthStore::availability
   - V3ProviderHealthStore::availability_for_session
   - V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response
@@ -5008,6 +5009,7 @@ features:
   - V3TargetInterpreter::select_available_with_health
   - V3ProviderFailureRuntimeHealth::record_provider_key_failure_action
   - V3ProviderFailureRuntimeHealth::run_due_provider_key_health_probes
+  - V3ProviderHealthStore::configured_failure_policy
   allowed_paths:
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
