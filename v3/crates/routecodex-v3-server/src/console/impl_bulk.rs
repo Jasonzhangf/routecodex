@@ -27,7 +27,7 @@ pub(crate) fn build_v3_console_emission_context(
 ) -> V3ConsoleEmissionContext {
     let identity =
         resolve_v3_console_log_identity_from_parts(headers, payload, &request_identity.request_id);
-    V3ConsoleEmissionContext {
+    let context = V3ConsoleEmissionContext {
         state: Arc::clone(state),
         entry_protocol: entry_protocol.to_string(),
         endpoint: endpoint.to_string(),

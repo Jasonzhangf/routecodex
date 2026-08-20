@@ -9,6 +9,8 @@ mod responses_direct_server_outcome;
 mod scope_metadata;
 mod session_admission;
 mod websocket;
+mod webui_observability;
+mod webui_observability_endpoints;
 
 use webui_observability::V3WebuiObservability;
 use console::*;
@@ -377,7 +379,7 @@ pub async fn spawn_v3_server_aggregate(
                 return;
             }
         };
-        let startup_result = probe_health.run_startup_persistent_cooldown_probes(startup_now_ms, move |provider_id, auth_alias, model_id| {
+        let startup_result = probe_health.run_due_global_subscription_probes(startup_now_ms, move |provider_id, auth_alias, model_id| {
             let startup_manifest = Arc::clone(&startup_manifest);
             async move {
                 let target = build_v3_provider_global_probe_target(
