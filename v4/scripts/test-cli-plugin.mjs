@@ -27,11 +27,11 @@ assert.equal(descriptor.plugin_id, 'v4.std.protocol.wire_codec_proto');
 assert.equal(descriptor.node_id, 'V4ProviderReqCompat06Compat');
 
 const resources = JSON.parse(run('list-resources'));
-assert.ok(resources.some((entry) => entry.resource_id === 'v4.response.client_frame'));
+assert.ok(resources.some((entry) => entry.resource_id === 'v4.response.client_object'));
 
 const permissions = JSON.parse(run('node-permissions', 'V4ServerRespOutbound06ClientFrame'));
 assert.deepEqual(permissions.reads, ['v4.response.client_wire_payload']);
-assert.deepEqual(permissions.writes, ['v4.response.client_frame']);
+assert.deepEqual(permissions.writes, ['v4.response.client_object']);
 
 const zeroPermissions = JSON.parse(run('node-permissions', 'V4HubReqInbound03Normalized'));
 assert.deepEqual(zeroPermissions.reads, ['v4.request.normal_payload']);

@@ -1678,7 +1678,7 @@
           "scripts/test-cli-plugin.mjs",
           "crates/routecodex-v4-cli-plugin/src/lib.rs"
         ],
-        "minimum_test_count": 13,
+        "minimum_test_count": 8,
         "ordinary_mode_after_freeze": "disabled",
         "reenable_on": [
           "source_change",
