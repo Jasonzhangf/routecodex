@@ -249,6 +249,22 @@ impl V3ServerAggregateHandle {
         }
     }
 
+    /// Restart handoff follows the V1 exec contract. Signal the listeners and
+    /// immediately return control to the lifecycle owner; waiting for request
+    /// activity here deadlocks under continuous traffic and prevents exec.
+    /// In-flight clients receive the existing stream/error-chain outcome and
+    /// may reconnect against the replacement runtime.
+    pub async fn prepare_for_exec(mut self) {
+        if let Some(shutdown) = self.probe_shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        for listener in &mut self.listeners {
+            if let Some(shutdown) = listener.shutdown.take() {
+                let _ = shutdown.send(());
+            }
+        }
+    }
+
     pub async fn shutdown_listener_ports(&mut self, ports: &BTreeSet<u16>) -> Vec<u16> {
         let mut released = Vec::new();
         for listener in &mut self.listeners {

@@ -532,6 +532,7 @@ fn compile_v2_auth(
         token_file,
         secret_file,
         entries,
+        selection: _,
     } = auth;
     let inline_handle_count = usize::from(api_key.is_some())
         + usize::from(env.is_some())
@@ -905,6 +906,8 @@ pub struct V2ProviderAuthConfig {
     pub token_file: Option<String>,
     pub secret_file: Option<String>,
     pub entries: Option<Vec<V2ProviderAuthEntry>>,
+    #[serde(default)]
+    pub selection: Option<crate::types::V3SelectionPolicy>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
