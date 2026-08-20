@@ -251,6 +251,7 @@ function checkMainlineEdges(mainlinePath = path.join(v4Root, '.appsdk/maps/mainl
   allowedOwners.add('routecodex-v4-standard-plugins::register_standard_library');
   allowedOwners.add('routecodex-v4-standard-plugins::compile_standard_plan');
   allowedOwners.add('routecodex-v4-standard-plugins::StandardHandleRegistry');
+  allowedOwners.add('routecodex-v4-cli-plugin::run');
   const pathExists = (candidate) => {
     const trimmed = candidate.trim();
     const concrete = trimmed.endsWith('/**') ? trimmed.slice(0, -3) : trimmed;

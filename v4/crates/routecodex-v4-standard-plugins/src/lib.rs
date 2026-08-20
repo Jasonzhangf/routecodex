@@ -33,6 +33,8 @@ pub mod diagnostic;
 pub mod error;
 pub mod protocol;
 pub mod provider;
+pub mod response_inbound;
+pub mod response_outbound;
 pub mod routing;
 
 pub const STANDARD_LIBRARY_VERSION: &str = "0.1.0";
@@ -190,6 +192,10 @@ pub fn standard_resource_registry() -> ResourceRegistry {
                 axis: ResourceAxis::Data,
             },
             ResourceEntry {
+                resource_id: "v4.response.provider_raw".to_string(),
+                axis: ResourceAxis::Data,
+            },
+            ResourceEntry {
                 resource_id: "v4.response.normal_payload".to_string(),
                 axis: ResourceAxis::Data,
             },
@@ -270,6 +276,7 @@ pub fn standard_allowed_reads() -> Vec<String> {
         "v4.request.normal_payload".to_string(),
         "v4.request.provider_semantic".to_string(),
         "v4.request.provider_wire_payload".to_string(),
+        "v4.response.provider_raw".to_string(),
         "v4.response.normal_payload".to_string(),
         "v4.response.client_wire_payload".to_string(),
         "v4.control.metadata_center".to_string(),
@@ -296,6 +303,7 @@ pub fn standard_allowed_writes() -> Vec<String> {
         "v4.request.provider_semantic".to_string(),
         "v4.request.provider_wire_payload".to_string(),
         "v4.response.normal_payload".to_string(),
+        "v4.response.client_wire_payload".to_string(),
         "v4.control.metadata_center".to_string(),
         "v4.control.route_facts".to_string(),
         "v4.control.target_selection".to_string(),
@@ -312,8 +320,10 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
     match node_id {
         "V4HubReqInbound03Normalized" => vec!["v4.request.normal_payload".to_string()],
         "V4HubReqChatProcess04Governed" => vec!["v4.request.normal_payload".to_string()],
+        "V4HubRespInbound02Parsed" => vec!["v4.response.provider_raw".to_string()],
         "V4HubRespChatProcess03Governed" => vec!["v4.response.normal_payload".to_string()],
         "V4HubRespOutbound04ClientSemantic" => vec!["v4.response.normal_payload".to_string()],
+        "V4ServerSseOut05FrameBoundary" => vec!["v4.response.client_wire_payload".to_string()],
         "V4HubReqOutbound05ProviderSemantic" => vec!["v4.request.normal_payload".to_string()],
         "V4ProviderReqCompat06Compat" => vec!["v4.request.provider_semantic".to_string()],
         "V4ProviderSseOut07WireBoundary" => vec![
@@ -321,6 +331,7 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.config.manifest".to_string(),
             "v4.secret.provider_auth_handle".to_string(),
         ],
+        "V4ServerRespOutbound06ClientFrame" => vec!["v4.response.client_wire_payload".to_string()],
         "V4MetadataCenter01ScopeRegistry" => vec!["v4.control.metadata_center".to_string()],
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],
@@ -339,8 +350,10 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
     match node_id {
         "V4HubReqInbound03Normalized" => Vec::new(),
         "V4HubReqChatProcess04Governed" => vec!["v4.request.normal_payload".to_string()],
+        "V4HubRespInbound02Parsed" => vec!["v4.response.normal_payload".to_string()],
         "V4HubRespChatProcess03Governed" => vec!["v4.response.normal_payload".to_string()],
-        "V4HubRespOutbound04ClientSemantic" => Vec::new(),
+        "V4HubRespOutbound04ClientSemantic" => vec!["v4.response.client_wire_payload".to_string()],
+        "V4ServerSseOut05FrameBoundary" => Vec::new(),
         "V4HubReqOutbound05ProviderSemantic" => vec!["v4.request.provider_semantic".to_string()],
         "V4ProviderReqCompat06Compat" => vec!["v4.request.provider_wire_payload".to_string()],
         "V4ProviderSseOut07WireBoundary" => Vec::new(),
@@ -367,8 +380,8 @@ pub fn standard_descriptors() -> Vec<NodePluginDescriptor> {
 /// All standard plugins registered by immutable plugin id.
 pub fn standard_plugins() -> Vec<StandardPlugin> {
     let mut codec = plugin(
-        "v4.std.protocol.mock_codec",
-        PluginCategory::Protocol,
+        "v4.std.provider.wire_build",
+        PluginCategory::Provider,
         "V4ProviderReqCompat06Compat",
         "request_outbound",
         Some(6),
@@ -380,8 +393,9 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
         vec!["v4.request.provider_wire_payload"],
     );
     codec.descriptor.selection_group = Some("provider_wire_codec".to_string());
-    let mut codec_alt = plugin(
-        "v4.std.protocol.mock_codec_alt",
+
+    let mut codec_proto = plugin(
+        "v4.std.protocol.wire_codec_proto",
         PluginCategory::Protocol,
         "V4ProviderReqCompat06Compat",
         "request_outbound",
@@ -389,13 +403,13 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
         PluginKind::Operator,
         PluginEffect::Semantic,
         PluginPhase::Semantic,
-        200,
+        201,
         vec!["v4.request.provider_semantic"],
         vec!["v4.request.provider_wire_payload"],
     );
-    codec_alt.descriptor.selection_group = Some("provider_wire_codec".to_string());
+    codec_proto.descriptor.selection_group = Some("provider_wire_codec".to_string());
 
-    vec![
+    let mut plugins = vec![
         plugin(
             "v4.std.contract.input_validate",
             PluginCategory::Contracts,
@@ -514,7 +528,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             vec!["v4.control.error_chain"],
         ),
         codec,
-        codec_alt,
+        codec_proto,
         plugin(
             "v4.std.chat_process.request_governance",
             PluginCategory::ChatProcess,
@@ -619,7 +633,10 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             vec!["v4.request.provider_wire_payload"],
             vec![],
         ),
-    ]
+    ];
+    plugins.extend(response_inbound::protocol_decode_descriptors());
+    plugins.extend(response_outbound::response_outbound_descriptors());
+    plugins
 }
 
 /// Convert one standard plugin to a catalog entry. The entry is a typed
@@ -912,8 +929,8 @@ impl StandardHandleRegistry {
             ("v4.std.control.payload_cycle_record", payload_cycle_record),
             ("v4.std.error.typed_intake", error_intake),
             ("v4.std.error.projection_adapter", error_projection),
-            ("v4.std.protocol.mock_codec", protocol_codec),
-            ("v4.std.protocol.mock_codec_alt", protocol_codec),
+            ("v4.std.provider.wire_build", protocol_codec),
+            ("v4.std.protocol.wire_codec_proto", protocol_codec),
             ("v4.std.chat_process.request_governance", request_governance),
             (
                 "v4.std.chat_process.response_governance",
@@ -926,6 +943,12 @@ impl StandardHandleRegistry {
             ("v4.std.provider.wire_mock", wire_mock),
             ("v4.std.provider.transport_mock", transport_mock),
         ] {
+            handles.insert(id, MockHandle { execute_fn });
+        }
+        for (id, execute_fn) in response_inbound::response_inbound_handles() {
+            handles.insert(id, MockHandle { execute_fn });
+        }
+        for (id, execute_fn) in response_outbound::response_outbound_handles() {
             handles.insert(id, MockHandle { execute_fn });
         }
         Self { handles }
@@ -1008,8 +1031,8 @@ mod tests {
             "v4.std.control.payload_cycle_record",
             "v4.std.error.typed_intake",
             "v4.std.error.projection_adapter",
-            "v4.std.protocol.mock_codec",
-            "v4.std.protocol.mock_codec_alt",
+            "v4.std.provider.wire_build",
+            "v4.std.protocol.wire_codec_proto",
             "v4.std.chat_process.request_governance",
             "v4.std.chat_process.response_governance",
             "v4.std.routing.route_facts_producer",
@@ -1018,6 +1041,10 @@ mod tests {
             "v4.std.provider.auth_handle_mock",
             "v4.std.provider.wire_mock",
             "v4.std.provider.transport_mock",
+            "v4.std.response.protocol_decode",
+            "v4.std.response.client_semantic_projection",
+            "v4.std.response.sse_frame_boundary",
+            "v4.std.response.frame_build",
         ];
         actual.sort_unstable();
         expected.sort_unstable();

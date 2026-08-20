@@ -26,6 +26,7 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-cordis-host.mjs',
   'verify-v4-node-container.mjs',
   'verify-v4-standard-plugins.mjs',
+  'verify-v4-cli-plugin.mjs',
 ];
 
 export const RED_SUITES = [
@@ -43,6 +44,7 @@ export const RED_SUITES = [
   ['verify-v4-cordis-host.mjs', '--red-self-test'],
   ['verify-v4-node-container.mjs', '--red-self-test'],
   ['verify-v4-standard-plugins.mjs', '--red-self-test'],
+  ['verify-v4-cli-plugin.mjs', '--red-self-test'],
 ];
 
 export const CONSUMER_REGRESSIONS = [

@@ -263,6 +263,28 @@
       ]
     },
     {
+      "function_id": "v4.plugin.cli_inspector",
+      "owner": "routecodex-v4-cli-plugin",
+      "entry_symbols": [
+        "run",
+        "Command::Version",
+        "Command::ListPlugins",
+        "Command::DescribePlugin",
+        "Command::ListResources",
+        "Command::NodePermissions",
+        "Command::Surface",
+        "Command::Categories"
+      ],
+      "entry_paths": [
+        "crates/routecodex-v4-cli-plugin/src/main.rs"
+      ],
+      "required_gates": [
+        "v4_cli_plugin_l2_regression",
+        "v4_parity_gate_cli_plugin",
+        "v4_parity_gate_cli_plugin_red"
+      ]
+    },
+    {
       "function_id": "v4.plugin.bridge",
       "owner": "routecodex-v4-cordis-bridge",
       "entry_symbols": [

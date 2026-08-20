@@ -101,6 +101,7 @@ resources:
   - modelId
   semantic_contract:
     control_fields_forbidden: true
+    provider_selection_forbidden: true
     protocol_metadata_forbidden: true
     secret_handle_only: true
   allowed_writers:
@@ -189,6 +190,8 @@ resources:
   - V4HubRespOutbound04ClientSemantic
   - V4ServerRespOutbound06ClientFrame
   allowed_readers:
+  - V4ServerSseOut05FrameBoundary
+  - V4ServerRespOutbound06ClientFrame
   - V4ServerFrame
   forbidden_writers:
   - V4ControlMetadataCenter
@@ -270,6 +273,8 @@ resources:
   - V4MetadataCenter01ScopeRegistry::register
   - V4MetadataCenter01ScopeRegistry::consume
   - V4MetadataCenter01ScopeRegistry::release
+  - V4HubReqChatProcess04Governed
+  - V4HubRespChatProcess03Governed
   allowed_readers:
   - V4HubReqChatProcess04Governed
   - V4Router

@@ -488,6 +488,27 @@
       ]
     },
     {
+      "gate_id": "v4_cli_plugin_l2_regression",
+      "command": "cargo test --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked",
+      "required_for": [
+        "routecodex-v4-cli-plugin:architecture_stable"
+      ]
+    },
+    {
+      "gate_id": "v4_parity_gate_cli_plugin",
+      "command": "node scripts/architecture/verify-v4-cli-plugin.mjs",
+      "required_for": [
+        "routecodex-v4-cli-plugin:architecture_stable"
+      ]
+    },
+    {
+      "gate_id": "v4_parity_gate_cli_plugin_red",
+      "command": "node scripts/architecture/verify-v4-cli-plugin.mjs --red-self-test",
+      "required_for": [
+        "routecodex-v4-cli-plugin:architecture_stable"
+      ]
+    },
+    {
       "gate_id": "v4_build_verify_positive",
       "command": "node scripts/verify.mjs",
       "required_for": [

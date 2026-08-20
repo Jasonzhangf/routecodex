@@ -106,11 +106,17 @@ const NODE_PERMISSIONS = new Map([
   ['V4HubReqChatProcess04Governed', {
     reads: ['v4.request.normal_payload'], writes: ['v4.request.normal_payload'],
   }],
+  ['V4HubRespInbound02Parsed', {
+    reads: ['v4.response.provider_raw'], writes: ['v4.response.normal_payload'],
+  }],
   ['V4HubRespChatProcess03Governed', {
     reads: ['v4.response.normal_payload'], writes: ['v4.response.normal_payload'],
   }],
   ['V4HubRespOutbound04ClientSemantic', {
-    reads: ['v4.response.normal_payload'], writes: [],
+    reads: ['v4.response.normal_payload'], writes: ['v4.response.client_wire_payload'],
+  }],
+  ['V4ServerSseOut05FrameBoundary', {
+    reads: ['v4.response.client_wire_payload'], writes: [],
   }],
   ['V4HubReqOutbound05ProviderSemantic', {
     reads: ['v4.request.normal_payload'], writes: ['v4.request.provider_semantic'],
@@ -127,7 +133,7 @@ const NODE_PERMISSIONS = new Map([
     writes: [],
   }],
   ['V4ServerRespOutbound06ClientFrame', {
-    reads: [], writes: ['v4.response.client_wire_payload'],
+    reads: ['v4.response.client_wire_payload'], writes: ['v4.response.client_wire_payload'],
   }],
   ['V4MetadataCenter01ScopeRegistry', {
     reads: ['v4.control.metadata_center'], writes: ['v4.control.metadata_center'],
@@ -466,8 +472,8 @@ function validate(
     }
 
     const descriptors = parseStandardDescriptors(source);
-    if (descriptors.length !== 19) {
-      failures.push(`${MODULE}: expected 19 parseable standard descriptors, got ${descriptors.length}`);
+    if (descriptors.length !== 20) {
+      failures.push(`${MODULE}: expected 20 parseable standard descriptors, got ${descriptors.length}`);
     }
     const anchors = activeNodeAnchors(nodeGraph);
     const operationsByResource = new Map(

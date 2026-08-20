@@ -1545,12 +1545,15 @@
         },
         "input_paths": [
           "crates/routecodex-v4-standard-plugins/src/lib.rs",
+          "crates/routecodex-v4-standard-plugins/src/response_inbound.rs",
+          "crates/routecodex-v4-standard-plugins/src/response_outbound.rs",
           "crates/routecodex-v4-standard-plugins/tests/l2_catalog_admission.rs",
           "crates/routecodex-v4-standard-plugins/tests/l2_plan_compilation.rs",
+          "crates/routecodex-v4-standard-plugins/tests/l2_response_inbound_outbound.rs",
           "crates/routecodex-v4-standard-plugins/tests/l2_node_container_blackbox.rs",
           "contracts/plugin-library.contract.json"
         ],
-        "minimum_test_count": 12,
+        "minimum_test_count": 31,
         "ordinary_mode_after_freeze": "disabled",
         "reenable_on": [
           "source_change",
@@ -1628,6 +1631,72 @@
         "suite_id": "v4-cordis-host-l3-regression"
       },
       "source_owner": "routecodex-v4-cordis-host",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/routecodex-v4-cli-plugin/**",
+      "artifact_paths": [
+        "cli-plugin.contract.json"
+      ],
+      "build": {
+        "args": [
+          "build",
+          "--release",
+          "--manifest-path",
+          "Cargo.toml",
+          "-p",
+          "routecodex-v4-cli-plugin",
+          "--locked"
+        ],
+        "program": "cargo",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        "contracts/cli-plugin.contract.json",
+        "contracts/plugin-library.contract.json"
+      ],
+      "dependency_modules": [
+        "routecodex-v4-standard-plugins"
+      ],
+      "generated_outputs": [
+        "generated/cli-plugin/**"
+      ],
+      "module_id": "routecodex-v4-cli-plugin",
+      "owned_paths": [
+        "crates/routecodex-v4-cli-plugin/**"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "--manifest-path",
+            "Cargo.toml",
+            "-p",
+            "routecodex-v4-cli-plugin",
+            "--locked"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "crates/routecodex-v4-cli-plugin/Cargo.toml",
+          "crates/routecodex-v4-cli-plugin/src/main.rs",
+          "contracts/cli-plugin.contract.json"
+        ],
+        "minimum_test_count": 4,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v4-cli-plugin-l2-regression"
+      },
+      "source_owner": "routecodex-v4-cli-plugin",
       "stage": "source_implemented"
     }
   ],
