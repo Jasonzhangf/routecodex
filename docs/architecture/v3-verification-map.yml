@@ -3105,7 +3105,7 @@ features:
     global_install_restart: required
     live_evidence:
     - .agent-collab/runs/20260820T053056Z-Macstudio-56195-routepolicy/evidence.jsonl
-    - installed_binary_sha256: ca08fb5b26e5db1b9320383b80886f4c033f2436583e441eeb29e4cf93d4b35a
+    - installed_binary_sha256: 4feeae924f30406f36a59a3bd9d00ca96046b64e96816346dd4c6885a463820d
     - aggregate_instance: v3-b471504442d1075ffc56
     - listeners: [10000, 7777, 4444]
     - old_sample_replay: http_200_response_completed
@@ -3142,7 +3142,7 @@ features:
     global_install_restart: required
     live_evidence:
     - .agent-collab/runs/20260820T053056Z-Macstudio-56195-routepolicy/evidence.jsonl
-    - installed_binary_sha256: ca08fb5b26e5db1b9320383b80886f4c033f2436583e441eeb29e4cf93d4b35a
+    - installed_binary_sha256: 4feeae924f30406f36a59a3bd9d00ca96046b64e96816346dd4c6885a463820d
     - aggregate_instance: v3-b471504442d1075ffc56
     - listeners: [10000, 7777, 4444]
     - old_sample_replay: http_200_response_completed
