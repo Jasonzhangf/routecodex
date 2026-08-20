@@ -3068,6 +3068,7 @@ features:
   owner_modules:
   - routecodex-v3-config
   - routecodex-v3-route-classifier
+  - routecodex-v3-runtime
   - routecodex-v3-virtual-router
   design:
   - docs/goals/v3-route-policy-condition-evaluation-design.md
@@ -3090,6 +3091,7 @@ features:
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --test config_v3_contract
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-virtual-router
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries

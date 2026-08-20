@@ -3,10 +3,12 @@ pub struct V3CurrentTurnRouteFacts {
     /// Typed facts are the only input to route classification. This type must
     /// not expose request/response payload or metadata carriers.
     pub reached_long_context: bool,
+    pub is_compaction: bool,
     pub has_image_attachment: bool,
     pub latest_message_from_user: bool,
     pub stopless_followup: bool,
     pub has_current_turn_tool_output: bool,
+    pub has_current_turn_tool_execution_error: bool,
     pub has_current_turn_web_search: bool,
     pub last_assistant_tool_category: Option<String>,
     pub has_background_keyword: bool,
@@ -16,7 +18,8 @@ pub type RouteClassifierInput = V3CurrentTurnRouteFacts;
 
 pub const DEFAULT_ROUTE: &str = "default";
 
-pub const ROUTE_PRIORITY: [&str; 8] = [
+pub const ROUTE_PRIORITY: [&str; 9] = [
+    "compact",
     "multimodal",
     "web_search",
     "longcontext",
@@ -66,6 +69,11 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
     let web_search = web_search_tool_intent || input.has_current_turn_web_search;
 
     let evaluation = vec![
+        (
+            "compact",
+            input.is_compaction,
+            "compact:request-purpose",
+        ),
         (
             "multimodal",
             input.has_image_attachment,

@@ -6,6 +6,8 @@ use crate::{classify_tool_call, RouteToolCallClassification};
 pub struct V3CurrentTurnSignals {
     pub latest_message_from_user: bool,
     pub has_current_turn_tool_output: bool,
+    pub has_current_turn_tool_execution_error: bool,
+    pub is_compaction: bool,
     pub has_current_turn_web_search: bool,
     pub has_current_turn_image: bool,
     pub last_assistant_tool: Option<RouteToolCallClassification>,
@@ -118,6 +120,8 @@ fn extract_message_signals(messages: &[Value]) -> V3CurrentTurnSignals {
         };
     };
     let mut has_current_turn_tool_output = false;
+    let mut has_current_turn_tool_execution_error = false;
+    let is_compaction = false;
     let mut has_current_turn_web_search = false;
     let mut has_current_turn_image = latest_user_index
         .and_then(|index| messages.get(index))
@@ -126,7 +130,10 @@ fn extract_message_signals(messages: &[Value]) -> V3CurrentTurnSignals {
     for message in segment {
         has_current_turn_image |= message_contains_image(message);
         match message_role(message).as_deref() {
-            Some("tool") => has_current_turn_tool_output = true,
+            Some("tool") => {
+                has_current_turn_tool_output = true;
+                has_current_turn_tool_execution_error |= tool_result_is_error(message);
+            }
             Some("assistant") => {
                 if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
                     if !calls.is_empty() {
@@ -167,6 +174,8 @@ fn extract_message_signals(messages: &[Value]) -> V3CurrentTurnSignals {
     V3CurrentTurnSignals {
         latest_message_from_user: latest_role.as_deref() == Some("user"),
         has_current_turn_tool_output,
+        has_current_turn_tool_execution_error,
+        is_compaction,
         has_current_turn_web_search,
         has_current_turn_image,
         last_assistant_tool,
@@ -188,6 +197,11 @@ fn extract_responses_signals(entries: &[Value]) -> V3CurrentTurnSignals {
             .unwrap_or(0);
         return V3CurrentTurnSignals {
             latest_message_from_user: latest_role.as_deref() == Some("user"),
+            is_compaction: latest_user_index.is_some_and(|index| {
+                entries[index..]
+                    .iter()
+                    .any(|entry| entry_type(entry).as_str() == "compaction")
+            }),
             has_current_turn_web_search: latest_user_index.is_some_and(|index| {
                 entries[current_turn_start..=index]
                     .iter()
@@ -202,6 +216,8 @@ fn extract_responses_signals(entries: &[Value]) -> V3CurrentTurnSignals {
         };
     };
     let mut has_current_turn_tool_output = false;
+    let mut has_current_turn_tool_execution_error = false;
+    let mut is_compaction = false;
     let mut has_current_turn_web_search = false;
     let mut has_current_turn_image =
         latest_user_index.is_some_and(|index| entries[index..].iter().any(entry_contains_image));
@@ -209,6 +225,7 @@ fn extract_responses_signals(entries: &[Value]) -> V3CurrentTurnSignals {
     for entry in segment {
         has_current_turn_image |= entry_contains_image(entry);
         let kind = entry_type(entry);
+        is_compaction |= kind == "compaction";
         if kind == "web_search" {
             has_current_turn_web_search = true;
         }
@@ -221,6 +238,7 @@ fn extract_responses_signals(entries: &[Value]) -> V3CurrentTurnSignals {
         }
         if is_tool_output_type(&kind) {
             has_current_turn_tool_output = true;
+            has_current_turn_tool_execution_error |= tool_result_is_error(entry);
             continue;
         }
         if response_entry_role(entry).as_deref() != Some("assistant") {
@@ -250,6 +268,8 @@ fn extract_responses_signals(entries: &[Value]) -> V3CurrentTurnSignals {
     V3CurrentTurnSignals {
         latest_message_from_user: latest_role.as_deref() == Some("user"),
         has_current_turn_tool_output,
+        has_current_turn_tool_execution_error,
+        is_compaction,
         has_current_turn_web_search,
         has_current_turn_image,
         last_assistant_tool,
@@ -380,6 +400,17 @@ fn is_tool_output_type(kind: &str) -> bool {
             | "tool_message"
             | "web_search_call_output"
     )
+}
+
+/// Only typed tool-result nodes can contribute to the route policy error
+/// window. Provider response errors are outside this function's input path.
+fn tool_result_is_error(value: &Value) -> bool {
+    value.get("is_error").and_then(Value::as_bool) == Some(true)
+        || value
+            .get("status")
+            .and_then(Value::as_str)
+            .is_some_and(|status| status.eq_ignore_ascii_case("error"))
+        || value.get("error").is_some_and(|error| !error.is_null())
 }
 
 fn classify_call_value(call: &Value) -> Option<RouteToolCallClassification> {
