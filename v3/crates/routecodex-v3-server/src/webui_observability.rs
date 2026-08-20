@@ -154,10 +154,8 @@ impl Default for V3WebuiObservability {
 
 impl V3WebuiObservability {
     pub(crate) fn new() -> Self {
-        let mut inner = V3WebuiObservabilityInner::default();
-        inner.next_sequence = 1;
         Self {
-            inner: Arc::new(std::sync::Mutex::new(inner)),
+            inner: Arc::new(std::sync::Mutex::new(V3WebuiObservabilityInner::default())),
         }
     }
 
@@ -183,8 +181,11 @@ impl V3WebuiObservability {
             .inner
             .lock()
             .map_err(|_| "v3 webui observability state is poisoned".to_string())?;
-        let sequence = inner.next_sequence;
-        inner.next_sequence = inner.next_sequence.saturating_add(1);
+        let sequence = inner
+            .next_sequence
+            .checked_add(1)
+            .ok_or_else(|| "v3 webui observability sequence exhausted".to_string())?;
+        inner.next_sequence = sequence;
 
         let event_type_str = event_type.as_str().to_string();
         let is_terminal = matches!(
@@ -315,7 +316,7 @@ impl V3WebuiObservability {
         let requests = inner.requests.clone();
         let stats = inner.stats.clone();
         Ok(V3ObsSnapshot {
-            cursor: inner.next_sequence.saturating_sub(1),
+            cursor: inner.next_sequence,
             requests,
             stats,
         })
@@ -333,7 +334,7 @@ impl V3WebuiObservability {
             .filter(|event| event.sequence > cursor)
             .cloned()
             .collect::<Vec<_>>();
-        let next_cursor = inner.next_sequence.saturating_sub(1);
+        let next_cursor = inner.next_sequence;
         Ok(V3ObsSinceResult {
             next_cursor,
             events,
@@ -557,5 +558,28 @@ mod tests {
         for (index, event) in result.events.iter().enumerate() {
             assert_eq!(event.sequence, (index + 1) as u64);
         }
+    }
+
+    #[test]
+    fn sequence_exhaustion_fails_explicitly() {
+        let observability = V3WebuiObservability::new();
+        observability.inner.lock().unwrap().next_sequence = u64::MAX - 1;
+        let key = build_v3_obs_request_key(5555, "last-sequence");
+        assert_eq!(
+            observability
+                .record(V3ObsEventType::Started, &key, scope(5555), meta("last-sequence"))
+                .unwrap(),
+            u64::MAX
+        );
+        let exhausted = observability.record(
+            V3ObsEventType::Started,
+            "5555:after-exhaustion",
+            scope(5555),
+            meta("after-exhaustion"),
+        );
+        assert_eq!(
+            exhausted.unwrap_err(),
+            "v3 webui observability sequence exhausted"
+        );
     }
 }

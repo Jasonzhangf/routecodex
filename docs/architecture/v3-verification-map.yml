@@ -3121,6 +3121,7 @@ features:
   - Repeated terminal events do not duplicate statistics or tombstones.
   - Evicted terminal replay returns an explicit resync_required result and does not recreate a row.
   - Event-log cursor older than the retained sequence boundary returns an explicit resync_required result.
+  - Sequence exhaustion returns an explicit error and never reuses a sequence number.
   required_negative:
   - Projection state does not enter provider/client payload, protocol metadata, continuation, or history.
   - Ordinary listeners do not expose /api/observability snapshot, stats, or events routes.

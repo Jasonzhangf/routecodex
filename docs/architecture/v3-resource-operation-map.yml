@@ -1790,6 +1790,7 @@ resources:
       terminal_tombstones_max: 4096
       evicted_terminal_replay: explicit_resync_required
       event_log_cursor_gap: explicit_resync_required
+      sequence_overflow: explicit_error
       control_state_in_payload: forbidden
     allowed_writers: [emit_v3_request_console_observation]
     allowed_readers: [V3WebuiObservability::snapshot, V3WebuiObservability::since]
