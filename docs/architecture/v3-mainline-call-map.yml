@@ -7180,6 +7180,20 @@ chains:
       produces: [v3.route.policy_action]
       side_channel_reads: [v3.route.policy_observations]
       side_channel_writes: [v3.route.policy_action]
+  - step_id: v3-route-policy-03
+    from_node: V3RoutePolicyAction
+    to_node: V3Router06RoutePoolResolved
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: V3VirtualRouter::resolve_route_pool_plan
+    callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    status: source_controlled
+    owner_feature_id: v3.route_policy_condition_evaluation
+    resource_flow:
+      consumes: [v3.route.policy_action]
+      produces: [v3.route.policy_action]
+      side_channel_reads: [v3.route.policy_action]
+      side_channel_writes: []
   - step_id: v3-provider-global-probe-relay-error-source
     from_node: V3HubRespChatProcess03Governed
     to_node: V3Error01SourceRaised

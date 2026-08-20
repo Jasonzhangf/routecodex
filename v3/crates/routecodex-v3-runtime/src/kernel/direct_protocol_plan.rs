@@ -61,6 +61,32 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
             ))
         }
     };
+    let route_policy_state = crate::route_policy::V3RoutePolicyRuntimeState::process_shared();
+    let route_policy_scope = crate::route_policy::V3RoutePolicyScope::without_conversation(
+        &standardized.protocol_context.server_id,
+        &classified.routing_group_id,
+        standardized.protocol_context.failure_session_scope.session_id(),
+        &standardized.protocol_context.server_id,
+    );
+    let route_policy_observation = crate::route_policy::observe_route_turn(
+        &standardized.body,
+        &classified.facts.route_classification.route_name,
+    );
+    let classified = match route_policy_state.evaluate_request(
+        manifest,
+        classified,
+        route_policy_scope,
+        &standardized.protocol_context.request_id,
+        route_policy_observation,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return Err(protocol_plan_failure(
+                runtime_source("V3Router05RequestClassified", error),
+                trace,
+            ))
+        }
+    };
     trace.push("V3Router05RequestClassified");
     let plan = match router.resolve_route_pool_plan(manifest, classified) {
         Ok(value) => value,

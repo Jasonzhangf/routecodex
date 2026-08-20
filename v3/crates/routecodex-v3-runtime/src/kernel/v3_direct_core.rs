@@ -57,7 +57,35 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             )
         }
     };
+    let route_policy_state = crate::route_policy::V3RoutePolicyRuntimeState::process_shared();
+    let route_policy_scope = crate::route_policy::V3RoutePolicyScope::without_conversation(
+        C::server_id(&standardized),
+        &classified.routing_group_id,
+        direct_failure_session_scope.session_id(),
+        C::server_id(&standardized),
+    );
+    let route_policy_observation = crate::route_policy::observe_route_turn(
+        C::body(&standardized),
+        &classified.facts.route_classification.route_name,
+    );
+    let classified = match route_policy_state.evaluate_request(
+        manifest,
+        classified,
+        route_policy_scope.clone(),
+        C::request_id(&standardized),
+        route_policy_observation,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return error_output(
+                runtime_source("V3Router05RequestClassified", error),
+                trace,
+                &crate::hooks::register_responses_direct_hooks(),
+            )
+        }
+    };
     trace.push("V3Router05RequestClassified");
+    let route_policy_group_id = classified.routing_group_id.clone();
     let plan = match router.resolve_route_pool_plan(manifest, classified) {
         Ok(value) => value,
         Err(error) => {
@@ -736,6 +764,30 @@ pub async fn execute_v3_direct_runtime_kernel_core<
         ) {
             return error_output(
                 commit_error,
+                trace,
+                &crate::hooks::register_responses_direct_hooks(),
+            );
+        }
+        let policies = match crate::route_policy::compile_route_policies(
+            manifest,
+            &route_policy_group_id,
+        ) {
+            Ok(policies) => policies,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3Router06RoutePoolResolved", error),
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                )
+            }
+        };
+        if let Err(error) = route_policy_state.commit_request(
+            &route_policy_scope,
+            C::request_id(&standardized),
+            &policies,
+        ) {
+            return error_output(
+                runtime_source("V3Router06RoutePoolResolved", error),
                 trace,
                 &crate::hooks::register_responses_direct_hooks(),
             );

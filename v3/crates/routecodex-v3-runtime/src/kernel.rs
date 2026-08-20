@@ -322,6 +322,33 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         None
     };
     let initial_selected_target_present = initial_selected_target.is_some();
+    let route_policy_state = crate::route_policy::V3RoutePolicyRuntimeState::process_shared();
+    let route_policy_scope = match continuation_scope.as_ref() {
+        Some(scope) => crate::route_policy::V3RoutePolicyScope::without_conversation(
+            &standardized.protocol_context.server_id,
+            &scope.key.routing_group,
+            direct_failure_session_scope.session_id(),
+            scope.key.port.to_string(),
+        )
+        .with_conversation(scope.key.conversation_id.clone()),
+        None => crate::route_policy::V3RoutePolicyScope::without_conversation(
+            &standardized.protocol_context.server_id,
+            direct_failure_session_scope.routing_group(),
+            direct_failure_session_scope.session_id(),
+            &standardized.protocol_context.server_id,
+        ),
+    };
+    let commit_route_policy = || -> Result<(), String> {
+        let policies = crate::route_policy::compile_route_policies(
+            manifest,
+            &route_policy_scope.routing_group_id,
+        )?;
+        route_policy_state.commit_request(
+            &route_policy_scope,
+            &standardized.protocol_context.request_id,
+            &policies,
+        )
+    };
     let expanded = if let Some(initial_expanded) = initial_expanded {
         // Server-side protocol plan already ran Router05..Target09; reuse its
         // candidate set for in-Target reselection instead of re-entering the
@@ -335,6 +362,26 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             &standardized.protocol_context.server_id,
             &standardized.protocol_context.endpoint,
             routing_facts,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3Router05RequestClassified", error),
+                    trace,
+                    &hook_registry,
+                )
+            }
+        };
+        let route_policy_observation = crate::route_policy::observe_route_turn(
+            &standardized.body,
+            &classified.facts.route_classification.route_name,
+        );
+        let classified = match route_policy_state.evaluate_request(
+            manifest,
+            classified,
+            route_policy_scope.clone(),
+            &standardized.protocol_context.request_id,
+            route_policy_observation,
         ) {
             Ok(value) => value,
             Err(error) => {
@@ -1433,6 +1480,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             ) {
                 return error_output(source, trace, &hook_registry);
             }
+        }
+        if let Err(error) = commit_route_policy() {
+            return error_output(
+                runtime_source("V3Router06RoutePoolResolved", error),
+                trace,
+                &hook_registry,
+            );
         }
         trace.push("V3DirectResp15ClientPayloadReady");
         trace.push("V3Resp15ClientPayload");

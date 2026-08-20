@@ -640,6 +640,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/tests/preplanned_target_revalidation.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/tests/protocol_mode_lock.rs
   - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  - v3/crates/routecodex-v3-runtime/src/route_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
