@@ -176,11 +176,11 @@ Observation 只回答“发生了什么”，不回答“应该选哪个模型�
 
 ### 5.3 Route Policy Action：路由动作
 
-动作只引用 manifest 中存在的 route object / pool id：
+动作最终只引用 manifest 中存在的 route pool；route object 只作为配置绑定层：
 
-- `select_route_object`；
+- `select_route_pool`；
 - `select_pool`；
-- `force_primary_route_object`；
+- `force_primary_route_pool`；
 - `continue_normal_policy`。
 
 引用缺失必须 fail-fast。
@@ -390,73 +390,70 @@ compact request purpose
 
 Compact route object 缺失、指向未知 pool、违反 entry protocol 或 continuation owner 时 fail-fast。
 
-Compact 默认可继续使用固定 `compact` pool，但它应成为 manifest 中的显式默认 route object，而不是只存在于 `ROUTE_PRIORITY` 常量中。
+Compact 使用独立的 `compact` route pool，不并入 thinking/coding 主模型池；它应成为 manifest 中的显式 route pool，而不是只存在于 `ROUTE_PRIORITY` 常量中。
 
 ### 8.3 主模型绑定
 
-“主模型”用 route object / pool 引用表达：
+“主模型”用 route pool 引用表达：
 
 ```text
-force_primary_route_object = primary-thinking
+force_primary_route_pool = thinking
 ```
 
 条件 evaluator 不直接携带 provider/model。provider/model 绑定仍由 Config manifest 与 Target owner 解析。
 
 ## 9. 首批两条历史策略
 
-### 9.1 Search-like 高密度
+### 9.1 Search pool 高密度
 
 目标：
 
 ```text
-最近 10 个 eligible turns 中，search-like 行为占比 > 80%
-且达到最小重复/样本条件
--> 下一次模型调用选择一次主 thinking route object
+最近 10 个 turn 中，工具池分流比例 > 80%
+且这些分流属于 search pool（grep、ls 等搜索命令也归入 search 分流观察）
+-> 下一次模型调用选择一次主 thinking route pool
 ```
 
 推荐 policy 形态：
 
 ```text
-policy_id: history.search_density_to_primary_thinking
+policy_id: history.search_pool_density_to_primary_thinking
 window_turns: 10
 condition:
   all:
     - history_window.observed_turns >= 10
-    - history_window.search_like_turns / history_window.eligible_turns > 0.80
-    - history_window.repeated_search_signature_count >= configured_minimum
+    - history_window.search_pool_turn_ratio > 0.80
 action:
-  select_route_object: primary-thinking
+  select_route_pool: thinking
 trigger:
   consume: once
   scope: session/conversation
 ```
 
-比例分母本文推荐：
+工具池分流比例的语义已锁定为 search pool 分流比例。具体计数单位需在 Stage 0 产出合同中固定；不得回退为 provider failure 或原始命令文本统计。
 
-```text
-search_like_turns / eligible_turns
-```
+新用户输入会 reset 工具池分流统计为 0；窗口不能跨用户任务拼接。历史窗口包含当前轮。
 
-不推荐 `search_like_calls / all_tool_calls`，避免一个 turn 内大量重复 tool call 扭曲窗口判断。
+如果没有足够历史窗口，不读取跨用户任务的旧历史，直接使用当前轮 route facts；当前轮判断仍受已注册 current-turn route policy 约束。
 
-首批 `search_like` 分类可覆盖：
+search 分流观察包括：
 
-- 注册的 `search` tool category；
-- `grep`；
-- `rg`；
-- `git grep`；
-- 已注册 hosted web-search tool；
-- 后续明确注册的 search-like tool。
+- 注册的 search tool category；
+- grep；
+- rg；
+- git grep；
+- ls 等实际用于搜索工作区的注册命令；
+- 已注册 hosted web-search tool。
 
-分类走 Rust typed tool classification owner。VR 不扫描原始 command string，不从日志文本推导。
+这些行为归入 search pool 观察，不新增独立 search-like 路由池。
 
 ### 9.2 错误窗口
 
 目标：
 
 ```text
-过去 5 个 eligible turns 中，已定义 error event >= 3
--> 下一次模型调用选择一次主 thinking route object
+过去 5 个 turn 中，工具执行结果错误 >= 3
+-> 下一次模型调用选择一次主 thinking route pool
 ```
 
 推荐 policy 形态：
@@ -467,25 +464,41 @@ window_turns: 5
 condition:
   all:
     - error_window.observed_turns >= 5
-    - error_window.error_turn_count > 2
+    - error_window.tool_execution_error_turn_count > 2
 action:
-  select_route_object: primary-thinking
+  select_route_pool: thinking
 trigger:
   consume: once
   scope: session/conversation
 ```
 
-“错误”默认按一次 request/call 的最终错误终态计数。provider 中间失败、被 reroute 后最终成功是否计入，必须由 Error event policy 单独声明。
+只统计工具调用的执行结果。provider failure、provider intermediate failure、reroute 后 provider success 均不进入此错误窗口。
 
-工具执行失败是否计入也必须显式配置：
+工具错误的去重粒度必须在 Stage 0 合同中锁定，候选是“一次 turn 任一工具错误计一次”。
+
+### 9.3 主模型 route pool
+
+本需求的主模型不是单个 provider/model，而是两个 route pool；Compact 独立于主模型池：
 
 ```text
-count_error_classes:
-  - terminal_provider_error
-  - tool_execution_error
+primary_model_pools = [thinking, coding]
+default_primary_model_pool = thinking
+compact_pool = compact
 ```
 
-不能让 route policy 自己读取所有 Error01~Error06 并重复计数。
+历史 search pool 高密度与工具执行错误窗口默认触发 thinking pool。coding pool 只有在显式配置条件命中时才成为主模型目标；Compact 始终走独立 compact pool。
+
+所有调度 action 必须引用 route pool；不允许 policy 直接携带 provider/model。
+
+### 9.4 历史窗口边界
+
+历史窗口包含当前轮：
+
+```text
+history_window = previous turns + current turn
+```
+
+新用户输入会 reset 工具池分流统计为 0。没有历史窗口时只看当前轮，不用跨用户任务的旧历史补足。
 
 ## 10. 触发、消费与优先级
 
@@ -561,7 +574,7 @@ entry_protocols = ["responses"]
 id = "compact-purpose"
 precedence = 10
 when = { atom = { field = "request.purpose", op = "eq", value = "compaction" } }
-action = { select_route_object = "compact-default" }
+action = { select_route_pool = "compact" }
 consume = "once"
 
 [[route_policies]]
@@ -572,7 +585,7 @@ when = { all = [
   { atom = { field = "history.observed_turns", op = "gte", value = 10 } },
   { atom = { field = "history.repeated_search_count", op = "gte", value = 2 } }
 ] }
-action = { select_route_object = "primary-thinking" }
+action = { select_route_pool = "thinking" }
 consume = "once"
 scope = "conversation"
 
@@ -580,7 +593,7 @@ scope = "conversation"
 id = "recent-errors"
 precedence = 40
 when = { atom = { field = "errors.error_turn_count", op = "gt", value = 2, window = 5 } }
-action = { select_route_object = "primary-thinking" }
+action = { select_route_pool = "thinking" }
 consume = "once"
 scope = "conversation"
 ```
@@ -722,12 +735,12 @@ Schema要求：
 
 ### Stage 5：启用 search-density intervention（中高难度）
 
-目标：启用第一个跨轮条件到主 thinking route object 的动作。
+目标：启用第一个跨轮条件到主 thinking route pool 的动作。
 
 工作：
 
 1. 注册 `history-search-density` policy；
-2. 绑定 `primary-thinking` route object；
+2. 绑定 `thinking` route pool；
 3. 增加一次性 trigger state；
 4. 明确 trigger 创建、消费、释放时点；
 5. 记录 typed evidence；
@@ -742,17 +755,17 @@ Schema要求：
 - 未触发不改变原路由；
 - trigger consumed 后恢复普通策略；
 - provider failure 不触发第二次 VR hit；
-- action 只引用 route object。
+- action 只引用 route pool。
 
 ### Stage 6：启用 error-window intervention（高难度）
 
-目标：启用最近 5 轮超过 2 次错误到主 thinking route object。
+目标：启用最近 5 轮超过 2 次工具执行错误到主 thinking route pool。
 
 工作：
 
 1. 注册 `recent-errors` policy；
 2. 绑定 error event policy；
-3. 绑定 `primary-thinking` route object；
+3. 绑定 `thinking` route pool；
 4. 处理与 search-density 同时命中；
 5. 增加 trigger dedup / precedence / expiry；
 6. 接入真实错误样本与同入口重放。
@@ -768,7 +781,7 @@ Schema要求：
 - error policy 不绕过 Error05 / Target owner；
 - 在线旧错误样本重放。
 
-### Stage 7：动态 live policy 与生产闭环（最难）
+### Stage 7：启动时 manifest 与生产闭环（最难）
 
 前置：
 
@@ -778,12 +791,14 @@ Schema要求：
 - source binding 与 owner boundary 通过；
 - DSH review 前置验证完成。
 
+目标：启动时编译并发布 deterministic policy manifest；live reload 不进入首版。
+
 工作：
 
 1. 编译 policy manifest；
 2. 发布 deterministic manifest；
-3. runtime 只消费 manifest；
-4. live reload 只替换已校验版本；
+3. runtime 只消费启动时 compiled manifest；
+4. 策略变化通过重新编译、安装、重启进入运行时；首版不实现 live reload；
 5. 验证所有配置成员 health；
 6. 使用 managed aggregate `routecodex restart`；
 7. 在线重放 Compact、连续 search、错误窗口样本；
@@ -828,11 +843,11 @@ Stage 3 与 Stage 4 可在合同确认后并行设计，但不能共用未定义
 
 ### Positive
 
-- Compact purpose 命中 configured compact route object；
+- Compact purpose 命中独立 `compact` route pool；
 - 当前轮 search continuation 保持既有 route parity；
-- 最近 10 轮 search-like ratio 超阈值命中一次 primary thinking；
-- 最近 5 轮 error count 超阈值命中一次 primary thinking；
-- route object 引用合法 pool；
+- 最近 10 轮 search pool 分流比例超阈值命中一次 `thinking` route pool；
+- 最近 5 轮工具执行错误超阈值命中一次 `thinking` route pool；
+- route pool 引用合法；
 - 同一 session trigger 生命周期确定；
 - 多 listener / 多 session scope 不互相污染。
 
@@ -891,7 +906,7 @@ Map 状态必须区分：
 13. policy precedence；
 14. missing observation 行为；
 15. route object 与 pool 引用关系；
-16. live reload 是否纳入首版。
+16. live reload 已排除在首版之外；首版只消费启动时 compiled manifest。
 
 任一项未锁定，只能停留在 Stage 0/设计，不得写 runtime。
 

@@ -5714,3 +5714,5 @@ Tags: #v3 #provider-health #priority-routing #cooldown #probe #account-error #re
 ## 2026-08-17 历史样本审计口径
 - provider/route 排障不能只用当前实测；必须同时扫描 canonical `~/.rcc/codex-samples/<endpoint>/ports/<port>/` 下全部历史 `error.json`、`provider-request.json`、`provider-response.json`，并把历史错误样本作为请求形状与根因判定证据。
 Tags: #v3 #historical-samples #error-samples #provider-debug
+# 2026-08-20 V3 route policy decision lock
+- Jason confirmed route-policy semantics: a turn is one request plus response; new user input resets tool-pool routing statistics to zero; the ten-turn history window includes current turn and does not cross the new user task. The 80% threshold means search-pool diversion ratio, with search behavior including search tools and registered grep/ls-style search commands. Tool execution results are the counted error source; provider failures are excluded. Primary model routing targets route pools: thinking and coding, default thinking. Compact uses an independent compact route pool. All scheduling actions reference route pools, never provider/model. First version excludes live reload and consumes startup-compiled manifest only.

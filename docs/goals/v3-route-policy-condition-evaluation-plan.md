@@ -66,28 +66,32 @@ typed observations
 7. 先红后绿；先 focused test/build，再 global install/restart/live replay，最后 DSH Review。
 8. 任一编码前决策未锁定，停在 Stage 0，不写 runtime。
 
-## 4. 需要 Jason 先恢复的决策
+## 4. Jason 已恢复的决策
 
-进入 Stage 1 前必须明确：
+以下口径已锁定，Stage 0 决策阻塞解除：
 
-1. 最近 10 轮的 eligible turn：只算 assistant/user 完整轮，还是包含工具中间轮？
-2. 80% 分母：推荐 search-like turns / eligible turns。
-3. search-like 分类：是否包含 search tool、grep、rg、git grep、hosted web search？
-4. repeated search signature：按工具类别、命令目标、查询归一化，还是仅要求至少 N 个 search-like turn？
-5. 最近 5 轮错误计数：按最终 client-visible failure，还是 provider intermediate failure 也计数？
-6. tool execution error 是否计入错误窗口。
-7. reroute 后最终成功的 provider error 是否计入。
-8. trigger consume 时点：route plan 创建、provider send 前，还是 provider 成功后。
-9. trigger expiry / cooldown。
-10. scope：session、conversation，还是 session + conversation + port/group。
-11. Compact 默认 route object 名称和目标 pool。
-12. Compact 与 continuation owner 冲突时是否始终 owner 优先。
-13. policy precedence：Compact、explicit model、history intervention、current-turn、static match 的顺序。
-14. missing observation：统计条件窗口不足时 fail-fast 还是 not-matched。
-15. route object 是否首版只允许引用 pool，不允许直接 provider/model。
-16. live reload 是否纳入第一版。
+1. 最近十轮按 turn 统计；一个请求加对应响应算一个 turn。
+2. 新的用户输入到来时，工具池分流统计 reset 为 0；不能把上一段用户任务的工具统计带入新任务。
+3. 80% 指工具池分流比例，不是 search call 占所有 tool call 的比例。
+4. search-like 等同 search 分流；grep、ls 等执行搜索时会使用的命令纳入 search 分流观察。
+5. tool execution error 是重要错误来源，必须进入错误窗口统计。
+6. provider failure 不进入这组条件统计；只计算工具调用的执行结果。
+7. 主模型是 thinking 和 coding 两个 route pool；默认主模型 route pool 是 thinking。
+8. 所有调度选择都引用 route pool，不直接指定 provider/model。
+9. Compact 走独立 route pool，不并入 thinking/coding 主模型池。
+10. 历史窗口包含当前轮；没有历史窗口时只看当前轮，不跨用户任务读取旧历史。
+11. 首版不实现 live reload。
 
-未恢复前，允许继续做合同、schema 草案、red test design；禁止实现 runtime 语义。
+仍需在编码前由实现者按上述决策落成可执行合同的细节：
+
+- 10-turn 窗口中，用户 reset 后从新用户 turn 重新累计；当前轮包含在窗口内；
+- “工具池分流比例”的具体计数单位，是工具池命中 turn 数 / 十轮，还是工具池调用次数 / 十轮；
+- ls 按搜索行为纳入 search pool；不新增独立 search-like pool；
+- 工具执行结果的错误去重粒度：一次工具调用、一次请求内任一工具错误，或一整个 turn 任一工具错误；
+- thinking/coding 主模型池的 precedence：历史 search 触发时默认选 thinking，coding 仅在配置条件命中时选 coding；Compact 独立 pool 优先；
+- trigger consume 时点、expiry、scope 与 missing observation 行为。
+
+这些是实现合同细化，不再重新打开 Jason 已锁定的八项核心决策。
 
 ## 5. 技术方案与文件清单
 
@@ -238,7 +242,7 @@ typed observations
 5. Stage 4：error-window projection。
 6. Stage 5：search-density one-shot intervention。
 7. Stage 6：error-window one-shot intervention。
-8. Stage 7：deterministic live manifest、安装、重启、在线旧样本、DSH Review。
+8. Stage 7：deterministic startup manifest、安装、重启、在线旧样本、DSH Review；首版不做 live reload。
 9. 每阶段完成后更新 evidence、map status、mainline binding 和 review surface。
 10. 任一阶段修改 runtime 后，后续所有运行时证据重新验证；旧 PASS 不继承。
 
@@ -270,4 +274,3 @@ typed observations
 - docs/architecture/v3-function-map.yml
 - docs/architecture/v3-mainline-call-map.yml
 - docs/architecture/v3-verification-map.yml
-
