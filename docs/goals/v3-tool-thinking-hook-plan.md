@@ -1,6 +1,6 @@
 # V3 Tool-Thinking Hook Design and Implementation Plan
 
-Status: design approved for implementation planning; runtime code not changed.
+Status: Phase 1 implementation landed; live quality closeout and DSH Review pending.
 
 Date: 2026-08-20
 
@@ -138,7 +138,9 @@ The authoring switch is initially a boolean feature flag:
 
 ```toml
 [features]
-"tool-thinking" = true
+tool_thinking = true
+
+`tool_thinking` is the configuration key for the logical `tool-thinking` feature.
 ```
 
 The compiler expands it into one atomic hook bundle. The runtime consumes the

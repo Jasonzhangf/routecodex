@@ -213,6 +213,7 @@ fn parses_full_config_v3_without_interpreting_targets() {
 
     assert_eq!(manifest.version, 3);
     assert_eq!(manifest.features.get("stopless_center"), Some(&true));
+    assert_eq!(manifest.features.get("tool_thinking"), Some(&false));
     assert_eq!(
         manifest.features.get("responses_direct_stopless_center"),
         None,
@@ -658,6 +659,19 @@ fn stopless_center_compiled_default_preserves_global_and_server_overrides() {
         manifest.servers["primary"].features.get("stopless_center"),
         Some(&true)
     );
+}
+
+#[test]
+fn tool_thinking_compiled_feature_preserves_explicit_global_toggle() {
+    let enabled = FULL_CONFIG.replace(
+        "[features]\n",
+        "[features]\ntool_thinking = true\n",
+    );
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&enabled).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest.features.get("tool_thinking"), Some(&true));
 }
 
 #[test]

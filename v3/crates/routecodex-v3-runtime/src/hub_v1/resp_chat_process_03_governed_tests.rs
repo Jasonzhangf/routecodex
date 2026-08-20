@@ -63,6 +63,27 @@ fn resp03_multiple_toolreasons_pair_by_tool_call_order_and_strip_duplicates() {
 }
 
 #[test]
+fn resp03_strips_orphan_toolreason_close_and_responses_output_text_marker() {
+    let mut payload = json!({
+        "output_text": "visible</toolreason>",
+        "output": [{
+            "type": "message",
+            "content": [{"type": "output_text", "text": "answer<toolreason>inspect state"}]
+        }, {
+            "type": "function_call",
+            "name": "inspect_state"
+        }]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    assert_eq!(payload["output_text"], "visible");
+    assert_eq!(payload["output"][0]["content"][0]["text"], "answer");
+    assert!(!payload.to_string().contains("<toolreason>"));
+    assert!(!payload.to_string().contains("</toolreason>"));
+}
+
+#[test]
 fn resp03_toolreason_without_tool_call_is_hard_stripped_without_reasoning_guess() {
     let mut payload = json!({
         "choices":[{"message":{

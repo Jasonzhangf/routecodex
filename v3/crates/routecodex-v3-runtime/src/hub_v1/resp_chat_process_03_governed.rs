@@ -1160,6 +1160,10 @@ pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03(payload: &mut Val
             }
         }
     }
+    if let Some(output_text) = payload.get("output_text").and_then(Value::as_str) {
+        let (visible, _) = extract_toolreason(output_text);
+        payload["output_text"] = Value::String(visible);
+    }
     if let Some(content) = payload.get_mut("content").and_then(Value::as_array_mut) {
         let tool_names = content
             .iter()
@@ -1245,10 +1249,10 @@ fn extract_toolreasons(text: &str) -> (String, Vec<String>) {
     let mut remaining = text;
     loop {
         let Some(start) = remaining.find("<toolreason>") else {
-            visible.push_str(remaining);
+            visible.push_str(&remaining.replace("</toolreason>", ""));
             break;
         };
-        visible.push_str(&remaining[..start]);
+        visible.push_str(&remaining[..start].replace("</toolreason>", ""));
         let rest = &remaining[start + "<toolreason>".len()..];
         let Some(end) = rest.find("</toolreason>") else {
             break;
