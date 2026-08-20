@@ -4,12 +4,12 @@
     "v3.route_policy_condition_evaluation",
     "v3.server_internal_observability_projection"
   ],
-  "review_target_commit": "72114d82e302245f6b550397b5936c846308c1e8",
+  "review_target_commit": "8633a3ccab7ae25406b31e26e4c053e010fb5aec",
   "runtime_source_commit": "9d10bee147e5bc5ebc301c742a00ea737bb41ec5",
   "runtime_source_unchanged_between_commits": true,
   "installed_binary": {
     "path": "/Users/fanzhang/.local/bin/rccv3",
-    "sha256": "4feeae924f30406f36a59a3bd9d00ca96046b64e96816346dd4c6885a463820d",
+    "sha256": "c2d53ca33e485af93194e4c01a80f21cebb76429c828fc4f2d67d694cc7a34ef",
     "build_version": "0.90.4574"
   },
   "aggregate": {
