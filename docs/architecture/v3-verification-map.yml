@@ -3153,6 +3153,8 @@ features:
   - classified irrecoverable failure creates scoped global cooldown
   - recoverable failures one and two lower score without cooldown
   - recoverable failure three creates cooldown
+  - configured provider health threshold and cooldown schedule the key probe boundary
+  - classified auth-key and recoverable probe failures use distinct configured cadences
   - success increases key score and clears failure streak
   - restart retains cooldown and startup probe is required before readmission
   - probe success clears cooldown and applies recovery floor

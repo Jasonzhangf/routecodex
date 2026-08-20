@@ -1,5 +1,7 @@
 use routecodex_v3_config::internal::classify_v3_internal_provider_error;
-use routecodex_v3_config::internal::v3_internal_error_handling;
+use routecodex_v3_config::internal::{
+    v3_internal_error_handling, v3_provider_probe_interval_ms,
+};
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ProviderDispositionStepManifest,
     V3ProviderErrorActionPolicyManifest, V3ProviderErrorActionScope, V3ProviderErrorRetryMode,
@@ -33,13 +35,6 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 
-fn provider_failure_probe_interval_ms(scope: V3ProviderFailureCooldownScope) -> u64 {
-    let policy = v3_internal_error_handling();
-    match scope {
-        V3ProviderFailureCooldownScope::AuthKey => policy.unrecoverable_probe_interval_ms,
-        V3ProviderFailureCooldownScope::Session => policy.recoverable_probe_interval_ms,
-    }
-}
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -586,7 +581,7 @@ impl V3ProviderFailureRuntimeHealth {
                         auth_alias.as_deref(),
                         model_id.as_deref(),
                         now_ms,
-                        provider_failure_probe_interval_ms(V3ProviderFailureCooldownScope::AuthKey),
+                        v3_provider_probe_interval_ms(true),
                     )?;
                     return Err(format!(
                         "startup provider cooldown probe failed for {provider_id}: {error}"
@@ -640,7 +635,7 @@ impl V3ProviderFailureRuntimeHealth {
                         auth_alias.as_deref(),
                         model_id.as_deref(),
                         now_ms,
-                        provider_failure_probe_interval_ms(V3ProviderFailureCooldownScope::AuthKey),
+                        v3_provider_probe_interval_ms(true),
                     )?;
                     probe_errors.push(format!(
                         "persistent provider probe failed for {provider_id}: {error}"
@@ -702,7 +697,7 @@ impl V3ProviderFailureRuntimeHealth {
                         permit.auth_alias(),
                         permit.model_id(),
                         now_ms,
-                        provider_failure_probe_interval_ms(V3ProviderFailureCooldownScope::Session),
+                        v3_provider_probe_interval_ms(false),
                     )?;
                     probe_errors.push(format!(
                         "persistent provider key probe failed for {}:{}:{}: {error}",

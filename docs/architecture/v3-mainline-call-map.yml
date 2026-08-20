@@ -7212,6 +7212,20 @@ chains:
       produces: [v3.provider.key_health_state]
       side_channel_reads: [v3.provider.failure_action]
       side_channel_writes: [v3.provider.key_health_state]
+  - step_id: v3-provider-key-health-configured-policy
+    from_node: V3ProviderError02Classified
+    to_node: V3ProviderKeyHealthState
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderHealthStore::configured_failure_policy
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    status: anchored
+    owner_feature_id: v3.provider_key_health_scoring
+    resource_flow:
+      consumes: [v3.error.classified]
+      produces: [v3.provider.key_health_state]
+      side_channel_reads: [v3.error.classified]
+      side_channel_writes: [v3.provider.key_health_state]
   - step_id: v3-provider-key-health-persistence
     from_node: V3ProviderKeyHealthState
     to_node: V3ProviderKeyHealthPersisted
@@ -7530,17 +7544,3 @@ chains:
       produces: [v3.error.classified]
     side_channel_reads: [v3.error.source]
     side_channel_writes: [v3.error.classified]
-  - step_id: v3-provider-key-health-configured-policy
-    from_node: V3ProviderError02Classified
-    to_node: V3ProviderHealthStateMutated
-    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderHealthStore::configured_failure_policy
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
-    status: anchored
-    owner_feature_id: v3.provider_health_scoring_cooldown
-    resource_flow:
-      consumes: [v3.error.classified]
-      produces: [v3.provider.health_state]
-      side_channel_reads: [v3.error.classified]
-      side_channel_writes: [v3.provider.health_state]

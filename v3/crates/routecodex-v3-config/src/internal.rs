@@ -172,6 +172,15 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
     &POLICY
 }
 
+pub fn v3_provider_probe_interval_ms(auth_key_scope: bool) -> u64 {
+    let policy = v3_internal_error_handling();
+    if auth_key_scope {
+        policy.unrecoverable_probe_interval_ms
+    } else {
+        policy.recoverable_probe_interval_ms
+    }
+}
+
 pub fn classify_v3_internal_provider_error(
     stage: &str,
     status: u16,
