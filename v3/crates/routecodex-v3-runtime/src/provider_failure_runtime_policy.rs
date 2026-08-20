@@ -725,14 +725,20 @@ impl V3ProviderFailureRuntimeHealth {
     ) -> Result<(), String> {
         // post-commit SSE 流失败只在当前 session/key 内记录；不能写 provider
         // 级共享 cooldown，否则一个断流会污染其他 session 和其他 key。
-        self.record_provider_failure_record(
-            failure_session_scope,
-            provider_id,
-            auth_alias,
-            model_id,
-            Some(reason),
-            v3_relay_provider_policy_now_epoch_ms()?,
-        )?;
+        self.store
+            .record_provider_failure_in_session_with_policy(
+                failure_session_scope,
+                provider_id,
+                auth_alias,
+                model_id,
+                Some(reason),
+                v3_relay_provider_policy_now_epoch_ms()?,
+                Some(V3ProviderFailurePolicy {
+                    cooldown_scope: V3ProviderFailureCooldownScope::Session,
+                    ..Default::default()
+                }),
+            )
+            .map_err(|error| error.to_string())?;
         self.record_provider_action_failure_in_scope(
             failure_session_scope,
             provider_id,
