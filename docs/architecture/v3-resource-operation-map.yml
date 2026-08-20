@@ -1789,6 +1789,7 @@ resources:
       request_rows_max: 2048
       terminal_tombstones_max: 4096
       evicted_terminal_replay: explicit_resync_required
+      event_log_cursor_gap: explicit_resync_required
       control_state_in_payload: forbidden
     allowed_writers: [emit_v3_request_console_observation]
     allowed_readers: [V3WebuiObservability::snapshot, V3WebuiObservability::since]

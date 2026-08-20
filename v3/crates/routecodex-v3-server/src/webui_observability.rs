@@ -141,6 +141,7 @@ struct V3WebuiObservabilityInner {
     terminal_keys: BTreeSet<String>,
     terminal_key_order: VecDeque<String>,
     resync_after_sequence: Option<u64>,
+    oldest_retained_sequence: Option<u64>,
     events: std::collections::VecDeque<V3ObsEvent>,
     stats: V3ObsStats,
     active: std::collections::BTreeSet<String>,
@@ -297,6 +298,7 @@ impl V3WebuiObservability {
         });
         if inner.events.len() > 2048 {
             inner.events.pop_front();
+            inner.oldest_retained_sequence = inner.events.front().map(|event| event.sequence);
         }
         // stats snapshot derived from the same typed projection
         inner.stats = stats_snapshot;
@@ -335,9 +337,10 @@ impl V3WebuiObservability {
         Ok(V3ObsSinceResult {
             next_cursor,
             events,
-            resync_required: inner
-                .resync_after_sequence
-                .is_some_and(|sequence| cursor < sequence),
+            resync_required: inner.resync_after_sequence.is_some_and(|sequence| cursor < sequence)
+                || inner
+                    .oldest_retained_sequence
+                    .is_some_and(|sequence| cursor.saturating_add(1) < sequence),
         })
     }
 }
@@ -510,5 +513,22 @@ mod tests {
         let replay = o.since(0).unwrap();
         assert!(replay.resync_required);
         assert!(replay.events.iter().all(|event| event.request_key != first_key));
+    }
+
+    #[test]
+    fn event_log_eviction_requires_resync() {
+        let o = V3WebuiObservability::new();
+        for index in 0..1100 {
+            let request_id = format!("event-window-{index}");
+            let key = build_v3_obs_request_key(5555, &request_id);
+            o.record(V3ObsEventType::Started, &key, scope(5555), meta(&request_id)).unwrap();
+            o.record(V3ObsEventType::RouteSelected, &key, scope(5555), meta(&request_id)).unwrap();
+        }
+        let stale = o.since(0).unwrap();
+        assert!(stale.resync_required);
+        assert_eq!(stale.events.len(), 2048);
+        let current = o.since(stale.next_cursor).unwrap();
+        assert!(!current.resync_required);
+        assert!(current.events.is_empty());
     }
 }

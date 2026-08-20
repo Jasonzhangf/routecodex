@@ -7104,39 +7104,6 @@ chains:
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
 
-- chain_id: v3.server.internal_observability_projection
-  owner_feature_id: v3.server_internal_observability_projection
-  summary: Server-owned typed diagnostic projection records bounded request lifecycle observations; evicted terminal replay reports resync requirement without entering business payload.
-  edges:
-  - step_id: v3-server-observability-record
-    from_node: V3ServerConsoleObservation
-    to_node: V3WebuiObservability
-    caller_symbol: emit_v3_request_console_observation
-    caller_file: v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
-    callee_symbol: V3WebuiObservability::record
-    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
-    status: anchored
-    owner_feature_id: v3.server_internal_observability_projection
-    resource_flow:
-      consumes: [v3.runtime.responses_observability]
-      produces: [v3.server.internal_observability_projection]
-      side_channel_reads: [v3.runtime.responses_observability]
-      side_channel_writes: [v3.server.internal_observability_projection]
-  - step_id: v3-server-observability-resync
-    from_node: V3WebuiObservability
-    to_node: V3ObsSinceResult
-    caller_symbol: V3WebuiObservability::since
-    caller_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
-    callee_symbol: V3ObsSinceResult
-    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
-    status: anchored
-    owner_feature_id: v3.server_internal_observability_projection
-    resource_flow:
-      consumes: [v3.server.internal_observability_projection]
-      produces: [v3.server.internal_observability_projection]
-      side_channel_reads: [v3.server.internal_observability_projection]
-      side_channel_writes: []
-
   - step_id: v3-provider-global-probe-02
     from_node: V3ServerAggregateLifecycle
     to_node: V3ProviderGlobalProbeExecution
@@ -7210,6 +7177,39 @@ chains:
       produces: [v3.error.classified]
       side_channel_reads: [v3.error.source]
       side_channel_writes: [v3.error.classified]
+
+- chain_id: v3.server.internal_observability_projection
+  owner_feature_id: v3.server_internal_observability_projection
+  summary: Server-owned typed diagnostic projection records bounded request lifecycle observations; evicted terminal replay reports resync requirement without entering business payload.
+  edges:
+  - step_id: v3-server-observability-record
+    from_node: V3ServerConsoleObservation
+    to_node: V3WebuiObservability
+    caller_symbol: emit_v3_request_console_observation
+    caller_file: v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+    callee_symbol: V3WebuiObservability::record
+    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes: [v3.runtime.responses_observability]
+      produces: [v3.server.internal_observability_projection]
+      side_channel_reads: [v3.runtime.responses_observability]
+      side_channel_writes: [v3.server.internal_observability_projection]
+  - step_id: v3-server-observability-resync
+    from_node: V3WebuiObservability
+    to_node: V3ObsSinceResult
+    caller_symbol: V3WebuiObservability::since
+    caller_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    callee_symbol: V3ObsSinceResult
+    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    status: anchored
+    owner_feature_id: v3.server_internal_observability_projection
+    resource_flow:
+      consumes: [v3.server.internal_observability_projection]
+      produces: [v3.server.internal_observability_projection]
+      side_channel_reads: [v3.server.internal_observability_projection]
+      side_channel_writes: []
 
 - chain_id: v3.route_policy.condition_evaluation
   owner_feature_id: v3.route_policy_condition_evaluation
