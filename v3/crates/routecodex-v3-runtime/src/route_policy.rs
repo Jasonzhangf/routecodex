@@ -116,7 +116,13 @@ impl V3RoutePolicyRuntimeState {
             .get(&scope)
             .cloned()
             .unwrap_or_else(|| V3RouteHistoryWindow::new(max_policy_window(&policies)));
-        let action = evaluate_v3_route_policies(&policies, observation.clone(), &history)
+        let mut history_with_current = history;
+        history_with_current.record_turn(observation);
+        let action = evaluate_v3_route_policies(
+            &policies,
+            observation.clone(),
+            &history_with_current,
+        )
             .map_err(|error| format!("route policy evaluation failed: {error:?}"))?;
         self.pending
             .lock()
