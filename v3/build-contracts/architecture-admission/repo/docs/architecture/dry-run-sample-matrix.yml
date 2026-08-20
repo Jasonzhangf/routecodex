@@ -1,0 +1,83 @@
+version: 1
+matrix_id: debug.pipeline_dry_run_loop.m1_blackbox_fixtures
+feature_id: debug.pipeline_dry_run_loop
+mainline_id: debug.pipeline_dry_run_loop.mainline
+owner_module: src/debug/pipeline-dry-run.ts
+scope: "M1 repeatable black-box dry-run fixture validation; no runtime behavior change"
+
+samples:
+  request_provider_request_positive:
+    kind: request_dry_run_artifact
+    source_client_request: /Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/client-request.json
+    artifact: /Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/runs/sample_1783839364169/agent-collab-dryrun-slice/dry-run.provider-request.json
+    generation_command: "node scripts/replay-codex-sample.mjs --sample /Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/client-request.json --dry-run provider-request --base http://127.0.0.1:5520 --label agent-collab-dryrun-slice"
+    live_dependency: "requires already-running local RouteCodex endpoint; gate validates the captured artifact without restart/install"
+    expected_fields:
+      object: routecodex.pipeline_dry_run
+      kind: provider_request
+      dryRun: true
+      evidence.stoppedBeforeProviderSend: true
+      evidence.providerRequestSnapshotWritten: true
+      providerRequest.method: POST
+      providerRequest.body: present
+
+  response_converter_positive:
+    kind: response_dry_run_sample
+    source_provider_response: /Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/provider-response.json
+    artifact: ".agent-collab/runs/20260712T065350Z-Macstudio-61037-599a/response-dry-run-openai-chat/response-dry-run.json"
+    repeatable_command: "npm run dry-run:codex-response -- --sample /Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/provider-response.json --out-dir <temp-out-dir>"
+    expected_fields:
+      ok: true
+      converted.status: 200
+      converted.body.object: chat.completion
+      converted.body.choices: present
+
+negative_fixtures:
+  request_missing_routecodex_object:
+    source: scripts/tests/pipeline-dry-run-blackbox-fixtures.mjs
+    expected_failure_substring: object=routecodex.pipeline_dry_run
+  request_missing_stopped_before_provider_send:
+    source: scripts/tests/pipeline-dry-run-blackbox-fixtures.mjs
+    expected_failure_substring: evidence.stoppedBeforeProviderSend=true
+  request_missing_provider_request_body:
+    source: scripts/tests/pipeline-dry-run-blackbox-fixtures.mjs
+    expected_failure_substring: providerRequest.body
+  response_missing_ok_true:
+    source: scripts/tests/pipeline-dry-run-blackbox-fixtures.mjs
+    expected_failure_substring: ok=true
+  response_missing_converted_status:
+    source: scripts/tests/pipeline-dry-run-blackbox-fixtures.mjs
+    expected_failure_substring: converted.status=200
+  response_missing_converted_body:
+    source: scripts/tests/pipeline-dry-run-blackbox-fixtures.mjs
+    expected_failure_substring: converted.body object
+  response_serialized_sse_stream_without_replay_text:
+    source: scripts/tests/pipeline-dry-run-blackbox-fixtures.mjs
+    expected_failure_substrings:
+      - serialized sseStream
+      - Re-capture with snapshots enabled
+  request_non_local_header_rejection:
+    source: tests/debug/pipeline-dry-run.spec.ts
+    expected_failure_substring: "403"
+
+required_gates:
+  focused:
+    - npm run test:pipeline-dry-run
+    - npm run test:pipeline-dry-run-blackbox-fixtures
+  architecture:
+    - npm run verify:function-map-compile-gate
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:resource-source-bindings
+    - npm run verify:architecture-review-surface-light
+  longtail:
+    - npm run verify:architecture-ci-longtail
+
+runtime_fix_admission_rule:
+  - "Request bugs must first produce or validate the final providerRequest through request dry-run."
+  - "Response bugs must first produce the black-box converter result through response dry-run."
+  - "No failing sample or red fixture means no runtime refactor admission for this slice."
+  - "Serialized live sseStream snapshots without bodyText/raw/text are not offline replay evidence and must be re-captured."
+
+known_gaps:
+  - "The repeatable gate validates the existing request dry-run artifact; live request replay remains an evidence step when port 5520 is already healthy."
+  - "The gate intentionally does not restart, install, or mutate live runtime/config."

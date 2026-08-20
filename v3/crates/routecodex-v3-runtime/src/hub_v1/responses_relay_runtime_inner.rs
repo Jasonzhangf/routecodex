@@ -13,6 +13,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     stopless_control: Option<V3ResponsesRelayStoplessControlExecution<'_>>,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3ResponsesRelayRetryPolicy,
+    allow_exhaustion_rescue_probe: bool,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
@@ -203,7 +204,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         } else if let Some(selected) = initial_selected_target.take() {
             selected
         } else {
-            match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
+            let target_resolution_input = V3RelayProviderTargetResolutionInput {
                 manifest,
                 server_id: &input.server_id,
                 failure_session_scope: &input.failure_session_scope,
@@ -215,7 +216,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 now_ms: v3_relay_provider_policy_now_epoch_ms()
                     .map_err(V3ResponsesRelayRuntimeError::Target)?,
                 deterministic_sample,
-            }) {
+            };
+            let target_resolution = if allow_exhaustion_rescue_probe {
+                resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await
+            } else {
+                resolve_v3_relay_target_outcome(target_resolution_input)
+            };
+            match target_resolution {
                 V3RelayProviderTargetResolution::Selected(selected) => selected,
                 V3RelayProviderTargetResolution::Failed(source)
                     if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
@@ -691,8 +698,15 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
                         Some(manifest),
                         Some(&selected_target_provider_id),
-                        &hook_provider_value,
+                        &provider_value,
                     )
+                    .or_else(|| {
+                        responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
+                            Some(manifest),
+                            Some(&selected_target_provider_id),
+                            &hook_provider_value,
+                        )
+                    })
                 {
                     let global_probe_compatible = semantic_error.provider_global_failure
                         && provider_wire_protocol == V3HubProviderWireProtocol::Responses
@@ -702,21 +716,32 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             .and_then(|provider| provider.responses.as_ref())
                             .is_some();
                     if global_probe_compatible {
-                        let fingerprint = routecodex_v3_error::V3ProviderErrorFingerprint::new(
+                        let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+                            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+                            "V3HubRespChatProcess03Governed",
                             semantic_error.code.clone(),
                             semantic_error.code.clone(),
-                            provider_status,
+                            routecodex_v3_error::V3ExternalErrorLink {
+                                kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+                                status: Some(provider_status),
+                                code: Some(semantic_error.code.clone()),
+                                provider_id: Some(selected_target_provider_id.clone()),
+                                upstream_request_id: None,
+                                message: Some(semantic_error.code.clone()),
+                            },
+                        );
+                        let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy(
+                            source,
+                            semantic_error.cooldown_ms,
                             semantic_error.code.clone(),
-                        )
-                        .map_err(V3ResponsesRelayRuntimeError::Target)?;
+                        );
                         provider_health
-                            .record_provider_global_subscription_failure(
+                            .record_provider_global_health_for_classified_error(
                                 &input.failure_session_scope,
                                 &selected_target_provider_id,
                                 Some(&selected.candidate.auth_alias),
                                 Some(&selected.candidate.model_id),
-                                fingerprint,
-                                semantic_error.cooldown_ms,
+                                &classified,
                                 v3_relay_provider_policy_now_epoch_ms()
                                     .map_err(V3ResponsesRelayRuntimeError::Target)?,
                             )
@@ -856,6 +881,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             &web_search_state,
                             transport,
                             &input.request_id,
+                            allow_exhaustion_rescue_probe,
                         )
                         .await?
                     };
@@ -1024,21 +1050,32 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             .and_then(|provider| provider.responses.as_ref())
                             .is_some();
                     if global_probe_compatible {
-                        let fingerprint = routecodex_v3_error::V3ProviderErrorFingerprint::new(
+                        let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+                            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+                            "V3HubRespChatProcess03Governed",
                             semantic_error.code.clone(),
                             semantic_error.code.clone(),
-                            provider_status,
+                            routecodex_v3_error::V3ExternalErrorLink {
+                                kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+                                status: Some(provider_status),
+                                code: Some(semantic_error.code.clone()),
+                                provider_id: Some(selected_target_provider_id.clone()),
+                                upstream_request_id: None,
+                                message: Some(semantic_error.code.clone()),
+                            },
+                        );
+                        let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy(
+                            source,
+                            semantic_error.cooldown_ms,
                             semantic_error.code.clone(),
-                        )
-                        .map_err(V3ResponsesRelayRuntimeError::Target)?;
+                        );
                         provider_health
-                            .record_provider_global_subscription_failure(
+                            .record_provider_global_health_for_classified_error(
                                 &input.failure_session_scope,
                                 &selected_target_provider_id,
                                 Some(&selected.candidate.auth_alias),
                                 Some(&selected.candidate.model_id),
-                                fingerprint,
-                                semantic_error.cooldown_ms,
+                                &classified,
                                 v3_relay_provider_policy_now_epoch_ms()
                                     .map_err(V3ResponsesRelayRuntimeError::Target)?,
                             )
@@ -1185,6 +1222,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             &web_search_state,
                             transport,
                             &input.request_id,
+                            allow_exhaustion_rescue_probe,
                         )
                         .await?
                     };

@@ -1,0 +1,40 @@
+lifecycle_id: debug.unified_surface.mainline
+summary: debug unified surface governance shell for diag artifacts, snapshots, logger rendering, harness/replay, and policy observation, with explicit separation from runtime diagnostics contracts
+owner_feature_id: debug.unified_surface
+owner_module: src/debug/index.ts
+entrypoint:
+  node_id: DebugObs01SurfaceRequested
+  wiki_page: docs/architecture/wiki/debug-unified-surface-mainline-source.md
+  call_map_chain_id: debug.unified_surface.mainline
+node_ids:
+  - DebugObs01SurfaceRequested
+  - DebugObs02DiagCaptured
+  - DebugObs03SnapshotCaptured
+  - DebugObs04LoggerEmitted
+  - DebugObs05HarnessExecuted
+  - DebugObs06PolicyRecorded
+  - DebugObs07ReplayedOrInspected
+step_ids:
+  - dbg-01
+  - dbg-02
+  - dbg-03
+  - dbg-04
+  - dbg-05
+  - dbg-06
+edge_status_counts:
+  anchored: 0
+  partial: 0
+  binding_pending: 6
+  total: 6
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+  goal_doc: docs/goals/debug-unified-surface-goal.md
+verification:
+  min_call_map_chain: debug.unified_surface.mainline
+  min_function_feature: debug.unified_surface
+  required_gates:
+    - npm run verify:debug-unified-surface
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency
+    - npm run verify:architecture-wiki-sync

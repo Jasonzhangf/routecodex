@@ -208,6 +208,7 @@ struct V3ProviderActionGateState {
     waiter_queue: VecDeque<u64>,
     next_waiter_ticket: u64,
     next_admission_at: Instant,
+    minimum_delay_ms: u64,
     admitted_generation: Option<u64>,
     admitted_action_scope: Option<V3ProviderActionProviderScope>,
     success_transition_generation: Option<u64>,
@@ -538,6 +539,14 @@ impl V3ProviderActionGate {
         &self,
         key: &V3ProviderActionGateKey,
     ) -> Result<V3ProviderActionFailureRecorded, String> {
+        self.record_failure_with_minimum_delay(key, 0)
+    }
+
+    pub fn record_failure_with_minimum_delay(
+        &self,
+        key: &V3ProviderActionGateKey,
+        configured_minimum_delay_ms: u64,
+    ) -> Result<V3ProviderActionFailureRecorded, String> {
         let now = Instant::now();
         let mut states = self.lock_states()?;
         prune_idle_states(&mut states);
@@ -571,8 +580,11 @@ impl V3ProviderActionGate {
                     && active_key.provider_scope.session_id == key.provider_scope.session_id
             }) {
                 state.mode = V3ProviderActionGateMode::Sustained;
-                state.next_admission_at =
-                    now + Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS);
+                state.minimum_delay_ms = state
+                    .minimum_delay_ms
+                    .max(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS)
+                    .max(configured_minimum_delay_ms);
+                state.next_admission_at = now + Duration::from_millis(state.minimum_delay_ms);
                 state.success_transition_generation = None;
                 state.terminal_transition_generation = None;
                 state.updated_at = now;
@@ -588,8 +600,9 @@ impl V3ProviderActionGate {
                 }
                 state.mode = V3ProviderActionGateMode::Sustained;
                 state.consecutive_failures = state.consecutive_failures.saturating_add(1);
-                state.next_admission_at =
-                    now + Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS);
+                state.minimum_delay_ms =
+                    V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS.max(configured_minimum_delay_ms);
+                state.next_admission_at = now + Duration::from_millis(state.minimum_delay_ms);
                 state.success_transition_generation = None;
                 state.terminal_transition_generation = None;
                 state.updated_at = now;
@@ -608,6 +621,7 @@ impl V3ProviderActionGate {
                 } else {
                     V3ProviderActionGateMode::Isolated
                 };
+                let minimum_delay_ms = mode_delay_ms(mode).max(configured_minimum_delay_ms);
                 states.insert(
                     key.clone(),
                     V3ProviderActionGateState {
@@ -616,7 +630,8 @@ impl V3ProviderActionGate {
                         consecutive_failures: 1,
                         waiter_queue: VecDeque::new(),
                         next_waiter_ticket: 1,
-                        next_admission_at: now + Duration::from_millis(mode_delay_ms(mode)),
+                        next_admission_at: now + Duration::from_millis(minimum_delay_ms),
+                        minimum_delay_ms,
                         admitted_generation: None,
                         admitted_action_scope: None,
                         success_transition_generation: None,
@@ -633,7 +648,7 @@ impl V3ProviderActionGate {
         Ok(V3ProviderActionFailureRecorded {
             generation: state.generation,
             mode: state.mode,
-            minimum_delay_ms: mode_delay_ms(state.mode),
+            minimum_delay_ms: state.minimum_delay_ms,
             recovery_ticket: V3ProviderActionRecoveryTicket::new(key.clone(), state.generation)?,
         })
     }
@@ -656,8 +671,10 @@ impl V3ProviderActionGate {
             state.waiter_queue.push_back(ticket);
             if state.waiter_queue.len() > 1 && state.mode == V3ProviderActionGateMode::Isolated {
                 state.mode = V3ProviderActionGateMode::Sustained;
-                state.next_admission_at =
-                    now + Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS);
+                state.minimum_delay_ms = state
+                    .minimum_delay_ms
+                    .max(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS);
+                state.next_admission_at = now + Duration::from_millis(state.minimum_delay_ms);
                 state.updated_at = now;
                 let _ = state.change_tx.send(state.generation);
             }
@@ -768,7 +785,7 @@ impl V3ProviderActionWaiter {
                     let admission = V3ProviderActionAdmission {
                         generation: state.generation,
                         mode: state.mode,
-                        minimum_delay_ms: mode_delay_ms(state.mode),
+                        minimum_delay_ms: state.minimum_delay_ms,
                         released_by_success: true,
                         reevaluate_after_terminal: false,
                         refreshed_recovery_witness: None,
@@ -784,7 +801,7 @@ impl V3ProviderActionWaiter {
                     let admission = V3ProviderActionAdmission {
                         generation: state.generation,
                         mode: state.mode,
-                        minimum_delay_ms: mode_delay_ms(state.mode),
+                        minimum_delay_ms: state.minimum_delay_ms,
                         released_by_success: false,
                         reevaluate_after_terminal: true,
                         refreshed_recovery_witness: Some(
@@ -803,6 +820,7 @@ impl V3ProviderActionWaiter {
                 {
                     let admission_mode = state.mode;
                     let admission_generation = state.generation;
+                    let admission_minimum_delay_ms = state.minimum_delay_ms;
                     if self.admit_action {
                         state.admitted_generation = Some(admission_generation);
                         state.admitted_action_scope = Some(self.action_scope.clone());
@@ -814,7 +832,7 @@ impl V3ProviderActionWaiter {
                     let admission = V3ProviderActionAdmission {
                         generation: admission_generation,
                         mode: admission_mode,
-                        minimum_delay_ms: mode_delay_ms(admission_mode),
+                        minimum_delay_ms: admission_minimum_delay_ms,
                         released_by_success: false,
                         reevaluate_after_terminal: false,
                         refreshed_recovery_witness: None,

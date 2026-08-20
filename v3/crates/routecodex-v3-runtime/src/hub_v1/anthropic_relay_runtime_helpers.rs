@@ -8,6 +8,20 @@ pub fn project_v3_anthropic_relay_runtime_failure(
             "direct_model_not_found",
             message,
         ),
+        V3AnthropicRelayRuntimeError::ProviderCompat(error) => match error.classification() {
+            V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
+                super::provider_compat_boundary_source(
+                    "ProviderRespCompat02ProviderCompat",
+                    &error,
+                )
+            }
+            V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3HubRuntime",
+                "anthropic_relay_runtime_error",
+                error.to_string(),
+            ),
+        },
         error => build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",

@@ -1,0 +1,129 @@
+registry_id: v3.protocol_request_field_projection.modules
+status: design_feature_scope
+runtime_conformance: pending
+global_module_registry_status: pending
+owner_feature_id: v3.protocol_conversion_field_parity
+canonical_doc: docs/design/v3-protocol-request-field-projection.md
+scope_rule: Every runtime source file modified by this feature must appear in exactly one module owned_paths list below. This registry does not claim full-repository source ownership coverage.
+modules:
+  - module_id: v3.protocol_codec.shared_client_metadata
+    owner: routecodex-v3-runtime::hub_v1::client_metadata_projection
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
+    allowed_operations:
+      - classify registered Codex client metadata keys for explicit target projection rejection or exact user_id mapping
+      - report unknown client metadata payload paths
+    forbidden_operations:
+      - read or write MetadataCenter
+      - construct routing, continuation, retry, or provider selection state
+      - emit provider wire fields
+  - module_id: v3.protocol_codec.req_inbound_dispatch
+    owner: routecodex-v3-runtime::hub_v1::req_inbound_02_normalized
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
+    allowed_operations:
+      - dispatch each entry protocol to its adjacent inbound codec
+      - preserve registered Chat payload fields emitted by the adjacent inbound codec
+    forbidden_operations:
+      - read or write MetadataCenter
+      - preserve raw source protocol payload after Chat canonicalization
+      - reconstruct one registered payload semantic from another
+  - module_id: v3.protocol_codec.responses_inbound
+    owner: routecodex-v3-runtime::hub_v1::responses_openai_codec
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
+    allowed_operations:
+      - decode Responses wire into Chat canonical and registered payload extensions
+      - validate source protocol field types and value domains
+    forbidden_operations:
+      - read or write MetadataCenter
+      - encode Anthropic or Gemini wire
+      - recover fields from raw payload after Req02
+  - module_id: v3.protocol_codec.openai_outbound
+    owner: routecodex-v3-runtime::hub_v1::request_outbound_format
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs
+    allowed_operations:
+      - validate target field domain
+      - project Chat semantics to OpenAI Chat or Responses wire
+      - report canonical unmapped payload paths
+    forbidden_operations:
+      - silent strip
+      - approximate effort or budget conversion
+      - read MetadataCenter or raw inbound payload
+      - build Anthropic or Gemini wire fields
+  - module_id: v3.protocol_codec.anthropic
+    owner: routecodex-v3-runtime::hub_v1::anthropic_codec
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
+    allowed_operations:
+      - decode Anthropic wire into Chat semantics
+      - project governed Chat semantics into Anthropic wire
+      - enforce Anthropic metadata, effort, thinking, and budget domains
+    forbidden_operations:
+      - encode reasoning policy as system marker
+      - infer budget from qualitative effort
+      - relabel session, thread, turn, or installation identifiers as Anthropic metadata.user_id
+      - reconstruct Anthropic cache_control from Responses prompt_cache_key
+      - consume unregistered Responses store or text.verbosity values
+      - read MetadataCenter or raw Responses wire
+  - module_id: v3.protocol_codec.gemini
+    owner: routecodex-v3-runtime::hub_v1::gemini_codec
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
+    allowed_operations:
+      - decode Gemini wire into Chat semantics
+      - project governed Chat semantics into Gemini wire
+      - validate thinking level and budget against target capabilities
+    forbidden_operations:
+      - infer includeThoughts from Anthropic display
+      - infer token budget from qualitative effort
+      - read MetadataCenter
+  - module_id: v3.protocol_codec.provider_compat_dispatch
+    owner: routecodex-v3-runtime::hub_v1::provider_req_compat_06_provider_compat
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+    allowed_operations:
+      - dispatch Req07 Chat/provider semantic to the selected adjacent target codec
+    forbidden_operations:
+      - reconstruct source protocol payload
+      - implement field-specific approximation
+      - read MetadataCenter payload copies
+allowed_edges:
+  - from: v3.protocol_codec.openai_outbound
+    to: v3.protocol_codec.shared_client_metadata
+    direction: outbound_client_metadata_classification
+  - from: v3.protocol_codec.anthropic
+    to: v3.protocol_codec.shared_client_metadata
+    direction: outbound_client_metadata_classification
+  - from: v3.protocol_codec.req_inbound_dispatch
+    to: v3.protocol_codec.responses_inbound
+    direction: inbound_responses
+  - from: v3.protocol_codec.req_inbound_dispatch
+    to: v3.protocol_codec.anthropic
+    direction: inbound_anthropic
+  - from: v3.protocol_codec.responses_inbound
+    to: V3HubReqChatProcess04Governed
+    direction: inbound
+  - from: V3HubReqChatProcess04Governed
+    to: v3.protocol_codec.provider_compat_dispatch
+    via: V3HubReqOutbound07ProviderSemantic
+    direction: outbound
+  - from: v3.protocol_codec.provider_compat_dispatch
+    to: v3.protocol_codec.openai_outbound
+    direction: outbound_openai
+  - from: v3.protocol_codec.provider_compat_dispatch
+    to: v3.protocol_codec.anthropic
+    direction: outbound_anthropic
+  - from: v3.protocol_codec.provider_compat_dispatch
+    to: v3.protocol_codec.gemini
+    direction: outbound_gemini_dispatch
+verification_gate: npm run verify:v3-protocol-conversion-field-parity

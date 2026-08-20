@@ -57,6 +57,7 @@ pub(crate) fn provider_http_failure(
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         observability,
         terminal_projection: None,
+        matched_policy: None,
     }
 }
 
@@ -97,6 +98,7 @@ pub(crate) fn provider_runtime_failure(
         source_stage: provider_runtime_failure_stage(&error),
         observability,
         terminal_projection,
+        matched_policy: None,
     }
 }
 
@@ -108,6 +110,7 @@ pub(crate) fn provider_semantic_failure(
 ) -> V3ResponsesRelayProviderFailure {
     let policy_error_type = error.code.clone();
     let policy_error_message = error.message.clone();
+    let matched_policy = error.matched_policy.clone();
     V3ResponsesRelayProviderFailure {
         status,
         policy_error_type,
@@ -116,6 +119,7 @@ pub(crate) fn provider_semantic_failure(
         source_stage: "V3ProviderRespInbound01Raw",
         observability,
         terminal_projection: None,
+        matched_policy,
     }
 }
 
@@ -138,6 +142,7 @@ pub(crate) fn provider_response_stream_relay_failure(
             source_stage: "V3ProviderRespInbound01Raw",
             observability,
             terminal_projection: None,
+            matched_policy: None,
         },
         other => provider_runtime_failure(
             provider_response_stream_failure(other, request_id, provider_id),
@@ -152,32 +157,61 @@ pub(crate) fn provider_request_relay_failure(
     provider_id: &str,
     observability: Option<V3RuntimeObservability>,
 ) -> Result<V3ResponsesRelayProviderFailure, V3ResponsesRelayRuntimeError> {
-    let (source_stage, error_type, message) = match error {
-        V3ResponsesRelayRuntimeError::ProviderCompat(error) => (
-            "ProviderReqCompat06ProviderCompat",
-            "provider_request_compat_error",
-            format!("V3 Responses Relay provider compat failed: {error}"),
-        ),
+    let (source_stage, error_type, message, terminal_projection) = match error {
+        V3ResponsesRelayRuntimeError::ProviderCompat(error) => {
+            let boundary = match error.classification() {
+                V3ProviderCompatErrorClassification::PayloadBoundaryViolation => Some(
+                    V3ErrorHandlingCenter::project_terminal(
+                        V3ErrorHandlingCenter::decide_provider(
+                            V3ErrorHandlingCenterInput {
+                                source: super::provider_compat_boundary_source(
+                                    "ProviderReqCompat06ProviderCompat",
+                                    &error,
+                                ),
+                                action_scope: V3ErrorActionScope::ProviderInstance {
+                                    provider_id: provider_id.to_string(),
+                                },
+                                candidates_remaining: 0,
+                                source_status: Some(400),
+                            },
+                            false,
+                            false,
+                            None,
+                        ),
+                    ),
+                ),
+                V3ProviderCompatErrorClassification::Other => None,
+            };
+            (
+                "ProviderReqCompat06ProviderCompat",
+                "provider_request_compat_error",
+                format!("V3 Responses Relay provider compat failed: {error}"),
+                boundary,
+            )
+        }
         V3ResponsesRelayRuntimeError::ProviderWireEncoding(message) => (
             "V3ProviderReqOutbound08WirePayload",
             "provider_request_wire_error",
             format!("V3 Responses Relay provider wire encoding failed: {message}"),
+            None,
         ),
         V3ResponsesRelayRuntimeError::Provider(error) => (
             "V3ProviderReqOutbound08WirePayload",
             "provider_request_wire_error",
             error.to_string(),
+            None,
         ),
         other => return Err(other),
     };
     Ok(V3ResponsesRelayProviderFailure {
-        status: 502,
+        status: terminal_projection.as_ref().map_or(502, |projection| projection.status),
         policy_error_type: error_type.to_string(),
         policy_error_message: message.clone(),
         provider_id: provider_id.to_string(),
         source_stage,
         observability,
-        terminal_projection: None,
+        terminal_projection,
+        matched_policy: None,
     })
 }
 
@@ -255,6 +289,7 @@ pub(crate) fn provider_response_hook_failure(
                 source_stage: "V3HubRespChatProcess03Governed",
                 observability,
                 terminal_projection: None,
+                matched_policy: None,
             }
         }
     }

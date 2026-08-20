@@ -468,9 +468,7 @@ fn build_implicit_capability_pool_tier(
     client_model: Option<&str>,
 ) -> Option<V3Router06SelectionPlanTier> {
     let candidates = manifest.capability_model_candidates();
-    let Some(models) = candidates.get(signal) else {
-        return None;
-    };
+    let models = candidates.get(signal)?;
     let mut targets = Vec::new();
     for candidate in models {
         if let Some(client) = client_model {

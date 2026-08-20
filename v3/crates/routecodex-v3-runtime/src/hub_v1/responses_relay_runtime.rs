@@ -12,12 +12,12 @@ use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecove
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
     provider_runtime_failure_stage, resolve_v3_relay_target_outcome,
-    run_v3_relay_provider_failure_policy, v3_relay_provider_candidate_key_parts,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
-    V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
-    V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolution,
-    V3RelayProviderTargetResolutionInput,
+    resolve_v3_relay_target_outcome_with_rescue, run_v3_relay_provider_failure_policy,
+    v3_relay_provider_candidate_key_parts, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
+    V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
+    V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};
 use crate::{
@@ -149,6 +149,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_stople
         }),
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
+        true,
         None,
         None,
         None,
@@ -187,6 +188,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
         }),
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
+        true,
         provider_failure_event_sink,
         local_stopless.route_selection_event_sink.clone(),
         None,
@@ -229,6 +231,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
         }),
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
+        true,
         provider_failure_event_sink,
         local_stopless.route_selection_event_sink.clone(),
         Some(initial_selected_target),
@@ -416,6 +419,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         None,
         provider_health.runtime_health(),
         retry_policy,
+        true,
         None,
         None,
         None,
@@ -443,6 +447,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         None,
         provider_health.runtime_health(),
         retry_policy,
+        true,
         None,
         None,
         None,
@@ -481,6 +486,7 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
         }),
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
+        true,
         None,
         None,
         None,
@@ -534,6 +540,10 @@ async fn handle_v3_responses_relay_provider_failure(
         v3_responses_relay_provider_failure_reason(&failure)
             .unwrap_or("provider failure")
             .to_string(),
+        failure
+            .matched_policy
+            .as_ref()
+            .map(V3ProviderFailureDirective::policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: state.failed_candidates,
             same_candidate_retries: state.same_candidate_retries,
@@ -989,7 +999,10 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
                         index,
                         &projected_item,
                     ) {
-                        frames.push(Err(error));
+                        frames.push(Err(routecodex_v3_error::raise_v3_sse_provider_failure(
+                            "provider_response_sse_stream",
+                            error,
+                        )));
                         return Box::pin(stream::iter(frames));
                     }
                     frames.push(Ok(build_v3_runtime_sse_json_frame(
@@ -1040,7 +1053,7 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
 }
 
 fn append_v3_responses_client_function_call_progress_frames(
-    frames: &mut Vec<Result<Vec<u8>, String>>,
+    frames: &mut Vec<Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>>,
     response_id: &str,
     output_index: usize,
     item: &Value,

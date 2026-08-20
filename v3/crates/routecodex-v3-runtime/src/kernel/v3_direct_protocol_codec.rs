@@ -13,9 +13,9 @@
 //! 中只实现一份。
 use crate::nodes::{V3ChatDirect11Policy, V3Req04StandardizedChat};
 use crate::{
+    direct_response_hooks::V3DirectResponseCompatContext,
     hooks::build_v3_provider_error_source,
     nodes::{V3Req04StandardizedResponses, V3ResponsesDirect11Policy},
-    shared::project_provider_raw_to_client_payload,
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
@@ -38,6 +38,19 @@ pub(crate) type V3DirectResponseProjectionFuture = Pin<
             > + Send,
     >,
 >;
+
+pub(crate) fn build_direct_response_compat_context(
+    target: &V3Target10ConcreteProviderSelected,
+) -> Result<V3DirectResponseCompatContext, String> {
+    Ok(V3DirectResponseCompatContext {
+        provider_protocol: crate::hub_v1::provider_wire_protocol_for_selected_candidate(
+            &target.candidate,
+        )?,
+        canonical_model_id: target.candidate.model_id.clone(),
+        model_capabilities: target.candidate.model_capabilities.clone(),
+        compatibility_profile: target.candidate.compatibility_profile.clone(),
+    })
+}
 
 pub trait V3DirectProtocolCodec {
     type Standardized;
@@ -79,7 +92,10 @@ pub trait V3DirectProtocolCodec {
         V3Error01SourceRaised,
     >;
 
-    fn run_response_projection(raw: V3ProviderResp14Raw) -> V3DirectResponseProjectionFuture;
+    fn run_response_projection(
+        raw: V3ProviderResp14Raw,
+        context: V3DirectResponseCompatContext,
+    ) -> V3DirectResponseProjectionFuture;
 
     fn run_error(
         source: V3Error01SourceRaised,
@@ -242,11 +258,11 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         crate::hooks::responses_direct_provider_transport_hook(wire)
     }
 
-    fn run_response_projection(raw: V3ProviderResp14Raw) -> V3DirectResponseProjectionFuture {
-        Box::pin(project_provider_raw_to_client_payload(
-            crate::hub_v1::V3HubProviderWireProtocol::Responses,
-            raw,
-        ))
+    fn run_response_projection(
+        raw: V3ProviderResp14Raw,
+        context: V3DirectResponseCompatContext,
+    ) -> V3DirectResponseProjectionFuture {
+        crate::hooks::responses_direct_response_projection_hook_with_context(raw, context)
     }
 
     fn run_error(
@@ -338,11 +354,11 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
         crate::hooks::chat_direct_provider_transport_hook(wire)
     }
 
-    fn run_response_projection(raw: V3ProviderResp14Raw) -> V3DirectResponseProjectionFuture {
-        Box::pin(project_provider_raw_to_client_payload(
-            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
-            raw,
-        ))
+    fn run_response_projection(
+        raw: V3ProviderResp14Raw,
+        context: V3DirectResponseCompatContext,
+    ) -> V3DirectResponseProjectionFuture {
+        crate::hooks::chat_direct_response_projection_hook(raw, context)
     }
 
     fn run_error(

@@ -35,8 +35,9 @@ use super::{
     build_v3_provider_transport_request_for_protocol, provider_wire_protocol_for_selected_candidate,
 };
 use crate::provider_failure_runtime_policy::{
-    resolve_v3_relay_target_outcome, v3_relay_provider_policy_now_epoch_ms,
-    V3ProviderFailureRuntimeHealth, V3RelayProviderTargetResolution,
+    resolve_v3_relay_target_outcome, resolve_v3_relay_target_outcome_with_rescue,
+    v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
+    V3RelayProviderTargetResolution,
     V3RelayProviderTargetResolutionInput,
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -131,6 +132,7 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
     web_search_state: &V3WebSearchCenterState,
     transport: &T,
     request_id: &str,
+    allow_exhaustion_rescue_probe: bool,
 ) -> Result<V3WebSearchCenterState, V3ResponsesRelayRuntimeError> {
     let binding = backend_binding
         .map(str::trim)
@@ -173,7 +175,7 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
         "stream": false
     });
     // 2. target 解析：body.model = backend binding -> direct model plan pin。
-    let selected = match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
+    let target_resolution_input = V3RelayProviderTargetResolutionInput {
         manifest,
         server_id,
         entry_kind: "responses",
@@ -184,7 +186,13 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
         provider_health,
         now_ms: v3_relay_provider_policy_now_epoch_ms()?,
         deterministic_sample: 0,
-    }) {
+    };
+    let target_resolution = if allow_exhaustion_rescue_probe {
+        resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await
+    } else {
+        resolve_v3_relay_target_outcome(target_resolution_input)
+    };
+    let selected = match target_resolution {
         V3RelayProviderTargetResolution::Selected(selected) => selected,
         V3RelayProviderTargetResolution::Failed(source)
             if source.source_kind == V3ErrorSourceKind::ModelNotFound =>

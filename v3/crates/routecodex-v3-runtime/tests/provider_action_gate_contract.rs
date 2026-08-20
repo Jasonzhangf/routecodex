@@ -2,7 +2,8 @@ use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_runtime::{
     V3ProviderActionGate, V3ProviderActionGateKey, V3ProviderActionGateMode,
     V3ProviderActionProviderScope, V3ProviderActionRecoveryTransition,
-    V3_PROVIDER_ACTION_ISOLATED_DELAY_MS, V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS,
+    V3_PROVIDER_ACTION_ISOLATED_DELAY_MS, V3_PROVIDER_ACTION_MEDIUM_DELAY_MS,
+    V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS,
 };
 use std::time::{Duration, Instant};
 
@@ -13,6 +14,15 @@ fn key(error_family: &str) -> V3ProviderActionGateKey {
         "provider-a:key-a:model-a",
         error_family,
     )
+}
+
+#[test]
+fn configured_backoff_is_a_minimum_for_provider_action_admission() {
+    let gate = V3ProviderActionGate::default();
+    let recorded = gate
+        .record_failure_with_minimum_delay(&key("configured_backoff"), 7_000)
+        .expect("record configured backoff");
+    assert_eq!(recorded.minimum_delay_ms, 7_000);
 }
 
 fn session_scope(server_id: &str, routing_group: &str) -> V3ProviderFailureSessionScope {
@@ -372,6 +382,36 @@ async fn second_failure_before_success_promotes_and_extends_the_sustained_deadli
     assert!(
         final_failure_at.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
         "provider action was admitted before five seconds from the latest failure"
+    );
+}
+
+#[test]
+fn consecutive_failures_follow_one_three_five_and_success_resets() {
+    let gate = V3ProviderActionGate::default();
+    let scope = key("provider_http_500");
+
+    let first = gate.record_failure(&scope).expect("first failure");
+    assert_eq!(first.mode, V3ProviderActionGateMode::Isolated);
+    assert_eq!(first.minimum_delay_ms, V3_PROVIDER_ACTION_ISOLATED_DELAY_MS);
+
+    let second = gate.record_failure(&scope).expect("second failure");
+    assert_eq!(second.mode, V3ProviderActionGateMode::Medium);
+    assert_eq!(second.minimum_delay_ms, V3_PROVIDER_ACTION_MEDIUM_DELAY_MS);
+
+    let third = gate.record_failure(&scope).expect("third failure");
+    assert_eq!(third.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(third.minimum_delay_ms, V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS);
+
+    let fourth = gate.record_failure(&scope).expect("fourth failure");
+    assert_eq!(fourth.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(fourth.minimum_delay_ms, V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS);
+
+    gate.record_success(&scope).expect("success resets failure sequence");
+    let after_success = gate.record_failure(&scope).expect("failure after success");
+    assert_eq!(after_success.mode, V3ProviderActionGateMode::Isolated);
+    assert_eq!(
+        after_success.minimum_delay_ms,
+        V3_PROVIDER_ACTION_ISOLATED_DELAY_MS
     );
 }
 
@@ -887,6 +927,7 @@ async fn success_released_recovery_reenters_the_retained_five_second_generation(
         tokio::spawn(async move { gate.wait_for_recovery_ticket(&ticket, action_scope).await })
     };
     tokio::time::sleep(Duration::from_millis(25)).await;
+    let sustained_started = Instant::now();
     gate.record_success(&failed)
         .expect("provider success retains queued recovery lane");
 
@@ -900,7 +941,6 @@ async fn success_released_recovery_reenters_the_retained_five_second_generation(
     assert_eq!(refreshed.key(), &failed);
     assert_eq!(refreshed.generation(), first_ticket.generation() + 1);
 
-    let sustained_started = Instant::now();
     let transition = gate
         .wait_for_recovery_ticket(&refreshed, action_scope)
         .await

@@ -13,8 +13,9 @@
 use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    resolve_v3_relay_target_outcome, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
+    resolve_v3_relay_target_outcome, resolve_v3_relay_target_outcome_with_rescue,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    V3ProviderFailureRuntimeHealth,
     V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
     V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolution,
     V3RelayProviderTargetResolutionInput,
@@ -39,7 +40,14 @@ async fn guard_relay_sse_first_frame(
     sse_first_frame_timeout_ms: Option<u64>,
 ) -> Result<routecodex_v3_provider_responses::V3ProviderSseStream, V3ProviderError> {
     use futures_util::StreamExt;
-    let first = tokio::time::timeout(V3_RELAY_SSE_FIRST_FRAME_TIMEOUT, stream.next())
+    let first_frame_timeout = sse_first_frame_timeout_ms
+        .map(std::time::Duration::from_millis)
+        .ok_or_else(|| V3ProviderError::Transport {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: "published provider SSE first-frame timeout is missing".to_string(),
+        })?;
+    let first = tokio::time::timeout(first_frame_timeout, stream.next())
         .await
         .map_err(|_| V3ProviderError::Transport {
             request_id: request_id.to_string(),
@@ -108,9 +116,6 @@ pub(crate) fn guard_v3_provider_sse_idle(
         },
     ))
 }
-
-/// Relay SSE 首帧超时（与 Direct SSE 首帧守卫一致，30s）。
-const V3_RELAY_SSE_FIRST_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Relay transport 响应头等待上限：provider 在窗口内未返回响应头（上游挂起/无响应）
 /// 时归一化为 Transport 错误进入错误链——记录 provider failure（health）+ reselect 切
@@ -314,6 +319,7 @@ pub async fn execute_v3_relay_runtime_core<'store, C, T>(
     retry_policy: V3RelayProviderFailureRetryPolicy,
     continuation_lookup: V3HubContinuationLookup<'store>,
     provider_header_overrides: Vec<V3ProviderRequestHeader>,
+    allow_exhaustion_rescue_probe: bool,
 ) -> Result<C::Output, V3RelayCoreError>
 where
     C: V3RelayProtocolCodec,
@@ -380,19 +386,25 @@ where
         let selected = if let Some(selected) = retry_selected.take() {
             selected
         } else {
-            match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
-                manifest,
-                server_id,
-                failure_session_scope: &failure_session_scope,
-                entry_kind: C::ENTRY_KIND,
-                endpoint_path,
-                body: routing_payload_ref,
-                request_local_excluded_candidates: &failed_candidates,
-                provider_health: &provider_health,
-                now_ms: v3_relay_provider_policy_now_epoch_ms()
-                    .map_err(V3RelayCoreError::Target)?,
-                deterministic_sample,
-            }) {
+            let target_resolution_input = V3RelayProviderTargetResolutionInput {
+                    manifest,
+                    server_id,
+                    failure_session_scope: &failure_session_scope,
+                    entry_kind: C::ENTRY_KIND,
+                    endpoint_path,
+                    body: routing_payload_ref,
+                    request_local_excluded_candidates: &failed_candidates,
+                    provider_health: &provider_health,
+                    now_ms: v3_relay_provider_policy_now_epoch_ms()
+                        .map_err(V3RelayCoreError::Target)?,
+                    deterministic_sample,
+                };
+            let target_resolution = if allow_exhaustion_rescue_probe {
+                resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await
+            } else {
+                resolve_v3_relay_target_outcome(target_resolution_input)
+            };
+            match target_resolution {
                 V3RelayProviderTargetResolution::Selected(selected) => selected,
                 V3RelayProviderTargetResolution::Failed(source)
                     if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
@@ -822,7 +834,13 @@ mod tests {
     async fn guard_rejects_empty_sse_stream() {
         let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
             Box::pin(futures_util::stream::empty());
-        let result = guard_relay_sse_first_frame("req-empty", "provider-1", stream, None).await;
+        let result = guard_relay_sse_first_frame(
+            "req-empty",
+            "provider-1",
+            stream,
+            Some(30_000),
+        )
+        .await;
         assert!(result.is_err(), "empty SSE stream must fail the guard");
     }
 
@@ -834,7 +852,7 @@ mod tests {
                 Ok(b"data: ping\n\n".to_vec()),
                 Ok(b"data: pong\n\n".to_vec()),
             ]));
-        let mut guarded = guard_relay_sse_first_frame("req-ok", "provider-1", stream, None)
+        let mut guarded = guard_relay_sse_first_frame("req-ok", "provider-1", stream, Some(30_000))
             .await
             .expect("non-empty stream must pass the guard");
         let first = guarded
@@ -865,8 +883,35 @@ mod tests {
                 reason: "upstream reset".to_string(),
             })]),
         );
-        let result = guard_relay_sse_first_frame("req-err", "provider-1", stream, None).await;
+        let result = guard_relay_sse_first_frame(
+            "req-err",
+            "provider-1",
+            stream,
+            Some(30_000),
+        )
+        .await;
         assert!(result.is_err(), "first frame error must propagate");
+    }
+
+    #[tokio::test]
+    async fn guard_honors_configured_first_frame_timeout() {
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
+            Box::pin(futures_util::stream::pending());
+        let result =
+            guard_relay_sse_first_frame("req-timeout", "provider-1", stream, Some(1)).await;
+        assert!(
+            result.is_err(),
+            "configured first-frame timeout must fail pending SSE"
+        );
+    }
+
+    #[tokio::test]
+    async fn guard_rejects_zero_first_frame_timeout() {
+        let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
+            Box::pin(futures_util::stream::pending());
+        let result =
+            guard_relay_sse_first_frame("req-zero-timeout", "provider-1", stream, Some(0)).await;
+        assert!(result.is_err(), "zero first-frame timeout must fail fast");
     }
 
     /// 空闲守卫：正常 provider 流逐帧透传、EOF 原样结束（不改变语义）。

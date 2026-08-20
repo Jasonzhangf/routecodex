@@ -176,6 +176,7 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
             source_stage: "V3ProviderReqOutbound09TransportRequest",
             terminal_projection: Some(terminal_projection),
             observability: None,
+            matched_policy: None,
         },
         vec!["V3ProviderReqOutbound09TransportRequest"],
         0,
@@ -414,7 +415,8 @@ async fn collect_projected_sse(
 ) -> Vec<Result<String, String>> {
     stream
         .map(|item| {
-            item.and_then(|bytes| String::from_utf8(bytes).map_err(|error| error.to_string()))
+            item.map_err(|error| error.message)
+                .and_then(|bytes| String::from_utf8(bytes).map_err(|error| error.to_string()))
         })
         .collect()
         .await

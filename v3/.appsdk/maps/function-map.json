@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "functions": [
+    {"function_id":"goal_clarification","owner":"appsdk::goal","entry_symbols":["clarify"],"required_gates":["goal_confirmed"]},
+    {"function_id":"compile_artifact","owner":"appsdk::compiler","entry_symbols":["compile"],"required_gates":["contract_valid","sdk_pinned"]},
+    {"function_id":"fix_lifecycle_graph","owner":"appsdk::fix_lifecycle","entry_symbols":["assert_fix_lifecycle_graph"],"required_gates":["worktree_clean","baseline_reproduced","fix_candidate_verified","architecture_review_pass","post_architecture_effectiveness","mainline_merge_identity"]},
+    {"function_id":"promote_freeze_publish","owner":"appsdk::lifecycle","entry_symbols":["promote_module","freeze_module","publish_active"],"required_gates":["fix_lifecycle_graph","record_graph","artifact_hash","vcs_clean"]},
+    {"function_id":"v3_provider_global_cooldown_coordinator","owner":"routecodex-v3-provider-responses::V3ProviderGlobalCooldownCoordinator","entry_symbols":["load","record_failure","acquire_probe","apply_probe_result","persist","availability"],"allowed_paths":["crates/routecodex-v3-provider-responses/src/**"],"forbidden_paths":["crates/routecodex-v3-virtual-router/src/**","crates/routecodex-v3-target/src/**","request_payload/**","response_payload/**"],"required_gates":["provider_cooldown_contract","provider_startup_probe_contract","provider_payload_control_separation"]},
+    {"function_id":"v3_provider_failure_classification_bridge","owner":"routecodex-v3-runtime::V3ProviderFailureRuntimeHealth","entry_symbols":["record_typed_provider_failure"],"allowed_paths":["crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs","crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs"],"forbidden_paths":["crates/routecodex-v3-provider-responses/src/provider_global_health.rs"],"required_gates":["provider_cooldown_contract","v3_provider_compile"]},
+    {"function_id":"v3_provider_ready_probe_lifecycle","owner":"routecodex-v3-server::V3ServerAggregateLifecycle","entry_symbols":["publish_listener_ready","run_startup_provider_probes","run_due_provider_probes"],"allowed_paths":["crates/routecodex-v3-server/src/lib.rs"],"forbidden_paths":["request_payload/**","response_payload/**"],"required_gates":["provider_startup_probe_contract","v3_live_install_restart_replay"]}
+  ]
+}

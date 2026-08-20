@@ -1,8 +1,11 @@
+use crate::direct_response_hooks::V3DirectResponseCompatContext;
 use crate::nodes::{
     build_v3_responses_direct_11_policy_from_v3_target_10, V3ChatDirect11Policy,
-    V3Req04StandardizedResponses, V3RequestPurpose, V3ResponsesDirect11Policy,
+    V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
 };
-use crate::shared::{project_provider_raw_to_client_payload, V3ProviderResponseProjection};
+use crate::shared::{
+    project_provider_raw_to_client_payload_with_plan, V3ProviderResponseProjection,
+};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
     build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3Error05ExecutionDecision,
@@ -11,7 +14,6 @@ use routecodex_v3_error::{
     V3InternalErrorCode,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_compact_wire_payload,
     build_v3_provider_12_responses_wire_payload, V3Provider12ResponsesWirePayload,
     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResp14Raw,
     V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
@@ -51,7 +53,8 @@ type ProviderTransportHook = fn(
 type ResponseProjectionFuture = Pin<
     Box<dyn Future<Output = Result<V3ProviderResponseProjection, V3Error01SourceRaised>> + Send>,
 >;
-type ResponseProjectionHook = fn(V3ProviderResp14Raw) -> ResponseProjectionFuture;
+type ContextualResponseProjectionHook =
+    fn(V3ProviderResp14Raw, V3DirectResponseCompatContext) -> ResponseProjectionFuture;
 type ErrorHook = fn(
     V3Error01SourceRaised,
     V3ErrorActionScope,
@@ -67,7 +70,7 @@ pub struct V3HookRegistry {
     route: RouteHook,
     request_projection: RequestProjectionHook,
     provider_transport: ProviderTransportHook,
-    response_projection: ResponseProjectionHook,
+    contextual_response_projection: ContextualResponseProjectionHook,
     error: ErrorHook,
 }
 
@@ -111,11 +114,12 @@ impl V3HookRegistry {
         (self.provider_transport)(wire)
     }
 
-    pub async fn run_response_projection(
+    pub async fn run_response_projection_with_context(
         &self,
         raw: V3ProviderResp14Raw,
+        context: V3DirectResponseCompatContext,
     ) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
-        (self.response_projection)(raw).await
+        (self.contextual_response_projection)(raw, context).await
     }
 
     pub fn run_error(
@@ -176,7 +180,7 @@ pub fn register_responses_direct_hooks() -> V3HookRegistry {
         route: responses_direct_route_hook,
         request_projection: responses_direct_request_projection_hook,
         provider_transport: responses_direct_provider_transport_hook,
-        response_projection: responses_direct_response_projection_hook,
+        contextual_response_projection: responses_direct_response_projection_hook_with_context,
         error: responses_direct_error_hook,
     }
 }
@@ -202,19 +206,6 @@ pub(crate) fn responses_direct_request_projection_hook(
                 V3InternalErrorCode::V3Provider12ResponsesWirePayload,
             )
         })?;
-    if policy.request_purpose == V3RequestPurpose::NativeCompaction
-        && provider_protocol != crate::hub_v1::V3HubProviderWireProtocol::Responses
-    {
-        return Err(build_v3_error_01_source_raised_internal(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3ResponsesDirect11Policy",
-            "compact_target_protocol_unsupported",
-            "Responses compact requires a same-protocol Responses provider target",
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
-        ));
-    }
-    let reasoning_effort_explicit =
-        crate::hub_v1::provider_req_compat_reasoning_effort_explicit(&policy.request_body);
     let request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
         policy.request_body.clone(),
         candidate,
@@ -266,7 +257,6 @@ pub(crate) fn responses_direct_request_projection_hook(
         candidate,
         provider_protocol,
         &profile,
-        reasoning_effort_explicit,
     )
     .map_err(|error| {
         build_v3_error_01_source_raised_internal(
@@ -332,34 +322,29 @@ pub(crate) fn responses_direct_request_projection_hook(
             ))
         }
     };
-    let target = V3ResponsesProviderTarget {
-        provider_id: candidate.provider_id.clone(),
-        provider_type: candidate.provider_type.clone(),
-        base_url: candidate.base_url.clone(),
-        canonical_model_id: candidate.model_id.clone(),
-        wire_model: candidate.wire_model.clone(),
-        compatibility_profile: candidate.compatibility_profile.clone(),
-        sse_first_frame_timeout_ms: candidate.sse_first_frame_timeout_ms,
-        auth: V3ProviderAuthHandle {
-            alias: candidate.auth_alias.clone(),
-            secret,
+    build_v3_provider_12_responses_wire_payload(
+        policy.request_id.clone(),
+        V3ResponsesProviderTarget {
+            provider_id: candidate.provider_id.clone(),
+            provider_type: candidate.provider_type.clone(),
+            base_url: candidate.base_url.clone(),
+            canonical_model_id: candidate.model_id.clone(),
+            wire_model: candidate.wire_model.clone(),
+            compatibility_profile: candidate.compatibility_profile.clone(),
+            sse_first_frame_timeout_ms: candidate.sse_first_frame_timeout_ms,
+            auth: V3ProviderAuthHandle {
+                alias: candidate.auth_alias.clone(),
+                secret,
+            },
+            responses_transport: candidate.responses_transport,
+            websocket_v2_url: candidate.websocket_v2_url.clone(),
+            provider_request_cleanup: candidate.provider_request_cleanup.clone(),
+            request_timeout_ms: candidate.request_timeout_ms,
+            initial_concurrency_budget: candidate.initial_concurrency_budget,
         },
-        responses_transport: candidate.responses_transport,
-        websocket_v2_url: candidate.websocket_v2_url.clone(),
-        provider_request_cleanup: candidate.provider_request_cleanup.clone(),
-        request_timeout_ms: candidate.request_timeout_ms,
-        initial_concurrency_budget: candidate.initial_concurrency_budget,
-    };
-    let wire = if policy.request_purpose == V3RequestPurpose::NativeCompaction {
-        build_v3_provider_12_responses_compact_wire_payload(
-            policy.request_id.clone(),
-            target,
-            request_body,
-        )
-    } else {
-        build_v3_provider_12_responses_wire_payload(policy.request_id.clone(), target, request_body)
-    };
-    wire.map_err(provider_error_source("V3Provider12ResponsesWirePayload"))
+        request_body,
+    )
+    .map_err(provider_error_source("V3Provider12ResponsesWirePayload"))
 }
 
 pub(crate) fn responses_direct_provider_transport_hook(
@@ -390,11 +375,40 @@ pub(crate) fn responses_direct_provider_transport_hook(
         })
 }
 
-fn responses_direct_response_projection_hook(raw: V3ProviderResp14Raw) -> ResponseProjectionFuture {
-    Box::pin(project_provider_raw_to_client_payload(
-        crate::hub_v1::V3HubProviderWireProtocol::Responses,
-        raw,
-    ))
+pub(crate) fn responses_direct_response_projection_hook_with_context(
+    raw: V3ProviderResp14Raw,
+    context: V3DirectResponseCompatContext,
+) -> ResponseProjectionFuture {
+    Box::pin(async move {
+        let plan = context.compile_plan().map_err(|error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3DirectResp14ProviderCompat",
+                "direct_response_compat_plan_compile_failed",
+                error,
+                V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
+            )
+        })?;
+        project_provider_raw_to_client_payload_with_plan(raw, &plan).await
+    })
+}
+
+pub(crate) fn chat_direct_response_projection_hook(
+    raw: V3ProviderResp14Raw,
+    context: V3DirectResponseCompatContext,
+) -> ResponseProjectionFuture {
+    Box::pin(async move {
+        let plan = context.compile_plan().map_err(|error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3DirectResp14ProviderCompat",
+                "direct_response_compat_plan_compile_failed",
+                error,
+                V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
+            )
+        })?;
+        project_provider_raw_to_client_payload_with_plan(raw, &plan).await
+    })
 }
 
 fn provider_error_source(
@@ -802,6 +816,7 @@ mod tests {
                     model_capabilities: vec!["text".to_string()],
                     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
                     max_context_tokens: None,
+                    context_token_estimate_scale_bps: 10_000,
                     base_url: "https://provider.invalid/v1".to_string(),
                     responses_process: None,
                     responses_transport: V3ResponsesTransportKind::Http,
@@ -827,7 +842,6 @@ mod tests {
             },
             request_id: "req-direct-model-binding".to_string(),
             request_body: json!({"model": client_model, "input": "hello"}),
-            request_purpose: V3RequestPurpose::Conversation,
             previous_response_id: None,
         }
     }
@@ -844,40 +858,6 @@ mod tests {
         ] {
             assert!(registry.require_hook(hook), "{hook}");
         }
-    }
-
-    #[test]
-    fn compact_policy_projects_only_to_native_responses_compact_wire() {
-        let mut policy = direct_policy_with_models("gpt-5.5", "gpt-5.5", "gpt-5.5");
-        policy.request_purpose = V3RequestPurpose::NativeCompaction;
-        let wire = responses_direct_request_projection_hook(&policy)
-            .expect("same-protocol compact policy must project to provider wire");
-        assert_eq!(
-            wire.endpoint(),
-            routecodex_v3_provider_responses::V3ResponsesRequestEndpoint::Compact
-        );
-    }
-
-    #[test]
-    fn native_compact_rejects_cross_protocol_target() {
-        let mut policy = direct_policy_with_models("gpt-5.5", "gpt-5.5", "gpt-5.5");
-        policy.request_purpose = V3RequestPurpose::NativeCompaction;
-        policy.target.candidate.provider_type = "openai_chat".to_string();
-        let error = responses_direct_request_projection_hook(&policy)
-            .expect_err("native compact must not be converted to another provider protocol");
-        assert_eq!(error.code, "compact_target_protocol_unsupported");
-    }
-
-    #[test]
-    fn auxiliary_compact_policy_keeps_the_normal_provider_endpoint() {
-        let mut policy = direct_policy_with_models("gpt-5.5", "gpt-5.5", "gpt-5.5");
-        policy.request_purpose = V3RequestPurpose::AuxiliaryCompaction;
-        let wire = responses_direct_request_projection_hook(&policy)
-            .expect("auxiliary compact policy must keep the ordinary provider request shape");
-        assert_eq!(
-            wire.endpoint(),
-            routecodex_v3_provider_responses::V3ResponsesRequestEndpoint::Responses
-        );
     }
 
     #[test]
@@ -987,16 +967,24 @@ mod tests {
     async fn malformed_json_response_is_explicit_error() {
         let registry = register_responses_direct_hooks();
         let result = registry
-            .run_response_projection(V3ProviderResp14Raw::from_json(
-                "req",
-                "test",
-                200,
-                vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"application/json".to_vec(),
-                }],
-                b"not-json".to_vec(),
-            ))
+            .run_response_projection_with_context(
+                V3ProviderResp14Raw::from_json(
+                    "req",
+                    "test",
+                    200,
+                    vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"application/json".to_vec(),
+                    }],
+                    b"not-json".to_vec(),
+                ),
+                V3DirectResponseCompatContext {
+                    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol::Responses,
+                    canonical_model_id: "test-model".to_string(),
+                    model_capabilities: vec!["text".to_string()],
+                    compatibility_profile: None,
+                },
+            )
             .await;
         let source = result.expect_err("malformed provider JSON must be an explicit error");
         assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);

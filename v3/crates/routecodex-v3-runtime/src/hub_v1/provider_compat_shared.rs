@@ -142,6 +142,12 @@ fn build_v3_openai_chat_transport_request_from_v3_provider_08(
     .map_err(|error| error.to_string())
 }
 
+/// opencode 对 DeepSeek 系模型的标准 reasoning 回传处理（transform.ts interleaved）：
+/// DeepSeek 上游要求**每条 assistant 消息都必须携带 `reasoning_content`**——即使本轮没有
+/// 明文 reasoning 也要回传空字符串（"DeepSeek may return empty reasoning_content which
+/// still needs to be sent back"）。缺失该字段会触发上游 400：
+/// `The reasoning_content in the thinking mode must be passed back to the API`。
+/// 只补缺失字段：已有 reasoning_content（明文或空占位）的消息保持不变。
 fn is_v3_deepseek_reasoning_target(canonical_model_id: &str) -> bool {
     canonical_model_id.to_ascii_lowercase().contains("deepseek")
 }
@@ -164,33 +170,6 @@ pub(crate) fn is_v3_retain_response_cipher(target_plan_len: usize, model_id: &st
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{json, Value};
+    use serde_json::json;
 
-    #[test]
-    fn opencode_deepseek_reasoning_passthrough_backfills_empty_assistant_reasoning_content() {
-        let mut body = json!({
-            "model": "deepseek-v4-flash",
-            "reasoning_effort": "high",
-            "messages": [
-                {"role": "user", "content": "hi"},
-                {"role": "assistant", "content": "first answer"},
-                {"role": "assistant", "content": "second answer", "reasoning_content": "kept"}
-            ]
-        });
-        assert!(is_v3_deepseek_reasoning_target("deepseek-v4-flash"));
-        assert!(!is_v3_deepseek_reasoning_target("gpt-5.6-sol"));
-
-        provider_compat_core::apply_deepseek_v4_request_compat(&mut body);
-
-        let messages = body["messages"].as_array().unwrap();
-        // 非 assistant 消息不补
-        assert_eq!(messages[0]["reasoning_content"], Value::Null);
-        // 无 reasoning_content 的 assistant 消息补空占位（opencode 标准：空也回传）
-        assert_eq!(
-            messages[1]["reasoning_content"],
-            Value::String(String::new())
-        );
-        // 已有明文 reasoning_content 保持不变
-        assert_eq!(messages[2]["reasoning_content"], "kept");
-    }
 }

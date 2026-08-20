@@ -184,6 +184,7 @@ async fn target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider
         None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
+        false,
         None,
         None,
         None,
@@ -272,6 +273,7 @@ async fn relay_reselect_can_handoff_to_direct_target_after_provider_failure() {
             None,
             V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
             V3ResponsesRelayRetryPolicy::default(),
+            false,
             None,
             None,
             None,
@@ -478,6 +480,27 @@ reason_code = "provider_diagnostic_zero_usage"
 retry_mode = "reselect_before_client_projection"
 cooldown_ms = 300000
 disable_scope = "provider_model"
+
+[[error.provider_error_action_policy]]
+policy_id = "glmrelay_openai_invalid_field_type_200"
+[error.provider_error_action_policy.scope]
+provider_id = "glmrelay_openai"
+provider_type = "openai_chat"
+[error.provider_error_action_policy.match]
+http_status = 200
+content_contains_any = ["Type invalid, should be set"]
+[error.provider_error_action_policy.action]
+kind = "periodic_recovery"
+reason_code = "provider_invalid_field_type"
+retry_mode = "reselect_before_client_projection"
+cooldown_ms = 900000
+disable_scope = "provider_model"
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 400
+reason_code = "provider_invalid_field_type"
+public_code = "provider_invalid_field_type"
+message_mode = "code_only"
 
 [servers.s]
 bind = "127.0.0.1"
@@ -876,19 +899,34 @@ fn openai_chat_visible_zero_output_text_with_real_usage_remains_success() {
 #[test]
 fn openai_chat_upstream_overload_diagnostic_is_provider_error() {
     let manifest = glmrelay_error_policy_manifest();
+    let provider_payload = json!({
+        "id": "chatcmpl_overload_diagnostic",
+        "model": "glm-5.2",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "mac超负荷运载，应该是挂了"
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
+    });
+    let projection = responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
+        Some(&manifest),
+        Some("glmrelay_openai"),
+        &provider_payload,
+    )
+    .expect("configured diagnostic policy must match");
+    assert_eq!(
+        projection
+            .matched_policy
+            .as_ref()
+            .map(V3ProviderFailureDirective::policy)
+            .map(|policy| policy.policy_id.as_str()),
+        Some("glmrelay_openai_200_diagnostic_zero_usage")
+    );
     let error = build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
-        &json!({
-            "id": "chatcmpl_overload_diagnostic",
-            "model": "glm-5.2",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "mac超负荷运载，应该是挂了"
-                },
-                "finish_reason": "stop"
-            }],
-            "usage": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
-        }),
+        &provider_payload,
         &json!({"tools": [{"type":"function","function":{"name":"exec_command"}}]}),
         Some(&manifest),
         Some("glmrelay_openai"),
@@ -931,6 +969,38 @@ async fn openai_chat_stream_overload_diagnostic_policy_is_provider_error() {
     assert!(
         error.to_string().contains("provider_diagnostic_zero_usage"),
         "wrong error: {error}"
+    );
+}
+
+#[test]
+fn glmrelay_invalid_field_type_diagnostic_is_mapped_to_400_policy() {
+    let manifest = glmrelay_error_policy_manifest();
+    let provider_payload = json!({
+        "id": "chatcmpl_invalid_field_type",
+        "model": "glm-5.2",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "field Tools[8].Type invalid, should be set"
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {"prompt_tokens": 12, "completion_tokens": 1, "total_tokens": 13}
+    });
+    let projection = responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
+        Some(&manifest),
+        Some("glmrelay_openai"),
+        &provider_payload,
+    )
+    .expect("invalid field type diagnostic must be provider failure");
+    assert_eq!(projection.code, "provider_invalid_field_type");
+    assert_eq!(
+        projection
+            .matched_policy
+            .as_ref()
+            .map(V3ProviderFailureDirective::policy)
+            .map(|policy| policy.policy_id.as_str()),
+        Some("glmrelay_openai_invalid_field_type_200")
     );
 }
 

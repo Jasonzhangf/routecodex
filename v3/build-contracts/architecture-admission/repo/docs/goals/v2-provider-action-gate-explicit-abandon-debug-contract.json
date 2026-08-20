@@ -1,0 +1,141 @@
+{
+  "symptom": {
+    "observed": "A V2 provider recovery action is automatically replaced after five seconds even when its provider action is still active; waiter order is nondeterministic and an admitted action has no explicit cancellation/drop transition.",
+    "expected": "An admitted V2 recovery action remains exclusive until provider success, provider failure, terminal commit, or explicit health-neutral abandon. Waiters are FIFO and cancellation removes only the caller's ticket.",
+    "entry": [
+      "V2 RequestExecutor provider failure -> ErrorErr05 recovery action",
+      "V2 terminal ErrorErr05 projection",
+      "V2 client abort during provider-action wait or after admission"
+    ],
+    "ids": [],
+    "raw_evidence": [
+      "sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs::poll_admission advances an admitted generation when next_admission_at expires.",
+      "provider_action_gate.rs::record_failure clears admitted_generation for an active routing-group action.",
+      "ProviderActionGateState.waiters is HashSet<String>.",
+      "request-executor-error-action-queue.ts finally calls only cancelProviderActionWaitNative, which cannot abandon an already-admitted generation."
+    ]
+  },
+  "sop_model_flow": {
+    "status": "known",
+    "flow_id": "error.provider_action_gate.mainline",
+    "source_docs": [
+      "docs/goals/direct-relay-cross-request-error-storm-control-plan.md",
+      "docs/architecture/function-map.yml",
+      "docs/architecture/mainline-call-map.yml",
+      "docs/architecture/verification-map.yml",
+      "docs/architecture/resource-operation-map.yml",
+      "docs/architecture/manifests/error.provider_action_gate.mainline.yml",
+      "docs/architecture/wiki/error-provider-action-gate-mainline.md"
+    ],
+    "lifecycle_nodes": [
+      "ErrorErr05ExecutionDecision",
+      "ProviderActionGateFailureRecorded",
+      "ProviderActionGateAdmission",
+      "ProviderRecoveryAction",
+      "ProviderActionSuccessFailureTerminalOrAbandon"
+    ],
+    "resource_edges": [
+      "error.chain -> error.provider_action_gate",
+      "error.provider_action_gate -> provider recovery action admission",
+      "provider recovery action outcome -> error.provider_action_gate"
+    ],
+    "forbidden_edges": [
+      "wall clock expiry -> inferred provider action cancellation",
+      "waiter cancellation -> another waiter ticket removal",
+      "client disconnect -> provider health failure",
+      "TS host -> duplicate admission policy"
+    ],
+    "owner_graph": [
+      "error.provider_action_gate -> sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs",
+      "router-hotpath-napi/src/lib.rs -> NAPI JSON boundary only",
+      "provider-action-gate-host.ts -> thin JSON host only",
+      "request-executor-error-action-queue.ts -> timer/AbortSignal scheduling only"
+    ],
+    "gap_if_new": ""
+  },
+  "hypotheses": [
+    {
+      "id": "H1",
+      "cause": "V2 conflates the sustained five-second spacing deadline with an admitted action lifetime lease.",
+      "modules": [
+        "sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs"
+      ],
+      "supporting_evidence": "poll_admission clears admitted_generation solely when next_admission_at reaches zero, and the existing admitted_action_without_outcome test explicitly expects that behavior.",
+      "counter_evidence_or_gap": "False only if an admitted generation remains blocked after next_admission_at and can be released by an explicit abandon operation.",
+      "verification_action": "Replace the timed-expiry expectation with a red test that holds admission beyond its deadline, then explicitly abandons and verifies a full sustained floor.",
+      "confidence": 100
+    },
+    {
+      "id": "H2",
+      "cause": "A HashSet waiter collection allows a later waiter to overtake the first waiter.",
+      "modules": [
+        "sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs"
+      ],
+      "supporting_evidence": "ProviderActionGateState.waiters has no stable order and poll_admission checks only membership.",
+      "counter_evidence_or_gap": "False only if admission is explicitly restricted to the front ticket and cancellation preserves the remaining order.",
+      "verification_action": "Add FIFO and middle-ticket cancellation red tests.",
+      "confidence": 100
+    },
+    {
+      "id": "H3",
+      "cause": "The thin host has no admitted-action abort transition, so removing timed expiry would leave client-aborted actions permanently active.",
+      "modules": [
+        "sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs",
+        "src/modules/llmswitch/bridge/provider-action-gate-host.ts",
+        "src/server/runtime/http-server/executor/request-executor-error-action-queue.ts"
+      ],
+      "supporting_evidence": "Only cancel_wait exists and it removes a pre-admission waiter; admitted waiters are removed from the collection before the TS function returns.",
+      "counter_evidence_or_gap": "False only if the admitted generation is explicitly abandoned on AbortSignal and the compare-by-generation operation is health-neutral.",
+      "verification_action": "Add host mock tests for pre-admission cancel vs post-admission abandon and a native abandon contract test.",
+      "confidence": 100
+    }
+  ],
+  "active_hypothesis": "H1",
+  "confirmed_hypothesis": "H1",
+  "first_divergence_node": "ProviderActionGateAdmission",
+  "root_cause_module": "V2 Rust provider action gate admitted-generation lifecycle",
+  "unique_owner": [
+    "record_failure",
+    "poll_admission",
+    "abandon_admission"
+  ],
+  "owner_graph_confirmed": true,
+  "allowed_paths": [
+    "sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs",
+    "sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs",
+    "src/modules/llmswitch/bridge/provider-action-gate-host.ts",
+    "src/modules/llmswitch/bridge/native-exports.ts",
+    "src/server/runtime/http-server/executor/request-executor-error-action-queue.ts",
+    "tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts",
+    "tests/server/runtime/http-server/executor/request-executor-error-action-queue.native.spec.ts",
+    "docs/goals/v2-provider-action-gate-explicit-abandon-debug-contract.json",
+    "docs/architecture/**",
+    "scripts/architecture/verify-v3-provider-action-gate.mjs",
+    "scripts/tests/v3-provider-action-gate-red-fixtures.mjs",
+    "note.md",
+    "MEMORY.md",
+    ".agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md"
+  ],
+  "forbidden_paths": [
+    "src/providers/profile/**",
+    "src/server/handlers/**",
+    "sharedmodule/llmswitch-core/src/servertool/**",
+    "v3/crates/routecodex-v3-runtime/**"
+  ],
+  "required_verification": [
+    "V2 Rust provider_action_gate red then green unit tests",
+    "V2 NAPI and thin-host Jest tests",
+    "full mapped provider-action architecture gates",
+    "RequestExecutor focused regressions",
+    "Codex review semantic PASS",
+    "installed managed restart and controlled 429/burst/cancel/FIFO replay"
+  ],
+  "exact_replay": {
+    "source": "The original live symptom is a leaking/concurrent provider 429. Source closure requires the native explicit-abandon/FIFO state-machine tests; runtime closure still requires controlled installed 429 and cancellation replay.",
+    "commands": [
+      "cargo +stable test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi provider_action_gate --lib -- --nocapture",
+      "pnpm exec jest tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts tests/server/runtime/http-server/executor/request-executor-error-action-queue.native.spec.ts --runInBand"
+    ]
+  },
+  "confidence": 100
+}

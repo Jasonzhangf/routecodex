@@ -221,13 +221,12 @@ pub(crate) fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -
 fn v3_post_commit_sse_error_event_chunk(source: V3Error01SourceRaised) -> Vec<u8> {
     let projected = project_v3_post_commit_sse_source(source, 502);
     let (code, message) = v3_error_body_code_message(&projected.body);
-    v3_post_commit_sse_message_event_chunk(&code, &message)
-}
-
-fn v3_post_commit_sse_message_event_chunk(code: &str, message: &str) -> Vec<u8> {
     let event = json!({
         "type": "error",
-        "error": {"code": code, "message": message}
+        "error": {
+            "code": code,
+            "message": message
+        }
     });
     format!("event: error\ndata: {event}\n\n").into_bytes()
 }
@@ -287,11 +286,15 @@ pub(crate) fn v3_relay_client_sse_body(
         }
         match stream.next().await {
             Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-            Some(Err(error)) => Some((
-                Ok::<Vec<u8>, io::Error>(v3_post_commit_sse_message_event_chunk(
-                    "provider_response_sse_stream",
-                    &error,
-                )),
+            Some(Err(source)) if is_v3_client_disconnect_source(&source) => Some((
+                Err(io::Error::other(format!(
+                    "{}: {}",
+                    source.code, source.message
+                ))),
+                (stream, true),
+            )),
+            Some(Err(source)) => Some((
+                Ok(v3_post_commit_sse_error_event_chunk(source)),
                 (stream, true),
             )),
             None => None,
@@ -310,17 +313,15 @@ pub(crate) fn v3_client_sse_body(
         }
         match stream.next().await {
             Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-            Some(Err(source)) if routecodex_v3_error::is_v3_client_disconnect_source(&source) => {
-                Some((
-                    Err(io::Error::other(format!(
-                        "{}: {}",
-                        source.code, source.message
-                    ))),
-                    (stream, true),
-                ))
-            }
+            Some(Err(source)) if is_v3_client_disconnect_source(&source) => Some((
+                Err(io::Error::other(format!(
+                    "{}: {}",
+                    source.code, source.message
+                ))),
+                (stream, true),
+            )),
             Some(Err(source)) => Some((
-                Ok::<Vec<u8>, io::Error>(v3_post_commit_sse_error_event_chunk(source)),
+                Ok(v3_post_commit_sse_error_event_chunk(source)),
                 (stream, true),
             )),
             None => None,

@@ -1,3 +1,5 @@
+#![allow(clippy::bool_comparison)]
+
 use routecodex_v3_runtime::{
     characterize_v3_anthropic_client_input_to_hub_semantic,
     characterize_v3_anthropic_hub_response_semantic_to_client_projection,
@@ -2286,6 +2288,28 @@ fn anthropic_reasoning_effort_preserves_high_effort_intersection_values() {
         .expect("Anthropic effort projection must preserve declared intersection values");
 
         assert_eq!(provider_request["output_config"]["effort"], effort);
+    }
+}
+
+#[test]
+fn anthropic_reasoning_effort_maps_non_intersection_values_to_closest_legal_level() {
+    for (source, expected) in [
+        ("none", "low"),
+        ("minimal", "low"),
+        ("definitely_invalid", "medium"),
+    ] {
+        let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+            "model":"claude-fable-5",
+            "stream": false,
+            "reasoning_effort": source,
+            "messages":[{"role":"user","content":"map effort"}]
+        }))
+        .expect("Anthropic effort must map into its official qualitative domain");
+
+        assert_eq!(
+            provider_request["output_config"]["effort"], expected,
+            "{source}"
+        );
     }
 }
 

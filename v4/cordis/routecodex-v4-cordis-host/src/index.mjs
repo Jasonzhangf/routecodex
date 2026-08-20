@@ -60,6 +60,7 @@ const EXECUTION_FAILURE_CODES = new Set([
   'unregistered_handle',
   'handle_error',
   'effect_violation',
+  'resource_access_violation',
   'bridge_error',
   'protocol_error',
 ]);

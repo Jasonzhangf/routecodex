@@ -86,7 +86,7 @@ pub(crate) fn responses_relay_output_response(
         .header("content-type", content_type);
     let body = match output.client_body {
         V3ResponsesRelayClientBody::Sse(client_stream) => v3_relay_client_sse_body(
-            wrap_v3_relay_sse_console_stream(client_stream, stream_console_finalizer),
+            wrap_v3_responses_relay_sse_console_stream(client_stream, stream_console_finalizer),
             successful_sse.then_some(keepalive_interval),
         ),
         V3ResponsesRelayClientBody::Json(client_response) => Body::from(
@@ -99,9 +99,9 @@ pub(crate) fn responses_relay_output_response(
 }
 
 pub(crate) fn wrap_v3_relay_sse_console_stream(
-    stream: V3ResponsesRelayClientStream,
+    stream: V3OpenAiChatClientStream,
     finalizer: Option<V3SseConsoleFinalizer>,
-) -> V3ResponsesRelayClientStream {
+) -> V3OpenAiChatClientStream {
     match finalizer {
         Some(finalizer) => {
             wrap_v3_relay_sse_closeout_stream(stream, move |terminal| match terminal {
@@ -116,8 +116,26 @@ pub(crate) fn wrap_v3_relay_sse_console_stream(
     }
 }
 
-pub(crate) struct V3SseConsoleCloseoutStream {
+pub(crate) fn wrap_v3_responses_relay_sse_console_stream(
     stream: V3ResponsesRelayClientStream,
+    finalizer: Option<V3SseConsoleFinalizer>,
+) -> V3ResponsesRelayClientStream {
+    match finalizer {
+        Some(finalizer) => {
+            wrap_v3_direct_sse_closeout_stream(stream, move |terminal| match terminal {
+                V3SseConsoleStreamTerminal::Completed => finalizer.complete_relay_sse(),
+                V3SseConsoleStreamTerminal::Dropped => finalizer.client_disconnected(),
+                V3SseConsoleStreamTerminal::Failed(message) => {
+                    finalizer.provider_stream_failed(&message)
+                }
+            })
+        }
+        None => stream,
+    }
+}
+
+pub(crate) struct V3SseConsoleCloseoutStream {
+    stream: V3OpenAiChatClientStream,
     closeout: Option<Box<dyn FnOnce(V3SseConsoleStreamTerminal) + Send>>,
 }
 
@@ -161,9 +179,9 @@ impl Drop for V3SseConsoleCloseoutStream {
 }
 
 pub(crate) fn wrap_v3_relay_sse_closeout_stream(
-    stream: V3ResponsesRelayClientStream,
+    stream: V3OpenAiChatClientStream,
     closeout: impl FnOnce(V3SseConsoleStreamTerminal) + Send + 'static,
-) -> V3ResponsesRelayClientStream {
+) -> V3OpenAiChatClientStream {
     Box::pin(V3SseConsoleCloseoutStream {
         stream,
         closeout: Some(Box::new(closeout)),
@@ -511,6 +529,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             routecodex_v3_runtime::default_responses_transport(),
             state.provider_health.runtime_health(),
             now_epoch_ms,
+            true,
             Some(&provider_failure_event_sink),
             Some(&route_selection_event_sink),
         )

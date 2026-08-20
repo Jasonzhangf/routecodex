@@ -1,7 +1,6 @@
 use super::*;
 use async_trait::async_trait;
 use routecodex_v3_config::*;
-use routecodex_v3_error::V3Error01SourceRaised;
 use routecodex_v3_provider_responses::{
     V3ProviderError, V3ProviderHttpFailure, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
@@ -157,7 +156,6 @@ fn test_plan_http_request(
         execution_id: execution_id.to_string(),
         method: "POST".to_string(),
         path: "/v1/responses".to_string(),
-        request_purpose: crate::V3RequestPurpose::Conversation,
         body: json!({"model":"client-model","input":"hello"}),
     }
 }
@@ -175,7 +173,6 @@ fn test_responses_raw(
         execution_id: execution_id.to_string(),
         method: "POST".to_string(),
         path: "/v1/responses".to_string(),
-        request_purpose: crate::V3RequestPurpose::Conversation,
         body,
     }
 }
@@ -244,32 +241,6 @@ async fn direct_sse_runtime_timing_publishes_only_after_clean_eof() {
     assert_eq!(
         timing.internal.checked_add(timing.external),
         Some(timing.runtime_total)
-    );
-}
-
-#[tokio::test]
-async fn direct_sse_terminal_owner_closes_unfinished_external_attempt() {
-    let runtime_timing = V3RuntimeTimingState::start();
-    runtime_timing.start_external().unwrap();
-    let observation = V3RuntimeStreamObservation::default();
-    let source = Box::pin(stream::iter(vec![Ok(
-        b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
-            .to_vec(),
-    )]));
-    let mut governed = wrap_direct_sse_provider_outcome_stream(
-        source,
-        test_direct_sse_provider_outcome("direct_sse_terminal_owner_closes_external"),
-        runtime_timing.clone(),
-        observation.clone(),
-    );
-
-    while let Some(item) = governed.next().await {
-        assert!(item.is_ok(), "terminal closeout must not fail timing: {item:?}");
-    }
-
-    assert!(
-        observation.snapshot().unwrap().timing.is_some(),
-        "terminal owner must publish timing after closing the active external attempt"
     );
 }
 
@@ -531,11 +502,16 @@ async fn direct_sse_response_done_without_completed_is_terminal_missing() {
     let mut forwarded_done = false;
     while let Some(result) = governed.next().await {
         match result {
-            Ok(frame) => forwarded_done |= frame.windows(12).any(|window| window == b"data: [DONE]"),
+            Ok(frame) => {
+                forwarded_done |= frame.windows(12).any(|window| window == b"data: [DONE]")
+            }
             Err(source) => error = Some(source),
         }
     }
-    assert!(forwarded_done, "direct must preserve trailing [DONE] after terminal event");
+    assert!(
+        forwarded_done,
+        "direct must preserve trailing [DONE] after terminal event"
+    );
     let error = error.expect("response.done without response.completed must fail closeout");
     assert_eq!(error.code, "provider_response_sse_terminal_missing");
     assert!(error.message.contains("[DONE] without response.completed"));
@@ -1025,7 +1001,6 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
             execution_id: "exec".to_string(),
             method: "POST".to_string(),
             path: "/v1/responses".to_string(),
-            request_purpose: crate::V3RequestPurpose::Conversation,
             body: json!({
                 "model":"client-model",
                 "input":"hello",
@@ -1144,7 +1119,6 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
             execution_id: "exec-plan-session-a".to_string(),
             method: "POST".to_string(),
             path: "/v1/responses".to_string(),
-            request_purpose: crate::V3RequestPurpose::Conversation,
             body: json!({"model":"client-model","input":"hello"}),
         },
         provider_health.clone(),
@@ -1176,7 +1150,6 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
             execution_id: "exec-plan-session-b".to_string(),
             method: "POST".to_string(),
             path: "/v1/responses".to_string(),
-            request_purpose: crate::V3RequestPurpose::Conversation,
             body: json!({"model":"client-model","input":"hello"}),
         },
         provider_health,
@@ -1504,7 +1477,7 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
 }
 
 #[tokio::test]
-async fn direct_sse_precommit_failures_reselect_before_client_stream() {
+async fn provider_sse_failure_event_reselects_before_client_stream() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct FirstSseFailureSecondSucceeds {
@@ -1517,34 +1490,15 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
             &self,
             request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            let attempt = self.sends.fetch_add(1, Ordering::SeqCst);
-            if attempt < 3 {
-                // 前 3 次尝试覆盖显式 failure、empty completed.output=[]、
-                // empty completed.output 缺失；都必须在 Resp15 前进入 Error01，
-                // 由既有瞬态策略同 provider 重试并最终 reselect。
+            if self.sends.fetch_add(1, Ordering::SeqCst) < 3 {
+                // 前 3 次尝试：同一 provider first 每次都在 HTTP 200 SSE 流内
+                // 报失败事件（瞬态流内失败 → health-neutral 同 provider 重试）。
                 assert_eq!(
                     request.provider_id(),
                     "first",
                     "attempt {} must hit first",
                     self.sends.load(Ordering::SeqCst)
                 );
-                let frames = match attempt {
-                    0 => vec![
-                        Ok::<Vec<u8>, V3ProviderError>(
-                            b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
-                        ),
-                        Ok::<Vec<u8>, V3ProviderError>(
-                            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"first quota exhausted\"}}}\n\n".to_vec(),
-                        ),
-                    ],
-                    1 => vec![Ok::<Vec<u8>, V3ProviderError>(
-                        b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_empty_array\",\"output\":[]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty_array\",\"status\":\"completed\",\"output\":[]}}\n\n".to_vec(),
-                    )],
-                    2 => vec![Ok::<Vec<u8>, V3ProviderError>(
-                        b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_empty_absent\",\"output\":[]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty_absent\",\"status\":\"completed\"}}\n\n".to_vec(),
-                    )],
-                    _ => unreachable!("attempt is bounded above"),
-                };
                 return Ok(V3ProviderResp14Raw::from_sse(
                     request.request_id().to_string(),
                     request.provider_id().to_string(),
@@ -1553,7 +1507,14 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
                         name: "content-type".to_string(),
                         value: b"text/event-stream".to_vec(),
                     }],
-                    Box::pin(stream::iter(frames)),
+                    Box::pin(stream::iter(vec![
+                        Ok::<Vec<u8>, V3ProviderError>(
+                            b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
+                        ),
+                        Ok::<Vec<u8>, V3ProviderError>(
+                            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"first quota exhausted\"}}}\n\n".to_vec(),
+                        ),
+                    ])),
                 ));
             }
             assert_eq!(
@@ -1604,32 +1565,26 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
         4,
-        "precommit SSE failures must retry same provider 3 times then switch: {output:?}"
+        "transient SSE failure must retry same provider 3 times then switch: {output:?}"
     );
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
     assert!(
         output.node_trace.contains(&"V3DirectTransientRetrySame"),
-        "precommit failures must retry same provider: {:?}",
+        "transient failures must retry same provider: {:?}",
         output.node_trace
     );
     let observability = output
         .observability
         .as_ref()
-        .expect("provider SSE precommit failure switch must be observable");
+        .expect("provider SSE failure switch must be observable");
     assert_eq!(
         observability.provider_failure_events.len(),
         1,
         "only the 3rd transient failure reports once to the error center: {output:?}"
     );
     assert_eq!(
-        observability.provider_failure_events[0]
-            .error_type
-            .as_deref(),
-        Some("provider_response_sse_empty")
-    );
-    assert_eq!(
         observability.provider_failure_events[0].message,
-        "provider SSE completed before content or tool output"
+        "first quota exhausted"
     );
     assert_eq!(
         observability.provider_failure_events[0]
@@ -1647,73 +1602,6 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
             panic!("provider SSE failure must be reselected before client stream starts")
         }
     }
-}
-
-#[tokio::test]
-async fn direct_sse_deepseek_console_go_compat_follows_compatibility_profile() {
-    // 正向：provider_id 不是 opencode-go，但 manifest 声明了
-    // responses:deepseek-console-go profile，SSE 帧内 function_call 必须回射为
-    // custom_tool_call（客户端声明的 custom 工具形态）。
-    struct ProfileSseTransport;
-
-    #[async_trait]
-    impl ResponsesTransport for ProfileSseTransport {
-        async fn send(
-            &self,
-            request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            assert_eq!(request.provider_id(), "ds");
-            assert_eq!(request.body()["model"], "deepseek-v4-flash");
-            Ok(V3ProviderResp14Raw::from_sse(
-                request.request_id().to_string(),
-                request.provider_id().to_string(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"text/event-stream".to_vec(),
-                }],
-                Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(
-                    b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_ds_1\",\"status\":\"in_progress\"}}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"exec_command\",\"arguments\":\"{\\\"input\\\":\\\"ls -la\\\"}\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ds_1\",\"status\":\"completed\"}}\n\n"
-                        .to_vec(),
-                )])),
-            ))
-        }
-    }
-
-    let routing_group = "direct_sse_profile_compat";
-    let manifest = scoped_test_manifest(deepseek_console_go_profile_manifest(), routing_group);
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let raw = test_responses_raw(
-        routing_group,
-        "req",
-        "exec",
-        json!({"model":"client-model","input":"hello","stream":true}),
-    );
-    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
-    let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
-            .with_provider_health(provider_health)
-            .with_initial_plan(&plan),
-        &manifest,
-        raw,
-        crate::register_responses_direct_hooks(),
-        &ProfileSseTransport,
-    )
-    .await;
-
-    assert_eq!(output.client_payload.status, 200, "{output:?}");
-    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
-        panic!("expected SSE client body: {:?}", output.client_payload.body);
-    };
-    let mut text = String::new();
-    while let Some(chunk) = stream.next().await {
-        text.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
-    }
-    assert!(
-        text.contains("custom_tool_call"),
-        "profile compat must rewrite function_call -> custom_tool_call: {text}"
-    );
-    assert!(!text.contains("\"type\":\"function_call\""), "{text}");
 }
 
 #[tokio::test]
@@ -1881,7 +1769,6 @@ async fn pinned_unavailable_provider_consumes_error05_gate_before_terminal_relea
             execution_id: "exec-pinned-unavailable-retry".to_string(),
             method: "POST".to_string(),
             path: "/v1/responses".to_string(),
-            request_purpose: crate::V3RequestPurpose::Conversation,
             body: json!({
                 "model":"client-model",
                 "previous_response_id":"resp_pinned_unavailable",
@@ -2083,97 +1970,3 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
 
 #[path = "../../src/kernel/tests/direct_websearch_mode_b.rs"]
 mod direct_websearch_mode_b;
-
-// V3 Direct Responses SSE 静默失败红测：provider 关闭响应时，若 SSE 流缺少
-// response.completed / response.incomplete / response.failed 这三个 Responses
-// terminal event 之一（即使收到 delta 并随后 clean EOF），direct runtime 必须
-// 在 client stream 上发出显式 `provider_response_sse_terminal_missing` 错误，
-// 绝不能以 HTTP 200 + 空 body 静默结束。terminal guard 在
-// V3ResponsesDirectRuntimeCoreState::no_continuation() 路径上必须无条件挂载
-// （不受 `if let (Some(continuation_state), Some(scope))` 条件控制）。
-#[tokio::test]
-async fn direct_sse_no_continuation_missing_terminal_is_explicit_error() {
-    use futures_util::stream;
-
-    struct NoTerminalSseTransport;
-
-    #[async_trait]
-    impl ResponsesTransport for NoTerminalSseTransport {
-        async fn send(
-            &self,
-            request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            let body = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n".to_vec();
-            let sse_stream = stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(body)]);
-            Ok(V3ProviderResp14Raw::from_sse(
-                request.request_id().to_string(),
-                request.provider_id().to_string(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"text/event-stream".to_vec(),
-                }],
-                Box::pin(sse_stream),
-            ))
-        }
-    }
-
-    let routing_group = "direct_sse_no_continuation_missing_terminal";
-    let manifest = scoped_test_manifest(test_manifest(), routing_group);
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let raw = test_responses_raw(
-        routing_group,
-        "req",
-        "exec",
-        json!({"model": "client-model", "input": "hello"}),
-    );
-    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
-    let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
-            .with_provider_health(provider_health)
-            .with_initial_plan(&plan),
-        &manifest,
-        raw,
-        crate::register_responses_direct_hooks(),
-        &NoTerminalSseTransport,
-    )
-    .await;
-
-    assert_eq!(output.client_payload.status, 200, "{output:?}");
-    let mut client_stream = match output.client_payload.body {
-        V3ClientBody::Sse(stream) => stream,
-        other => panic!("direct SSE no-continuation path must produce SSE body, got {other:?}"),
-    };
-
-    use futures_util::StreamExt;
-    let mut saw_delta = false;
-    let mut saw_missing_terminal = false;
-    while let Some(item) = client_stream.next().await {
-        match item {
-            Ok(bytes) => {
-                if std::str::from_utf8(&bytes)
-                    .ok()
-                    .map(|s| s.contains("response.output_text.delta"))
-                    .unwrap_or(false)
-                {
-                    saw_delta = true;
-                }
-            }
-            Err(error) => {
-                if error.code == "provider_response_sse_terminal_missing" {
-                    saw_missing_terminal = true;
-                    break;
-                }
-            }
-        }
-    }
-    assert!(
-        saw_delta,
-        "delta frame must be forwarded before terminal guard fires"
-    );
-    assert!(
-        saw_missing_terminal,
-        "missing Responses terminal event must yield explicit provider_response_sse_terminal_missing error, \
-         not silent clean EOF (200 OK with empty body)"
-    );
-}

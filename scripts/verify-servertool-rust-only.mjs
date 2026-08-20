@@ -246,15 +246,26 @@ function checkPackageAndCiLists() {
   const pkg = JSON.parse(readRequired(packagePath));
   for (const scriptName of ['build', 'build:min']) {
     const script = pkg.scripts?.[scriptName] ?? '';
-    if (!script.includes('npm run verify:servertool-rust-only')) {
-      fail('servertool-gate-in-build', `package.json ${scriptName} must run verify:servertool-rust-only`);
+    if (script !== 'npm --prefix v3 run build') {
+      fail('servertool-root-thin-build', `package.json ${scriptName} must remain a thin V3 build dispatcher`);
     }
+  }
+  for (const workflow of ['.github/workflows/test.yml', '.github/workflows/release.yml']) {
+    const workflowPath = repoPath(workflow);
+    const source = readRequired(workflowPath);
+    assertContains(
+      'servertool-gate-in-ci',
+      workflowPath,
+      source,
+      'node scripts/verify-servertool-rust-only.mjs',
+    );
   }
   const packageText = readRequired(packagePath);
   for (const deleted of deletedServerSideToolTests.map(rel)) {
     assertNotContains('servertool-deleted-tests-unlisted', packagePath, packageText, deleted);
   }
-  pass('servertool-gate-in-build', 'build scripts keep servertool rust-only gate');
+  pass('servertool-root-thin-build', 'root build scripts remain thin V3 dispatchers');
+  pass('servertool-gate-in-ci', 'test and release workflows run the root-owned gate');
 }
 
 console.log('\n=== verify-servertool-rust-only ===\n');

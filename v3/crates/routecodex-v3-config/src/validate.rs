@@ -628,6 +628,11 @@ fn compile_providers(
                 provider.default_model
             )));
         }
+        if provider.sse_first_frame_timeout_ms == Some(0) {
+            return Err(validation(format!(
+                "provider {id} sse_first_frame_timeout_ms must be non-zero"
+            )));
+        }
         let auth = compile_auth(&id, provider.auth)?;
         let provider_type = provider.provider_type;
         let mut models = compile_models(&id, provider.models)?;
@@ -656,8 +661,8 @@ fn compile_providers(
                     routing_group: None,
                 },
                 matcher: policy.matcher,
-                path: None,
-                action: Some(policy.action),
+                path: policy.path,
+                action: policy.action,
             }
         }));
         providers.insert(
@@ -677,7 +682,11 @@ fn compile_providers(
                 compatibility_profile,
                 features: provider.features,
                 request_timeout_ms: provider.request_timeout_ms,
-                sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
+                sse_first_frame_timeout_ms: Some(
+                    provider
+                        .sse_first_frame_timeout_ms
+                        .unwrap_or(default_provider_sse_first_frame_timeout_ms()),
+                ),
             },
         );
     }
@@ -695,12 +704,14 @@ fn normalize_v3_provider_compatibility_profile(profile: Option<String>) -> Optio
 
 /// v3-native inline provider 的 compatibility profile 编译默认：只允许已
 /// 登记给 v3-native 的条目，避免 v2 provider-directory 的整表默认静默改变
-/// v3-native 既有配置的 wire 行为。当前唯一已登记条目是 opencode-go 的
+/// v3-native 既有配置的 wire 行为。已登记条目包括 opencode-go 的
 /// `responses:deepseek-console-go`（Console Go 网关工具映射 + 交错工具段
-/// reasoning 注入契约）。
+/// reasoning 注入契约）和 cc-sol 的 `responses:thinking-tags`（direct
+/// 当前轮 thinking tag / reasoning_content 投影）。
 fn resolve_v3_native_provider_default_compatibility_profile(provider_id: &str) -> Option<String> {
     match provider_id.trim() {
         "opencode-go" => Some("responses:deepseek-console-go".to_string()),
+        "cc-sol" => Some("responses:thinking-tags".to_string()),
         _ => None,
     }
 }
@@ -837,21 +848,13 @@ fn compile_provider_request_cleanup(
     Ok(V3ProviderRequestCleanupAuthoringConfig { historical_fields })
 }
 
-pub(crate) fn compile_auth(
+fn compile_auth(
     provider_id: &str,
     authoring: V3ProviderAuthAuthoringConfig,
 ) -> Result<V3ProviderAuthManifest, V3ConfigError> {
     if authoring.entries.is_empty() {
         return Err(validation(format!(
             "provider {provider_id} auth entries are empty"
-        )));
-    }
-    if matches!(
-        authoring.selection.strategy,
-        V3SelectionStrategy::RoundRobin
-    ) {
-        return Err(validation(format!(
-            "provider {provider_id} auth selection strategy only supports priority or weighted"
         )));
     }
     let mut aliases = BTreeSet::new();
@@ -936,22 +939,8 @@ pub(crate) fn compile_auth(
                 entry.alias
             )));
         }
-        if entry.priority.is_some_and(|priority| priority < 0) {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} priority cannot be negative",
-                entry.alias
-            )));
-        }
-        if entry.weight.is_some_and(|weight| weight == 0) {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} weight must be positive",
-                entry.alias
-            )));
-        }
         entries.push(V3ProviderAuthEntryManifest {
             alias: entry.alias,
-            priority: entry.priority,
-            weight: entry.weight,
             env: entry.env,
             token_file: entry.token_file,
             secret_file: entry.secret_file,
@@ -961,7 +950,6 @@ pub(crate) fn compile_auth(
     }
     Ok(V3ProviderAuthManifest {
         auth_type: authoring.auth_type,
-        selection: authoring.selection,
         entries,
     })
 }
@@ -1038,6 +1026,11 @@ fn compile_models(
             }
             _ => {}
         }
+        if !(10_000..=100_000).contains(&model.context_token_estimate_scale_bps) {
+            return Err(validation(format!(
+                "provider {provider_id} model {id} context_token_estimate_scale_bps must be between 10000 and 100000"
+            )));
+        }
         models.insert(
             id.clone(),
             V3ProviderModelManifest {
@@ -1052,6 +1045,7 @@ fn compile_models(
                 thinking: model.thinking,
                 max_tokens: model.max_tokens,
                 max_context_tokens: model.max_context_tokens,
+                context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                 features: model.features,
             },
         );
@@ -1446,9 +1440,7 @@ fn validate_auth_alias_ref(
     Ok(())
 }
 
-pub(crate) fn compile_debug(
-    authoring: V3DebugAuthoringConfig,
-) -> Result<V3DebugManifest, V3ConfigError> {
+fn compile_debug(authoring: V3DebugAuthoringConfig) -> Result<V3DebugManifest, V3ConfigError> {
     if authoring
         .log_file
         .as_deref()
@@ -1464,7 +1456,8 @@ pub(crate) fn compile_debug(
         log_console: authoring.log_console,
         log_file: authoring.log_file,
         snapshots: authoring.snapshots,
-        // Live sample persistence is lifecycle-authorized and never a config default.
+        // Live sample persistence is a lifecycle authorization, never a config
+        // compilation default.  The lifecycle layer may opt in explicitly.
         codex_samples: false,
         snapshot_stages,
         snapshot_direct: authoring.snapshot_direct.unwrap_or(true),
@@ -1473,6 +1466,7 @@ pub(crate) fn compile_debug(
         full_codex_sampling: false,
     })
 }
+
 include!("validate/provider_error_policy.rs");
 
 fn ensure_unique_listen_addresses(
@@ -1495,5 +1489,111 @@ fn require_id(kind: &str, id: &str) -> Result<(), V3ConfigError> {
         Err(validation(format!("{kind} id is empty")))
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod dev_sample_default_tests {
+    use super::*;
+
+    #[test]
+    fn config_compilation_does_not_authorize_codex_samples() {
+        let manifest = compile_debug(V3DebugAuthoringConfig {
+            codex_samples: None,
+            ..V3DebugAuthoringConfig::default()
+        })
+        .unwrap();
+        assert!(!manifest.codex_samples);
+    }
+}
+
+#[cfg(test)]
+mod compatibility_profile_default_tests {
+    use super::resolve_v3_native_provider_default_compatibility_profile;
+
+    #[test]
+    fn cc_sol_defaults_to_thinking_tag_response_compat() {
+        assert_eq!(
+            resolve_v3_native_provider_default_compatibility_profile("cc-sol").as_deref(),
+            Some("responses:thinking-tags")
+        );
+    }
+}
+
+#[cfg(test)]
+mod secret_file_compile_tests {
+    use super::*;
+    use std::fs;
+
+    fn authoring_with(entry: V3ProviderAuthEntryAuthoringConfig) -> V3ProviderAuthAuthoringConfig {
+        V3ProviderAuthAuthoringConfig {
+            auth_type: V3ProviderAuthType::ApiKey,
+            entries: vec![entry],
+        }
+    }
+
+    #[test]
+    fn compile_auth_validates_secret_file_key_at_config_time() {
+        let dir = std::env::temp_dir().join(format!("rcc-secret-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("secrets.conf");
+        fs::write(&file, "opencode-go.key1 = \"sk-one\"\n").unwrap();
+        let file_str = file.display().to_string();
+
+        let ok = compile_auth(
+            "p",
+            authoring_with(V3ProviderAuthEntryAuthoringConfig {
+                alias: "key1".to_string(),
+                env: None,
+                token_file: None,
+                api_key: None,
+                secret_file: Some(file_str.clone()),
+                secret_key: Some("opencode-go.key1".to_string()),
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            ok.entries[0].secret_file.as_deref(),
+            Some(file_str.as_str())
+        );
+        assert_eq!(
+            ok.entries[0].secret_key.as_deref(),
+            Some("opencode-go.key1")
+        );
+
+        let err = compile_auth(
+            "p",
+            authoring_with(V3ProviderAuthEntryAuthoringConfig {
+                alias: "key1".to_string(),
+                env: None,
+                token_file: None,
+                api_key: None,
+                secret_file: Some(file_str),
+                secret_key: Some("missing.key".to_string()),
+            }),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("secret_file validation failed"),
+            "{err}"
+        );
+
+        let pair_err = compile_auth(
+            "p",
+            authoring_with(V3ProviderAuthEntryAuthoringConfig {
+                alias: "key1".to_string(),
+                env: None,
+                token_file: None,
+                api_key: None,
+                secret_file: Some("x".to_string()),
+                secret_key: None,
+            }),
+        )
+        .unwrap_err();
+        assert!(
+            pair_err.to_string().contains("declared together"),
+            "{pair_err}"
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

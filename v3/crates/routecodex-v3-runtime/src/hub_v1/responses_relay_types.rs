@@ -2,8 +2,12 @@ use super::*;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub type V3ResponsesRelayClientStream =
-    Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
+pub type V3ResponsesRelayClientStream = Pin<
+    Box<
+        dyn futures_util::Stream<Item = Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>>
+            + Send,
+    >,
+>;
 
 pub enum V3ResponsesRelayClientBody {
     Json(Value),
@@ -250,6 +254,22 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
     pub(crate) source_stage: &'static str,
     pub(crate) observability: Option<V3RuntimeObservability>,
     pub(crate) terminal_projection: Option<routecodex_v3_error::V3Error06ClientProjected>,
+    pub(crate) matched_policy: Option<V3ProviderFailureDirective>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct V3ProviderFailureDirective {
+    policy: V3ProviderErrorActionPolicyManifest,
+}
+
+impl V3ProviderFailureDirective {
+    pub(crate) fn from_matched_policy(policy: V3ProviderErrorActionPolicyManifest) -> Self {
+        Self { policy }
+    }
+
+    pub(crate) fn policy(&self) -> &V3ProviderErrorActionPolicyManifest {
+        &self.policy
+    }
 }
 
 pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {

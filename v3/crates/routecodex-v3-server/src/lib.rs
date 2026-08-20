@@ -1,4 +1,3 @@
-mod compaction_request;
 mod console;
 mod endpoint_handlers;
 mod executors;
@@ -11,7 +10,7 @@ mod scope_metadata;
 mod session_admission;
 mod websocket;
 
-use compaction_request::classify_v3_request_purpose;
+use webui_observability::V3WebuiObservability;
 use console::*;
 use endpoint_handlers::{
     allocate_v3_console_request_id, allocate_v3_console_request_identity,
@@ -58,7 +57,8 @@ use routecodex_v3_debug::{
     V3DebugTraceScope, V3DryRunFixture, V3RedactionPolicy,
 };
 use routecodex_v3_error::{
-    project_v3_http_boundary_error, project_v3_post_commit_sse_source,
+    is_v3_client_disconnect_source, project_v3_http_boundary_error,
+    project_v3_post_commit_sse_source,
     project_v3_server_invalid_request, project_v3_server_runtime_failure,
     project_v3_server_websocket_error, raise_v3_debug_artifact_failure,
     raise_v3_runtime_observability_contract_failure, raise_v3_sse_client_disconnect,
@@ -67,7 +67,6 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_runtime::{
     build_v3_provider_global_probe_target, build_v3_server_03_http_request_raw,
-    build_v3_server_03_http_request_raw_with_purpose,
     execute_v3_anthropic_relay_dry_run_runtime_with_client_headers,
     execute_v3_anthropic_relay_runtime_with_default_transport,
     execute_v3_anthropic_relay_runtime_with_default_transport_and_client_headers,
@@ -98,8 +97,8 @@ use routecodex_v3_runtime::{
     V3ChatDirectCodec, V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput,
     V3FoundationRuntimeOutput, V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput,
     V3GeminiRelayRuntimeOutput, V3OpenAiChatClientStream, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3RequestPurpose,
-    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
+    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayDryRunOutcome, V3ResponsesRelayLocalContinuationScope,
@@ -120,9 +119,8 @@ use routecodex_v3_sse::{
 };
 use serde_json::{json, Map, Value};
 use session_admission::{
-    hold_response_body_admission_permit, hold_response_body_request_activity_permit,
-    V3ResponsesSessionAdmissionGate, V3ResponsesSessionAdmissionPermit,
-    V3ResponsesSessionAdmissionScope, V3ServerRequestActivityGate,
+    hold_response_body_admission_permit, V3ResponsesSessionAdmissionGate,
+    V3ResponsesSessionAdmissionPermit, V3ResponsesSessionAdmissionScope,
 };
 use std::collections::BTreeSet;
 use std::env;
@@ -164,7 +162,7 @@ struct V3ListenerState {
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeSet<String>>>,
     responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
-    request_activity: Arc<V3ServerRequestActivityGate>,
+    webui_observability: V3WebuiObservability,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,14 +209,12 @@ pub struct V3ListenerHandle {
     pub server_id: String,
     pub addr: SocketAddr,
     shutdown: Option<oneshot::Sender<()>>,
-    join: Option<tokio::task::JoinHandle<Result<(), std::io::Error>>>,
 }
 
 #[derive(Debug)]
 pub struct V3ServerAggregateHandle {
     pub listeners: Vec<V3ListenerHandle>,
     probe_shutdown: Option<oneshot::Sender<()>>,
-    request_activity: Arc<V3ServerRequestActivityGate>,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -237,27 +233,6 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 
 impl V3ServerAggregateHandle {
     pub async fn shutdown(mut self) {
-        // Normal shutdown is graceful: stop accepting, then let active
-        // responses drain before the managed process exits.
-        self.request_activity.wait_for_quiescence().await;
-        self.signal_shutdown();
-        for listener in &mut self.listeners {
-            if let Some(join) = listener.join.take() {
-                let _ = join.await;
-            }
-        }
-    }
-
-    /// Restart handoff follows the V1 exec contract. Signal the listeners and
-    /// immediately return control to the lifecycle owner; waiting for request
-    /// activity here deadlocks under continuous traffic and prevents exec.
-    /// In-flight clients receive the existing stream/error-chain outcome and
-    /// may reconnect against the replacement runtime.
-    pub async fn prepare_for_exec(mut self) {
-        self.signal_shutdown();
-    }
-
-    fn signal_shutdown(&mut self) {
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -332,8 +307,8 @@ pub async fn spawn_v3_server_aggregate(
     }
 
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
+    let webui_observability = V3WebuiObservability::new();
     let mut listeners = Vec::with_capacity(bound.len());
-    let request_activity = Arc::new(V3ServerRequestActivityGate::default());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
         let app = build_v3_listener_router(V3ListenerState {
@@ -352,24 +327,23 @@ pub async fn spawn_v3_server_aggregate(
             provider_health: provider_health.clone(),
             realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
             responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
-            request_activity: Arc::clone(&request_activity),
+            webui_observability: webui_observability.clone(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let join = tokio::spawn(async move {
-            axum::serve(
+        tokio::spawn(async move {
+            let _ = axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<SocketAddr>(),
             )
             .with_graceful_shutdown(async move {
                 let _ = shutdown_rx.await;
             })
-            .await
+            .await;
         });
         listeners.push(V3ListenerHandle {
             server_id,
             addr,
             shutdown: Some(shutdown_tx),
-            join: Some(join),
         });
     }
     if console_enabled {
@@ -395,6 +369,29 @@ pub async fn spawn_v3_server_aggregate(
     let probe_manifest = Arc::clone(&manifest);
     let probe_health = Arc::clone(&provider_health).runtime_health();
     tokio::spawn(async move {
+        let startup_manifest = Arc::clone(&probe_manifest);
+        let startup_now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_millis() as u64,
+            Err(error) => {
+                eprintln!("provider persistent startup probe clock failure: {error}");
+                return;
+            }
+        };
+        let startup_result = probe_health.run_startup_persistent_cooldown_probes(startup_now_ms, move |provider_id, auth_alias, model_id| {
+            let startup_manifest = Arc::clone(&startup_manifest);
+            async move {
+                let target = build_v3_provider_global_probe_target(
+                    &startup_manifest,
+                    &provider_id,
+                    auth_alias.as_deref(),
+                    model_id.as_deref(),
+                )?;
+                probe_v3_provider_global_target(target).await
+            }
+        }).await;
+        if let Err(error) = startup_result {
+            eprintln!("provider persistent startup probe cycle failed: {error}");
+        }
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             tokio::select! {
@@ -408,7 +405,7 @@ pub async fn spawn_v3_server_aggregate(
                         }
                     };
                     let manifest_for_probe = Arc::clone(&probe_manifest);
-                    let result = probe_health.run_due_global_subscription_probes(now_ms, move |provider_id, auth_alias, model_id| {
+                    let result = probe_health.run_due_persistent_cooldown_probes(now_ms, move |provider_id, auth_alias, model_id| {
                         let manifest_for_probe = Arc::clone(&manifest_for_probe);
                         async move {
                             let target = build_v3_provider_global_probe_target(
@@ -421,23 +418,7 @@ pub async fn spawn_v3_server_aggregate(
                         }
                     }).await;
                     if let Err(error) = result {
-                        eprintln!("provider global probe cycle failed: {error}");
-                    }
-                    let manifest_for_probe = Arc::clone(&probe_manifest);
-                    let result = probe_health.run_due_provider_cooldown_probes(now_ms, move |provider_id, auth_alias, model_id| {
-                        let manifest_for_probe = Arc::clone(&manifest_for_probe);
-                        async move {
-                            let target = build_v3_provider_global_probe_target(
-                                &manifest_for_probe,
-                                &provider_id,
-                                auth_alias.as_deref(),
-                                model_id.as_deref(),
-                            )?;
-                            probe_v3_provider_global_target(target).await
-                        }
-                    }).await;
-                    if let Err(error) = result {
-                        eprintln!("provider cooldown probe cycle failed: {error}");
+                        eprintln!("provider persistent cooldown probe cycle failed: {error}");
                     }
                 }
             }
@@ -446,7 +427,6 @@ pub async fn spawn_v3_server_aggregate(
     Ok(V3ServerAggregateHandle {
         listeners,
         probe_shutdown: Some(probe_shutdown),
-        request_activity,
     })
 }
 
@@ -478,7 +458,6 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
             "/v1/responses",
             post(pending_endpoint).get(responses_websocket_endpoint),
         )
-        .route("/v1/responses/compact", post(pending_endpoint))
         .route("/v1/messages", post(pending_endpoint))
         .route("/v1/chat/completions", post(pending_endpoint))
         .route(
@@ -500,6 +479,18 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         .route(
             "/_routecodex/diagnostics/virtual-router/dry-run",
             post(virtual_router_dry_run),
+        )
+        .route(
+            "/api/observability/snapshot",
+            get(webui_observability_endpoints::observability_snapshot),
+        )
+        .route(
+            "/api/observability/stats",
+            get(webui_observability_endpoints::observability_stats),
+        )
+        .route(
+            "/api/observability/events",
+            get(webui_observability_endpoints::observability_events),
         )
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(path_not_found)
@@ -647,7 +638,7 @@ fn current_epoch_ms() -> u64 {
         .unwrap_or(0)
 }
 
-async fn admit_v3_responses_session_after_json_parse(
+fn admit_v3_responses_session_after_json_parse(
     state: &Arc<V3ListenerState>,
     path: &str,
     request_headers: &HeaderMap,
@@ -673,14 +664,33 @@ async fn admit_v3_responses_session_after_json_parse(
             );
         }
     };
-    let permit = state
-        .responses_session_admission
-        .admit(V3ResponsesSessionAdmissionScope {
-            endpoint: path.to_string(),
+    let permit = match state.responses_session_admission.try_admit(
+        V3ResponsesSessionAdmissionScope {
+            endpoint: "/v1/responses".to_string(),
             session_id,
             conversation_id,
-        })
-        .await;
+        },
+    ) {
+        Ok(permit) => permit,
+        Err(()) => {
+            let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
+                Ok(request_id) => request_id,
+                Err(response) => return Err(*response),
+            };
+            return Err(error_output_response_for_responses_request_with_project_path(
+                &state.server,
+                path,
+                &request_id,
+                project_http_input_error(
+                    V3HttpBoundaryErrorKind::RequestInFlight,
+                    "another /v1/responses request is still active for this listener session or conversation",
+                ),
+                request_headers,
+                Some(payload),
+                resolve_v3_console_project_path(request_headers, payload).as_deref(),
+            ));
+        }
+    };
     Ok(permit)
 }
 
@@ -688,7 +698,6 @@ async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
-    let request_activity_permit = state.request_activity.admit();
     let request_headers = request.headers().clone();
     let method = request.method().as_str().to_string();
     let path = request.uri().path().to_string();
@@ -703,7 +712,7 @@ async fn pending_endpoint(
             Ok(request_id) => request_id,
             Err(response) => return *response,
         };
-        let response = error_output_response_for_server(
+        return error_output_response_for_server(
             &state.server,
             &path,
             &request_id,
@@ -712,26 +721,10 @@ async fn pending_endpoint(
                 format!("endpoint path {path} has no entry protocol binding"),
             ),
         );
-        return hold_response_body_request_activity_permit(response, request_activity_permit);
     };
     let entry_protocol = binding.entry_protocol.clone();
     let execution_mode = binding.execution_mode;
     let pending_owner_symbol = binding.pending_owner_symbol.clone();
-    let request_purpose = match classify_v3_request_purpose(&path, &request_headers) {
-        Ok(request_purpose) => request_purpose,
-        Err(message) => {
-            let request_id = match allocate_v3_console_request_id(&state, &path, None) {
-                Ok(request_id) => request_id,
-                Err(response) => return *response,
-            };
-            return error_output_response_for_server(
-                &state.server,
-                &path,
-                &request_id,
-                project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-            );
-        }
-    };
     if !state
         .server
         .endpoints
@@ -742,7 +735,7 @@ async fn pending_endpoint(
             Ok(request_id) => request_id,
             Err(response) => return *response,
         };
-        let response = error_output_response_for_server(
+        return error_output_response_for_server(
             &state.server,
             &path,
             &request_id,
@@ -754,7 +747,6 @@ async fn pending_endpoint(
                 ),
             ),
         );
-        return hold_response_body_request_activity_permit(response, request_activity_permit);
     }
     let payload = match read_json_payload(request).await {
         Ok(payload) => payload,
@@ -801,16 +793,14 @@ async fn pending_endpoint(
             } else {
                 frame
             };
-            let response = responses_direct_output_response(
+            return responses_direct_output_response(
                 frame,
                 Duration::from_millis(state.server.http_sse_keepalive_ms),
             );
-            return hold_response_body_request_activity_permit(response, request_activity_permit);
         }
     };
     let admission_permit = if entry_protocol == "responses" {
         match admit_v3_responses_session_after_json_parse(&state, &path, &request_headers, &payload)
-            .await
         {
             Ok(permit) => permit,
             Err(response) => return response,
@@ -827,15 +817,13 @@ async fn pending_endpoint(
         entry_protocol,
         execution_mode,
         pending_owner_symbol,
-        request_purpose,
         payload,
     )
     .await;
-    let response = match admission_permit {
+    match admission_permit {
         Some(permit) => hold_response_body_admission_permit(response, permit),
         None => response,
-    };
-    hold_response_body_request_activity_permit(response, request_activity_permit)
+    }
 }
 
 /// v3.protocol.pending_projection：尚未实现协议绑定的客户端响应统一由

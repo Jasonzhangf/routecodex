@@ -34,6 +34,7 @@ impl V3CodexSampleStore {
         self.retention
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn persist(
         &self,
         port: u16,
@@ -64,7 +65,8 @@ impl V3CodexSampleStore {
             .persistence_guard
             .lock()
             .map_err(|error| format!("codex sample persistence lock poisoned: {error}"))?;
-        let port_root = resolve_v3_codex_samples_root()?
+        let samples_root = resolve_v3_codex_samples_root()?;
+        let port_root = samples_root
             .join(format_v3_codex_sample_endpoint_dir(
                 entry_protocol,
                 endpoint,
@@ -80,11 +82,11 @@ impl V3CodexSampleStore {
         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
         serde_json::to_writer_pretty(&mut file, payload).map_err(|error| error.to_string())?;
         file.write_all(b"\n").map_err(|error| error.to_string())?;
-        enforce_v3_codex_sample_request_retention(&port_root, Some(&dir), self.retention)?;
+        enforce_v3_codex_sample_global_retention(&samples_root, Some(&dir), self.retention)?;
         Ok(())
     }
 
-    pub fn enforce_listener_retention(&self, port: u16) -> Result<(), String> {
+    pub fn enforce_retention(&self) -> Result<(), String> {
         if !self.enabled {
             return Ok(());
         }
@@ -92,25 +94,11 @@ impl V3CodexSampleStore {
         if !samples_root.exists() {
             return Ok(());
         }
-        let endpoint_dirs = fs::read_dir(&samples_root)
-            .map_err(|error| error.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?;
-        for endpoint_dir in endpoint_dirs {
-            if !endpoint_dir
-                .file_type()
-                .map_err(|error| error.to_string())?
-                .is_dir()
-            {
-                continue;
-            }
-            let port_root = endpoint_dir.path().join("ports").join(port.to_string());
-            if !port_root.is_dir() {
-                continue;
-            }
-            enforce_v3_codex_sample_request_retention(&port_root, None, self.retention)?;
-        }
-        Ok(())
+        enforce_v3_codex_sample_global_retention(&samples_root, None, self.retention)
+    }
+
+    pub fn enforce_listener_retention(&self, _port: u16) -> Result<(), String> {
+        self.enforce_retention()
     }
 }
 
@@ -155,30 +143,60 @@ fn encode_v3_codex_sample_path_segment(value: &str) -> String {
     }
 }
 
-fn enforce_v3_codex_sample_request_retention(
-    port_root: &Path,
+fn enforce_v3_codex_sample_global_retention(
+    samples_root: &Path,
     protected_request_dir: Option<&Path>,
     retention: usize,
 ) -> Result<(), String> {
-    let entries = fs::read_dir(port_root)
+    let endpoint_dirs = fs::read_dir(samples_root)
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
     let mut request_dirs = Vec::new();
-    for entry in entries {
-        if !entry
+    for endpoint_dir in endpoint_dirs {
+        if !endpoint_dir
             .file_type()
             .map_err(|error| error.to_string())?
             .is_dir()
         {
             continue;
         }
-        let modified = entry
-            .metadata()
+        let ports_dir = endpoint_dir.path().join("ports");
+        if !ports_dir.is_dir() {
+            continue;
+        }
+        for port_dir in fs::read_dir(ports_dir)
             .map_err(|error| error.to_string())?
-            .modified()
-            .map_err(|error| error.to_string())?;
-        request_dirs.push((entry, modified));
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?
+        {
+            if !port_dir
+                .file_type()
+                .map_err(|error| error.to_string())?
+                .is_dir()
+            {
+                continue;
+            }
+            for request_dir in fs::read_dir(port_dir.path())
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?
+            {
+                if !request_dir
+                    .file_type()
+                    .map_err(|error| error.to_string())?
+                    .is_dir()
+                {
+                    continue;
+                }
+                let modified = request_dir
+                    .metadata()
+                    .map_err(|error| error.to_string())?
+                    .modified()
+                    .map_err(|error| error.to_string())?;
+                request_dirs.push((request_dir, modified));
+            }
+        }
     }
     if request_dirs.len() <= retention {
         return Ok(());
@@ -389,6 +407,25 @@ mod tests {
                     .exists(),
                 "error evidence must still be persisted when error_samples_only"
             );
+            store
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    "req-3",
+                    "error.json",
+                    &json!({"status": 400}),
+                    true,
+                    Some(400),
+                )
+                .unwrap();
+            assert!(
+                sample_dir(home_base)
+                    .join("req-3")
+                    .join("error.json")
+                    .exists(),
+                "provider 400 error evidence must be persisted"
+            );
         });
     }
 
@@ -412,6 +449,44 @@ mod tests {
             }
             let dirs = fs::read_dir(sample_dir(home_base)).unwrap().count();
             assert_eq!(dirs, 200);
+        });
+    }
+
+    #[test]
+    fn retention_caps_samples_across_endpoints_and_ports() {
+        with_test_home(|home_base| {
+            let store = V3CodexSampleStore::new(true, 200, false);
+            for index in 0..201 {
+                let (protocol, endpoint, port) = if index % 2 == 0 {
+                    ("responses", "/v1/responses", 10000)
+                } else {
+                    ("openai_chat", "/v1/chat/completions", 5520)
+                };
+                store
+                    .persist(
+                        port,
+                        protocol,
+                        endpoint,
+                        &format!("req-{index}"),
+                        "request.json",
+                        &json!({"n": index}),
+                        true,
+                        Some(502),
+                    )
+                    .unwrap();
+            }
+            let root = home_base.join("home").join(".rcc").join("codex-samples");
+            let total_dirs = fs::read_dir(&root)
+                .unwrap()
+                .flat_map(|endpoint| {
+                    let ports = endpoint.unwrap().path().join("ports");
+                    fs::read_dir(ports)
+                        .unwrap()
+                        .flat_map(|port| fs::read_dir(port.unwrap().path()).unwrap())
+                        .collect::<Vec<_>>()
+                })
+                .count();
+            assert_eq!(total_dirs, 200);
         });
     }
 

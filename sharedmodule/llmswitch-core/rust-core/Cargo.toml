@@ -1,11 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = [
-  "crates/provider-compat-core",
-  "crates/stop-message-core",
-  "crates/servertool-core"
-]
+members = []
 
 [workspace.package]
 edition = "2021"

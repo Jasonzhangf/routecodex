@@ -7,6 +7,8 @@
 
 本页记录 RouteCodex 错误处理的**目标收口架构**与实现边界。历史 V2 机制中凡是“独立错误中心 / event bus”语义，均以本页的新决策为准，后续实现需同步删除旧中间层。
 
+> 当前审计真源见本文末尾 `V3 当前错误处理审计合同（2026-08-17）`（约第 358 行）；旧章节是历史设计记录。
+
 ## 0a. 2026-04-16 当前已验证收口状态
 
 - **provider 执行期错误主链已切到 `Virtual Router policy`**
@@ -123,6 +125,15 @@
 4. `unrecoverable / periodic_recovery`
    - 同 provider 连续第 3 次失败后，非最后 default provider 从当前可选池排除并冷却 15 分钟；成功清零连续错误
    - 若当前 route pool 或 default pool 仍有候选继续切；只有可选池耗尽且最后 default 当前请求 attempt budget 耗尽后才返客户端
+
+### 1.0.3 cooldown 计数、复活与池耗尽自救（2026-08-16）
+
+1. provider health 的默认阈值是连续 3 次错误；HTTP 401/403 等账号错误通过可编辑的 `error.provider_error_action_policy` 设置为连续 2 次，禁止在 provider runtime 写 provider-specific 分支。
+2. 任意 provider 错误（包括已开始响应后的 SSE stream 错误）只进入一次统一 failure record；禁止 stream 路径绕过计数阈值直接写 cooldown。
+3. 普通成功只清连续错误计数，不得清除已经形成的 cooldown。冷却 provider 只有真实 provider probe 返回 2xx 后才能恢复可选；health healthy、超时到期或跨 session admission 都不能代替 probe。
+4. 完整配置候选集第一次选择耗尽后，在进入 `ErrorErr06ClientProjected` 前，对所有 cooldown identity 执行一次连续 cooldown block 级单飞自救 probe；并发请求等待同一 probe，不得重复发 probe。只有 probe 成功清除 cooldown 后才开启下一 generation；probe 收口后重新读取 health projection 并只重跑一次 Target09→Target10 选择。
+5. 自救 probe 失败或 probe target 无法构造时保持 cooldown；某些 probe 失败不能阻止其他 probe 成功后的重新选择。一个 cooldown generation 已完成自救后，后续耗尽请求不得形成 probe 风暴。
+6. Responses Relay、Anthropic Relay、通用 Relay、web-search hop 与 Direct 的 dry-run 均必须在共享 rescue owner 前显式关闭自救 probe，不得发送 provider I/O；所有 probe permit、完成状态与 availability projection 都是 typed health side-channel，禁止进入 provider/client 正常 payload。
 
 ### 1.0.2a 2026-06-20 provider error reroutable-until-default-empty contract
 
@@ -355,3 +366,220 @@ native error plan 投影成客户端可见 `Error` carrier；已删除的
 - Host 在将错误映射为 `ProviderErrorEvent` 时，可将 `category` 映射到统一的 `event.code`（例如
   `TOOL_ERROR` / `EXTERNAL_ERROR` / `INTERNAL_ERROR`），而把细粒度 `ProviderProtocolErrorCode` 放入
   `event.details.reason`，从而同时兼顾统计与排障信息。
+# V3 当前错误处理审计合同（2026-08-17）
+
+本节是当前运行版本的审计入口；下面较早的章节保留历史收口记录，若与本节冲突，以本节和实际 Rust/配置为准。
+
+## 1. 唯一主链
+
+```text
+provider/runtime/direct/executor
+  -> ErrorErr01SourceRaised
+  -> ErrorErr02HostCaptured
+  -> ErrorErr03RuntimeClassified
+  -> ErrorErr04RouterPolicyApplied
+  -> ErrorErr05ExecutionDecision
+  -> ErrorErr06ClientProjected
+```
+
+- `routecodex-v3-error` 负责 typed error 链、是否仍有候选、是否允许投影。
+- `routecodex-v3-runtime/src/provider_failure_runtime_policy.rs` 负责读取 action policy、生成 health policy、执行切换/重试动作。
+- `routecodex-v3-provider-responses/src/health.rs` 是 provider health/cooldown 的唯一状态 owner。
+- Executor/direct/relay/server 只能消费 `ErrorErr05ExecutionDecision`，不得本地按 HTTP 状态码再造一套路由、冷却或 fallback。
+- 控制状态（route、retry、health、cooldown、continuation、error）只在 typed side-channel/Error 链；不得进入 provider/client 业务 payload。
+
+## 2. 错误来源与归一化
+
+| 来源 | 例子 | 归一化位置 | 默认影响 |
+|---|---|---|---|
+| 客户端入口 | malformed JSON、Responses 字段类型错误、无效 `reasoning.effort` | req inbound / `ClientInboundCanonical` | 直接 400，不切 provider，不写 health |
+| Provider HTTP | 400/401/403/429/5xx | provider error reporter → action policy | 先按 policy 重试/切换；候选耗尽后才投影 |
+| Provider transport | timeout、连接失败、SSE idle timeout | provider runtime / Error01 | provider failure，可切换；按匹配 policy 计数 |
+| Provider SSE | malformed frame、未知终态、流中断 | `provider.sse_decode` / SSE error owner | 进入统一 provider failure；不得直接把中间错误裸返回客户端 |
+| 内部 followup | servertool/client injection/re-enter 失败 | `provider.followup` marker | health-neutral；不污染 provider cooldown |
+| 客户端断开 | `client_disconnect`、HTTP 499、response closed | transport cancel boundary | health-neutral、不可投影、不可拉黑 |
+
+`special_400` 只表示客户端请求/协议合同错误。Provider 返回的 HTTP 400 不是自动等同于客户端 400，必须经过 provider action policy；不能用状态码在 handler 里短路。
+
+## 3. 动作决策顺序
+
+1. 记录 typed source error（provider、auth alias、model、stage、status、error type）。
+2. 按 `provider_error_action_policy` 做确定性匹配：provider scope/model scope/status/content matcher。
+3. 读取 `wait_retry`：得到 attempt budget、retry mode、backoff；`reselect_before_client_projection` 优先排除当前候选并切到下一候选。
+4. 调用唯一 health owner 写入 failure/cooldown；health scope 来自匹配到的 `Cooldown.scope`。
+5. 只要合法候选仍存在，`ErrorErr05` 必须继续执行；不能提前进入客户端投影。
+6. 只有 optional/default 候选均耗尽，且最后 default 的 attempt budget 已耗尽，才允许 `ErrorErr06ClientProjected`。
+7. 客户端投影必须携带完整 `ErrorErr05` decision；不能用裸 `status`、`candidateExhausted` 或 message 重新判断。
+
+禁止：host fallback、静默吞错、把 provider 错误伪装成成功、在 SSE/outbound 阶段补偿 payload、在 direct path 另建一套策略。
+
+## 4. 当前冷却矩阵
+
+### 4.1 401/403：auth-key 全局冷却
+
+错误处理的全局分类/动作真源：`v3/crates/routecodex-v3-config/src/internal.toml`，由
+`routecodex-v3-config/src/internal.rs` 通过 `include_str!` 编译期嵌入并 fail-fast 校验；
+不放在用户的 `~/.rcc/config.v3.toml`。用户配置只承载 provider/route 等声明，不能承载内部错误处理特判。
+
+provider 的“原始错误 → 标准错误事实”映射是另一层，不属于 `internal.toml`：provider runtime/catalog
+先把上游 HTTP、transport、SSE、协议错误映射成统一 typed provider error（status、stage、error type、provider/auth/model）；
+映射完成后，才由 `internal.toml` 中的分类/动作规则决定瞬态、可恢复、不可恢复，以及重试、切换、计数、冷却和 probe。
+
+| 项目 | 当前规则 |
+|---|---|
+| 匹配 | HTTP 401 或 HTTP 403 |
+| 第一次 | `wait_retry`，`reselect_before_client_projection`，最多 2 attempts，backoff 1s |
+| 第二次 | `scope = auth_key`，duration 3,600,000ms（1小时） |
+| 冷却键 | `provider_id + auth_alias`，不含 session，不含 model |
+| 影响范围 | 只阻断该 provider 的该 key；同 provider 其他 key、其他 provider 保持可选 |
+| session | 不同 session 共享该 auth-key 冷却，避免坏 key 在新 session 继续被打 |
+| 恢复 | 冷却到期后允许重新尝试；active cooldown 不被普通成功请求绕过 |
+| 客户端最终投影 | 候选耗尽后 502，reason code 分别为 `provider_account_http_401` / `provider_account_http_403` |
+
+实现链：
+
+```text
+configured_health_policy_for_failure
+  -> V3ProviderFailurePolicy { cooldown_scope: AuthKey }
+  -> V3ProviderHealthStore::record_provider_failure_in_session_with_policy
+  -> auth_key_consecutive_failures / auth_key_cooldowns
+  -> availability_for_session blocks only provider+auth_alias
+```
+
+### 4.2 其他错误
+
+- 没有 `scope = auth_key` 的 policy 时，默认使用 session-scoped failure/cooldown。
+- 常规默认策略是 3 次、15 分钟（具体以编译 manifest 的 default path 为准）。
+- provider-level probe 状态是另一条 side-channel，只用于明确的 provider cooldown/probe contract，不能被普通 session failure 偷用。
+- 401/403 的 auth-key map 与 provider-level probe map 分离；不能因为一个 key 失败而把 provider 全部 key 拉黑。
+
+## 5. SSE 专项合同
+
+### Provider SSE 错误
+
+- SSE decode/idle/stream termination 必须先转成 typed provider failure，再回到统一 Error01-05。
+- stream 已向客户端提交后发生错误，也不能把原始 provider 错误直接写成客户端 SSE `event:error` 并结束；应在 provider failure policy 中切换/重试，或在真正耗尽后走唯一 client projection。
+- SSE 错误本身不得自动升级为 provider-global cooldown；是否计 health 由 stage marker 和 policy 决定。
+
+### Client disconnect
+
+- `client_disconnect`、HTTP 499、客户端 response close 是取消，不是 provider 故障。
+- 不计 consecutive failure、不触发 auth-key/provider cooldown、不切 provider、不返回 provider-visible 4xx。
+
+## 6. Direct / Relay 差异
+
+| 入口 | 允许做什么 | 禁止做什么 |
+|---|---|---|
+| Relay | 通过 Hub Pipeline 归一化；调用统一 provider policy；按 Error05 切换 | 在 relay handler 自己实现重试/冷却/fallback |
+| Direct | 保持同协议 request/response passthrough；错误仍进入统一 Error01-05 | 因 passthrough 而直接 rethrow provider 错误；另建 direct error mapper/重试链 |
+| HTTP/SSE handler | 只做 Error06 client frame 投影 | 根据 payload/message/status 自己重建控制状态 |
+
+Responses continuation 另受三重键约束：entry protocol + continuation owner（direct/relay）+ session/conversation/port/group；continuation 状态不参与 provider error payload 重建。
+
+## 7. 审计必查不变量
+
+```text
+bad key #1 401 -> retry/reselect
+bad key #2 401 -> auth_key cooldown 1h
+same provider key in another session -> unavailable
+same provider key with another model -> unavailable
+same provider key2 -> available
+same provider other provider -> available
+client malformed request -> 400, no health mutation
+provider 400 -> policy path, not automatic client 400
+SSE decode/idle -> Error01-05, not raw client disconnect
+client disconnect -> health-neutral
+```
+
+Required regression pairs：
+
+- positive：第二次 401/403 跨 session 冷却同一 key；负向：key2/provider2 不受影响。
+- positive：候选存在时 provider failure 继续切换；负向：候选耗尽前不得 Error06 投影。
+- positive：客户端 malformed request 返回 400；负向：provider HTTP 400 不得被入口错误分支误归类为客户端 malformed 400。
+- positive：SSE failure 进入 provider policy；负向：SSE error 不得直接写客户端并静默结束。
+- positive：client disconnect 不写 health；负向：不得触发 cooldown/provider switch。
+
+## 8. 当前验证与已知审计缺口
+
+已验证：
+
+- provider health auth-key 回归：8 passed，1 个既有 retired test ignored。
+- `cargo check -p routecodex-v3-provider-responses -p routecodex-v3-runtime` 通过。
+- release 安装 `0.90.4595`、聚合 restart 通过；10000/5520/6666/4444 `/health` 全部 200。
+
+待审计闭环：
+
+- `v3.provider.health_state` 的 architecture resource map 仍主要描述 session identity；auth-key 跨 session resource/edge/gate 需要同步登记。
+- 当前 worktree 有其他未隔离改动，DSH review unavailable，Codex review 因无关改动和上述 map-sync P1 未通过；不能把该 review 结果当成实现失败，也不能宣称架构 review PASS。
+- 生产 401/403 真实 replay 未人为制造；当前证据是配置、源码、回归和安装/健康验证，未修改线上凭据制造故障。
+
+## 9. Jason 确认的目标策略（审计基准，2026-08-17）
+
+本节覆盖并修正前文旧的“按状态码默认策略”描述。最终实现必须先读取配置分类，再执行类别动作；请求错误也必须进入同一切 provider 决策，不得在入口单独短路。
+
+### 9.1 三类错误
+
+| 类别 | 典型错误 | 计数 | 冷却范围 | 冷却 | 恢复 |
+|---|---|---:|---|---:|---|
+| 瞬态 transient | SSE decode、SSE idle/stream interruption、连接瞬态 | 不计数 | 无 | 无 | 立即切 provider；只走防风暴阻塞等待：1s → 3s → 5s |
+| 可恢复 recoverable | 500、502 等 provider 暂时不可用 | 同一 session 连续累计 | session + provider key | 3 次 / 15 分钟 | 每 15 分钟 probe；probe 成功恢复 |
+| 不可恢复 unrecoverable | 401、402、403、503 等账号/实例不可恢复错误 | 全局连续累计 | provider + auth key | 2 次 / 1 小时 | 每 1 小时 probe；probe 成功恢复 |
+
+“不可恢复”表示当前账号/实例错误需要较长恢复窗口，不表示可以绕过统一策略直接返回客户端；只要还有合法候选，仍然先切 provider。最终投影仍只由 Error05 决定。
+
+### 9.2 配置是分类真源
+
+V3 全局 `internal.toml` 必须表达 `category = transient | recoverable | unrecoverable`，运行时不得再维护一张按状态码硬编码的分类表。用户 `config.v3.toml` 不负责这张内部分类表。配置匹配针对已完成映射的 typed provider error，至少可以按：
+
+- HTTP status / provider error type / stage（如 `provider.sse_decode`）；
+- provider、model、protocol 的可选 scope；
+- content matcher（仅用于协议已确认的 provider envelope，不得从业务 payload 猜控制状态）。
+
+匹配结果应编译成 typed policy：
+
+```text
+ConfiguredFailureClass
+  -> TransientAction
+  -> RecoverableSessionHealthAction
+  -> UnrecoverableAuthKeyHealthAction
+```
+
+执行层只能消费该 typed policy；禁止 RequestExecutor、SSE handler、direct/relay runtime 自己判断“401/502/某 message 属于哪类”。
+
+### 9.3 请求错误也必须切 provider
+
+“请求错误”分两种，不能混淆：
+
+1. 客户端入口 malformed/contract 错误：这是 `ClientInboundCanonical`，直接客户端 400，不是 provider failure。
+2. provider 因请求形状、模型能力或协议不兼容返回的 400/422：先按配置分类，进入 provider failure policy；只要还有候选就切 provider，不能直接把 provider 400 原样返回客户端。
+
+因此完整决策顺序固定为：
+
+```text
+raw provider error
+  -> provider error mapping (typed provider error)
+  -> internal.toml configured classification
+  -> transient immediate reselect OR
+     recoverable session counter OR
+     unrecoverable auth-key counter
+  -> Error05 candidate decision
+  -> only when candidates exhausted: Error06 client projection
+```
+
+### 9.4 与当前代码的差异（必须修正）
+
+- 当前 transient 路径仍存在同 provider retry budget 和 30 秒 session bypass；目标应改为不计数、直接 reselect，只由统一 action queue 提供 1s/3s/5s 防风暴等待。
+- 401/403/402/503 的 auth-key 两次/1小时已纳入 `unrecoverable` typed category；recoverable 与 unrecoverable 的 probe interval 分别由 `internal.toml` 的 15 分钟/1 小时字段注入 typed policy，不再使用单一固定间隔。
+- 普通默认 policy 的 3 次/15 分钟是 session cooldown；冷却到期由对应 scope 的周期 probe 恢复，不能靠普通业务成功隐式绕过 active cooldown。auth-key probe 成功同时清理该 key 的 cooldown 与连续失败计数。
+- health policy 仍保留 session cooldown、auth-key cooldown、provider probe 三张物理状态表，但写入入口已由 typed policy 的 scope 与 probe interval 决定；调用方不得按 stage 自行选择。
+- 当前 architecture map 尚未登记 auth-key 跨 session resource；在实现最终收敛前必须同步 resource/function/mainline/verification map 和正反回归。
+
+### 9.5 审计验收矩阵
+
+| 断言 | 正向 | 反向 |
+|---|---|---|
+| transient SSE | 立即换下一个 provider；仅观测 1s/3s/5s 等待 | 不写 failure counter、不写 session/provider cooldown、不 probe 旧 key |
+| recoverable 502 | session 内第 1/2 次继续切换；第 3 次 session key 冷却 15m | session B 不继承 session A；key2 不受影响；active cooldown 不被普通成功绕过 |
+| unrecoverable 401/403/503 | 跨 session 第 2 次 auth-key 冷却 1h；每小时 probe | provider 其他 key 可选；其他 provider 可选；单次失败不立即拉黑 |
+| provider request 400 | 进入配置分类并切 provider | 不得被入口 malformed-400 分支吞掉或直接投影 |
+| candidate exhaustion | Error05 明确 exhausted 后才 Error06 | 候选未空时不得客户端断流/返回 provider 原始错误 |

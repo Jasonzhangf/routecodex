@@ -33,14 +33,13 @@ audit_truth_contract:
   projection_status_legend:
     mapped_exact: Source and target preserve the same semantics, possibly through a validated field rename or value intersection.
     mapped_compatible_registered: Target uses a registered wrapper with an explicit semantic delta and a required reverse projection.
-    source_roundtrip_only: Same-protocol Direct preserves the source value, while cross-protocol Relay has no registered target projection.
-    unsupported_fail_fast: No exact or registered compatible projection preserves the required behavior; the adjacent codec fails explicitly.
+    unsupported: No exact or registered compatible projection preserves the required behavior; adjacent outbound codec fails explicitly.
   audited_status_counts:
-    covered: 162
+    covered: 160
     covered_but_target_dependent: 0
     runtime_conformance_pending: 3
-    partial: 112
-    extension_declared: 219
+    partial: 113
+    extension_declared: 220
     source_inventory_only: 0
     shape_branch_gap: 18
     codec_shape_only: 14
@@ -60,7 +59,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - extension_declared
-      affected_count: 219
+      affected_count: 220
       evidence: Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime
         conversion completion claim.
       required_owner: v3 protocol codec owner selected per field family
@@ -82,7 +81,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - partial
-      affected_count: 112
+      affected_count: 113
       evidence: Main protocol paths cover some directions, but not all equivalent request/response transforms across
         Responses, OpenAI Chat, Anthropic, and Gemini.
       required_owner: v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files
@@ -131,147 +130,6 @@ audit_truth_contract:
       required_owner: SSE/edge transport docs and gate only
       closeout_status: no_business_runtime_closeout
       closeout_rule: Keep edge fields out of provider/client normal payload; do not reclassify them as Chat semantic fields.
-    - gap_id: gap.anthropic_response_projection_completion
-      category: runtime_closeout
-      affected_statuses:
-        - covered
-      affected_count: 3
-      evidence: Anthropic terminal value mapping, typed tool-result error projection, and the duplicate terminal classification row are source-closed by the 74/7 red baseline, 81/0 focused green suite, and JSON/SSE shared-owner integration regressions.
-      required_owner: docs/goals/v3-anthropic-protocol-matrix-projection-completion-plan.md
-      closeout_status: source_closed_runtime_live_pending
-      closeout_rule: Close only in the adjacent Anthropic codec and generic typed terminality owner; Direct, handler, SSE, provider transport, Virtual Router, MetadataCenter, continuation, and request cleanup remain forbidden.
-anthropic_response_projection_contract:
-  contract_id: v3.anthropic_response_projection.closed_matrix.v1
-  owner_feature_id: v3.protocol_conversion_field_parity
-  terminal_owner: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs
-  content_block_owner: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs
-  typed_terminality_owner: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-  tool_result_owner: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
-  tool_result_status_carrier: request.messages[].routecodex_chat_extension.responses_tool_output_status
-  tool_result_status_writer: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
-  tool_result_status_reader: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
-  direct_same_protocol_policy: source_roundtrip_only
-  forbidden_owners:
-    - handler
-    - SSE transport
-    - provider transport
-    - Virtual Router
-    - MetadataCenter
-    - continuation
-    - request cleanup
-  official_sources:
-    stop_reason: https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/src/anthropic/types/stop_reason.py
-    message: https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/src/anthropic/types/message.py
-    content_block: https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/src/anthropic/types/content_block.py
-    responses_status: https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/responses/response.py
-    verified_at: '2026-08-19'
-  terminal_values:
-    - source: end_turn
-      hub: stop
-      responses_status: completed
-      projection_status: mapped_exact
-      supplemental: finish_reason=end_turn
-    - source: tool_use
-      hub: tool_calls
-      responses_status: requires_action
-      projection_status: mapped_compatible_registered
-      supplemental: typed tool call required
-    - source: max_tokens
-      hub: max_tokens
-      responses_status: incomplete
-      projection_status: mapped_exact
-      supplemental: incomplete_details.reason=max_output_tokens
-    - source: stop_sequence
-      hub: stop_sequence
-      responses_status: completed
-      projection_status: mapped_exact
-      supplemental: exact non-empty stop_sequence required
-    - source: pause_turn
-      hub: pause_turn
-      responses_status: in_progress
-      projection_status: mapped_compatible_registered
-      supplemental: preserve finish_reason=pause_turn without fabricating tool output
-    - source: refusal
-      hub: content_filter
-      responses_status: incomplete
-      projection_status: mapped_compatible_registered
-      supplemental: incomplete_details.reason=content_filter and exact optional stop_details
-    - source: model_context_window_exceeded
-      hub: context_window_exceeded
-      responses_status: null
-      projection_status: unsupported_fail_fast
-      supplemental: never relabel input context exhaustion as max_output_tokens
-  terminal_unknown_policy: missing, null final, non-string, and unknown stop_reason fail at terminal_owner
-  tool_result_status_values:
-    - source: absent
-      anthropic_is_error: omitted
-      projection_status: mapped_exact
-    - source: completed
-      anthropic_is_error: omitted
-      projection_status: mapped_exact
-    - source: incomplete
-      anthropic_is_error: true
-      projection_status: mapped_compatible_registered
-    - source: in_progress
-      anthropic_is_error: null
-      projection_status: unsupported_fail_fast
-    - source: unknown_or_malformed
-      anthropic_is_error: null
-      projection_status: unsupported_fail_fast
-  response_content_blocks:
-    - source: text
-      projection_status: mapped_exact
-      relay_policy: ordered Responses output_text
-    - source: thinking
-      projection_status: mapped_compatible_registered
-      relay_policy: Responses reasoning summary plus opaque signature
-    - source: redacted_thinking
-      projection_status: mapped_compatible_registered
-      relay_policy: Responses reasoning encrypted_content
-    - source: tool_use
-      projection_status: mapped_exact
-      relay_policy: typed Responses function call or governed custom wrapper
-    - source: server_tool_use
-      projection_status: mapped_compatible_registered
-      relay_policy: registered web_search subset only; other names fail explicitly
-    - source: web_search_tool_result
-      projection_status: mapped_compatible_registered
-      relay_policy: exact paired registered web_search result only
-    - source: web_fetch_tool_result
-      projection_status: source_roundtrip_only
-      relay_policy: unsupported_fail_fast
-    - source: code_execution_tool_result
-      projection_status: source_roundtrip_only
-      relay_policy: unsupported_fail_fast
-    - source: bash_code_execution_tool_result
-      projection_status: source_roundtrip_only
-      relay_policy: unsupported_fail_fast
-    - source: text_editor_code_execution_tool_result
-      projection_status: source_roundtrip_only
-      relay_policy: unsupported_fail_fast
-    - source: tool_search_tool_result
-      projection_status: source_roundtrip_only
-      relay_policy: unsupported_fail_fast
-    - source: container_upload
-      projection_status: source_roundtrip_only
-      relay_policy: unsupported_fail_fast
-  response_content_unknown_policy: missing type and unknown type are distinct fail-fast diagnostics with response.content[index].type
-  required_tests:
-    - anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix
-    - anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_values
-    - anthropic_model_context_window_stop_is_explicitly_unsupported_for_responses
-    - responses_tool_result_status_projects_only_registered_anthropic_is_error_semantic
-    - responses_tool_result_status_rejects_nonterminal_or_unknown_values
-    - responses_tool_result_status_survives_chat_canonical_carrier
-    - responses_tool_result_status_rejects_unregistered_value_before_chat_canonical
-    - responses_relay_anthropic_wire_preserves_typed_tool_result_error_status
-    - responses_relay_anthropic_wire_omits_is_error_for_registered_success_statuses
-    - responses_relay_anthropic_rejects_unregistered_tool_result_status_before_transport
-    - anthropic_response_content_block_enum_is_closed_and_diagnostic
-    - anthropic_web_search_result_requires_exact_pairing
-    - anthropic_json_and_sse_materialization_share_terminal_projection_owner
-    - anthropic_json_and_sse_reject_unknown_terminal_without_success_projection
-    - responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details
 source_inventory:
   purpose: Downloaded source protocol field inventory for semantic matrix audit. This is not a runtime source.
   sources:
@@ -1726,7 +1584,7 @@ chat_semantic_translation_groups:
           - request.input[].function_call_output.status
         response_fields:
           - response.output[].function_call.status
-        transform: Absent/completed remain success, incomplete maps to Anthropic is_error=true, and every other value fails before provider transport.
+        transform: Responses status may map to error/success after explicit value contract; not yet exact.
       anthropic:
         request_fields:
           - request.messages[].content[].tool_result.is_error
@@ -1737,10 +1595,9 @@ chat_semantic_translation_groups:
           - request.contents[].parts[].toolResponse.response
         response_fields: []
         transform: Gemini may encode error in response shape; no explicit boolean in inventory.
-    chat_extension_fields:
-      - request.messages[].routecodex_chat_extension.responses_tool_output_status
-    current_impl: covered
-    gap: Closed by the registered Responses-to-Chat carrier and the shared Anthropic status projector; absent/completed remain success, incomplete becomes is_error=true, and every other value fails before wire build
+    chat_extension_fields: []
+    current_impl: extension_declared
+    gap: Responses/Gemini value mapping requires runtime contract
   - group_id: reasoning.request_effort
     standard_chat_field: request.reasoning_effort
     chat_fields:
@@ -2216,8 +2073,8 @@ chat_semantic_translation_groups:
           - response.promptFeedback.blockReason
         transform: Gemini finishReason/blockReason map to Chat finish_reason/error terminal groups.
     chat_extension_fields: []
-    current_impl: covered
-    gap: Closed by one Anthropic terminal projector shared by JSON and SSE materialization, with exact registered status/details and fail-fast unknown handling
+    current_impl: partial
+    gap: value table needs full runtime gate before conversion edits
   - group_id: response.usage_tokens
     standard_chat_field: response.usage.total_tokens
     chat_fields:
@@ -10714,7 +10571,7 @@ outbound_projection_contract:
       target_protocol: openai_chat
       status: consumed_by_transform
       fields:
-        - request.client_metadata[session_id|thread_id|turn_id|root_turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
+        - request.client_metadata[root_turn_id|session_id|thread_id|turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
     - source_protocol: responses
       target_protocol: openai_chat
       status: target_unsupported
@@ -10760,7 +10617,7 @@ outbound_projection_contract:
       status: consumed_by_transform
       fields:
         - request.metadata[non_user_id] -> response.metadata before RespChatProcess
-        - request.client_metadata[session_id|thread_id|turn_id|root_turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
+        - request.client_metadata[root_turn_id|session_id|thread_id|turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
         - request.prompt_cache_key[non_empty_string] -> local cache hint only
         - request.reasoning.summary[auto|concise|detailed] -> local response-shaping policy only
         - request.reasoning.generate_summary[auto|concise|detailed] -> local response-shaping policy only

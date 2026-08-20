@@ -88,6 +88,9 @@ a conflict.
   `ResourceAccessViolation`; execute before publish -> `InvalidState`.
 - Isolation pair: metadata-only execution preserves pre-existing error/route
   resources byte-for-byte; error-only execution preserves metadata center.
+- Missing-resource negatives: scope, payload-cycle, error-intake and
+  error-projection handles reject an absent typed resource and never fabricate
+  an empty owner resource.
 
 ### 4.4 Test-consumer regression (active-link conventions)
 

@@ -268,6 +268,7 @@ pub enum V3ErrorSourceKind {
     ModelNotFound,
     PendingEndpoint,
     ProviderFailure,
+    ProviderCompatPayloadBoundaryViolation,
     TargetPoolExhausted,
     RuntimeFailure,
     ClientDisconnect,
@@ -291,6 +292,10 @@ pub struct V3Error02Classified {
     pub source: V3Error01SourceRaised,
     pub class: &'static str,
     pub terminal_state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_global_cooldown_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_global_semantic_signature: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -495,6 +500,7 @@ pub struct V3Error05ExecutionDecision {
 }
 
 impl V3Error05ExecutionDecision {
+    #[allow(clippy::result_large_err)]
     pub fn try_into_terminal(self) -> Result<V3Error05TerminalDecision, Self> {
         let source_kind = &self.exhaustion.local_action.classified.source.source_kind;
         let valid_terminal = match source_kind {
@@ -609,6 +615,7 @@ fn validate_internal_error_source_kind(source_kind: &V3ErrorSourceKind) {
         | V3ErrorSourceKind::PathNotFound
         | V3ErrorSourceKind::ModelNotFound
         | V3ErrorSourceKind::PendingEndpoint
+        | V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation
         | V3ErrorSourceKind::TargetPoolExhausted
         | V3ErrorSourceKind::ClientDisconnect => {
             panic!("client/route terminal errors cannot carry a RouteCodex internal error code")
@@ -646,6 +653,10 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
         V3ErrorSourceKind::ProviderFailure => {
             ("provider_failure", "non_terminal_if_candidates_remain")
         }
+        V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => (
+            "provider_compat_payload_boundary_violation",
+            "already_terminal",
+        ),
         V3ErrorSourceKind::TargetPoolExhausted => ("target_pool_exhausted", "already_terminal"),
         V3ErrorSourceKind::RuntimeFailure => ("runtime_failure", "already_terminal"),
         V3ErrorSourceKind::ClientDisconnect => ("client_disconnect", "already_terminal"),
@@ -655,7 +666,20 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
         source,
         class,
         terminal_state,
+        provider_global_cooldown_ms: None,
+        provider_global_semantic_signature: None,
     }
+}
+
+pub fn build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy(
+    source: V3Error01SourceRaised,
+    cooldown_ms: Option<u64>,
+    semantic_signature: String,
+) -> V3Error02Classified {
+    let mut classified = build_v3_error_02_classified_from_v3_error_01(source);
+    classified.provider_global_cooldown_ms = cooldown_ms;
+    classified.provider_global_semantic_signature = Some(semantic_signature);
+    classified
 }
 
 /// 瞬态失败（SSE 流内协议失败 / transport 响应头挂起）判定，由错误处理中心
@@ -672,7 +696,7 @@ pub fn is_v3_retryable_transient_source(source: &V3Error01SourceRaised) -> bool 
     if source.source_kind != V3ErrorSourceKind::ProviderFailure {
         return false;
     }
-    is_v3_retryable_transient_stage_code(&source.source_stage, &source.code)
+    is_v3_retryable_transient_stage_code(source.source_stage, &source.code)
 }
 
 /// Returns whether a provider failure is health-neutral and eligible for the
@@ -831,6 +855,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
             .and_then(|external| external.status)
             .filter(|status| *status >= 400)
             .unwrap_or(502),
+        V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => 400,
         V3ErrorSourceKind::TargetPoolExhausted => 503,
         V3ErrorSourceKind::RuntimeFailure => 500,
         V3ErrorSourceKind::ClientDisconnect => 499,
@@ -842,12 +867,12 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         .action
         .health_affecting
         .then(|| execution.exhaustion.local_action.action.clone());
-    let mut error = serde_json::json!({
+    let error = serde_json::json!({
         "code": source.code,
         "message": source.message,
     });
     let body = routecodex_v3_debug::project_debug_value_verbatim(
-        &routecodex_v3_debug::V3RedactionPolicy::default(),
+        &routecodex_v3_debug::V3RedactionPolicy,
         serde_json::json!({ "error": error }),
     );
     V3Error06ClientProjected {
@@ -1121,7 +1146,8 @@ pub fn project_v3_post_commit_sse_source(
     if matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
         // 例外证明：post-commit 阶段 SSE 事件已向客户端提交（200 + 已流出的
         // 帧），物理上无法 reroute/reselect；此处硬编码 0/false/false 走完整
-        // Error01-06 链仅用于 console 观测投影，不进入 client body。
+        // Error01-06 链用于 post-commit console 观测与标准协议 error closeout；
+        // 不允许把原始 Rust/Hyper body error 直接暴露给客户端。
         let classified = build_v3_error_02_classified_from_v3_error_01(source);
         let action = build_v3_error_03_target_local_action_from_v3_error_02(
             classified,
@@ -1264,3 +1290,30 @@ mod tests {
 mod subscription;
 
 pub use subscription::V3ProviderErrorFingerprint;
+
+/// Provider compat payload boundary violation: provider request or response
+/// payload carried a top-level RouteCodex control-like field (`semantics`,
+/// `processed`, `processingMetadata`). This is the typed source classification
+/// registered at the unique V3 error owner; the compat edge is the unique
+/// source, and the typed Error01-06 chain is the unique projection.
+pub const V3_PROVIDER_COMPAT_PAYLOAD_BOUNDARY_VIOLATION_CODE: &str =
+    "provider_compat_payload_boundary_violation";
+
+pub fn raise_v3_provider_compat_payload_boundary_violation(
+    source_stage: &'static str,
+    field: &'static str,
+    reason: impl Into<String>,
+) -> V3Error01SourceRaised {
+    let message = format!(
+        "{} field={} detail={}",
+        V3_PROVIDER_COMPAT_PAYLOAD_BOUNDARY_VIOLATION_CODE,
+        field,
+        reason.into()
+    );
+    build_v3_error_01_source_raised(
+        V3ErrorSourceKind::InvalidRequest,
+        source_stage,
+        V3_PROVIDER_COMPAT_PAYLOAD_BOUNDARY_VIOLATION_CODE,
+        message,
+    )
+}

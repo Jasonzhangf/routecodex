@@ -1,0 +1,46 @@
+lifecycle_id: v3.runtime_timing_observability.mainline
+summary: Responses Direct/Relay Runtime starts one monotonic state, accumulates every provider attempt, publishes only at governed terminal or Direct SSE clean EOF, and exposes a read-only Server projection.
+owner_feature_id: v3.runtime_timing_observability
+owner_module: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+entrypoint:
+  node_id: V3RuntimeTimingStart
+  wiki_page: docs/architecture/function-map.yml
+  call_map_chain_id: v3.runtime_timing_observability.mainline
+node_ids:
+  - V3RuntimeTimingExternalAttempt
+  - V3RuntimeTimingExternalComplete
+  - V3RuntimeTimingObservability
+  - V3RuntimeTimingProtocolHandoff
+  - V3RuntimeTimingServerProjection
+  - V3RuntimeTimingStart
+  - V3RuntimeTimingStreamObservation
+  - V3RuntimeTimingTerminal
+step_ids:
+  - v3-runtime-timing-01
+  - v3-runtime-timing-02
+  - v3-runtime-timing-03
+  - v3-runtime-timing-04
+  - v3-runtime-timing-05
+  - v3-runtime-timing-06
+  - v3-runtime-timing-07
+  - v3-runtime-timing-08
+  - v3-runtime-timing-09
+  - v3-runtime-timing-10
+  - v3-runtime-timing-11
+  - v3-runtime-timing-12
+  - v3-runtime-timing-13
+  - v3-runtime-timing-14
+edge_status_counts:
+  anchored: 14
+  partial: 0
+  binding_pending: 0
+  total: 14
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: v3.runtime_timing_observability.mainline
+  min_function_feature: v3.runtime_timing_observability
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

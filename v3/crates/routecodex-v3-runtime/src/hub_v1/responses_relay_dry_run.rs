@@ -162,6 +162,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         stopless_control,
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
+        false,
         None,
         None,
         initial_selected_target,

@@ -1,0 +1,14 @@
+{
+  "worktree_id": "wt-routecodex-v3-global-provider-cooldown-20260817",
+  "issue_id": "routecodex-v3-global-provider-cooldown",
+  "module_id": "routecodex-v3-global-provider-cooldown",
+  "base_ref": "main",
+  "base_commit": "ac45995482a82f07778715e239a0525735506afc",
+  "branch": "codex/v3-global-provider-cooldown-appsdk",
+  "head_commit": "ac45995482a82f07778715e239a0525735506afc",
+  "initial_clean": true,
+  "final_clean": true,
+  "isolation_mode": "isolated_worktree",
+  "scope_hash": "sha256:93a18993836d2f8c1756c68a491538e870c4b691e3536d15116c7f36b13883fd",
+  "created_at": "2026-08-17T15:05:48Z"
+}

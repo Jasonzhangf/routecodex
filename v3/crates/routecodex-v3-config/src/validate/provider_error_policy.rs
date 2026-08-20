@@ -125,6 +125,14 @@ fn legacy_provider_error_path(
     policy_id: &str,
     action: &V3ProviderErrorActionManifest,
 ) -> Result<Vec<V3ProviderDispositionStepManifest>, V3ConfigError> {
+    if action.provider_global_failure
+        && action.kind == V3ProviderErrorActionClass::DisableUntilRestart
+        && action.cooldown_ms.is_none()
+    {
+        return Err(validation(format!(
+            "provider error action policy {policy_id} provider_global_failure requires an explicit cooldown_ms"
+        )));
+    }
     let mut path = vec![V3ProviderDispositionStepManifest::WaitRetry {
         retry_mode: action.retry_mode,
         max_attempts: 1,

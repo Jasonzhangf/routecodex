@@ -27,6 +27,16 @@
   "execution_response_rule": "JS port #settle dispatches the response schema by pending op: lifecycle success must NOT project output; execute_node success carries only {ok, request_id, state, in_flight, output} where output is the typed NodeExecutionOutput; execute_node failure is a v4.node_container.execution_failure fact; the two decoders never accept the other's fields",
   "failure_rule": "NodeContainer lifecycle failures are recorded by the lifecycle-dispatch owner as typed v4.node_container.lifecycle_failure facts and projected on the same lifecycle port; they do not enter v4.control.error_chain because this management channel has no product request/session/target scope and must not fabricate one",
   "execution_failure_rule": "NodeContainer execution failures are recorded by the execution-dispatch owner as typed v4.node_container.execution_failure facts and projected on the same host port; they do not enter v4.control.error_chain because this management channel has no product request/session/target scope and must not fabricate one",
+  "execution_failure_codes": [
+    "plan_hash_mismatch",
+    "invalid_state",
+    "unregistered_handle",
+    "handle_error",
+    "effect_violation",
+    "resource_access_violation",
+    "bridge_error",
+    "protocol_error"
+  ],
   "forbidden": [
     "hard-coded inFlight=0",
     "binding pending edge",
@@ -47,6 +57,7 @@
     "real Cordis fibers drive ordered Rust NodePluginPlan execution",
     "execution plan hash mismatch fails before Rust handles run",
     "unregistered plugin handle fails fast with typed execution failure",
+    "resource access violation retains its typed execution failure code",
     "JS and Rust reject undeclared execution fields",
     "execute after drain rejects invalid_state",
     "JS execution response decoder rejects malformed output",

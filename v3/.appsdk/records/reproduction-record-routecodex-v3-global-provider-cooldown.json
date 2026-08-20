@@ -1,0 +1,15 @@
+{
+  "reproduction_id": "reproduction-routecodex-v3-global-provider-cooldown-baseline",
+  "issue_id": "routecodex-v3-global-provider-cooldown",
+  "module_id": "routecodex-v3-global-provider-cooldown",
+  "worktree_id": "wt-routecodex-v3-global-provider-cooldown-20260817",
+  "base_commit": "ac45995482a82f07778715e239a0525735506afc",
+  "input_hashes": [
+    "sha256:provider_global_subscription_probe_contract@ac45995482a82f07778715e239a0525735506afc",
+    "sha256:opencode-go-key1-6-live-matrix-20260817"
+  ],
+  "baseline_evidence_id": "evidence-routecodex-v3-global-provider-cooldown-baseline-red",
+  "first_divergence": "Existing provider health is split across session/auth/global maps; baseline contract has no persistent state or server-ready startup probe. Two existing global probe assertions fail before implementation: same auth key across sessions/models is not uniformly cooled and business success can observe an inconsistent global cooldown state.",
+  "result": "reproduced",
+  "created_at": "2026-08-17T15:24:00Z"
+}

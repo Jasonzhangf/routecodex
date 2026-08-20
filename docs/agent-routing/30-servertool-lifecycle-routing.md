@@ -67,7 +67,6 @@ servertool / stopless / followup / schema gate 改动前，先查：
 - `docs/design/servertool-cli-projection-migration.md`
 - `docs/stop-message-auto.md`
 - `docs/design/servertool-stopmessage-lifecycle.md`
-- `docs/design/servertool-followup-rebuild-from-origin.md`
 - `docs/design/rcc-unified-fence-marker-spec.md`
 - `docs/design/servertool-rust-only-architecture.md`
 - `docs/routing-instructions.md`

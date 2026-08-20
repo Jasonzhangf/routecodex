@@ -54,18 +54,11 @@ pub enum V3ResponsesStreamIntent {
     Sse,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum V3ResponsesRequestEndpoint {
-    Responses,
-    Compact,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Provider12ResponsesWirePayload {
     request_id: String,
     target: V3ResponsesProviderTarget,
     stream_intent: V3ResponsesStreamIntent,
-    endpoint: V3ResponsesRequestEndpoint,
     body: Value,
 }
 
@@ -82,10 +75,6 @@ impl V3Provider12ResponsesWirePayload {
         self.stream_intent
     }
 
-    pub fn endpoint(&self) -> V3ResponsesRequestEndpoint {
-        self.endpoint
-    }
-
     pub fn body(&self) -> &Value {
         &self.body
     }
@@ -96,16 +85,9 @@ impl V3Provider12ResponsesWirePayload {
         String,
         V3ResponsesProviderTarget,
         V3ResponsesStreamIntent,
-        V3ResponsesRequestEndpoint,
         Value,
     ) {
-        (
-            self.request_id,
-            self.target,
-            self.stream_intent,
-            self.endpoint,
-            self.body,
-        )
+        (self.request_id, self.target, self.stream_intent, self.body)
     }
 }
 
@@ -113,33 +95,6 @@ pub fn build_v3_provider_12_responses_wire_payload(
     request_id: impl Into<String>,
     target: V3ResponsesProviderTarget,
     current_request_body: Value,
-) -> Result<V3Provider12ResponsesWirePayload, V3ProviderError> {
-    build_v3_provider_12_responses_wire_payload_for_endpoint(
-        request_id,
-        target,
-        current_request_body,
-        V3ResponsesRequestEndpoint::Responses,
-    )
-}
-
-pub fn build_v3_provider_12_responses_compact_wire_payload(
-    request_id: impl Into<String>,
-    target: V3ResponsesProviderTarget,
-    current_request_body: Value,
-) -> Result<V3Provider12ResponsesWirePayload, V3ProviderError> {
-    build_v3_provider_12_responses_wire_payload_for_endpoint(
-        request_id,
-        target,
-        current_request_body,
-        V3ResponsesRequestEndpoint::Compact,
-    )
-}
-
-fn build_v3_provider_12_responses_wire_payload_for_endpoint(
-    request_id: impl Into<String>,
-    target: V3ResponsesProviderTarget,
-    current_request_body: Value,
-    endpoint: V3ResponsesRequestEndpoint,
 ) -> Result<V3Provider12ResponsesWirePayload, V3ProviderError> {
     let request_id = request_id.into();
     let stream_intent = match current_request_body
@@ -157,11 +112,6 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
             })
         }
     };
-    if endpoint == V3ResponsesRequestEndpoint::Compact
-        && stream_intent == V3ResponsesStreamIntent::Sse
-    {
-        return Err(V3ProviderError::InvalidStreamIntent { request_id });
-    }
     if let Some(field) = find_v3_routecodex_control_payload_key(&current_request_body) {
         return Err(V3ProviderError::ControlFieldInWireBody { request_id, field });
     }
@@ -218,7 +168,6 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
         request_id,
         target,
         stream_intent,
-        endpoint,
         body,
     })
 }
@@ -307,9 +256,9 @@ fn strip_v3_request_encrypted_reasoning(body: &mut Value, deepseek_compat: bool)
                 .iter()
                 .any(|key| {
                     obj.get(*key).is_some_and(|value| {
-                        !value.is_null()
-                            && !(value.is_array() && value.as_array().is_some_and(Vec::is_empty))
-                            && !(value.as_str().is_some_and(str::is_empty))
+                        !(value.is_null()
+                            || value.as_str().is_some_and(str::is_empty)
+                            || (value.is_array() && value.as_array().is_some_and(Vec::is_empty)))
                     })
                 });
             if !has_plain_content {
@@ -496,7 +445,7 @@ fn normalize_deepseek_thinking_stopless_tool_choice(
     body: &mut Value,
     target: &V3ResponsesProviderTarget,
 ) {
-    if matches!(target.provider_type.as_str(), "responses" | "openai_chat")
+    if target.provider_type == "openai_chat"
         && (target.canonical_model_id == "deepseek-v4-flash"
             || target.wire_model == "deepseek-v4-flash")
         && v3_wire_payload_is_thinking_mode(body)

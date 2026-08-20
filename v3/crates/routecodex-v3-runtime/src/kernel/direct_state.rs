@@ -233,10 +233,12 @@ impl V3ResponsesDirectContinuationState {
         response_id: &str,
         scope: &V3ResponsesDirectContinuationScope,
         now_epoch_ms: u64,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, crate::remote_continuation::V3RemoteContinuationError> {
         self.store
             .lock()
-            .map_err(|error| error.to_string())
+            .map_err(|error| crate::remote_continuation::V3RemoteContinuationError::Codec {
+                message: error.to_string(),
+            })
             .and_then(
                 |store| match store.load_for_req03(response_id, &scope.key, now_epoch_ms) {
                     Ok(_) => Ok(true),
@@ -247,7 +249,7 @@ impl V3ResponsesDirectContinuationState {
                         }
                         | crate::remote_continuation::V3RemoteContinuationError::Expired { .. },
                     ) => Ok(false),
-                    Err(error) => Err(error.to_string()),
+                    Err(error) => Err(error),
                 },
             )
     }
@@ -259,10 +261,26 @@ impl V3ResponsesDirectContinuationState {
         scope: &V3ResponsesDirectContinuationScope,
         now_epoch_ms: u64,
     ) -> Result<(), String> {
+        self.commit_for_req03_test_with_pin(
+            response_id,
+            scope,
+            V3RemoteContinuationPin::new("direct-provider", "gpt-5.5", "key"),
+            now_epoch_ms,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn commit_for_req03_test_with_pin(
+        &self,
+        response_id: &str,
+        scope: &V3ResponsesDirectContinuationScope,
+        pin: V3RemoteContinuationPin,
+        now_epoch_ms: u64,
+    ) -> Result<(), String> {
         let locator = V3RemoteContinuationLocator::new_direct(
             response_id,
             scope.key.clone(),
-            V3RemoteContinuationPin::new("direct-provider", "gpt-5.5", "key"),
+            pin,
             "test-capability-revision",
             now_epoch_ms,
             now_epoch_ms + REMOTE_CONTINUATION_TTL_MS,
@@ -338,6 +356,7 @@ struct V3ResponsesDirectRuntimeCoreState<'a> {
     now_epoch_ms: u64,
     provider_health: Option<V3ProviderFailureRuntimeHealth>,
     provider_health_neutral: bool,
+    allow_exhaustion_rescue_probe: bool,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_protocol_decision: Option<V3Execution11ProtocolDecision>,
     // Candidate set from the Server-side protocol plan; always set together
@@ -363,6 +382,7 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
             now_epoch_ms: 0,
             provider_health: None,
             provider_health_neutral: false,
+            allow_exhaustion_rescue_probe: true,
             initial_selected_target: None,
             initial_protocol_decision: None,
             initial_expanded: None,
@@ -387,6 +407,7 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
             now_epoch_ms,
             provider_health: None,
             provider_health_neutral: false,
+            allow_exhaustion_rescue_probe: true,
             initial_selected_target: None,
             initial_protocol_decision: None,
             initial_expanded: None,
@@ -415,6 +436,11 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
 
     fn with_provider_health_neutral(mut self) -> Self {
         self.provider_health_neutral = true;
+        self
+    }
+
+    fn with_exhaustion_rescue_probe_disabled(mut self) -> Self {
+        self.allow_exhaustion_rescue_probe = false;
         self
     }
 

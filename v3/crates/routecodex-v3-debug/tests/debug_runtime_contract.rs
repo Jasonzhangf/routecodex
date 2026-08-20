@@ -1,3 +1,5 @@
+#![allow(clippy::default_constructed_unit_structs)]
+
 use routecodex_v3_debug::{
     V3DebugBoundedTextCapture, V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture,
     V3RedactionPolicy,

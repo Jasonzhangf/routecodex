@@ -196,6 +196,7 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
                     thinking: None,
                     max_tokens: None,
                     max_context_tokens: None,
+                    context_token_estimate_scale_bps: 10_000,
                     features: BTreeMap::new(),
                 },
             )]),
@@ -1047,6 +1048,7 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
                     thinking: None,
                     max_tokens: None,
                     max_context_tokens: None,
+                    context_token_estimate_scale_bps: 10_000,
                     features: BTreeMap::new(),
                 },
             )]),
@@ -1083,7 +1085,7 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
         .map(|tier| tier.pool_id.as_str())
         .collect();
     assert!(
-        tier_ids.iter().any(|id| *id == "implicit:multimodal"),
+        tier_ids.contains(&"implicit:multimodal"),
         "implicit multimodal pool tier must exist when no explicit pool: {tier_ids:?}"
     );
     let implicit = plan

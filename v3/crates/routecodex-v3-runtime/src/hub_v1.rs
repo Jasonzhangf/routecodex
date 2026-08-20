@@ -8,17 +8,25 @@ pub(crate) use common::{
     v3_stopless_center_enabled_for_server, V3HubOpaquePayload, V3HubRelayCanonicalResponseContext,
     V3HubResponsePayload, V3HubResponseToolCall,
 };
-pub use common::{
+pub(crate) use common::{
+    classify_v3_provider_compat_error, provider_compat_boundary_source,
+    V3ProviderCompatErrorClassification,
     V3HubContinuationCommit, V3HubContinuationOwnership, V3HubEntryProtocol, V3HubExecutionMode,
     V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayToolKind,
     V3HubRequestSemanticProtocol, V3HubResponseNormalizedKind, V3HubResponseTerminality,
     V3HubServertoolResponseAction, V3HubTargetResolution, V3HubTransportIntent,
-    V3ProviderCompatError, V3ProviderCompatProfileId, V3ServerToolCenter, V3ServerToolCenterKey,
+    V3ProviderCompatProfileId, V3ServerToolCenter, V3ServerToolCenterKey,
     V3ServerToolCenterPoisoned, V3ServerToolCenterWriteAction, V3ServerToolCenterWriteAuditEntry,
     V3ServerToolCenterWriteOrigin, V3ServerToolInstanceState, V3ServerToolName,
     V3StoplessCenterNextRequestPolicy, V3StoplessCenterPhase, V3StoplessCenterState,
     V3StoplessCenterSteering, V3StoplessCenterStopKind, V3WebSearchCenterPhase,
     V3WebSearchCenterState,
+};
+mod provider_compat_error;
+pub(crate) use provider_compat_error::classify_v3_provider_compat_error;
+pub use provider_compat_error::{
+    extract_v3_provider_compat_boundary_field, provider_compat_boundary_source,
+    V3ProviderCompatError, V3ProviderCompatErrorClassification,
 };
 
 mod side_channel;

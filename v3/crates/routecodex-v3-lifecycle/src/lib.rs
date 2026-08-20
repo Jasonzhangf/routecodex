@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(unused_variables, clippy::zombie_processes))]
+
 use routecodex_v3_config::{V3Config05ManifestPublished, V3ConfigStore};
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde::{Deserialize, Serialize};

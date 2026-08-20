@@ -305,16 +305,17 @@ fn project_responses_reasoning_to_chat_fields(
     if let Some(effort) = reasoning.get("effort").filter(|value| !value.is_null()) {
         let effort = effort
             .as_str()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_ascii_lowercase)
-            .filter(|value| {
-                matches!(
-                    value.as_str(),
-                    "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-                )
-            })
-            .ok_or_else(|| "Responses reasoning.effort has an invalid value".to_string())?;
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "Responses reasoning.effort must be a non-empty string".to_string())?;
+        let normalized = effort.trim().to_ascii_lowercase();
+        let effort = if matches!(
+            normalized.as_str(),
+            "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+        ) {
+            normalized
+        } else {
+            effort.to_string()
+        };
         request.insert("reasoning_effort".to_string(), Value::String(effort));
     }
     let summary = match (reasoning.get("summary"), reasoning.get("generate_summary")) {

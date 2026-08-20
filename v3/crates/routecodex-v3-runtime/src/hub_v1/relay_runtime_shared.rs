@@ -194,6 +194,7 @@ pub async fn handle_provider_failure(
         failure.status,
         failure_error_type(&failure),
         provider_failure_message(&failure),
+        None,
         state,
     )
     .await

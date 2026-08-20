@@ -327,7 +327,10 @@ pub struct V3ProviderSemanticErrorPolicyAuthoringConfig {
     pub policy_id: String,
     #[serde(rename = "match")]
     pub matcher: V3ProviderErrorMatcherAuthoringConfig,
-    pub action: V3ProviderErrorActionAuthoringConfig,
+    #[serde(default)]
+    pub path: Option<Vec<V3ProviderDispositionStepAuthoringConfig>>,
+    #[serde(default)]
+    pub action: Option<V3ProviderErrorActionAuthoringConfig>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -521,7 +524,11 @@ pub struct V3ProviderAuthoringConfig {
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     #[serde(default)]
     pub health: Option<V3ProviderHealthAuthoringConfig>,
-    #[serde(default)]
+    #[serde(
+        default,
+        rename = "response_error_policy",
+        alias = "semantic_error_policy"
+    )]
     pub semantic_error_policy: Vec<V3ProviderSemanticErrorPolicyAuthoringConfig>,
     #[serde(default)]
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
@@ -542,6 +549,11 @@ pub struct V3ProviderAuthoringConfig {
 /// provider per-request 总超时默认值（毫秒）：300s。
 pub fn default_provider_request_timeout_ms() -> u64 {
     300_000
+}
+
+/// provider SSE 首帧/帧间隔超时默认值（毫秒）：30s。
+pub fn default_provider_sse_first_frame_timeout_ms() -> u64 {
+    30_000
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -640,8 +652,14 @@ pub struct V3ProviderModelAuthoringConfig {
     pub max_tokens: Option<u64>,
     #[serde(default)]
     pub max_context_tokens: Option<u64>,
+    #[serde(default = "default_context_token_estimate_scale_bps")]
+    pub context_token_estimate_scale_bps: u64,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+}
+
+fn default_context_token_estimate_scale_bps() -> u64 {
+    10_000
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -962,9 +980,7 @@ impl V3Config05ManifestPublished {
     /// provider model declarations. The Virtual Router consumes this index to
     /// construct implicit capability pools without interpreting provider
     /// internals itself.
-    pub fn capability_model_candidates(
-        &self,
-    ) -> BTreeMap<String, Vec<V3CapabilityModelCandidate>> {
+    pub fn capability_model_candidates(&self) -> BTreeMap<String, Vec<V3CapabilityModelCandidate>> {
         let mut index: BTreeMap<String, Vec<V3CapabilityModelCandidate>> = BTreeMap::new();
         for provider in self.providers.values() {
             if !provider.enabled {
@@ -1128,6 +1144,7 @@ pub struct V3ProviderModelManifest {
     pub thinking: Option<String>,
     pub max_tokens: Option<u64>,
     pub max_context_tokens: Option<u64>,
+    pub context_token_estimate_scale_bps: u64,
     pub features: BTreeMap<String, bool>,
 }
 

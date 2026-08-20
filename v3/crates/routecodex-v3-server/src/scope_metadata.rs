@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 pub(crate) struct V3ResponsesContinuationEntryFacts {
     pub(crate) previous_response_id: Option<String>,
+    pub(crate) has_function_call_output: bool,
     pub(crate) has_unpaired_function_call_output: bool,
 }
 
@@ -12,6 +13,7 @@ impl V3ResponsesContinuationEntryFacts {
     pub(crate) fn project(payload: &Value) -> Self {
         Self {
             previous_response_id: responses_payload_previous_response_id(payload),
+            has_function_call_output: payload_input_has_function_call_output(payload.get("input")),
             has_unpaired_function_call_output: payload_input_has_unpaired_function_call_output(
                 payload.get("input"),
             ),
@@ -60,8 +62,7 @@ pub(crate) fn build_responses_direct_continuation_scope(
 ) -> Result<V3ResponsesDirectContinuationScope, String> {
     let (session_id, conversation_id) = request_local_continuation_scope(
         headers,
-        entry_facts.previous_response_id.is_some()
-            || entry_facts.has_unpaired_function_call_output,
+        entry_facts.previous_response_id.is_some() || entry_facts.has_unpaired_function_call_output,
         request_id,
     )?;
     Ok(V3ResponsesDirectContinuationScope::responses(
@@ -141,6 +142,10 @@ pub(crate) fn request_local_continuation_scope(
             let request_scope = format!("request:{request_id}");
             Ok((request_scope.clone(), request_scope))
         }
+        (Some(_), None) | (None, Some(_)) if !requires_client_scope => {
+            let request_scope = format!("request:{request_id}");
+            Ok((request_scope.clone(), request_scope))
+        }
         _ => Err(
             "Responses continuation requires typed session and conversation control headers; request payload and client metadata cannot construct continuation control identity"
                 .to_string(),
@@ -180,6 +185,18 @@ pub(crate) fn responses_control_scope_headers(
         read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS)
     });
     Ok((session_id, conversation_id))
+}
+
+pub(crate) fn payload_input_has_function_call_output(input: Option<&Value>) -> bool {
+    match input {
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|item| item.get("type").and_then(Value::as_str) == Some("function_call_output")),
+        Some(Value::Object(item)) => {
+            item.get("type").and_then(Value::as_str) == Some("function_call_output")
+        }
+        _ => false,
+    }
 }
 
 pub(crate) fn payload_input_has_unpaired_function_call_output(input: Option<&Value>) -> bool {

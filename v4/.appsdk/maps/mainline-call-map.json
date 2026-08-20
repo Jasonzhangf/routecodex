@@ -856,6 +856,50 @@
       ],
       "path": "crates/routecodex-v4-cli-plugin/src/main.rs",
       "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-runtime",
+      "owner": "routecodex-v4-runtime::execute_mock_transport_slice",
+      "edge_type": "mock_transport_orchestration",
+      "caller_feature_id": "v4.runtime.real_pipeline_mock_transport",
+      "callee_feature_id": "v4.runtime.real_pipeline_mock_transport",
+      "caller_path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "callee_path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "caller_symbols": [
+        "execute_mock_transport_slice",
+        "MockTransportIdentityCounter::next_identity"
+      ],
+      "callee_symbols": [
+        "SkeletonRuntime::execute_request_fixture_scoped",
+        "SkeletonRuntime::execute_mock_response_scoped",
+        "MockTransportReport",
+        "MockTransportError"
+      ],
+      "resource_id": "v4.pipeline.mock_transport_report",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime",
+      "to": "routecodex-v4-error",
+      "owner": "routecodex-v4-runtime::project_runtime_fault",
+      "edge_type": "error_chain_projection",
+      "caller_feature_id": "v4.runtime.real_pipeline_mock_transport",
+      "callee_feature_id": "v4.error.mainline",
+      "caller_path": "crates/routecodex-v4-runtime/src/lib.rs",
+      "callee_path": "crates/routecodex-v4-error/src/lib.rs",
+      "caller_symbols": [
+        "error_chain_client_projection_message",
+        "project_runtime_fault"
+      ],
+      "callee_symbols": [
+        "ErrorChain",
+        "ClientProjection"
+      ],
+      "resource_id": "v4.pipeline.mock_transport_error",
+      "path": "crates/routecodex-v4-runtime/src/lib.rs,crates/routecodex-v4-error/src/lib.rs",
+      "status": "active"
     }
   ]
 }

@@ -1,4 +1,5 @@
 pub mod diagnostics;
+pub mod direct_response_hooks;
 pub mod foundation;
 pub mod hooks;
 pub mod hub_v1;
@@ -18,6 +19,10 @@ mod shared;
 mod token_estimation;
 
 pub use diagnostics::{project_v3_virtual_router_dry_run, project_v3_virtual_router_status};
+pub use direct_response_hooks::{
+    compile_direct_response_compat_plan, V3DirectResponseCompatBlock, V3DirectResponseCompatFacts,
+    V3DirectResponseCompatPlan,
+};
 pub use foundation::{
     execute_v3_foundation_pending_runtime, execute_v3_p5_routing_runtime, project_v3_debug_failure,
     V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3P5Runtime,

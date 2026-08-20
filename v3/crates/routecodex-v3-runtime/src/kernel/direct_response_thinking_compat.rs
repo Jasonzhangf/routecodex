@@ -107,7 +107,7 @@ fn rewrite_v3_direct_thinking_tag_sse_bytes(input: &[u8]) -> Result<Vec<u8>, Str
         .map_err(|error| error.to_string())?;
     decoder.finish().map_err(|error| error.to_string())?;
 
-    let Some(terminal) = frames
+    let terminal = frames
         .iter()
         .filter_map(|frame| v3_direct_sse_frame_json(frame.frame()))
         .find(|value| {
@@ -120,9 +120,8 @@ fn rewrite_v3_direct_thinking_tag_sse_bytes(input: &[u8]) -> Result<Vec<u8>, Str
                         "response.completed" | "response.incomplete" | "response.failed"
                     )
                 })
-        }) else {
-        return Ok(input.to_vec());
-    };
+        })
+        .ok_or_else(|| "thinking-tag compat requires a terminal Responses event".to_string())?;
     let original_output = terminal
         .pointer("/response/output")
         .and_then(Value::as_array)

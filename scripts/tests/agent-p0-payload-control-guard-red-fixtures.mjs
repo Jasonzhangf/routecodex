@@ -11,7 +11,6 @@ const files = [
   '.agents/skills/rcc-dev-skills/SKILL.md',
   '.agents/skills/rcc-v3-architecture/SKILL.md',
   'package.json',
-  'scripts/architecture/verify-v3-architecture-ci.mjs',
 ];
 const cases = [
   ['project Agent loses batch replacement ban', 'AGENTS.md', 'P0 禁止脚本批量替换', 'P0 修改工具建议'],
@@ -27,7 +26,7 @@ const cases = [
   ['architecture skill loses reverse rebuild ban', '.agents/skills/rcc-v3-architecture/SKILL.md', 'normal payload 也不得重建', 'normal payload 可以重建'],
   ['architecture skill runs code review before functional verification', '.agents/skills/rcc-v3-architecture/SKILL.md', '功能验证 -> live 闭环 -> code review', 'code review -> 功能验证 -> live 闭环'],
   ['dev skill loses module forbidden paths review', '.agents/skills/rcc-dev-skills/SKILL.md', 'allowed/forbidden paths', 'owned paths'],
-  ['architecture CI drops the P0 entry guard', 'scripts/architecture/verify-v3-architecture-ci.mjs', "  ['verify:agent-p0-payload-control-guard', 'Agent and RouteCodex skill entry surfaces expose the P0 payload/control isolation guard before routing'],\n", ''],
+  ['root V3 architecture dispatcher bypasses V3 ownership', 'package.json', '"verify:v3-architecture-ci": "npm --prefix v3 run verify:v3-architecture-ci"', '"verify:v3-architecture-ci": "node scripts/architecture/verify-v3-architecture-ci.mjs"'],
 ];
 
 const failures = [];

@@ -1,5 +1,6 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+use routecodex_v3_error::V3ProviderErrorFingerprint;
 use serde_json::json;
 
 fn test_provider_failure_scope(
@@ -92,6 +93,133 @@ targets = [
     .expect("global-pool-alive manifest")
 }
 
+fn account_threshold_manifest() -> V3Config05ManifestPublished {
+    let source = r#"
+version = 3
+
+[[error.provider_error_action_policy]]
+policy_id = "account_http_401_two_errors"
+[error.provider_error_action_policy.match]
+http_status = 401
+[[error.provider_error_action_policy.path]]
+step = "wait_retry"
+retry_mode = "reselect_before_client_projection"
+max_attempts = 2
+backoff_ms = 1000
+[[error.provider_error_action_policy.path]]
+step = "cooldown"
+scope = "auth_key"
+duration_ms = 900000
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 502
+reason_code = "provider_account_http_401"
+message_mode = "code_only"
+
+[[error.provider_error_action_policy]]
+policy_id = "account_http_403_two_errors"
+[error.provider_error_action_policy.match]
+http_status = 403
+[[error.provider_error_action_policy.path]]
+step = "wait_retry"
+retry_mode = "reselect_before_client_projection"
+max_attempts = 2
+backoff_ms = 1000
+[[error.provider_error_action_policy.path]]
+step = "cooldown"
+scope = "auth_key"
+duration_ms = 900000
+[[error.provider_error_action_policy.path]]
+step = "project"
+status = 502
+reason_code = "provider_account_http_403"
+message_mode = "code_only"
+
+[servers.account_threshold]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "account_threshold"
+endpoints = ["responses"]
+[providers.primary]
+type = "responses"
+base_url = "http://primary.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "PRIMARY_KEY" }] }
+[providers.primary.models.gpt-test]
+wire_name = "gpt-test"
+capabilities = ["text"]
+[route_groups.account_threshold.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", key = "key1", priority = 1 }]
+"#;
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(source).expect("account threshold authoring"),
+    )
+    .expect("account threshold manifest")
+}
+
+#[test]
+fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
+    let manifest = account_threshold_manifest();
+    for status in [401, 403] {
+        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+        let session = test_provider_failure_scope(
+            "account_threshold",
+            "account_threshold",
+            &format!("account-threshold-{status}"),
+        )
+        .unwrap();
+        for index in 0..2 {
+            let record = health
+                .record_provider_failure_record_with_policy(
+                    &manifest,
+                    &session,
+                    "primary",
+                    Some("responses"),
+                    Some("key1"),
+                    Some("gpt-test"),
+                    Some("account failure"),
+                    status,
+                    Some("provider_http_error"),
+                    "account failure",
+                    100 + index,
+                )
+                .unwrap();
+            assert_eq!(record.failure_count, (index + 1) as u32);
+            assert_eq!(
+                record.state,
+                if index == 0 { "healthy" } else { "cooldown" }
+            );
+        }
+    }
+
+    let other_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let session = test_provider_failure_scope(
+        "account_threshold",
+        "account_threshold",
+        "ordinary-threshold-session",
+    )
+    .unwrap();
+    for index in 0..3 {
+        let record = other_health
+            .record_provider_failure_record_with_policy(
+                &manifest,
+                &session,
+                "primary",
+                Some("responses"),
+                Some("key1"),
+                Some("gpt-test"),
+                Some("ordinary failure"),
+                500,
+                Some("provider_http_error"),
+                "ordinary failure",
+                200 + index,
+            )
+            .unwrap();
+        assert_eq!(record.state, if index < 2 { "healthy" } else { "cooldown" });
+    }
+}
+
 fn resolve_target(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
@@ -134,6 +262,131 @@ fn resolve_target_for_scope(
 }
 
 #[test]
+fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
+    let manifest = global_pool_alive_manifest("global_status_policy");
+    let cases = [(401, 2), (403, 2), (429, 3), (500, 3), (502, 3), (599, 3)];
+    for (status, threshold) in cases {
+        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+        let scope = test_provider_failure_scope(
+            "global_status_policy",
+            "global_status_policy",
+            "runtime-policy-status",
+        )
+        .expect("failure session scope");
+        for attempt in 0..threshold {
+            health
+                .record_provider_failure_record_with_policy(
+                    &manifest,
+                    &scope,
+                    "first",
+                    Some("responses"),
+                    Some("key1"),
+                    Some("gpt-test"),
+                    Some("provider status failure"),
+                    "V3ProviderRespInbound01Raw",
+                    status,
+                    Some("provider_http_error"),
+                    "upstream status",
+                    10_000 + attempt as u64,
+                )
+                .expect("runtime provider failure policy should record");
+        }
+        assert!(
+            !health
+                .global_subscription_store
+                .availability("first", Some("key1"), Some("gpt-test"), 10_000)
+                .expect("global availability")
+                .available,
+            "status {status} must block only after its declared threshold"
+        );
+    }
+
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let scope = test_provider_failure_scope(
+        "global_status_policy",
+        "global_status_policy",
+        "runtime-policy-negative",
+    )
+    .expect("failure session scope");
+    health
+        .record_provider_failure_record_with_policy(
+            &manifest,
+            &scope,
+            "first",
+            Some("responses"),
+            Some("key1"),
+            Some("gpt-test"),
+            Some("request-shaped failure"),
+            "V3ProviderReqOutbound09TransportRequest",
+            400,
+            Some("provider_http_error"),
+            "request rejected",
+            20_000,
+        )
+        .expect("request-shaped failure should remain session-scoped");
+    assert!(
+        health
+            .global_subscription_store
+            .availability("first", Some("key1"), Some("gpt-test"), 20_000)
+            .expect("global availability")
+            .available
+    );
+}
+
+#[test]
+fn configured_semantic_global_failure_keeps_manifest_cooldown_policy() {
+    let manifest = global_pool_alive_manifest("semantic_global_policy");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let scope = test_provider_failure_scope(
+        "semantic_global_policy",
+        "semantic_global_policy",
+        "semantic-session",
+    )
+    .expect("failure session scope");
+    let fingerprint = V3ProviderErrorFingerprint::new(
+        "provider_diagnostic_zero_usage",
+        "semantic_error",
+        200,
+        "diagnostic_zero_usage",
+    )
+    .expect("semantic fingerprint");
+    for attempt in 0..3 {
+        health
+            .record_provider_global_subscription_failure(
+                &scope,
+                "first",
+                Some("key1"),
+                Some("gpt-test"),
+                fingerprint.clone(),
+                Some(1234),
+                30_000 + attempt,
+            )
+            .expect("configured semantic global failure should be accepted");
+    }
+    assert_eq!(
+        health
+            .global_subscription_store
+            .availability("first", Some("key1"), Some("gpt-test"), 30_000)
+            .expect("global availability")
+            .blocked_until_ms,
+        Some(31_236)
+    );
+    let no_duration = health.record_provider_global_subscription_failure(
+        &scope,
+        "first",
+        Some("key1"),
+        Some("gpt-test"),
+        fingerprint,
+        None,
+        40_000,
+    );
+    assert_eq!(
+        no_duration,
+        Err("unsupported provider global health error class".to_string())
+    );
+}
+
+#[test]
 fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_alive() {
     let scope = "global_pool_alive";
     let manifest = global_pool_alive_manifest(scope);
@@ -164,11 +417,16 @@ fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_al
         &session,
         now + 10,
     );
-    let V3RelayProviderTargetResolution::Selected(selected) = resolution else {
-        panic!("globally alive route pool must remain selectable");
+    let V3RelayProviderTargetResolution::Exhausted {
+        attempted_candidates,
+    } = resolution
+    else {
+        panic!("provider cooldown probe state must block every availability projection");
     };
-    assert_eq!(selected.candidate.provider_id, "first");
-    assert!(!selected.default_floor_protected);
+    assert_eq!(attempted_candidates.len(), 2);
+    assert!(attempted_candidates
+        .iter()
+        .all(|candidate| candidate.contains("provider_cooldown_probe_pending")));
 }
 
 fn assert_resolution_failure(
@@ -339,6 +597,7 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
         502,
         Some("provider_request_compat_error".to_string()),
         "arguments must be valid JSON".to_string(),
+        None,
         &mut state,
     )
     .await
@@ -398,6 +657,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         429,
         Some("provider_transport_error".to_string()),
         "prior provider returned 429".to_string(),
+        None,
         &mut state,
     )
     .await
@@ -655,6 +915,7 @@ async fn transport_error_excludes_only_the_failed_provider_key() {
         502,
         Some("provider_transport_error".to_string()),
         "error sending request for url".to_string(),
+        None,
         &mut state,
     )
     .await
@@ -755,6 +1016,7 @@ message_mode = "code_only"
         429,
         Some("provider_http_429".to_string()),
         "quota exceeded".to_string(),
+        None,
         &mut state,
     )
     .await
@@ -771,4 +1033,104 @@ message_mode = "code_only"
         projection.body["error"]["code"], "E_PATH_RATE_LIMIT",
         "project step public_code must override the projected client code"
     );
+}
+
+#[tokio::test]
+async fn matched_response_policy_identity_drives_retry_without_message_rematch() {
+    let scope = "response_policy_identity";
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "__SCOPE__"
+endpoints = ["responses"]
+[providers.first]
+type = "responses"
+base_url = "http://first.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "FIRST_KEY" }] }
+[[providers.first.response_error_policy]]
+policy_id = "exact_response_policy"
+[providers.first.response_error_policy.match]
+http_status = 200
+content_contains_any = ["original diagnostic payload"]
+[[providers.first.response_error_policy.path]]
+step = "wait_retry"
+retry_mode = "retry_same"
+max_attempts = 3
+backoff_ms = 7000
+backoff_multiplier = 2
+[[providers.first.response_error_policy.path]]
+step = "project"
+status = 503
+reason_code = "wrapped_provider_error"
+public_code = "E_WRAPPED_PROVIDER"
+message_mode = "code_only"
+[[providers.first.response_error_policy]]
+policy_id = "reselect_then_retry_policy"
+[providers.first.response_error_policy.match]
+http_status = 429
+[[providers.first.response_error_policy.path]]
+step = "wait_retry"
+retry_mode = "reselect_before_client_projection"
+max_attempts = 3
+backoff_ms = 5000
+[[providers.first.response_error_policy.path]]
+step = "project"
+status = 503
+reason_code = "reselect_exhausted"
+public_code = "E_RESELECT_EXHAUSTED"
+message_mode = "code_only"
+[providers.first.models.gpt-test]
+wire_name = "gpt-test"
+capabilities = ["text", "tools"]
+[route_groups.__SCOPE__.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 1 }
+]
+"#
+    .replace("__SCOPE__", scope);
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&source).expect("response-policy authoring"),
+    )
+    .expect("response-policy manifest");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select the provider"),
+    };
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: None,
+        failure_session_scope: test_provider_failure_scope(scope, scope, "session-policy-id")
+            .expect("test failure session scope"),
+        provider_health: &health,
+        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+    let result = run_v3_relay_provider_failure_policy(
+        &context,
+        selected,
+        "V3ProviderRespInbound01Raw",
+        200,
+        Some("wrapped_provider_error".to_string()),
+        "compressed message no longer contains configured keyword".to_string(),
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            trace: &mut trace,
+        },
+    )
+    .await
+    .expect("exact matched policy must drive Error05");
+
+    assert_eq!(result.event.action, "policy_retry_same");
+    assert_eq!(result.event.wait_ms, Some(7000));
+    assert!(result.retry_selected.is_some());
+    assert_eq!(same_candidate_retries.values().copied().next(), Some(1));
 }

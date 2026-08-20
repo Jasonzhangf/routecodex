@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "gates":[
+    {"gate_id":"contract_valid","command":"appsdk verify <project>","required_for":["compile","promotion","freeze"]},
+    {"gate_id":"sdk_pinned","command":"appsdk pin-lock <project> --binary <sdk>","required_for":["compile","promotion","freeze"]},
+    {"gate_id":"record_graph","command":"appsdk verify <project>","required_for":["architecture_stable","freeze","publish"]},
+    {"gate_id":"vcs_clean","command":"appsdk verify <project>","required_for":["freeze"]},
+    {"gate_id":"regression_report","command":"appsdk verify <project>","required_for":["freeze","frozen_integrity"]},
+    {"gate_id":"worktree_clean","command":"appsdk verify <project>","required_for":["reproduction","fix_candidate"]},
+    {"gate_id":"baseline_reproduced","command":"appsdk verify <project>","required_for":["fix_candidate"]},
+    {"gate_id":"fix_candidate_verified","command":"appsdk verify <project>","required_for":["architecture_review"]},
+    {"gate_id":"architecture_review_pass","command":"appsdk verify <project>","required_for":["architecture_stable","effectiveness"]},
+    {"gate_id":"post_architecture_effectiveness","command":"appsdk verify <project>","required_for":["merge_admission"]},
+    {"gate_id":"mainline_merge_identity","command":"appsdk verify <project>","required_for":["promotion","compile","freeze","publish"]},
+    {"gate_id":"fix_lifecycle_graph","command":"appsdk verify <project>","required_for":["promotion","freeze","publish"]},
+    {"gate_id":"provider_cooldown_contract","command":"cargo test --manifest-path Cargo.toml -p routecodex-v3-provider-responses --test provider_global_cooldown_persistence_contract -- --nocapture","required_for":["architecture_review","effectiveness","merge_admission"]},
+    {"gate_id":"provider_startup_probe_contract","command":"cargo test --manifest-path Cargo.toml -p routecodex-v3-server --test provider_cooldown_startup_probe_contract -- --nocapture","required_for":["architecture_review","effectiveness","merge_admission"]},
+    {"gate_id":"provider_payload_control_separation","command":"npm run verify:v3-module-boundaries","required_for":["architecture_review","effectiveness","merge_admission"]},
+    {"gate_id":"v3_provider_compile","command":"cargo check --manifest-path Cargo.toml -p routecodex-v3-provider-responses -p routecodex-v3-runtime -p routecodex-v3-server --no-default-features","required_for":["architecture_review","effectiveness","merge_admission"]},
+    {"gate_id":"v3_live_install_restart_replay","command":"routecodex restart","required_for":["effectiveness","merge_admission"]}
+  ]
+}

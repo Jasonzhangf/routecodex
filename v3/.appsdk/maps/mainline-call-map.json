@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "lifecycle_id":"routecodex-v3-global-provider-cooldown-appsdk",
+  "nodes":["clarify","worktree_ready","reproduced","fix_candidate","architecture_review","effectiveness_verified","merge_ready","merged","promotion","compile","active","protected","verify"],
+  "edges":[
+    {"from":"clarify","to":"worktree_ready","owner":"appsdk::fix_lifecycle"},
+    {"from":"worktree_ready","to":"reproduced","owner":"appsdk::fix_lifecycle"},
+    {"from":"reproduced","to":"fix_candidate","owner":"appsdk::fix_lifecycle"},
+    {"from":"fix_candidate","to":"architecture_review","owner":"appsdk::fix_lifecycle"},
+    {"from":"architecture_review","to":"effectiveness_verified","owner":"appsdk::fix_lifecycle"},
+    {"from":"effectiveness_verified","to":"merge_ready","owner":"appsdk::fix_lifecycle"},
+    {"from":"merge_ready","to":"merged","owner":"appsdk::fix_lifecycle"},
+    {"from":"merged","to":"promotion","owner":"appsdk::lifecycle"},
+    {"from":"promotion","to":"compile","owner":"appsdk::compiler"},
+    {"from":"compile","to":"active","owner":"appsdk::publisher"},
+    {"from":"active","to":"protected","owner":"appsdk::freezer"},
+    {"from":"protected","to":"verify","owner":"appsdk::verifier"},
+    {"from":"verify","to":"worktree_ready","owner":"appsdk::workspace","return_path":true},
+    {"from":"V3Config05ManifestPublished","to":"V3ProviderGlobalCooldownCoordinator::load","owner":"routecodex-v3-provider-responses"},
+    {"from":"V3ProviderFailureRuntimeHealth::record_typed_provider_failure","to":"V3ProviderGlobalCooldownCoordinator::record_failure","owner":"routecodex-v3-runtime"},
+    {"from":"V3ProviderGlobalCooldownCoordinator::availability","to":"V3TargetCandidateSetExpanded","owner":"routecodex-v3-provider-responses"},
+    {"from":"V3ServerAggregateLifecycle::listener_ready","to":"V3ProviderGlobalCooldownCoordinator::run_startup_provider_probes","owner":"routecodex-v3-server"},
+    {"from":"V3ProviderGlobalCooldownCoordinator::due_probe","to":"V3ProviderGlobalCooldownCoordinator::apply_probe_result","owner":"routecodex-v3-provider-responses"}
+  ]
+}

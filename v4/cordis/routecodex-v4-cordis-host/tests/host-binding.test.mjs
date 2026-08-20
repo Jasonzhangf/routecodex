@@ -351,7 +351,7 @@ test('JS lifecycle encoder rejects fields not declared by the operation', async 
 test('real Cordis fibers drive ordered Rust NodePluginPlan execution', async (t) => {
   const port = new RustNodeContainerPort({ binaryPath });
   t.after(() => port.close());
-  const entries = [controlEntry(), semanticEntry(), observerEntry()];
+  const entries = [semanticEntry(), observerEntry()];
   const nodePlan = plan(entries);
   const events = [];
   const host = new CordisBoundNodeHost({
@@ -367,17 +367,42 @@ test('real Cordis fibers drive ordered Rust NodePluginPlan execution', async (t)
     control: {},
   });
   assert.deepEqual(output.data, { steps: ['v4.test.echo'] });
-  assert.deepEqual(output.control, {
-    metadata_center: { written_by: 'control' },
-  });
+  assert.deepEqual(output.control, {});
   assert.equal(output.diagnostics.length, 1);
   assert.equal(output.diagnostics[0].kind, 'node.observed');
-  assert.equal(host.fibers.length, 3);
-  assert.deepEqual(events, ['active', 'active', 'active']);
+  assert.equal(host.fibers.length, 2);
+  assert.deepEqual(events, ['active', 'active']);
 
   await host.drain();
   await host.dispose();
-  assert.deepEqual(events, ['active', 'active', 'active', 'disposed', 'disposed', 'disposed']);
+  assert.deepEqual(events, ['active', 'active', 'disposed', 'disposed']);
+});
+
+test('resource access violation retains its typed execution failure code', async (t) => {
+  const port = new RustNodeContainerPort({ binaryPath });
+  t.after(() => port.close());
+  const entries = [controlEntry()];
+  const nodePlan = plan(entries);
+  const host = new CordisBoundNodeHost({
+    port,
+    plan: nodePlan,
+    nodeId: nodePlan.node_id,
+    descriptor: { roleId: nodePlan.role_id },
+  });
+
+  await host.mount(entries.map((entry) => plugin(entry)));
+  await assert.rejects(
+    host.executeNode(nodePlan.hash, { data: {}, control: 'not-a-control-carrier' }),
+    (error) => (
+      error instanceof CordisHostError
+      && error.code === 'resource_access_violation'
+      && error.failure?.resource_id === 'v4.node_container.execution_failure'
+      && error.failure?.operation === 'execute_node'
+    ),
+  );
+
+  await host.drain();
+  await host.dispose();
 });
 
 test('execution plan hash mismatch fails before Rust handles run', async (t) => {

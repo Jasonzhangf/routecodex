@@ -1,5 +1,6 @@
 pub mod adaptive_concurrency;
 mod error;
+pub mod global_cooldown;
 #[cfg_attr(not(test), allow(dead_code))]
 mod health;
 pub mod probe;
@@ -11,9 +12,13 @@ pub mod transport;
 pub mod wire;
 
 pub use error::{V3ProviderError, V3ProviderHttpFailure};
+pub use global_cooldown::{
+    V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass, V3ProviderCooldownObservation,
+};
 pub use health::{
     V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
-    V3ProviderAvailabilityRegistry, V3ProviderFailurePolicy, V3ProviderFailureRecord,
+    V3ProviderAvailabilityRegistry, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
+    V3ProviderFailureRecord,
     V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
 };
 pub use probe::build_v3_provider_global_probe_request;
@@ -38,9 +43,8 @@ pub use transport::{
     V3Transport13ResponsesHttpRequest, V3Transport13ResponsesRequest,
 };
 pub use wire::{
-    apply_v3_response_cipher_policy, build_v3_provider_12_responses_compact_wire_payload,
-    build_v3_provider_12_responses_wire_payload, find_v3_routecodex_control_payload_key,
-    V3Provider12ResponsesWirePayload, V3ProviderAuthHandle, V3ProviderAuthSecretHandle,
-    V3ResponsesProviderTarget, V3ResponsesRequestEndpoint, V3ResponsesStreamIntent,
+    apply_v3_response_cipher_policy, build_v3_provider_12_responses_wire_payload,
+    find_v3_routecodex_control_payload_key, V3Provider12ResponsesWirePayload, V3ProviderAuthHandle,
+    V3ProviderAuthSecretHandle, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
     V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS,
 };

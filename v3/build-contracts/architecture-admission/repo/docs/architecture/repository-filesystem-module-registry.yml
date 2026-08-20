@@ -1,0 +1,79 @@
+version: 1
+status: active
+modules:
+  - module_id: architecture.repository_filesystem_governance
+    owner_feature_id: architecture.repository_filesystem_governance
+    owned_paths:
+      - .gitignore
+      - scripts/ci/repo-sanity.mjs
+      - scripts/architecture/verify-repository-filesystem-governance.mjs
+      - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+      - v3/README.md
+      - v3/fixtures
+      - deprecated/v2
+      - .agents/skills/rcc-dev-skills/SKILL.md
+      - .agents/skills/rcc-dev-skills/references
+      - .agents/skills/rcc-v3-architecture/SKILL.md
+      - docs/architecture/repository-filesystem-module-registry.yml
+      - docs/goals/root-generated-artifacts-governance-plan.md
+      - docs/goals/root-generated-artifacts-governance-execution-prompt.md
+    allowed_paths:
+      - docs/architecture/function-map.yml
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/resource-operation-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/architecture/wiki/mainline-call-graph.md
+      - docs/architecture/wiki/html/mainline-call-graph.html
+      - docs/design/payload-copy-hotspot-inventory.md
+      - deprecated/v2/retirement-manifest.yml
+      - scripts/architecture/verify-agent-p0-payload-control-guard.mjs
+      - scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs
+      - docs/architecture/reviews/agent-worker-p0-architecture-guard-audit.md
+    forbidden_paths:
+      - src
+      - sharedmodule/llmswitch-core/rust-core
+      - v3/crates
+      - config
+    allowed_edges:
+      - from: RepoFilesystemAuthoring01Policy
+        to: RepoFilesystemVerify02Gate
+      - from: RepoFilesystemVerify02Gate
+        to: RepoFilesystemBuild03Required
+    forbidden_resources:
+      - request.normal_payload
+      - provider.wire_payload
+      - response.client_payload
+      - metadata.runtime_control
+  - module_id: v3.target_interpreter
+    owner_feature_id: v3.virtual_router_target_interpreter
+    status: implementation_active
+    owned_paths:
+      - v3/crates/routecodex-v3-target/**
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+      - docs/goals/v3-virtual-router-target-interpreter-plan.md
+      - docs/goals/v3-target-priority-context-heuristic-test-design.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+    forbidden_paths:
+      - src
+      - sharedmodule/llmswitch-core/rust-core
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+      - v3/crates/routecodex-v3-provider-responses/src/wire.rs
+      - v3/crates/routecodex-v3-server
+    allowed_edges:
+      - from: V3Router07OpaqueTargetHitOnce
+        to: V3Target08KindClassified
+      - from: V3Target08KindClassified
+        to: V3Target09CandidateSetExpanded
+      - from: V3Target09CandidateSetExpanded
+        to: V3Target10ConcreteProviderSelected
+    forbidden_resources:
+      - v3.request.normal_payload
+      - v3.provider.wire_payload
+      - v3.response.client_payload
+      - v3.metadata.runtime_control

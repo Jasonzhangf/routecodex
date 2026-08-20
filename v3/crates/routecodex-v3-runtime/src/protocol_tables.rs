@@ -659,39 +659,6 @@ mod tests {
             tables
                 .map_value(
                     V3TableKind::FinishReason,
-                    "anthropic",
-                    "pause_turn",
-                    V3TableDirection::Inbound
-                )
-                .unwrap(),
-            Some("pause_turn")
-        );
-        assert_eq!(
-            tables
-                .map_value(
-                    V3TableKind::FinishReason,
-                    "anthropic",
-                    "refusal",
-                    V3TableDirection::Inbound
-                )
-                .unwrap(),
-            Some("content_filter")
-        );
-        assert_eq!(
-            tables
-                .map_value(
-                    V3TableKind::FinishReason,
-                    "anthropic",
-                    "model_context_window_exceeded",
-                    V3TableDirection::Inbound
-                )
-                .unwrap(),
-            Some("context_window_exceeded")
-        );
-        assert_eq!(
-            tables
-                .map_value(
-                    V3TableKind::FinishReason,
                     "responses",
                     "requires_action",
                     V3TableDirection::Inbound
@@ -721,17 +688,6 @@ mod tests {
                 )
                 .unwrap(),
             Some("length")
-        );
-        assert_eq!(
-            tables
-                .map_value(
-                    V3TableKind::FinishReason,
-                    "anthropic",
-                    "content_filter",
-                    V3TableDirection::Outbound,
-                )
-                .unwrap(),
-            Some("refusal")
         );
         // 未命中
         assert_eq!(

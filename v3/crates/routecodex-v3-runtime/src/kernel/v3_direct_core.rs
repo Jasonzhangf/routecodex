@@ -18,6 +18,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
     transport: &T,
     provider_health: V3ProviderFailureRuntimeHealth,
     now_epoch_ms: u64,
+    allow_exhaustion_rescue_probe: bool,
     provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
 ) -> V3ResponsesDirectRuntimeOutput {
@@ -107,16 +108,26 @@ pub async fn execute_v3_direct_runtime_kernel_core<
     loop {
         let selected = match retry_selected.take() {
             Some(selected) => selected,
-            None => match select_v3_target_with_session_then_global(
-                &target,
+            None => match select_v3_expanded_target_with_exhaustion_rescue(
+                manifest,
                 expanded.clone(),
-                &availability,
+                &direct_failure_session_scope,
                 &provider_health,
                 &failed_candidates,
                 now_epoch_ms,
-            ) {
-                Ok(value) => value,
-                Err(error) => {
+                allow_exhaustion_rescue_probe,
+            )
+            .await
+            {
+                V3TargetSelectionAfterRescue::Selected(value) => value,
+                V3TargetSelectionAfterRescue::Failed(source) => {
+                    return error_output(
+                        source,
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    );
+                }
+                V3TargetSelectionAfterRescue::Exhausted(error) => {
                     // 可观测性：exhausted 时带全部候选明细（provider:alias:model:
                     // 原因），否则 console 只有 "N candidates unavailable" 无法诊断
                     // 哪个候选因何被冷却/排除。
@@ -440,6 +451,25 @@ pub async fn execute_v3_direct_runtime_kernel_core<
         };
         trace.push("V3ProviderResp14Raw");
         if provider_raw.status() >= 400 {
+            let provider_status = provider_raw.status();
+            let provider_name = provider_raw.provider_id().to_string();
+            let provider_detail = provider_raw.into_body_bytes().await.ok().and_then(|body| {
+                serde_json::from_slice::<serde_json::Value>(&body)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .pointer("/error/message")
+                            .or_else(|| value.pointer("/message"))
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string)
+                    })
+                    .or_else(|| {
+                        String::from_utf8(body)
+                            .ok()
+                            .filter(|text| !text.trim().is_empty())
+                            .map(|text| text.chars().take(512).collect())
+                    })
+            });
             if let Err(timing_error) = runtime_timing.finish_external() {
                 return error_output(
                     runtime_source("V3RuntimeTimingExternal", timing_error),
@@ -450,19 +480,23 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             let source = build_v3_error_01_source_raised_external(
                 V3ErrorSourceKind::ProviderFailure,
                 "V3ProviderResp14Raw",
-                format!("provider_http_{}", provider_raw.status()),
-                format!(
-                    "provider {} returned {}",
-                    provider_raw.provider_id(),
-                    provider_raw.status()
+                format!("provider_http_{provider_status}"),
+                provider_detail.as_deref().map_or_else(
+                    || format!("provider {provider_name} returned {provider_status}"),
+                    |detail| {
+                        format!("provider {provider_name} returned {provider_status}: {detail}")
+                    },
                 ),
                 V3ExternalErrorLink {
                     kind: V3ExternalErrorKind::Provider,
-                    status: Some(provider_raw.status()),
-                    code: Some(format!("HTTP_{}", provider_raw.status())),
-                    provider_id: Some(provider_raw.provider_id().to_string()),
+                    status: Some(provider_status),
+                    code: Some(format!("HTTP_{provider_status}")),
+                    provider_id: Some(provider_name),
                     upstream_request_id: None,
-                    message: Some(format!("provider returned HTTP {}", provider_raw.status())),
+                    message: Some(provider_detail.as_deref().map_or_else(
+                        || format!("provider returned HTTP {provider_status}"),
+                        |detail| format!("provider returned HTTP {provider_status}: {detail}"),
+                    )),
                 },
             );
             drop(provider_action_permit.take());
@@ -478,7 +512,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                 },
                 C::policy_target(&policy),
                 source,
-                provider_raw.status(),
+                provider_status,
                 &mut V3DirectProviderFailurePolicyState {
                     failed_candidates: &mut failed_candidates,
                     same_candidate_retries: &mut same_candidate_retries,
@@ -548,7 +582,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
                         C::policy_target(&policy),
                         C::ENTRY_PROTOCOL,
                         "json",
-                        Some(provider_raw.status()),
+                        Some(provider_status),
                         "failed",
                         provider_failure_events.clone(),
                         false,
@@ -564,106 +598,134 @@ pub async fn execute_v3_direct_runtime_kernel_core<
             }
         }
         let provider_status = provider_raw.status();
-        let response_projection = match C::run_response_projection(provider_raw).await {
-            Ok(projection) => projection,
-            Err(source) => {
-                if let Err(error) = runtime_timing.finish_external() {
-                    return error_output(
-                        runtime_source("V3RuntimeTimingExternal", error),
-                        trace,
-                        &crate::hooks::register_responses_direct_hooks(),
-                    );
-                }
-                drop(provider_action_permit.take());
-                let policy_result = match run_v3_direct_provider_failure_policy(
-                    &V3DirectProviderFailurePolicyContext {
-                        failure_session_scope: &direct_failure_session_scope,
-                        provider_health: &provider_health,
-                        run_error: C::run_error,
-                        availability: &availability,
-                        expanded: Some(&expanded),
-                        provider_pinned: false,
-                        now_epoch_ms,
-                    },
-                    C::policy_target(&policy),
-                    source,
-                    502,
-                    &mut V3DirectProviderFailurePolicyState {
-                        failed_candidates: &mut failed_candidates,
-                        same_candidate_retries: &mut same_candidate_retries,
-                        trace: &mut trace,
-                    },
+        let response_projection_context = match crate::kernel::v3_direct_protocol_codec::build_direct_response_compat_context(
+            C::policy_target(&policy),
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3DirectResp14ProviderCompat", error),
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
                 )
-                .await
-                {
-                    Ok(result) => result,
-                    Err(source) => {
+            }
+        };
+        let response_projection = match C::run_response_projection(
+            provider_raw,
+            response_projection_context,
+        )
+        .await
+        {
+                Ok(projection) => projection,
+                Err(source) => {
+                    if let Err(error) = runtime_timing.finish_external() {
+                        return error_output(
+                            runtime_source("V3RuntimeTimingExternal", error),
+                            trace,
+                            &crate::hooks::register_responses_direct_hooks(),
+                        );
+                    }
+                    if !matches!(
+                        source.source_kind,
+                        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
+                    ) {
                         return error_output(
                             source,
                             trace,
                             &crate::hooks::register_responses_direct_hooks(),
-                        )
+                        );
                     }
-                };
-                if let Some(event) = policy_result.event.clone() {
-                    provider_failure_events.push(event.clone());
-                    publish_v3_direct_provider_failure_event(
-                        provider_failure_event_sink,
+                    drop(provider_action_permit.take());
+                    let policy_result = match run_v3_direct_provider_failure_policy(
+                        &V3DirectProviderFailurePolicyContext {
+                            failure_session_scope: &direct_failure_session_scope,
+                            provider_health: &provider_health,
+                            run_error: C::run_error,
+                            availability: &availability,
+                            expanded: Some(&expanded),
+                            provider_pinned: false,
+                            now_epoch_ms,
+                        },
                         C::policy_target(&policy),
-                        C::ENTRY_PROTOCOL,
-                        "json",
-                        Some(event.status),
-                        &provider_failure_events,
-                        &event,
-                        total_attempts(&accumulator, send_attempts),
-                    );
-                }
-                match &policy_result.decision.action {
-                    V3Error05ExecutionAction::WaitThenReselect { recovery } => {
-                        pending_provider_action_recovery = Some(recovery.clone());
-                        continue;
-                    }
-                    V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
-                        retry_selected = policy_result.retry_selected.map(|selected| *selected);
-                        pending_provider_action_recovery = Some(recovery.clone());
-                        continue;
-                    }
-                    _ => {
-                        if let Err(release_error) = C::release_after_error(
-                            &control,
-                            manifest,
-                            C::server_id(&standardized),
-                            &standardized,
-                            C::request_id(&standardized),
-                            &mut trace,
-                        ) {
+                        source,
+                        502,
+                        &mut V3DirectProviderFailurePolicyState {
+                            failed_candidates: &mut failed_candidates,
+                            same_candidate_retries: &mut same_candidate_retries,
+                            trace: &mut trace,
+                        },
+                    )
+                    .await
+                    {
+                        Ok(result) => result,
+                        Err(source) => {
                             return error_output(
-                                release_error,
+                                source,
                                 trace,
                                 &crate::hooks::register_responses_direct_hooks(),
-                            );
+                            )
                         }
-                        let mut observability = build_v3_direct_runtime_observability(
+                    };
+                    if let Some(event) = policy_result.event.clone() {
+                        provider_failure_events.push(event.clone());
+                        publish_v3_direct_provider_failure_event(
+                            provider_failure_event_sink,
                             C::policy_target(&policy),
                             C::ENTRY_PROTOCOL,
                             "json",
-                            policy_result.event.as_ref().map(|event| event.status),
-                            "failed",
-                            provider_failure_events.clone(),
-                            false,
-                        );
-                        observability.attempts = Some(total_attempts(&accumulator, send_attempts));
-                        let projected =
-                            V3ErrorHandlingCenter::project_terminal(policy_result.decision);
-                        return projected_error_output_with_observability(
-                            projected,
-                            trace,
-                            Some(observability),
+                            Some(event.status),
+                            &provider_failure_events,
+                            &event,
+                            total_attempts(&accumulator, send_attempts),
                         );
                     }
+                    match &policy_result.decision.action {
+                        V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                            pending_provider_action_recovery = Some(recovery.clone());
+                            continue;
+                        }
+                        V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
+                            retry_selected = policy_result.retry_selected.map(|selected| *selected);
+                            pending_provider_action_recovery = Some(recovery.clone());
+                            continue;
+                        }
+                        _ => {
+                            if let Err(release_error) = C::release_after_error(
+                                &control,
+                                manifest,
+                                C::server_id(&standardized),
+                                &standardized,
+                                C::request_id(&standardized),
+                                &mut trace,
+                            ) {
+                                return error_output(
+                                    release_error,
+                                    trace,
+                                    &crate::hooks::register_responses_direct_hooks(),
+                                );
+                            }
+                            let mut observability = build_v3_direct_runtime_observability(
+                                C::policy_target(&policy),
+                                C::ENTRY_PROTOCOL,
+                                "json",
+                                policy_result.event.as_ref().map(|event| event.status),
+                                "failed",
+                                provider_failure_events.clone(),
+                                false,
+                            );
+                            observability.attempts =
+                                Some(total_attempts(&accumulator, send_attempts));
+                            let projected =
+                                V3ErrorHandlingCenter::project_terminal(policy_result.decision);
+                            return projected_error_output_with_observability(
+                                projected,
+                                trace,
+                                Some(observability),
+                            );
+                        }
+                    }
                 }
-            }
-        };
+            };
         if let Err(commit_error) = C::commit_after_response(
             &control,
             manifest,

@@ -82,9 +82,3 @@ fn direct_sse_thinking_tag_compat_keeps_ordinary_response_byte_exact() {
         input
     );
 }
-
-#[test]
-fn direct_sse_thinking_tag_compat_does_not_turn_nonterminal_stream_into_502() {
-    let input = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n";
-    assert_eq!(rewrite_v3_direct_thinking_tag_sse_bytes(input).unwrap(), input);
-}

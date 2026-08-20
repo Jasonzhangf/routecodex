@@ -7,10 +7,10 @@ use super::{
     build_v3_openai_responses_standard_request_from_chat_canonical,
     encode_v3_responses_semantic_as_anthropic_request, provider_protocol_compat_id,
     V3HubOpaquePayload, V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic,
-    V3ProviderCompatError, V3ProviderCompatProfileId,
+    classify_v3_provider_compat_error, V3ProviderCompatError, V3ProviderCompatProfileId,
 };
 use provider_compat_core::req_outbound_stage3_compat::{
-    run_req_outbound_stage3_compat, AdapterContext, CompatResult, ReqOutboundCompatInput,
+    run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
 };
 use serde_json::Value;
 
@@ -23,8 +23,6 @@ pub struct ProviderReqCompat06ProviderCompat {
     pub(crate) previous: V3HubReqOutbound07ProviderSemantic,
     pub(crate) profile: V3ProviderCompatProfileId,
     pub(crate) payload: V3HubOpaquePayload,
-    applied_profile: Option<String>,
-    native_applied: bool,
 }
 
 pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
@@ -34,27 +32,17 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
         Some(profile) => V3ProviderCompatProfileId::from_config(Some(profile)),
         None => V3ProviderCompatProfileId::Passthrough,
     };
-    let compat = apply_v3_provider_req_compat(&input, &profile)?;
+    let payload = apply_v3_provider_req_compat(&input, &profile)?;
     Ok(ProviderReqCompat06ProviderCompat {
         previous: input,
         profile,
-        payload: V3HubOpaquePayload(std::sync::Arc::new(compat.payload)),
-        applied_profile: compat.applied_profile,
-        native_applied: compat.native_applied,
+        payload: V3HubOpaquePayload(std::sync::Arc::new(payload)),
     })
 }
 
 impl ProviderReqCompat06ProviderCompat {
     pub fn profile(&self) -> &V3ProviderCompatProfileId {
         &self.profile
-    }
-
-    pub fn applied_profile(&self) -> Option<&str> {
-        self.applied_profile.as_deref()
-    }
-
-    pub fn native_applied(&self) -> bool {
-        self.native_applied
     }
 
     pub(crate) fn provider_semantic_payload(&self) -> &Value {
@@ -65,71 +53,36 @@ impl ProviderReqCompat06ProviderCompat {
 fn apply_v3_provider_req_compat(
     input: &V3HubReqOutbound07ProviderSemantic,
     profile: &V3ProviderCompatProfileId,
-) -> Result<CompatResult, V3ProviderCompatError> {
+) -> Result<Value, V3ProviderCompatError> {
     let reasoning_effort_explicit =
         provider_req_compat_reasoning_effort_explicit(input.provider_semantic_payload());
-    let payload =
-        build_v3_provider_standard_protocol_payload_from_req07(input).map_err(|reason| {
-            V3ProviderCompatError {
-                stage: "request_protocol",
-                profile: profile.as_str().to_string(),
-                reason,
-            }
+    let payload = build_v3_provider_standard_protocol_payload_from_req07(input).map_err(|reason| {
+            classify_v3_provider_compat_error("request_protocol", profile, reason)
         })?;
-    let mut compat = apply_v3_provider_req_compat_profile(
+    apply_v3_provider_req_compat_to_provider_payload(
         payload,
         input.selected_target(),
         input.provider_protocol,
         profile,
-        reasoning_effort_explicit,
-    )?;
-    normalize_deepseek_thinking_stopless_tool_choice(
-        &mut compat.payload,
-        input.selected_target(),
-        input.provider_protocol,
-    );
-    Ok(compat)
+    )
 }
 
 pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
-    payload: Value,
+    mut payload: Value,
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
     profile: &V3ProviderCompatProfileId,
-    reasoning_effort_explicit: bool,
 ) -> Result<Value, V3ProviderCompatError> {
-    let mut compat = apply_v3_provider_req_compat_profile(
-        payload,
-        selected,
-        provider_protocol,
-        profile,
-        reasoning_effort_explicit,
-    )?;
-    normalize_deepseek_thinking_stopless_tool_choice(
-        &mut compat.payload,
-        selected,
-        provider_protocol,
-    );
-    Ok(compat.payload)
-}
-
-fn apply_v3_provider_req_compat_profile(
-    payload: Value,
-    selected: &routecodex_v3_target::V3TargetCandidate,
-    provider_protocol: V3HubProviderWireProtocol,
-    profile: &V3ProviderCompatProfileId,
-    reasoning_effort_explicit: bool,
-) -> Result<CompatResult, V3ProviderCompatError> {
+    project_reasoning_effort_for_selected_target(&mut payload, selected, provider_protocol)?;
     let provider_key = format!(
         "{}:{}:{}",
         selected.provider_id, selected.auth_alias, selected.model_id
     );
-    run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+    let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
         payload,
         adapter_context: AdapterContext {
             compatibility_profile: profile.as_optional_string(),
             provider_protocol: Some(provider_protocol_compat_id(provider_protocol)),
-            reasoning_effort_explicit: Some(reasoning_effort_explicit),
             model_id: Some(selected.model_id.clone()),
             original_model_id: Some(selected.wire_model.clone()),
             provider_id: Some(selected.provider_id.clone()),
@@ -142,23 +95,127 @@ fn apply_v3_provider_req_compat_profile(
         },
         explicit_profile: profile.as_optional_string(),
     })
-    .map_err(|reason| V3ProviderCompatError {
-        stage: "request",
-        profile: profile.as_str().to_string(),
-        reason,
-    })
+    .map(|result| result.payload)
+    .map_err(|reason| classify_v3_provider_compat_error("request", profile, reason))?;
+    let mut result = result;
+    project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
+    normalize_deepseek_thinking_stopless_tool_choice(&mut result, selected, provider_protocol);
+    Ok(result)
 }
 
-pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> bool {
-    payload
-        .get("reasoning_effort")
-        .or_else(|| {
-            payload
-                .get("reasoning")
-                .and_then(Value::as_object)
-                .and_then(|reasoning| reasoning.get("effort"))
-        })
-        .is_some()
+fn project_reasoning_effort_for_selected_target(
+    payload: &mut Value,
+    selected: &routecodex_v3_target::V3TargetCandidate,
+    provider_protocol: V3HubProviderWireProtocol,
+) -> Result<(), V3ProviderCompatError> {
+    let is_deepseek = matches!(
+        selected.compatibility_profile.as_deref(),
+        Some("chat:deepseek-max" | "responses:deepseek-console-go")
+    );
+    let is_minimax = selected.compatibility_profile.as_deref() == Some("chat:minimax");
+
+    let effort_path = match provider_protocol {
+        V3HubProviderWireProtocol::Responses => "/reasoning/effort",
+        V3HubProviderWireProtocol::OpenAiChat => "/reasoning_effort",
+        V3HubProviderWireProtocol::Anthropic => "/output_config/effort",
+        V3HubProviderWireProtocol::Gemini => return Ok(()),
+    };
+    let Some(raw_effort) = payload.pointer(effort_path).cloned() else {
+        return Ok(());
+    };
+    let effort = raw_effort
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| V3ProviderCompatError {
+            stage: "request_reasoning_effort_projection",
+            profile: selected
+                .compatibility_profile
+                .clone()
+                .unwrap_or_else(|| "protocol-default".to_string()),
+            reason: format!("non_empty_string_required path={effort_path}"),
+        })?
+        .to_ascii_lowercase();
+
+    if is_minimax {
+        match provider_protocol {
+            V3HubProviderWireProtocol::Anthropic => {
+                if let Some(root) = payload.as_object_mut() {
+                    if let Some(output_config) =
+                        root.get_mut("output_config").and_then(Value::as_object_mut)
+                    {
+                        output_config.remove("effort");
+                        if output_config.is_empty() {
+                            root.remove("output_config");
+                        }
+                    }
+                    if effort != "none" {
+                        root.insert(
+                            "thinking".to_string(),
+                            serde_json::json!({"type":"adaptive"}),
+                        );
+                    }
+                }
+            }
+            V3HubProviderWireProtocol::OpenAiChat => {
+                if let Some(root) = payload.as_object_mut() {
+                    root.remove("reasoning_effort");
+                }
+            }
+            _ => {}
+        }
+        return Ok(());
+    }
+
+    let projected = if is_deepseek {
+        match effort.as_str() {
+            "none" => "none",
+            "xhigh" | "max" => "max",
+            _ => "high",
+        }
+    } else {
+        match provider_protocol {
+            V3HubProviderWireProtocol::Responses | V3HubProviderWireProtocol::OpenAiChat => {
+                match effort.as_str() {
+                    "none" | "minimal" | "low" | "medium" | "high" | "xhigh" => effort.as_str(),
+                    "max" => "xhigh",
+                    _ => "medium",
+                }
+            }
+            V3HubProviderWireProtocol::Anthropic => match effort.as_str() {
+                "none" | "minimal" => "low",
+                "low" | "medium" | "high" | "xhigh" | "max" => effort.as_str(),
+                _ => "medium",
+            },
+            V3HubProviderWireProtocol::Gemini => unreachable!(),
+        }
+    };
+
+    match provider_protocol {
+        V3HubProviderWireProtocol::Responses => {
+            if let Some(reasoning) = payload.get_mut("reasoning").and_then(Value::as_object_mut) {
+                reasoning.insert("effort".to_string(), Value::String(projected.to_string()));
+            }
+        }
+        V3HubProviderWireProtocol::OpenAiChat => {
+            if let Some(root) = payload.as_object_mut() {
+                root.insert(
+                    "reasoning_effort".to_string(),
+                    Value::String(projected.to_string()),
+                );
+            }
+        }
+        V3HubProviderWireProtocol::Anthropic => {
+            if let Some(output_config) = payload
+                .get_mut("output_config")
+                .and_then(Value::as_object_mut)
+            {
+                output_config.insert("effort".to_string(), Value::String(projected.to_string()));
+            }
+        }
+        V3HubProviderWireProtocol::Gemini => unreachable!(),
+    }
+    Ok(())
 }
 
 fn build_v3_provider_standard_protocol_payload_from_req07(
@@ -260,6 +317,7 @@ mod tests {
             model_capabilities: vec!["text".to_string()],
             web_search_execution_mode: V3WebSearchExecutionMode::None,
             max_context_tokens: None,
+            context_token_estimate_scale_bps: 10_000,
             base_url: "https://provider.invalid/v1".to_string(),
             responses_process: None,
             responses_transport: V3ResponsesTransportKind::Http,
@@ -605,12 +663,7 @@ mod tests {
             json!({
                 "model": "client-route-alias",
                 "input": "hello",
-                "client_metadata": {
-                    "session_id": "session-1",
-                    "thread_id": "thread-1",
-                    "turn_id": "turn-1",
-                    "root_turn_id": "root-turn-1"
-                },
+                "client_metadata": {"session_id": "session-1"},
                 "stream": false
             }),
             V3HubProviderWireProtocol::Anthropic,
@@ -744,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_max_profile_uses_max_when_only_summary_projects_an_effort() {
+    fn deepseek_profile_maps_summary_derived_medium_to_official_high_domain() {
         let mut req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Responses,
             json!({
@@ -758,11 +811,11 @@ mod tests {
             Some("chat:deepseek-max".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect("summary-derived effort must preserve the DeepSeek default max");
+            .expect("summary-derived medium must use the DeepSeek high projection");
 
         assert_eq!(
             req_compat.provider_semantic_payload()["reasoning_effort"],
-            "max"
+            "high"
         );
     }
 
@@ -853,67 +906,6 @@ mod tests {
             web_search["function"]["parameters"]["properties"]["search_content_types"]["default"],
             json!(["text", "image"])
         );
-    }
-
-    #[test]
-    fn glm_anthropic_request_outbound_runs_standard_codec_before_provider_compat() {
-        let mut req07 = relay_req07_for_entry(
-            V3HubEntryProtocol::Responses,
-            json!({
-                "model": "gpt-5.5",
-                "messages": [{"role":"user","content":"search before reasoning"}],
-                "reasoning_effort": "high",
-                "reasoning_summary_policy": "detailed",
-                "tools": [
-                    {
-                        "type": "function",
-                        "name": "read_file",
-                        "description": "Read one file",
-                        "parameters": {"type":"object","properties":{}}
-                    },
-                    {
-                        "type": "web_search",
-                        "external_web_access": true,
-                        "search_content_types": ["text", "image"],
-                        "search_context_size": "medium"
-                    }
-                ]
-            }),
-            V3HubProviderWireProtocol::Anthropic,
-        );
-        req07.previous.selected_target.provider_id = "glmrelay_anthropic".to_string();
-        req07.previous.selected_target.provider_type = "anthropic".to_string();
-        req07.previous.selected_target.model_id = "glm-5.2".to_string();
-        req07.previous.selected_target.wire_model = "glm-5.2".to_string();
-        req07.previous.selected_target.model_capabilities = vec![
-            "text".to_string(),
-            "reasoning".to_string(),
-            "tools".to_string(),
-            "web_search".to_string(),
-        ];
-        req07.previous.selected_target.web_search_execution_mode =
-            V3WebSearchExecutionMode::NativeRemoteSearchToolMix;
-        req07.previous.selected_target.compatibility_profile = Some("chat:glm".to_string());
-
-        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect("GLM request outbound must encode standard Anthropic before provider compat");
-        let payload = req_compat.provider_semantic_payload();
-
-        assert_eq!(payload["model"], "glm-5.2");
-        assert_eq!(req_compat.applied_profile(), Some("chat:glm"));
-        assert!(req_compat.native_applied());
-        assert_eq!(payload["thinking"]["type"], "adaptive");
-        assert_eq!(payload["output_config"]["effort"], "high");
-        let tools = payload["tools"].as_array().expect("provider tools");
-        assert!(tools
-            .iter()
-            .any(|tool| { tool.get("name").and_then(Value::as_str) == Some("read_file") }));
-        assert!(tools.iter().any(|tool| {
-            tool.get("type").and_then(Value::as_str) == Some("web_search_20250305")
-                && tool.get("name").and_then(Value::as_str) == Some("web_search")
-        }));
-        assert!(payload.get("reasoning_effort").is_none());
-        assert!(payload.get("web_search_options").is_none());
     }
 
     #[test]
