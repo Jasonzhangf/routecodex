@@ -135,8 +135,10 @@ pub(crate) fn classify_v3_provider_sse_json_data(
     if is_v3_provider_sse_protocol_neutral_keepalive_json_event(&event) {
         return Ok(None);
     }
-    if provider_protocol == V3HubProviderWireProtocol::Anthropic
-        && event.get("type").and_then(Value::as_str) == Some("ping")
+    if matches!(
+        provider_protocol,
+        V3HubProviderWireProtocol::Responses | V3HubProviderWireProtocol::Anthropic
+    ) && event.get("type").and_then(Value::as_str) == Some("ping")
     {
         return Ok(None);
     }
@@ -214,7 +216,15 @@ fn is_v3_provider_sse_protocol_neutral_keepalive_json_event(event: &Value) -> bo
     let Some(object) = event.as_object() else {
         return false;
     };
-    object.contains_key("ping") || object.is_empty()
+    if matches!(
+        object.get("choices").and_then(Value::as_array),
+        Some(choices) if choices.is_empty()
+    ) {
+        return true;
+    }
+    object.get("type").and_then(Value::as_str) == Some("ping")
+        || object.contains_key("ping")
+        || object.is_empty()
 }
 
 /// 非 JSON keepalive data 文本（如 `data: ping` / `data: keep-alive`）：
@@ -526,7 +536,7 @@ fn response_message_part_has_client_output(part: &Value) -> Result<bool, String>
         .and_then(Value::as_str)
         .ok_or_else(|| "provider Responses message content part requires type".to_string())?;
     let field = match part_type {
-        "output_text" => "text",
+        "output_text" | "reasoning_text" | "summary_text" => "text",
         "refusal" => "refusal",
         "output_audio" => "transcript",
         other => {
@@ -886,6 +896,44 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
+    fn responses_reasoning_content_part_events_are_registered() {
+        let classify = |data| {
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, data)
+                .expect("Responses reasoning content part must classify")
+        };
+        assert_eq!(
+            classify(
+                r#"{"type":"response.content_part.added","part":{"type":"reasoning_text","text":"thinking"}}"#
+            ),
+            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
+        );
+        assert_eq!(
+            classify(
+                r#"{"type":"response.content_part.added","part":{"type":"summary_text","text":"summary"}}"#
+            ),
+            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
+        );
+        assert_eq!(
+            classify(
+                r#"{"type":"response.content_part.added","part":{"type":"reasoning_text","text":""}}"#
+            ),
+            Some(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
+        );
+    }
+
+    #[test]
+    fn responses_ping_event_is_keepalive() {
+        assert_eq!(
+            classify_v3_provider_sse_json_data(
+                V3HubProviderWireProtocol::Responses,
+                r#"{"type":"ping"}"#,
+            )
+            .expect("Responses ping must remain a keepalive"),
+            None
+        );
+    }
+
+    #[test]
     fn responses_reasoning_text_terminal_regression_is_registered() {
         let reasoning_item = r#"{"type":"reasoning","id":"reasoning_1","status":"incomplete","content":[{"type":"reasoning_text","text":"We need answer exactly."}],"summary":[],"encrypted_content":"cipher-1"}"#;
         let item_done = format!(
@@ -1029,6 +1077,18 @@ mod provider_sse_json_codec_tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn json_ping_event_is_transport_keepalive() {
+        assert_eq!(
+            classify_v3_provider_sse_json_data(
+                V3HubProviderWireProtocol::Responses,
+                r#"{"type":"ping"}"#,
+            )
+                .expect("JSON ping must remain a keepalive"),
+            None,
+        );
     }
 
     #[test]

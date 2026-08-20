@@ -199,6 +199,7 @@ struct V3ProviderFailureSessionKey {
 #[derive(Debug, Clone)]
 struct V3ProviderCooldown {
     reason: String,
+    original_cooldown_until_ms: Option<u64>,
     until_ms: Option<u64>,
     next_probe_at_ms: Option<u64>,
     probe_in_flight: bool,
@@ -456,6 +457,7 @@ impl V3ProviderHealthStore {
                 reason: record_reason
                     .clone()
                     .unwrap_or_else(|| "provider_consecutive_failures".to_string()),
+                original_cooldown_until_ms: cooldown_until_ms,
                 until_ms: cooldown_until_ms,
                 // provider 级冷却到期后由后台 probe 复活；until_restart 冷却
                 // 不设探针（保持"直到重启"语义）。
@@ -534,6 +536,7 @@ impl V3ProviderHealthStore {
                 reason: reason
                     .map(str::to_string)
                     .unwrap_or_else(|| "provider_transient_exhausted".to_string()),
+                original_cooldown_until_ms: Some(until_ms),
                 until_ms: Some(until_ms),
                 next_probe_at_ms: None,
                 probe_in_flight: false,
@@ -801,35 +804,6 @@ impl V3ProviderHealthStore {
             now_ms.saturating_add(probe_state.probe_interval_ms.max(1)),
         );
         Ok(())
-    }
-
-    pub fn try_acquire_cross_session_revive(
-        &self,
-        failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        now_ms: u64,
-    ) -> Result<bool, V3ProviderHealthError> {
-        let key =
-            provider_failure_session_key(failure_session_scope, provider_id, auth_alias, model_id);
-        let mut state = self
-            .state
-            .write()
-            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let Some(cooldown) = state.cooldowns.get(&key).cloned() else {
-            // Revival is an admission to clear an expired cooldown.  A
-            // provider with no cooldown has nothing to revive and must not
-            // be mistaken for a successful cross-session recovery.
-            return Ok(false);
-        };
-        if cooldown.until_ms.is_some_and(|until_ms| until_ms > now_ms) {
-            return Ok(false);
-        }
-        let _original_cooldown_until_ms = cooldown.original_cooldown_until_ms;
-        state.cooldowns.remove(&key);
-        state.consecutive_failures.remove(&key);
-        Ok(true)
     }
 
     pub(crate) fn update_quota_state(
@@ -1228,8 +1202,13 @@ fn upsert_provider_cooldown_probe_with_interval(
             provider_id,
             auth_alias,
             model_id,
-        ))
-        .is_some_and(|probe_state| probe_state.probe_in_flight);
+        ));
+    let probe_in_flight = existing.is_some_and(|probe_state| probe_state.probe_in_flight);
+    let rescue_probe_attempted =
+        existing.is_some_and(|probe_state| probe_state.rescue_probe_attempted);
+    let completion = existing
+        .map(|probe_state| probe_state.completion.clone())
+        .unwrap_or_else(|| tokio::sync::watch::channel(false).0);
     state.provider_cooldown_probes.insert(
         provider_cooldown_probe_key(provider_id, auth_alias, model_id),
         V3ProviderCooldownProbeState {

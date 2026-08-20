@@ -185,6 +185,7 @@ pub fn run_init(options: &InitOptions) -> Result<(), String> {
             max_context: None,
             max_context_tokens: None,
             context_window: None,
+            context_token_estimate_scale_bps: 10_000,
             web_search_execution_mode: None,
             web_search_backend: None,
             features: BTreeMap::new(),
