@@ -32,6 +32,14 @@ use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
+
+fn provider_failure_probe_interval_ms(scope: V3ProviderFailureCooldownScope) -> u64 {
+    let policy = v3_internal_error_handling();
+    match scope {
+        V3ProviderFailureCooldownScope::AuthKey => policy.unrecoverable_probe_interval_ms,
+        V3ProviderFailureCooldownScope::Session => policy.recoverable_probe_interval_ms,
+    }
+}
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -578,7 +586,7 @@ impl V3ProviderFailureRuntimeHealth {
                         auth_alias.as_deref(),
                         model_id.as_deref(),
                         now_ms,
-                        v3_internal_error_handling().unrecoverable_probe_interval_ms,
+                        provider_failure_probe_interval_ms(V3ProviderFailureCooldownScope::AuthKey),
                     )?;
                     return Err(format!(
                         "startup provider cooldown probe failed for {provider_id}: {error}"
@@ -632,7 +640,7 @@ impl V3ProviderFailureRuntimeHealth {
                         auth_alias.as_deref(),
                         model_id.as_deref(),
                         now_ms,
-                        v3_internal_error_handling().unrecoverable_probe_interval_ms,
+                        provider_failure_probe_interval_ms(V3ProviderFailureCooldownScope::AuthKey),
                     )?;
                     probe_errors.push(format!(
                         "persistent provider probe failed for {provider_id}: {error}"
@@ -694,7 +702,7 @@ impl V3ProviderFailureRuntimeHealth {
                         permit.auth_alias(),
                         permit.model_id(),
                         now_ms,
-                        v3_internal_error_handling().recoverable_probe_interval_ms,
+                        provider_failure_probe_interval_ms(V3ProviderFailureCooldownScope::Session),
                     )?;
                     probe_errors.push(format!(
                         "persistent provider key probe failed for {}:{}:{}: {error}",

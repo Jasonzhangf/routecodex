@@ -224,6 +224,81 @@ fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
     }
 }
 
+#[test]
+fn classified_probe_intervals_keep_auth_key_and_recoverable_cadences_distinct() {
+    assert_eq!(
+        provider_failure_probe_interval_ms(V3ProviderFailureCooldownScope::AuthKey),
+        60 * 60_000
+    );
+    assert_eq!(
+        provider_failure_probe_interval_ms(V3ProviderFailureCooldownScope::Session),
+        15 * 60_000
+    );
+}
+
+#[test]
+fn configured_provider_health_threshold_is_applied_to_key_cooldown() {
+    let mut manifest = global_pool_alive_manifest("configured_key_threshold");
+    manifest
+        .providers
+        .get_mut("first")
+        .expect("first provider")
+        .health = Some(routecodex_v3_config::V3ProviderHealthAuthoringConfig {
+        enabled: true,
+        failure_threshold: 2,
+        cooldown_ms: 1_234,
+    });
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let scope = test_provider_failure_scope(
+        "configured_key_threshold",
+        "configured_key_threshold",
+        "configured-key-threshold",
+    )
+    .unwrap();
+    for attempt in 0..2 {
+        health
+            .record_provider_failure_record_with_policy(
+                None,
+                &manifest,
+                &scope,
+                "first",
+                Some("responses"),
+                Some("key1"),
+                Some("gpt-test"),
+                Some("configured threshold failure"),
+                "V3ProviderRespInbound01Raw",
+                500,
+                Some("provider_http_error"),
+                "configured threshold failure",
+                10_000 + attempt,
+            )
+            .unwrap();
+    }
+    assert!(
+        !health
+            .key_health
+            .scheduling_projection("first", "key1", "gpt-test", 1, 1, 10_000)
+            .unwrap()
+            .available
+    );
+    assert_eq!(
+        health
+            .key_health
+            .provider_key_health_probe_keys(11_234, false)
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        health
+            .key_health
+            .provider_key_health_probe_keys(11_235, false)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
 fn resolve_target(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
