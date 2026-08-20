@@ -71,10 +71,7 @@ pub enum CatalogError {
 impl std::fmt::Display for CatalogError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::DuplicateConflict {
-                plugin_id,
-                version,
-            } => write!(
+            Self::DuplicateConflict { plugin_id, version } => write!(
                 formatter,
                 "catalog conflict for {plugin_id}@{version}: identity fields differ"
             ),
@@ -86,24 +83,21 @@ impl std::fmt::Display for CatalogError {
                 formatter,
                 "plugin {plugin_id} owned by {owner} conflicts with existing owner {existing_owner}"
             ),
-            Self::ArtifactHashMismatch {
-                plugin_id,
-                version,
-            } => write!(
+            Self::ArtifactHashMismatch { plugin_id, version } => write!(
                 formatter,
                 "{plugin_id}@{version}: artifact hash does not match registered bytes"
             ),
-            Self::ContractHashMismatch {
-                plugin_id,
-                version,
-            } => write!(
+            Self::ContractHashMismatch { plugin_id, version } => write!(
                 formatter,
                 "{plugin_id}@{version}: contract hash does not match registered contract"
             ),
             Self::MissingDependency {
                 plugin_id,
                 dependency,
-            } => write!(formatter, "plugin {plugin_id} missing dependency {dependency}"),
+            } => write!(
+                formatter,
+                "plugin {plugin_id} missing dependency {dependency}"
+            ),
             Self::UnsatisfiedVersion {
                 plugin_id,
                 dependency,
@@ -321,10 +315,8 @@ impl PluginCatalog {
                 }
             }
         }
-        let mut in_degree: HashMap<&str, usize> = adjacency
-            .keys()
-            .map(|id| (*id, 0usize))
-            .collect();
+        let mut in_degree: HashMap<&str, usize> =
+            adjacency.keys().map(|id| (*id, 0usize)).collect();
         for targets in adjacency.values() {
             for target in targets {
                 *in_degree.get_mut(target).expect("target tracked") += 1;
@@ -495,14 +487,17 @@ mod tests {
         let artifact_hash = sha256_hex(&artifact);
         let contract_hash = sha256_hex(&contract);
         let mut catalog = PluginCatalog::new();
-        let mut dependent = entry("v4.request.dependent", "0.1.0", &artifact_hash, &contract_hash);
+        let mut dependent = entry(
+            "v4.request.dependent",
+            "0.1.0",
+            &artifact_hash,
+            &contract_hash,
+        );
         dependent.depends_on = vec![DependencySpec {
             plugin_id: "v4.request.missing".to_string(),
             version_req: "0.1.0".to_string(),
         }];
-        catalog
-            .register(dependent, &artifact, &contract)
-            .unwrap();
+        catalog.register(dependent, &artifact, &contract).unwrap();
         let error = catalog.resolve_dependencies().unwrap_err();
         assert!(matches!(error, CatalogError::MissingDependency { .. }));
     }
@@ -516,19 +511,27 @@ mod tests {
         let mut catalog = PluginCatalog::new();
         catalog
             .register(
-                entry("v4.request.provider", "0.1.0", &artifact_hash, &contract_hash),
+                entry(
+                    "v4.request.provider",
+                    "0.1.0",
+                    &artifact_hash,
+                    &contract_hash,
+                ),
                 &artifact,
                 &contract,
             )
             .unwrap();
-        let mut dependent = entry("v4.request.dependent", "0.1.0", &artifact_hash, &contract_hash);
+        let mut dependent = entry(
+            "v4.request.dependent",
+            "0.1.0",
+            &artifact_hash,
+            &contract_hash,
+        );
         dependent.depends_on = vec![DependencySpec {
             plugin_id: "v4.request.provider".to_string(),
             version_req: ">=0.2.0".to_string(),
         }];
-        catalog
-            .register(dependent, &artifact, &contract)
-            .unwrap();
+        catalog.register(dependent, &artifact, &contract).unwrap();
         let error = catalog.resolve_dependencies().unwrap_err();
         assert!(matches!(error, CatalogError::UnsatisfiedVersion { .. }));
     }

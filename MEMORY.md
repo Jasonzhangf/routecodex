@@ -5574,3 +5574,68 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
   参数：`inject` 对 host 容器服务 + 节点内插件 `services_provided` 联合校验
   （15 tests）；`playground/**` 归 routecodex-v4-governance 模块。
 Tags: #v4 #cordis #node-container #plugin #isolation #experiment
+
+## 2026-08-18 V3 架构审计确证
+- HEAD `4638bde6d` 的 V3 审计发现：`v3.web_search_servertool_state_machine` 在 function/verification/mainline registry 仍是 design / design_only_not_implemented，8 条边均 binding_pending；但 `hub_v1/web_search_hop.rs` 已由 Responses Relay runtime 调用，执行额外 provider hop、Resp03 client projection、失败 health mutation。目标态 manifest 不能作为现状真源；实现与 map 未锁定时，视为 P1 架构违规。
+- 架构文档列出的 fallback、metadata leak、error-chain bypass、function-map coverage、thin-wrapper 等 `verify:architecture-*` 门禁未注册到 package.json，文档与 CI/build 不一致。以后审计必须同时核对“文档声明、package script、CI/build 接线”三者。
+- `verify-v3-module-boundaries` 当前是选定源码的字符串规则，不是全量 owned_paths + import/call-edge 机器真源；未跟踪 worker helper 与 HEAD 中的 candidate-key 语义重复但未被 gate 拦截。该 helper 未被引用，不能直接判定为生产重复；它证明 dirty source 未纳入边界审计。module registry 完整覆盖和真实边解析仍是 V3 架构门禁缺口。
+- `verify:v3-rust-only` 只排除 `target`，当前工作树会扫描 ignored `v3/node_modules`；`verify:v3-file-size` 当前被 `health.rs` 1513 行阻断。前者是否在 CI 复现取决于依赖目录是否存在；审计报告必须区分“代码架构 finding”和“门禁自身不可重复/当前红”。
+
+## 2026-08-18 V3 架构审计 复核确证（第二轮反转）
+- `web_search_hop.rs` 在 runtime crate 内承担 backend binding、provider target 选择、Req01-09 重建、provider wire/transport、health mutation（`provider_health.record_provider_failure_record`，forbidden writer 越界，违反 `v3-resource-operation-map.yml:839`）、Resp03 client projection——6 项不属于该模块的职责。
+- `execute_local_web_search_hop` 返回 `V3ResponsesRelayRuntimeError`（runtime 私有类型），非 `V3Error05ExecutionDecision`；`responses_relay_runtime_inner.rs:850,1179` 与 `kernel.rs:1228` 三个调用点都用 `.await?` 早返，绕过唯一错误链（Error01-06）。
+- `kernel/direct_runtime_helpers.rs:93` `record_v3_direct_provider_failure_record` 是 forbidden writer 越界的第二条 runtime 生产写入路径（第一条是 `web_search_hop.rs:334`）。
+- `V3ServerToolCenter` 已实现（`hub_v1/common.rs:951`）且广泛实写（kernel + hub_v1 多处），但 manifest 仍 `binding_status: design` / `status: design`；状态机 owner 与实写模块解耦，无唯一聚合入口。
+- untracked `provider_failure_routing_helpers.rs` 经 `cargo check` 复核确认当前不在编译图（`provider_failure_runtime_policy.rs` 无 `mod provider_failure_routing_helpers;`），是死代码+ P2 重复占位；防止被 `mod` 引入为 P1 重复定义。`tests.rs:235,400,430` 实际消费 HEAD 真源 `provider_failure_runtime_policy.rs:1621-1644` 而非 worker helper。
+- 14+ 处 `handle_error_before_resp03!` 复制粘贴（`responses_relay_runtime_inner.rs`）绑死错误/stopless/Resp03 三个语义，无法独立演化——收敛 web_search 的副产品。
+Tags: #v3 #architecture-audit #websearch #servertool #provider-health #error-chain
+
+## V4 独立 runtime 基线（2026-08-18 确证）
+- V4 binary：`v4/playground/v4-independent-runtime-admission-20260818T031744Z-Macstudio-38512-26190/v4/target/release/rccv4`，version `0.1.0-v4-admission`，manifest_digest `sha256:04212484444c6aa7043774b2313bf693dd22705f1fee55708778c96e6404fba9`。
+- V4 listener：PID 53861，端口 `127.0.0.1:5521`，tmux session `rccv4-5521`，cwd = V4 worktree 的 `v4/`。
+- V4 config：`/Volumes/extension/.rcc/config.v4.toml`（独立文件，不与 v3 共享）。
+- V4 provider：`cc-sol`，protocol `responses`，model `gpt-5.6-sol`，inline apiKey（不再要求 tokenFile）。
+- V3 listener：PID 49763，端口 `4444/5520/7777/10000`；admin PID 15304 端口 `8777`；tmux session `rccstart` 编排。
+- 端口分配互斥：V3 集合 `4444/5520/7777/10000/8777`；V4 集合 `5521`。V4 后续新增端口必须先 `lsof` 查空闲并避开 V3 集合。
+
+## 跨 V3/V4 工作硬规则（2026-08-18 升级）
+1. V3 任何文件、进程、tmux 会话、admin 端点，**禁止**未经 Jason 显式授权的删除/回滚/迁移/重启/`Ctrl-C`/`kill`/管理。即便"清理 V4 收尾残留"也不许碰 V3。
+2. V4 收尾工作流必须限定在 V4 worktree 内，使用独立 tmux session（如 `rccv4-<port>`）；禁止触碰 `~/.rcc/config.v3.toml`、`/Volumes/extension/.rcc/config.v3.toml`、V3 PID、V3 admin 端口。
+3. V4 配置独立命名为 `config.v4.toml`；新增 V4 端口前用 `lsof -nP -iTCP -sTCP:LISTEN` 与 V3 集合做不重叠检查。
+4. V4 provider `cc-sol` 等历史 inline-apiKey provider 必须由 `routecodex-v4-provider` crate 的 `ProviderAuthHandle::InlineKey` / `TokenFile` / `SecretFileKey` 三态解析，缺一字段 fail-fast，禁 silent strip。
+
+## 2026-08-18 V3 OpenCode Go auth selection
+- `routecodex-v3-config` / `routecodex-v3-target` now own explicit auth selection syntax: `selection.strategy` accepts `priority` or `weighted`; each auth entry accepts validated `priority` and positive `weight`.
+- Keyless provider targets expand every auth entry in Rust. Priority preserves ascending tier order; weighted rotates within a tier by deterministic sample. Control selection remains side-channel/config manifest state, not provider payload.
+- Runtime `/Volumes/extension/.rcc/provider/opencode-go/config.v2.toml` is explicit key1-key11 with priority 1..11; secret file contains 11 entries and the duplicated `opencode-go-2.token` was removed. Never log values.
+- Verified: config/target/virtual-router tests, cargo check, installed `rccv3 0.90.4570`, aggregate restart, all three listener health checks, and live VR dry-run showing opencode-go key1-key11 expansion. DSH review remained `working/pending` after 900s, so no PASS claim.
+- 2026-08-18 V3 restart in-flight preservation confirmed: listener serve `JoinHandle` must be retained and awaited after graceful shutdown signal; dropping it before `exec` replaces the Tokio runtime and loses active Responses/SSE handlers. Aggregate restart now drains listener tasks before exec. Verified install `0.90.4582`, aggregate restart, and health on 4444/7777/10000.
+
+## 2026-08-19 V3 SSE/restart closeout evidence
+- `v3_openai_chat_relay_sse_accept_response` previously dropped the task when Error06 projected a non-JSON body, producing silent SSE EOF/reconnect storms. Main now emits an explicit SSE error data frame (`fc0d0c549`).
+- Direct Responses continuation disabled is now a typed gate for both stream wrapping and commit/release (`d22e404f1`); direct continuation integration test set passed 27/27.
+- Request activity gate keeps listeners accepting while in-flight response bodies drain, then performs graceful listener shutdown and exec. Installed `rccv3 0.90.4585`; aggregate `routecodex restart --config /Volumes/extension/.rcc/config.v3.toml` completed; 4444/7777/10000 health returned 200.
+
+## 2026-08-19 V3 400 classification and reasoning owner correction
+- Generic V3 provider-failure executors no longer branch on HTTP status 400. 400 must be selected by the configured provider-error policy matcher and then consume the common classification/retry/health/projection chain; explicit status checks in relay and direct retry paths were removed (`5c5f42eaf`, `06ceaf702`).
+- DeepSeek V4 reasoning request compatibility remains owned by `provider-compat-core`; the V3 regression now calls that owner and supplies `reasoning_effort=high` (`aa4d14961`). This preserves the prior reasoning fix without reviving a duplicate direct helper.
+- Installed/restarted V3 `0.90.4587`; 4444/7777/10000 health all 200. V4 untouched.
+
+## 2026-08-19 V4 响应链插件合并 baseline
+- V4 standard-plugins 现在同时承载数据面响应链与 continuation 控制面：`response_inbound/outbound` 负责 `provider_raw -> normal_payload -> client_wire_payload -> frame`，`continuation_control` 只从 `v4.control.metadata_center` 读 typed continuation facts，经 `v4.scope.session` bridge slot 调 runtime `ScopeRegistry::bind/release`。
+- 组合后 25 个 standard plugin descriptors；response L2 9 个、continuation L2 4 个；runtime 与 cordis-bridge 均未加入 `v4/Cargo.toml` workspace，runtime 消费用 build-link `test-consumer`。
+- 合并 worktree `playground/v4-response-chain-plugins-combined-integration-20260819T050500Z-Macstudio-15000-v4respintegration`（base `4813ae09`），`node scripts/verify.mjs` 20 gates + 14 consumers + isolation、`verify-red.mjs` 14 suites 全绿；未 install/restart/live replay，未 commit/merge/DSH review。
+- 经验：V4 worktree 内跑 `verify-isolation.mjs` 必须先有 `v4/node_modules`；`npm install --no-package-lock` 即可，否则 Node 会解析到 root node_modules 被 gate 判 FAIL。standard-plugins regression `minimum_test_count` 是 suite 总数，不能按“新增测试文件数”硬加；本项目当前 21 对应 lib 4 + l2 文件 41。
+Tags: #v4 #response-chain #plugin #continuation #scope-session #integration
+## 2026-08-19 V3 SSE 错误可见性硬锁
+
+- Superseded immediately on 2026-08-19: “provider SSE error must become client-visible `event:error`” is incorrect. “Cannot swallow” means the error must enter typed Error01→05 before client commit, trigger candidate/default switching while capacity remains, and reach Error06 as final HTTP 502 only after both pools are empty.
+- Server/SSE handler must never expose an intermediate provider error as client `event:error`; body `io::Error`, abrupt EOF, dropped task, and log-only handling are also forbidden because they bypass switching. If an error is discovered after commit, repair Runtime pre-commit/commit authority rather than compensate in Server/outbound.
+
+## 2026-08-19 V4 请求链插件 Node 01-07 阶段确证
+
+- V4 request plugin chain 的生产分支为 `codex/v4-request-chain-plugin-full-closeout-20260819T085059Z`，阶段提交 `92ac6f3d7`，本地总审修复提交 `53fd6aa31`。Router05 candidate filter 产出的 typed `eligible_candidates` 是 Router06 target selection 的唯一候选输入；Router06 禁止重读 manifest 并重复过滤，否则 candidate-filter 小插件成为旁路空壳。
+- `v4.pipeline.request_plugin_chain` 已为 function map `active/anchored`，request-chain gate 同时锁该状态；Direct/Relay SSE live gate 必须验证 `text/event-stream`、event/data frame 与 `response.completed`，不得用 JSON terminal 或 `response.failed` 冒充成功 SSE。
+- 修复后证据：standard-plugins/runtime/cordis-bridge/router/provider 共 80 tests；request red 5/5、standard red 21/21、node-graph red 30/30；resource binding 66/66、plane/capability isolation、release build 均绿；独立 V4 真实 Direct/Relay JSON/SSE replay 7/7。远端与本地 HEAD 均为 `53fd6aa31144751e407f3b4ce9c83db420146512`。
+- Jason 明确指定 `先提交，再总体 review` 时，先提交并推送已独立验证的阶段，再做 commit-scope 总审；禁止在未提交 diff 上重复启动长 review。Jason 明确取消外部 review 时，取消精确 task，改走本地检查→修复→重验→追加 commit/push。
+Tags: #v4 #request-plugin-chain #virtual-router #candidate-filter #direct #relay #sse #workflow-correction

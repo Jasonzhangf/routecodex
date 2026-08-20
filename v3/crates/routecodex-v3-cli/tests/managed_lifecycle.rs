@@ -557,6 +557,26 @@ setInterval(() => {{}}, 1000);
     child
 }
 
+fn spawn_sigterm_resistant_listener(port: u16) -> Child {
+    let script = format!(
+        r#"
+const net = require('net');
+process.on('SIGTERM', () => {{}});
+net.createServer((socket) => socket.end()).listen({{ host: '127.0.0.1', port: {} }});
+setInterval(() => {{}}, 1000);
+"#,
+        port
+    );
+    let child = Command::new("node")
+        .args(["-e", &script])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_port(port, true);
+    child
+}
+
 fn single_instance_dir(state_root: &Path) -> PathBuf {
     let entries = fs::read_dir(state_root.join("instances"))
         .unwrap()
@@ -1620,6 +1640,76 @@ fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
     for port in ports {
         wait_port(port, false);
     }
+    let start_output = start.wait_with_output().unwrap();
+    assert!(
+        start_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start_output.stderr)
+    );
+}
+
+#[test]
+fn start_force_releases_occupied_admin_webui_port_before_server_bind() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let admin_port = free_port();
+    let mut occupied = spawn_sigterm_resistant_listener(admin_port);
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let admin_bind = format!("127.0.0.1:{admin_port}");
+    let mut start = Command::new(binary)
+        .args(["start", "--config"])
+        .arg(&config)
+        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+        .env("ROUTECODEX_V3_ADMIN_BIND", &admin_bind)
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("ROUTECODEX_V3_STOP_TIMEOUT_MS", "200")
+        .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "800")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && occupied.try_wait().unwrap().is_none() {
+        sleep(Duration::from_millis(50));
+    }
+    if occupied.try_wait().unwrap().is_none() {
+        let _ = occupied.kill();
+        let _ = occupied.wait();
+        let _ = start.kill();
+        let output = start.wait_with_output().unwrap();
+        panic!(
+            "start must release the occupied admin WebUI port: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let killed = occupied.wait().unwrap();
+    assert!(!killed.success(), "SIGTERM-resistant admin listener must be force-killed");
+
+    for port in ports {
+        wait_port(port, true);
+    }
+    wait_port(admin_port, true);
+
+    let stop = Command::new(binary)
+        .args(["stop", "--config"])
+        .arg(&config)
+        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+        .env("ROUTECODEX_V3_ADMIN_BIND", &admin_bind)
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .output()
+        .unwrap();
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+    wait_port(admin_port, false);
     let start_output = start.wait_with_output().unwrap();
     assert!(
         start_output.status.success(),

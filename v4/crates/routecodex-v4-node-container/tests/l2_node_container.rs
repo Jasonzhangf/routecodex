@@ -221,8 +221,9 @@ fn positive_in_flight_guard_tracks_and_releases_execution() {
 fn positive_execute_is_bound_to_active_plan_hash() {
     let plan = empty_plan();
     let bindings = binding_for(&plan);
-    let container =
-        full_lifecycle(NodeContainer::declare("node-a", plan.clone(), bindings).expect("valid binding"));
+    let container = full_lifecycle(
+        NodeContainer::declare("node-a", plan.clone(), bindings).expect("valid binding"),
+    );
     let output = container
         .execute_with_plan_hash(
             &plan.hash,
