@@ -1456,18 +1456,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         state.clone(),
                     );
                 }
-                wrap_v3_direct_sse_provider_stream_for_outcome(
-                    &mut response_projection.client_payload.body,
-                    provider_health.clone(),
-                    &direct_failure_session_scope,
-                    &policy,
-                    provider_health_neutral,
-                    &mut provider_action_permit,
-                    runtime_timing.clone(),
-                    stream_observation.clone(),
-                    Some(Arc::clone(&route_policy_terminal_commit)),
-                );
             }
+            wrap_v3_direct_sse_provider_stream_for_outcome(
+                &mut response_projection.client_payload.body,
+                provider_health.clone(),
+                &direct_failure_session_scope,
+                &policy,
+                provider_health_neutral,
+                &mut provider_action_permit,
+                runtime_timing.clone(),
+                stream_observation.clone(),
+                Some(Arc::clone(&route_policy_terminal_commit)),
+            );
             return finalize_v3_direct_resp15_streaming_output(
                 &policy,
                 provider_status,

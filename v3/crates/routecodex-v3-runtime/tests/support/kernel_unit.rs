@@ -1636,6 +1636,65 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
 }
 
 #[tokio::test]
+async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
+    struct FailedSseTransport;
+
+    #[async_trait]
+    impl ResponsesTransport for FailedSseTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(
+                    b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"
+                        .to_vec(),
+                )])),
+            ))
+        }
+    }
+
+    let routing_group = "direct_sse_no_continuation_error";
+    let manifest = scoped_test_manifest(test_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req",
+        "exec",
+        json!({"model":"client-model","input":"hello","stream":true}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &FailedSseTransport,
+    )
+    .await;
+
+    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
+        panic!("expected direct SSE response");
+    };
+    assert!(stream.next().await.expect("partial frame").is_ok());
+    let error = stream
+        .next()
+        .await
+        .expect("provider EOF must emit a typed error")
+        .expect_err("provider EOF without response.completed must not be clean EOF");
+    assert_eq!(error.code, "provider_response_sse_terminal_missing");
+}
+
+#[tokio::test]
 async fn matched_optional_failure_uses_captured_default_without_router_reentry() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 

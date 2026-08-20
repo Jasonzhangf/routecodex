@@ -449,6 +449,7 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
                 provider_id,
                 frame.frame().fields(),
                 compatibility_profile,
+                should_start_client_stream,
             )? == DirectSseInitialFrameAction::StartClientStream
             {
                 should_start_client_stream = true;
@@ -466,6 +467,7 @@ fn direct_sse_frame_provider_failure_source(
     provider_id: &str,
     fields: &[SseField],
     compatibility_profile: Option<&str>,
+    business_output_seen: bool,
 ) -> Result<DirectSseInitialFrameAction, V3Error01SourceRaised> {
     let data = collect_v3_provider_sse_json_data(fields);
     let parsed = match classify_v3_provider_sse_json_data(
@@ -495,9 +497,18 @@ fn direct_sse_frame_provider_failure_source(
             Ok(DirectSseInitialFrameAction::ContinueBuffering)
         }
         V3ProviderResponsesJsonFrameOutcome::StartClientStream
-        | V3ProviderResponsesJsonFrameOutcome::Terminal
-        | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput => {
+        | V3ProviderResponsesJsonFrameOutcome::Terminal => {
             Ok(DirectSseInitialFrameAction::StartClientStream)
+        }
+        V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput if business_output_seen => {
+            Ok(DirectSseInitialFrameAction::StartClientStream)
+        }
+        V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput => {
+            Err(build_v3_provider_sse_json_error(
+                provider_id,
+                "provider_response_sse_empty",
+                "provider SSE completed before content or tool output".to_string(),
+            ))
         }
         V3ProviderResponsesJsonFrameOutcome::Failure { code, message } => Err(
             build_v3_provider_sse_json_error(provider_id, &code, message),
