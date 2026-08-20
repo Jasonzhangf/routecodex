@@ -134,6 +134,8 @@ pub fn apply_route_group_view_to_authoring(
         .entry(group.group_id.clone())
         .or_insert_with(|| V3RouteGroupAuthoringConfig {
             pools: BTreeMap::new(),
+            compact_route_object: None,
+            route_policies: Vec::new(),
             features: BTreeMap::new(),
         });
     for port in &group.ports {
@@ -152,6 +154,7 @@ pub fn apply_route_group_view_to_authoring(
                     selection: V3SelectionPolicy {
                         strategy: V3SelectionStrategy::Priority,
                     },
+                    route_object: None,
                     match_rule: None,
                     targets: Vec::new(),
                     features: BTreeMap::new(),

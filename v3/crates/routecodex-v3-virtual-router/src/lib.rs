@@ -115,6 +115,8 @@ pub enum V3VirtualRouterError {
         group_id: String,
         pool_ids: Vec<String>,
     },
+    #[error("route group {group_id} route object {route_object} is absent")]
+    RouteObjectMissing { group_id: String, route_object: String },
     #[error("route group {group_id} non-default pool {pool_id} has no match declaration")]
     PoolMatchMissing { group_id: String, pool_id: String },
     #[error("routing facts entry protocol is empty or does not match endpoint {0}")]
@@ -196,6 +198,44 @@ impl V3VirtualRouter {
         manifest: &V3Config05ManifestPublished,
         classified: V3Router05RequestClassified,
     ) -> Result<V3Router06RoutePoolResolved, V3VirtualRouterError> {
+        if classified.facts.route_classification.route_name == "compact" {
+            let group = manifest
+                .route_groups
+                .get(&classified.routing_group_id)
+                .ok_or_else(|| {
+                    V3VirtualRouterError::RouteGroupMissing(classified.routing_group_id.clone())
+                })?;
+            let compact_route_object = group.compact_route_object.as_deref().ok_or_else(|| {
+                V3VirtualRouterError::RouteObjectMissing {
+                    group_id: classified.routing_group_id.clone(),
+                    route_object: "compact".to_string(),
+                }
+            })?;
+            let compact_pool_id = group
+                .route_pool_for_object(compact_route_object)
+                .ok_or_else(|| V3VirtualRouterError::RouteObjectMissing {
+                    group_id: classified.routing_group_id.clone(),
+                    route_object: compact_route_object.to_string(),
+                })?;
+            let compact_pool = group.pools.get(compact_pool_id).ok_or_else(|| {
+                V3VirtualRouterError::PoolMissing {
+                    group_id: classified.routing_group_id.clone(),
+                    pool_id: compact_pool_id.to_string(),
+                }
+            })?;
+            if compact_pool.targets.is_empty() {
+                return Err(V3VirtualRouterError::PoolEmpty {
+                    group_id: classified.routing_group_id.clone(),
+                    pool_id: compact_pool_id.to_string(),
+                });
+            }
+            return Ok(V3Router06RoutePoolResolved {
+                server_id: classified.server_id,
+                routing_group_id: classified.routing_group_id,
+                facts: classified.facts,
+                tiers: vec![build_plan_tier(compact_pool)],
+            });
+        }
         if let Some(direct) = resolve_v3_direct_model_plan(manifest, &classified) {
             return direct;
         }

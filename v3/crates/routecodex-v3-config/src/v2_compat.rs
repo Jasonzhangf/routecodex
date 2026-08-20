@@ -321,6 +321,7 @@ fn compile_v2_route_groups(
                     route_id.clone(),
                     V3RoutePoolAuthoringConfig {
                         selection: V3SelectionPolicy { strategy },
+                        route_object: None,
                         match_rule,
                         targets,
                         features: BTreeMap::new(),
@@ -336,6 +337,8 @@ fn compile_v2_route_groups(
                 group_id.clone(),
                 V3RouteGroupAuthoringConfig {
                     pools,
+                    compact_route_object: None,
+                    route_policies: Vec::new(),
                     features: BTreeMap::new(),
                 },
             ))
@@ -715,7 +718,7 @@ fn compile_v2_provider_models(
                         .max_context_tokens
                         .or(model.context_window)
                         .or(model.max_context),
-                    context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
+                    context_token_estimate_scale_bps: 10_000,
                     features: model.features,
                 },
             )
@@ -953,14 +956,6 @@ pub struct V2ProviderModelConfig {
     pub web_search_backend: Option<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
-}
-
-fn default_context_token_estimate_scale_bps() -> u64 {
-    10_000
-}
-
-fn default_context_token_estimate_scale_bps() -> u64 {
-    10_000
 }
 
 impl V2ProviderModelConfig {
