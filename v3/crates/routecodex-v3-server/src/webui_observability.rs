@@ -189,6 +189,7 @@ impl V3WebuiObservability {
         if row.started_epoch_ms == 0 {
             row.started_epoch_ms = now;
         }
+        let was_terminal = row.result.is_some();
         // maintain attempt/switch counters and terminal result
         match event_type {
             V3ObsEventType::ProviderAttemptStarted => row.attempts += 1,
@@ -197,24 +198,30 @@ impl V3WebuiObservability {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
                 row.result = Some("success".to_string());
                 inner.active.remove(request_key);
-                inner.terminal_order.push_back(request_key.to_string());
-                inner.stats.success += 1;
+                if !was_terminal {
+                    inner.terminal_order.push_back(request_key.to_string());
+                    inner.stats.success += 1;
+                }
                 inner.stats.active = inner.active.len() as u64;
             }
             V3ObsEventType::Failed => {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
                 row.result = Some("error".to_string());
                 inner.active.remove(request_key);
-                inner.terminal_order.push_back(request_key.to_string());
-                inner.stats.error += 1;
+                if !was_terminal {
+                    inner.terminal_order.push_back(request_key.to_string());
+                    inner.stats.error += 1;
+                }
                 inner.stats.active = inner.active.len() as u64;
             }
             V3ObsEventType::Cancelled => {
                 row.duration_ms = Some(now.saturating_sub(row.started_epoch_ms));
                 row.result = Some("cancelled".to_string());
                 inner.active.remove(request_key);
-                inner.terminal_order.push_back(request_key.to_string());
-                inner.stats.cancelled += 1;
+                if !was_terminal {
+                    inner.terminal_order.push_back(request_key.to_string());
+                    inner.stats.cancelled += 1;
+                }
                 inner.stats.active = inner.active.len() as u64;
             }
             V3ObsEventType::Started => {
@@ -421,5 +428,19 @@ mod tests {
         let snapshot = o.snapshot(0).unwrap();
         assert!(snapshot.requests.len() <= 2048);
         assert!(!snapshot.requests.contains_key("5555:bounded-0"));
+    }
+
+    #[test]
+    fn repeated_terminal_events_do_not_grow_terminal_queue() {
+        let o = V3WebuiObservability::new();
+        let request_id = "repeated-terminal";
+        let key = build_v3_obs_request_key(5555, request_id);
+        o.record(V3ObsEventType::Started, &key, scope(5555), meta(request_id)).unwrap();
+        for _ in 0..10_000 {
+            o.record(V3ObsEventType::Completed, &key, scope(5555), meta(request_id)).unwrap();
+        }
+        let snapshot = o.snapshot(0).unwrap();
+        assert_eq!(snapshot.requests.len(), 1);
+        assert_eq!(snapshot.stats.success, 1);
     }
 }
