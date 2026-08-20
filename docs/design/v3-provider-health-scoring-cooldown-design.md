@@ -127,9 +127,9 @@ pub struct V3ProviderFailureAction {
 
 `V3ProviderFailureAction` 必须由 Error classification/policy 唯一构造。Provider health store 不得二次猜测 recoverability。
 Action 同时携带 `V3ProviderHealthScope`：普通 recoverable failure 使用
-`SessionProviderKey`，由既有 session health owner 在第 3 次阻断当前 session；只有
-`GlobalProviderKey` action 才允许 key-health persistence 写入跨 session cooldown。Target
-不得从 error message 或 score 推导 scope。
+`GlobalProviderKey`，由 Provider-owned key health 在第 3 次阻断该 provider+auth key，跨
+session 持久化并要求 probe；只有显式 request-local/health-neutral action 才使用
+`SessionProviderKey`。Target 不得从 error message 或 score 推导 scope。
 
 ### 4.2 Health key
 
@@ -219,9 +219,10 @@ recoverable failure #3
   -> probe schedule
 ```
 
-三次计数必须绑定 action scope 和 provider key。不同 session、不同 auth key 不得意外合并；同一 auth key 在不同 model 上必须共享同一计数和 score。
-普通 recoverable 的长期 key score 可以跨 session 累积，但其 cooldown admission 仍由 session
-scope owner 决定；global action 才能在 provider-key health projection 中直接 blocked。
+三次计数必须绑定 action scope 和 provider key。不同 auth key 不得意外合并；同一 auth key
+在不同 session、不同 model 上必须共享同一计数、score 和 cooldown。只有明确构造的
+`SessionProviderKey` action 才限制在当前 session；普通 recoverable 不得退化成 session-only
+绕行，否则会使持久化 cooldown 和 restart probe 失效。
 
 ### 5.4 显式 direct pin 规则
 

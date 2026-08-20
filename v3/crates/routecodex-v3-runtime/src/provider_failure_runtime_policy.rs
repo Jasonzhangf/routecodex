@@ -707,32 +707,6 @@ impl V3ProviderFailureRuntimeHealth {
         self.default_same_provider_retries
     }
 
-    pub(crate) fn record_provider_global_cooldown_failure(
-        &self,
-        _failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        _fingerprint: routecodex_v3_error::V3ProviderErrorFingerprint,
-        cooldown_ms: Option<u64>,
-        now_ms: u64,
-    ) -> Result<(), String> {
-        self.global_cooldown
-            .lock()
-            .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
-            .record_failure(
-                provider_id,
-                auth_alias,
-                model_id,
-                V3ProviderCooldownFailureClass::Semantic,
-                now_ms,
-                V3ProviderCooldownObservation {
-                    retry_after_ms: cooldown_ms,
-                    ..Default::default()
-                },
-            )
-    }
-
     pub(crate) fn record_provider_failure_record(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,

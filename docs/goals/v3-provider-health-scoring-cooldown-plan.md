@@ -131,7 +131,7 @@
 4. 固化默认 delta：success +20、recoverable -100、irrecoverable -400、probe failure -50；实际值经 manifest/policy 注入。
 5. 固化 score clamp 0..1000。
 6. probe success 使用 recovery floor，不直接恢复满分。
-7. 保持普通 recoverable cooldown 的 session isolation；global subscription health 承担跨 session 的明确 global action。
+7. 普通 recoverable cooldown 绑定 provider+auth key，跨 session 持久化并由 probe 恢复；只有显式 request-local action 才保持 session isolation。
 
 门槛：unit tests、generation stale-success negative tests、session/key isolation tests，以及同一 key 跨 model 共享 score/cooldown 的正反测试。
 

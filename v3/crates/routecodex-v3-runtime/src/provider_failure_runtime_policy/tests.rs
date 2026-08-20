@@ -304,6 +304,14 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                 .available,
             "status {status} must block only after its declared threshold"
         );
+        let key_projection = health
+            .key_health
+            .scheduling_projection("first", "key1", "gpt-test", 1, 1, 10_000)
+            .expect("provider key health projection");
+        assert!(
+            !key_projection.available,
+            "status {status} must persist a provider-key cooldown"
+        );
     }
 
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
