@@ -121,6 +121,7 @@ pub struct V3ProtocolContext {
     pub execution_id: String,
     pub endpoint: String,
     pub method: String,
+    pub request_purpose: V3RequestPurpose,
     pub previous_response_id: Option<String>,
 }
 
@@ -213,6 +214,7 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
             execution_id: raw.execution_id,
             endpoint: raw.path,
             method: raw.method,
+            request_purpose: raw.request_purpose,
             previous_response_id,
         },
         body,
@@ -240,6 +242,7 @@ pub fn build_v3_chat_req_04_standardized_from_v3_server_03(
             execution_id: raw.execution_id,
             endpoint: raw.path,
             method: raw.method,
+            request_purpose: raw.request_purpose,
             previous_response_id: None,
         },
         body,
@@ -258,7 +261,8 @@ pub fn build_v3_router_request_facts_from_v3_req_04_chat(
             &standardized.protocol_context.server_id,
         ),
         false,
-        is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
+        standardized.protocol_context.request_purpose.is_compaction()
+            || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
         Some(manifest),
     )
 }
@@ -275,7 +279,8 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
             &standardized.protocol_context.server_id,
         ),
         false,
-        is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
+        standardized.protocol_context.request_purpose.is_compaction()
+            || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
         Some(manifest),
     )
 }
@@ -689,7 +694,9 @@ mod tests {
         build_v3_req_04_standardized_responses_from_v3_server_03,
         build_v3_router_request_facts_for_entry,
         build_v3_router_request_facts_for_entry_with_control,
-        build_v3_router_request_facts_from_v3_req_04_chat, build_v3_server_03_http_request_raw,
+        build_v3_router_request_facts_from_v3_req_04_chat,
+        build_v3_server_03_http_request_raw,
+        build_v3_server_03_http_request_raw_with_purpose, V3RequestPurpose,
     };
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use routecodex_v3_error::V3ProviderFailureSessionScope;
@@ -751,6 +758,36 @@ mod tests {
         assert!(normalized.protocol_context.previous_response_id.is_none());
         assert!(normalized.body.get("previous_response_id").is_none());
         assert_eq!(normalized.body["model"], "gpt-5.5");
+    }
+
+    #[test]
+    fn auxiliary_compaction_purpose_reaches_responses_route_facts() {
+        let raw = build_v3_server_03_http_request_raw_with_purpose(
+            "controlled".to_string(),
+            V3ProviderFailureSessionScope::new("controlled", "controlled", "request")
+                .expect("failure scope"),
+            "request".to_string(),
+            "execution".to_string(),
+            "POST".to_string(),
+            "/v1/responses".to_string(),
+            V3RequestPurpose::AuxiliaryCompaction,
+            json!({
+                "model": "gpt-5.5",
+                "input": "compact this conversation"
+            }),
+        );
+        let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
+            .expect("auxiliary compaction must normalize as Responses");
+        let facts = super::build_v3_router_request_facts_from_v3_req_04(
+            &normalized,
+            &manifest_mode_b_websearch_for_routing_facts(),
+        );
+
+        assert_eq!(facts.route_classification.route_name, "compact");
+        assert!(facts
+            .route_classification
+            .reasoning
+            .contains("compact:registered-ingress"));
     }
 
     #[test]
