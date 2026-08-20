@@ -2,7 +2,8 @@ use super::*;
 use async_trait::async_trait;
 use routecodex_v3_config::*;
 use routecodex_v3_provider_responses::{
-    V3ProviderError, V3ProviderHttpFailure, V3ProviderResp14Raw, V3ProviderResponseHeader,
+    V3ProviderError, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
+    V3ProviderHttpFailure, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
 };
 use serde_json::json;
@@ -1102,17 +1103,24 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
 
     for offset in 0..3 {
         provider_health
-            .record_provider_failure_record(
+            .store()
+            .record_provider_failure_in_session_with_policy(
                 &session_a,
                 "first",
                 Some("key"),
                 Some("test"),
                 Some("controlled protocol plan cooldown"),
                 now + offset,
+                Some(V3ProviderFailurePolicy {
+                    failure_threshold: 3,
+                    cooldown_ms: 900_000,
+                    probe_interval_ms: 900_000,
+                    until_restart: false,
+                    cooldown_scope: V3ProviderFailureCooldownScope::Session,
+                }),
             )
             .expect("session A failure should be recorded");
     }
-
     let plan_a = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
         V3Server03HttpRequestRaw {
@@ -1160,9 +1168,9 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
         provider_health,
         now + 10,
     )
-    .expect("session B protocol plan should inherit provider-level cooldown from session A");
-    assert_eq!(plan_b.decision.target.candidate.provider_id, "second");
-    assert_eq!(plan_b.decision.target.unavailable_candidates.len(), 1);
+    .expect("session B protocol plan should preserve session isolation from session A");
+    assert_eq!(plan_b.decision.target.candidate.provider_id, "first");
+    assert_eq!(plan_b.decision.target.unavailable_candidates.len(), 0);
 }
 
 #[tokio::test]

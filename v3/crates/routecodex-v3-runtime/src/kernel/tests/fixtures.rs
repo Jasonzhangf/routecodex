@@ -61,6 +61,10 @@ default_model = "test"
 auth = { type = "api_key", entries = [{ alias = "key", env = "FIRST_KEY" }] }
 [providers.first.models.test]
 wire_name = "wire-first"
+[providers.first.health]
+enabled = true
+failure_threshold = 3
+cooldown_ms = 900000
 
 [providers.second]
 type = "responses"
@@ -69,6 +73,10 @@ default_model = "test"
 auth = { type = "api_key", entries = [{ alias = "key", env = "SECOND_KEY" }] }
 [providers.second.models.test]
 wire_name = "wire-second"
+[providers.second.health]
+enabled = true
+failure_threshold = 3
+cooldown_ms = 900000
 
 [forwarders.responses]
 model = "client-model"
