@@ -884,6 +884,22 @@
       "resource_id": "v4.pipeline.mock_transport_error",
       "path": "crates/routecodex-v4-runtime/src/lib.rs,crates/routecodex-v4-error/src/lib.rs",
       "status": "active"
+    },
+    {
+      "from": "routecodex-v4-cli-plugin",
+      "to": "routecodex-v4-standard-plugins",
+      "owner": "routecodex-v4-cli-plugin::run",
+      "edge_type": "readonly_projection",
+      "symbols": [
+        "standard_plugins",
+        "standard_resource_registry",
+        "standard_allowed_reads",
+        "standard_allowed_writes",
+        "standard_node_allowed_reads",
+        "standard_node_allowed_writes"
+      ],
+      "path": "crates/routecodex-v4-cli-plugin/src/main.rs",
+      "status": "active"
     }
   ]
 }

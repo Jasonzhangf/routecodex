@@ -13,7 +13,7 @@
   "descriptor_rule": "every standard descriptor declares an exact active node-graph node_id, role_id and position plus valid resource axis, effect, phase, order, owner and canonical hashes; unknown or mismatched node selectors are rejected before plan compilation",
   "node_scoped_resource_rule": "standard plan compilation derives exact reads and writes from the descriptor-bound active node; callers cannot broaden permissions, non-adjacent resource transitions are rejected, and provider_semantic can only flow forward into provider_wire_payload",
   "side_channel_rule": "control, error and diagnostic facts travel only in typed side channels (control carrier / diagnostics sink) and never enter normal data; payload must never reconstruct control state",
-  "keyless_rule": "the M5 baseline is keyless and behavior-minimal: validators, the identity/mock codec, governance mock, typed route facts and provider mocks are deterministic and must not claim real product migration, real credentials or real provider/client semantics",
-  "no_fallback_rule": "plugin failure propagates as a typed error through the bridge; no fallback, silent strip, payload reconstruction, provider/client metadata leakage, second runtime/kernel or cross-node dispatch",
+  "keyless_rule": "the baseline remains keyless: request/provider mocks are deterministic, while response plugins perform schema-bound data-plane projection without credentials or provider-specific branches",
+  "no_fallback_rule": "plugin failure propagates as a typed error through the bridge; no fallback, silent strip, payload reconstruction, internal control metadata leakage, second runtime/kernel or cross-node dispatch",
   "category_separation_rule": "control-only plugins never write normal data, diagnostic-only plugins never write data or control, and provider/client metadata never leaks into wire payload"
 }

@@ -57,7 +57,7 @@ fn positive_different_nodes_compile_distinct_deterministic_plans() {
         "request_outbound",
         "request",
         6,
-        &["v4.std.protocol.mock_codec"],
+        &["v4.std.provider.wire_build"],
     )
     .expect("outbound plan compiles");
 
@@ -141,15 +141,13 @@ fn positive_response_chat_process_plan_compiles() {
 
 #[test]
 fn negative_selection_group_multi_active_rejected() {
-    let mut authoring = standard_authoring(&[
-        "v4.std.protocol.mock_codec",
-        "v4.std.protocol.mock_codec_alt",
-    ])
-    .expect("standard authoring succeeds for known ids");
-    // Both protocol variants enabled -> group has two active variants.
-    for plugin in &mut authoring {
-        plugin.enabled = true;
-    }
+    let mut authoring = standard_authoring(&["v4.std.provider.wire_build"])
+        .expect("standard authoring succeeds for known id");
+    // Clone the same selection-group variant under a second plugin id so the
+    // plan compiler sees two active variants in one group.
+    let mut alt = authoring[0].clone();
+    alt.descriptor.plugin_id = "v4.std.provider.wire_build_alt".to_string();
+    authoring.push(alt);
     let error = compile_authoring(
         "V4ProviderReqCompat06Compat",
         "request_outbound",
@@ -216,7 +214,7 @@ fn negative_missing_before_target_rejected() {
 
 #[test]
 fn negative_unknown_node_id_rejected() {
-    let mut authoring = standard_authoring(&["v4.std.protocol.mock_codec"])
+    let mut authoring = standard_authoring(&["v4.std.provider.wire_build"])
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.node_selector.node_id =
         "V4ProviderReqOutbound06WirePayload".to_string();
@@ -233,7 +231,7 @@ fn negative_unknown_node_id_rejected() {
 
 #[test]
 fn negative_active_node_role_mismatch_rejected() {
-    let authoring = standard_authoring(&["v4.std.protocol.mock_codec"])
+    let authoring = standard_authoring(&["v4.std.provider.wire_build"])
         .expect("standard authoring succeeds for known id");
     let error = compile_authoring(
         "V4ProviderReqCompat06Compat",
@@ -248,7 +246,7 @@ fn negative_active_node_role_mismatch_rejected() {
 
 #[test]
 fn negative_active_node_position_mismatch_rejected() {
-    let authoring = standard_authoring(&["v4.std.protocol.mock_codec"])
+    let authoring = standard_authoring(&["v4.std.provider.wire_build"])
         .expect("standard authoring succeeds for known id");
     let error = compile_authoring(
         "V4ProviderReqCompat06Compat",
@@ -279,7 +277,7 @@ fn negative_unknown_plugin_id_returns_typed_plan_error() {
 
 #[test]
 fn negative_non_adjacent_provider_semantic_reversal_rejected() {
-    let mut authoring = standard_authoring(&["v4.std.protocol.mock_codec"])
+    let mut authoring = standard_authoring(&["v4.std.provider.wire_build"])
         .expect("standard authoring succeeds for known id");
     authoring[0].descriptor.writes = vec!["v4.request.normal_payload".to_string()];
     let error = compile_authoring(
