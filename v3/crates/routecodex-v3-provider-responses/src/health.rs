@@ -220,12 +220,20 @@ pub enum V3ProviderHealthError {
 }
 
 impl V3ProviderHealthStore {
-    pub fn configured_failure_policy(&self, provider_id: &str) -> V3ProviderFailurePolicy {
+    pub fn configured_failure_policy(
+        &self,
+        provider_id: &str,
+    ) -> Result<V3ProviderFailurePolicy, String> {
         self.state
             .read()
-            .ok()
-            .and_then(|state| state.failure_policies.get(provider_id).copied())
-            .unwrap_or_default()
+            .map_err(|error| format!("provider health state poisoned: {error}"))
+            .map(|state| {
+                state
+                    .failure_policies
+                    .get(provider_id)
+                    .copied()
+                    .unwrap_or_default()
+            })
     }
 
     pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {

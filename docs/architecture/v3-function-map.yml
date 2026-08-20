@@ -385,6 +385,7 @@ features:
   - V3ProviderSessionAvailabilityReader::availability
   - V3ProviderHealthStore::record_provider_failure_in_session
   - V3ProviderHealthStore::record_provider_success_in_session
+  - V3ProviderHealthStore::configured_failure_policy
   - V3ProviderHealthStore::availability
   - V3ProviderHealthStore::availability_for_session
   - V3ProviderGlobalSubscriptionHealthStore::record_invalid_subscription_response

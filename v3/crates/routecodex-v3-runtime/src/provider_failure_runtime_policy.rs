@@ -578,9 +578,7 @@ impl V3ProviderFailureRuntimeHealth {
                         auth_alias.as_deref(),
                         model_id.as_deref(),
                         now_ms,
-                        self.store
-                            .configured_failure_policy(&provider_id)
-                            .probe_interval_ms,
+                        v3_internal_error_handling().unrecoverable_probe_interval_ms,
                     )?;
                     return Err(format!(
                         "startup provider cooldown probe failed for {provider_id}: {error}"
@@ -634,9 +632,7 @@ impl V3ProviderFailureRuntimeHealth {
                         auth_alias.as_deref(),
                         model_id.as_deref(),
                         now_ms,
-                        self.store
-                            .configured_failure_policy(&provider_id)
-                            .probe_interval_ms,
+                        v3_internal_error_handling().unrecoverable_probe_interval_ms,
                     )?;
                     probe_errors.push(format!(
                         "persistent provider probe failed for {provider_id}: {error}"
@@ -698,9 +694,7 @@ impl V3ProviderFailureRuntimeHealth {
                         permit.auth_alias(),
                         permit.model_id(),
                         now_ms,
-                        self.store
-                            .configured_failure_policy(&provider_id)
-                            .probe_interval_ms,
+                        v3_internal_error_handling().recoverable_probe_interval_ms,
                     )?;
                     probe_errors.push(format!(
                         "persistent provider key probe failed for {}:{}:{}: {error}",
@@ -785,10 +779,9 @@ impl V3ProviderFailureRuntimeHealth {
         )?;
         let mut action = build_v3_provider_failure_action_from_v3_error_02(&classified);
         if action.recovery == V3ProviderRecoveryKind::RecoverableCounted {
-            action.cooldown_ms = self
-                .store
-                .configured_failure_policy(provider_id)
-                .cooldown_ms;
+            let policy = self.store.configured_failure_policy(provider_id)?;
+            action.failure_threshold = policy.failure_threshold;
+            action.cooldown_ms = policy.cooldown_ms;
         }
         self.record_provider_key_failure_action(
             provider_id,
