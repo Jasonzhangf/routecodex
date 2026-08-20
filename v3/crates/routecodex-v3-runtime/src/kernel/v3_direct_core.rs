@@ -63,7 +63,8 @@ pub async fn execute_v3_direct_runtime_kernel_core<
         &classified.routing_group_id,
         direct_failure_session_scope.session_id(),
         C::server_id(&standardized),
-    );
+    )
+    .with_conversation(direct_failure_session_scope.session_id());
     let route_policy_observation = crate::route_policy::observe_route_turn(
         C::body(&standardized),
         &classified.facts.route_classification.route_name,

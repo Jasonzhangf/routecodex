@@ -35999,3 +35999,9 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - `routecodex-v3-runtime/src/route_policy.rs` now owns typed scope/history/pending action state. Evaluation uses a cloned history with the current turn recorded first; commit occurs only after a successful non-streaming response, while provider failure paths do not commit.
 - VR consumes `V3Router05RequestClassified.route_policy_pool` as one explicit pool and does not add default tiers or perform a second hit.
 - Full runtime check reached runtime compilation after fixing the pre-existing provider cooldown probe field drift, but origin/main still has 58 unrelated runtime compile errors (duplicate compatibility owners, missing probe/retry symbols, and stale continuation helper signatures). Route-policy-specific diagnostics are clear after fixing current-turn inclusion.
+
+# 2026-08-20 Route Policy Stage 3 stream/scope
+
+- Ordinary direct calls now use the provider failure session id as the conversation key when no Responses continuation scope exists; this enables the 10-turn history window while preserving server/group/session/port isolation. Responses continuation calls keep their explicit conversation id.
+- Streaming route-policy history commits through the typed SSE terminal-success callback only after provider SSE terminal validation, provider success recording, runtime timing completion, and stream observation completion. Provider stream errors and incomplete streams do not commit the pending turn.
+- The runtime baseline remains non-buildable on untouched provider-failure/shared/relay owners; current route-policy additions no longer introduce route-policy-specific diagnostics in the check output.

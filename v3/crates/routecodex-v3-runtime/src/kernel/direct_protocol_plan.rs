@@ -67,7 +67,8 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         &classified.routing_group_id,
         standardized.protocol_context.failure_session_scope.session_id(),
         &standardized.protocol_context.server_id,
-    );
+    )
+    .with_conversation(standardized.protocol_context.failure_session_scope.session_id());
     let route_policy_observation = crate::route_policy::observe_route_turn(
         &standardized.body,
         &classified.facts.route_classification.route_name,

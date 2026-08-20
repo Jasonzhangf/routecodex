@@ -336,17 +336,40 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             direct_failure_session_scope.routing_group(),
             direct_failure_session_scope.session_id(),
             &standardized.protocol_context.server_id,
-        ),
+        )
+        .with_conversation(direct_failure_session_scope.session_id()),
+    };
+    let route_policy_policies = match crate::route_policy::compile_route_policies(
+        manifest,
+        &route_policy_scope.routing_group_id,
+    ) {
+        Ok(policies) => policies,
+        Err(error) => {
+            return error_output(
+                runtime_source("V3Router05RequestClassified", error),
+                trace,
+                &hook_registry,
+            )
+        }
+    };
+    let route_policy_terminal_commit: Arc<dyn Fn() -> Result<(), String> + Send + Sync> = {
+        let route_policy_state = route_policy_state.clone();
+        let route_policy_scope = route_policy_scope.clone();
+        let request_id = standardized.protocol_context.request_id.clone();
+        let route_policy_policies = route_policy_policies.clone();
+        Arc::new(move || {
+            route_policy_state.commit_request(
+                &route_policy_scope,
+                &request_id,
+                &route_policy_policies,
+            )
+        })
     };
     let commit_route_policy = || -> Result<(), String> {
-        let policies = crate::route_policy::compile_route_policies(
-            manifest,
-            &route_policy_scope.routing_group_id,
-        )?;
         route_policy_state.commit_request(
             &route_policy_scope,
             &standardized.protocol_context.request_id,
-            &policies,
+            &route_policy_policies,
         )
     };
     let expanded = if let Some(initial_expanded) = initial_expanded {
@@ -1438,6 +1461,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     &mut provider_action_permit,
                     runtime_timing.clone(),
                     stream_observation.clone(),
+                    Some(Arc::clone(&route_policy_terminal_commit)),
                 );
             }
             return finalize_v3_direct_resp15_streaming_output(

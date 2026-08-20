@@ -123,6 +123,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream(
     provider_outcome: V3DirectSseProviderOutcome,
     runtime_timing: V3RuntimeTimingState,
     stream_observation: V3RuntimeStreamObservation,
+    route_policy_terminal_commit: Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>,
 ) -> V3ClientSseStream {
     struct StreamState {
         source: V3ClientSseStream,
@@ -130,6 +131,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream(
         provider_outcome: V3DirectSseProviderOutcome,
         runtime_timing: V3RuntimeTimingState,
         stream_observation: V3RuntimeStreamObservation,
+        route_policy_terminal_commit: Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>,
         done: bool,
     }
 
@@ -140,6 +142,7 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream(
             provider_outcome,
             runtime_timing,
             stream_observation,
+            route_policy_terminal_commit,
             done: false,
         },
         |mut state| async move {
@@ -233,7 +236,17 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream(
                         }
                     };
                     match state.stream_observation.record_timing(timing) {
-                        Ok(()) => None,
+                        Ok(()) => match state
+                            .route_policy_terminal_commit
+                            .as_ref()
+                            .map(|commit| commit())
+                        {
+                            Some(Err(error)) => Some((
+                                Err(runtime_source("V3Router06RoutePoolResolved", error)),
+                                state,
+                            )),
+                            _ => None,
+                        },
                         Err(error) => {
                             Some((Err(runtime_source("V3RuntimeTimingTerminal", error)), state))
                         }
