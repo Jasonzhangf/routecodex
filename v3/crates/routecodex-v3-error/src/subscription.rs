@@ -94,7 +94,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
                 .unwrap_or(60 * 60_000),
         };
     }
-    V3ProviderFailureAction::recoverable_session(&classified.source.code)
+    V3ProviderFailureAction::recoverable(&classified.source.code)
 }
 
 fn is_irrecoverable_provider_failure_code(code: &str) -> bool {
@@ -238,7 +238,7 @@ mod tests {
             503,
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(action.scope, V3ProviderHealthScope::SessionProviderKey);
+        assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
         assert_eq!(action.failure_threshold, 3);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(

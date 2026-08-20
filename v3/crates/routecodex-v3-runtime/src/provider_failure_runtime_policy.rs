@@ -754,69 +754,6 @@ impl V3ProviderFailureRuntimeHealth {
             .map_err(|error| error.to_string())
     }
 
-    pub(crate) fn record_provider_failure_record_from_source(
-        &self,
-        failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        source: &V3Error01SourceRaised,
-        now_ms: u64,
-    ) -> Result<V3ProviderFailureRecord, String> {
-        let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
-        self.record_provider_global_health_for_classified_error(
-            failure_session_scope,
-            provider_id,
-            auth_alias,
-            model_id,
-            &classified,
-            now_ms,
-        )?;
-        let action = build_v3_provider_failure_action_from_v3_error_02(&classified);
-        self.record_provider_key_failure_action(
-            provider_id,
-            auth_alias,
-            model_id,
-            &action,
-            now_ms,
-        )?;
-        self.store
-            .record_provider_failure_in_session(
-                failure_session_scope,
-                provider_id,
-                auth_alias,
-                model_id,
-                Some(&source.message),
-                now_ms,
-            )
-            .map_err(|error| error.to_string())
-    }
-
-    pub(crate) fn record_provider_failure_record_with_action(
-        &self,
-        failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        reason: Option<&str>,
-        now_ms: u64,
-        action: &V3ProviderFailureAction,
-    ) -> Result<V3ProviderFailureRecord, String> {
-        self.record_provider_key_failure_action(provider_id, auth_alias, model_id, action, now_ms)?;
-        let record = self
-            .store
-            .record_provider_failure_in_session(
-                failure_session_scope,
-                provider_id,
-                auth_alias,
-                model_id,
-                reason,
-                now_ms,
-            )
-            .map_err(|error| error.to_string())?;
-        Ok(record)
-    }
-
     pub(crate) fn record_provider_failure_record_with_policy(
         &self,
         matched_policy_directive: Option<&V3ProviderErrorActionPolicyManifest>,
