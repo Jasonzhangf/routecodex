@@ -54,7 +54,7 @@ pub(crate) fn response_outbound_descriptors() -> Vec<StandardPlugin> {
             PluginPhase::Projection,
             400,
             vec!["v4.response.client_wire_payload"],
-            vec!["v4.response.client_frame"],
+            vec!["v4.response.client_object"],
         ),
     ]
 }

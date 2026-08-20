@@ -230,6 +230,32 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: true
   binding_status: anchored
+- resource_id: v4.response.client_object
+  axis: data
+  verification_gate:
+  - v4_parity_gate_standard_plugins
+  resource_kind: client_frame_object
+  lifecycle: v4.plugin.standard_library
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4ServerRespOutbound06ClientFrame
+  owner_symbols:
+  - frame_build
+  identity:
+  - requestId
+  semantic_contract:
+    control_fields_forbidden: true
+    error_projection_only: V4Error06ClientProjected
+  allowed_writers:
+  - V4ServerRespOutbound06ClientFrame
+  allowed_readers:
+  - V4ServerRespOutbound06ClientFrame
+  forbidden_writers:
+  - V4ControlMetadataCenter
+  - V4DebugSnapshotLedger
+  - V4ProviderReqCompat06Compat
+  may_enter_provider_body: false
+  may_enter_client_body: true
+  binding_status: anchored
 - resource_id: v4.control.side_channel
   axis: control
   verification_gate:
@@ -1828,8 +1854,7 @@ resources:
   - plugin_id
   - resource_id
   - node_id
-  allowed_writers:
-  - routecodex-v4-cli-plugin
+  allowed_writers: []
   allowed_readers:
   - appsdk::verify
   forbidden_writers:

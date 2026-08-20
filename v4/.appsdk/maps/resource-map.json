@@ -197,6 +197,17 @@
       "status": "active"
     },
     {
+      "resource_id": "v4.response.client_object",
+      "owner": "routecodex-v4-standard-plugins::frame_build",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
       "resource_id": "v4.control.side_channel",
       "owner": "routecodex-v4-control::V4Control01ScopeBoundCarrier",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
