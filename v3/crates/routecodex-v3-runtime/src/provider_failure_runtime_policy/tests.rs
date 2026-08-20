@@ -241,7 +241,7 @@ fn classified_probe_intervals_keep_auth_key_and_recoverable_cadences_distinct() 
 }
 
 #[test]
-fn configured_health_policy_preserves_session_and_auth_key_probe_scope() {
+fn configured_health_policy_preserves_non_auth_and_auth_key_probe_scope() {
     let mut manifest = account_threshold_manifest();
     let mut session_policy = manifest.error.provider_error_action_policy[0].clone();
     session_policy.policy_id = "ordinary_http_500_session".to_string();
@@ -251,10 +251,22 @@ fn configured_health_policy_preserves_session_and_auth_key_probe_scope() {
             *scope = V3ProviderErrorActionScope::ProviderModel;
         }
     }
+    let mut provider_instance_policy = session_policy.clone();
+    provider_instance_policy.policy_id = "ordinary_http_501_instance".to_string();
+    provider_instance_policy.matcher.http_status = Some(501);
+    for step in &mut provider_instance_policy.path {
+        if let V3ProviderDispositionStepManifest::Cooldown { scope, .. } = step {
+            *scope = V3ProviderErrorActionScope::ProviderInstance;
+        }
+    }
     manifest
         .error
         .provider_error_action_policy
         .push(session_policy);
+    manifest
+        .error
+        .provider_error_action_policy
+        .push(provider_instance_policy);
 
     let session_policy = configured_health_policy_for_failure(
         None,
@@ -267,8 +279,28 @@ fn configured_health_policy_preserves_session_and_auth_key_probe_scope() {
         "ordinary failure",
     )
     .expect("session-scoped policy");
-    assert_eq!(session_policy.cooldown_scope, V3ProviderFailureCooldownScope::Session);
+    assert_eq!(
+        session_policy.cooldown_scope,
+        V3ProviderFailureCooldownScope::Session
+    );
     assert_eq!(session_policy.probe_interval_ms, 15 * 60_000);
+
+    let provider_instance_policy = configured_health_policy_for_failure(
+        None,
+        &manifest,
+        "primary",
+        Some("responses"),
+        Some("gpt-test"),
+        501,
+        Some("provider_http_error"),
+        "ordinary instance failure",
+    )
+    .expect("provider-instance policy");
+    assert_eq!(
+        provider_instance_policy.cooldown_scope,
+        V3ProviderFailureCooldownScope::Session
+    );
+    assert_eq!(provider_instance_policy.probe_interval_ms, 15 * 60_000);
 
     let auth_key_policy = configured_health_policy_for_failure(
         None,
@@ -281,7 +313,10 @@ fn configured_health_policy_preserves_session_and_auth_key_probe_scope() {
         "account failure",
     )
     .expect("auth-key policy");
-    assert_eq!(auth_key_policy.cooldown_scope, V3ProviderFailureCooldownScope::AuthKey);
+    assert_eq!(
+        auth_key_policy.cooldown_scope,
+        V3ProviderFailureCooldownScope::AuthKey
+    );
     assert_eq!(auth_key_policy.probe_interval_ms, 60 * 60_000);
 }
 
