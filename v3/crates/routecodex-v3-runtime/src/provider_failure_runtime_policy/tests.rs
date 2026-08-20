@@ -241,6 +241,51 @@ fn classified_probe_intervals_keep_auth_key_and_recoverable_cadences_distinct() 
 }
 
 #[test]
+fn configured_health_policy_preserves_session_and_auth_key_probe_scope() {
+    let mut manifest = account_threshold_manifest();
+    let mut session_policy = manifest.error.provider_error_action_policy[0].clone();
+    session_policy.policy_id = "ordinary_http_500_session".to_string();
+    session_policy.matcher.http_status = Some(500);
+    for step in &mut session_policy.path {
+        if let V3ProviderDispositionStepManifest::Cooldown { scope, .. } = step {
+            *scope = V3ProviderErrorActionScope::ProviderModel;
+        }
+    }
+    manifest
+        .error
+        .provider_error_action_policy
+        .push(session_policy);
+
+    let session_policy = configured_health_policy_for_failure(
+        None,
+        &manifest,
+        "primary",
+        Some("responses"),
+        Some("gpt-test"),
+        500,
+        Some("provider_http_error"),
+        "ordinary failure",
+    )
+    .expect("session-scoped policy");
+    assert_eq!(session_policy.cooldown_scope, V3ProviderFailureCooldownScope::Session);
+    assert_eq!(session_policy.probe_interval_ms, 15 * 60_000);
+
+    let auth_key_policy = configured_health_policy_for_failure(
+        None,
+        &manifest,
+        "primary",
+        Some("responses"),
+        Some("gpt-test"),
+        401,
+        Some("provider_http_error"),
+        "account failure",
+    )
+    .expect("auth-key policy");
+    assert_eq!(auth_key_policy.cooldown_scope, V3ProviderFailureCooldownScope::AuthKey);
+    assert_eq!(auth_key_policy.probe_interval_ms, 60 * 60_000);
+}
+
+#[test]
 fn configured_provider_health_threshold_is_applied_to_key_cooldown() {
     let mut manifest = global_pool_alive_manifest("configured_key_threshold");
     manifest
