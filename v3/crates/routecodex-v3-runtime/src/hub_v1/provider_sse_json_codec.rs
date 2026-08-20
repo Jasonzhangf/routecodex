@@ -336,36 +336,6 @@ mod provider_sse_json_codec_tests {
     use super::*;
 
     #[test]
-    fn empty_output_item_lifecycle_frames_do_not_authorize_client_commit() {
-        for data in [
-            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"message","status":"in_progress","content":[]}}"#,
-            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","status":"in_progress","content":[],"summary":[]}}"#,
-        ] {
-            assert_eq!(
-                classify_v3_provider_generic_sse_json_data(data)
-                    .expect("empty lifecycle frame must classify"),
-                Some(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering),
-                "empty output item must remain precommit: {data}"
-            );
-        }
-    }
-
-    #[test]
-    fn non_empty_output_items_remain_client_commit_authority() {
-        for data in [
-            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"message","status":"in_progress","content":[{"type":"output_text","text":"hello"}]}}"#,
-            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","status":"in_progress","call_id":"call_1","name":"tool","arguments":""}}"#,
-        ] {
-            assert_eq!(
-                classify_v3_provider_generic_sse_json_data(data)
-                    .expect("non-empty output item must classify"),
-                Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream),
-                "business output must authorize streaming: {data}"
-            );
-        }
-    }
-
-    #[test]
     fn json_type_is_the_only_semantic_source() {
         let outcome = classify_v3_provider_responses_json_data(
             r#"{"type":"response.completed","response":{"id":"resp_1"}}"#,

@@ -57,7 +57,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 mod direct_sse_provider_outcome;
 use direct_sse_provider_outcome::{
-    wrap_direct_sse_provider_outcome_stream, V3DirectSseProviderOutcome,
+    wrap_direct_sse_provider_outcome_stream, wrap_direct_sse_provider_outcome_stream_with_terminal_commit,
+    V3DirectSseProviderOutcome,
 };
 mod direct_runtime_helpers_stream;
 mod v3_direct_protocol_codec;
@@ -323,7 +324,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
     };
     let initial_selected_target_present = initial_selected_target.is_some();
     let route_policy_state = crate::route_policy::V3RoutePolicyRuntimeState::process_shared();
-    let route_policy_scope = match continuation_scope.as_ref() {
+    let mut route_policy_scope = match continuation_scope.as_ref() {
         Some(scope) => crate::route_policy::V3RoutePolicyScope::without_conversation(
             &standardized.protocol_context.server_id,
             &scope.key.routing_group,
@@ -338,39 +339,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             &standardized.protocol_context.server_id,
         )
         .with_conversation(direct_failure_session_scope.session_id()),
-    };
-    let route_policy_policies = match crate::route_policy::compile_route_policies(
-        manifest,
-        &route_policy_scope.routing_group_id,
-    ) {
-        Ok(policies) => policies,
-        Err(error) => {
-            return error_output(
-                runtime_source("V3Router05RequestClassified", error),
-                trace,
-                &hook_registry,
-            )
-        }
-    };
-    let route_policy_terminal_commit: Arc<dyn Fn() -> Result<(), String> + Send + Sync> = {
-        let route_policy_state = route_policy_state.clone();
-        let route_policy_scope = route_policy_scope.clone();
-        let request_id = standardized.protocol_context.request_id.clone();
-        let route_policy_policies = route_policy_policies.clone();
-        Arc::new(move || {
-            route_policy_state.commit_request(
-                &route_policy_scope,
-                &request_id,
-                &route_policy_policies,
-            )
-        })
-    };
-    let commit_route_policy = || -> Result<(), String> {
-        route_policy_state.commit_request(
-            &route_policy_scope,
-            &standardized.protocol_context.request_id,
-            &route_policy_policies,
-        )
     };
     let expanded = if let Some(initial_expanded) = initial_expanded {
         // Server-side protocol plan already ran Router05..Target09; reuse its
@@ -395,6 +363,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 )
             }
         };
+        route_policy_scope.routing_group_id = classified.routing_group_id.clone();
         let route_policy_observation = crate::route_policy::observe_route_turn(
             &standardized.body,
             &classified.facts.route_classification.route_name,
@@ -458,6 +427,39 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         Some(expanded)
     } else {
         None
+    };
+    let route_policy_policies = match crate::route_policy::compile_route_policies(
+        manifest,
+        &route_policy_scope.routing_group_id,
+    ) {
+        Ok(policies) => policies,
+        Err(error) => {
+            return error_output(
+                runtime_source("V3Router05RequestClassified", error),
+                trace,
+                &hook_registry,
+            )
+        }
+    };
+    let route_policy_terminal_commit: Arc<dyn Fn() -> Result<(), String> + Send + Sync> = {
+        let route_policy_state = route_policy_state.clone();
+        let route_policy_scope = route_policy_scope.clone();
+        let request_id = standardized.protocol_context.request_id.clone();
+        let route_policy_policies = route_policy_policies.clone();
+        Arc::new(move || {
+            route_policy_state.commit_request(
+                &route_policy_scope,
+                &request_id,
+                &route_policy_policies,
+            )
+        })
+    };
+    let commit_route_policy = || -> Result<(), String> {
+        route_policy_state.commit_request(
+            &route_policy_scope,
+            &standardized.protocol_context.request_id,
+            &route_policy_policies,
+        )
     };
     let mut failed_candidates = initial_request_local_excluded_candidates;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
@@ -1107,7 +1109,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 if !matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
                     if let Err(error) = release_terminal_failure_locator(
                         continuation_state,
+                        continuation_scope.as_ref(),
                         previous_response_id.as_deref(),
+                        &selected_pin,
                     ) {
                         return error_output(
                             runtime_source("V3HubRespContinuation04Committed", error),
@@ -1419,7 +1423,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             );
             response_projection.client_payload.body = match body {
                 V3ClientBody::Sse(stream) => {
-                    let stream = wrap_direct_sse_provider_event_json_observation_stream(
+                    let stream = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
                         stream,
                         stream_observation.clone(),
                         runtime_timing.clone(),

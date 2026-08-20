@@ -123,6 +123,21 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream(
     provider_outcome: V3DirectSseProviderOutcome,
     runtime_timing: V3RuntimeTimingState,
     stream_observation: V3RuntimeStreamObservation,
+) -> V3ClientSseStream {
+    wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
+        source,
+        provider_outcome,
+        runtime_timing,
+        stream_observation,
+        None,
+    )
+}
+
+pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
+    source: V3ClientSseStream,
+    provider_outcome: V3DirectSseProviderOutcome,
+    runtime_timing: V3RuntimeTimingState,
+    stream_observation: V3RuntimeStreamObservation,
     route_policy_terminal_commit: Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>,
 ) -> V3ClientSseStream {
     struct StreamState {

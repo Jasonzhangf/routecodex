@@ -1,11 +1,13 @@
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ProviderDispositionStepManifest,
-    V3ProviderErrorActionPolicyManifest, V3ProviderErrorActionScope,
+    V3ProviderErrorActionPolicyManifest, V3ProviderErrorActionScope, V3ProviderErrorRetryMode,
 };
 use routecodex_v3_config::internal::classify_v3_internal_provider_error;
 use routecodex_v3_config::internal::v3_internal_error_handling;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
+    build_v3_error_02_classified_from_v3_error_01,
+    build_v3_provider_global_failure_policy, V3Error01SourceRaised,
     V3Error05ExecutionDecision,
     V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
     V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind,
@@ -157,162 +159,6 @@ pub(crate) struct V3RelayProviderFailurePolicyState<'state> {
     pub(crate) trace: &'state mut Vec<&'static str>,
 }
 
-fn configured_retry_budget_for_failure(
-    manifest: &V3Config05ManifestPublished,
-    provider_id: &str,
-    provider_type: Option<&str>,
-    model_id: Option<&str>,
-    status: u16,
-    error_type: Option<&str>,
-    message: &str,
-    default_budget: usize,
-) -> usize {
-    let Some(policy) = manifest
-        .error
-        .provider_error_action_policy
-        .iter()
-        .find(|policy| {
-            provider_error_policy_matches_source_failure(
-                policy,
-                provider_id,
-                provider_type,
-                model_id,
-                status,
-                error_type,
-            ) && (policy.matcher.content_contains_any.is_empty()
-                || policy
-                    .matcher
-                    .content_contains_any
-                    .iter()
-                    .any(|value| message.contains(value))
-                || error_type == Some(policy.action.reason_code.as_str()))
-        })
-    else {
-        return default_budget;
-    };
-    policy
-        .path
-        .iter()
-        .find_map(|step| match step {
-            V3ProviderDispositionStepManifest::WaitRetry { max_attempts, .. } => {
-                Some(max_attempts.saturating_sub(1) as usize)
-            }
-            _ => None,
-        })
-        .unwrap_or(default_budget)
-}
-
-fn configured_health_policy_for_failure(
-    manifest: &V3Config05ManifestPublished,
-    provider_id: &str,
-    provider_type: Option<&str>,
-    model_id: Option<&str>,
-    source_stage: &str,
-    status: u16,
-    error_type: Option<&str>,
-    message: &str,
-) -> Option<V3ProviderFailurePolicy> {
-    let policy = manifest
-        .error
-        .provider_error_action_policy
-        .iter()
-        .find(|policy| {
-            provider_error_policy_matches_source_failure(
-                policy,
-                provider_id,
-                provider_type,
-                model_id,
-                status,
-                error_type,
-            ) && (policy.matcher.content_contains_any.is_empty()
-                || policy
-                    .matcher
-                    .content_contains_any
-                    .iter()
-                    .any(|value| message.contains(value)))
-        });
-    let internal_policy = v3_internal_error_handling();
-    if policy.is_none() {
-        let category = classify_v3_internal_provider_error(
-            source_stage,
-            status,
-            error_type.unwrap_or_default(),
-        );
-        return match category {
-            routecodex_v3_config::internal::V3InternalErrorCategory::Transient => None,
-            routecodex_v3_config::internal::V3InternalErrorCategory::Recoverable => Some(
-                V3ProviderFailurePolicy {
-                    failure_threshold: internal_policy.recoverable_failure_threshold,
-                    cooldown_ms: internal_policy.recoverable_cooldown_ms,
-                    probe_interval_ms: internal_policy.recoverable_probe_interval_ms,
-                    until_restart: false,
-                    cooldown_scope: V3ProviderFailureCooldownScope::Session,
-                },
-            ),
-            routecodex_v3_config::internal::V3InternalErrorCategory::Unrecoverable => Some(
-                V3ProviderFailurePolicy {
-                    failure_threshold: internal_policy.unrecoverable_failure_threshold,
-                    cooldown_ms: internal_policy.unrecoverable_cooldown_ms,
-                    probe_interval_ms: internal_policy.unrecoverable_probe_interval_ms,
-                    until_restart: false,
-                    cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
-                },
-            ),
-        };
-    }
-    let policy = policy.expect("matched provider policy checked above");
-    let threshold = policy
-        .path
-        .iter()
-        .find_map(|step| match step {
-            V3ProviderDispositionStepManifest::WaitRetry { max_attempts, .. } => {
-                Some((*max_attempts).max(1))
-            }
-            _ => None,
-        })
-        .unwrap_or(1);
-    let cooldown_ms = policy.path.iter().find_map(|step| match step {
-        V3ProviderDispositionStepManifest::Cooldown {
-            duration_ms: Some(duration_ms),
-            ..
-        } => Some((*duration_ms).max(1)),
-        _ => None,
-    });
-    let until_restart = policy.path.iter().any(|step| {
-        matches!(
-            step,
-            V3ProviderDispositionStepManifest::Cooldown {
-                until_restart: Some(true),
-                ..
-            }
-        )
-    });
-    let cooldown_scope = policy.path.iter().find_map(|step| match step {
-        V3ProviderDispositionStepManifest::Cooldown {
-            scope: V3ProviderErrorActionScope::AuthKey,
-            ..
-        } => Some(V3ProviderFailureCooldownScope::AuthKey),
-        V3ProviderDispositionStepManifest::Cooldown { .. } => {
-            Some(V3ProviderFailureCooldownScope::Session)
-        }
-        _ => None,
-    }).unwrap_or(V3ProviderFailureCooldownScope::Session);
-    if cooldown_ms.is_none() && !until_restart {
-        return None;
-    }
-    Some(V3ProviderFailurePolicy {
-        failure_threshold: threshold,
-        cooldown_ms: cooldown_ms.unwrap_or(1),
-        probe_interval_ms: if cooldown_scope == V3ProviderFailureCooldownScope::AuthKey {
-            internal_policy.unrecoverable_probe_interval_ms
-        } else {
-            internal_policy.recoverable_probe_interval_ms
-        },
-        until_restart,
-        cooldown_scope,
-    })
-}
-
 pub(crate) struct V3RelayProviderTargetResolutionInput<'input> {
     pub(crate) manifest: &'input V3Config05ManifestPublished,
     pub(crate) server_id: &'input str,
@@ -416,6 +262,7 @@ impl<R: V3ProviderAvailabilityReader + ?Sized> V3ProviderAvailabilityReader
 #[derive(Debug, Clone)]
 pub struct V3ProviderFailureRuntimeHealth {
     store: V3ProviderHealthStore,
+    global_subscription_store: V3ProviderGlobalSubscriptionHealthStore,
     global_cooldown: Arc<Mutex<V3ProviderCooldownCoordinator>>,
     action_gate: V3ProviderActionGate,
     default_same_provider_retries: usize,
@@ -455,6 +302,7 @@ impl V3ProviderAvailabilityReader for V3SessionGlobalAvailabilityReader<'_> {
 impl V3ProviderFailureRuntimeHealth {
     pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         let store = V3ProviderHealthStore::from_manifest(manifest);
+        let global_subscription_store = store.global_subscription_store();
         let state_directory = std::env::var_os("ROUTECODEX_V3_STATE_DIR")
             .map(PathBuf::from)
             .or_else(|| {
@@ -476,6 +324,7 @@ impl V3ProviderFailureRuntimeHealth {
             V3ProviderCooldownCoordinator::new(path, 5 * 60 * 60_000)
         };
         Self {
+            global_subscription_store,
             global_cooldown: Arc::new(Mutex::new(global_cooldown)),
             store,
             action_gate: V3ProviderActionGate::process_shared(),
@@ -664,7 +513,6 @@ impl V3ProviderFailureRuntimeHealth {
         provider_type: Option<&str>,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
-        source_stage: &str,
         reason: Option<&str>,
         source_stage: &'static str,
         status: u16,
@@ -710,7 +558,6 @@ impl V3ProviderFailureRuntimeHealth {
                     provider_id,
                     provider_type,
                     model_id,
-                    source_stage,
                     status,
                     error_type,
                     message,
@@ -980,7 +827,9 @@ impl V3ProviderFailureRuntimeHealth {
 
 impl From<V3ProviderHealthStore> for V3ProviderFailureRuntimeHealth {
     fn from(store: V3ProviderHealthStore) -> Self {
+        let global_subscription_store = store.global_subscription_store();
         Self {
+            global_subscription_store,
             global_cooldown: Arc::new(Mutex::new(V3ProviderCooldownCoordinator::new(
                 PathBuf::from(".routecodex-v3-provider-cooldowns.json"),
                 5 * 60 * 60_000,
@@ -1146,7 +995,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 Some(&selected.candidate.provider_type),
                 Some(&selected.candidate.auth_alias),
                 Some(&selected.candidate.model_id),
-                source_stage,
                 reason,
                 source_stage,
                 status,
@@ -1156,6 +1004,11 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             )
             .map_err(|error| error.to_string())?
     };
+    let retries_done = state
+        .same_candidate_retries
+        .get(&candidate_key)
+        .copied()
+        .unwrap_or(0);
     if configured_retry_mode(matched_policy) == Some(V3ProviderErrorRetryMode::RetrySame)
         && health_record.state != "cooldown"
         && retries_done < configured_same_candidate_retries
@@ -1847,6 +1700,8 @@ pub(crate) fn v3_relay_provider_policy_now_epoch_ms() -> Result<u64, String> {
         .map(|duration| duration.as_millis() as u64)
         .map_err(|error| format!("system time precedes Unix epoch: {error}"))
 }
+
+include!("provider_failure_runtime_policy_configured.rs");
 
 /// 瞬态失败（SSE 流内/挂起）同 provider 重试预算：与
 /// `V3_TRANSIENT_PROVIDER_RETRY_BUDGET` 一致（=2 次重试，
