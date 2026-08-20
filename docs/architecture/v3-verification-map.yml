@@ -3062,7 +3062,7 @@ features:
     forbidden_claim: Source tests alone do not prove GLM Replay live behavior; installed failing-shape and positive-control replay plus DSH Review are mandatory.
 
 - feature_id: v3.route_policy_condition_evaluation
-  status: source_controlled_runtime_live_verified_pending_dsh
+  status: source_active_live_verified
   change_risk: high
   owner_kind: rust_v3_route_policy_condition_evaluation
   owner_modules:
@@ -3105,10 +3105,10 @@ features:
     global_install_restart: required
     live_evidence:
     - docs/architecture/evidence/v3-route-policy-condition-evaluation-live.json
-    forbidden_claim: Do not claim complete until DSH Review returns semantic PASS.
+    dsh_review: VERDICT: PASS (v3-route-policy-condition-20260820-final-review-12)
 
 - feature_id: v3.server_internal_observability_projection
-  status: source_controlled_runtime_live_verified_pending_dsh
+  status: source_active_live_verified
   owner_kind: rust_v3_bounded_internal_observability_projection
   owner_scope: Server owns bounded typed diagnostic projection state; no public observability API is registered on ordinary listeners.
   unit:
@@ -3138,4 +3138,4 @@ features:
     global_install_restart: required
     live_evidence:
     - docs/architecture/evidence/v3-route-policy-condition-evaluation-live.json
-    forbidden_claim: Do not claim complete until DSH Review returns semantic PASS.
+    dsh_review: VERDICT: PASS (v3-route-policy-condition-20260820-final-review-12)

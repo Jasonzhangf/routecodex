@@ -32,5 +32,9 @@
     "node scripts/architecture/verify-architecture-mainline-call-map.mjs",
     "git diff --check"
   ],
-  "dsh_review": "pending_final_pass"
+  "dsh_review": {
+    "verdict": "PASS",
+    "task_id": "v3-route-policy-condition-20260820-final-review-12",
+    "final": "/Users/fanzhang/.dsh/reviews/v3-route-policy-condition-20260820-final-review-12/review.final.md"
+  }
 }
