@@ -2396,6 +2396,27 @@ features:
     data-plane semantics owned by adjacent codecs. Routing, switching, retry, continuation,
     health, and stopless/servertool control remain in typed control resources/MetadataCenter;
     neither side may mirror or reconstruct the other.
+  compatibility_exceptions:
+  - exception_id: v3.responses_inbound.codex_builtin_integer_schema
+    status: source_controlled
+    owner_symbol: build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat
+    implementation_symbol: normalize_v3_codex_integer_tool_schema
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+    allowed_stage: V3HubReqInbound02Normalized
+    source_contract: Codex built-in exec_command/write_stdin schemas emit number for runtime integer arguments
+    allowed_tools: [exec_command, write_stdin]
+    allowed_fields:
+    - exec_command.yield_time_ms
+    - exec_command.max_output_tokens
+    - write_stdin.session_id
+    - write_stdin.yield_time_ms
+    - write_stdin.max_output_tokens
+    rewrite: direct_parameters_properties_type_number_to_integer
+    forbidden: [generic_schema_coercion, user_tool_rewrite, outbound_rewrite, numeric_value_rewrite, metadata_projection]
+    required_tests:
+    - responses_inbound_restores_codex_integer_tool_schema_types
+    - responses_inbound_does_not_rewrite_string_session_id_schema
+    - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
@@ -2443,6 +2464,9 @@ features:
   - v3-protocol-field-parity-openai-outbound-summary-01
   entry_symbols:
   - build_v3_chat_canonical_request_from_responses_payload
+  - normalize_v3_codex_integer_tool_schema
+  - build_v3_chat_canonical_request_from_responses_payload_for_req_inbound
+  - build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat
   - project_v3_responses_arguments_to_openai_chat_wire
   - build_v3_openai_chat_standard_request_from_chat_canonical
   - project_openai_client_metadata_to_metadata
@@ -2480,7 +2504,11 @@ features:
   - anthropic_responses_field_parity_rejects_malformed_function_arguments
   - openai_chat_same_protocol_field_parity_request_response_matrix
   - responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history
+  - responses_inbound_restores_codex_integer_tool_schema_types
+  - responses_inbound_does_not_rewrite_string_session_id_schema
+  - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   allowed_paths:
+  - v3/package.json
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs

@@ -91,6 +91,182 @@ fn responses_web_search_current_turn_item_projects_to_canonical_tools() {
         .iter()
         .any(|tool| { tool.get("type").and_then(Value::as_str) == Some("web_search") }));
 }
+
+#[test]
+fn responses_inbound_restores_codex_integer_tool_schema_types() {
+    let request = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(&json!({
+        "model": "gpt-5.5",
+        "tools": [
+            {
+                "type": "function",
+                "name": "exec_command",
+                "description": "Runs a command in a PTY, returning output or a session ID.",
+                "strict": false,
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "cmd": {"type": "string"},
+                        "justification": {"type": "string"},
+                        "login": {"type": "boolean"},
+                        "yield_time_ms": {"type": "number"},
+                        "max_output_tokens": {"type": "number"},
+                        "prefix_rule": {"type": "array", "items": {"type": "string"}},
+                        "sandbox_permissions": {"type": "string", "enum": ["use_default", "require_escalated"]},
+                        "shell": {"type": "string"},
+                        "tty": {"type": "boolean"},
+                        "workdir": {"type": "string"}
+                    },
+                    "required": ["cmd"]
+                }
+            },
+            {
+                "type": "function",
+                "name": "write_stdin",
+                "description": "Writes characters to an existing unified exec session and returns recent output.",
+                "strict": false,
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "chars": {"type": "string"},
+                        "session_id": {"type": "number"},
+                        "yield_time_ms": {"type": "number"},
+                        "max_output_tokens": {"type": "number"}
+                    },
+                    "required": ["session_id"]
+                }
+            },
+            {
+                "type": "function",
+                "name": "user_tool",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"ratio": {"type": "number"}}
+                }
+            }
+        ],
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "run it"}]
+        }]
+    }))
+    .expect("Responses request must canonicalize");
+
+    let tools = request["tools"].as_array().expect("canonical tools");
+    assert_eq!(
+        tools[0]["parameters"]["properties"]["yield_time_ms"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        tools[0]["parameters"]["properties"]["max_output_tokens"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        tools[0]["parameters"]["properties"]["cmd"]["type"],
+        "string"
+    );
+    assert_eq!(
+        tools[1]["parameters"]["properties"]["session_id"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        tools[1]["parameters"]["properties"]["yield_time_ms"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        tools[1]["parameters"]["properties"]["max_output_tokens"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        tools[2]["parameters"]["properties"]["ratio"]["type"],
+        "number"
+    );
+
+    let anthropic_wire = super::super::encode_v3_responses_semantic_as_anthropic_request(request)
+        .expect("canonical Responses payload must project to Anthropic wire");
+    let anthropic_tool = &anthropic_wire["tools"][0];
+    assert_eq!(
+        anthropic_tool["input_schema"]["properties"]["yield_time_ms"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        anthropic_tool["input_schema"]["properties"]["max_output_tokens"]["type"],
+        "integer"
+    );
+}
+
+#[test]
+fn responses_inbound_does_not_rewrite_string_session_id_schema() {
+    let request = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(&json!({
+        "model": "gpt-5.5",
+        "tools": [{
+            "type": "function",
+            "name": "write_stdin",
+            "parameters": {
+                "type": "object",
+                "properties": {"session_id": {"type": "string"}}
+            }
+        }],
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "poll"}]
+        }]
+    }))
+    .expect("Responses request must canonicalize");
+
+    assert_eq!(
+        request["tools"][0]["parameters"]["properties"]["session_id"]["type"],
+        "string"
+    );
+}
+
+#[test]
+fn responses_inbound_does_not_rewrite_same_named_user_tool_schema() {
+    let request = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(&json!({
+        "model": "gpt-5.5",
+        "tools": [{
+            "type": "function",
+            "name": "exec_command",
+            "description": "User-defined command tool",
+            "strict": false,
+            "parameters": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "cmd": {"type": "string"},
+                    "justification": {"type": "string"},
+                    "login": {"type": "boolean"},
+                    "max_output_tokens": {"type": "number", "minimum": 1},
+                    "prefix_rule": {"type": "array", "items": {"type": "string"}},
+                    "sandbox_permissions": {"type": "string", "enum": ["use_default", "require_escalated"]},
+                    "shell": {"type": "string"},
+                    "tty": {"type": "boolean"},
+                    "workdir": {"type": "string"},
+                    "yield_time_ms": {"type": "number"}
+                },
+                "required": ["cmd"]
+            }
+        }],
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "custom"}]
+        }]
+    }))
+    .expect("Responses request must canonicalize");
+
+    assert_eq!(
+        request["tools"][0]["parameters"]["properties"]["yield_time_ms"]["type"],
+        "number"
+    );
+    assert_eq!(
+        request["tools"][0]["parameters"]["properties"]["max_output_tokens"]["type"],
+        "number"
+    );
+}
 #[test]
 fn responses_web_search_call_projects_to_openai_chat_tool_pair_with_synthetic_id() {
     let request = build_v3_chat_canonical_request_from_responses_payload(&json!({

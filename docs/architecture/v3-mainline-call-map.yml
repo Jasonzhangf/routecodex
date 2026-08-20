@@ -4127,7 +4127,7 @@ chains:
     to_node: V3HubReqInbound02Normalized
     caller_symbol: build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
-    callee_symbol: build_v3_chat_canonical_request_from_responses_payload_for_req_inbound
+    callee_symbol: build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
     status: anchored
     binding_kind: adjacent_inbound_static_order_projection
@@ -4135,6 +4135,7 @@ chains:
     semantic_contract:
       - Consume Responses input strictly left to right without sorting messages, declarations, calls, or results.
       - Project only contiguous assistant semantic items into one Chat assistant turn and stop at every message or tool-result boundary.
+      - Apply only the registered black-box Codex compatibility exception `v3.responses_inbound.codex_builtin_integer_schema`: exact built-in `exec_command`/`write_stdin` tool schema fields may project direct `number` types to `integer`; no generic, user-tool, value, outbound, or metadata rewrite is permitted.
     resource_flow:
       consumes:
       - v3.request.normal_payload

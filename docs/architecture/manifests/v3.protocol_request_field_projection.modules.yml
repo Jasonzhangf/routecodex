@@ -37,9 +37,12 @@ modules:
     allowed_operations:
       - decode Responses wire into Chat canonical and registered payload extensions
       - validate source protocol field types while preserving non-empty forward-compatible effort values
+      - apply the registered Codex built-in integer-schema compatibility projection only at Responses ReqInbound02
     forbidden_operations:
       - read or write MetadataCenter
       - encode Anthropic or Gemini wire
+      - apply the Codex integer-schema projection to Anthropic inbound or Resp04 continuation callers
+      - classify a user-defined same-named tool by name alone
       - recover fields from raw payload after Req02
   - module_id: v3.protocol_codec.openai_outbound
     owner: routecodex-v3-runtime::hub_v1::request_outbound_format

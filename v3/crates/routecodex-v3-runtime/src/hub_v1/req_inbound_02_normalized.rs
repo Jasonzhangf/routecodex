@@ -1,5 +1,4 @@
 use super::{
-    build_v3_chat_canonical_request_from_responses_payload_for_req_inbound,
     encode_v3_anthropic_request_as_responses_semantic, normalize_v3_history_image_placeholders,
     V3HubEntryProtocol, V3HubReqInbound01ClientRaw, V3HubRequestSemanticProtocol,
 };
@@ -38,7 +37,7 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
         let raw = Arc::make_mut(&mut input.payload.0);
         normalize_v3_history_image_placeholders(raw);
         let mut canonical =
-            build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(raw)
+            super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(raw)
                 .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
         normalize_v3_history_image_placeholders(&mut canonical);
         input.payload.0 = Arc::new(canonical);
@@ -79,10 +78,11 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
                 }
             }
         }
-        let mut canonical = build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
-            &responses_semantic,
-        )
-        .map_err(|error| format!("Anthropic inbound Chat canonicalization failed: {error}"))?;
+        let mut canonical =
+            super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+                &responses_semantic,
+            )
+            .map_err(|error| format!("Anthropic inbound Chat canonicalization failed: {error}"))?;
         if let Some(canonical_object) = canonical.as_object_mut() {
             for (key, value) in anthropic_preserved_fields {
                 canonical_object.insert(key, value);
@@ -144,7 +144,7 @@ pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbo
         });
     }
     let mut input = input;
-    let canonical = build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
+    let canonical = super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(
         input.payload.0.as_ref(),
     )
     .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;

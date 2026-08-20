@@ -35,6 +35,27 @@ does not claim that every row in that inventory is already implemented. A field
 is runtime-active only after its positive and negative gates, global install,
 managed restart, and live replay have passed.
 
+## Registered black-box client compatibility exception
+
+The lossless schema rule has one deliberately narrow inbound exception for the
+Codex client's built-in shell tools. The Codex source declares the runtime
+integer arguments `exec_command.yield_time_ms`,
+`exec_command.max_output_tokens`, `write_stdin.session_id`,
+`write_stdin.yield_time_ms`, and `write_stdin.max_output_tokens` as JSON Schema
+`number`. The client is a black box and its emitted request snapshot is already
+`number`, while the tool contract consumed by the downstream provider must be
+`integer` for these known fields.
+
+Accordingly, the Responses inbound owner may rewrite only a direct
+`parameters.properties.<field>.type` value from `number` to `integer` when the
+tool name is exactly `exec_command` or `write_stdin` and the field is in the
+registered list above. This is a protocol-compatibility projection, not generic
+schema normalization: user-defined tools, other numeric fields, non-direct
+schemas, and all outbound codecs remain unchanged. The positive and negative
+tests are `responses_inbound_restores_codex_integer_tool_schema_types`,
+`responses_inbound_does_not_rewrite_string_session_id_schema`, and
+`responses_inbound_does_not_rewrite_same_named_user_tool_schema`.
+
 ## Canonical storage contract
 
 `request.*` in this document is a semantic path, not a wire object to serialize.

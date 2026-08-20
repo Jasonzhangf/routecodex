@@ -591,6 +591,22 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload_for_req_inb
     build_v3_chat_canonical_request_from_responses_payload(payload)
 }
 
+pub(super) fn build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(
+    payload: &Value,
+) -> Result<Value, String> {
+    let mut request = build_v3_chat_canonical_request_from_responses_payload(payload)?;
+    let root_tool_count = payload
+        .get("tools")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    if let Some(tools) = request.get_mut("tools").and_then(Value::as_array_mut) {
+        for tool in tools.iter_mut().take(root_tool_count) {
+            normalize_v3_codex_integer_tool_schema(tool);
+        }
+    }
+    Ok(request)
+}
+
 fn build_v3_openai_chat_message_from_responses_message(
     item: &Map<String, Value>,
 ) -> Result<Value, String> {
@@ -1220,6 +1236,196 @@ fn read_v3_non_empty_str(value: Option<&Value>) -> Option<&str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+fn normalize_v3_codex_integer_tool_schema(tool: &mut Value) {
+    let Some(tool_object) = tool.as_object_mut() else {
+        return;
+    };
+    let tool_name = tool_object.get("name").and_then(Value::as_str).or_else(|| {
+        tool_object
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)
+    });
+    let Some(tool_name) = tool_name else {
+        return;
+    };
+    let is_registered_codex_schema = match tool_name {
+        "exec_command" => is_registered_codex_tool_schema(
+            tool_object,
+            &[
+                "cmd",
+                "justification",
+                "login",
+                "max_output_tokens",
+                "prefix_rule",
+                "sandbox_permissions",
+                "shell",
+                "tty",
+                "workdir",
+                "yield_time_ms",
+            ],
+            &["cmd"],
+        ),
+        "write_stdin" => is_registered_codex_tool_schema(
+            tool_object,
+            &["chars", "max_output_tokens", "session_id", "yield_time_ms"],
+            &["session_id"],
+        ),
+        _ => false,
+    };
+    if !is_registered_codex_schema {
+        return;
+    }
+    let integer_fields: &[&str] = match tool_name {
+        "exec_command" => &["yield_time_ms", "max_output_tokens"],
+        "write_stdin" => &["session_id", "yield_time_ms", "max_output_tokens"],
+        _ => return,
+    };
+    let parameters = if tool_object.contains_key("parameters") {
+        tool_object.get_mut("parameters")
+    } else {
+        tool_object
+            .get_mut("function")
+            .and_then(Value::as_object_mut)
+            .and_then(|function| function.get_mut("parameters"))
+    };
+    let Some(properties) = parameters
+        .and_then(Value::as_object_mut)
+        .and_then(|parameters| parameters.get_mut("properties"))
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    for field in integer_fields {
+        if properties
+            .get(*field)
+            .and_then(Value::as_object)
+            .and_then(|property| property.get("type"))
+            .and_then(Value::as_str)
+            == Some("number")
+        {
+            if let Some(property) = properties.get_mut(*field).and_then(Value::as_object_mut) {
+                property.insert("type".to_string(), Value::String("integer".to_string()));
+            }
+        }
+    }
+}
+
+fn is_registered_codex_tool_schema(
+    tool: &Map<String, Value>,
+    property_names: &[&str],
+    required_names: &[&str],
+) -> bool {
+    let tool_name = tool.get("name").and_then(Value::as_str);
+    let expected_description = match tool_name {
+        Some("exec_command") => Some("Runs a command in a PTY, returning output or a session ID."),
+        Some("write_stdin") => {
+            Some("Writes characters to an existing unified exec session and returns recent output.")
+        }
+        _ => None,
+    };
+    if !tool.keys().all(|key| {
+        matches!(
+            key.as_str(),
+            "description" | "name" | "parameters" | "strict" | "type"
+        )
+    }) || tool.get("description").and_then(Value::as_str) != expected_description
+    {
+        return false;
+    }
+    if tool.get("type").and_then(Value::as_str) != Some("function")
+        || tool.get("strict").and_then(Value::as_bool) != Some(false)
+    {
+        return false;
+    }
+    let Some(parameters) = tool.get("parameters").and_then(Value::as_object) else {
+        return false;
+    };
+    if parameters.get("type").and_then(Value::as_str) != Some("object")
+        || parameters
+            .get("additionalProperties")
+            .and_then(Value::as_bool)
+            != Some(false)
+    {
+        return false;
+    }
+    let Some(properties) = parameters.get("properties").and_then(Value::as_object) else {
+        return false;
+    };
+    let Some(required) = parameters.get("required").and_then(Value::as_array) else {
+        return false;
+    };
+    let expected_types = [
+        ("cmd", "string"),
+        ("justification", "string"),
+        ("login", "boolean"),
+        ("prefix_rule", "array"),
+        ("sandbox_permissions", "string"),
+        ("shell", "string"),
+        ("tty", "boolean"),
+        ("workdir", "string"),
+        ("chars", "string"),
+    ];
+    let schema_properties_are_registered = properties.iter().all(|(name, property)| {
+        let Some(property) = property.as_object() else {
+            return false;
+        };
+        if !property
+            .keys()
+            .all(|key| matches!(key.as_str(), "type" | "description" | "items" | "enum"))
+        {
+            return false;
+        }
+        if property.get("items").is_some()
+            && property
+                .get("items")
+                .and_then(Value::as_object)
+                .and_then(|items| items.get("type"))
+                .and_then(Value::as_str)
+                != Some("string")
+        {
+            return false;
+        }
+        if property.get("enum").is_some()
+            && !property
+                .get("enum")
+                .and_then(Value::as_array)
+                .is_some_and(|values| values.iter().all(Value::is_string))
+        {
+            return false;
+        }
+        match name.as_str() {
+            "prefix_rule" => property.get("items").is_some(),
+            "sandbox_permissions" => property.get("enum").is_some(),
+            _ => property.get("items").is_none() && property.get("enum").is_none(),
+        }
+    });
+    properties.len() == property_names.len()
+        && property_names
+            .iter()
+            .all(|name| properties.contains_key(*name))
+        && schema_properties_are_registered
+        && expected_types.iter().all(|(name, expected)| {
+            if !property_names.contains(name) {
+                true
+            } else {
+                properties
+                    .get(*name)
+                    .and_then(Value::as_object)
+                    .and_then(|property| property.get("type"))
+                    .and_then(Value::as_str)
+                    .map_or(false, |actual| actual == *expected)
+            }
+        })
+        && required.len() == required_names.len()
+        && required.iter().all(|value| {
+            value
+                .as_str()
+                .is_some_and(|name| required_names.contains(&name))
+        })
 }
 
 #[cfg(test)]

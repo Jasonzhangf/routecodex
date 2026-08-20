@@ -1633,8 +1633,21 @@ features:
   change_risk: high
   owner_kind: rust_v3_protocol_codec_field_parity
   owner_scope: Lossless V2/V3 field parity for the supported V3 Relay protocol conversion paths and same-protocol Responses Direct provider wire preservation without server/SSE/MetadataCenter repair owners.
+  compatibility_exceptions:
+  - compatibility_id: v3.responses_inbound.codex_builtin_integer_schema
+    status: source_controlled
+    runtime_evidence: pending_current_entry_replay
+    owner: v3.protocol_codec.responses_inbound
+    required_gates:
+    - npm --prefix v3 run test:v3-responses-inbound-codex-integer-schema-compat
+    - npm run verify:v3-protocol-conversion-field-parity
+    - npm run verify:v3-module-boundaries
+    - install_restart_and_online_responses_replay
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
@@ -1688,6 +1701,7 @@ features:
   - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
   - Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect.
   - Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire.
+  - The registered Codex black-box compatibility exception rewrites only the five exact built-in shell-tool schema fields from direct `number` to `integer` at Responses inbound; user tools, unrelated numeric fields, non-direct schemas, and outbound paths remain unchanged.
   - OpenAI Chat same-protocol Relay preserves request and response field families without cross-protocol repair.
   - OpenAI Chat outbound maps exact client_metadata.user_id to public metadata.user_id, consumes registered Codex client-local keys before provider send, and rejects unknown client_metadata keys plus reasoning-summary
     policy before provider send.
@@ -1715,6 +1729,9 @@ features:
   - anthropic_wire_consumes_reasoning_summary_policy_as_local_response_hint
   - anthropic_projection_context_consumes_reasoning_summary_policy_for_response_shape
   - openai_chat_wire_rejects_invalid_reasoning_summary_policy
+  - responses_inbound_restores_codex_integer_tool_schema_types
+  - responses_inbound_does_not_rewrite_string_session_id_schema
+  - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - Live V3 0.90.4017 request `openai-responses-router-gpt-5.5-20260801T215453223-700406-1956` entered on 5520, targeted `modrouter_anthropic[key2].claude-fable-5`, and returned HTTP 200 `requires_action`
     after the complete typed node chain.
   - Managed instance `v3-91d56506a37701333e88` reported build 0.90.4017 healthy on 5520, 5555, and 10000; installed binary SHA256 was `01c4144679fbb424771ba5f15341eedf1f05cc2b78d3ba7a92578177ee00af9c`.
@@ -3111,7 +3128,7 @@ features:
     global_install_restart: required
     live_evidence:
     - docs/architecture/evidence/v3-route-policy-condition-evaluation-live.json
-    dsh_review: VERDICT: PASS (v3-route-policy-condition-20260820-final-review-12)
+    dsh_review: 'VERDICT: PASS (v3-route-policy-condition-20260820-final-review-12)'
 
 - feature_id: v3.server_internal_observability_projection
   status: source_active_live_verified
@@ -3144,4 +3161,4 @@ features:
     global_install_restart: required
     live_evidence:
     - docs/architecture/evidence/v3-route-policy-condition-evaluation-live.json
-    dsh_review: VERDICT: PASS (v3-route-policy-condition-20260820-final-review-12)
+    dsh_review: 'VERDICT: PASS (v3-route-policy-condition-20260820-final-review-12)'
