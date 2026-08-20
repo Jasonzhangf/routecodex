@@ -9,8 +9,6 @@ pub(crate) use common::{
     V3HubResponsePayload, V3HubResponseToolCall,
 };
 pub(crate) use common::{
-    classify_v3_provider_compat_error, provider_compat_boundary_source,
-    V3ProviderCompatErrorClassification,
     V3HubContinuationCommit, V3HubContinuationOwnership, V3HubEntryProtocol, V3HubExecutionMode,
     V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayToolKind,
     V3HubRequestSemanticProtocol, V3HubResponseNormalizedKind, V3HubResponseTerminality,
