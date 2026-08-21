@@ -345,6 +345,7 @@ description: P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl�
 
 - 触发：审查 provider key score、failure streak、cooldown、probe 或同 priority 调度；单测/源码通过不能作为完成证据。
 - 唯一 owner：Error 分类生成 typed failure action；`routecodex-v3-provider-responses` key health 修改 score/streak/cooldown/probe/persistence；Target 只读 scheduling projection；VR 不修改 health。
+- identity 不变量：key health identity 固定为 `provider_id + auth_alias + model_id`。同 model 跨 session 共享状态；同 provider/key 的不同 model 必须隔离 score、streak、cooldown、probe。持久化 schema v3 迁移只能从 `probe_model_id` 恢复单一 model，缺失必须 fail-fast，禁止扩散到全部 model。
 - 分类不变量：recoverable 默认第 3 次才 key cooldown，AuthKey/不可恢复进入 global cooldown；Session/recoverable probe=15m，AuthKey probe=60m；probe failure 继续 blocked，probe success 才恢复且保留 recovery floor。
 - 强制动作：先查 resource/function/mainline/verification map；定向正反测试与 map gate 通过后，精确 release build/install，比较 repo/global hash 与版本，执行唯一 managed aggregate `routecodex restart -c <config> --timeout-ms ...`，检查全部成员 `/health`，再做真实旧样本 failure/probe/scheduling replay；最后才 DSH Review。
 - 反模式：把 `provider.health` 配置硬编码进 runtime、用 bool 替代 typed scope、只改 function map 不改 mainline/verification、把旧日志或源码静态阅读冒充 installed/live evidence、触碰共享 dirty worktree。

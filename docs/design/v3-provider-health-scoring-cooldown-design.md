@@ -127,24 +127,24 @@ pub struct V3ProviderFailureAction {
 
 `V3ProviderFailureAction` 必须由 Error classification/policy 唯一构造。Provider health store 不得二次猜测 recoverability。
 Action 同时携带 `V3ProviderHealthScope`：普通 recoverable failure 使用
-`GlobalProviderKey`，由 Provider-owned key health 在第 3 次阻断该 provider+auth key，跨
+`GlobalProviderKey`，由 Provider-owned key health 在第 3 次阻断该 provider+auth key+model，跨
 session 持久化并要求 probe；只有显式 request-local/health-neutral action 才使用
 `SessionProviderKey`。Target 不得从 error message 或 score 推导 scope。
 
 ### 4.2 Health key
 
 ```text
-ProviderKeyHealthKey = provider_id + auth_alias
+ProviderKeyHealthKey = provider_id + auth_alias + model_id
 ```
 
 scope 由分类动作决定：
 
 | 类别 | 默认 scope | 说明 |
 | --- | --- | --- |
-| Auth / Quota | provider + auth key | 同 auth key 的 model 可共同受影响时使用 |
-| RateLimit | provider + auth key | 本设计按 key 统一计分；model 只作为 probe/request projection，不拆分 health state |
+| Auth / Quota | provider + auth key + model | 只有该模型的上游配额/鉴权状态受影响 |
+| RateLimit | provider + auth key + model | 按 provider/key/model 计分；同一 key 的其他模型保持可用 |
 | Transport | session + provider key，三次后进入配置的 global policy | 避免单请求瞬态污染所有 session |
-| Semantic / Protocol | provider + auth key | 只阻断确定受影响的 key；不得按 model 复制一套 score |
+| Semantic / Protocol | provider + auth key + model | 只阻断确定受影响的模型，不扩散到同 key 其他模型 |
 | ClientDisconnect | none | health-neutral |
 | Session-local invalid state | session + provider key 或 session-only | 不得提升为 provider global |
 
@@ -219,8 +219,8 @@ recoverable failure #3
   -> probe schedule
 ```
 
-三次计数必须绑定 action scope 和 provider key。不同 auth key 不得意外合并；同一 auth key
-在不同 session、不同 model 上必须共享同一计数、score 和 cooldown。只有明确构造的
+三次计数必须绑定 action scope 和 provider key model。不同 auth key 不得意外合并；同一 auth key
+在不同 session、同一 model 上必须共享同一计数、score 和 cooldown；不同 model 必须隔离。只有明确构造的
 `SessionProviderKey` action 才限制在当前 session；普通 recoverable 不得退化成 session-only
 绕行，否则会使持久化 cooldown 和 restart probe 失效。
 
@@ -315,7 +315,7 @@ probe_in_flight
 ```
 
 写入必须原子提交；load/decode/lock/persist 失败显式报错，不能把错误转换成 available。
-当前 key-health persistence schema 为 v3，canonical identity 是 `provider_id + auth_alias`；model 只用于当前 candidate 和 probe wire model，不参与 score、streak、cooldown、generation 的索引。v1/v2 的旧条目按 provider+auth_alias 显式合并后读入，下一次 mutation 以 v3 写回；未知 schema 必须显式拒绝，不能静默解释为新的 score truth。持久化 recoverable key 由 Provider key-health 自己登记 startup/due probe candidate；不可恢复 key 的 probe 由 global cooldown owner 持有，二者不得重复探测。
+当前 key-health persistence schema 为 v4，canonical identity 是 `provider_id + auth_alias + model_id`。v1/v2 旧条目按完整 provider/key/model identity 保留，v3 旧条目从 state 的 `probe_model_id` 恢复 model；缺少该字段必须显式拒绝，不能把 cooldown 扩散到同 key 的全部模型。下一次 mutation 以 v4 写回；未知 schema 必须显式拒绝，不能静默解释为新的 score truth。持久化 recoverable key 由 Provider key-health 自己登记 startup/due probe candidate；不可恢复 key 的 probe 由 global cooldown owner 持有，二者不得重复探测。
 
 V3 仍保留两个不同 owner 的持久化资源：`provider-key-health.json` 保存 key score、streak、key cooldown 和
 probe generation；`provider-cooldowns.json` 保存分类级 cooldown coordinator 的 probe deadline。

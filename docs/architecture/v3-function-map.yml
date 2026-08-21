@@ -1,6 +1,40 @@
 version: 1
 status: h1_typed_skeleton_and_static_registry_bound
 features:
+- feature_id: v3.provider_key_health_model_granularity
+  status: source_controlled_runtime_pending_live_replay
+  change_risk: high
+  owner_kind: rust_v3_provider_key_health
+  owner_crates:
+  - routecodex-v3-provider-responses
+  owner_files:
+  - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs
+  resource_bindings:
+  - v3.provider.key_health_state
+  entry_symbols:
+  - V3ProviderKeyHealthStore::record_provider_failure_action
+  - V3ProviderKeyHealthStore::record_provider_success
+  - V3ProviderKeyHealthStore::complete_probe_success
+  - V3ProviderKeyHealthStore::complete_probe_failure
+  - V3ProviderKeyHealthStore::scheduling_projection
+  - V3ProviderKeyHealthStore::provider_key_health_probe_keys
+  allowed_paths:
+  - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs
+  - docs/architecture
+  - docs/design/v3-provider-health-scoring-cooldown-design.md
+  - docs/goals/v3-provider-health-scoring-cooldown-plan.md
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  - v3/crates/routecodex-v3-virtual-router
+  - v3/crates/routecodex-v3-target/src/lib.rs
+  required_gates:
+  - npm run test:v3-provider-health-contract
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
 - feature_id: v3.provider_global_cooldown_persistence
   owner_crate: routecodex-v3-provider-responses
   owner_file: v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs

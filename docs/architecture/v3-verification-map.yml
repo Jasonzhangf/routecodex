@@ -2,6 +2,36 @@ version: 2
 status: p6_frozen_hub_v1_h1_typed_skeleton_implemented
 scope: routecodex-v3-p0-p6-plus-hub-v1-h1
 features:
+- feature_id: v3.provider_key_health_model_granularity
+  status: source_controlled_runtime_pending_live_replay
+  change_risk: high
+  owner_kind: provider_health_model_identity
+  owner_modules:
+  - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs
+  contract:
+  - docs/design/v3-provider-health-scoring-cooldown-design.md
+  - docs/goals/v3-provider-health-scoring-cooldown-plan.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  required_positive:
+  - same provider and auth key share health across sessions for the same model
+  - same provider and auth key remain available for a different model
+  - legacy model-specific entries remain isolated during migration
+  required_negative:
+  - v3 persistence without probe_model_id fails explicitly
+  - key health state never enters provider or client payload
+  required_gates:
+  - npm run test:v3-provider-health-contract
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_boundary:
+    source_controlled: true
+    live_cutover: required
+    global_install_restart: required
+    live_evidence: required
+    dsh_review: required
 - feature_id: v3.provider_global_cooldown_persistence
   status: source_active_live_verification_required
   owner_kind: provider_health_persistence

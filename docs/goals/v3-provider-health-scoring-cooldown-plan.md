@@ -125,15 +125,15 @@
 
 动作：
 
-1. 增加 `V3ProviderKeyHealthState`，key 为 provider + auth key；model 只作为候选和 probe wire model，不参与 health identity。
+1. 增加 `V3ProviderKeyHealthState`，identity 为 provider + auth key + model；同一 key 的不同 model 必须独立计分、冷却和 probe。
 2. 增加 `score_milli`、failure/success streak、last timestamps、generation、scope/class。
 3. 实现 success/failure/probe score mutation。
 4. 固化默认 delta：success +20、recoverable -100、irrecoverable -400、probe failure -50；实际值经 manifest/policy 注入。
 5. 固化 score clamp 0..1000。
 6. probe success 使用 recovery floor，不直接恢复满分。
-7. 普通 recoverable cooldown 绑定 provider+auth key，跨 session 持久化并由 probe 恢复；只有显式 request-local action 才保持 session isolation。
+7. 普通 recoverable cooldown 绑定 provider+auth key+model，跨 session 持久化并由对应 model probe 恢复；只有显式 request-local action 才保持 session isolation。
 
-门槛：unit tests、generation stale-success negative tests、session/key isolation tests，以及同一 key 跨 model 共享 score/cooldown 的正反测试。
+门槛：unit tests、generation stale-success negative tests、session/key/model isolation tests，以及同一 key 不同 model 不共享 score/cooldown 的正反测试。
 
 ### Phase 3：Persistence 与 probe lockstep
 
@@ -142,7 +142,7 @@
 动作：
 
 1. 扩展 persistence schema：score/streak/generation/scope/class/cooldown/probe。
-2. 版本化 schema；v1/v2 旧条目按 provider+auth key 显式合并后升级为 v3，未知 schema 不能静默解释成新 score truth。
+2. 版本化 schema；v1/v2 旧条目按 provider+auth key+model 保留并升级为 v4，v3 条目必须从 `probe_model_id` 恢复 model，缺失即 fail-fast；未知 schema 不能静默解释成新 score truth。
 3. 原子写入、load/decode/lock failure 显式错误。
 4. restart 触发 startup probe；deadline 只产生 probe eligibility。
 5. probe failure 保留 cooldown 并 reschedule；probe success 清 cooldown、清 failure generation、设置 recovery floor。

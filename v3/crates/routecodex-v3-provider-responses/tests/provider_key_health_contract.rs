@@ -42,7 +42,7 @@ fn session_scoped_recoverable_failures_do_not_create_global_key_cooldown() {
     let projection = store
         .scheduling_projection("provider-a", "key-a", "model-b", 1, 1, 103)
         .expect("session-scoped projection");
-    assert_eq!(projection.score_milli, 700);
+    assert_eq!(projection.score_milli, 1_000);
     assert!(projection.available);
     assert_eq!(projection.blocked_scopes, Vec::<String>::new());
 }
@@ -257,6 +257,41 @@ fn key_health_persistence_reads_legacy_v1_state_with_new_optional_fields() {
 }
 
 #[test]
+fn key_health_persistence_keeps_legacy_models_isolated() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("provider-key-health.json");
+    std::fs::write(
+        &path,
+        r#"{
+          "schema_version": 1,
+          "entries": [
+            [
+              {"provider_id":"provider-a","auth_alias":"key-a","model_id":"model-a"},
+              {"score_milli":600,"failure_streak":3,"cooldown_until_ms":900000,"probe_required":true,"score_generation":4}
+            ],
+            [
+              {"provider_id":"provider-a","auth_alias":"key-a","model_id":"model-b"},
+              {"score_milli":900,"failure_streak":1,"cooldown_until_ms":null,"probe_required":false,"score_generation":2}
+            ]
+          ]
+        }"#,
+    )
+    .expect("legacy state fixture");
+
+    let store = V3ProviderKeyHealthStore::load_persistent(path).expect("legacy state loads");
+    let model_a = store
+        .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, 100)
+        .expect("model-a projection");
+    let model_b = store
+        .scheduling_projection("provider-a", "key-a", "model-b", 1, 1, 100)
+        .expect("model-b projection");
+    assert!(!model_a.available);
+    assert_eq!(model_a.score_milli, 600);
+    assert!(model_b.available);
+    assert_eq!(model_b.score_milli, 900);
+}
+
+#[test]
 fn key_health_persistence_accepts_pascal_case_scope_written_by_previous_binary() {
     let directory = tempfile::tempdir().expect("temp directory");
     let path = directory.path().join("provider-key-health.json");
@@ -278,6 +313,44 @@ fn key_health_persistence_accepts_pascal_case_scope_written_by_previous_binary()
         .expect("previous state projection");
     assert_eq!(projection.score_milli, 600);
     assert!(projection.available);
+}
+
+#[test]
+fn key_health_persistence_rejects_v3_state_without_model_identity() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("provider-key-health.json");
+    std::fs::write(
+        &path,
+        r#"{
+          "schema_version": 3,
+          "entries": [[
+            {"provider_id":"provider-a","auth_alias":"key-a"},
+            {"score_milli":600,"failure_streak":1,"scope":"None","failure_class":null,"success_streak":0,"last_failure_at_ms":100,"last_success_at_ms":null,"cooldown_until_ms":null,"probe_required":false,"global_probe_owned":false,"probe_model_id":null,"score_generation":1}
+          ]]
+        }"#,
+    )
+    .expect("previous state fixture");
+
+    let error = V3ProviderKeyHealthStore::load_persistent(path)
+        .expect_err("v3 state without a model identity must fail");
+    assert!(error.contains("missing probe_model_id"));
+}
+
+#[test]
+fn key_health_persistence_writes_schema_v4_with_model_identity() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("provider-key-health.json");
+    let store = V3ProviderKeyHealthStore::new_persistent(path.clone());
+    store
+        .record_provider_success("provider-a", "key-a", "model-a", 100)
+        .expect("persist model health");
+
+    let value: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(path).expect("read persisted state"),
+    )
+    .expect("decode persisted state");
+    assert_eq!(value["schema_version"], 4);
+    assert_eq!(value["entries"][0][0]["model_id"], "model-a");
 }
 
 #[test]
@@ -322,7 +395,7 @@ fn irrecoverable_action_enters_cooldown_on_first_failure() {
 }
 
 #[test]
-fn score_and_cooldown_are_isolated_per_provider_key_not_model() {
+fn score_and_cooldown_are_isolated_per_provider_key_and_model() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
     for now_ms in 100..103 {
@@ -342,8 +415,8 @@ fn score_and_cooldown_are_isolated_per_provider_key_not_model() {
         .expect("cooled key");
 
     assert!(unaffected_auth_key.available);
-    assert!(!same_key_different_model.available);
-    assert_eq!(same_key_different_model.score_milli, cooled_key.score_milli);
+    assert!(same_key_different_model.available);
+    assert_eq!(same_key_different_model.score_milli, 1_000);
     assert!(!cooled_key.available);
 }
 

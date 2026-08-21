@@ -14,6 +14,7 @@ static PERSIST_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 struct V3ProviderKeyHealthIdentity {
     provider_id: String,
     auth_alias: String,
+    model_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
@@ -21,6 +22,12 @@ struct V3LegacyProviderKeyHealthIdentity {
     provider_id: String,
     auth_alias: String,
     model_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+struct V3ProviderKeyHealthIdentityV3 {
+    provider_id: String,
+    auth_alias: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,6 +62,11 @@ struct V3ProviderKeyHealthFile {
 #[derive(Debug, Clone, Deserialize)]
 struct V3LegacyProviderKeyHealthFile {
     entries: Vec<(V3LegacyProviderKeyHealthIdentity, V3ProviderKeyHealthState)>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct V3ProviderKeyHealthFileV3 {
+    entries: Vec<(V3ProviderKeyHealthIdentityV3, V3ProviderKeyHealthState)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -181,6 +193,11 @@ impl V3ProviderKeyHealthStore {
                 merge_legacy_entries(legacy.entries)
             }
             3 => {
+                let file: V3ProviderKeyHealthFileV3 = serde_json::from_value(value)
+                    .map_err(|error| format!("decode provider key health state v3: {error}"))?;
+                migrate_v3_entries(file.entries)?
+            }
+            4 => {
                 let file: V3ProviderKeyHealthFile = serde_json::from_value(value)
                     .map_err(|error| format!("decode provider key health state: {error}"))?;
                 file.entries.into_iter().collect()
@@ -260,7 +277,7 @@ impl V3ProviderKeyHealthStore {
                 entry.score_generation = entry.score_generation.saturating_add(1);
             }
             (
-                projection(&identity, entry, model_id, now_ms),
+                projection(&identity, entry, now_ms),
                 state.clone(),
             )
         };
@@ -292,7 +309,7 @@ impl V3ProviderKeyHealthStore {
             entry.last_success_at_ms = Some(now_ms);
             entry.score_generation = entry.score_generation.saturating_add(1);
             (
-                projection(&identity, entry, model_id, now_ms),
+                projection(&identity, entry, now_ms),
                 state.clone(),
             )
         };
@@ -344,7 +361,7 @@ impl V3ProviderKeyHealthStore {
             entry.score_milli = entry.score_milli.max(600);
             entry.score_generation = entry.score_generation.saturating_add(1);
             (
-                projection(&identity, entry, model_id, now_ms),
+                projection(&identity, entry, now_ms),
                 state.clone(),
             )
         };
@@ -374,7 +391,7 @@ impl V3ProviderKeyHealthStore {
             entry.score_milli = apply_delta(entry.score_milli, -50);
             entry.score_generation = entry.score_generation.saturating_add(1);
             (
-                projection(&identity, entry, model_id, now_ms),
+                projection(&identity, entry, now_ms),
                 state.clone(),
             )
         };
@@ -406,12 +423,12 @@ impl V3ProviderKeyHealthStore {
                             .cooldown_until_ms
                             .is_some_and(|deadline| deadline <= now_ms))
             })
-            .filter_map(|(identity, health)| {
-                Some((
+            .map(|(identity, _health)| {
+                (
                     identity.provider_id.clone(),
                     identity.auth_alias.clone(),
-                    health.probe_model_id.clone()?,
-                ))
+                    identity.model_id.clone(),
+                )
             })
             .collect())
     }
@@ -430,7 +447,7 @@ impl V3ProviderKeyHealthStore {
             .get(&identity)
             .filter(|health| health.probe_required && !health.global_probe_owned)
             .map(|health| (health.score_generation, health.probe_model_id.clone()));
-        let Some((expected_generation, probe_model_id)) = state else {
+        let Some((expected_generation, _probe_model_id)) = state else {
             return Ok(None);
         };
         let mut in_flight = self
@@ -446,7 +463,7 @@ impl V3ProviderKeyHealthStore {
         Ok(Some(V3ProviderKeyHealthProbePermit {
             provider_id: identity.provider_id,
             auth_alias: identity.auth_alias,
-            model_id: probe_model_id.unwrap_or_else(|| model_id.to_string()),
+            model_id: identity.model_id,
             expected_generation,
         }))
     }
@@ -524,10 +541,11 @@ impl V3ProviderSchedulingReader for V3ProviderKeyHealthStore {
     }
 }
 
-fn identity(provider_id: &str, auth_alias: &str, _model_id: &str) -> V3ProviderKeyHealthIdentity {
+fn identity(provider_id: &str, auth_alias: &str, model_id: &str) -> V3ProviderKeyHealthIdentity {
     V3ProviderKeyHealthIdentity {
         provider_id: provider_id.to_string(),
         auth_alias: auth_alias.to_string(),
+        model_id: model_id.to_string(),
     }
 }
 
@@ -569,7 +587,6 @@ fn apply_delta(value: u32, delta: i32) -> u32 {
 fn projection(
     identity: &V3ProviderKeyHealthIdentity,
     state: &V3ProviderKeyHealthState,
-    model_id: &str,
     now_ms: u64,
 ) -> V3ProviderKeyHealthProjection {
     let cooldown = state.probe_required
@@ -580,7 +597,7 @@ fn projection(
     V3ProviderKeyHealthProjection {
         provider_id: identity.provider_id.clone(),
         auth_alias: identity.auth_alias.clone(),
-        model_id: model_id.to_string(),
+        model_id: identity.model_id.clone(),
         score_milli: state.score_milli,
         failure_streak: state.failure_streak,
         success_streak: state.success_streak,
@@ -613,7 +630,7 @@ fn persist_state(
             .map_err(|error| format!("create provider key health state directory: {error}"))?;
     }
     let bytes = serde_json::to_vec_pretty(&V3ProviderKeyHealthFile {
-        schema_version: 3,
+        schema_version: 4,
         entries: state
             .iter()
             .map(|(identity, health)| (identity.clone(), health.clone()))
@@ -640,29 +657,38 @@ fn merge_legacy_entries(
         let identity = V3ProviderKeyHealthIdentity {
             provider_id: legacy_identity.provider_id,
             auth_alias: legacy_identity.auth_alias,
+            model_id: legacy_identity.model_id.clone(),
         };
         health.probe_model_id = Some(legacy_identity.model_id);
         merged
             .entry(identity)
-            .and_modify(|current: &mut V3ProviderKeyHealthState| {
-                current.score_milli = current.score_milli.min(health.score_milli);
-                current.failure_streak = current.failure_streak.max(health.failure_streak);
-                current.success_streak = current.success_streak.max(health.success_streak);
-                current.cooldown_until_ms = current.cooldown_until_ms.max(health.cooldown_until_ms);
-                current.probe_required |= health.probe_required;
-                current.global_probe_owned |= health.global_probe_owned;
-                current.score_generation = current.score_generation.max(health.score_generation);
-                if health.last_failure_at_ms > current.last_failure_at_ms {
-                    current.last_failure_at_ms = health.last_failure_at_ms;
-                }
-                if health.last_success_at_ms > current.last_success_at_ms {
-                    current.last_success_at_ms = health.last_success_at_ms;
-                }
-                if current.probe_model_id.is_none() {
-                    current.probe_model_id = health.probe_model_id.clone();
-                }
-            })
             .or_insert(health);
     }
     merged
+}
+
+fn migrate_v3_entries(
+    entries: Vec<(V3ProviderKeyHealthIdentityV3, V3ProviderKeyHealthState)>,
+) -> Result<BTreeMap<V3ProviderKeyHealthIdentity, V3ProviderKeyHealthState>, String> {
+    let mut migrated = BTreeMap::new();
+    for (legacy_identity, health) in entries {
+        let model_id = health.probe_model_id.clone().ok_or_else(|| {
+            format!(
+                "provider key health state v3 entry is missing probe_model_id for provider {} auth {}",
+                legacy_identity.provider_id, legacy_identity.auth_alias
+            )
+        })?;
+        let identity = V3ProviderKeyHealthIdentity {
+            provider_id: legacy_identity.provider_id,
+            auth_alias: legacy_identity.auth_alias,
+            model_id,
+        };
+        if migrated.insert(identity.clone(), health).is_some() {
+            return Err(format!(
+                "provider key health state v3 contains duplicate model identity for provider {} auth {} model {}",
+                identity.provider_id, identity.auth_alias, identity.model_id
+            ));
+        }
+    }
+    Ok(migrated)
 }
