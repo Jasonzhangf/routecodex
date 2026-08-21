@@ -52,6 +52,11 @@ pub(crate) use relay_runtime_core::{
 };
 mod responses_openai_codec;
 pub(crate) use responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound;
+mod responses_sse_tree;
+pub use responses_sse_tree::*;
+mod openai_chat_sse_tree;
+mod anthropic_sse_tree;
+pub use openai_chat_sse_tree::*;
 mod client_metadata_projection;
 mod history_image_cleanup;
 pub(crate) use history_image_cleanup::{
@@ -148,6 +153,7 @@ pub use anthropic_relay_runtime::*;
 mod anthropic_relay_runtime_codec;
 pub use anthropic_relay_runtime_codec::*;
 mod resource_hooks;
+mod relay_sse_hooks;
 pub use resource_hooks::*;
 
 #[cfg(test)]

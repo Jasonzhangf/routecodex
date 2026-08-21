@@ -281,6 +281,30 @@ fn key_health_persistence_accepts_pascal_case_scope_written_by_previous_binary()
 }
 
 #[test]
+fn key_health_persistence_migrates_schema_v4_model_key_entries() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("provider-key-health.json");
+    std::fs::write(
+        &path,
+        r#"{
+          "schema_version": 4,
+          "entries": [[
+            {"provider_id":"provider-a","auth_alias":"key-a","model_id":"model-a"},
+            {"score_milli":600,"failure_streak":1,"scope":"None","failure_class":null,"success_streak":0,"last_failure_at_ms":100,"last_success_at_ms":null,"cooldown_until_ms":null,"probe_required":false,"global_probe_owned":false,"probe_model_id":"model-a","score_generation":1}
+          ]]
+        }"#,
+    )
+    .expect("schema v4 state fixture");
+
+    let store = V3ProviderKeyHealthStore::load_persistent(path).expect("schema v4 loads");
+    let projection = store
+        .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, 100)
+        .expect("schema v4 projection");
+    assert_eq!(projection.score_milli, 600);
+    assert!(projection.available);
+}
+
+#[test]
 fn stale_probe_generation_cannot_clear_newer_failure_state() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");

@@ -23,6 +23,7 @@ pub struct V3DirectResponseCompatFacts<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3DirectResponseCompatPlan {
+    pub provider_protocol: V3HubProviderWireProtocol,
     pub canonical_model_id: String,
     pub blocks: Vec<V3DirectResponseCompatBlock>,
 }
@@ -106,6 +107,7 @@ pub fn compile_direct_response_compat_plan(
         }
     };
     Ok(V3DirectResponseCompatPlan {
+        provider_protocol: facts.provider_protocol,
         canonical_model_id: facts.canonical_model_id.to_string(),
         blocks: vec![block],
     })

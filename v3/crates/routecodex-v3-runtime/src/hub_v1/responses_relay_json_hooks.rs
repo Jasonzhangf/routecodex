@@ -34,8 +34,17 @@ pub(crate) fn run_json_response_hooks(
     ),
     V3ResponsesRelayRuntimeError,
 > {
+    let normalized_provider_value = match input.provider_protocol {
+        V3HubProviderWireProtocol::Responses => {
+            normalize_v3_responses_json_document(input.provider_value, "Responses")?
+        }
+        V3HubProviderWireProtocol::OpenAiChat => {
+            normalize_v3_openai_chat_json_document(input.provider_value)?
+        }
+        _ => input.provider_value.clone(),
+    };
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
-        input.provider_value.clone(),
+        normalized_provider_value,
         V3ProviderRespInbound01RawContext::new(
             V3HubEntryProtocol::Responses,
             input.provider_protocol,
@@ -58,7 +67,10 @@ pub(crate) fn run_json_response_hooks(
                 Some(input.manifest),
                 input.provider_id,
             )?;
-        resp02.set_responses_semantic_payload(converted);
+        resp02.set_responses_semantic_payload(normalize_v3_responses_json_document(
+            &converted,
+            "OpenAI Chat",
+        )?);
     }
     trace.push("V3HubRespInbound02Normalized");
     let response_hook_profile = responses_relay_response_hook_profile(
@@ -93,6 +105,37 @@ pub(crate) fn run_json_response_hooks(
         response_stopless_state,
         response_web_search_state,
     ))
+}
+
+fn normalize_v3_responses_json_document(
+    value: &Value,
+    protocol: &'static str,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    V3ResponsesJsonDocument::from_json(value)
+        .map_err(|_| {
+            V3ResponsesRelayRuntimeError::Response(
+                V3HubRelayResponseError::ProviderProtocolResponseMalformed {
+                    protocol,
+                    reason: "typed JSON document is malformed",
+                },
+            )
+        })
+        .map(|document| document.to_normalized_value())
+}
+
+fn normalize_v3_openai_chat_json_document(
+    value: &Value,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    V3OpenAiChatJsonDocument::from_json(value)
+        .map_err(|_| {
+            V3ResponsesRelayRuntimeError::Response(
+                V3HubRelayResponseError::ProviderProtocolResponseMalformed {
+                    protocol: "OpenAI Chat",
+                    reason: "typed JSON document is malformed",
+                },
+            )
+        })
+        .map(|document| document.to_normalized_value())
 }
 
 /// 把搜索 hop 结果投影到客户端可见的 finalized 响应：追加 hosted

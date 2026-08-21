@@ -63,6 +63,7 @@ mod tests {
             None,
             false,
             false,
+            V3RuntimeStreamObservation::default(),
             outcome,
         );
         let mut chunks = Vec::new();
@@ -99,6 +100,7 @@ mod tests {
             None,
             false,
             false,
+            V3RuntimeStreamObservation::default(),
             outcome,
         );
         let mut saw_error = false;
@@ -130,6 +132,7 @@ mod tests {
             None,
             false,
             false,
+            V3RuntimeStreamObservation::default(),
             outcome,
         );
         let mut chunks = Vec::new();
@@ -174,6 +177,7 @@ mod tests {
             None,
             false,
             false,
+            V3RuntimeStreamObservation::default(),
             outcome,
         );
         let mut saw_error = false;

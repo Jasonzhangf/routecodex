@@ -1,4 +1,5 @@
 use super::*;
+use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
     v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
@@ -361,6 +362,27 @@ fn project_json_response(
     Ok(client)
 }
 
+struct V3OpenAiChatRelayTypedSemanticHook<'a> {
+    observation: &'a V3RuntimeStreamObservation,
+    catalog: V3RelaySseHookCatalog,
+}
+
+impl V3OpenAiChatSseSemanticHook for V3OpenAiChatRelayTypedSemanticHook<'_> {
+    fn notify(&mut self, input: &V3OpenAiChatSseHookInput<'_>) {
+        let _ = self
+            .observation
+            .record_typed_object_type("openai_chat", &input.protocol.object);
+        self.catalog.notify_chat(input);
+    }
+
+    fn rewrite(
+        &mut self,
+        semantic: &mut V3OpenAiChatSseSemanticObject,
+    ) -> Result<(), V3OpenAiChatSseTreeError> {
+        self.catalog.rewrite_chat(semantic)
+    }
+}
+
 struct V3OpenAiChatSseState {
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     decoder: routecodex_v3_sse::SseIncrementalDecoder,
@@ -373,6 +395,7 @@ struct V3OpenAiChatSseState {
     web_search_center_state: Option<V3WebSearchCenterState>,
     /// 请求侧 VR 路由决策算好的"保留响应密文"标记，SSE 帧级 Resp03 消费。
     retain_response_cipher: bool,
+    stream_observation: V3RuntimeStreamObservation,
     /// 治理层拒绝（web_search Mode B 无投影路径）typed 标志：这是 RouteCodex
     /// 控制面决策，不是 provider 流错误，禁止写 provider-health。
     governance_rejected: bool,
@@ -433,6 +456,7 @@ fn project_sse_stream(
     web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
+    stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3OpenAiChatClientStream {
     use futures_util::StreamExt;
@@ -450,6 +474,7 @@ fn project_sse_stream(
         web_search_center_state,
         retain_response_cipher,
         tool_thinking_enabled,
+        stream_observation,
         governance_rejected: false,
         provider_outcome,
     };
@@ -582,15 +607,12 @@ fn enqueue_sse_client_chunks(
 ) -> Result<(), String> {
     for frame in frames {
         if state.seen_done {
-            let fields = frame.frame().fields();
-            let is_tail = fields.iter().any(|field| {
-                matches!(
-                    field,
-                    routecodex_v3_sse::SseField::Named { name, value }
-                        if name == "data" && is_v3_openai_chat_settlement_tail_frame(value)
-                )
-            });
-            if fields.is_empty() || is_tail {
+            let object = crate::sse_object_pipeline::SseObjectFrame::from_frame(&frame);
+            let is_tail = object
+                .normalized_data_json()
+                .as_deref()
+                .is_some_and(is_v3_openai_chat_settlement_tail_frame);
+            if !object.has_data() || is_tail {
                 // Comment-only keep-alive frames and non-semantic settlement
                 // frames (e.g. `{"choices":[],"cost":"0"}`) after [DONE] are
                 // benign protocol tails, not stream corruption.
@@ -598,16 +620,8 @@ fn enqueue_sse_client_chunks(
             }
             return Err("OpenAI Chat SSE emitted a frame after [DONE]".into());
         }
-        let mut data = None;
-        for field in frame.frame().fields() {
-            if let routecodex_v3_sse::SseField::Named { name, value } = field {
-                if name == "data" {
-                    data = Some(value.clone());
-                }
-            }
-        }
-        let Some(data) = data else { continue };
-        if data == "[DONE]" {
+        let object = crate::sse_object_pipeline::SseObjectFrame::from_frame(&frame);
+        if object.is_done() {
             if !state.terminal {
                 return Err("OpenAI Chat SSE emitted [DONE] before terminal finish_reason".into());
             }
@@ -615,9 +629,35 @@ fn enqueue_sse_client_chunks(
             state.pending.push_back(Ok(b"data: [DONE]\n\n".to_vec()));
             continue;
         }
-        let payload: Value = serde_json::from_str(&data).map_err(|error| error.to_string())?;
+        if object.has_data() && !object.is_json_valid() {
+            return Err("OpenAI Chat SSE data is not valid JSON".into());
+        }
+        let Some(payload) = object.data_value().cloned() else {
+            continue;
+        };
+        let transport_object = V3OpenAiChatSseTransportObject::new(
+            object.event_name().map(ToOwned::to_owned),
+            payload.clone(),
+        );
+        let protocol = V3OpenAiChatSseProtocolMetadata::from_chunk(&payload)
+            .map_err(|error| error.to_string())?;
+        let semantic =
+            classify_v3_openai_chat_sse_chunk(&payload).map_err(|error| error.to_string())?;
+        let mut semantic_hook = V3OpenAiChatRelayTypedSemanticHook {
+            observation: &state.stream_observation,
+            catalog: compile_v3_hub_relay_response_hooks().typed_sse_catalog(),
+        };
+        let mut semantic = semantic;
+        apply_v3_openai_chat_sse_semantic_hook(
+            &mut semantic,
+            &transport_object,
+            &protocol,
+            &mut semantic_hook,
+        )
+        .map_err(|error| error.to_string())?;
+        let projected_payload = project_v3_openai_chat_sse_chunk_json(&semantic);
         let client_payload = project_sse_event_payload(
-            payload,
+            projected_payload,
             state.compatibility_profile.as_deref(),
             state.web_search_execution_mode,
             state.web_search_center_state.as_ref(),
@@ -671,6 +711,7 @@ fn project_responses_sse_as_openai_chat_stream(
     web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
+    _stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3OpenAiChatClientStream {
     use futures_util::StreamExt;
@@ -688,10 +729,10 @@ fn project_responses_sse_as_openai_chat_stream(
             false,
             compatibility_profile,
             web_search_execution_mode,
-        web_search_center_state,
-        retain_response_cipher,
-        tool_thinking_enabled,
-        provider_outcome,
+            web_search_center_state,
+            retain_response_cipher,
+            tool_thinking_enabled,
+            provider_outcome,
         ),
         |(
             mut provider,
@@ -720,10 +761,10 @@ fn project_responses_sse_as_openai_chat_stream(
                             finished,
                             compatibility_profile,
                             web_search_execution_mode,
-            web_search_center_state,
-            retain_response_cipher,
-            tool_thinking_enabled,
-            provider_outcome,
+                            web_search_center_state,
+                            retain_response_cipher,
+                            tool_thinking_enabled,
+                            provider_outcome,
                         ),
                     ));
                 }
@@ -824,6 +865,9 @@ fn project_responses_sse_as_openai_chat_stream(
                         }
                         let event: Value =
                             serde_json::from_str(&data).map_err(|error| error.to_string())?;
+                        let event = classify_v3_responses_sse_event(&event)
+                            .map(|semantic| project_v3_responses_sse_event_json(&semantic))
+                            .map_err(|error| error.to_string())?;
                         let event_type = event
                             .get("type")
                             .and_then(Value::as_str)
@@ -1185,6 +1229,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         web_search_state: Option<V3WebSearchCenterState>,
         _retain_response_cipher: bool,
         tool_thinking_enabled: bool,
+        stream_observation: V3RuntimeStreamObservation,
         outcome: V3OpenAiChatSseProviderOutcome,
     ) -> Result<V3OpenAiChatClientStream, V3RelayCoreError> {
         if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
@@ -1195,6 +1240,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
                 web_search_state,
                 _retain_response_cipher,
                 tool_thinking_enabled,
+                stream_observation.clone(),
                 outcome,
             ));
         }
@@ -1210,6 +1256,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
                 web_search_state,
                 _retain_response_cipher,
                 tool_thinking_enabled,
+                stream_observation.clone(),
                 outcome,
             ));
         }
@@ -1224,6 +1271,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             web_search_state,
             _retain_response_cipher,
             tool_thinking_enabled,
+            stream_observation,
             outcome,
         ))
     }

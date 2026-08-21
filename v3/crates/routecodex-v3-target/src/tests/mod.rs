@@ -797,6 +797,21 @@ fn optional_exhaustion_continues_inside_captured_default_floor() {
 }
 
 #[test]
+fn route_tier_precedes_default_target_priority_when_both_are_available() {
+    let expanded = expanded_tools();
+    let selected = V3TargetInterpreter::default()
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(selected.candidate.path[0], "pool:tools");
+}
+
+#[test]
 fn streaming_is_not_a_candidate_capability_filter() {
     let expanded = expanded_tools();
     let mut candidate = expanded

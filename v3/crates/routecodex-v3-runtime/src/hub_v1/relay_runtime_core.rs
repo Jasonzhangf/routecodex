@@ -15,10 +15,9 @@ use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecove
 use crate::provider_failure_runtime_policy::{
     resolve_v3_relay_target_outcome, resolve_v3_relay_target_outcome_with_rescue,
     v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3ProviderFailureRuntimeHealth,
-    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
-    V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolution,
-    V3RelayProviderTargetResolutionInput,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
+    V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
+    V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
 };
 use crate::runtime_timing::V3RuntimeTimingState;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
@@ -268,6 +267,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         web_search_state: Option<V3WebSearchCenterState>,
         retain_response_cipher: bool,
         tool_thinking_enabled: bool,
+        stream_observation: V3RuntimeStreamObservation,
         outcome: Self::SseOutcome,
     ) -> Result<Self::SseStream, V3RelayCoreError>;
     /// 组装 JSON 成功输出（observability 由骨架统一构建，codec 只负责写入
@@ -390,18 +390,18 @@ where
             selected
         } else {
             let target_resolution_input = V3RelayProviderTargetResolutionInput {
-                    manifest,
-                    server_id,
-                    failure_session_scope: &failure_session_scope,
-                    entry_kind: C::ENTRY_KIND,
-                    endpoint_path,
-                    body: routing_payload_ref,
-                    request_local_excluded_candidates: &failed_candidates,
-                    provider_health: &provider_health,
-                    now_ms: v3_relay_provider_policy_now_epoch_ms()
-                        .map_err(V3RelayCoreError::Target)?,
-                    deterministic_sample,
-                };
+                manifest,
+                server_id,
+                failure_session_scope: &failure_session_scope,
+                entry_kind: C::ENTRY_KIND,
+                endpoint_path,
+                body: routing_payload_ref,
+                request_local_excluded_candidates: &failed_candidates,
+                provider_health: &provider_health,
+                now_ms: v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(V3RelayCoreError::Target)?,
+                deterministic_sample,
+            };
             let target_resolution = if allow_exhaustion_rescue_probe {
                 resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await
             } else {
@@ -781,6 +781,7 @@ where
                     guarded_stream,
                     V3_RELAY_SSE_STREAM_IDLE_TIMEOUT,
                 );
+                let stream_observation = V3RuntimeStreamObservation::default();
                 let sse = C::project_sse(
                     idle_guarded_stream,
                     provider_wire_protocol,
@@ -789,6 +790,7 @@ where
                     request_web_search_state.clone(),
                     retain_response_cipher,
                     request_tool_thinking_enabled,
+                    stream_observation.clone(),
                     C::build_sse_outcome(
                         &provider_health,
                         &failure_session_scope,
@@ -805,14 +807,16 @@ where
                 // SSE 终态由客户端流收口时的 observation 合并决定（chat/gemini
                 // wire 无 status 字段，语义 finish_reason 推导 completed）。
                 observability.response_status = Some("streaming".to_string());
-                let stream_observation = V3RuntimeStreamObservation::default();
                 observability.timing = Some(
                     runtime_timing
                         .finish_runtime()
                         .map_err(|timing_error| V3RelayCoreError::Target(timing_error))?,
                 );
-                let sse =
-                    wrap_v3_relay_client_sse_usage_observation(sse, stream_observation.clone());
+                let sse = wrap_v3_relay_client_sse_usage_observation(
+                    sse,
+                    C::ENTRY_PROTOCOL,
+                    stream_observation.clone(),
+                );
                 // Return the projected stream immediately after the first-frame guard.
                 // The client connection must remain independent from provider EOF and
                 // post-commit failures; the codec stream owns those later outcomes and
@@ -839,13 +843,8 @@ mod tests {
     async fn guard_rejects_empty_sse_stream() {
         let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
             Box::pin(futures_util::stream::empty());
-        let result = guard_relay_sse_first_frame(
-            "req-empty",
-            "provider-1",
-            stream,
-            Some(30_000),
-        )
-        .await;
+        let result =
+            guard_relay_sse_first_frame("req-empty", "provider-1", stream, Some(30_000)).await;
         assert!(result.is_err(), "empty SSE stream must fail the guard");
     }
 
@@ -888,13 +887,8 @@ mod tests {
                 reason: "upstream reset".to_string(),
             })]),
         );
-        let result = guard_relay_sse_first_frame(
-            "req-err",
-            "provider-1",
-            stream,
-            Some(30_000),
-        )
-        .await;
+        let result =
+            guard_relay_sse_first_frame("req-err", "provider-1", stream, Some(30_000)).await;
         assert!(result.is_err(), "first frame error must propagate");
     }
 

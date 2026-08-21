@@ -82,3 +82,32 @@ fn direct_sse_thinking_tag_compat_keeps_ordinary_response_byte_exact() {
         input
     );
 }
+
+#[tokio::test]
+async fn direct_sse_thinking_tag_consumer_buffers_split_transport_chunks_until_terminal() {
+    let input = tagged_sse(&["<thinking>", "inspect", "</thinking>"], "<thinking>inspect</thinking>");
+    let chunks = input
+        .chunks(7)
+        .map(|chunk| Ok(chunk.to_vec()))
+        .collect::<Vec<_>>();
+    let mut output = wrap_v3_direct_responses_thinking_tag_consumer_stream(
+        Box::pin(futures_util::stream::iter(chunks)),
+    );
+
+    let first = output.next().await.expect("terminal output").unwrap();
+    let text = String::from_utf8(first).unwrap();
+    assert!(text.contains("response.reasoning_summary_text.delta"), "{text}");
+    assert!(text.contains("inspect"), "{text}");
+    assert!(output.next().await.is_none());
+}
+
+#[tokio::test]
+async fn direct_sse_thinking_tag_consumer_exports_transport_decode_error() {
+    let mut output = wrap_v3_direct_responses_thinking_tag_consumer_stream(Box::pin(
+        futures_util::stream::iter(vec![Ok(vec![0xff])]),
+    ));
+
+    let error = output.next().await.expect("transport error").unwrap_err();
+    assert_eq!(error.source_stage, "V3DirectResp14ProviderProjectionPrepared");
+    assert!(output.next().await.is_none());
+}

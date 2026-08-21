@@ -330,6 +330,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         _web_search_state: Option<V3WebSearchCenterState>,
         _retain_response_cipher: bool,
         tool_thinking_enabled: bool,
+        _stream_observation: V3RuntimeStreamObservation,
         outcome: V3GeminiSseProviderOutcome,
     ) -> Result<V3GeminiRelayClientStream, V3RelayCoreError> {
         Ok(project_sse_stream(

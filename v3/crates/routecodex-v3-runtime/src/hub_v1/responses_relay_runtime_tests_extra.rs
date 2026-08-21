@@ -182,7 +182,10 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
         0,
     );
 
-    assert_eq!(output.status, 429);
+    assert_eq!(
+        output.status, 502,
+        "Error06 terminal exhaustion projection owns the client status after all provider candidates are exhausted"
+    );
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => panic!("provider error must project as JSON"),

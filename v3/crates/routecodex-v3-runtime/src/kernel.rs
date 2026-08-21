@@ -1,4 +1,5 @@
 use crate::hooks::{build_v3_provider_error_source, V3HookRegistry};
+use crate::sse_object_pipeline::process_sse_object_frame;
 use crate::hub_v1::{
     apply_v3_stop_servertool_hook_at_resp03, apply_v3_stopless_request_hook_at_req04,
     apply_v3_tool_call_servertool_hook_at_resp03,
@@ -46,8 +47,9 @@ use routecodex_v3_provider_responses::{
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
     build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
-    build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField, SseIncrementalDecoder,
-    SseTransportIn02DecodedFrame, SseTransportLimits,
+    build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField,
+    SseIncrementalDecoder, SseTransportIn02DecodedFrame, SseTransportIn03ValidatedFrameStream,
+    SseTransportLimits,
 };
 use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
@@ -61,6 +63,9 @@ use direct_sse_provider_outcome::{
     wrap_direct_sse_provider_outcome_stream_with_terminal_commit, V3DirectSseProviderOutcome,
 };
 mod direct_runtime_helpers_stream;
+pub mod direct_request_key_hooks;
+mod direct_sse_consumers;
+pub(crate) use direct_sse_consumers::V3DirectSseTypedHookCatalog;
 mod v3_direct_protocol_codec;
 pub use v3_direct_protocol_codec::{
     V3ChatDirectCodec, V3DirectProtocolCodec, V3ResponsesDirectCodec,
@@ -1439,6 +1444,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             == Some("responses:deepseek-console-go"),
                         policy.target.candidate.compatibility_profile.as_deref()
                             == Some("responses:thinking-tags"),
+                        hook_registry.direct_sse_typed_hooks(),
                     );
                     V3ClientBody::Sse(stream)
                 }

@@ -365,3 +365,52 @@ pub(crate) fn error_output(
         protocol_direct_handoff: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relay_transport_error_is_promoted_to_provider_malformed_sse() {
+        let failure = provider_response_stream_relay_failure(
+            V3ResponsesRelayRuntimeError::ProviderSseTransport(
+                "SSE stream ended before the final frame delimiter".to_owned(),
+            ),
+            "req-1",
+            "provider-1",
+            None,
+        );
+        assert_eq!(failure.source_stage, "V3ProviderRespInbound01Raw");
+        assert_eq!(failure.status, 502);
+        assert!(failure.policy_error_message.contains("malformed SSE"));
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+            failure.source_stage,
+            "provider_response_sse_unterminated_frame",
+            failure.policy_error_message,
+        );
+        let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(source);
+        let local = routecodex_v3_error::build_v3_error_03_target_local_action_from_v3_error_02(
+            classified,
+            routecodex_v3_error::V3ErrorActionScope::ProviderInstance {
+                provider_id: "provider-1".to_owned(),
+            },
+            0,
+        );
+        let exhaustion =
+            routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+                local, 0, false, false,
+            );
+        let execution = routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
+            exhaustion,
+            None,
+        );
+        let projected = routecodex_v3_error::build_v3_error_06_client_projected_from_v3_error_05(
+            execution
+                .try_into_terminal()
+                .expect("exhausted relay transport error must project terminally"),
+        );
+        assert_eq!(projected.chain, routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS);
+        assert_ne!(projected.body.get("response"), Some(&json!({"status":"completed"})));
+    }
+}

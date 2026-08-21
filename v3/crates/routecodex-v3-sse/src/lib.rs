@@ -42,6 +42,50 @@ pub enum SseTransportError {
     DownstreamWrite { message: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SseTransportErrorExport {
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl From<SseTransportError> for SseTransportErrorExport {
+    fn from(error: SseTransportError) -> Self {
+        let (code, message) = match error {
+            SseTransportError::InvalidUtf8 => (
+                "provider_response_sse_invalid_utf8",
+                "invalid UTF-8".to_owned(),
+            ),
+            SseTransportError::UnterminatedFrame => (
+                "provider_response_sse_unterminated_frame",
+                "stream ended before the final frame delimiter".to_owned(),
+            ),
+            SseTransportError::FrameLimitExceeded { limit } => (
+                "provider_response_sse_frame_limit_exceeded",
+                format!("frame exceeds {limit} bytes"),
+            ),
+            SseTransportError::BufferLimitExceeded { limit } => (
+                "provider_response_sse_buffer_limit_exceeded",
+                format!("decoder buffer exceeds {limit} bytes"),
+            ),
+            SseTransportError::Aborted => (
+                "provider_response_sse_aborted",
+                "SSE transport aborted".to_owned(),
+            ),
+            SseTransportError::Timeout { timeout } => (
+                "provider_response_sse_timeout",
+                format!("SSE transport timed out after {timeout:?}"),
+            ),
+            SseTransportError::UpstreamRead { message } => {
+                ("provider_response_sse_upstream_read", message)
+            }
+            SseTransportError::DownstreamWrite { message } => {
+                ("provider_response_sse_downstream_write", message)
+            }
+        };
+        Self { code, message }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SseTransportLifecycleState {
     Flowing,
@@ -512,7 +556,7 @@ mod tests {
         let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
         let frames = decoder
             .push(build_sse_transport_in_01_raw_chunk(
-                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"first\nsecond line\"}\n\n",
+                b"data: {\"kind\":\"generic\",\"text\":\"first\nsecond line\"}\n\n",
             ))
             .unwrap();
         assert_eq!(frames.len(), 1);
@@ -526,7 +570,7 @@ mod tests {
             })
             .expect("data field must be present");
         assert_eq!(
-            data, "{\"type\":\"response.output_text.delta\",\"delta\":\"first\nsecond line\"}",
+            data, "{\"kind\":\"generic\",\"text\":\"first\nsecond line\"}",
             "colonless continuation must be appended to the previous data value"
         );
     }
@@ -562,7 +606,7 @@ mod tests {
         let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
         let frames = decoder
             .push(build_sse_transport_in_01_raw_chunk(
-                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"first\n\nsecond\"}\n\n",
+                b"data: {\"kind\":\"generic\",\"text\":\"first\n\nsecond\"}\n\n",
             ))
             .unwrap();
         assert_eq!(
@@ -580,7 +624,7 @@ mod tests {
             })
             .expect("data field must be present");
         assert_eq!(
-            data, "{\"type\":\"response.output_text.delta\",\"delta\":\"first\n\nsecond\"}",
+            data, "{\"kind\":\"generic\",\"text\":\"first\n\nsecond\"}",
             "JSON value with raw blank line must be preserved as one frame"
         );
     }
@@ -791,5 +835,25 @@ mod tests {
         );
         assert_eq!(lifecycle.state(), SseTransportLifecycleState::Flowing);
         assert!(!lifecycle.is_released());
+    }
+}
+
+#[cfg(test)]
+mod transport_error_export_tests {
+    use super::*;
+
+    #[test]
+    fn transport_errors_export_stable_error_chain_codes() {
+        assert_eq!(
+            SseTransportErrorExport::from(SseTransportError::UnterminatedFrame).code,
+            "provider_response_sse_unterminated_frame"
+        );
+        assert_eq!(
+            SseTransportErrorExport::from(SseTransportError::Timeout {
+                timeout: Duration::from_secs(2),
+            })
+            .code,
+            "provider_response_sse_timeout"
+        );
     }
 }

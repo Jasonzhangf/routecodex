@@ -78,8 +78,6 @@ mod tests {
             secret_key: None,
             api_key: None,
             required_capabilities: Vec::new(),
-            priority: 0,
-            weight: 1,
             pool_ids: vec!["default".to_string()],
             default_pool_member: true,
             path: vec!["provider-a".to_string()],

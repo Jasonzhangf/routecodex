@@ -1,4 +1,7 @@
 use super::*;
+use crate::kernel::direct_sse_consumers::{
+    build_v3_sse_transport_error_source, V3DirectSseContentConsumer,
+};
 
 struct V3DirectSseRemoteContinuationPolicy {
     state: V3ResponsesDirectContinuationState,
@@ -75,6 +78,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
         retain_response_cipher,
         false,
         false,
+        V3DirectSseTypedHookCatalog::default(),
     )
 }
 
@@ -86,6 +90,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     retain_response_cipher: bool,
     deepseek_console_go: bool,
     thinking_tags: bool,
+    typed_hooks: V3DirectSseTypedHookCatalog,
 ) -> V3ClientSseStream {
     struct StreamState {
         source: V3ClientSseStream,
@@ -95,11 +100,12 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
         strip_client_response_id: bool,
         retain_response_cipher: bool,
         deepseek_console_go: bool,
+        typed_hooks: V3DirectSseTypedHookCatalog,
         done: bool,
     }
 
     let source = if thinking_tags {
-        wrap_v3_direct_sse_thinking_tag_compat_stream(source)
+        wrap_v3_direct_responses_thinking_tag_consumer_stream(source)
     } else {
         source
     };
@@ -112,6 +118,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
             strip_client_response_id,
             retain_response_cipher,
             deepseek_console_go,
+            typed_hooks,
             done: false,
         },
         |mut state| async move {
@@ -127,6 +134,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                         state.strip_client_response_id,
                         state.retain_response_cipher,
                         state.deepseek_console_go,
+                        state.typed_hooks,
                     )
                     .map(|out| out.unwrap_or(chunk));
                     if result.is_err() {
@@ -146,7 +154,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                     );
                     match decoder
                         .finish()
-                        .map_err(|error| runtime_source("V3ProviderResp14Raw", error))
+                        .map_err(build_v3_sse_transport_error_source)
                     {
                         Ok(()) if state.runtime_timing.is_finished().unwrap_or(false) => None,
                         Ok(()) => match state.runtime_timing.finish_external() {
@@ -173,184 +181,39 @@ fn record_direct_sse_provider_event_json_chunk(
     strip_client_response_id: bool,
     retain_response_cipher: bool,
     deepseek_console_go: bool,
+    typed_hooks: V3DirectSseTypedHookCatalog,
 ) -> Result<Option<Vec<u8>>, V3Error01SourceRaised> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
-        .map_err(|error| runtime_source("V3ProviderResp14Raw", error))?;
+        .map_err(build_v3_sse_transport_error_source)?;
     if frames.is_empty() {
-        return Ok(None);
-    }
-    // 所有改写都关闭：纯 usage 观测，透传原 chunk（direct 字节保真路径）。
-    if !strip_client_response_id && retain_response_cipher && !deepseek_console_go {
-        for frame in &frames {
-            record_direct_sse_provider_event_json_frame(
-                frame.frame().fields(),
-                stream_observation,
-            )?;
-        }
         return Ok(None);
     }
     let mut rewritten = Vec::new();
     let mut any_rewritten = false;
+    let mut content_consumer = V3DirectSseContentConsumer {
+        retain_response_cipher,
+        strip_client_response_id,
+        deepseek_console_go,
+        typed_hooks,
+    };
     for frame in frames {
         record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
-        // 帧改写优先级：密文剥离（唯一 hook）优先；同一帧极少同时携带
-        // response.id 与 encrypted_content（created/completed 帧 vs reasoning 帧），
-        // 冲突帧只做密文剥离。
-        let frame_data = if !retain_response_cipher {
-            rewritten_v3_sse_frame_data_cipher(frame.frame())
-        } else {
-            None
-        };
-        let frame_data = match frame_data {
-            Some(pair) => Some(pair),
-            None if deepseek_console_go => {
-                rewritten_v3_sse_frame_data_tool_call_compat(frame.frame()).or_else(|| {
-                    if strip_client_response_id {
-                        rewritten_v3_sse_frame_data_response_id(frame.frame())
-                    } else {
-                        None
-                    }
-                })
-            }
-            None if strip_client_response_id => {
-                rewritten_v3_sse_frame_data_response_id(frame.frame())
-            }
-            None => None,
-        };
-        if let Some((event_name, data)) = frame_data {
-            if !event_name.is_empty() {
-                rewritten.extend_from_slice(b"event: ");
-                rewritten.extend_from_slice(event_name.as_bytes());
-                rewritten.push(b'\n');
-            }
-            rewritten.extend_from_slice(b"data: ");
-            rewritten.extend_from_slice(data.as_bytes());
-            rewritten.push(b'\n');
-            rewritten.push(b'\n');
+        let original =
+            build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame).into_bytes();
+        let projected = process_sse_object_frame(&frame, &mut content_consumer)
+            .map_err(|error| runtime_source("V3ProviderResp14Raw", error.to_string()))?
+            .into_bytes();
+        if projected != original {
             any_rewritten = true;
-        } else {
-            rewritten.extend_from_slice(
-                build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame).as_bytes(),
-            );
         }
+        rewritten.extend_from_slice(&projected);
     }
     if any_rewritten {
         Ok(Some(rewritten))
     } else {
         Ok(None)
     }
-}
-
-/// 若帧 data JSON 中存在 Codex 密文字段（encrypted_content 以 rsn_/gAAAA 开头），
-/// 用唯一剥离 hook（apply_v3_response_cipher_policy）移除后返回 (event 名, 改写后 data)；
-/// 未改写返回 None。retain=false（非单 gpt provider）时由调用方保证进入此分支。
-fn rewritten_v3_sse_frame_data_cipher(
-    frame: &SseTransportIn02DecodedFrame,
-) -> Option<(String, String)> {
-    let mut event_name = String::new();
-    let mut rewritten_data = None;
-    for field in frame.fields() {
-        let SseField::Named { name, value } = field else {
-            continue;
-        };
-        match name.as_str() {
-            "event" => event_name = value.clone(),
-            "data" if !value.is_empty() => {
-                let Ok(mut parsed) = serde_json::from_str::<Value>(value.as_str()) else {
-                    continue;
-                };
-                let original = parsed.clone();
-                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
-                    &mut parsed,
-                    false,
-                );
-                // 用 Value 相等比较（键序无关），避免 serde_json 重排键序导致
-                // 无密文帧也被误判改写（direct SSE 字节保真）。
-                if parsed != original {
-                    rewritten_data = serde_json::to_string(&parsed).ok();
-                }
-            }
-            _ => {}
-        }
-    }
-    rewritten_data.map(|data| (event_name, data))
-}
-
-/// DeepSeek Console Go 响应 SSE 帧回射：`response.output_item.added/done` 事件
-/// 中 `item.type=function_call`（name≠apply_patch）回射为 `custom_tool_call`，
-/// 并把 `arguments`（`{"input":"<raw>"}` JSON 字符串）解包回 `input` 原始字符串。
-/// 客户端声明的是 custom 工具形态，必须回射否则客户端不执行、下一轮历史缺
-/// output（孤儿 call）触发上游 400。
-fn rewritten_v3_sse_frame_data_tool_call_compat(
-    frame: &SseTransportIn02DecodedFrame,
-) -> Option<(String, String)> {
-    let mut event_name = String::new();
-    let mut rewritten_data = None;
-    for field in frame.fields() {
-        let SseField::Named { name, value } = field else {
-            continue;
-        };
-        match name.as_str() {
-            "event" => event_name = value.clone(),
-            "data" if !value.is_empty() => {
-                let Ok(mut parsed) = serde_json::from_str::<Value>(value.as_str()) else {
-                    continue;
-                };
-                let Some(item) = parsed.get("item").cloned() else {
-                    continue;
-                };
-                // 与 JSON 响应侧复用同一个 compat 函数：构造 {"output":[item]}
-                // 交给 apply_deepseek_console_go_response_compat 回射，再取回 item。
-                let compat = provider_compat_core::apply_deepseek_console_go_response_compat(
-                    json!({"output": [item]}),
-                );
-                let Some(rewritten_item) = compat
-                    .get("output")
-                    .and_then(Value::as_array)
-                    .and_then(|output| output.first())
-                else {
-                    continue;
-                };
-                if rewritten_item == parsed.get("item").unwrap_or(&Value::Null) {
-                    continue;
-                }
-                if let Some(object) = parsed.as_object_mut() {
-                    object.insert("item".to_string(), rewritten_item.clone());
-                }
-                rewritten_data = serde_json::to_string(&parsed).ok();
-            }
-            _ => {}
-        }
-    }
-    rewritten_data.map(|data| (event_name, data))
-}
-
-/// 若帧 data 中的 `response.id` 被替换，返回 (event 名, 改写后 data)；
-/// 未改写返回 None。
-fn rewritten_v3_sse_frame_data_response_id(
-    frame: &SseTransportIn02DecodedFrame,
-) -> Option<(String, String)> {
-    let mut event_name = String::new();
-    let mut rewritten_data = None;
-    for field in frame.fields() {
-        let SseField::Named { name, value } = field else {
-            continue;
-        };
-        match name.as_str() {
-            "event" => event_name = value.clone(),
-            "data" if !value.is_empty() => {
-                let Ok(mut parsed) = serde_json::from_str::<Value>(value.as_str()) else {
-                    continue;
-                };
-                if crate::shared::strip_v3_response_id_from_json_body(&mut parsed) {
-                    rewritten_data = serde_json::to_string(&parsed).ok();
-                }
-            }
-            _ => {}
-        }
-    }
-    rewritten_data.map(|data| (event_name, data))
 }
 
 fn record_direct_sse_provider_event_json_frame(
@@ -478,7 +341,9 @@ pub(crate) fn compat_source(
             let field = extract_v3_provider_compat_boundary_field(&error.reason)
                 .unwrap_or("control_like_top_level_field");
             routecodex_v3_error::raise_v3_provider_compat_payload_boundary_violation(
-                stage, field, error.reason.as_str(),
+                stage,
+                field,
+                error.reason.as_str(),
             )
         }
         V3ProviderCompatErrorClassification::Other => runtime_source(stage, error),
@@ -845,6 +710,9 @@ fn require_static_hooks(hook_registry: &V3HookRegistry) {
     for hook in [
         "ResponsesDirectRouteHook",
         "ResponsesDirectRequestProjectionHook",
+        "ResponsesDirectSystemPromptKeyHook",
+        "ResponsesDirectDeveloperPromptKeyHook",
+        "ResponsesDirectToolsKeyHook",
         "ResponsesDirectProviderTransportHook",
         "ResponsesDirectResponseProjectionHook",
         "ResponsesDirectErrorHook",
