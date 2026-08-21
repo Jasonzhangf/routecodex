@@ -822,34 +822,6 @@ impl V3ProviderHealthStore {
         Ok(())
     }
 
-    pub fn try_acquire_cross_session_revive(
-        &self,
-        failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        now_ms: u64,
-    ) -> Result<bool, V3ProviderHealthError> {
-        let key =
-            provider_failure_session_key(failure_session_scope, provider_id, auth_alias, model_id);
-        let mut state = self
-            .state
-            .write()
-            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let Some(cooldown) = state.cooldowns.get(&key).cloned() else {
-            // Revival is an admission to clear an expired cooldown.  A
-            // provider with no cooldown has nothing to revive and must not
-            // be mistaken for a successful cross-session recovery.
-            return Ok(false);
-        };
-        if cooldown.until_ms.is_some_and(|until_ms| until_ms > now_ms) {
-            return Ok(false);
-        }
-        state.cooldowns.remove(&key);
-        state.consecutive_failures.remove(&key);
-        Ok(true)
-    }
-
     pub(crate) fn update_quota_state(
         &self,
         scope: &V3ErrorActionScope,
