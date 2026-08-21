@@ -65,8 +65,8 @@ struct V3LegacyProviderKeyHealthFile {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct V3ProviderKeyHealthFileV4 {
-    entries: Vec<(V3LegacyProviderKeyHealthIdentity, V3ProviderKeyHealthState)>,
+struct V3ProviderKeyHealthFileV3 {
+    entries: Vec<(V3ProviderKeyHealthIdentityV3, V3ProviderKeyHealthState)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -201,11 +201,6 @@ impl V3ProviderKeyHealthStore {
                 let file: V3ProviderKeyHealthFile = serde_json::from_value(value)
                     .map_err(|error| format!("decode provider key health state: {error}"))?;
                 load_v4_entries(file.entries)?
-            }
-            4 => {
-                let file: V3ProviderKeyHealthFileV4 = serde_json::from_value(value)
-                    .map_err(|error| format!("decode provider key health state v4: {error}"))?;
-                merge_legacy_entries(file.entries)
             }
             other => {
                 return Err(format!(
