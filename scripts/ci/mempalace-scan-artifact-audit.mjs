@@ -55,7 +55,6 @@ patterns = {
     "fixtures": re.compile(r"(^|/)fixtures/"),
     "note.md": re.compile(r"(^|/)note\.md$"),
     "MEMORY.md": re.compile(r"(^|/)MEMORY\.md$"),
-    "DELIVERY.md": re.compile(r"(^|/)DELIVERY\.md$"),
 }
 hits = {name: [path for path in files if pattern.search(path)] for name, pattern in patterns.items()}
 print(json.dumps({"scannedFiles": len(files), "hits": hits}, ensure_ascii=False))

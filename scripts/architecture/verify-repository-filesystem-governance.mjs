@@ -34,6 +34,13 @@ function verifyRepositoryFilesystemGovernance() {
     'docs/architecture/mainline-call-map.yml',
     'docs/architecture/verification-map.yml',
     'docs/architecture/no-fallback-diff-rules.json',
+    'docs/architecture/v3-resource-operation-map.yml',
+    'docs/architecture/v3-function-map.yml',
+    'docs/architecture/v3-mainline-call-map.yml',
+    'docs/architecture/v3-verification-map.yml',
+    'docs/architecture/repository-filesystem-module-registry.yml',
+    'docs/architecture/v3-build-tool-module-registry.yml',
+    'docs/architecture/v3-runtime-module-registry.yml',
   ];
   let moduleOwner;
   const moduleRegistryPath = path.join(
@@ -51,11 +58,13 @@ function verifyRepositoryFilesystemGovernance() {
     const requiredOwnedPaths = [
       '.gitignore',
       'scripts/ci/repo-sanity.mjs',
+      'scripts/ci/mempalace-scan-artifact-audit.mjs',
       'scripts/architecture/verify-repository-filesystem-governance.mjs',
       'scripts/tests/repository-filesystem-governance-red-fixtures.mjs',
       'v3/README.md',
       'v3/fixtures',
-      'deprecated/v2',
+      'docs/audits/repository-root-layout-v3-v2-audit.md',
+      'docs/goals/repository-root-retirement-v4-v3-integration-plan.md',
     ];
     if (registry?.status !== 'active') failures.push('repository filesystem module registry must be active');
     if (!moduleOwner) failures.push('repository filesystem module owner is missing');
@@ -84,19 +93,14 @@ function verifyRepositoryFilesystemGovernance() {
   for (const relativePath of activeMachineMaps) {
     const absolutePath = path.join(repoRoot, relativePath);
     if (!fs.existsSync(absolutePath)) continue;
-    if (fs.readFileSync(absolutePath, 'utf8').includes('deprecated/v2/')) {
+    const content = fs.readFileSync(absolutePath, 'utf8');
+    if (content.includes('deprecated/v2/') || /deprecated\/v2(?=[\s"'\n]|$)/.test(content)) {
       failures.push(`active machine map must not bind retired V2 archive: ${relativePath}`);
     }
   }
 
-  const deprecatedRoot = path.join(repoRoot, 'deprecated');
-  if (fs.existsSync(deprecatedRoot)) {
-    for (const entry of fs.readdirSync(deprecatedRoot)) {
-      if (entry !== 'v2') failures.push(`unsupported deprecated root child: deprecated/${entry}`);
-    }
-    if (!fs.existsSync(path.join(deprecatedRoot, 'v2/README.md'))) {
-      failures.push('deprecated V2 archive must have deprecated/v2/README.md');
-    }
+  if (fs.existsSync(path.join(repoRoot, 'deprecated'))) {
+    failures.push('retired archive root must not exist: deprecated');
   }
 
   const pendingDeletions = new Set(lines(git(['diff', '--name-only', '--diff-filter=D'])));

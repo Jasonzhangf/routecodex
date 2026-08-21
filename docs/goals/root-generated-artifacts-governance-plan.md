@@ -29,11 +29,11 @@ Current root classification:
 | Path | Class | Evidence | Decision |
 |---|---|---|---|
 | `dist/` | Build output | `tsconfig.json outDir`, Vite `outDir` | Keep for dev, clean through build script only |
-| `sharedmodule/llmswitch-core/dist/` | Core build output | core `tsconfig.json outDir` | Keep for dev, clean through core build script only |
+| `v3/dist/` | V3 build output | V3 package/build contract | Keep for V3 packaging only |
 | `node_modules/` | Dependency output | package manager | Keep local, ignored |
-| `sharedmodule/llmswitch-core/rust-core/target/` | Rust build output | Cargo target, large rebuild cost | Keep local, ignored |
+| `v3/target/` | V3 Rust build output | V3 Cargo target, large rebuild cost | Keep local, ignored |
 | `tmp/` | Test/runtime temp | Jest session artifacts | Must be disposable |
-| `test-results/`, `sharedmodule/**/test-results/` | Test output | scripts write snapshots/matrix output | Must be disposable |
+| `test-results/` | Test output | scripts write snapshots/matrix output | Must be disposable |
 | `coverage/` | Coverage output | Jest coverage config | Must be disposable |
 | `artifacts/pack/` | Packaging output | pack/install scripts | Approved generated root; root `*.tgz`, `.install-pack/`, and non-pack `artifacts/*` are forbidden |
 | `bin/`, `lib/` | Local npm prefix residue | ignored, symlink to repo | Remove and prevent root local prefix usage |
@@ -48,18 +48,18 @@ Current root classification:
 | `.agent-state/` | Agent/tool local state | `.reasonix/`, `.codex-work/`, `.drudge/`, `clock.md` migrated from root | Approved local root; old root state names forbidden |
 | `.cache/model-cache/` | Model cache | root `models/bert` migrated without deletion | Approved local cache root; root `models/` and non-model-cache `.cache/*` are forbidden |
 | `samples/` | Tracked/evidence samples | package/test usage | Keep as sample/evidence truth |
-| `vendor/` | Retired dependency copy | `scripts/vendor-core.mjs` uses `sharedmodule/llmswitch-core` directly; no runtime/package consumer | Deleted on 2026-08-03; gate forbids reappearance |
+| `vendor/` | Retired dependency copy | No runtime/package consumer after V3 ownership consolidation | Deleted on 2026-08-03; gate forbids reappearance |
 | `v3/` | Primary RouteCodex implementation | Rust workspace and `rccv3` distribution truth | Active source; new runtime work belongs here |
-| `deprecated/v2/` | Retired V2 authoring archive | explicit V2 docs, consistency scripts, source notes, and tests | Historical reference only; active V2 root directories are forbidden |
+| `deprecated/v2/` | Retired V2 authoring archive (historical) | none; archive removed | Must remain absent; active V2 root directories are forbidden |
 
 ## Root Layout Contract
 
 Root is reserved for:
 
-- project entry documents: `AGENTS.md`, `README.md`, `DELIVERY.md`, `MEMORY.md`, `note.md`;
+- project entry documents: `AGENTS.md`, `README.md`, `MEMORY.md`, `note.md`;
 - package/toolchain manifests: `package.json`, `package-lock.json`, `tsconfig*.json`, `jest.config.js`, `eslint.config.js`, `.gitignore`, `.gitattributes`;
-- source/config/test/documentation roots: `v3/`, `src/`, `sharedmodule/`, `config/`, `configsamples/`, `docs/`, `scripts/`, `tests/`, `samples/`, `webui/`;
-- retired source archive root: `deprecated/`; only `deprecated/v2/` is approved, and it is never an active runtime/build/package surface;
+- source/config/test/documentation roots: `v3/`, `src/`, `config/`, `docs/`, `scripts/`, `tests/`, `samples/`, `webui/`;
+- retired source archive root: `deprecated/`; no retired V2 archive is approved in the current tree; the path must remain absent;
 - local-only state roots explicitly approved by policy: `.beads/`, `.agents/`, `memory/`, `CACHE.md`;
 - generated roots explicitly approved by policy: `dist/`, `node_modules/`, `tmp/`, `coverage/`, `test-results/`, `logs/`, and Rust workspace-local `target/` directories under their owning packages.
 - generated roots explicitly approved by policy for packaging: `artifacts/pack/`.
@@ -75,7 +75,7 @@ All code that writes files must choose one of these roots:
 |---|---|---|
 | TypeScript build output | `dist/` or package-local `dist/` | Never emit side-by-side `src/**/*.js`, `.d.ts`, `.js.map` |
 | Web UI build output | `dist/daemon-admin-ui/` | `webui/` remains source input |
-| Core build output | `sharedmodule/llmswitch-core/dist/` | Native node artifacts must live under core `dist/native/` |
+| V3 build output | `v3/dist/` | V3 release artifacts remain under the V3 package domain |
 | Rust build output | Cargo `target/` | Do not copy `.node` into source directories |
 | Test temp | `tmp/<suite>/` or OS temp via `fs.mkdtemp(os.tmpdir())` | If evidence is needed after test, promote to `test-results/<suite>/` |
 | Test reports | `test-results/<suite>/` | Never write ad-hoc root JSON or logs |
@@ -144,7 +144,6 @@ High-confidence disposable items may be deleted after `git check-ignore` evidenc
 
 - `tmp/`
 - `test-results/`
-- `sharedmodule/**/test-results/`
 - `.install-pack/`
 - root `*.tgz`
 - `.DS_Store`
@@ -165,7 +164,7 @@ Do not delete without a dedicated migration decision:
 2026-08-03 migration decisions:
 
 - Root `.reasonix/` was retired after its state moved to `.agent-state/reasonix/`.
-- `vendor/` was deleted after reference audit confirmed the sharedmodule is the direct source.
+- `vendor/` was deleted after reference audit confirmed V3 is the sole active source.
 - `docs/architecture/backups/`, `note.md.d/`, and `samples/mock-provider/_archive/` were deleted as unreferenced backup/archive residue.
 - Stale per-run Cargo target directories were removed while retaining `.agent-collab` actor, heartbeat, event, evidence, and log records.
 - V3 is the primary implementation and has an explicit standalone entry at `v3/README.md`.

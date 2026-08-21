@@ -976,7 +976,7 @@ resources:
     identity: [entryProtocol, providerProtocol, clientProjectionProtocol, fieldFamily]
     allowed_writers: [docs/design/v3-protocol-request-field-projection.md, docs/goals/v3-protocol-conversion-field-parity-test-design.md, docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md, docs/architecture/manifests/v3.protocol_request_field_projection.yml, docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml, docs/architecture/reviews/v3-protocol-semantic-matrix-review.md, docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml, scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs]
     allowed_readers: [v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs, docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html, scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter, SSE transport, provider transport, src, sharedmodule]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter, SSE transport, provider transport, src]
     data_plane_fields: [client_metadata, metadata, reasoning_effort, reasoning_budget_tokens, reasoning_summary_policy, reasoning_context_policy, reasoning_mode, reasoning_include_thoughts, reasoning_display_policy, stop, thinking, tool_choice, usage, model, created, response_format]
     control_plane_fields: [metadata_center, routeHint, stoplessCenter, requestCapabilities]
     may_enter_provider_body: false
@@ -1605,7 +1605,7 @@ resources:
     allowed_readers: [cargo_build, cargo_test, v3_artifact_budget]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     canonical_path: v3/target
-    forbidden_paths: [target, v4/target, sharedmodule/llmswitch-core/rust-core/target]
+    forbidden_paths: [target, v4/target]
     release_point: cargo_clean_or_owned_artifact_release
     may_enter_provider_body: false
     may_enter_client_body: false

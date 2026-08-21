@@ -66,4 +66,4 @@ export ANTHROPIC_API_KEY="your_anthropic_key"
 - [路由指令](docs/routing-instructions.md)
 - [AGENTS.md](AGENTS.md)
 
-V2 历史资料仅存放在 [`deprecated/v2/`](deprecated/v2/README.md)，不得被 package、build、CI 或默认测试重新接线。
+V2 历史资料已从仓库物理移除，不得恢复 archive、package、build、CI 或默认测试入口。

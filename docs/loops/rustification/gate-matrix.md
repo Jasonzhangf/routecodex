@@ -32,10 +32,10 @@ only orchestration or a native shell.
 
 | Layer | Required gates |
 | --- | --- |
-| Owner | Hub Pipeline Rust crates under `sharedmodule/llmswitch-core/rust-core/` plus mapped native entry wrappers only. |
+| Owner | Hub Pipeline Rust crates under `v3/crates/` plus mapped V3 entry wrappers only. |
 | Feature map | Hub request/response Chat Process, tool governance, servertool followup, continuation, history/reasoning owner features. |
 | Mainline | Adjacent edges covering `HubReqInbound02Standardized -> HubReqChatProcess03Governed`, `HubReqChatProcess03Governed -> VrRoute04SelectedTarget`, `HubRespInbound02Parsed -> HubRespChatProcess03Governed`, and `HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic`. |
-| Whitebox | `npm run verify:llmswitch-rustification-audit`; Rust-only gates for responses history/protocol, tool normalization, servertool, continuation, function-map compile, and mainline map compile as listed in `verification-map.yml`. |
+| Whitebox | `npm --prefix v3 run verify:v3-rust-only`; V3 gates for responses history/protocol, tool normalization, servertool, continuation, function-map compile, and mainline map compile as listed in `verification-map.yml`. |
 | Blackbox | Old failing sample or live-equivalent replay through the same HTTP entry when the touched semantic changes request/response behavior. |
 | Quality | No TS-owned tool governance, continuation repair, history repair, required_action inference, payload sanitize, provider patching, fallback, or provider special case in Hub stages. |
 | Evidence | run log must include classification, owner feature, owner path, mainline edge ids, gates run, replay/sample path if required, and remaining TS shell role. |
@@ -48,10 +48,10 @@ Rust-owned without Hub/provider payload repair.
 
 | Layer | Required gates |
 | --- | --- |
-| Owner | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/` and mapped VR native entrypoints. |
+| Owner | V3 Virtual Router crates under `v3/crates/` and mapped V3 entrypoints. |
 | Feature map | Virtual Router route/forwarder/failure-policy owner features and provider runtime ingress policy features. |
 | Mainline | Adjacent edges covering `HubReqChatProcess03Governed -> VrRoute04SelectedTarget` and `VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic`. |
-| Whitebox | `npm run verify:llmswitch-rustification-audit`; `npm run verify:provider-failure-ban-blackbox`; `npm run verify:function-map-compile-gate`; `npm run verify:architecture-mainline-call-map`; focused VR/forwarder tests listed in `verification-map.yml`. |
+| Whitebox | `npm --prefix v3 run verify:v3-rust-only`; V3 provider-failure, function-map, mainline, and focused VR gates listed in `verification-map.yml`. |
 | Blackbox | Routing/failure replay when selection, pool exhaustion, default tier, health/quota, or provider failure semantics change. |
 | Quality | No provider-key branch in Hub/VR, no TS route selection duplicate, no default pool empty acceptance, no provider error rethrow before Rust policy decision, no payload patching in VR. |
 | Evidence | run log must include route/failure classification, owner feature, mainline edge ids, gates run, replay path if required, and any `ts_io_shell_ok` wrapper paths. |
@@ -83,7 +83,7 @@ TypeScript-owned provider/Hub semantics.
 | Owner | Provider runtime wire codec/transport/auth/error capture owner features, with provider-specific logic contained inside provider runtime only. |
 | Feature map | Provider runtime, outbound codec, inbound parser, and error capture features. |
 | Mainline | Adjacent edges covering `HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload`, `ProviderReqOutbound06WirePayload -> ProviderReqOutbound07TransportRequest`, `ProviderRespInbound01Raw -> HubRespInbound02Parsed`, and error entry into `ErrorErr01SourceRaised -> ErrorErr02HostCaptured`. |
-| Whitebox | Focused provider runtime/codec/parser tests for touched owner; `npm run verify:llmswitch-rustification-audit`; provider error/reroute gates listed in `verification-map.yml`. |
+| Whitebox | Focused provider runtime/codec/parser tests for touched owner; `npm --prefix v3 run verify:v3-rust-only`; provider error/reroute gates listed in `verification-map.yml`. |
 | Blackbox | Provider replay or recorded fixture replay when provider wire body, stream parse, auth, retry/reroute error capture, or upstream response parse changes. |
 | Quality | Provider-specific differences stay in provider runtime. No Hub/VR provider special case, no TS fallback conversion, no metadata in provider wire body/options, no swallowed parse/transport errors. |
 | Evidence | run log must classify each provider path as `rust_ssot`, `native_shell_ok`, `ts_io_shell_ok`, or `ts_semantic_debt`, and list any runtime-only provider-specific exceptions. |

@@ -1,7 +1,6 @@
 {
   "schemaVersion": 1,
-  "scope": "sharedmodule/llmswitch-core/src non-native production TypeScript from llmswitch-rustification-audit",
-  "generatedFrom": "node scripts/ci/llmswitch-rustification-audit.mjs --json",
+  "scope": "V3 non-native production TypeScript surface; runtime ownership is under v3/",
   "classificationContract": {
     "native_shell_ok": "TypeScript is a fail-fast native facade or type projection over Rust truth.",
     "type_shell_ok": "TypeScript is compile-time/public API shape only and owns no runtime decision.",

@@ -15,7 +15,7 @@ Scope: 全仓移除 TypeScript 生产代码，其余无用统一归档/移除，
 - `verify:v3-rust-only-server-entry` 扩展为"全仓 Rust-only"门禁，锁死 TS 复活。
 - 所有退役/删除动作逐块 owner 核实，禁脚本批量替换；每块补 red fixture 防复活。
 
-## 2. 现状盘点（证据，2026-08-04）
+## 2. 历史盘点（证据，2026-08-04；非当前文件系统事实）
 
 | 项 | 值 |
 | --- | --- |
@@ -23,7 +23,7 @@ Scope: 全仓移除 TypeScript 生产代码，其余无用统一归档/移除，
 | `dist/` | 490 js（tsc 编译产物）+ `bin/rccv3`（Rust Mach-O） |
 | V3 Rust workspace | 12 crates / 163 .rs / 58 features / 100 resources |
 | `sharedmodule/llmswitch-core` | src 已 0 TS（全 Rust + assets + json） |
-| `deprecated/v2/` | 32 文件归档 |
+| `deprecated/v2/` | 历史归档，当前已物理移除 |
 | `configsamples/` `samples/` `webui/` | 已移除 + red-lock |
 | 生产 server | `dist/bin/rccv3 server start`（Rust），监听 10000/5520/5555，0.90.4116 |
 
@@ -32,7 +32,8 @@ Scope: 全仓移除 TypeScript 生产代码，其余无用统一归档/移除，
 - `src/cli.ts`（484 行）仍是完整 TS CLI，编译为 `dist/cli.js`。
 - guardian daemon 仍以 `node dist/cli.js __guardian-daemon` 运行（实测 PID 2192），监听 localhost:50415。
 - Rust CLI（`v3/crates/routecodex-v3-cli/src/main.rs`）已覆盖 `server start/status/stop` 等；**未覆盖** guardian daemon、launcher、restart/stop/start 编排、code/claude/codex 命令、guardian 客户端。
-- `build:base` 仍跑 `tsc`（`node scripts/gen-build-info.mjs && tsc && node scripts/copy-v3-cli-bin.mjs`）。
+- 历史基线曾由 root `gen-build-info` 加 `tsc` 驱动；当前 `build:base` 已由
+  root 薄分发器转发到 `npm --prefix v3 run build`，不再生成 root build-info。
 
 ## 3. 退役边界与前置依赖
 

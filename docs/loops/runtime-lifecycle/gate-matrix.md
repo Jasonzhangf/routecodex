@@ -33,12 +33,12 @@ claim.
 
 | Layer | Required gates |
 | --- | --- |
-| Owner | `scripts/install-release.sh`, `scripts/install-release-snapshot.mjs`, `scripts/verify-rcc-release-install.mjs`, `package.json`, `package-lock.json`, `src/build-info.ts`. |
+| Owner | `scripts/install-release.sh`, `v3/package.json`, `v3/package-lock.json`, and the V3 install/pack entrypoints. |
 | Feature map | Build wiring gate plus affected runtime lifecycle feature if start/restart behavior changes. |
 | Mainline | `runtime.lifecycle.mainline` only when install adoption writes stop-intent or starts/restarts a managed process. |
-| Whitebox | `npm run verify:function-map-build-wiring`; version sync check for `package.json`, lock root, lock package root, and `src/build-info.ts`; focused test for any touched script/helper. |
-| Blackbox | `npm run install:release` with explicit `ROUTECODEX_INSTALL_VERIFY_PORT=<port>`; `routecodex --version`; `rcc --version`; `/health.version === package.json.version` on the verification port and every configured sibling port affected by restart. |
-| Quality | Prove build/pack scripts do not mutate global install; release verifier uses temp `--prefix`; no repo path leaks in packed packages; no symlinked `rcc-llmswitch-core`; no stale live version accepted. |
+| Whitebox | `npm run verify:v3-build-admission-lockstep`; V3 package/lock version sync; focused test for any touched script/helper. |
+| Blackbox | `npm run install:release` with explicit `ROUTECODEX_INSTALL_VERIFY_PORT=<port>`; `npm --prefix v3 run pack:npm`; installed V3 CLI version and `/health.version === v3/package.json.version` on every configured listener affected by restart. |
+| Quality | Prove build/pack scripts do not mutate global install; no repo path leaks in packed packages; no symlinked `rcc-llmswitch-core`; no stale live version accepted. |
 | Evidence | run log must include source version, CLI versions, install/current release path, health version per port, and live probe command/result. |
 | Escalate | Any version mismatch, wrong runtime root, install script hang, health mismatch, or required blackbox unavailable. |
 

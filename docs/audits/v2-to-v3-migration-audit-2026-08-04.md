@@ -5,7 +5,7 @@ Scope: 全仓审计，评估 V2 → V3 迁移现状、迁移完成度、剩余�
 
 ## 结论摘要（先给结论）
 
-Jason，当前项目已从"V2 为主"切换为"V3 为主 + V2 收尾退役"阶段。V3 是生产主运行面（`rccv3` 二进制为 Rust Mach-O，入口 `dist/bin/rccv3 server start`），V2 已物理归档到 `deprecated/v2/`（32 文件，只读参考，无 runtime import）。**迁移方向正确，但未完成**：`src/` 仍有 490 TS 文件 / 97,783 LOC 在生产树中，其中相当比例是已退役 V2 兼容壳或待 Rust 接管的旧语义，需要按 owner 逐块退役。迁移本身是"渐进式 Rust 化收口"，不是一次性整目录搬移。
+Jason，本文是 2026-08-04 的历史审计记录：当时项目已从"V2 为主"切换为"V3 为主 + V2 收尾退役"阶段，V2 尚在 `deprecated/v2/` 只读归档。当前状态已推进：V2 archive 已物理移除；本文中的 archive 数量与路径仅保留作历史证据，不是现状合同。
 
 ## 一、现状盘点（证据）
 
@@ -15,7 +15,7 @@ Jason，当前项目已从"V2 为主"切换为"V3 为主 + V2 收尾退役"阶�
 | `v3/` | V3 Rust workspace + 语义 runtime | 生产主源 |
 | `sharedmodule/llmswitch-core` | 共享 Rust/NAPI/core | 保留，不复制进 v3 |
 | `src/` | Node/TS 壳/CLI/IO/兼容 | 保留到逐模块 owner 审计退役 |
-| `deprecated/v2/` | V2 归档 | 只读，32 文件 |
+| `deprecated/v2/` | V2 归档（历史快照） | 当前已物理移除 |
 | `configsamples/`、`samples/`、`webui/` | 退役 V2 | 已移除 |
 | `artifacts/`、`dist/`、`node_modules/` | 生成物 | 非源 |
 
@@ -34,7 +34,7 @@ Jason，当前项目已从"V2 为主"切换为"V3 为主 + V2 收尾退役"阶�
 - 实测运行：`rccv3 server run-managed-child`（PID 38966）监听 10000/5520/5555，版本 0.90.4116（install:v3 产出），health 报告 `version=3`。
 
 ### V2 退役进度
-- `deprecated/v2/` 32 文件归档。
+- 当时 `deprecated/v2/` 32 文件归档；现已删除。
 - `configsamples/`、`samples/`、`webui/` 已移除并 red-lock。
 - `src/` 内仍有 V2 兼容壳（如 `src/providers/profile/families`、`src/client` 等）待逐块 owner 审计退役。
 

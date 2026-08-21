@@ -20,7 +20,7 @@
 ## 2. 控制面现状(证据)
 
 - 活跃代码中无 `MetadataCenter` 实现;全仓命中仅在 `docs/architecture/metadata-center-manifest.yml`(设计契约)、`v3/crates/routecodex-v3-provider-responses/src/wire.rs:363-421`(防泄漏黑名单)。
-- 旧 TS 实现(`src/server/runtime/http-server/metadata-center/metadata-center.ts` 等)只存在于 `deprecated/v2/docs/` 与 `docs/architecture/wiki/metadata-center-audit.md`。旧版审计结论:"多处写入、反复 merge、无唯一真源、provenance 不可追"——即被重构掉的旧问题。
+- 旧 TS 实现(`src/server/runtime/http-server/metadata-center/metadata-center.ts` 等)曾记录于历史 `deprecated/v2/docs/` 与 `docs/architecture/wiki/metadata-center-audit.md`；V2 archive 当前已物理移除。旧版审计结论:"多处写入、反复 merge、无唯一真源、provenance 不可追"——即被重构掉的旧问题。
 - V3 实际控制面载体:
   - `V3ServerToolCenter`(`v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs:919-1035`):server 级 `Arc<Mutex<BTreeMap<V3ServerToolCenterKey, V3ServerToolInstanceState>>>`,键含 tool_name + scope_key(common.rs:907-912);实例为 Stopless | WebSearch(common.rs:892-895)。
   - routing/provider-selection:`routecodex-v3-virtual-router` / `routecodex-v3-target`。

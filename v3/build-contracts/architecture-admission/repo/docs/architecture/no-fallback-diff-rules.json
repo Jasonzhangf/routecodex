@@ -778,11 +778,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/gen-build-info.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "scripts/generate-snapshot-data.mjs",
       "textContains": ""
     },

@@ -77,7 +77,6 @@ memory/
 # Local development files
 CACHE.md
 MEMORY.md
-DELIVERY.md
 note.md
 botpy.log
 /*.backup

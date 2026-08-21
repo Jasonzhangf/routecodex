@@ -382,7 +382,7 @@ function checkCIPlatform(workflowPath) {
     const steps = Array.isArray(job.steps)
       ? job.steps.map((step) => step.run ?? '').join('\n')
       : '';
-    if (steps.includes('verify:ci')) {
+    if (steps.includes('npm --prefix v4 run verify:ci')) {
       const runner = String(job['runs-on'] ?? '');
       if (!ARM64_MACOS_RUNNER_LABELS.has(runner)) {
         out.push(

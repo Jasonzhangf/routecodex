@@ -27,7 +27,7 @@ function listRootEntries({ includeIgnored = false } = {}) {
 
 function isForbiddenRootFile(p) {
   const base = path.posix.basename(p);
-  const allow = new Set(['AGENTS.md', 'README.md', 'MEMORY.md', 'HEARTBEAT.md', 'DELIVERY.md', 'task.md', 'note.md']);
+  const allow = new Set(['AGENTS.md', 'README.md', 'MEMORY.md', 'HEARTBEAT.md', 'task.md', 'note.md']);
   if (allow.has(base)) return false;
   if (/^test-.*\.(mjs|js|ts|py)$/i.test(base)) return true;
   if (/^debug-.*\.(mjs|js|ts)$/i.test(base)) return true;
@@ -75,7 +75,6 @@ function checkRootLayout() {
     '.gitattributes',
     '.gitignore',
     'AGENTS.md',
-    'DELIVERY.md',
     'HEARTBEAT.md',
     'MEMORY.md',
     'README.md',
@@ -88,7 +87,6 @@ function checkRootLayout() {
     'package-lock.json',
     'package.json',
     'scripts',
-    'sharedmodule',
     'src',
     'task.md',
     'tests',
@@ -337,20 +335,6 @@ function checkTrackedSecrets() {
   }
 }
 
-function checkLlmswitchRustificationAudit() {
-  const out = spawnSync('node', ['scripts/ci/llmswitch-rustification-audit.mjs'], {
-    encoding: 'utf8',
-  });
-  if (out.status !== 0) {
-    console.error('[repo-sanity] llmswitch rustification audit failed');
-    const stdout = String(out.stdout || '').trim();
-    const stderr = String(out.stderr || '').trim();
-    if (stdout) console.error(stdout);
-    if (stderr) console.error(stderr);
-    process.exit(2);
-  }
-}
-
 function checkRepositoryFilesystemGovernance() {
   const checks = [
     ['scripts/architecture/verify-repository-filesystem-governance.mjs'],
@@ -366,6 +350,16 @@ function checkRepositoryFilesystemGovernance() {
       if (stderr) console.error(stderr);
       process.exit(2);
     }
+  }
+}
+
+function checkRootPackageLock() {
+  const root = process.cwd();
+  const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+  const rootPackage = lock.packages?.[''];
+  if (!rootPackage || rootPackage.name !== packageJson.name || rootPackage.version !== packageJson.version) {
+    throw new Error('root package-lock.json root package does not match package.json');
   }
 }
 
@@ -385,6 +379,7 @@ if (forbidden.length) {
 }
 
 checkRootLayout();
+checkRootPackageLock();
 checkApprovedGeneratedSubroots();
 checkRootGeneratedResidue();
 checkRootWriteSources();
@@ -392,6 +387,5 @@ checkLegacyInstallScriptsDeleted();
 checkUntrackedNotIgnored();
 checkTrackedSecrets();
 checkRepositoryFilesystemGovernance();
-checkLlmswitchRustificationAudit();
 
 console.log('[repo-sanity] ok');

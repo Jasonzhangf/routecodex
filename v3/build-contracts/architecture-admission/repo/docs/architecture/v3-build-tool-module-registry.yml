@@ -13,7 +13,6 @@ modules:
       - ~/.local/bin/rccv3
     forbidden_paths:
       - src
-      - sharedmodule
       - ~/.rcc/install
     required_gates:
       - npm --prefix v3 run test:distribution
@@ -42,7 +41,6 @@ modules:
     forbidden_paths:
       - v3/crates
       - src
-      - sharedmodule
       - ~/.rcc
     required_gates:
       - npm --prefix v3 run verify:v3-build-test-artifact-budget
@@ -90,7 +88,6 @@ modules:
       - target
       - dist
       - artifacts
-      - sharedmodule/llmswitch-core/rust-core/target
     required_gates:
       - npm --prefix v3 run verify:isolation
       - npm --prefix v3 run test:isolation:red

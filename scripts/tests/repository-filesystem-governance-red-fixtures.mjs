@@ -19,7 +19,7 @@ const cases = [
   ['active V2 consistency directory', 'scripts/v2-consistency/README.md', 'active V2 directory must be archived'],
   ['active V2 source directory', 'src/v2/README.md', 'active V2 directory must be archived'],
   ['active V2 test directory', 'tests/v2/README.md', 'active V2 directory must be archived'],
-  ['unsupported deprecated root child', 'deprecated/v1/README.md', 'unsupported deprecated root child'],
+  ['retired archive root', 'deprecated/v1/README.md', 'retired archive root must not exist: deprecated'],
   [
     'retired V2 active resource binding',
     'docs/architecture/resource-operation-map.yml',
@@ -49,6 +49,12 @@ const cases = [
     'docs/architecture/no-fallback-diff-rules.json',
     'active machine map must not bind retired V2 archive',
     '{"pathContains":"deprecated/v2/monitoring/v2-monitoring-analysis.mjs"}\n',
+  ],
+  [
+    'retired V2 exact root binding',
+    'docs/architecture/v3-runtime-module-registry.yml',
+    'active machine map must not bind retired V2 archive',
+    '  - deprecated/v2\n',
   ],
 ];
 
