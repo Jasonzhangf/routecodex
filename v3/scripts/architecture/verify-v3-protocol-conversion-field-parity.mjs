@@ -24,7 +24,7 @@ const paths = {
   requestOutboundMetadata: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   requestOutboundFormatExtraTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
   providerReqCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
-  providerCompatCore: 'sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs',
+  providerCompatCore: 'v3/crates/provider-compat-core/src/lib.rs',
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesRuntimeInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
@@ -53,11 +53,11 @@ const paths = {
   resourceMap: 'docs/architecture/v3-resource-operation-map.yml',
   packageJson: 'package.json',
   v3PackageJson: 'v3/package.json',
-  v3ArchitectureCi: 'scripts/architecture/verify-v3-architecture-ci.mjs',
+  v3ArchitectureCi: 'v3/scripts/architecture/verify-v3-architecture-ci.mjs',
   matrixReview: 'docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
   fieldMatrix: V3_PROTOCOL_SEMANTIC_FIELD_MATRIX_PATH,
   fieldMatrixHtml: V3_PROTOCOL_SEMANTIC_FIELD_MATRIX_HTML_PATH,
-  fieldMatrixRenderer: 'scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
+  fieldMatrixRenderer: 'v3/scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
 };
 
 const text = Object.fromEntries(Object.entries(paths).map(([key, path]) => [key, readFileSync(path, 'utf8')]));
@@ -467,6 +467,12 @@ for (const phrase of [
   '"metadata" | "client_metadata" | "prompt_cache_key" | "store" | "text"',
 ]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
 forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /responses_reasoning_effort_as_anthropic_budget/, /responses_reasoning_policy_as_anthropic_system_marker/, /<routecodex_reasoning_request/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s]);
+const targetReasoningEffortProjection = functionSlice(
+  text.providerReqCompat,
+  paths.providerReqCompat,
+  'fn project_reasoning_effort_for_selected_target',
+  'fn build_v3_provider_standard_protocol_payload_from_req07',
+);
 for (const phrase of [
   'project_reasoning_effort_for_selected_target',
   '"responses:deepseek-console-go"',
@@ -782,7 +788,7 @@ for (const [owner, body, phrases] of [
     'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
     'docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html',
     'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
-    'scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
+    'v3/scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
     'Text truth for the audit lives in docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
     'build_v3_chat_canonical_request_from_responses_payload',
     'project_v3_responses_arguments_to_openai_chat_wire',
@@ -1208,8 +1214,8 @@ for (const command of [
 if (!String(text.v3ArchitectureCi ?? '').includes("'verify:v3-protocol-conversion-field-parity-ci'")) {
   failures.push(`${paths.v3ArchitectureCi}: verify:v3-architecture-ci must run verify:v3-protocol-conversion-field-parity-ci`);
 }
-if (pkg.scripts?.['render:v3-protocol-semantic-field-matrix'] !== 'node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs') {
-  failures.push(`${paths.packageJson}: render:v3-protocol-semantic-field-matrix must run node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs`);
+if (pkg.scripts?.['render:v3-protocol-semantic-field-matrix'] !== 'node v3/scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs') {
+  failures.push(`${paths.packageJson}: render:v3-protocol-semantic-field-matrix must run node v3/scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs`);
 }
 for (const scriptName of ['test:v3-protocol-conversion-field-parity', 'test:v3-anthropic-codec-characterization', 'test:v3-gemini-codec-characterization', 'verify:v3-cargo-fmt']) {
   if (/\+\s*(?:stable|nightly|\d+(?:\.\d+){1,2})\b/u.test(String(pkg.scripts?.[scriptName] ?? ''))) {

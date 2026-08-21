@@ -147,6 +147,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         &provider_health,
         &BTreeSet::new(),
         now_epoch_ms,
+        0,
         deterministic_sample,
     ) {
         Ok(value) => value,

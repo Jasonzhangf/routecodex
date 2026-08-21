@@ -141,6 +141,7 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         provider_health,
         request_local_excluded_candidates,
         now_ms,
+        0,
         deterministic_sample,
     ) {
         Ok(selected) => return V3TargetSelectionAfterRescue::Selected(selected),
@@ -177,6 +178,7 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         provider_health,
         request_local_excluded_candidates,
         retry_now_ms,
+        0,
         deterministic_sample,
     ) {
         Ok(selected) => V3TargetSelectionAfterRescue::Selected(selected),

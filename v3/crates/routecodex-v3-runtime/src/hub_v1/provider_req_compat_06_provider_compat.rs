@@ -338,6 +338,8 @@ mod tests {
             websocket_v2_url: None,
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
             request_timeout_ms: 300_000,
+            priority: 0,
+            weight: 1,
             sse_first_frame_timeout_ms: None,
             initial_concurrency_budget: 8,
             compatibility_profile: None,

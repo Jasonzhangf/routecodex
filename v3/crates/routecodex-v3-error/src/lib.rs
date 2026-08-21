@@ -13,6 +13,7 @@ pub enum V3InternalErrorLane {
 pub enum V3InternalErrorCode {
     V3Server03HttpRequestRaw,
     V3Req04StandardizedResponses,
+    V3Req04StandardizedChat,
     V3Router05RequestClassified,
     V3Router06RoutePoolResolved,
     V3Router07OpaqueTargetHitOnce,
@@ -70,6 +71,14 @@ impl V3InternalErrorCode {
                 owner_feature_id: "v3.responses_direct_mvp_architecture",
                 module_block: "500-11x",
                 title: "responses request standardization internal failure",
+            },
+            V3InternalErrorCode::V3Req04StandardizedChat => V3InternalErrorRegistryEntry {
+                code: "500-111",
+                lane: V3InternalErrorLane::Request,
+                node_id: "V3Req04StandardizedChat",
+                owner_feature_id: "v3.responses_direct_mvp_architecture",
+                module_block: "500-11x",
+                title: "chat request standardization internal failure",
             },
             V3InternalErrorCode::V3Router05RequestClassified => V3InternalErrorRegistryEntry {
                 code: "500-120",

@@ -1121,6 +1121,7 @@ fn reselect_from_captured_target_plan(
         request_local_excluded_candidates,
         now_ms,
         context.deterministic_sample,
+        context.deterministic_sample,
     ) {
         Ok(selected) => V3RelayProviderTargetResolution::Selected(selected),
         Err(exhausted) => V3RelayProviderTargetResolution::Exhausted {
