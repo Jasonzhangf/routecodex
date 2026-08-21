@@ -858,12 +858,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         V3ErrorSourceKind::PathNotFound => 404,
         V3ErrorSourceKind::ModelNotFound => 404,
         V3ErrorSourceKind::PendingEndpoint => 501,
-        V3ErrorSourceKind::ProviderFailure => source
-            .external_error
-            .as_ref()
-            .and_then(|external| external.status)
-            .filter(|status| *status >= 400)
-            .unwrap_or(502),
+        V3ErrorSourceKind::ProviderFailure => 502,
         V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => 400,
         V3ErrorSourceKind::TargetPoolExhausted => 503,
         V3ErrorSourceKind::RuntimeFailure => 500,

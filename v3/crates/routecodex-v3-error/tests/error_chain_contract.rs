@@ -44,7 +44,7 @@ fn project_exhausted_provider(
 }
 
 #[test]
-fn error_handling_center_owns_error01_06_and_preserves_provider_error_status() {
+fn error_handling_center_owns_error01_06_and_projects_provider_failure_as_502() {
     let source = build_v3_error_01_source_raised_external(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderReqOutbound09TransportRequest",
@@ -67,7 +67,7 @@ fn error_handling_center_owns_error01_06_and_preserves_provider_error_status() {
         Some(429),
     );
 
-    assert_eq!(projected.status, 429);
+    assert_eq!(projected.status, 502);
     assert_eq!(projected.body["error"]["code"], "rate_limit_error");
     assert!(
         projected.body["error"].get("error_node").is_none()
@@ -272,7 +272,7 @@ fn external_provider_429_projects_external_link_without_internal_code() {
         None,
     );
 
-    assert_eq!(projected.status, 429);
+    assert_eq!(projected.status, 502);
     assert_eq!(projected.body["error"]["code"], "provider_http_429");
     assert!(
         projected.body["error"].get("external_error").is_none(),
@@ -281,6 +281,34 @@ fn external_provider_429_projects_external_link_without_internal_code() {
     );
     assert!(projected.body["error"].get("internal_code").is_none());
     assert!(projected.body["error"].get("internal_node").is_none());
+}
+
+#[test]
+fn exhausted_provider_http_400_projects_as_bad_gateway() {
+    let source = build_v3_error_01_source_raised_external(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderReqOutbound09TransportRequest",
+        "provider_http_400",
+        "provider returned HTTP 400",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(400),
+            code: Some("HTTP_400".to_string()),
+            provider_id: Some("opencode-go".to_string()),
+            upstream_request_id: None,
+            message: Some("provider returned HTTP 400".to_string()),
+        },
+    );
+    let projected = project_exhausted_provider(
+        source,
+        V3ErrorActionScope::CanonicalModel {
+            provider_id: "opencode-go".to_string(),
+            model_id: "deepseek-v4-flash".to_string(),
+        },
+        Some(400),
+    );
+    assert_eq!(projected.status, 502);
+    assert_eq!(projected.body["error"]["code"], "provider_http_400");
 }
 
 #[test]
