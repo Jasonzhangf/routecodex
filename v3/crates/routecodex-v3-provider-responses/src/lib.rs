@@ -6,6 +6,7 @@ mod health;
 pub mod key_health;
 pub mod probe;
 mod provider_cooldown_probe;
+mod probe_backoff;
 pub mod provider_global_health;
 pub mod raw_response;
 mod shared;

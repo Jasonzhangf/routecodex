@@ -54,7 +54,7 @@ fn reset_is_corrected_and_bounded_by_provider_maximum() {
         .unwrap();
     assert_eq!(
         coordinator.max_deadline_ms(key().0, key().1, key().2),
-        Some(5 * 60 * 60_000 + 1_000)
+        Some(1_000 + 3 * 60_000)
     );
 }
 
@@ -93,11 +93,69 @@ fn due_probe_is_only_released_after_success() {
             },
         )
         .unwrap();
-    assert!(coordinator.acquire_due_probe(1_009).unwrap().is_none());
-    let permit = coordinator.acquire_due_probe(1_010).unwrap().unwrap();
-    coordinator.apply_probe_failure(permit, 1_011).unwrap();
-    assert!(coordinator.acquire_due_probe(1_011).unwrap().is_none());
-    let permit = coordinator.acquire_due_probe(61_011).unwrap().unwrap();
-    coordinator.apply_probe_success(permit, 61_012).unwrap();
-    assert!(coordinator.availability(key().0, key().1, key().2, 61_013));
+    assert!(coordinator
+        .acquire_due_probe(1_000 + 3 * 60_000 - 1)
+        .unwrap()
+        .is_none());
+    let permit = coordinator
+        .acquire_due_probe(1_000 + 3 * 60_000)
+        .unwrap()
+        .unwrap();
+    coordinator
+        .apply_probe_failure(permit, 1_000 + 3 * 60_000)
+        .unwrap();
+    assert!(coordinator
+        .acquire_due_probe(1_000 + 3 * 60_000 + 5 * 60_000 - 1)
+        .unwrap()
+        .is_none());
+    let permit = coordinator
+        .acquire_due_probe(1_000 + 3 * 60_000 + 5 * 60_000)
+        .unwrap()
+        .unwrap();
+    coordinator
+        .apply_probe_success(permit, 1_000 + 3 * 60_000 + 5 * 60_000)
+        .unwrap();
+    assert!(coordinator.availability(
+        key().0,
+        key().1,
+        key().2,
+        1_000 + 3 * 60_000 + 5 * 60_000 + 1
+    ));
+}
+
+#[test]
+fn failed_probes_follow_dynamic_backoff_and_cap_at_five_hours() {
+    let mut coordinator = V3ProviderCooldownCoordinator::new(path("backoff"), 24 * 60 * 60_000);
+    coordinator
+        .record_failure(
+            key().0,
+            key().1,
+            key().2,
+            V3ProviderCooldownFailureClass::Transport,
+            0,
+            V3ProviderCooldownObservation::default(),
+        )
+        .unwrap();
+    let delays = [
+        3 * 60_000,
+        5 * 60_000,
+        15 * 60_000,
+        60 * 60_000,
+        3 * 60 * 60_000,
+        5 * 60 * 60_000,
+    ];
+    let mut now = 0;
+    for delay in delays {
+        now += delay;
+        let permit = coordinator.acquire_due_probe(now).unwrap().unwrap();
+        coordinator.apply_probe_failure(permit, now).unwrap();
+    }
+    assert!(coordinator
+        .acquire_due_probe(now + 5 * 60 * 60_000 - 1)
+        .unwrap()
+        .is_none());
+    assert!(coordinator
+        .acquire_due_probe(now + 5 * 60 * 60_000)
+        .unwrap()
+        .is_some());
 }

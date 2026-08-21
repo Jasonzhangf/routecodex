@@ -1,3 +1,4 @@
+use crate::probe_backoff::probe_backoff_ms;
 use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key, V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState,
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
@@ -342,7 +343,7 @@ impl V3ProviderHealthStore {
                 .unwrap_or_default()
         });
         if policy.cooldown_scope == V3ProviderFailureCooldownScope::AuthKey {
-            let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
+            let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
             let scope_label = format!("auth_key:{provider_id}:{}", auth_alias.unwrap_or("-"));
             if let Some(cooldown) = state
                 .auth_key_cooldowns
@@ -379,7 +380,9 @@ impl V3ProviderHealthStore {
             let failure_count = failure.failure_count;
             let record_reason = failure.reason.clone();
             let cooldown_until_ms = (failure_count >= policy.failure_threshold)
-                .then(|| (!policy.until_restart).then(|| now_ms.saturating_add(policy.cooldown_ms)))
+                .then(|| {
+                    (!policy.until_restart).then(|| now_ms.saturating_add(probe_backoff_ms(0)))
+                })
                 .flatten();
             let record_state = if failure_count >= policy.failure_threshold {
                 if let Some(until_ms) = cooldown_until_ms {
@@ -389,7 +392,7 @@ impl V3ProviderHealthStore {
                         auth_alias,
                         model_id,
                         until_ms,
-                        policy.probe_interval_ms,
+                        probe_backoff_ms(0),
                     );
                 }
                 state.auth_key_cooldowns.insert(
@@ -469,7 +472,7 @@ impl V3ProviderHealthStore {
         // 独立计数，不能互相污染。
         if failure_count >= policy.failure_threshold {
             cooldown_until_ms =
-                (!policy.until_restart).then(|| now_ms.saturating_add(policy.cooldown_ms));
+                (!policy.until_restart).then(|| now_ms.saturating_add(probe_backoff_ms(0)));
             record_state = "cooldown".to_string();
             let cooldown = V3ProviderCooldown {
                 reason: record_reason
@@ -480,7 +483,7 @@ impl V3ProviderHealthStore {
                 // provider 级冷却到期后由后台 probe 复活；until_restart 冷却
                 // 不设探针（保持"直到重启"语义）。
                 next_probe_at_ms: (!policy.until_restart)
-                    .then(|| now_ms.saturating_add(policy.probe_interval_ms.max(1))),
+                    .then(|| now_ms.saturating_add(probe_backoff_ms(0))),
                 probe_in_flight: false,
             };
             state.cooldowns.insert(key.clone(), cooldown);
@@ -587,7 +590,7 @@ impl V3ProviderHealthStore {
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
         state.cooldowns.remove(&key);
-        let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
+        let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         if !state.auth_key_cooldowns.contains_key(&auth_key) {
             state.auth_key_consecutive_failures.remove(&auth_key);
         }
@@ -811,8 +814,10 @@ impl V3ProviderHealthStore {
             return Ok(());
         };
         probe_state.probe_in_flight = false;
-        probe_state.next_probe_at_ms =
-            Some(now_ms.saturating_add(probe_state.probe_interval_ms.max(1)));
+        probe_state.probe_failure_count = probe_state.probe_failure_count.saturating_add(1);
+        probe_state.probe_interval_ms = probe_backoff_ms(probe_state.probe_failure_count);
+        probe_state.next_probe_at_ms = Some(now_ms.saturating_add(probe_state.probe_interval_ms));
+        probe_state.blocked_until_ms = probe_state.next_probe_at_ms;
         probe_state.completion.send_replace(true);
         Ok(())
     }
@@ -901,7 +906,7 @@ impl V3ProviderHealthStore {
         remove_expired_session_state(&mut state, now_ms);
         let mut projection =
             global_availability_projection(&state, provider_id, auth_alias, model_id, now_ms);
-        let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
+        let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         if let Some(cooldown) = state
             .auth_key_cooldowns
             .get(&auth_key)
@@ -1231,7 +1236,7 @@ fn upsert_provider_cooldown_probe_with_interval(
     auth_alias: Option<&str>,
     model_id: Option<&str>,
     blocked_until_ms: u64,
-    probe_interval_ms: u64,
+    _probe_interval_ms: u64,
 ) {
     // 已有 probe 在途时保留 in-flight 标记：并发失败 re-upsert 不得清掉
     // 单飞锁，否则会并发启动第二个 probe。
@@ -1253,7 +1258,8 @@ fn upsert_provider_cooldown_probe_with_interval(
         V3ProviderCooldownProbeState {
             blocked_until_ms: Some(blocked_until_ms),
             next_probe_at_ms: Some(blocked_until_ms),
-            probe_interval_ms: probe_interval_ms.max(1),
+            probe_interval_ms: probe_backoff_ms(0),
+            probe_failure_count: 0,
             probe_in_flight,
             probe_model_id: model_id.map(str::to_string),
             rescue_probe_attempted,
@@ -1447,13 +1453,13 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
             )
             .unwrap();
         assert_eq!(second.state, "cooldown");
-        assert_eq!(second.cooldown_until_ms, Some(3_600_101));
+        assert_eq!(second.cooldown_until_ms, Some(180_101));
         assert!(store
-            .provider_cooldown_probe_keys_due(3_600_100)
+            .provider_cooldown_probe_keys_due(180_100)
             .unwrap()
             .is_empty());
         assert_eq!(
-            store.provider_cooldown_probe_keys_due(3_600_101).unwrap(),
+            store.provider_cooldown_probe_keys_due(180_101).unwrap(),
             vec![(
                 "provider-a".to_string(),
                 Some("key-a".to_string()),
@@ -1472,7 +1478,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                 .available
         );
         assert!(
-            !store
+            store
                 .availability_for_session(
                     &session("session-c"),
                     "provider-a",
@@ -1503,7 +1509,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                     "provider-a",
                     Some("key-a"),
                     Some("gpt-5.5"),
-                    3_600_102,
+                    180_102,
                 )
                 .available
         );

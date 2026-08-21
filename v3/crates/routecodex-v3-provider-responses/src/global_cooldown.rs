@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-const PROBE_RETRY_INTERVAL_MS: u64 = 60_000;
+use crate::probe_backoff::probe_backoff_ms;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum V3ProviderCooldownFailureClass {
@@ -33,6 +33,8 @@ struct V3ProviderCooldownEntry {
     blocked_until_ms: u64,
     next_probe_at_ms: u64,
     probe_in_flight: bool,
+    #[serde(default)]
+    probe_failure_count: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,10 +87,26 @@ impl V3ProviderCooldownCoordinator {
                 file.schema_version
             ));
         }
+        let mut entries: BTreeMap<V3ProviderCooldownKey, V3ProviderCooldownEntry> =
+            BTreeMap::new();
+        for (key, entry) in file.entries {
+            if let Some((_, existing)) = entries
+                .iter_mut()
+                .find(|(existing_key, _)| Self::same_identity(existing_key, &key))
+            {
+                existing.blocked_until_ms = existing.blocked_until_ms.max(entry.blocked_until_ms);
+                existing.next_probe_at_ms = existing.next_probe_at_ms.max(entry.next_probe_at_ms);
+                existing.probe_in_flight |= entry.probe_in_flight;
+                existing.probe_failure_count =
+                    existing.probe_failure_count.max(entry.probe_failure_count);
+            } else {
+                entries.insert(key, entry);
+            }
+        }
         Ok(Self {
             path,
             max_cooldown_ms: max_cooldown_ms.max(1),
-            entries: file.entries.into_iter().collect(),
+            entries,
         })
     }
 
@@ -99,24 +117,27 @@ impl V3ProviderCooldownCoordinator {
         model_id: Option<&str>,
         failure_class: V3ProviderCooldownFailureClass,
         now_ms: u64,
-        observation: V3ProviderCooldownObservation,
+        _observation: V3ProviderCooldownObservation,
     ) -> Result<(), String> {
         let max_deadline = now_ms.saturating_add(self.max_cooldown_ms);
-        let observed_deadline = observation
-            .reset_at_ms
-            .or_else(|| {
-                observation
-                    .retry_after_ms
-                    .map(|delta| now_ms.saturating_add(delta))
-            })
-            .unwrap_or(max_deadline);
+        let observed_deadline = now_ms.saturating_add(probe_backoff_ms(0)).min(max_deadline);
         let key = self.key(provider_id, auth_alias, model_id, failure_class);
+        let prior_failure_count = self
+            .entries
+            .iter()
+            .filter(|(existing_key, _)| Self::same_identity(existing_key, &key))
+            .map(|(_, entry)| entry.probe_failure_count)
+            .max()
+            .unwrap_or(0);
+        self.entries
+            .retain(|existing_key, _| !Self::same_identity(existing_key, &key));
         self.entries.insert(
             key,
             V3ProviderCooldownEntry {
                 blocked_until_ms: observed_deadline.min(max_deadline),
                 next_probe_at_ms: observed_deadline.min(max_deadline),
                 probe_in_flight: false,
+                probe_failure_count: prior_failure_count,
             },
         );
         self.persist()
@@ -213,7 +234,9 @@ impl V3ProviderCooldownCoordinator {
             .get_mut(&permit.key)
             .ok_or_else(|| "provider cooldown probe state missing".to_string())?;
         entry.probe_in_flight = false;
-        entry.next_probe_at_ms = now_ms.saturating_add(PROBE_RETRY_INTERVAL_MS);
+        entry.probe_failure_count = entry.probe_failure_count.saturating_add(1);
+        entry.next_probe_at_ms = now_ms.saturating_add(probe_backoff_ms(entry.probe_failure_count));
+        entry.blocked_until_ms = entry.next_probe_at_ms;
         self.persist()
     }
 
@@ -244,5 +267,11 @@ impl V3ProviderCooldownCoordinator {
             model_id: model_id.map(str::to_string),
             failure_class,
         }
+    }
+
+    fn same_identity(left: &V3ProviderCooldownKey, right: &V3ProviderCooldownKey) -> bool {
+        left.provider_id == right.provider_id
+            && left.auth_alias == right.auth_alias
+            && left.model_id == right.model_id
     }
 }
