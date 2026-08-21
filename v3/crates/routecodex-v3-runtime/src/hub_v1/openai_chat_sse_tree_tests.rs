@@ -46,7 +46,8 @@ fn chat_sse_null_usage_is_absent_but_scalar_usage_is_rejected() {
         "object":"chat.completion.chunk",
         "choices":[],
         "usage":null
-    })).unwrap();
+    }))
+    .unwrap();
     assert!(semantic.usage.is_none());
 
     assert!(matches!(
@@ -271,6 +272,32 @@ fn chat_reducer_materializes_one_typed_completion_from_delta_tree() {
 }
 
 #[test]
+fn chat_reducer_keeps_tool_call_when_terminal_delta_also_has_empty_content() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_empty_content_tool_call",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_empty_content_tool_call",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_reasoning_stop","type":"function","function":{"name":"reasoningStop","arguments":"{\"stopreason\":2}"}}],"content":""},"finish_reason":"tool_calls"}]
+        }))
+        .unwrap();
+
+    let output = reducer.materialize_completion().unwrap();
+    assert_eq!(
+        output["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"],
+        "{\"stopreason\":2}"
+    );
+    assert_eq!(output["choices"][0]["finish_reason"], "tool_calls");
+}
+
+#[test]
 fn chat_reducer_rejects_unknown_finish_reason() {
     let error = V3OpenAiChatSseReducerState::default()
         .apply_chunk(&json!({
@@ -316,7 +343,12 @@ fn chat_json_document_round_trips_choices_messages_tools_usage_and_extensions() 
     assert_eq!(document.choices.len(), 1);
     assert_eq!(document.choices[0].index, 0);
     assert_eq!(document.choices[0].message.tool_calls.len(), 1);
-    assert_eq!(document.choices[0].message.tool_calls[0].function_name.as_deref(), Some("lookup"));
+    assert_eq!(
+        document.choices[0].message.tool_calls[0]
+            .function_name
+            .as_deref(),
+        Some("lookup")
+    );
     assert_eq!(document.to_normalized_value(), input);
     assert_eq!(
         V3OpenAiChatJsonDocument::from_json(&document.to_normalized_value()).unwrap(),

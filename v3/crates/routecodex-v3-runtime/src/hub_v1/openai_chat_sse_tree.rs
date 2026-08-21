@@ -152,10 +152,7 @@ impl V3OpenAiChatSseMaterializedChoice {
         Ok(())
     }
 
-    fn to_message_value(
-        &self,
-        index: usize,
-    ) -> Result<Value, V3OpenAiChatSseTreeError> {
+    fn to_message_value(&self, index: usize) -> Result<Value, V3OpenAiChatSseTreeError> {
         let mut message = serde_json::Map::new();
         message.insert(
             "role".to_owned(),
@@ -624,19 +621,11 @@ fn classify_choice(choice: &Value) -> Result<V3OpenAiChatSseChoice, V3OpenAiChat
             "tool_calls",
         ],
     );
-    let semantic_delta = if let Some(value) = delta_object.get("content").and_then(Value::as_str) {
-        V3OpenAiChatSseDelta::Text(value.to_owned())
-    } else if let Some(value) = delta_object
-        .get("reasoning_content")
-        .or_else(|| delta_object.get("reasoning"))
-        .and_then(Value::as_str)
+    let semantic_delta = if let Some(tool_calls) = delta_object
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .filter(|calls| !calls.is_empty())
     {
-        V3OpenAiChatSseDelta::Reasoning(value.to_owned())
-    } else if let Some(value) = delta_object.get("refusal").and_then(Value::as_str) {
-        V3OpenAiChatSseDelta::Refusal(value.to_owned())
-    } else if let Some(value) = delta_object.get("role").and_then(Value::as_str) {
-        V3OpenAiChatSseDelta::Role(value.to_owned())
-    } else if let Some(tool_calls) = delta_object.get("tool_calls").and_then(Value::as_array) {
         let call = tool_calls
             .first()
             .ok_or(V3OpenAiChatSseTreeError::ToolCallNotObject)?;
@@ -653,6 +642,18 @@ fn classify_choice(choice: &Value) -> Result<V3OpenAiChatSseChoice, V3OpenAiChat
             name: function.and_then(|value| string_field(value, "name")),
             arguments: function.and_then(|value| string_field(value, "arguments")),
         })
+    } else if let Some(value) = delta_object.get("content").and_then(Value::as_str) {
+        V3OpenAiChatSseDelta::Text(value.to_owned())
+    } else if let Some(value) = delta_object
+        .get("reasoning_content")
+        .or_else(|| delta_object.get("reasoning"))
+        .and_then(Value::as_str)
+    {
+        V3OpenAiChatSseDelta::Reasoning(value.to_owned())
+    } else if let Some(value) = delta_object.get("refusal").and_then(Value::as_str) {
+        V3OpenAiChatSseDelta::Refusal(value.to_owned())
+    } else if let Some(value) = delta_object.get("role").and_then(Value::as_str) {
+        V3OpenAiChatSseDelta::Role(value.to_owned())
     } else {
         V3OpenAiChatSseDelta::Empty
     };
@@ -1106,8 +1107,8 @@ fn parse_v3_openai_chat_json_content_part(
     let object = value
         .as_object()
         .ok_or(V3OpenAiChatJsonTreeError::ContentPartNotObject)?;
-    let part_type = string_field(object, "type")
-        .ok_or(V3OpenAiChatJsonTreeError::ContentPartNotObject)?;
+    let part_type =
+        string_field(object, "type").ok_or(V3OpenAiChatJsonTreeError::ContentPartNotObject)?;
     Ok(V3OpenAiChatJsonContentPart {
         part_type,
         text: string_field(object, "text"),
