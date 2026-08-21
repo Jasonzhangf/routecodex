@@ -201,8 +201,8 @@ fn record_direct_sse_provider_event_json_chunk(
         record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
         let original =
             build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame).into_bytes();
-        let projected = process_sse_object_frame(&frame, &mut content_consumer)
-            .map_err(|error| runtime_source("V3ProviderResp14Raw", error.to_string()))?
+        let projected = process_sse_object_frame(&frame, content_consumer)
+            .map_err(|error| provider_sse_failure_source(error.to_string()))?
             .into_bytes();
         if projected != original {
             any_rewritten = true;
@@ -221,7 +221,16 @@ fn record_direct_sse_provider_event_json_frame(
     stream_observation: &V3RuntimeStreamObservation,
 ) -> Result<(), V3Error01SourceRaised> {
     record_v3_provider_sse_json_frame(fields, stream_observation)
-        .map_err(|error| runtime_source("V3ProviderResp14Raw", error))
+        .map_err(provider_sse_failure_source)
+}
+
+fn provider_sse_failure_source(message: impl Into<String>) -> V3Error01SourceRaised {
+    build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_response_sse_stream",
+        message.into(),
+    )
 }
 
 impl V3DirectSseRemoteContinuationPolicy {

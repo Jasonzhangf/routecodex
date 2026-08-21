@@ -1,6 +1,9 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-use routecodex_v3_error::V3ProviderErrorFingerprint;
+use routecodex_v3_error::{
+    build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderErrorFingerprint,
+    V3ProviderHealthScope,
+};
 use serde_json::json;
 
 fn test_provider_failure_scope(
@@ -512,6 +515,77 @@ fn unavailable_candidate_is_exhaustion_not_runtime_failure() {
 }
 
 #[test]
+fn post_commit_response_stream_failure_updates_global_key_health() {
+    let manifest = target_resolution_manifest("post_commit_sse_counted");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let session = test_provider_failure_scope(
+        "post_commit_sse_counted",
+        "post_commit_sse_counted",
+        "counted-session",
+    )
+    .expect("counted session scope");
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderRespInbound01Raw",
+        "provider_response_sse_stream",
+        "Responses SSE event must be a JSON object",
+    );
+
+    for _ in 0..3 {
+        health
+            .record_post_commit_provider_stream_failure_from_source(
+                &session,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                &source,
+            )
+            .expect("post-commit response stream failure must update key health");
+    }
+
+    let projection =
+        routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
+            &health,
+            "primary",
+            "key1",
+            "gpt-test",
+            1,
+            1,
+            v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+        );
+    assert_eq!(projection.score_milli, 700);
+    assert!(!projection.available);
+}
+
+#[test]
+fn incomplete_key_identity_fails_before_provider_cooldown_write() {
+    let manifest = target_resolution_manifest("incomplete_key_identity");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let action = V3ProviderFailureAction {
+        class_code: "provider_auth_failure".to_string(),
+        recovery: V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
+        scope: V3ProviderHealthScope::GlobalProviderKey,
+        score_delta_milli: -400,
+        failure_threshold: 1,
+        cooldown_ms: 60 * 60_000,
+    };
+
+    let result = health.record_provider_key_failure_action(
+        "primary",
+        None,
+        None,
+        &action,
+        v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+    );
+    assert!(result.is_err());
+    assert!(health
+        .global_cooldown
+        .lock()
+        .expect("global cooldown lock")
+        .availability("primary", None, None, u64::MAX));
+}
+
+#[test]
 fn post_commit_sse_failures_never_cool_provider_or_block_fresh_session() {
     let manifest = target_resolution_manifest("post_commit_sse_transient");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -539,7 +613,7 @@ fn post_commit_sse_failures_never_cool_provider_or_block_fresh_session() {
                 "primary",
                 Some("key1"),
                 Some("gpt-test"),
-                "provider_response_sse_stream",
+                "provider_response_sse_inter_event_timeout",
                 "controlled post-commit SSE EOF",
             )
             .expect("post-commit SSE observation must close cleanly");

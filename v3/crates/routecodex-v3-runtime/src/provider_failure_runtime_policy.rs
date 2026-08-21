@@ -430,14 +430,23 @@ impl V3ProviderFailureRuntimeHealth {
         action: &V3ProviderFailureAction,
         now_ms: u64,
     ) -> Result<(), String> {
+        let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) else {
+            if action.recovery != V3ProviderRecoveryKind::NotProviderHealth {
+                return Err(format!(
+                    "provider health action {} requires complete key identity: provider={provider_id} auth_alias={auth_alias:?} model_id={model_id:?}",
+                    action.class_code
+                ));
+            }
+            return Ok(());
+        };
         if action.recovery == V3ProviderRecoveryKind::IrrecoverableGlobalCooldown {
             self.global_cooldown
                 .lock()
                 .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
                 .record_failure(
                     provider_id,
-                    auth_alias,
-                    model_id,
+                    Some(auth_alias),
+                    Some(model_id),
                     V3ProviderCooldownFailureClass::Auth,
                     now_ms,
                     V3ProviderCooldownObservation {
@@ -446,9 +455,6 @@ impl V3ProviderFailureRuntimeHealth {
                     },
                 )?;
         }
-        let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) else {
-            return Ok(());
-        };
         self.key_health
             .record_provider_failure_action(provider_id, auth_alias, model_id, action, now_ms)
             .map(|_| ())
@@ -726,13 +732,18 @@ impl V3ProviderFailureRuntimeHealth {
         cooldown_ms: Option<u64>,
         now_ms: u64,
     ) -> Result<(), String> {
+        let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) else {
+            return Err(format!(
+                "provider global cooldown requires complete key identity: provider={provider_id} auth_alias={auth_alias:?} model_id={model_id:?}"
+            ));
+        };
         self.global_cooldown
             .lock()
             .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
             .record_failure(
                 provider_id,
-                auth_alias,
-                model_id,
+                Some(auth_alias),
+                Some(model_id),
                 V3ProviderCooldownFailureClass::Semantic,
                 now_ms,
                 V3ProviderCooldownObservation {
@@ -1056,14 +1067,36 @@ impl V3ProviderFailureRuntimeHealth {
         model_id: Option<&str>,
         source: &V3Error01SourceRaised,
     ) -> Result<(), String> {
-        self.record_post_commit_provider_stream_failure(
+        let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
+        let action = build_v3_provider_failure_action_from_v3_error_02(&classified);
+        if action.recovery == V3ProviderRecoveryKind::HealthNeutralTransient {
+            return self.record_post_commit_provider_stream_failure(
+                failure_session_scope,
+                provider_id,
+                auth_alias,
+                model_id,
+                &source.code,
+                &source.message,
+            );
+        }
+        let now_ms = v3_relay_provider_policy_now_epoch_ms()?;
+        self.record_provider_failure_record_with_action(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            Some(&source.message),
+            now_ms,
+            &action,
+        )?;
+        self.record_provider_action_failure_in_scope(
             failure_session_scope,
             provider_id,
             auth_alias,
             model_id,
             &source.code,
-            &source.message,
-        )
+        )?;
+        Ok(())
     }
 
     pub(crate) async fn wait_for_error05_recovery(

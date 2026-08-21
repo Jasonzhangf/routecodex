@@ -65,7 +65,17 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             cooldown_ms: 0,
         };
     }
-    if is_v3_retryable_transient_source(&classified.source) {
+    let status = classified
+        .source
+        .external_error
+        .as_ref()
+        .and_then(|error| error.status);
+    let response_stream_failure = classified.source.code == "provider_response_sse_stream";
+    let http_status_is_health_counted = matches!(status, Some(500 | 502));
+    if !response_stream_failure
+        && !http_status_is_health_counted
+        && is_v3_retryable_transient_source(&classified.source)
+    {
         return V3ProviderFailureAction {
             class_code: classified.source.code.clone(),
             recovery: V3ProviderRecoveryKind::HealthNeutralTransient,
@@ -75,12 +85,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             cooldown_ms: 0,
         };
     }
-    let status = classified
-        .source
-        .external_error
-        .as_ref()
-        .and_then(|error| error.status);
-    if matches!(status, Some(401 | 403 | 402))
+    if matches!(status, Some(401 | 402 | 403 | 503))
         || is_irrecoverable_provider_failure_code(&classified.source.code)
     {
         return V3ProviderFailureAction {
@@ -94,7 +99,11 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
                 .unwrap_or(60 * 60_000),
         };
     }
-    V3ProviderFailureAction::recoverable_session(&classified.source.code)
+    if response_stream_failure || http_status_is_health_counted {
+        V3ProviderFailureAction::recoverable(&classified.source.code)
+    } else {
+        V3ProviderFailureAction::recoverable_session(&classified.source.code)
+    }
 }
 
 fn is_irrecoverable_provider_failure_code(code: &str) -> bool {
@@ -237,9 +246,12 @@ mod tests {
             "provider_connect_failed",
             503,
         ));
-        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(action.scope, V3ProviderHealthScope::SessionProviderKey);
-        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(
+            action.recovery,
+            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
+        );
+        assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
+        assert_eq!(action.failure_threshold, 1);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",
@@ -271,10 +283,19 @@ mod tests {
             "provider_response_sse_stream",
             200,
         ));
-        assert_eq!(
-            action.recovery,
-            V3ProviderRecoveryKind::HealthNeutralTransient
-        );
-        assert_eq!(action.score_delta_milli, 0);
+        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
+        assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
+        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.score_delta_milli, -100);
+
+        let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderRespInbound01Raw",
+            "provider_response_sse_stream",
+            502,
+        ));
+        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
+        assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
+        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.score_delta_milli, -100);
     }
 }

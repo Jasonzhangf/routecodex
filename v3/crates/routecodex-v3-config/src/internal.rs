@@ -180,14 +180,18 @@ pub fn classify_v3_internal_provider_error(
     let policy = v3_internal_error_handling();
     let transient_stage = policy.transient_stages.iter().any(|value| value == stage)
         && ((!code.starts_with("provider_http_"))
-            || (stage.contains("Transport")
-                && code == "provider_response_header_timeout"));
-    if transient_stage {
-        V3InternalErrorCategory::Transient
-    } else if policy.unrecoverable_http_statuses.contains(&status) {
+            || (stage.contains("Transport") && code == "provider_response_header_timeout"));
+    // HTTP status is authoritative once an upstream response status exists.
+    // A 5xx SSE/body failure must not inherit the health-neutral policy used
+    // for 2xx stream-internal failures merely because both share a response
+    // stage. Transport header hangs normally have no upstream status and
+    // therefore remain transient.
+    if policy.unrecoverable_http_statuses.contains(&status) {
         V3InternalErrorCategory::Unrecoverable
     } else if policy.recoverable_http_statuses.contains(&status) {
         V3InternalErrorCategory::Recoverable
+    } else if transient_stage {
+        V3InternalErrorCategory::Transient
     } else {
         V3InternalErrorCategory::Recoverable
     }
@@ -500,5 +504,33 @@ mod tests {
         assert!(is_v3_gpt_family_model("GPT-5.5"));
         assert!(!is_v3_gpt_family_model("deepseek-v4-flash"));
         assert!(!is_v3_gpt_family_model("minimax-m3"));
+    }
+
+    #[test]
+    fn provider_http_status_precedes_response_stage_transient_classification() {
+        assert_eq!(
+            classify_v3_internal_provider_error(
+                "V3ProviderRespInbound01Raw",
+                502,
+                "provider_response_sse_stream"
+            ),
+            V3InternalErrorCategory::Recoverable
+        );
+        assert_eq!(
+            classify_v3_internal_provider_error(
+                "V3ProviderRespInbound01Raw",
+                200,
+                "provider_response_sse_stream"
+            ),
+            V3InternalErrorCategory::Transient
+        );
+        assert_eq!(
+            classify_v3_internal_provider_error(
+                "V3ProviderReqOutbound09TransportRequest",
+                0,
+                "provider_response_header_timeout"
+            ),
+            V3InternalErrorCategory::Transient
+        );
     }
 }
