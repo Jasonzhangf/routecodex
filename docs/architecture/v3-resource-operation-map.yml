@@ -131,7 +131,7 @@ resources:
     allowed_readers: [models_endpoint, json_response]
     forbidden_writers: [routecodex-v3-config, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
     may_enter_provider_body: false
-    may_enter_client_body: true
+    may_enter_client_body: false
     binding_status: anchored
   - resource_id: v3.models.route_group_scoped_refs
     resource_kind: client_catalog_source_refs
@@ -1892,3 +1892,245 @@ resources:
     may_enter_metadata_center: false
     binding_status: anchored
     required_gates: [npm --prefix v3 run pack:dev, npm --prefix v3 run pack:npm]
+
+  - resource_id: v3.sse.responses.semantic_tree
+    resource_kind: protocol_semantic_tree
+    lifecycle: v3.response_sse.decode_and_project
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3ResponsesSseSemanticObject
+    identity: [responseId, outputIndex, itemId, contentIndex]
+    allowed_writers: [classify_v3_responses_sse_output_item, rewrite_v3_responses_sse_content, V3ResponsesSseReducerState::apply_event]
+    allowed_readers: [V3ResponsesSseHookInput, responses_provider_event_codec]
+    forbidden_writers: [routecodex-v3-sse, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.sse.responses.json_document
+    resource_kind: protocol_json_document_tree
+    lifecycle: v3.response_json.decode_and_project
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3ResponsesJsonDocument
+    identity: [responseId, outputIndex, itemId]
+    allowed_writers: [V3ResponsesJsonDocument::from_json, V3ResponsesJsonDocument::to_normalized_value]
+    allowed_readers: [run_json_response_hooks]
+    forbidden_writers: [routecodex-v3-sse, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.direct.request_key_view
+    resource_kind: typed_direct_request_key_view
+    lifecycle: v3.direct.request_projection
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3DirectRequestKeyView
+    identity: [requestId, protocol, keyKind, ordinal]
+    allowed_writers: [parse_v3_direct_request_key_view]
+    allowed_readers: [V3DirectRequestKeyHookCatalog, V3DirectRequestKeyHook::notify, V3DirectRequestKeyHook::rewrite]
+    forbidden_writers: [MetadataCenter, routing, retry, health, continuation, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.direct.request_key_effect
+    resource_kind: typed_direct_request_key_effect
+    lifecycle: v3.direct.request_projection
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3DirectRequestKeyEdits
+    identity: [requestId, protocol, keyKind]
+    allowed_writers: [V3DirectRequestKeyHookCatalog, V3DirectRequestKeyHook::rewrite, apply_v3_direct_request_key_edits]
+    allowed_readers: [responses_direct_request_projection_hook, chat_direct_request_projection_hook]
+    forbidden_writers: [MetadataCenter, routing, retry, health, continuation, response.client_payload]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.sse.object_pipeline
+    resource_kind: protocol_object_pipeline
+    lifecycle: v3.sse.object_pipeline
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-sse
+    owner_node: SseObjectFrame
+    identity: [requestId, providerId, frameSequence, outputMode]
+    allowed_writers: [SseObjectFrame::from_frame, SseObjectFrame::from_json, process_sse_object_frame, process_sse_object_json]
+    allowed_readers: [SseObjectConsumer, project_sse_frame, project_sse_object]
+    forbidden_writers: [routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.sse.transport_error_export
+    resource_kind: typed_error_export
+    lifecycle: v3.sse.transport_boundary
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-sse
+    owner_node: SseTransportErrorExport
+    identity: [requestId, providerId, frameSequence, code]
+    allowed_writers: [SseTransportErrorExport::from]
+    allowed_readers: [build_v3_sse_transport_error_source, ErrorErr01SourceRaised]
+    forbidden_writers: [routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.sse.responses.protocol_metadata
+    resource_kind: protocol_side_channel
+    lifecycle: v3.response_sse.decode_and_project
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3ResponsesSseProtocolMetadata
+    identity: [responseId, sequenceNumber, outputIndex, itemId, contentIndex]
+    allowed_writers: [V3ResponsesSseProtocolMetadata::from_event]
+    allowed_readers: [V3ResponsesSseHookInput]
+    forbidden_writers: [routecodex-v3-sse, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.sse.responses.hook_effect
+    resource_kind: protocol_hook_effect
+    lifecycle: v3.response_sse.hook
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3ResponsesSseContentRewrite
+    identity: [itemId, contentKind]
+    allowed_writers: [rewrite_v3_responses_sse_content]
+    allowed_readers: [responses_provider_event_codec, V3ResponsesSseHookInput]
+    forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, request.normal_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.sse.chat.semantic_tree
+    resource_kind: protocol_semantic_tree
+    lifecycle: v3.chat_sse.decode_and_project
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OpenAiChatSseSemanticObject
+    identity: [completionId, choiceIndex, toolCallPosition]
+    allowed_writers: [classify_v3_openai_chat_sse_chunk, rewrite_v3_openai_chat_sse_content, V3OpenAiChatSseReducerState::apply_chunk]
+    allowed_readers: [V3OpenAiChatSseHookInput, openai_chat_codec]
+    forbidden_writers: [routecodex-v3-sse, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.sse.chat.json_document
+    resource_kind: protocol_json_document_tree
+    lifecycle: v3.chat_json.decode_and_project
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OpenAiChatJsonDocument
+    identity: [completionId, choiceIndex, toolCallIndex]
+    allowed_writers: [V3OpenAiChatJsonDocument::from_json, V3OpenAiChatJsonDocument::to_normalized_value]
+    allowed_readers: [run_json_response_hooks]
+    forbidden_writers: [routecodex-v3-sse, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.sse.chat.protocol_metadata
+    resource_kind: protocol_side_channel
+    lifecycle: v3.chat_sse.decode_and_project
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OpenAiChatSseProtocolMetadata
+    identity: [completionId, created, model, systemFingerprint]
+    allowed_writers: [V3OpenAiChatSseProtocolMetadata::from_chunk]
+    allowed_readers: [V3OpenAiChatSseHookInput]
+    forbidden_writers: [routecodex-v3-sse, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.sse.chat.hook_effect
+    resource_kind: protocol_hook_effect
+    lifecycle: v3.chat_sse.hook
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OpenAiChatSseContentRewrite
+    identity: [choiceIndex, contentKind]
+    allowed_writers: [rewrite_v3_openai_chat_sse_content]
+    allowed_readers: [openai_chat_codec, V3OpenAiChatSseHookInput]
+    forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, request.normal_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.sse.relay.typed_hook_catalog
+    resource_kind: protocol_hook_catalog
+    lifecycle: v3.relay.response_object_pipeline
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_module: relay_sse_hooks
+    owner_node: V3RelaySseHookCatalog
+    identity: [protocol, hook_kind, registration_revision]
+    allowed_writers: [V3RelaySseHookCatalog::new, V3RelaySseHookCatalog::with_responses, V3RelaySseHookCatalog::with_chat]
+    allowed_readers: [responses_provider_event_codec, provider_stream_materialization, openai_chat_relay_runtime]
+    forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, request.normal_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.sse.direct.typed_hook_catalog
+    resource_kind: protocol_hook_catalog
+    lifecycle: v3.direct.response_object_pipeline
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_module: direct_sse_consumers
+    owner_node: V3DirectSseTypedHookCatalog
+    identity: [protocol, hook_kind, registration_revision]
+    allowed_writers: [V3DirectSseTypedHookCatalog::new, V3DirectSseTypedHookCatalog::with_responses, V3DirectSseTypedHookCatalog::with_chat]
+    allowed_readers: [V3DirectSseContentConsumer::consume, project_direct_typed_protocol_data]
+    forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, request.normal_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.sse.anthropic.semantic_tree
+    resource_kind: protocol_semantic_tree
+    lifecycle: v3.anthropic_messages_sse.decode_and_project
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3AnthropicSseReducerState
+    identity: [messageId, blockIndex, eventType]
+    allowed_writers: [V3AnthropicSseProtocolMetadata::from_event, V3AnthropicSseReducerState::apply_event]
+    allowed_readers: [V3AnthropicSseHookInput, provider_stream_materialization]
+    forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
+  - resource_id: v3.sse.anthropic.hook_effect
+    resource_kind: protocol_hook_effect
+    lifecycle: v3.anthropic_messages_sse.hook
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3AnthropicSseSemanticHook
+    identity: [messageId, blockIndex, contentKind]
+    allowed_writers: [V3AnthropicSseSemanticHook::rewrite]
+    allowed_readers: [V3AnthropicSseHookInput, provider_stream_materialization]
+    forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, request.normal_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    may_enter_metadata_center: false
+    binding_status: design

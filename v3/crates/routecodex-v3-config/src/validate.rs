@@ -1681,7 +1681,11 @@ mod secret_file_compile_tests {
 
     #[test]
     fn compile_auth_validates_secret_file_key_at_config_time() {
-        let dir = std::env::temp_dir().join(format!("rcc-secret-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "rcc-secret-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
         fs::create_dir_all(&dir).unwrap();
         let file = dir.join("secrets.conf");
         fs::write(&file, "opencode-go.key1 = \"sk-one\"\n").unwrap();

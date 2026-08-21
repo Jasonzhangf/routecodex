@@ -17,6 +17,7 @@ use crate::{
     hooks::build_v3_provider_error_source,
     nodes::{V3Req04StandardizedResponses, V3ResponsesDirect11Policy},
 };
+use crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
     V3InternalErrorCode,
@@ -87,6 +88,7 @@ pub trait V3DirectProtocolCodec {
 
     fn run_request_projection(
         policy: &Self::Policy,
+        request_key_catalog: &V3DirectRequestKeyHookCatalog,
     ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised>;
 
     fn run_provider_transport(
@@ -258,8 +260,12 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
 
     fn run_request_projection(
         policy: &Self::Policy,
+        request_key_catalog: &V3DirectRequestKeyHookCatalog,
     ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
-        crate::hooks::responses_direct_request_projection_hook(policy)
+        crate::hooks::responses_direct_request_projection_hook_with_key_catalog(
+            policy,
+            request_key_catalog,
+        )
     }
 
     fn run_provider_transport(
@@ -381,8 +387,12 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
 
     fn run_request_projection(
         policy: &Self::Policy,
+        request_key_catalog: &V3DirectRequestKeyHookCatalog,
     ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
-        crate::hooks::chat_direct_request_projection_hook(policy)
+        crate::hooks::chat_direct_request_projection_hook_with_key_catalog(
+            policy,
+            request_key_catalog,
+        )
     }
 
     fn run_provider_transport(

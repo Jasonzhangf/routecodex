@@ -1,4 +1,5 @@
 use super::*;
+use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
 use std::ops::Deref;
@@ -383,6 +384,7 @@ pub struct V3HubRelayResponseHookRegistry {
     commit: fn(
         V3HubRespChatProcess03Outcome,
     ) -> Result<V3HubRespContinuation04Outcome, V3HubRelayResponseError>,
+    typed_sse_catalog: V3RelaySseHookCatalog,
 }
 
 impl V3HubRelayResponseHookRegistry {
@@ -407,6 +409,10 @@ impl V3HubRelayResponseHookRegistry {
     ) -> Result<V3HubRespContinuation04Outcome, V3HubRelayResponseError> {
         (self.commit)(input)
     }
+
+    pub(crate) fn typed_sse_catalog(&self) -> V3RelaySseHookCatalog {
+        self.typed_sse_catalog
+    }
 }
 
 pub fn compile_v3_hub_relay_response_hooks() -> V3HubRelayResponseHookRegistry {
@@ -414,6 +420,7 @@ pub fn compile_v3_hub_relay_response_hooks() -> V3HubRelayResponseHookRegistry {
         normalize: normalize_v3_hub_relay_response,
         govern: govern_v3_hub_relay_response,
         commit: commit_v3_hub_relay_response,
+        typed_sse_catalog: V3RelaySseHookCatalog::new(),
     }
 }
 

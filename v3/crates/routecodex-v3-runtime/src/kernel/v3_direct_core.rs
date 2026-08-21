@@ -22,6 +22,38 @@ pub async fn execute_v3_direct_runtime_kernel_core<
     provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
 ) -> V3ResponsesDirectRuntimeOutput {
+    let request_key_catalog =
+        crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog();
+    execute_v3_direct_runtime_kernel_core_with_key_catalog::<C, T>(
+        control,
+        manifest,
+        raw,
+        transport,
+        provider_health,
+        now_epoch_ms,
+        allow_exhaustion_rescue_probe,
+        provider_failure_event_sink,
+        route_selection_event_sink,
+        &request_key_catalog,
+    )
+    .await
+}
+
+pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
+    C: V3DirectProtocolCodec,
+    T: ResponsesTransport,
+>(
+    mut control: C::Control,
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    transport: &T,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    now_epoch_ms: u64,
+    allow_exhaustion_rescue_probe: bool,
+    provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
+    route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
+    request_key_catalog: &crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog,
+) -> V3ResponsesDirectRuntimeOutput {
     let accumulator = V3RuntimeObservabilityAccumulator::start();
     let runtime_timing = accumulator.timing();
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
@@ -262,7 +294,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
         }
         let policy = C::run_route(selected.clone(), &standardized);
         trace.push(C::POLICY_STAGE);
-        let wire = match C::run_request_projection(&policy) {
+        let wire = match C::run_request_projection(&policy, request_key_catalog) {
             Ok(value) => value,
             Err(source) => {
                 return error_output(

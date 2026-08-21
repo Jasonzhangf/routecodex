@@ -1,4 +1,10 @@
 use crate::direct_response_hooks::V3DirectResponseCompatContext;
+use crate::kernel::direct_request_key_hooks::{
+    apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog,
+    V3DirectRequestKeyEdits, V3DirectRequestKeyHookCatalog, V3DirectRequestKeyKind,
+    V3DirectRequestKeyMount, V3DirectRequestKeyView, V3DirectRequestProtocol,
+};
+use crate::kernel::V3DirectSseTypedHookCatalog;
 use crate::nodes::{
     build_v3_responses_direct_11_policy_from_v3_target_10, V3ChatDirect11Policy,
     V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
@@ -19,8 +25,26 @@ use routecodex_v3_provider_responses::{
     V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_target::V3Target10ConcreteProviderSelected;
+use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
+
+fn apply_v3_direct_request_key_hook_with_catalog(
+    body: Value,
+    protocol: V3DirectRequestProtocol,
+    catalog: &V3DirectRequestKeyHookCatalog,
+) -> Result<Value, V3Error01SourceRaised> {
+    let mut catalog = *catalog;
+    apply_v3_direct_request_key_hook(body, protocol, &mut catalog).map_err(|error| {
+        build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3DirectRequestKeyHook",
+            "direct_request_key_hook_failed",
+            error,
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+        )
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3HookPoint {
@@ -45,6 +69,7 @@ type RouteHook = fn(
 ) -> V3ResponsesDirect11Policy;
 type RequestProjectionHook = fn(
     &V3ResponsesDirect11Policy,
+    &V3DirectRequestKeyHookCatalog,
 ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised>;
 type ProviderTransportHook = fn(
     V3Provider12ResponsesWirePayload,
@@ -69,6 +94,8 @@ pub struct V3HookRegistry {
     hooks: &'static [V3RegisteredHook],
     route: RouteHook,
     request_projection: RequestProjectionHook,
+    request_key_catalog: V3DirectRequestKeyHookCatalog,
+    direct_sse_typed_hooks: V3DirectSseTypedHookCatalog,
     provider_transport: ProviderTransportHook,
     contextual_response_projection: ContextualResponseProjectionHook,
     error: ErrorHook,
@@ -104,7 +131,15 @@ impl V3HookRegistry {
         &self,
         policy: &V3ResponsesDirect11Policy,
     ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
-        (self.request_projection)(policy)
+        (self.request_projection)(policy, &self.request_key_catalog)
+    }
+
+    pub(crate) fn request_key_catalog(&self) -> &V3DirectRequestKeyHookCatalog {
+        &self.request_key_catalog
+    }
+
+    pub(crate) fn direct_sse_typed_hooks(&self) -> V3DirectSseTypedHookCatalog {
+        self.direct_sse_typed_hooks
     }
 
     pub fn run_provider_transport(
@@ -143,6 +178,13 @@ impl V3HookRegistry {
 }
 
 pub fn register_responses_direct_hooks() -> V3HookRegistry {
+    let catalog = default_v3_direct_request_key_hook_catalog();
+    register_responses_direct_hooks_with_key_catalog(&catalog)
+}
+
+pub(crate) fn register_responses_direct_hooks_with_key_catalog(
+    request_key_catalog: &V3DirectRequestKeyHookCatalog,
+) -> V3HookRegistry {
     static HOOKS: &[V3RegisteredHook] = &[
         V3RegisteredHook {
             hook_id: "ResponsesDirectRouteHook",
@@ -154,6 +196,24 @@ pub fn register_responses_direct_hooks() -> V3HookRegistry {
             hook_id: "ResponsesDirectRequestProjectionHook",
             hook_point: V3HookPoint::RequestProjection,
             input_node: "V3ResponsesDirect11Policy",
+            output_node: "V3Provider12ResponsesWirePayload",
+        },
+        V3RegisteredHook {
+            hook_id: "ResponsesDirectSystemPromptKeyHook",
+            hook_point: V3HookPoint::RequestProjection,
+            input_node: "V3Provider12ResponsesWirePayload",
+            output_node: "V3Provider12ResponsesWirePayload",
+        },
+        V3RegisteredHook {
+            hook_id: "ResponsesDirectDeveloperPromptKeyHook",
+            hook_point: V3HookPoint::RequestProjection,
+            input_node: "V3Provider12ResponsesWirePayload",
+            output_node: "V3Provider12ResponsesWirePayload",
+        },
+        V3RegisteredHook {
+            hook_id: "ResponsesDirectToolsKeyHook",
+            hook_point: V3HookPoint::RequestProjection,
+            input_node: "V3Provider12ResponsesWirePayload",
             output_node: "V3Provider12ResponsesWirePayload",
         },
         V3RegisteredHook {
@@ -178,7 +238,9 @@ pub fn register_responses_direct_hooks() -> V3HookRegistry {
     V3HookRegistry {
         hooks: HOOKS,
         route: responses_direct_route_hook,
-        request_projection: responses_direct_request_projection_hook,
+        request_projection: responses_direct_request_projection_hook_with_key_catalog,
+        request_key_catalog: *request_key_catalog,
+        direct_sse_typed_hooks: V3DirectSseTypedHookCatalog::default(),
         provider_transport: responses_direct_provider_transport_hook,
         contextual_response_projection: responses_direct_response_projection_hook_with_context,
         error: responses_direct_error_hook,
@@ -194,6 +256,14 @@ fn responses_direct_route_hook(
 
 pub(crate) fn responses_direct_request_projection_hook(
     policy: &V3ResponsesDirect11Policy,
+) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+    let catalog = default_v3_direct_request_key_hook_catalog();
+    responses_direct_request_projection_hook_with_key_catalog(policy, &catalog)
+}
+
+pub(crate) fn responses_direct_request_projection_hook_with_key_catalog(
+    policy: &V3ResponsesDirect11Policy,
+    key_catalog: &V3DirectRequestKeyHookCatalog,
 ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
     let candidate = &policy.target.candidate;
     let provider_protocol = crate::hub_v1::provider_wire_protocol_for_selected_candidate(candidate)
@@ -249,6 +319,33 @@ pub(crate) fn responses_direct_request_projection_hook(
         }
         _ => request_body,
     };
+    let direct_request_protocol = match provider_protocol {
+        crate::hub_v1::V3HubProviderWireProtocol::Responses => V3DirectRequestProtocol::Responses,
+        crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat => V3DirectRequestProtocol::OpenAiChat,
+        crate::hub_v1::V3HubProviderWireProtocol::Anthropic => {
+            return Err(build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ResponsesDirect11Policy",
+                "responses_direct_request_key_protocol_unsupported",
+                "Responses direct request key hooks do not support Anthropic projection",
+                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            ));
+        }
+        _ => {
+            return Err(build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ResponsesDirect11Policy",
+                "responses_direct_request_key_protocol_unsupported",
+                "Responses direct request key hooks require a registered provider protocol",
+                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            ));
+        }
+    };
+    request_body = apply_v3_direct_request_key_hook_with_catalog(
+        request_body,
+        direct_request_protocol,
+        key_catalog,
+    )?;
     let profile = crate::hub_v1::V3ProviderCompatProfileId::from_config(
         candidate.compatibility_profile.as_deref(),
     );
@@ -432,6 +529,14 @@ fn provider_error_source(
 pub(crate) fn chat_direct_request_projection_hook(
     policy: &V3ChatDirect11Policy,
 ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+    let catalog = default_v3_direct_request_key_hook_catalog();
+    chat_direct_request_projection_hook_with_key_catalog(policy, &catalog)
+}
+
+pub(crate) fn chat_direct_request_projection_hook_with_key_catalog(
+    policy: &V3ChatDirect11Policy,
+    key_catalog: &V3DirectRequestKeyHookCatalog,
+) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
     let candidate = &policy.target.candidate;
     let request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
         policy.request_body.clone(),
@@ -447,7 +552,7 @@ pub(crate) fn chat_direct_request_projection_hook(
             V3InternalErrorCode::V3Provider12ResponsesWirePayload,
         )
     })?;
-    let wire_body =
+    let mut wire_body =
         crate::hub_v1::build_v3_openai_chat_standard_request_from_chat_canonical(&request_body)
             .map_err(|error| {
                 build_v3_error_01_source_raised_internal(
@@ -458,6 +563,11 @@ pub(crate) fn chat_direct_request_projection_hook(
                     V3InternalErrorCode::V3Provider12ResponsesWirePayload,
                 )
             })?;
+    wire_body = apply_v3_direct_request_key_hook_with_catalog(
+        wire_body,
+        V3DirectRequestProtocol::OpenAiChat,
+        key_catalog,
+    )?;
     let secret = match (
         &candidate.env_name,
         &candidate.token_file,
@@ -798,6 +908,32 @@ mod tests {
     use serde_json::json;
     use std::collections::BTreeSet;
 
+    fn request_key_notify(_view: &V3DirectRequestKeyView) {}
+
+    fn direct_system_wire_mount(
+        _view: &V3DirectRequestKeyView,
+        edits: &mut V3DirectRequestKeyEdits,
+    ) -> Result<(), String> {
+        edits.system_append = Some("direct system hook".to_owned());
+        Ok(())
+    }
+
+    fn direct_tools_wire_mount(
+        _view: &V3DirectRequestKeyView,
+        edits: &mut V3DirectRequestKeyEdits,
+    ) -> Result<(), String> {
+        edits.tool_description_append = Some("direct tools hook".to_owned());
+        Ok(())
+    }
+
+    fn direct_developer_wire_mount(
+        _view: &V3DirectRequestKeyView,
+        edits: &mut V3DirectRequestKeyEdits,
+    ) -> Result<(), String> {
+        edits.developer_append = Some("direct developer hook".to_owned());
+        Ok(())
+    }
+
     fn direct_policy_with_models(
         client_model: &str,
         canonical_model: &str,
@@ -889,6 +1025,197 @@ mod tests {
 
         assert_eq!(wire.body()["model"], "provider-wire-model");
         assert_ne!(wire.body()["model"], "client-route-alias");
+    }
+
+    #[test]
+    fn direct_hook_registry_mounts_request_key_catalog_at_runtime() {
+        let mut policy = direct_policy_with_models(
+            "client-route-alias",
+            "canonical-provider-model",
+            "provider-wire-model",
+        );
+        policy.request_body = json!({
+            "model":"client-route-alias",
+            "instructions":"base system",
+            "input":"hello",
+            "tools":[]
+        });
+        let catalog = V3DirectRequestKeyHookCatalog::new(
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::System,
+                notify: request_key_notify,
+                rewrite: direct_system_wire_mount,
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Developer,
+                notify: request_key_notify,
+                rewrite: |_, _| Ok(()),
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Tools,
+                notify: request_key_notify,
+                rewrite: |_, _| Ok(()),
+            },
+        );
+        let registry = register_responses_direct_hooks_with_key_catalog(&catalog);
+        let wire = registry
+            .run_request_projection(&policy)
+            .expect("registered request key catalog must be consumed by Direct");
+        assert!(wire.body()["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("direct system hook"));
+        assert_eq!(wire.body()["model"], "provider-wire-model");
+        assert!(wire.body().get("metadata").is_none());
+    }
+
+    #[test]
+    fn direct_request_key_catalog_effect_reaches_responses_provider_wire_body() {
+        let mut policy = direct_policy_with_models(
+            "client-route-alias",
+            "canonical-provider-model",
+            "provider-wire-model",
+        );
+        policy.request_body = json!({
+            "model":"client-route-alias",
+            "instructions":"base system",
+            "input":"hello",
+            "tools":[{"type":"function","name":"lookup","description":"base tool","parameters":{"type":"object"}}]
+        });
+        let catalog = V3DirectRequestKeyHookCatalog::new(
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::System,
+                notify: request_key_notify,
+                rewrite: direct_system_wire_mount,
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Developer,
+                notify: request_key_notify,
+                rewrite: |_, _| Ok(()),
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Tools,
+                notify: request_key_notify,
+                rewrite: direct_tools_wire_mount,
+            },
+        );
+        let wire = responses_direct_request_projection_hook_with_key_catalog(&policy, &catalog)
+            .expect("typed Direct request key catalog must project to provider wire");
+        assert!(wire.body()["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("direct system hook"));
+        assert!(wire.body()["tools"][0]["description"]
+            .as_str()
+            .unwrap()
+            .contains("direct tools hook"));
+        assert_eq!(wire.body()["model"], "provider-wire-model");
+        assert!(wire.body().get("metadata").is_none());
+    }
+
+    #[test]
+    fn direct_request_key_catalog_effect_reaches_chat_provider_wire_body() {
+        let base = direct_policy_with_models(
+            "client-route-alias",
+            "canonical-provider-model",
+            "provider-wire-model",
+        );
+        let policy = V3ChatDirect11Policy {
+            target: base.target,
+            request_id: base.request_id,
+            request_body: json!({
+                "model":"client-route-alias",
+                "messages":[
+                    {"role":"system","content":"base system"},
+                    {"role":"developer","content":"base developer"},
+                    {"role":"user","content":"hello"}
+                ],
+                "tools":[{"type":"function","function":{"name":"lookup","description":"base tool","parameters":{"type":"object"}}}]
+            }),
+        };
+        let catalog = V3DirectRequestKeyHookCatalog::new(
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::System,
+                notify: request_key_notify,
+                rewrite: direct_system_wire_mount,
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Developer,
+                notify: request_key_notify,
+                rewrite: direct_developer_wire_mount,
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Tools,
+                notify: request_key_notify,
+                rewrite: direct_tools_wire_mount,
+            },
+        );
+        let wire = chat_direct_request_projection_hook_with_key_catalog(&policy, &catalog)
+            .expect("typed Direct Chat request key catalog must project to provider wire");
+        let messages = wire.body()["messages"].as_array().unwrap();
+        assert!(messages.iter().any(|message| {
+            message["role"] == "system"
+                && message["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("direct system hook"))
+        }));
+        assert!(messages.iter().any(|message| {
+            message["role"] == "developer"
+                && message["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("direct developer hook"))
+        }));
+        assert!(wire.body()["tools"][0]["function"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("direct tools hook"));
+        assert_eq!(wire.body()["model"], "provider-wire-model");
+        assert!(wire.body().get("metadata").is_none());
+    }
+
+    #[test]
+    fn chat_direct_codec_consumes_the_registered_key_catalog() {
+        let base = direct_policy_with_models(
+            "client-route-alias",
+            "canonical-provider-model",
+            "provider-wire-model",
+        );
+        let policy = V3ChatDirect11Policy {
+            target: base.target,
+            request_id: base.request_id,
+            request_body: json!({
+                "model":"client-route-alias",
+                "messages":[{"role":"system","content":"base system"}],
+                "tools":[]
+            }),
+        };
+        let catalog = V3DirectRequestKeyHookCatalog::new(
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::System,
+                notify: request_key_notify,
+                rewrite: direct_system_wire_mount,
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Developer,
+                notify: request_key_notify,
+                rewrite: |_, _| Ok(()),
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Tools,
+                notify: request_key_notify,
+                rewrite: |_, _| Ok(()),
+            },
+        );
+        let wire = <crate::kernel::V3ChatDirectCodec as crate::kernel::V3DirectProtocolCodec>::run_request_projection(
+            &policy,
+            &catalog,
+        )
+        .expect("Chat codec must consume the adjacent typed key catalog");
+        assert!(wire.body()["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("direct system hook"));
+        assert_eq!(wire.body()["model"], "provider-wire-model");
     }
 
     #[test]

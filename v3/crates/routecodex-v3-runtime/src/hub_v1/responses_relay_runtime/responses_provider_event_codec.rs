@@ -1,24 +1,58 @@
 use super::*;
+use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 
-pub(super) fn observe_v3_runtime_responses_sse_transport_chunk(
+struct V3ResponsesRelayTypedSemanticHook<'a> {
+    observation: &'a V3RuntimeStreamObservation,
+    catalog: V3RelaySseHookCatalog,
+}
+
+impl V3ResponsesSseSemanticHook for V3ResponsesRelayTypedSemanticHook<'_> {
+    fn notify(&mut self, input: &V3ResponsesSseHookInput<'_>) {
+        // Type notification is an observation-side effect only. It never
+        // enters the normalized response or provider/client payload.
+        let _ = self
+            .observation
+            .record_typed_object_type("responses", &input.protocol.event_type);
+        self.catalog.notify_responses(input);
+    }
+
+    fn rewrite(
+        &mut self,
+        semantic: &mut V3ResponsesSseSemanticObject,
+    ) -> Result<(), V3ResponsesSseTreeError> {
+        self.catalog.rewrite_responses(semantic)
+    }
+}
+
+pub(super) fn observe_v3_runtime_responses_sse_transport_chunk_typed(
     chunk: &[u8],
     decoder: &mut SseIncrementalDecoder,
     observation: &V3RuntimeStreamObservation,
-    response_scaffold: &mut Option<Value>,
-    output_items: &mut Vec<Value>,
-    output_text: &mut String,
+    reducer: &mut V3ResponsesSseReducerState,
+) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
+    let mut hook = V3ResponsesRelayTypedSemanticHook {
+        observation,
+        catalog: compile_v3_hub_relay_response_hooks().typed_sse_catalog(),
+    };
+    observe_v3_runtime_responses_sse_transport_chunk_typed_with_hook(
+        chunk, decoder, observation, reducer, &mut hook,
+    )
+}
+
+pub(super) fn observe_v3_runtime_responses_sse_transport_chunk_typed_with_hook(
+    chunk: &[u8],
+    decoder: &mut SseIncrementalDecoder,
+    observation: &V3RuntimeStreamObservation,
+    reducer: &mut V3ResponsesSseReducerState,
+    hook: &mut impl V3ResponsesSseSemanticHook,
 ) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
         .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
     let mut terminal_response = None;
     for frame in frames {
-        if let Some(response) = observe_v3_runtime_responses_sse_semantic_frame(
-            &frame,
-            observation,
-            response_scaffold,
-            output_items,
-            output_text,
+        if let Some(response) = observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
+            &frame, observation, reducer, hook,
         )? {
             terminal_response = Some(response);
         }
@@ -26,106 +60,119 @@ pub(super) fn observe_v3_runtime_responses_sse_transport_chunk(
     Ok(terminal_response)
 }
 
-/// 单个 SSE 帧的语义消费：非法 UTF-8 帧字节归 transport 失败（显式错误，
-/// 不做 silent 修复透传）；`data` 载荷的 JSON/schema 错误归 codec 失败。
-/// 供逐帧路径与 EOF trailing frame 路径共用，保证两类错误归属一致。
-pub(super) fn observe_v3_runtime_responses_sse_semantic_frame(
+pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed(
     frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
     observation: &V3RuntimeStreamObservation,
-    response_scaffold: &mut Option<Value>,
-    output_items: &mut Vec<Value>,
-    output_text: &mut String,
+    reducer: &mut V3ResponsesSseReducerState,
+) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
+    let mut hook = V3ResponsesRelayTypedSemanticHook {
+        observation,
+        catalog: compile_v3_hub_relay_response_hooks().typed_sse_catalog(),
+    };
+    observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
+        frame, observation, reducer, &mut hook,
+    )
+}
+
+pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
+    frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
+    observation: &V3RuntimeStreamObservation,
+    reducer: &mut V3ResponsesSseReducerState,
+    hook: &mut impl V3ResponsesSseSemanticHook,
 ) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
     if !frame.frame().raw_utf8_valid() {
         return Err(V3ResponsesRelayRuntimeError::ProviderSseTransport(
             "SSE input is not valid UTF-8".to_string(),
         ));
     }
-    let Some(data) = parse_v3_runtime_sse_frame_fields(frame)? else {
-        return Ok(None);
-    };
-    if data == "[DONE]" {
+    let object = crate::sse_object_pipeline::SseObjectFrame::from_frame(frame);
+    if object.is_done() || !object.has_data() {
         return Ok(None);
     }
-    let event: Value = serde_json::from_str(&data).map_err(|error| {
-        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-            "V3 Responses Relay response event payload is malformed: {error}"
-        ))
+    if !object.is_json_valid() {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "V3 Responses Relay response event payload is malformed".to_string(),
+        ));
+    }
+    let event = object.data_value().cloned().ok_or_else(|| {
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "V3 Responses Relay response event payload is missing".to_string(),
+        )
     })?;
+    let transport_object = V3ResponsesSseTransportObject::new(
+        object.event_name().map(ToOwned::to_owned),
+        event.clone(),
+    );
     if let Some(message) = extract_v3_provider_event_error_payload_message(&event) {
         return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             message,
         ));
     }
+    let semantic = classify_v3_responses_sse_event(&event).map_err(|error| {
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+    })?;
+    let mut semantic = semantic;
+    let protocol = semantic.protocol.clone();
+    apply_v3_responses_sse_semantic_hook(
+        &mut semantic,
+        &transport_object,
+        &protocol,
+        hook,
+    )
+    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()))?;
+    let projected_event = project_v3_responses_sse_event_json(&semantic);
     observation
-        .record_provider_event_json(&event)
+        .record_provider_event_json(&projected_event)
         .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-    collect_v3_runtime_responses_event_payload_evidence(
-        &event,
-        response_scaffold,
-        output_items,
-        output_text,
-    )?;
-    apply_v3_runtime_responses_semantic_event(&event, response_scaffold, output_items, output_text)
+    apply_v3_typed_responses_event(&projected_event, reducer)
 }
 
-fn apply_v3_runtime_responses_semantic_event(
+fn apply_v3_typed_responses_event(
     event: &Value,
-    response_scaffold: &mut Option<Value>,
-    output_items: &[Value],
-    output_text: &str,
+    reducer: &mut V3ResponsesSseReducerState,
 ) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
-    let semantic_event_type = event
+    if let Some(message) = extract_v3_provider_event_error_payload_message(event) {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            message,
+        ));
+    }
+    if event
         .get("type")
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty());
-    match semantic_event_type {
-        Some("response.created" | "response.in_progress") => {
-            if response_scaffold.is_none() {
-                *response_scaffold = Some(
-                    event
-                        .get("response")
-                        .cloned()
-                        .unwrap_or_else(|| event.clone()),
-                );
-            }
-            Ok(None)
+        .is_some_and(|event_type| !is_supported_typed_responses_event(event_type))
+    {
+        let event_type = event
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            format!("V3 Responses Relay response event type {event_type} is unsupported"),
+        ));
+    }
+    if event.get("type").and_then(Value::as_str) == Some("response.incomplete") {
+        let reason = event
+            .pointer("/response/incomplete_details/reason")
+            .or_else(|| event.pointer("/incomplete_details/reason"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if !matches!(reason, Some("max_output_tokens" | "content_filter")) {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "Responses SSE response.incomplete requires supported incomplete_details.reason"
+                    .to_owned(),
+            ));
         }
-        Some("response.completed") => {
-            build_v3_runtime_terminal_response(event, response_scaffold, output_items, output_text)
+    }
+    reducer.apply_event(event).map_err(|error| {
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+    })?;
+    match reducer.terminal {
+        Some(V3ResponsesSseTerminalState::Completed)
+        | Some(V3ResponsesSseTerminalState::Incomplete) => {
+            build_typed_responses_terminal_response(event, reducer).map(Some)
         }
-        // response.incomplete 是 Responses 协议合法终态（max_output_tokens 截断 /
-        // content_filter 触发）：与 completed 一样产出 terminal response（保留
-        // status=incomplete + incomplete_details），客户端按协议消费部分输出，
-        // 网关不得把它当 provider 流错误切 provider / 打 502。畸形终帧（缺
-        // incomplete_details.reason / 未知 reason）必须与 openai_chat_codec /
-        // provider_sse_json_codec 同口径 fail-fast，不能静默当 200 终态收下。
-        Some("response.incomplete") => {
-            let reason = event
-                .pointer("/response/incomplete_details/reason")
-                .or_else(|| event.pointer("/incomplete_details/reason"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty());
-            match reason {
-                Some("max_output_tokens" | "content_filter") => {}
-                Some(other) => {
-                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                        format!(
-                            "Responses SSE response.incomplete carries unsupported incomplete_details.reason {other}"
-                        ),
-                    ))
-                }
-                None => {
-                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                        "Responses SSE response.incomplete requires incomplete_details.reason"
-                            .to_string(),
-                    ))
-                }
-            }
-            build_v3_runtime_terminal_response(event, response_scaffold, output_items, output_text)
-        }
-        Some("response.failed" | "response.cancelled" | "response.canceled" | "response.error") => {
+        Some(V3ResponsesSseTerminalState::Failed)
+        | Some(V3ResponsesSseTerminalState::Cancelled) => {
             let message = event
                 .pointer("/response/error/message")
                 .or_else(|| event.pointer("/error/message"))
@@ -133,99 +180,136 @@ fn apply_v3_runtime_responses_semantic_event(
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or(V3_RESPONSES_RELAY_PROVIDER_EVENT_FAILED_MESSAGE);
             Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                message.to_string(),
+                message.to_owned(),
             ))
         }
-        Some(
-            "response.output_item.added"
+        None => Ok(None),
+    }
+}
+
+fn is_supported_typed_responses_event(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "response.created"
+            | "response.in_progress"
+            | "response.output_item.added"
             | "response.output_item.done"
             | "response.content_part.added"
             | "response.content_part.done"
+            | "response.output_text.delta"
+            | "response.output_text.done"
             | "response.reasoning_text.delta"
             | "response.reasoning_text.done"
-            | "response.reasoning_signature.delta"
-            | "response.reasoning_image.delta"
             | "response.reasoning_summary_part.added"
             | "response.reasoning_summary_part.done"
             | "response.reasoning_summary_text.delta"
             | "response.reasoning_summary_text.done"
-            | "response.output_text.delta"
-            | "response.output_text.done"
             | "response.function_call_arguments.delta"
             | "response.function_call_arguments.done"
             | "response.custom_tool_call_input.delta"
             | "response.custom_tool_call_input.done"
+            | "response.completed"
+            | "response.incomplete"
+            | "response.failed"
+            | "response.cancelled"
+            | "response.canceled"
+            | "response.error"
             | "response.requires_action"
-            | "response.done",
-        ) => Ok(None),
-        Some(other) if other.starts_with("response.") => {
-            Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                format!("V3 Responses Relay response event type {other} is unsupported"),
-            ))
-        }
-        _ => Ok(None),
-    }
+            | "response.done"
+    ) || !event_type.starts_with("response.")
 }
 
-fn build_v3_runtime_terminal_response(
+fn build_typed_responses_terminal_response(
     event: &Value,
-    response_scaffold: &mut Option<Value>,
-    output_items: &[Value],
-    output_text: &str,
-) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
+    reducer: &V3ResponsesSseReducerState,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let mut response = event
         .get("response")
-        .cloned()
-        .unwrap_or_else(|| event.clone());
-    merge_v3_runtime_responses_scaffold(&mut response, response_scaffold.as_ref());
-    attach_required_action_from_sse_event(&mut response, event);
-    apply_responses_stream_protocol_events_to_terminal_response(
-        &mut response,
-        output_items,
-        output_text,
-    )?;
-    Ok(Some(response))
-}
-
-fn merge_v3_runtime_responses_scaffold(response: &mut Value, scaffold: Option<&Value>) {
-    let (Some(response), Some(scaffold)) = (
-        response.as_object_mut(),
-        scaffold.and_then(Value::as_object),
-    ) else {
-        return;
-    };
-    for (key, value) in scaffold {
-        response.entry(key.clone()).or_insert_with(|| value.clone());
+        .and_then(|value| parse_response_container(value).ok())
+        .or_else(|| reducer.response.clone())
+        .map(|value| value.to_normalized_value())
+        .unwrap_or_else(|| json!({}));
+    if let Some(scaffold) = &reducer.response {
+        let scaffold = scaffold.to_normalized_value();
+        if let (Some(target), Some(source)) = (response.as_object_mut(), scaffold.as_object()) {
+            for (key, value) in source {
+                target.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
     }
-}
-
-fn attach_required_action_from_sse_event(response: &mut Value, event: &Value) {
-    let Some(required_action) = event.get("required_action").cloned() else {
-        return;
-    };
-    let Some(object) = response.as_object_mut() else {
-        return;
-    };
+    let object = response.as_object_mut().ok_or_else(|| {
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "typed Responses terminal response must be an object".to_owned(),
+        )
+    })?;
     object
-        .entry("required_action".to_string())
-        .or_insert(required_action);
+        .entry("status".to_owned())
+        .or_insert_with(|| Value::String("completed".to_owned()));
+    if let Some(required_action) = event.get("required_action") {
+        object.insert("required_action".to_owned(), required_action.clone());
+    }
+    let mut output = object
+        .get("output")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for item in reducer
+        .items
+        .iter()
+        .map(|item| item.item().to_normalized_value())
+    {
+        let output_index = item.get("output_index").and_then(Value::as_u64);
+        let identity = item
+            .get("call_id")
+            .or_else(|| item.get("id"))
+            .and_then(Value::as_str);
+        if let Some(identity) = identity {
+            if let Some(index) = output.iter().position(|existing| {
+                existing
+                    .get("call_id")
+                    .or_else(|| existing.get("id"))
+                    .and_then(Value::as_str)
+                    == Some(identity)
+            }) {
+                output[index] = item;
+                continue;
+            }
+        }
+        if let Some(output_index) = output_index.and_then(|value| usize::try_from(value).ok()) {
+            if let Some(index) = output.iter().position(|existing| {
+                existing.get("output_index").and_then(Value::as_u64) == Some(output_index as u64)
+            }) {
+                output[index] = item;
+                continue;
+            }
+            let insert_at = output_index.min(output.len());
+            output.insert(insert_at, item);
+        } else {
+            output.push(item);
+        }
+    }
+    object.insert("output".to_owned(), Value::Array(output));
+    if !reducer.output_text.trim().is_empty() {
+        object.insert(
+            "output_text".to_owned(),
+            Value::String(reducer.output_text.clone()),
+        );
+    }
+    Ok(response)
 }
 
 pub(super) fn parse_v3_runtime_sse_frame_fields(
     frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
 ) -> Result<Option<String>, V3ResponsesRelayRuntimeError> {
-    let mut data = String::new();
-    for field in frame.frame().fields() {
-        let SseField::Named { name, value } = field else {
-            continue;
-        };
-        if name == "data" {
-            if !data.is_empty() {
-                data.push('\n');
-            }
-            data.push_str(value);
-        }
+    let object = crate::sse_object_pipeline::SseObjectFrame::from_frame(frame);
+    if object.has_data() && !object.is_done() && !object.is_json_valid() {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "V3 Responses Relay response event payload is malformed".to_string(),
+        ));
     }
+    let Some(data) = object.normalized_data_json() else {
+        return Ok(None);
+    };
     let data = data.trim();
     if data.is_empty() {
         return Ok(None);
@@ -259,816 +343,74 @@ pub(super) fn extract_v3_provider_event_error_payload_message(payload: &Value) -
     }
 }
 
-fn collect_v3_runtime_responses_event_payload_evidence(
-    event: &Value,
-    response_scaffold: &mut Option<Value>,
-    output_items: &mut Vec<Value>,
-    output_text: &mut String,
-) -> Result<(), V3ResponsesRelayRuntimeError> {
-    let semantic_event_type = event
-        .get("type")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty());
-    match semantic_event_type {
-        Some("response.created" | "response.in_progress") => {
-            if response_scaffold.is_none() {
-                *response_scaffold = Some(
-                    event
-                        .get("response")
-                        .cloned()
-                        .unwrap_or_else(|| event.clone()),
-                );
-            }
-        }
-        Some("response.output_item.added" | "response.output_item.done") => {
-            if let Some(item) = event.get("item").cloned() {
-                upsert_v3_runtime_responses_event_output_item(output_items, item);
-            }
-        }
-        Some("response.content_part.added" | "response.content_part.done") => {
-            upsert_v3_runtime_responses_event_content_part(output_items, event);
-        }
-        Some("response.output_text.delta") => {
-            if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                output_text.push_str(delta);
-            }
-        }
-        Some("response.output_text.done") => {
-            if let Some(text) = event.get("text").and_then(Value::as_str) {
-                output_text.clear();
-                output_text.push_str(text);
-            }
-        }
-        Some("response.function_call_arguments.delta") => {
-            if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                append_v3_runtime_responses_event_function_arguments(output_items, event, delta);
-            }
-        }
-        Some("response.function_call_arguments.done") => {
-            if let Some(arguments) = event.get("arguments").and_then(Value::as_str) {
-                set_v3_runtime_responses_event_function_arguments(output_items, event, arguments);
-            }
-        }
-        Some("response.custom_tool_call_input.delta") => {
-            if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                append_v3_runtime_responses_event_custom_tool_call_input(
-                    output_items,
-                    event,
-                    delta,
-                );
-            }
-        }
-        Some("response.custom_tool_call_input.done") => {
-            if let Some(input) = event.get("input").and_then(Value::as_str) {
-                set_v3_runtime_responses_event_custom_tool_call_input(output_items, event, input);
-            }
-        }
-        Some("response.reasoning_summary_part.added") => {
-            upsert_v3_runtime_responses_event_reasoning_summary_part(output_items, event, false);
-        }
-        Some("response.reasoning_summary_part.done") => {
-            upsert_v3_runtime_responses_event_reasoning_summary_part(output_items, event, true);
-        }
-        Some("response.reasoning_summary_text.delta") => {
-            if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                append_v3_runtime_responses_event_reasoning_summary_text(
-                    output_items,
-                    event,
-                    delta,
-                );
-            }
-        }
-        Some("response.reasoning_summary_text.done") => {
-            if let Some(text) = event.get("text").and_then(Value::as_str) {
-                set_v3_runtime_responses_event_reasoning_summary_text(output_items, event, text);
-            }
-        }
-        Some("response.reasoning_text.delta") => {
-            if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                append_v3_runtime_responses_event_reasoning_content_text(
-                    output_items,
-                    event,
-                    delta,
-                );
-            }
-        }
-        Some("response.reasoning_text.done") => {
-            let text = event
-                .get("text")
-                .or_else(|| event.get("delta"))
-                .and_then(Value::as_str);
-            if let Some(text) = text {
-                set_v3_runtime_responses_event_reasoning_content_value(
-                    output_items,
-                    event,
-                    "reasoning_text",
-                    "text",
-                    Value::String(text.to_string()),
-                );
-            }
-        }
-        Some("response.reasoning_signature.delta") => {
-            if let Some(signature) = event.get("signature").cloned() {
-                set_v3_runtime_responses_event_reasoning_content_value(
-                    output_items,
-                    event,
-                    "reasoning_signature",
-                    "signature",
-                    signature,
-                );
-            }
-        }
-        Some("response.reasoning_image.delta") => {
-            if let Some(image_url) = event.get("image_url").cloned() {
-                set_v3_runtime_responses_event_reasoning_content_value(
-                    output_items,
-                    event,
-                    "reasoning_image",
-                    "image_url",
-                    image_url,
-                );
-            }
-        }
-        Some(
-            "response.completed"
-            | "response.done"
-            | "response.requires_action"
-            | "response.failed"
-            | "response.incomplete"
-            | "response.error",
-        ) => {}
-        Some(other) if other.starts_with("response.") => {
-            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                format!("V3 Responses Relay response event type {other} is unsupported"),
-            ));
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn read_v3_runtime_responses_event_index(event: &Value, field: &str) -> Option<usize> {
-    event
-        .get(field)
-        .and_then(Value::as_u64)
-        .and_then(|value| usize::try_from(value).ok())
-}
-
-fn read_v3_runtime_responses_event_item_id(event: &Value) -> Option<&str> {
-    event
-        .get("item_id")
-        .or_else(|| event.get("call_id"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-}
-
-fn find_v3_runtime_responses_event_output_item_index(
-    output_items: &[Value],
-    event: &Value,
-) -> Option<usize> {
-    if let Some(item_id) = read_v3_runtime_responses_event_item_id(event) {
-        if let Some(index) = output_items.iter().position(|item| {
-            item.get("id")
-                .or_else(|| item.get("call_id"))
-                .and_then(Value::as_str)
-                == Some(item_id)
-        }) {
-            return Some(index);
-        }
-    }
-    read_v3_runtime_responses_event_index(event, "output_index")
-        .filter(|index| *index < output_items.len())
-}
-
-fn ensure_v3_runtime_responses_event_output_item_index(
-    output_items: &mut Vec<Value>,
-    event: &Value,
-    item_type: &str,
-) -> Option<usize> {
-    if let Some(index) = find_v3_runtime_responses_event_output_item_index(output_items, event) {
-        return Some(index);
-    }
-    let item_id = read_v3_runtime_responses_event_item_id(event)?;
-    let mut item = Map::new();
-    item.insert("id".to_string(), Value::String(item_id.to_string()));
-    item.insert("type".to_string(), Value::String(item_type.to_string()));
-    output_items.push(Value::Object(item));
-    Some(output_items.len() - 1)
-}
-
-fn ensure_v3_runtime_responses_event_array_field<'item>(
-    item: &'item mut Value,
-    field: &str,
-) -> Option<&'item mut Vec<Value>> {
-    let object = item.as_object_mut()?;
-    object
-        .entry(field.to_string())
-        .or_insert_with(|| Value::Array(Vec::new()))
-        .as_array_mut()
-}
-
-fn ensure_v3_runtime_responses_event_summary_entry<'summary>(
-    summary: &'summary mut Vec<Value>,
-    summary_index: usize,
-) -> Option<&'summary mut Value> {
-    while summary.len() <= summary_index {
-        summary.push(json!({"type":"summary_text","text":""}));
-    }
-    let entry = summary.get_mut(summary_index)?;
-    if !entry.is_object() {
-        *entry = json!({"type":"summary_text","text":""});
-    }
-    if let Some(object) = entry.as_object_mut() {
-        object
-            .entry("type".to_string())
-            .or_insert_with(|| Value::String("summary_text".to_string()));
-        object
-            .entry("text".to_string())
-            .or_insert_with(|| Value::String(String::new()));
-    }
-    Some(entry)
-}
-
-fn upsert_v3_runtime_responses_event_content_part(output_items: &mut Vec<Value>, event: &Value) {
-    let Some(content_index) = read_v3_runtime_responses_event_index(event, "content_index") else {
-        return;
-    };
-    let Some(part) = event
-        .get("part")
-        .or_else(|| event.get("content_part"))
-        .cloned()
-    else {
-        return;
-    };
-    let Some(output_index) =
-        ensure_v3_runtime_responses_event_output_item_index(output_items, event, "message")
-    else {
-        return;
-    };
-    let Some(content) =
-        ensure_v3_runtime_responses_event_array_field(&mut output_items[output_index], "content")
-    else {
-        return;
-    };
-    while content.len() <= content_index {
-        content.push(json!({"type":"output_text","text":""}));
-    }
-    content[content_index] = part;
-}
-
-fn upsert_v3_runtime_responses_event_reasoning_summary_part(
-    output_items: &mut Vec<Value>,
-    event: &Value,
-    done: bool,
-) {
-    let Some(summary_index) = read_v3_runtime_responses_event_index(event, "summary_index") else {
-        return;
-    };
-    let Some(output_index) =
-        ensure_v3_runtime_responses_event_output_item_index(output_items, event, "reasoning")
-    else {
-        return;
-    };
-    let Some(summary) =
-        ensure_v3_runtime_responses_event_array_field(&mut output_items[output_index], "summary")
-    else {
-        return;
-    };
-    let Some(entry) = ensure_v3_runtime_responses_event_summary_entry(summary, summary_index)
-    else {
-        return;
-    };
-    if !done {
-        return;
-    }
-    let text = event
-        .pointer("/part/text")
-        .or_else(|| event.get("text"))
-        .and_then(Value::as_str);
-    if let Some(text) = text {
-        entry["text"] = Value::String(text.to_string());
-    }
-}
-
-fn append_v3_runtime_responses_event_reasoning_summary_text(
-    output_items: &mut Vec<Value>,
-    event: &Value,
-    delta: &str,
-) {
-    let Some(summary_index) = read_v3_runtime_responses_event_index(event, "summary_index") else {
-        return;
-    };
-    let Some(output_index) =
-        ensure_v3_runtime_responses_event_output_item_index(output_items, event, "reasoning")
-    else {
-        return;
-    };
-    let Some(summary) =
-        ensure_v3_runtime_responses_event_array_field(&mut output_items[output_index], "summary")
-    else {
-        return;
-    };
-    let Some(entry) = ensure_v3_runtime_responses_event_summary_entry(summary, summary_index)
-    else {
-        return;
-    };
-    let current = entry
-        .get("text")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    entry["text"] = Value::String(format!("{current}{delta}"));
-}
-
-fn set_v3_runtime_responses_event_reasoning_summary_text(
-    output_items: &mut Vec<Value>,
-    event: &Value,
-    text: &str,
-) {
-    let Some(summary_index) = read_v3_runtime_responses_event_index(event, "summary_index") else {
-        return;
-    };
-    let Some(output_index) =
-        ensure_v3_runtime_responses_event_output_item_index(output_items, event, "reasoning")
-    else {
-        return;
-    };
-    let Some(summary) =
-        ensure_v3_runtime_responses_event_array_field(&mut output_items[output_index], "summary")
-    else {
-        return;
-    };
-    if let Some(entry) = ensure_v3_runtime_responses_event_summary_entry(summary, summary_index) {
-        entry["text"] = Value::String(text.to_string());
-    }
-}
-
-fn append_v3_runtime_responses_event_reasoning_content_text(
-    output_items: &mut Vec<Value>,
-    event: &Value,
-    delta: &str,
-) {
-    let Some(current) = get_v3_runtime_responses_event_reasoning_content_value(
-        output_items,
-        event,
-        "reasoning_text",
-        "text",
-    ) else {
-        set_v3_runtime_responses_event_reasoning_content_value(
-            output_items,
-            event,
-            "reasoning_text",
-            "text",
-            Value::String(delta.to_string()),
-        );
-        return;
-    };
-    set_v3_runtime_responses_event_reasoning_content_value(
-        output_items,
-        event,
-        "reasoning_text",
-        "text",
-        Value::String(format!("{current}{delta}")),
-    );
-}
-
-fn get_v3_runtime_responses_event_reasoning_content_value(
-    output_items: &[Value],
-    event: &Value,
-    content_type: &str,
-    field: &str,
-) -> Option<String> {
-    let output_index = find_v3_runtime_responses_event_output_item_index(output_items, event)?;
-    let content_index = read_v3_runtime_responses_event_index(event, "content_index")?;
-    output_items
-        .get(output_index)?
-        .get("content")?
-        .as_array()?
-        .get(content_index)?
-        .get("type")
-        .and_then(Value::as_str)
-        .filter(|actual_type| *actual_type == content_type)?;
-    output_items
-        .get(output_index)?
-        .get("content")?
-        .as_array()?
-        .get(content_index)?
-        .get(field)?
-        .as_str()
-        .map(str::to_string)
-}
-
-fn set_v3_runtime_responses_event_reasoning_content_value(
-    output_items: &mut Vec<Value>,
-    event: &Value,
-    content_type: &str,
-    field: &str,
-    value: Value,
-) {
-    let Some(content_index) = read_v3_runtime_responses_event_index(event, "content_index") else {
-        return;
-    };
-    let Some(output_index) =
-        ensure_v3_runtime_responses_event_output_item_index(output_items, event, "reasoning")
-    else {
-        return;
-    };
-    let Some(content) =
-        ensure_v3_runtime_responses_event_array_field(&mut output_items[output_index], "content")
-    else {
-        return;
-    };
-    while content.len() <= content_index {
-        content.push(json!({"type":content_type}));
-    }
-    if !content[content_index].is_object() {
-        content[content_index] = json!({"type":content_type});
-    }
-    if let Some(object) = content[content_index].as_object_mut() {
-        object.insert("type".to_string(), Value::String(content_type.to_string()));
-        object.insert(field.to_string(), value);
-    }
-}
-
-fn upsert_v3_runtime_responses_event_output_item(output_items: &mut Vec<Value>, item: Value) {
-    let call_id = item
-        .get("call_id")
-        .or_else(|| item.get("id"))
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    if let Some(call_id) = call_id {
-        if let Some(existing) = output_items.iter_mut().find(|existing| {
-            existing
-                .get("call_id")
-                .or_else(|| existing.get("id"))
-                .and_then(Value::as_str)
-                == Some(call_id.as_str())
-        }) {
-            *existing = item;
-            return;
-        }
-    }
-    output_items.push(item);
-}
-
-fn append_v3_runtime_responses_event_function_arguments(
-    output_items: &mut [Value],
-    event: &Value,
-    delta: &str,
-) {
-    let Some(item) = find_v3_runtime_responses_event_function_item_mut(output_items, event) else {
-        return;
-    };
-    let current = item
-        .get("arguments")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    item["arguments"] = Value::String(format!("{current}{delta}"));
-}
-
-fn set_v3_runtime_responses_event_function_arguments(
-    output_items: &mut [Value],
-    event: &Value,
-    arguments: &str,
-) {
-    if let Some(item) = find_v3_runtime_responses_event_function_item_mut(output_items, event) {
-        item["arguments"] = Value::String(arguments.to_string());
-    }
-}
-
-fn append_v3_runtime_responses_event_custom_tool_call_input(
-    output_items: &mut [Value],
-    event: &Value,
-    delta: &str,
-) {
-    let Some(item) = find_v3_runtime_responses_event_function_item_mut(output_items, event) else {
-        return;
-    };
-    let current = item
-        .get("input")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    item["input"] = Value::String(format!("{current}{delta}"));
-}
-
-fn set_v3_runtime_responses_event_custom_tool_call_input(
-    output_items: &mut [Value],
-    event: &Value,
-    input: &str,
-) {
-    if let Some(item) = find_v3_runtime_responses_event_function_item_mut(output_items, event) {
-        item["input"] = Value::String(input.to_string());
-    }
-}
-
-fn find_v3_runtime_responses_event_function_item_mut<'items>(
-    output_items: &'items mut [Value],
-    event: &Value,
-) -> Option<&'items mut Value> {
-    if let Some(output_index) = event.get("output_index").and_then(Value::as_u64) {
-        return output_items.get_mut(output_index as usize);
-    }
-    let call_id = event
-        .get("call_id")
-        .or_else(|| event.get("item_id"))
-        .and_then(Value::as_str);
-    if let Some(call_id) = call_id {
-        return output_items.iter_mut().find(|item| {
-            item.get("call_id")
-                .or_else(|| item.get("id"))
-                .and_then(Value::as_str)
-                == Some(call_id)
-        });
-    }
-    output_items.iter_mut().rev().find(|item| {
-        matches!(
-            item.get("type").and_then(Value::as_str),
-            Some("function_call" | "custom_tool_call" | "tool_call")
-        )
-    })
-}
-
-fn apply_responses_stream_protocol_events_to_terminal_response(
-    response: &mut Value,
-    output_items: &[Value],
-    output_text: &str,
-) -> Result<(), V3ResponsesRelayRuntimeError> {
-    let object = response.as_object_mut().ok_or_else(|| {
-        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            "V3 Responses Relay response event terminal response must be an object".to_string(),
-        )
-    })?;
-    object
-        .entry("status".to_string())
-        .or_insert_with(|| Value::String("completed".to_string()));
-    if !output_items.is_empty() {
-        merge_v3_runtime_responses_stream_output_items_into_terminal_response(object, output_items);
-    }
-    let output_is_empty = object
-        .get("output")
-        .and_then(Value::as_array)
-        .is_none_or(Vec::is_empty);
-    if output_is_empty {
-        if !output_text.trim().is_empty() {
-            object.insert(
-                "output".to_string(),
-                json!([{"type":"output_text","text":output_text}]),
-            );
-        }
-    } else if !output_text.trim().is_empty() {
-        append_v3_runtime_responses_output_text_if_missing(object, output_text);
-    }
-    Ok(())
-}
-
-fn merge_v3_runtime_responses_stream_output_items_into_terminal_response(
-    object: &mut Map<String, Value>,
-    output_items: &[Value],
-) {
-    let output = object
-        .entry("output".to_string())
-        .or_insert_with(|| Value::Array(Vec::new()));
-    if !output.is_array() {
-        *output = Value::Array(Vec::new());
-    }
-    let Some(output) = output.as_array_mut() else {
-        return;
-    };
-    for (stream_index, stream_item) in output_items.iter().enumerate() {
-        if let Some(target_index) =
-            find_v3_runtime_responses_terminal_output_item_index(output, stream_item)
-        {
-            output[target_index] = merge_v3_runtime_responses_terminal_and_stream_output_item(
-                &output[target_index],
-                stream_item,
-            );
-            continue;
-        }
-        if output.get(stream_index) == Some(stream_item) {
-            continue;
-        }
-        if stream_index < output.len() {
-            output.insert(stream_index, stream_item.clone());
-        } else {
-            output.push(stream_item.clone());
-        }
-    }
-}
-
-fn find_v3_runtime_responses_terminal_output_item_index(
-    output: &[Value],
-    stream_item: &Value,
-) -> Option<usize> {
-    let identity = read_v3_runtime_responses_output_item_identity(stream_item)?;
-    output
-        .iter()
-        .position(|item| read_v3_runtime_responses_output_item_identity(item) == Some(identity))
-}
-
-fn read_v3_runtime_responses_output_item_identity(item: &Value) -> Option<&str> {
-    item.get("call_id")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            item.get("id")
-                .and_then(Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-        })
-}
-
-fn merge_v3_runtime_responses_terminal_and_stream_output_item(
-    terminal_item: &Value,
-    stream_item: &Value,
-) -> Value {
-    let (Some(terminal), Some(stream)) = (terminal_item.as_object(), stream_item.as_object())
-    else {
-        return terminal_item.clone();
-    };
-    let mut merged = terminal.clone();
-    for (key, value) in stream {
-        merged.entry(key.clone()).or_insert_with(|| value.clone());
-    }
-    Value::Object(merged)
-}
-
-fn append_v3_runtime_responses_output_text_if_missing(
-    object: &mut Map<String, Value>,
-    output_text: &str,
-) {
-    let Some(output) = object.get_mut("output").and_then(Value::as_array_mut) else {
-        return;
-    };
-    if output
-        .iter()
-        .any(v3_runtime_responses_output_item_has_visible_text)
-    {
-        return;
-    }
-    output.push(json!({"type":"output_text","text":output_text}));
-}
-
-fn v3_runtime_responses_output_item_has_visible_text(item: &Value) -> bool {
-    if item.get("type").and_then(Value::as_str) == Some("output_text")
-        && item
-            .get("text")
-            .and_then(Value::as_str)
-            .is_some_and(|text| !text.trim().is_empty())
-    {
-        return true;
-    }
-    item.get("content")
-        .and_then(Value::as_array)
-        .is_some_and(|content| {
-            content.iter().any(|part| {
-                matches!(
-                    part.get("type").and_then(Value::as_str),
-                    Some("output_text" | "text")
-                ) && part
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .is_some_and(|text| !text.trim().is_empty())
-            })
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    struct RewriteRelayMessageHook<'a> {
+        observation: &'a V3RuntimeStreamObservation,
+    }
+
+    impl V3ResponsesSseSemanticHook for RewriteRelayMessageHook<'_> {
+        fn notify(&mut self, input: &V3ResponsesSseHookInput<'_>) {
+            self.observation
+                .record_typed_object_type("responses", &input.protocol.event_type)
+                .expect("typed notification must remain observation-side only");
+        }
+
+        fn rewrite(
+            &mut self,
+            semantic: &mut V3ResponsesSseSemanticObject,
+        ) -> Result<(), V3ResponsesSseTreeError> {
+            if semantic.item == Some(V3ResponsesSseOutputItemKind::Message) {
+                semantic.rewrite_item_content(V3ResponsesSseContentRewrite::Text(
+                    "relay typed rewrite".to_owned(),
+                ))?;
+            }
+            Ok(())
+        }
+    }
+
     #[test]
-    fn terminal_merge_matches_tool_calls_by_call_id_before_item_id() {
-        let mut terminal = json!({
-            "output": [{
-                "type": "function_call",
-                "call_id": "call_shared",
-                "name": "exec_command",
-                "arguments": "{}"
-            }]
-        });
-        let stream_items = vec![json!({
-            "type": "function_call",
-            "id": "fc_stream",
-            "call_id": "call_shared",
-            "name": "exec_command",
-            "arguments": "{\"cmd\":\"pwd\"}"
-        })];
+    fn relay_responses_typed_hook_rewrite_is_consumed_before_reducer_projection() {
+        let observation = V3RuntimeStreamObservation::default();
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let mut hook = RewriteRelayMessageHook {
+            observation: &observation,
+        };
+        let chunk = br#"event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_relay_1","content":[{"type":"output_text","text":"before"}]}}
 
-        merge_v3_runtime_responses_stream_output_items_into_terminal_response(
-            terminal.as_object_mut().expect("terminal response object"),
-            &stream_items,
-        );
+"#;
 
-        let output = terminal["output"].as_array().expect("terminal output");
-        assert_eq!(output.len(), 1, "same tool call must not be duplicated");
-        assert_eq!(output[0]["call_id"], "call_shared");
-        assert_eq!(output[0]["id"], "fc_stream");
+        observe_v3_runtime_responses_sse_transport_chunk_typed_with_hook(
+            chunk,
+            &mut decoder,
+            &observation,
+            &mut reducer,
+            &mut hook,
+        )
+        .expect("typed Relay hook must rewrite before reducer consumption");
+
+        assert_eq!(reducer.items.len(), 1);
         assert_eq!(
-            output[0]["arguments"], "{}",
-            "response.completed arguments must remain authoritative"
+            reducer.items[0].item().to_normalized_value()["content"][0]["text"],
+            "relay typed rewrite"
+        );
+        assert_eq!(
+            observation
+                .snapshot()
+                .expect("observation snapshot")
+                .typed_object_types,
+            vec!["responses:response.output_item.done".to_owned()]
         );
     }
 
     #[test]
-    fn terminal_merge_keeps_distinct_tool_call_ids_separate() {
-        let mut terminal = json!({
-            "output": [{
-                "type": "function_call",
-                "id": "fc_shared",
-                "call_id": "call_first",
-                "name": "exec_command",
-                "arguments": "{}"
-            }]
-        });
-        let stream_items = vec![json!({
-            "type": "function_call",
-            "id": "fc_shared",
-            "call_id": "call_second",
-            "name": "exec_command",
-            "arguments": "{}"
-        })];
-
-        merge_v3_runtime_responses_stream_output_items_into_terminal_response(
-            terminal.as_object_mut().expect("terminal response object"),
-            &stream_items,
-        );
-
-        let output = terminal["output"].as_array().expect("terminal output");
-        assert_eq!(output.len(), 2, "distinct tool calls must remain separate");
-    }
-
-    #[test]
-    fn terminal_merge_matches_tool_search_calls_by_call_id() {
-        let mut terminal = json!({
-            "output": [{
-                "type": "tool_search_call",
-                "call_id": "call_search",
-                "status": "completed"
-            }]
-        });
-        let stream_items = vec![json!({
-            "type": "tool_search_call",
-            "id": "ts_stream",
-            "call_id": "call_search",
-            "status": "in_progress"
-        })];
-
-        merge_v3_runtime_responses_stream_output_items_into_terminal_response(
-            terminal.as_object_mut().expect("terminal response object"),
-            &stream_items,
-        );
-
-        let output = terminal["output"].as_array().expect("terminal output");
-        assert_eq!(
-            output.len(),
-            1,
-            "same tool-search call must not be duplicated"
-        );
-        assert_eq!(output[0]["call_id"], "call_search");
-        assert_eq!(output[0]["id"], "ts_stream");
-        assert_eq!(
-            output[0]["status"], "completed",
-            "response.completed status must not regress to stream state"
-        );
-    }
-
-    #[test]
-    fn terminal_merge_matches_non_call_output_by_item_id() {
-        let mut terminal = json!({
-            "output": [{
-                "type": "message",
-                "id": "msg_shared",
-                "role": "assistant",
-                "content": []
-            }]
-        });
-        let stream_items = vec![json!({
-            "type": "message",
-            "id": "msg_shared",
-            "role": "assistant",
-            "content": [{"type":"output_text","text":"ok"}]
-        })];
-
-        merge_v3_runtime_responses_stream_output_items_into_terminal_response(
-            terminal.as_object_mut().expect("terminal response object"),
-            &stream_items,
-        );
-
-        let output = terminal["output"].as_array().expect("terminal output");
-        assert_eq!(output.len(), 1, "same message item must not be duplicated");
-        assert_eq!(output[0]["id"], "msg_shared");
-        assert_eq!(
-            output[0]["content"],
-            json!([]),
-            "response.completed content must remain authoritative"
-        );
-    }
-
-    #[test]
-    fn response_incomplete_is_terminal_response_not_provider_error() {
-        let mut scaffold = None;
-        let terminal = apply_v3_runtime_responses_semantic_event(
+    fn response_incomplete_is_terminal_typed_response_not_provider_error() {
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let terminal = apply_v3_typed_responses_event(
             &json!({
                 "type": "response.incomplete",
                 "response": {
@@ -1078,9 +420,7 @@ mod tests {
                     "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
                 }
             }),
-            &mut scaffold,
-            &[],
-            "",
+            &mut reducer,
         )
         .expect("response.incomplete must produce a terminal response, not an error")
         .expect("response.incomplete must be terminal");
@@ -1094,9 +434,6 @@ mod tests {
 
     #[test]
     fn response_incomplete_without_or_unknown_reason_fails_fast() {
-        // 与 openai_chat_codec / provider_sse_json_codec 同口径：畸形
-        // response.incomplete（缺 reason / 未知 reason）必须显式报错，
-        // 禁止静默当 200 合法终态收下。
         for payload in [
             json!({
                 "type": "response.incomplete",
@@ -1108,20 +445,17 @@ mod tests {
                 "response": {"id": "resp_bad_2", "status": "incomplete"}
             }),
         ] {
-            let mut scaffold = None;
-            let error = apply_v3_runtime_responses_semantic_event(&payload, &mut scaffold, &[], "")
+            let mut reducer = V3ResponsesSseReducerState::default();
+            let error = apply_v3_typed_responses_event(&payload, &mut reducer)
                 .expect_err("malformed/unknown incomplete terminal must fail fast");
-            assert!(
-                error.to_string().contains("response.incomplete"),
-                "unexpected error: {error}"
-            );
+            assert!(error.to_string().contains("response.incomplete"));
         }
     }
 
     #[test]
-    fn response_failed_still_errors_as_provider_event_codec_failure() {
-        let mut scaffold = None;
-        let error = apply_v3_runtime_responses_semantic_event(
+    fn response_failed_still_errors_as_typed_provider_event_failure() {
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let error = apply_v3_typed_responses_event(
             &json!({
                 "type": "response.failed",
                 "response": {
@@ -1130,14 +464,9 @@ mod tests {
                     "error": {"message": "upstream model crashed"}
                 }
             }),
-            &mut scaffold,
-            &[],
-            "",
+            &mut reducer,
         )
         .expect_err("response.failed must remain an explicit provider event failure");
-        assert!(
-            error.to_string().contains("upstream model crashed"),
-            "unexpected error: {error}"
-        );
+        assert!(error.to_string().contains("upstream model crashed"));
     }
 }

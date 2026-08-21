@@ -417,9 +417,9 @@ fn provider_response_failure_classifier_keeps_provider_and_local_hook_errors_sep
 
 #[test]
 fn anthropic_provider_signature_delta_without_string_fails_explicitly() {
-    let mut state = V3AnthropicProviderStreamState::default();
-    collect_v3_anthropic_provider_stream_event(
-        json!({
+    let mut state = anthropic_sse_tree::V3AnthropicSseReducerState::default();
+    state
+        .apply_event(&json!({
             "type":"message_start",
             "message":{
                 "id":"msg_signature",
@@ -428,29 +428,23 @@ fn anthropic_provider_signature_delta_without_string_fails_explicitly() {
                 "content":[],
                 "usage":{"input_tokens":1}
             }
-        }),
-        &mut state,
-    )
-    .expect("message_start");
-    collect_v3_anthropic_provider_stream_event(
-        json!({
+        }))
+        .expect("message_start");
+    state
+        .apply_event(&json!({
             "type":"content_block_start",
             "index":0,
             "content_block":{"type":"thinking","thinking":""}
-        }),
-        &mut state,
-    )
-    .expect("thinking start");
+        }))
+        .expect("thinking start");
 
-    let error = collect_v3_anthropic_provider_stream_event(
-        json!({
+    let error = state
+        .apply_event(&json!({
             "type":"content_block_delta",
             "index":0,
             "delta":{"type":"signature_delta","signature":null}
-        }),
-        &mut state,
-    )
-    .expect_err("malformed signature_delta must not disappear");
+        }))
+        .expect_err("malformed signature_delta must not disappear");
 
     assert!(error
         .to_string()
@@ -489,12 +483,6 @@ provider_type = "openai_chat"
 [error.provider_error_action_policy.match]
 http_status = 200
 content_contains_any = ["Type invalid, should be set"]
-[error.provider_error_action_policy.action]
-kind = "periodic_recovery"
-reason_code = "provider_invalid_field_type"
-retry_mode = "reselect_before_client_projection"
-cooldown_ms = 900000
-disable_scope = "provider_model"
 [[error.provider_error_action_policy.path]]
 step = "project"
 status = 400

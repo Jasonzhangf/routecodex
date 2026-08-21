@@ -346,11 +346,15 @@ impl V3TargetInterpreter {
             } else {
                 saw_non_context_candidate = true;
             }
+            let route_tier_index = Self::route_tier_index(&expanded.route, candidate);
+            let effective_priority = (route_tier_index as i32)
+                .saturating_mul(1_000_000)
+                .saturating_add(candidate.priority);
             let projection = scheduling.scheduling_projection(
                 &candidate.provider_id,
                 &candidate.auth_alias,
                 &candidate.model_id,
-                candidate.priority,
+                effective_priority,
                 candidate.weight,
                 now_ms,
             );
@@ -441,9 +445,27 @@ impl V3TargetInterpreter {
             attempts: index + 1,
             default_floor_protected: false,
         })
-    }
+}
 
-    pub fn select_available<R: V3ProviderAvailabilityReader>(
+fn route_tier_index(
+    route: &V3Router07OpaqueTargetHitOnce,
+    candidate: &V3TargetCandidate,
+) -> usize {
+    candidate
+        .pool_ids
+        .iter()
+        .filter_map(|pool_id| {
+            route
+                .target_plan
+                .iter()
+                .find(|entry| entry.pool_id == *pool_id)
+                .map(|entry| entry.tier_index)
+        })
+        .min()
+        .unwrap_or(usize::MAX)
+}
+
+pub fn select_available<R: V3ProviderAvailabilityReader>(
         &self,
         expanded: V3Target09CandidateSetExpanded,
         availability: &R,

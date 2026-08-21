@@ -1187,6 +1187,7 @@ features:
       from the local continuation store; neither path is a Target model capability
   - OpenAI Responses request.reasoning is aliased to the thinking route fact before pool matching
   - Target dedupe retains optional/default provenance; the default floor is only a last-resort context-admission fallback and never overrides health cooldown or request-local provider-failure exclusion
+  - Within a captured route plan, route-tier order is applied before candidate priority; candidate priority/weight/health select only among candidates in the same eligible route tier, so the default floor cannot overtake a matched semantic tier by numeric priority alone
   required_gates:
   - npm run test:v3-p5-router-target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target context_admission_filters_over_limit_candidates -- --nocapture
@@ -1627,6 +1628,65 @@ features:
     source: Complete only when the transport boundary, codec owner, and runtime call edges are map-locked and positive/reverse tests pass.
     runtime: Requires build, global install, aggregate restart, all-port health, and exact same-entry live replay before delivery.
     forbidden_claim: Do not claim completion from transport tests alone.
+
+- feature_id: v3.responses_chat_sse_typed_tree_refactor
+  status: design
+  contract:
+  - docs/goals/v3-responses-chat-sse-tree-design.md
+  - docs/goals/v3-responses-chat-sse-tree-implementation.md
+  - docs/goals/v3-responses-chat-sse-tree-test-design.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  required_positive:
+  - Responses message, reasoning, and function_call classify as distinct typed items.
+  - Responses container, typed item, and terminal reducer state are updated without raw JSON replay.
+  - OpenAI Chat choices, deltas, role/content/refusal, and tool-call fragments classify as distinct typed nodes.
+  - OpenAI Chat reasoning, usage, and terminal reducer state are typed and extension-preserving.
+  - OpenAI Chat non-streaming JSON choices, messages, tool calls, usage, and extensions round-trip through V3OpenAiChatJsonDocument.
+  - Content rewrite preserves item identity and item type.
+  - Transport object, protocol metadata, and semantic object remain separate hook inputs.
+  - Direct and Relay provider frames pass through the independent SSE object boundary before projection.
+  required_negative:
+  - Unknown Responses item types fail at the protocol codec boundary.
+  - Rewrite hooks cannot alter identity, item type, terminality, framing, or control state.
+  - Protocol metadata does not enter normal provider or client payloads.
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-sse --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime responses_sse_tree --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime openai_chat_sse_tree --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_sse_consumers --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_sse --lib
+  - npm run verify:v3-static-hook-registry
+  - npm run verify:v3-relay-hook-resources
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_rule:
+    source: Complete only after Responses and Chat trees, hook registries, projection parity, and positive/reverse tests are implemented.
+    runtime: Requires build, aggregate restart, all-port health, and exact same-entry live replay before delivery.
+    forbidden_claim: Do not claim completion for Gemini, Anthropic, or live compatibility before their scoped phases.
+
+- feature_id: v3.direct.request_key_hooks
+  status: source_controlled_runtime_pending_live_replay
+  required_positive:
+  - Responses, OpenAI Chat, and Anthropic key views classify system, developer, and tools independently.
+  - Direct key rewrite can append system/developer content, rewrite tool descriptions, and inject protocol-shaped tools through typed edits.
+  - Direct Responses and Chat request projections invoke the key mount before provider wire emission.
+  - A custom key catalog changes the projected provider wire body without changing provider compatibility ownership.
+  required_negative:
+  - Key hooks cannot write MetadataCenter, routing, retry, health, continuation, response payload, or Relay JSON governance state.
+  - Key hooks do not reconstruct control state from business prompt or tool content.
+  required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_request_key_hooks
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_request_key_catalog_effect_reaches_responses_provider_wire_body
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_request_key_catalog_effect_reaches_chat_provider_wire_body
+  - CARGO_NET_OFFLINE=true cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - npm run verify:v3-resource-map
+  - git diff --check
+  completion_rule:
+    source: Complete only after the three protocol direct mounts and their reverse/negative tests are wired.
+    runtime: Requires direct and relay live replay with exact provider body evidence.
+    forbidden_claim: Do not claim Relay JSON uses Direct key hooks.
 - feature_id: vr.current_turn_typed_route_facts
   status: source_controlled_live_replay_pending
   change_risk: critical

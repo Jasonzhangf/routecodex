@@ -316,79 +316,27 @@ fn key_health_persistence_accepts_pascal_case_scope_written_by_previous_binary()
 }
 
 #[test]
-fn key_health_persistence_rejects_v3_state_without_model_identity() {
+fn key_health_persistence_migrates_schema_v4_model_key_entries() {
     let directory = tempfile::tempdir().expect("temp directory");
     let path = directory.path().join("provider-key-health.json");
     std::fs::write(
         &path,
         r#"{
-          "schema_version": 3,
+          "schema_version": 4,
           "entries": [[
-            {"provider_id":"provider-a","auth_alias":"key-a"},
-            {"score_milli":600,"failure_streak":1,"scope":"None","failure_class":null,"success_streak":0,"last_failure_at_ms":100,"last_success_at_ms":null,"cooldown_until_ms":null,"probe_required":false,"global_probe_owned":false,"probe_model_id":null,"score_generation":1}
+            {"provider_id":"provider-a","auth_alias":"key-a","model_id":"model-a"},
+            {"score_milli":600,"failure_streak":1,"scope":"None","failure_class":null,"success_streak":0,"last_failure_at_ms":100,"last_success_at_ms":null,"cooldown_until_ms":null,"probe_required":false,"global_probe_owned":false,"probe_model_id":"model-a","score_generation":1}
           ]]
         }"#,
     )
-    .expect("previous state fixture");
+    .expect("schema v4 state fixture");
 
-    let error = V3ProviderKeyHealthStore::load_persistent(path)
-        .expect_err("v3 state without a model identity must fail");
-    assert!(error.contains("missing probe_model_id"));
-}
-
-#[test]
-fn key_health_persistence_writes_schema_v4_with_model_identity() {
-    let directory = tempfile::tempdir().expect("temp directory");
-    let path = directory.path().join("provider-key-health.json");
-    let store = V3ProviderKeyHealthStore::new_persistent(path.clone());
-    store
-        .record_provider_success("provider-a", "key-a", "model-a", 100)
-        .expect("persist model health");
-
-    let value: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(path).expect("read persisted state"))
-            .expect("decode persisted state");
-    assert_eq!(value["schema_version"], 4);
-    assert_eq!(value["entries"][0][0]["model_id"], "model-a");
-}
-
-#[test]
-fn key_health_persistence_rejects_duplicate_v4_identity() {
-    let directory = tempfile::tempdir().expect("temp directory");
-    let path = directory.path().join("provider-key-health.json");
-    let entry_state = |score_milli: u32, cooldown_until_ms: &str| {
-        format!(
-            r#"{{"score_milli":{score_milli},"failure_streak":1,"scope":"None","failure_class":null,"success_streak":0,"last_failure_at_ms":100,"last_success_at_ms":null,"cooldown_until_ms":{cooldown_until_ms},"probe_required":false,"global_probe_owned":false,"probe_model_id":"model-a","score_generation":1}}"#
-        )
-    };
-    std::fs::write(
-        &path,
-        format!(
-            r#"{{
-              "schema_version": 4,
-              "entries": [
-                [
-                  {{"provider_id":"provider-a","auth_alias":"key-a","model_id":"model-a"}},
-                  {}
-                ],
-                [
-                  {{"provider_id":"provider-a","auth_alias":"key-a","model_id":"model-a"}},
-                  {}
-                ]
-              ]
-            }}"#,
-            entry_state(600, "900000"),
-            entry_state(900, "null"),
-        ),
-    )
-    .expect("duplicate state fixture");
-
-    let error = V3ProviderKeyHealthStore::load_persistent(path)
-        .expect_err("duplicate v4 identities must fail explicitly");
-    assert!(
-        error.contains("duplicate provider key health identity"),
-        "{error}"
-    );
+    let store = V3ProviderKeyHealthStore::load_persistent(path).expect("schema v4 loads");
+    let projection = store
+        .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, 100)
+        .expect("schema v4 projection");
+    assert_eq!(projection.score_milli, 600);
+    assert!(projection.available);
 }
 
 #[test]

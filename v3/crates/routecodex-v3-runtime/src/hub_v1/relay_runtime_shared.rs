@@ -9,10 +9,7 @@
 //! 错误统一以 `String` 表达，调用方（协议 runtime）负责 map_err 到自身错误类型；
 //! 统一失败结构 [`V3RelayProviderFailure`] 替代各协议 `V3*RelayProviderFailure` 副本。
 
-use crate::hub_v1::{
-    collect_v3_provider_sse_json_data, parse_v3_provider_sse_json_data, V3RuntimeObservability,
-    V3RuntimeStreamObservation,
-};
+use crate::hub_v1::{V3HubEntryProtocol, V3RuntimeObservability, V3RuntimeStreamObservation};
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,
     run_v3_relay_provider_failure_policy, V3RelayProviderFailurePolicyContext,
@@ -394,6 +391,7 @@ pub(crate) type V3RelayClientSseStream =
 /// `V3RelayClientSseStream`。
 pub(crate) fn wrap_v3_relay_client_sse_usage_observation<S>(
     stream: S,
+    protocol: V3HubEntryProtocol,
     observation: V3RuntimeStreamObservation,
 ) -> V3RelayClientSseStream
 where
@@ -413,7 +411,7 @@ where
             observation,
             done: false,
         },
-        |mut state| async move {
+        move |mut state| async move {
             if state.done {
                 return None;
             }
@@ -421,6 +419,7 @@ where
                 Some(Ok(chunk)) => {
                     let result = observe_relay_client_sse_usage_chunk(
                         &chunk,
+                        protocol,
                         &mut state.decoder,
                         &state.observation,
                     );
@@ -436,7 +435,17 @@ where
                     state.done = true;
                     Some((Err(error), state))
                 }
-                None => None,
+                None => {
+                    state.done = true;
+                    let decoder = std::mem::replace(
+                        &mut state.decoder,
+                        SseIncrementalDecoder::new(SseTransportLimits::default()),
+                    );
+                    match decoder.finish() {
+                        Ok(()) => None,
+                        Err(error) => Some((Err(error.to_string()), state)),
+                    }
+                }
             }
         },
     ))
@@ -444,6 +453,7 @@ where
 
 fn observe_relay_client_sse_usage_chunk(
     chunk: &[u8],
+    protocol: V3HubEntryProtocol,
     decoder: &mut SseIncrementalDecoder,
     observation: &V3RuntimeStreamObservation,
 ) -> Result<(), String> {
@@ -451,11 +461,113 @@ fn observe_relay_client_sse_usage_chunk(
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
         .map_err(|error| error.to_string())?;
     for frame in frames {
-        let data = collect_v3_provider_sse_json_data(frame.frame().fields());
-        let Some(event) = parse_v3_provider_sse_json_data(&data)? else {
+        let object = crate::sse_object_pipeline::SseObjectFrame::from_frame(&frame);
+        if object.is_done() || !object.has_data() {
+            continue;
+        }
+        if !object.is_json_valid() {
+            return Err("relay client SSE data is not valid JSON".to_owned());
+        }
+        let Some(event) = object.data_value() else {
             continue;
         };
-        observation.record_provider_event_json(&event)?;
+        match protocol {
+            V3HubEntryProtocol::Responses => {
+                let semantic = crate::hub_v1::classify_v3_responses_sse_event(event)
+                    .map_err(|error| error.to_string())?;
+                observation.record_typed_object_type(
+                    "responses",
+                    &semantic.protocol.event_type,
+                )?;
+                observation.record_provider_event_json(&semantic.to_normalized_value())?;
+            }
+            V3HubEntryProtocol::OpenAiChat => {
+                let semantic = crate::hub_v1::classify_v3_openai_chat_sse_chunk(event)
+                    .map_err(|error| error.to_string())?;
+                observation.record_typed_object_type("openai_chat", &semantic.protocol.object)?;
+                observation.record_provider_event_json(&semantic.to_normalized_value())?;
+            }
+            V3HubEntryProtocol::Anthropic | V3HubEntryProtocol::Gemini => {
+                // These client projections remain outside the current Responses/Chat
+                // migration scope. They still use the independent transport object;
+                // their protocol semantic migration is a later owner transition.
+                observation.record_provider_event_json(event)?;
+            }
+        }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::StreamExt;
+
+    fn observe_one(
+        protocol: V3HubEntryProtocol,
+        data: &str,
+        observation: &V3RuntimeStreamObservation,
+    ) -> Result<(), String> {
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let chunk = format!("data: {data}\n\n");
+        observe_relay_client_sse_usage_chunk(
+            chunk.as_bytes(),
+            protocol,
+            &mut decoder,
+            observation,
+        )
+    }
+
+    #[test]
+    fn relay_client_observation_uses_responses_typed_tree() {
+        let observation = V3RuntimeStreamObservation::default();
+        observe_one(
+            V3HubEntryProtocol::Responses,
+            r#"{"type":"response.output_text.delta","response_id":"resp_1","item_id":"msg_1","output_index":0,"content_index":0,"delta":"hello"}"#,
+            &observation,
+        )
+        .unwrap();
+        assert_eq!(
+            observation.snapshot().unwrap().typed_object_types,
+            vec!["responses:response.output_text.delta"]
+        );
+    }
+
+    #[test]
+    fn relay_client_observation_uses_chat_typed_tree() {
+        let observation = V3RuntimeStreamObservation::default();
+        observe_one(
+            V3HubEntryProtocol::OpenAiChat,
+            r#"{"object":"chat.completion.chunk","id":"chat_1","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}"#,
+            &observation,
+        )
+        .unwrap();
+        assert_eq!(
+            observation.snapshot().unwrap().typed_object_types,
+            vec!["openai_chat:chat.completion.chunk"]
+        );
+    }
+
+    #[test]
+    fn relay_client_observation_rejects_malformed_typed_payload() {
+        let observation = V3RuntimeStreamObservation::default();
+        let error = observe_one(V3HubEntryProtocol::Responses, "not-json", &observation)
+            .unwrap_err();
+        assert!(error.contains("not valid JSON"));
+    }
+
+    #[tokio::test]
+    async fn relay_client_observation_exports_unterminated_frame_at_eof() {
+        let observation = V3RuntimeStreamObservation::default();
+        let source = futures_util::stream::iter(vec![Ok(b"data: {".to_vec())]);
+        let mut wrapped = wrap_v3_relay_client_sse_usage_observation(
+            source,
+            V3HubEntryProtocol::Responses,
+            observation,
+        );
+        assert!(wrapped.next().await.unwrap().is_ok());
+        let error = wrapped.next().await.unwrap().unwrap_err();
+        assert!(error.contains("final frame delimiter"));
+        assert!(wrapped.next().await.is_none());
+    }
 }

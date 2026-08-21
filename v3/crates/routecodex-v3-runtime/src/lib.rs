@@ -16,6 +16,7 @@ pub mod remote_continuation;
 pub mod route_policy;
 pub mod responses_continuation_owner;
 mod runtime_timing;
+pub(crate) mod sse_object_pipeline;
 mod selected_provider_model_binding;
 mod shared;
 mod shared_direct_thinking_compat;
@@ -34,6 +35,7 @@ pub use hooks::{register_responses_direct_hooks, V3HookPoint, V3HookRegistry, V3
 pub use hub_v1::*;
 pub use kernel::{
     default_responses_transport, execute_v3_direct_runtime_kernel_core,
+    execute_v3_direct_runtime_kernel_core_with_key_catalog,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel,
@@ -49,6 +51,12 @@ pub use kernel::{
     V3ResponsesDirectStoplessControlScope, V3ResponsesDirectStoplessControlState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure,
     V3ResponsesProtocolRelayHandoff,
+};
+pub use kernel::direct_request_key_hooks::{
+    apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog,
+    V3DirectRequestKeyEdits, V3DirectRequestKeyHook, V3DirectRequestKeyHookCatalog,
+    V3DirectRequestKeyKind, V3DirectRequestKeyMount, V3DirectRequestKeyView,
+    V3DirectRequestProtocol, V3DirectRequestToolInjection, V3DirectRequestToolKey,
 };
 pub use local_continuation::*;
 pub use nodes::*;

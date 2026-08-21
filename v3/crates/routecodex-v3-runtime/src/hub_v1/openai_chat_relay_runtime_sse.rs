@@ -30,6 +30,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
     web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
+    _stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3OpenAiChatClientStream {
     use futures_util::StreamExt;

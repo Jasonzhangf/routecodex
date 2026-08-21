@@ -69,6 +69,67 @@ chains:
       produces: [v3.global_binary_install]
       side_channel_reads: []
       side_channel_writes: []
+
+- chain_id: v3.direct.request_key_hooks
+  owner_feature_id: v3.direct.request_key_hooks
+  summary: Direct request projection exposes typed mounts for system, developer, and tools keys; Relay JSON remains owned by req_inbound and req_chatprocess governance.
+  edges:
+  - step_id: v3-direct-request-key-01
+    from_node: V3ResponsesDirect11Policy
+    to_node: V3Provider12ResponsesWirePayload
+    caller_symbol: responses_direct_request_projection_hook
+    caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    callee_symbol: apply_v3_direct_request_key_hook
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_request_key_hooks.rs
+    status: active
+    owner_feature_id: v3.direct.request_key_hooks
+    resource_flow:
+      consumes: [v3.direct.request_key_view]
+      produces: [v3.direct.request_key_effect]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-direct-request-key-03
+    from_node: V3ResponsesDirect11Policy
+    to_node: V3Provider12ResponsesWirePayload
+    caller_symbol: responses_direct_request_projection_hook_with_key_catalog
+    caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    callee_symbol: apply_v3_direct_request_key_hook_with_catalog
+    callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    status: active
+    owner_feature_id: v3.direct.request_key_hooks
+    resource_flow:
+      consumes: [v3.direct.request_key_view]
+      produces: [v3.direct.request_key_effect]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-direct-request-key-02
+    from_node: V3ChatDirect11Policy
+    to_node: V3Provider12ResponsesWirePayload
+    caller_symbol: chat_direct_request_projection_hook
+    caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    callee_symbol: apply_v3_direct_request_key_hook
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_request_key_hooks.rs
+    status: active
+    owner_feature_id: v3.direct.request_key_hooks
+    resource_flow:
+      consumes: [v3.direct.request_key_view]
+      produces: [v3.direct.request_key_effect]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-direct-request-key-04
+    from_node: V3ChatDirect11Policy
+    to_node: V3Provider12ResponsesWirePayload
+    caller_symbol: execute_v3_direct_runtime_kernel_core_with_key_catalog
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    callee_symbol: V3ChatDirectCodec::run_request_projection
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
+    status: active
+    owner_feature_id: v3.direct.request_key_hooks
+    resource_flow:
+      consumes: [v3.direct.request_key_view]
+      produces: [v3.direct.request_key_effect]
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: v3-install-02
     from_node: V3Install02RustBinaryBuilt
     to_node: V3Install03DirectBinaryPublished
@@ -6943,7 +7004,7 @@ chains:
       to_node: V3ProviderResponsesEventCodec
       caller_symbol: build_v3_hub_resp_inbound_02_from_responses_provider_stream_events
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
-      callee_symbol: observe_v3_runtime_responses_sse_transport_chunk
+      callee_symbol: observe_v3_runtime_responses_sse_transport_chunk_typed
       callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -6961,9 +7022,9 @@ chains:
     - step_id: v3-provider-action-gate-51
       from_node: V3ProviderResponsesEventCodec
       to_node: V3ProviderResponsesTerminalOrFailureObserved
-      caller_symbol: observe_v3_runtime_responses_sse_semantic_frame
+      caller_symbol: observe_v3_runtime_responses_sse_semantic_frame_typed
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
-      callee_symbol: apply_v3_runtime_responses_semantic_event
+      callee_symbol: V3ResponsesSseReducerState::apply_event
       callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -7497,5 +7558,217 @@ chains:
     resource_flow:
       consumes: [v3.error.source]
       produces: [v3.error.classified]
-      side_channel_reads: [v3.error.source]
-      side_channel_writes: [v3.error.classified]
+    side_channel_reads: [v3.error.source]
+    side_channel_writes: [v3.error.classified]
+
+- chain_id: v3.responses_chat_sse_typed_tree
+  owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+  summary: The selected Responses or Chat protocol codec parses SSE data into transport, protocol metadata, and semantic typed nodes; only typed notification and business-content rewrite hooks may observe or mutate the semantic branch.
+  edges:
+  - step_id: v3-responses-json-document-01
+    from_node: ProviderRespInbound01Raw
+    to_node: HubRespInbound02Parsed
+    caller_symbol: run_json_response_hooks
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+    callee_symbol: V3ResponsesJsonDocument::from_json
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.responses.json_document]
+      produces: [v3.sse.responses.semantic_tree]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-responses-sse-tree-01
+    from_node: ProviderRespInbound01Raw
+    to_node: HubRespInbound02Parsed
+    caller_symbol: parse_v3_responses_sse_event
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+    callee_symbol: V3ResponsesSseProtocolMetadata::from_event
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.transport_decoded_frame]
+      produces: [v3.sse.responses.protocol_metadata, v3.sse.responses.semantic_tree]
+      side_channel_reads: []
+      side_channel_writes: [v3.sse.responses.protocol_metadata]
+  - step_id: v3-responses-sse-tree-02
+    from_node: HubRespInbound02Parsed
+    to_node: HubRespChatProcess03Governed
+    caller_symbol: upsert_v3_runtime_responses_event_output_item
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+    callee_symbol: classify_v3_responses_sse_output_item
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.responses.protocol_metadata]
+      produces: [v3.sse.responses.semantic_tree]
+      side_channel_reads: [v3.sse.responses.protocol_metadata]
+      side_channel_writes: []
+
+  - step_id: v3-responses-sse-tree-03
+    from_node: HubRespChatProcess03Governed
+    to_node: HubRespOutbound04ClientSemantic
+    caller_symbol: rewrite_v3_responses_sse_content
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+    callee_symbol: rewrite_v3_responses_sse_content
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+    status: design
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.responses.semantic_tree]
+      produces: [v3.sse.responses.hook_effect]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-responses-relay-typed-hook-catalog-01
+    from_node: HubRespInbound02Parsed
+    to_node: HubRespOutbound04ClientSemantic
+    caller_symbol: V3HubRelayResponseHookRegistry::typed_sse_catalog
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    callee_symbol: V3RelaySseHookCatalog::rewrite_responses
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.relay.typed_hook_catalog, v3.sse.responses.semantic_tree]
+      produces: [v3.sse.responses.hook_effect]
+      side_channel_reads: [v3.sse.relay.typed_hook_catalog]
+      side_channel_writes: []
+
+- chain_id: v3.openai_chat_sse_typed_tree
+  owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+  summary: The OpenAI Chat codec keeps chunk transport, protocol metadata, choices, deltas, finish reasons, and tool-call fragments distinct; rewrite hooks can change only business content.
+  edges:
+  - step_id: v3-chat-sse-tree-01
+    from_node: ProviderRespInbound01Raw
+    to_node: HubRespInbound02Parsed
+    caller_symbol: enqueue_sse_client_chunks
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    callee_symbol: classify_v3_openai_chat_sse_chunk
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.transport_decoded_frame]
+      produces: [v3.sse.chat.protocol_metadata, v3.sse.chat.semantic_tree]
+      side_channel_reads: []
+      side_channel_writes: [v3.sse.chat.protocol_metadata]
+  - step_id: v3-chat-sse-tree-02
+    from_node: HubRespChatProcess03Governed
+    to_node: HubRespOutbound04ClientSemantic
+    caller_symbol: rewrite_v3_openai_chat_sse_content
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
+    callee_symbol: rewrite_v3_openai_chat_sse_content
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
+    status: design
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.chat.semantic_tree]
+      produces: [v3.sse.chat.hook_effect]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-chat-json-document-01
+    from_node: ProviderRespInbound01Raw
+    to_node: HubRespInbound02Parsed
+    caller_symbol: run_json_response_hooks
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+    callee_symbol: V3OpenAiChatJsonDocument::from_json
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.chat.json_document]
+      produces: [v3.sse.chat.semantic_tree]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-relay-typed-hook-catalog-01
+    from_node: HubRespInbound02Parsed
+    to_node: HubRespOutbound04ClientSemantic
+    caller_symbol: V3HubRelayResponseHookRegistry::typed_sse_catalog
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    callee_symbol: V3RelaySseHookCatalog::rewrite_chat
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.relay.typed_hook_catalog, v3.sse.chat.semantic_tree]
+      produces: [v3.sse.chat.hook_effect]
+      side_channel_reads: [v3.sse.relay.typed_hook_catalog]
+      side_channel_writes: []
+
+- chain_id: v3.sse_error_and_direct_consumer_pre_wiring
+  owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+  summary: Direct SSE routes decoder failures through the exported transport-error adapter and response compatibility through the independent object consumer; Relay Responses/Chat materialization and projection now consume the same independent transport boundary and Relay-owned typed hook catalog.
+  edges:
+  - step_id: v3-sse-error-export-01
+    from_node: V3ProviderResp14Raw
+    to_node: ErrorErr01SourceRaised
+    caller_symbol: build_v3_sse_transport_error_source
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    callee_symbol: SseTransportErrorExport::from
+    callee_file: v3/crates/routecodex-v3-sse/src/lib.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.transport_error_export]
+      produces: [v3.error.source]
+      side_channel_reads: []
+      side_channel_writes: [v3.error.source]
+  - step_id: v3-direct-content-consumer-01
+    from_node: V3ProviderResp14Raw
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: V3DirectSseContentConsumer::consume
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    callee_symbol: process_sse_object_frame
+    callee_file: v3/crates/routecodex-v3-sse/src/lib.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.object_pipeline, v3.direct_response.compat_plan]
+      produces: [v3.sse.responses.hook_effect]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-direct-typed-projection-01
+    from_node: V3DirectResp14ProviderProjectionPrepared
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: V3DirectSseContentConsumer::consume
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    callee_symbol: project_direct_typed_protocol_data
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.object_pipeline]
+      produces: [v3.sse.responses.semantic_tree, v3.sse.chat.semantic_tree]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-direct-typed-hook-catalog-01
+    from_node: V3ProviderResp14Raw
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: V3DirectSseContentConsumer::consume
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    callee_symbol: V3DirectSseTypedHookCatalog::with_responses
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.direct.typed_hook_catalog, v3.sse.responses.semantic_tree]
+      produces: [v3.sse.responses.hook_effect]
+      side_channel_reads: [v3.sse.direct.typed_hook_catalog]
+      side_channel_writes: []
+  - step_id: v3-direct-typed-hook-catalog-02
+    from_node: V3DirectResp14ProviderProjectionPrepared
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: execute_v3_responses_direct_runtime_kernel
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: V3HookRegistry::direct_sse_typed_hooks
+    callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    status: active
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.sse.direct.typed_hook_catalog]
+      produces: [v3.sse.responses.hook_effect, v3.sse.chat.hook_effect]
+      side_channel_reads: [v3.sse.direct.typed_hook_catalog]
+      side_channel_writes: []

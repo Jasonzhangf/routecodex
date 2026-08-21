@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 pub(crate) use crate::shared_direct_thinking_compat::{
-    apply_v3_direct_thinking_tag_json_compat, project_v3_thinking_tag_text,
+    project_v3_thinking_tag_text,
 };
 
 /// Direct SSE 帧间超时：provider 返回 200 但首个或后续语义事件挂起时 fail-fast
@@ -260,8 +260,7 @@ async fn project_provider_raw_to_client_payload_inner(
                     sse_first_frame_timeout_ms,
                     thinking_tags,
                     deepseek_console_go,
-                    tool_thinking_enabled,
-                    toolreason_client_projection,
+                    compat_plan.provider_protocol,
                 )
                 .await?
             }
@@ -358,8 +357,7 @@ async fn process_direct_sse_stream(
     sse_first_frame_timeout_ms: Option<u64>,
     thinking_tags: bool,
     deepseek_console_go: bool,
-    tool_thinking_enabled: bool,
-    toolreason_client_projection: bool,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> Result<
     (
         V3ClientBody,
@@ -386,8 +384,7 @@ async fn process_direct_sse_stream(
         observation_state.clone(),
         usage_observation.clone(),
         compatibility_profile,
-        tool_thinking_enabled,
-        toolreason_client_projection,
+        provider_protocol,
     );
     Ok((
         V3ClientBody::Sse(client_stream),
@@ -583,37 +580,16 @@ fn observed_sse_client_stream(
     observation_state: V3SseRemoteContinuationObservationState,
     usage_observation: V3RuntimeStreamObservation,
     compatibility_profile: Option<&str>,
-    tool_thinking_enabled: bool,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> V3ClientSseStream {
-    observed_sse_client_stream_with_projection(
-        provider_id,
-        stream,
-        observation_state,
-        usage_observation,
-        compatibility_profile,
-        tool_thinking_enabled,
-        true,
-    )
-}
-
-fn observed_sse_client_stream_with_projection(
-    provider_id: String,
-    stream: V3ProviderSseStream,
-    observation_state: V3SseRemoteContinuationObservationState,
-    usage_observation: V3RuntimeStreamObservation,
-    compatibility_profile: Option<&str>,
-    tool_thinking_enabled: bool,
-    toolreason_client_projection: bool,
-) -> V3ClientSseStream {
-    observed_sse_client_stream_with_timeout_and_projection(
+    observed_sse_client_stream_with_protocol(
         provider_id,
         stream,
         observation_state,
         usage_observation,
         V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT,
         compatibility_profile,
-        tool_thinking_enabled,
-        toolreason_client_projection,
+        provider_protocol,
     )
 }
 
@@ -647,6 +623,26 @@ fn observed_sse_client_stream_with_timeout_and_projection(
     compatibility_profile: Option<&str>,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
+) -> V3ClientSseStream {
+    observed_sse_client_stream_with_protocol(
+        provider_id,
+        stream,
+        observation_state,
+        usage_observation,
+        frame_interval_timeout,
+        compatibility_profile,
+        crate::hub_v1::V3HubProviderWireProtocol::Responses,
+    )
+}
+
+fn observed_sse_client_stream_with_protocol(
+    provider_id: String,
+    stream: V3ProviderSseStream,
+    observation_state: V3SseRemoteContinuationObservationState,
+    usage_observation: V3RuntimeStreamObservation,
+    frame_interval_timeout: std::time::Duration,
+    compatibility_profile: Option<&str>,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> V3ClientSseStream {
     struct ObservedState {
         stream: V3ProviderSseStream,
@@ -769,6 +765,7 @@ fn observed_sse_client_stream_with_timeout_and_projection(
                         &mut state.response_id_candidate,
                         &state.observation_state,
                         &state.usage_observation,
+                        provider_protocol,
                         state
                             .compatibility_profile
                             .as_deref()
@@ -1007,6 +1004,7 @@ fn observe_sse_remote_continuation_chunk(
     response_id_candidate: &mut Option<String>,
     observation_state: &V3SseRemoteContinuationObservationState,
     usage_observation: &V3RuntimeStreamObservation,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     allow_cc_sol_untyped: bool,
 ) -> Result<(bool, bool), V3Error01SourceRaised> {
     let frames = decoder
@@ -1024,7 +1022,7 @@ fn observe_sse_remote_continuation_chunk(
         observe_sse_usage_frame(provider_id, fields, usage_observation)?;
         let data = collect_v3_provider_sse_json_data(fields);
         let classification = match classify_v3_provider_sse_json_data(
-            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+            provider_protocol,
             &data,
         ) {
             Ok(classification) => classification,
@@ -1653,7 +1651,7 @@ mod tests {
             observation_state,
             usage_observation.clone(),
             None,
-            false,
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
         );
         while client_stream.next().await.is_some() {}
 

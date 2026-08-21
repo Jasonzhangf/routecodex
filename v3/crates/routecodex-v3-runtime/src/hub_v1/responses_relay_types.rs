@@ -244,6 +244,7 @@ pub struct V3RuntimeStreamObservationSnapshot {
     pub finish_reason: Option<String>,
     pub usage: Option<V3RuntimeUsageSummary>,
     pub timing: Option<V3RuntimeTimingSummary>,
+    pub typed_object_types: Vec<String>,
 }
 
 pub(crate) struct V3ResponsesRelayProviderFailure {
@@ -347,6 +348,27 @@ impl V3RuntimeStreamObservation {
         }
         if usage.is_some() {
             snapshot.usage = usage;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn record_typed_object_type(
+        &self,
+        protocol: &str,
+        object_type: &str,
+    ) -> Result<(), String> {
+        let protocol = protocol.trim();
+        let object_type = object_type.trim();
+        if protocol.is_empty() || object_type.is_empty() {
+            return Ok(());
+        }
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        let value = format!("{protocol}:{object_type}");
+        if !snapshot.typed_object_types.contains(&value) {
+            snapshot.typed_object_types.push(value);
         }
         Ok(())
     }

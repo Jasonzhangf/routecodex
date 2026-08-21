@@ -310,5 +310,5 @@ fn protocol_mismatch_is_decided_before_same_protocol_process_policy() {
     )
     .expect_err("protocol mismatch must require Relay before reading same-protocol policy");
 
-    assert_eq!(error.code, "protocol_mismatch_relay_not_allowed");
+    assert_eq!(error.code, "responses_process_chat_relay_not_allowed");
 }
