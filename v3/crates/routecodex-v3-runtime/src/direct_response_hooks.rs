@@ -40,6 +40,7 @@ pub struct V3DirectResponseCompatContext {
     pub model_capabilities: Vec<String>,
     pub compatibility_profile: Option<String>,
     pub tool_thinking_enabled: bool,
+    pub toolreason_client_projection: bool,
 }
 
 impl V3DirectResponseCompatContext {

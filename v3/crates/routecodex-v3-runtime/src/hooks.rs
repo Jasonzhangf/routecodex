@@ -4,7 +4,7 @@ use crate::nodes::{
     V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
 };
 use crate::shared::{
-    project_provider_raw_to_client_payload_with_plan, V3ProviderResponseProjection,
+    project_provider_raw_to_client_payload_with_plan_and_projection, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
@@ -389,10 +389,11 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
                 V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
             )
         })?;
-        project_provider_raw_to_client_payload_with_plan(
+        project_provider_raw_to_client_payload_with_plan_and_projection(
             raw,
             &plan,
             context.tool_thinking_enabled,
+            context.toolreason_client_projection,
         )
         .await
     })
@@ -412,10 +413,11 @@ pub(crate) fn chat_direct_response_projection_hook(
                 V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
             )
         })?;
-        project_provider_raw_to_client_payload_with_plan(
+        project_provider_raw_to_client_payload_with_plan_and_projection(
             raw,
             &plan,
             context.tool_thinking_enabled,
+            context.toolreason_client_projection,
         )
         .await
     })
@@ -996,6 +998,7 @@ mod tests {
                     model_capabilities: vec!["text".to_string()],
                     compatibility_profile: None,
                     tool_thinking_enabled: false,
+                    toolreason_client_projection: true,
                 },
             )
             .await;

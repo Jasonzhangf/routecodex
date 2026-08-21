@@ -179,6 +179,11 @@ pub(crate) fn responses_relay_response_hook_profile(
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
 ) -> V3HubRelayResponseHookProfile {
+    let toolreason_client_projection = manifest
+        .features
+        .get("toolreason_client_projection")
+        .copied()
+        .unwrap_or(true);
     let profile = if web_search_execution_mode
         == routecodex_v3_config::V3WebSearchExecutionMode::NativeRemoteSearchToolMix
         || web_search_execution_mode.is_metadata_center_local_search()
@@ -189,12 +194,14 @@ pub(crate) fn responses_relay_response_hook_profile(
             .with_web_search_execution_mode(web_search_execution_mode)
             .with_retain_response_cipher(retain_response_cipher)
             .with_tool_thinking_enabled(tool_thinking_enabled)
+            .with_toolreason_client_projection(toolreason_client_projection)
     } else {
         // 未声明 web_search 执行模式的兼容路径：保持既有 exec_command 投影。
         V3HubRelayResponseHookProfile::empty()
             .with_servertool_name("web_search")
             .with_retain_response_cipher(retain_response_cipher)
             .with_tool_thinking_enabled(tool_thinking_enabled)
+            .with_toolreason_client_projection(toolreason_client_projection)
     };
     if !v3_stopless_center_enabled_for_server(manifest, server_id)
         || !stopless_control_has_client_session_scope

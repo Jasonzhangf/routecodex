@@ -169,13 +169,35 @@ pub(crate) async fn project_provider_raw_to_client_payload_with_plan(
     plan: &V3DirectResponseCompatPlan,
     tool_thinking_enabled: bool,
 ) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
-    project_provider_raw_to_client_payload_inner(raw, plan, tool_thinking_enabled).await
+    project_provider_raw_to_client_payload_with_plan_and_projection(
+        raw,
+        plan,
+        tool_thinking_enabled,
+        true,
+    )
+    .await
+}
+
+pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_projection(
+    raw: V3ProviderResp14Raw,
+    plan: &V3DirectResponseCompatPlan,
+    tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
+) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
+    project_provider_raw_to_client_payload_inner(
+        raw,
+        plan,
+        tool_thinking_enabled,
+        toolreason_client_projection,
+    )
+    .await
 }
 
 async fn project_provider_raw_to_client_payload_inner(
     raw: V3ProviderResp14Raw,
     compat_plan: &V3DirectResponseCompatPlan,
     tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
 ) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
     let provider_id = raw.provider_id().to_string();
     if raw.status() >= 400 {
@@ -239,6 +261,7 @@ async fn project_provider_raw_to_client_payload_inner(
                     thinking_tags,
                     deepseek_console_go,
                     tool_thinking_enabled,
+                    toolreason_client_projection,
                 )
                 .await?
             }
@@ -289,9 +312,10 @@ async fn project_provider_raw_to_client_payload_inner(
         if deepseek_console_go {
             parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
         }
-        crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03(
+        crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(
             &mut parsed,
             tool_thinking_enabled,
+            toolreason_client_projection,
         );
         let observation = observe_json_remote_continuation(&provider_id, status, &parsed)?;
         (V3ClientBody::Json(parsed), observation, None)
@@ -335,6 +359,7 @@ async fn process_direct_sse_stream(
     thinking_tags: bool,
     deepseek_console_go: bool,
     tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
 ) -> Result<
     (
         V3ClientBody,
@@ -355,13 +380,14 @@ async fn process_direct_sse_stream(
     .await?;
     let observation_state = V3SseRemoteContinuationObservationState::default();
     let usage_observation = V3RuntimeStreamObservation::default();
-    let client_stream = observed_sse_client_stream(
+    let client_stream = observed_sse_client_stream_with_projection(
         provider_id.to_string(),
         stream,
         observation_state.clone(),
         usage_observation.clone(),
         compatibility_profile,
         tool_thinking_enabled,
+        toolreason_client_projection,
     );
     Ok((
         V3ClientBody::Sse(client_stream),
@@ -559,7 +585,27 @@ fn observed_sse_client_stream(
     compatibility_profile: Option<&str>,
     tool_thinking_enabled: bool,
 ) -> V3ClientSseStream {
-    observed_sse_client_stream_with_timeout(
+    observed_sse_client_stream_with_projection(
+        provider_id,
+        stream,
+        observation_state,
+        usage_observation,
+        compatibility_profile,
+        tool_thinking_enabled,
+        true,
+    )
+}
+
+fn observed_sse_client_stream_with_projection(
+    provider_id: String,
+    stream: V3ProviderSseStream,
+    observation_state: V3SseRemoteContinuationObservationState,
+    usage_observation: V3RuntimeStreamObservation,
+    compatibility_profile: Option<&str>,
+    tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
+) -> V3ClientSseStream {
+    observed_sse_client_stream_with_timeout_and_projection(
         provider_id,
         stream,
         observation_state,
@@ -567,6 +613,7 @@ fn observed_sse_client_stream(
         V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT,
         compatibility_profile,
         tool_thinking_enabled,
+        toolreason_client_projection,
     )
 }
 
@@ -578,6 +625,28 @@ fn observed_sse_client_stream_with_timeout(
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
     tool_thinking_enabled: bool,
+) -> V3ClientSseStream {
+    observed_sse_client_stream_with_timeout_and_projection(
+        provider_id,
+        stream,
+        observation_state,
+        usage_observation,
+        frame_interval_timeout,
+        compatibility_profile,
+        tool_thinking_enabled,
+        true,
+    )
+}
+
+fn observed_sse_client_stream_with_timeout_and_projection(
+    provider_id: String,
+    stream: V3ProviderSseStream,
+    observation_state: V3SseRemoteContinuationObservationState,
+    usage_observation: V3RuntimeStreamObservation,
+    frame_interval_timeout: std::time::Duration,
+    compatibility_profile: Option<&str>,
+    tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
 ) -> V3ClientSseStream {
     struct ObservedState {
         stream: V3ProviderSseStream,
@@ -591,6 +660,7 @@ fn observed_sse_client_stream_with_timeout(
         semantic_deadline: tokio::time::Instant,
         compatibility_profile: Option<String>,
         tool_thinking_enabled: bool,
+        toolreason_client_projection: bool,
         compatibility_buffer: Vec<u8>,
         tool_thinking_buffer: Vec<u8>,
         tool_thinking_tool_names: Vec<String>,
@@ -611,6 +681,7 @@ fn observed_sse_client_stream_with_timeout(
             semantic_deadline: tokio::time::Instant::now() + frame_interval_timeout,
             compatibility_profile: compatibility_profile.map(ToOwned::to_owned),
             tool_thinking_enabled,
+            toolreason_client_projection,
             compatibility_buffer: Vec::new(),
             tool_thinking_buffer: Vec::new(),
             tool_thinking_tool_names: Vec::new(),
@@ -669,6 +740,7 @@ fn observed_sse_client_stream_with_timeout(
                             &mut state.tool_thinking_tool_names,
                             &mut state.tool_thinking_pending_reasons,
                             &mut state.tool_thinking_reason_emitted,
+                            state.toolreason_client_projection,
                             &chunk,
                         )
                     } else if state.compatibility_profile.as_deref()
@@ -733,11 +805,12 @@ fn observed_sse_client_stream_with_timeout(
                             None
                         } else {
                             Some(
-                                crate::hub_v1::project_v3_toolreason_sse_final_buffer_at_resp03(
+                                crate::hub_v1::project_v3_toolreason_sse_final_buffer_at_resp03_with_projection(
                                     &buffered,
                                     &mut state.tool_thinking_tool_names,
                                     &mut state.tool_thinking_pending_reasons,
                                     &mut state.tool_thinking_reason_emitted,
+                                    state.toolreason_client_projection,
                                 ),
                             )
                         }
@@ -841,6 +914,7 @@ fn apply_toolreason_to_sse_chunk_buffered(
         tool_names,
         pending_reasons,
         &mut reason_emitted,
+        true,
         chunk,
     )
 }
@@ -850,13 +924,15 @@ fn apply_toolreason_to_sse_chunk_buffered_with_state(
     tool_names: &mut Vec<String>,
     pending_reasons: &mut Vec<Option<String>>,
     reason_emitted: &mut bool,
+    project_to_client: bool,
     chunk: &[u8],
 ) -> Vec<u8> {
-    crate::hub_v1::project_v3_toolreason_sse_chunk_at_resp03(
+    crate::hub_v1::project_v3_toolreason_sse_chunk_at_resp03_with_projection(
         buffer,
         tool_names,
         pending_reasons,
         reason_emitted,
+        project_to_client,
         chunk,
     )
 }
@@ -1767,10 +1843,10 @@ mod tests {
         );
         let text = String::from_utf8(projected).expect("projected SSE must be UTF-8");
         assert!(!text.contains("<toolreason>"));
-        assert!(text.contains("◦ 调用工具 write_stdin，因为 关闭隔离进程"));
-        assert!(text.contains("reasoning_content"));
-        assert!(text.contains("\"type\":\"reasoning\""));
-        assert!(text.contains("summary_text"));
+        assert!(text.contains("调用工具 write_stdin：关闭隔离进程"));
+        assert!(text.contains("response.output_text.delta"));
+        assert!(text.contains("\"type\":\"message\""));
+        assert!(!text.contains("reasoning_content"));
     }
 
     #[test]
@@ -1795,7 +1871,7 @@ mod tests {
         );
         let text = String::from_utf8(projected).expect("projected SSE must be UTF-8");
         assert!(!text.contains("<toolreason>"));
-        assert!(text.contains("◦ 调用工具 read_file，因为 need context"));
+        assert!(text.contains("调用工具 read_file：need context"));
     }
 
     #[test]
@@ -1821,7 +1897,7 @@ mod tests {
             function_call,
         );
         let function_text = String::from_utf8(projected_function_call).expect("projected call");
-        assert!(function_text.contains("◦ 调用工具 read_file，因为 Inspect file."));
+        assert!(function_text.contains("调用工具 read_file：Inspect file."));
         assert!(function_text.contains("response.output_text.delta"));
         assert!(!function_text.contains("toolreason"));
     }

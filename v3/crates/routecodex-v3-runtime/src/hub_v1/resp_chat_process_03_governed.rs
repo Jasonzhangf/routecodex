@@ -4,12 +4,12 @@ use std::collections::BTreeSet;
 use std::ops::Deref;
 use std::sync::Arc;
 
-const V3_TOOLREASON_VISIBLE_PREFIX: &str = "◦ ";
-
 fn log_v3_toolreason_observation_at_resp03(tool_name: &str, reason: Option<&str>, stage: &str) {
-    match reason.and_then(normalize_v3_toolreason_reason_at_resp03) {
-        Some(reason) => eprintln!(
-            "\x1b[1;42;30m TOOLREASON OK \x1b[0m stage={stage} tool={tool_name} reason={reason}"
+    match reason.and_then(parse_v3_toolreason_fields_at_resp03) {
+        Some(fields) => eprintln!(
+            "\x1b[1;42;30m TOOLREASON OK \x1b[0m stage={stage} tool={tool_name} alignment={} reason={}"
+            , fields.goal_alignment_confidence.map_or("<missing>".to_string(), |value| value.to_string())
+            , fields.reason
         ),
         None => eprintln!(
             "\x1b[1;43;30m TOOLREASON MISSING \x1b[0m stage={stage} tool={tool_name} reason=<none>"
@@ -17,10 +17,31 @@ fn log_v3_toolreason_observation_at_resp03(tool_name: &str, reason: Option<&str>
     }
 }
 
-fn normalize_v3_toolreason_reason_at_resp03(reason: &str) -> Option<&str> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct V3ToolreasonFields {
+    reason: String,
+    goal_alignment_confidence: Option<u8>,
+}
+
+fn parse_v3_toolreason_fields_at_resp03(reason: &str) -> Option<V3ToolreasonFields> {
     let reason = reason.trim();
     if reason.is_empty() {
         return None;
+    }
+    if let Ok(object) = serde_json::from_str::<Value>(reason) {
+        let reason = object.get("reason").and_then(Value::as_str)?.trim();
+        if reason.is_empty() {
+            return None;
+        }
+        let goal_alignment_confidence = object
+            .get("goal_alignment_confidence")
+            .and_then(Value::as_u64)
+            .filter(|value| *value <= 100)
+            .map(|value| value as u8);
+        return Some(V3ToolreasonFields {
+            reason: reason.to_string(),
+            goal_alignment_confidence,
+        });
     }
     let lowered = reason.to_ascii_lowercase();
     let placeholder = [
@@ -35,7 +56,10 @@ fn normalize_v3_toolreason_reason_at_resp03(reason: &str) -> Option<&str> {
     if placeholder.iter().any(|marker| lowered.contains(marker)) {
         return None;
     }
-    Some(reason)
+    Some(V3ToolreasonFields {
+        reason: reason.to_string(),
+        goal_alignment_confidence: None,
+    })
 }
 
 fn emit_v3_toolreason_observation_at_resp03(
@@ -170,6 +194,7 @@ pub struct V3HubRelayResponseHookProfile {
     /// 默认 false（剥离），响应侧只消费该结果，不重复判定。
     retain_response_cipher: bool,
     tool_thinking: bool,
+    toolreason_client_projection: bool,
 }
 
 impl V3HubRelayResponseHookProfile {
@@ -191,6 +216,7 @@ impl V3HubRelayResponseHookProfile {
             stopless_transition_updated_at: None,
             retain_response_cipher: false,
             tool_thinking: false,
+            toolreason_client_projection: true,
         }
     }
 
@@ -243,6 +269,15 @@ impl V3HubRelayResponseHookProfile {
 
     pub fn tool_thinking_enabled(&self) -> bool {
         self.tool_thinking
+    }
+
+    pub fn with_toolreason_client_projection(mut self, enabled: bool) -> Self {
+        self.toolreason_client_projection = enabled;
+        self
+    }
+
+    pub fn toolreason_client_projection_enabled(&self) -> bool {
+        self.toolreason_client_projection
     }
 
     pub fn web_search_center_state(&self) -> Option<&V3WebSearchCenterState> {
@@ -416,7 +451,11 @@ fn govern_v3_hub_relay_response(
         strip_v3_resp03_encrypted_reasoning_content(input, profile.retain_response_cipher());
     let mut input = harvest_v3_think_blocks_at_resp03(input);
     let payload = Arc::make_mut(&mut input.previous.previous.payload.0);
-    map_v3_toolreason_to_reasoning_content_at_resp03(payload, profile.tool_thinking_enabled());
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(
+        payload,
+        profile.tool_thinking_enabled(),
+        profile.toolreason_client_projection_enabled(),
+    );
     let input = complete_or_repair_v3_resp03_tool_frames(input);
     let _identified_servertool_tool = super::servertool_hooks::inspect_v3_servertool_response_tool(
         input.provider_payload().as_ref(),
@@ -1133,19 +1172,39 @@ fn append_v3_resp03_openai_chat_reasoning_content(
 }
 
 pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03(payload: &mut Value, enabled: bool) {
-    map_v3_toolreason_to_reasoning_content_at_resp03_impl(payload, enabled, true);
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(payload, enabled, true);
+}
+
+pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(
+    payload: &mut Value,
+    enabled: bool,
+    project_to_client: bool,
+) {
+    map_v3_toolreason_to_reasoning_content_at_resp03_impl(
+        payload,
+        enabled,
+        project_to_client,
+        true,
+    );
 }
 
 fn map_v3_toolreason_to_reasoning_content_at_resp03_without_observation(
     payload: &mut Value,
     enabled: bool,
+    project_to_client: bool,
 ) {
-    map_v3_toolreason_to_reasoning_content_at_resp03_impl(payload, enabled, false);
+    map_v3_toolreason_to_reasoning_content_at_resp03_impl(
+        payload,
+        enabled,
+        project_to_client,
+        false,
+    );
 }
 
 fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
     payload: &mut Value,
     enabled: bool,
+    project_to_client: bool,
     observe: bool,
 ) {
     if !enabled {
@@ -1169,7 +1228,7 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            map_toolreason_in_text_object(message, &tool_names);
+            map_toolreason_in_text_object(message, &tool_names, project_to_client);
         }
     }
     if let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) {
@@ -1206,9 +1265,11 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
                         }
                     }
                 }
-                if let Some(reason) = mapped_reason {
+                if project_to_client {
+                    if let Some(reason) = mapped_reason {
                     if let Some(object) = item.as_object_mut() {
                         object.insert("reasoning_content".to_string(), Value::String(reason));
+                    }
                     }
                 }
             }
@@ -1243,7 +1304,7 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
             }
             reasons.append(&mut part_reasons);
         }
-        if !reasons.is_empty() && !tool_names.is_empty() {
+        if project_to_client && !reasons.is_empty() && !tool_names.is_empty() {
             if let Some(mapped) = format_toolreason_reasoning(&tool_names, &reasons[0]) {
                 payload["reasoning_content"] = Value::String(mapped);
             }
@@ -1328,12 +1389,9 @@ pub(crate) fn map_v3_toolreason_stream_event_at_resp03(
             let name = tool_name.clone()?;
             let reason = reason.trim();
             (!reason.is_empty()).then(|| {
-                format!(
-                    "{V3_TOOLREASON_VISIBLE_PREFIX}调用工具 {}，因为 {}",
-                    name.trim(),
-                    reason
-                )
+                format_toolreason_reasoning(std::slice::from_ref(&name), reason)
             })
+            .flatten()
         })
     };
     let remember_reason = |reason: Option<String>, pending_reasons: &mut Vec<Option<String>>| {
@@ -1489,6 +1547,24 @@ pub(crate) fn project_v3_toolreason_sse_chunk_at_resp03(
     reason_emitted: &mut bool,
     chunk: &[u8],
 ) -> Vec<u8> {
+    project_v3_toolreason_sse_chunk_at_resp03_with_projection(
+        buffer,
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        true,
+        chunk,
+    )
+}
+
+pub(crate) fn project_v3_toolreason_sse_chunk_at_resp03_with_projection(
+    buffer: &mut Vec<u8>,
+    tool_names: &mut Vec<String>,
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    project_to_client: bool,
+    chunk: &[u8],
+) -> Vec<u8> {
     buffer.extend_from_slice(chunk);
     let mut output = Vec::new();
     while let Some((end, delimiter_len)) = find_v3_sse_frame_end_at_resp03(buffer) {
@@ -1499,6 +1575,7 @@ pub(crate) fn project_v3_toolreason_sse_chunk_at_resp03(
             tool_names,
             pending_reasons,
             reason_emitted,
+            project_to_client,
         ));
     }
     output
@@ -1510,7 +1587,29 @@ pub(crate) fn project_v3_toolreason_sse_final_buffer_at_resp03(
     pending_reasons: &mut Vec<Option<String>>,
     reason_emitted: &mut bool,
 ) -> Vec<u8> {
-    project_v3_toolreason_sse_frame_at_resp03(buffer, tool_names, pending_reasons, reason_emitted)
+    project_v3_toolreason_sse_final_buffer_at_resp03_with_projection(
+        buffer,
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        true,
+    )
+}
+
+pub(crate) fn project_v3_toolreason_sse_final_buffer_at_resp03_with_projection(
+    buffer: &[u8],
+    tool_names: &mut Vec<String>,
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    project_to_client: bool,
+) -> Vec<u8> {
+    project_v3_toolreason_sse_frame_at_resp03(
+        buffer,
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        project_to_client,
+    )
 }
 
 /// Resp03 唯一的 Direct SSE turn closeout。工具调用已经被观察但模型没有
@@ -1559,6 +1658,7 @@ fn project_v3_toolreason_sse_frame_at_resp03(
     tool_names: &mut Vec<String>,
     pending_reasons: &mut Vec<Option<String>>,
     reason_emitted: &mut bool,
+    project_to_client: bool,
 ) -> Vec<u8> {
     let Ok(text) = std::str::from_utf8(chunk) else {
         return chunk.to_vec();
@@ -1600,6 +1700,8 @@ fn project_v3_toolreason_sse_frame_at_resp03(
                 payload.pointer("/item/type").and_then(Value::as_str),
                 Some("function" | "function_call" | "tool_call" | "custom_tool_call")
             );
+        let is_message_done = event_type == "response.output_item.done"
+            && payload.pointer("/item/type").and_then(Value::as_str) == Some("message");
         if !has_marker
             && !has_pending_message_reason
             && !is_tool_call_done
@@ -1615,9 +1717,13 @@ fn project_v3_toolreason_sse_frame_at_resp03(
             // validate every tool call and remove the private marker here.
             if let Some(response) = payload.get_mut("response") {
                 map_v3_toolreason_to_reasoning_content_at_resp03_without_observation(
-                    response, true,
+                    response,
+                    true,
+                    project_to_client,
                 );
-                append_v3_toolreason_completed_visible_text_at_resp03(response, &mut output);
+                if project_to_client && !*reason_emitted {
+                    append_v3_toolreason_completed_visible_text_at_resp03(response, &mut output);
+                }
                 if !*reason_emitted {
                     let mut response_tools = Vec::new();
                     let mut response_reasons = Vec::new();
@@ -1638,8 +1744,11 @@ fn project_v3_toolreason_sse_frame_at_resp03(
                 map_v3_toolreason_to_reasoning_content_at_resp03_without_observation(
                     &mut payload,
                     true,
+                    project_to_client,
                 );
-                append_v3_toolreason_completed_visible_text_at_resp03(&mut payload, &mut output);
+                if project_to_client && !*reason_emitted {
+                    append_v3_toolreason_completed_visible_text_at_resp03(&mut payload, &mut output);
+                }
                 if !*reason_emitted {
                     let mut response_tools = Vec::new();
                     let mut response_reasons = Vec::new();
@@ -1660,13 +1769,28 @@ fn project_v3_toolreason_sse_frame_at_resp03(
         } else {
             map_v3_toolreason_stream_event_at_resp03(
                 &mut payload,
-                true,
+                project_to_client,
                 tool_names,
                 pending_reasons,
                 reason_emitted,
             );
         }
-        if is_tool_call_done {
+        if project_to_client && is_tool_call_done {
+            if let Some(reasoning) = payload
+                .pointer("/item/reasoning_content")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+            {
+                output.push_str(&build_v3_toolreason_visible_text_sse_events_at_resp03(
+                    &payload,
+                    &reasoning,
+                ));
+                if let Some(item) = payload.get_mut("item").and_then(Value::as_object_mut) {
+                    item.remove("reasoning_content");
+                }
+            }
+        }
+        if project_to_client && is_message_done {
             if let Some(reasoning) = payload
                 .pointer("/item/reasoning_content")
                 .and_then(Value::as_str)
@@ -1947,7 +2071,11 @@ fn strip_v3_toolreason_markers_at_resp03(text: &str) -> String {
     visible
 }
 
-fn map_toolreason_in_text_object(message: &mut Map<String, Value>, tool_names: &[String]) {
+fn map_toolreason_in_text_object(
+    message: &mut Map<String, Value>,
+    tool_names: &[String],
+    project_to_client: bool,
+) {
     let Some(content) = message
         .get("content")
         .and_then(Value::as_str)
@@ -1961,6 +2089,9 @@ fn map_toolreason_in_text_object(message: &mut Map<String, Value>, tool_names: &
         return;
     }
     if tool_names.is_empty() {
+        return;
+    }
+    if !project_to_client {
         return;
     }
     let mut existing = message
@@ -1983,22 +2114,28 @@ fn map_toolreason_in_text_object(message: &mut Map<String, Value>, tool_names: &
 
 fn format_toolreason_reasoning(tool_names: &[String], reason: &str) -> Option<String> {
     let names = format_toolreason_tool_label(tool_names);
-    let reason = normalize_v3_toolreason_reason_at_resp03(reason)?;
+    let reason = parse_v3_toolreason_fields_at_resp03(reason)?.reason;
     if names.is_empty() || reason.is_empty() {
         return None;
     }
-    Some(format!(
-        "{V3_TOOLREASON_VISIBLE_PREFIX}调用工具 {names}，因为 {reason}"
-    ))
+    Some(format!("调用工具 {names}：{reason}"))
 }
 
 fn format_toolreason_tool_label(tool_names: &[String]) -> String {
-    tool_names
+    let mut names = tool_names
         .iter()
         .filter_map(|name| toolreason_stream_display_name(name))
         .filter(|name| !name.is_empty())
-        .collect::<Vec<_>>()
-        .join("、")
+        .fold(Vec::<String>::new(), |mut names, name| {
+            if !names.iter().any(|existing| existing == &name) {
+                names.push(name);
+            }
+            names
+        });
+    if names.iter().any(|name| name != "exec_command") {
+        names.retain(|name| name != "exec_command");
+    }
+    names.join("、")
 }
 
 fn toolreason_stream_display_name(name: &str) -> Option<String> {
@@ -2095,6 +2232,7 @@ fn is_v3_toolreason_placeholder(reason: &str) -> bool {
         return true;
     }
     normalized.starts_with("◦ 调用工具")
+        || normalized.starts_with("调用工具")
         || normalized.starts_with("#tool 调用工具")
         || normalized.starts_with("· 调用工具")
         || normalized.starts_with("🟢 调用工具")

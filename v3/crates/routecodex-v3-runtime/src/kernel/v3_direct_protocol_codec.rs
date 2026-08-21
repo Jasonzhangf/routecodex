@@ -42,6 +42,7 @@ pub(crate) type V3DirectResponseProjectionFuture = Pin<
 pub(crate) fn build_direct_response_compat_context(
     target: &V3Target10ConcreteProviderSelected,
     tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
 ) -> Result<V3DirectResponseCompatContext, String> {
     Ok(V3DirectResponseCompatContext {
         provider_protocol: crate::hub_v1::provider_wire_protocol_for_selected_candidate(
@@ -51,6 +52,7 @@ pub(crate) fn build_direct_response_compat_context(
         model_capabilities: target.candidate.model_capabilities.clone(),
         compatibility_profile: target.candidate.compatibility_profile.clone(),
         tool_thinking_enabled,
+        toolreason_client_projection,
     })
 }
 

@@ -1112,6 +1112,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             match crate::kernel::v3_direct_protocol_codec::build_direct_response_compat_context(
                 &policy.target,
                 manifest.features.get("tool_thinking").copied().unwrap_or(false),
+                manifest
+                    .features
+                    .get("toolreason_client_projection")
+                    .copied()
+                    .unwrap_or(true),
             ) {
                 Ok(context) => context,
                 Err(error) => {

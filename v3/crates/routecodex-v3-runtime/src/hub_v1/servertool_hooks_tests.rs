@@ -23,8 +23,10 @@ fn req04_tool_thinking_injects_detailed_guidance_into_system_instructions() {
     let instructions = payload["instructions"].as_str().unwrap();
     assert!(instructions.contains("工具调用时必须先输出原因标签"));
     assert!(instructions.contains("当前工具接口的结构化调用能力"));
-    assert!(instructions.contains("这一轮唯一原因"));
+    assert!(instructions.contains("这一轮唯一 JSON"));
     assert!(instructions.contains("在这一轮第一个结构化工具调用之前"));
+    assert!(instructions.contains("goal_alignment_confidence"));
+    assert!(instructions.contains("{\"reason\":\"真实、简短的直接动机\",\"goal_alignment_confidence\":85}"));
     assert!(instructions.contains("确认当前工作目录"));
     assert!(instructions.contains("加号"));
     assert!(!payload["tools"][0]["description"].as_str().unwrap().contains("toolreason"));

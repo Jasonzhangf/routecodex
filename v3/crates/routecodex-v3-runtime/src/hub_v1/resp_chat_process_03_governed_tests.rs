@@ -8,7 +8,7 @@ fn resp03_toolreason_maps_to_visible_reasoning_content_and_is_removed_from_text(
     let mut payload = json!({
         "choices":[{"message":{
             "role":"assistant",
-            "content":"<toolreason>Need inspect the file.</toolreason>",
+            "content":"<toolreason>{\"reason\":\"Need inspect the file.\",\"goal_alignment_confidence\":90}</toolreason>",
             "tool_calls":[{"id":"call_1","type":"function","function":{"name":"exec","arguments":"{}"}}]
         }}]
     });
@@ -16,9 +16,26 @@ fn resp03_toolreason_maps_to_visible_reasoning_content_and_is_removed_from_text(
     let message = &payload["choices"][0]["message"];
     assert_eq!(
         message["reasoning_content"],
-        "◦ 调用工具 exec，因为 Need inspect the file."
+        "调用工具 exec：Need inspect the file."
     );
     assert_eq!(message["content"], "");
+    assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
+fn resp03_toolreason_debug_projection_off_keeps_console_observation_only() {
+    let mut payload = json!({
+        "choices": [{
+            "message": {
+                "content": "<toolreason>{\"reason\":\"Inspect file\",\"goal_alignment_confidence\":80}</toolreason>",
+                "tool_calls": [{"type":"function","function":{"name":"read_file"}}]
+            }
+        }]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(&mut payload, true, false);
+    let message = &payload["choices"][0]["message"];
+    assert_eq!(message["content"], "");
+    assert!(message.get("reasoning_content").is_none());
     assert!(!payload.to_string().contains("toolreason"));
 }
 
@@ -55,7 +72,7 @@ fn resp03_multiple_toolreasons_pair_by_tool_call_order_and_strip_duplicates() {
     let message = &payload["choices"][0]["message"];
     assert_eq!(
         message["reasoning_content"],
-        "◦ 调用工具 cat、test，因为 Inspect file."
+        "调用工具 cat、test：Inspect file."
     );
     assert_eq!(message["content"], "");
     assert!(!payload.to_string().contains("toolreason"));
@@ -79,12 +96,27 @@ fn resp03_responses_post_call_toolreason_maps_once_and_preserves_calls() {
 
     assert_eq!(
         payload["output"][2]["reasoning_content"],
-        "◦ 调用工具 pwd、read_file，因为 确认工具结果所需的工作状态"
+        "调用工具 pwd、read_file：确认工具结果所需的工作状态"
     );
     assert_eq!(payload["output"][2]["content"][0]["text"], "");
     assert_eq!(payload["output"][0]["name"], "exec_command");
     assert_eq!(payload["output"][1]["name"], "read_file");
     assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
+fn resp03_toolreason_label_deduplicates_shell_wrappers_and_commands() {
+    assert_eq!(
+        format_toolreason_tool_label(&[
+            "exec_command".to_string(),
+            "exec_command".to_string(),
+            "test".to_string(),
+            "sed".to_string(),
+            "sed".to_string(),
+            "rg".to_string(),
+        ]),
+        "test、sed、rg"
+    );
 }
 
 #[test]
@@ -98,7 +130,7 @@ fn resp03_toolreason_uses_shell_command_as_display_tool_for_exec_command() {
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
     assert_eq!(
         payload["output"][1]["reasoning_content"],
-        "◦ 调用工具 curl，因为 检查服务健康状态"
+        "调用工具 curl：检查服务健康状态"
     );
     assert!(!payload.to_string().contains("调用工具 exec_command"));
 }
@@ -162,7 +194,7 @@ fn resp03_toolreason_prompt_fragment_and_mapped_reasoning_are_missing() {
     for reason in [
         "，填入这一次调用的真实当前动机，再输出结束标签",
         "具体动机、结束标签",
-        "◦ 调用工具 exec_command，因为 获取当前工作目录",
+        "调用工具 exec_command：获取当前工作目录",
     ] {
         let mut payload = json!({
             "choices": [{
@@ -312,7 +344,7 @@ fn direct_sse_post_call_toolreason_waits_past_tool_done_and_maps_once() {
 
     let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
     assert!(!output.contains("toolreason"));
-    assert_eq!(output.matches("reasoning_content").count(), 1);
+    assert_eq!(output.matches("event: response.output_text.delta").count(), 1);
     assert!(output.contains("确认当前工作目录"));
     assert!(output.contains("call_post_1"));
     assert!(
@@ -405,7 +437,7 @@ fn resp03_anthropic_text_toolreason_maps_against_tool_use() {
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
     assert_eq!(
         payload["reasoning_content"],
-        "◦ 调用工具 lookup，因为 Need lookup."
+        "调用工具 lookup：Need lookup."
     );
     assert_eq!(payload["content"][0]["text"], "");
     assert!(!payload.to_string().contains("toolreason"));

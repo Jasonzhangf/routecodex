@@ -630,6 +630,11 @@ pub async fn execute_v3_direct_runtime_kernel_core<
         let response_projection_context = match crate::kernel::v3_direct_protocol_codec::build_direct_response_compat_context(
             C::policy_target(&policy),
             manifest.features.get("tool_thinking").copied().unwrap_or(false),
+            manifest
+                .features
+                .get("toolreason_client_projection")
+                .copied()
+                .unwrap_or(true),
         ) {
             Ok(context) => context,
             Err(error) => {
