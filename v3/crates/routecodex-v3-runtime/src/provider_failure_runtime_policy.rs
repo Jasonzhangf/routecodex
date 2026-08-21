@@ -1226,7 +1226,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         .get(&candidate_key)
         .copied()
         .unwrap_or(0);
-    if configured_retry_mode(matched_policy) == Some(V3ProviderErrorRetryMode::RetrySame)
+    if configured_retry_mode(
+        matched_policy,
+        context.retry_policy.same_candidate_retries,
+    ) == Some(V3ProviderErrorRetryMode::RetrySame)
         && health_record.state != "cooldown"
         && retries_done < configured_same_candidate_retries
         && status != 400
