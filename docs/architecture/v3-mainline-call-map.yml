@@ -7,7 +7,21 @@ chains:
   summary: Runtime passes the exact provider, auth alias, and model identity to the Provider-owned key health store; Target reads only the resulting per-model scheduling projection.
   edges:
   - step_id: v3-provider-key-health-model-01
-    from_node: V3Error05ExecutionDecision
+    from_node: V3Error02Classified
+    to_node: V3ProviderFailureAction
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_source
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: build_v3_provider_failure_action_from_v3_error_02
+    callee_file: v3/crates/routecodex-v3-error/src/subscription.rs
+    status: source_controlled
+    owner_feature_id: v3.debug_error_foundation
+    resource_flow:
+      consumes: [v3.error.classified]
+      produces: [v3.provider.failure_action]
+      side_channel_reads: [v3.error.classified]
+      side_channel_writes: [v3.provider.failure_action]
+  - step_id: v3-provider-key-health-model-02
+    from_node: V3ProviderFailureAction
     to_node: V3ProviderKeyHealthStore
     caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_key_failure_action
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -16,23 +30,23 @@ chains:
     status: source_controlled
     owner_feature_id: v3.provider_key_health_model_granularity
     resource_flow:
-      consumes: [v3.error.execution_decision]
+      consumes: [v3.provider.failure_action]
       produces: [v3.provider.key_health_state]
-      side_channel_reads: [v3.error.execution_decision]
+      side_channel_reads: [v3.provider.failure_action]
       side_channel_writes: [v3.provider.key_health_state]
-  - step_id: v3-provider-key-health-model-02
-    from_node: V3ProviderKeyHealthStore
+  - step_id: v3-provider-key-health-model-03
+    from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
-    caller_symbol: select_v3_target_from_expanded_with_scheduling
+    caller_symbol: V3TargetInterpreter::select_available_with_health
     caller_file: v3/crates/routecodex-v3-target/src/lib.rs
     callee_symbol: V3ProviderSchedulingReader::scheduling_projection
     callee_file: v3/crates/routecodex-v3-provider-responses/src/key_health.rs
     status: source_controlled
-    owner_feature_id: v3.provider_key_health_model_granularity
+    owner_feature_id: v3.virtual_router_target_interpreter
     resource_flow:
-      consumes: [v3.provider.key_health_state]
-      produces: [v3.provider.availability_projection]
-      side_channel_reads: [v3.provider.key_health_state]
+      consumes: [v3.provider.scheduling_projection]
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.scheduling_projection]
       side_channel_writes: []
 - chain_id: v3.global_binary_install
   owner_feature_id: v3.global_binary_install

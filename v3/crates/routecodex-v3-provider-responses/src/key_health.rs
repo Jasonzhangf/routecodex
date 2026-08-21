@@ -200,7 +200,7 @@ impl V3ProviderKeyHealthStore {
             4 => {
                 let file: V3ProviderKeyHealthFile = serde_json::from_value(value)
                     .map_err(|error| format!("decode provider key health state: {error}"))?;
-                file.entries.into_iter().collect()
+                load_v4_entries(file.entries)?
             }
             other => {
                 return Err(format!(
@@ -276,10 +276,7 @@ impl V3ProviderKeyHealthStore {
             if mutated {
                 entry.score_generation = entry.score_generation.saturating_add(1);
             }
-            (
-                projection(&identity, entry, now_ms),
-                state.clone(),
-            )
+            (projection(&identity, entry, now_ms), state.clone())
         };
         persist_if_configured(self.path.as_ref(), &snapshot)?;
         Ok(result)
@@ -308,10 +305,7 @@ impl V3ProviderKeyHealthStore {
             entry.success_streak = entry.success_streak.saturating_add(1);
             entry.last_success_at_ms = Some(now_ms);
             entry.score_generation = entry.score_generation.saturating_add(1);
-            (
-                projection(&identity, entry, now_ms),
-                state.clone(),
-            )
+            (projection(&identity, entry, now_ms), state.clone())
         };
         persist_if_configured(self.path.as_ref(), &snapshot)?;
         Ok(result)
@@ -360,10 +354,7 @@ impl V3ProviderKeyHealthStore {
             entry.last_success_at_ms = Some(now_ms);
             entry.score_milli = entry.score_milli.max(600);
             entry.score_generation = entry.score_generation.saturating_add(1);
-            (
-                projection(&identity, entry, now_ms),
-                state.clone(),
-            )
+            (projection(&identity, entry, now_ms), state.clone())
         };
         persist_if_configured(self.path.as_ref(), &snapshot)?;
         Ok(result)
@@ -390,10 +381,7 @@ impl V3ProviderKeyHealthStore {
             entry.probe_required = true;
             entry.score_milli = apply_delta(entry.score_milli, -50);
             entry.score_generation = entry.score_generation.saturating_add(1);
-            (
-                projection(&identity, entry, now_ms),
-                state.clone(),
-            )
+            (projection(&identity, entry, now_ms), state.clone())
         };
         persist_if_configured(self.path.as_ref(), &snapshot)?;
         Ok(result)
@@ -541,6 +529,22 @@ impl V3ProviderSchedulingReader for V3ProviderKeyHealthStore {
     }
 }
 
+fn load_v4_entries(
+    entries: Vec<(V3ProviderKeyHealthIdentity, V3ProviderKeyHealthState)>,
+) -> Result<BTreeMap<V3ProviderKeyHealthIdentity, V3ProviderKeyHealthState>, String> {
+    let mut state = BTreeMap::new();
+    for (identity, health) in entries {
+        let inserted = state.insert(identity.clone(), health);
+        if inserted.is_some() {
+            return Err(format!(
+                "duplicate provider key health identity: {}/{}",
+                identity.provider_id, identity.auth_alias
+            ));
+        }
+    }
+    Ok(state)
+}
+
 fn identity(provider_id: &str, auth_alias: &str, model_id: &str) -> V3ProviderKeyHealthIdentity {
     V3ProviderKeyHealthIdentity {
         provider_id: provider_id.to_string(),
@@ -660,9 +664,7 @@ fn merge_legacy_entries(
             model_id: legacy_identity.model_id.clone(),
         };
         health.probe_model_id = Some(legacy_identity.model_id);
-        merged
-            .entry(identity)
-            .or_insert(health);
+        merged.entry(identity).or_insert(health);
     }
     merged
 }

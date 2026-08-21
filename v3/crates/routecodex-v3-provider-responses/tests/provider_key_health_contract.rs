@@ -345,12 +345,50 @@ fn key_health_persistence_writes_schema_v4_with_model_identity() {
         .record_provider_success("provider-a", "key-a", "model-a", 100)
         .expect("persist model health");
 
-    let value: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(path).expect("read persisted state"),
-    )
-    .expect("decode persisted state");
+    let value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).expect("read persisted state"))
+            .expect("decode persisted state");
     assert_eq!(value["schema_version"], 4);
     assert_eq!(value["entries"][0][0]["model_id"], "model-a");
+}
+
+#[test]
+fn key_health_persistence_rejects_duplicate_v4_identity() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("provider-key-health.json");
+    let entry_state = |score_milli: u32, cooldown_until_ms: &str| {
+        format!(
+            r#"{{"score_milli":{score_milli},"failure_streak":1,"scope":"None","failure_class":null,"success_streak":0,"last_failure_at_ms":100,"last_success_at_ms":null,"cooldown_until_ms":{cooldown_until_ms},"probe_required":false,"global_probe_owned":false,"probe_model_id":"model-a","score_generation":1}}"#
+        )
+    };
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{
+              "schema_version": 4,
+              "entries": [
+                [
+                  {{"provider_id":"provider-a","auth_alias":"key-a","model_id":"model-a"}},
+                  {}
+                ],
+                [
+                  {{"provider_id":"provider-a","auth_alias":"key-a","model_id":"model-a"}},
+                  {}
+                ]
+              ]
+            }}"#,
+            entry_state(600, "900000"),
+            entry_state(900, "null"),
+        ),
+    )
+    .expect("duplicate state fixture");
+
+    let error = V3ProviderKeyHealthStore::load_persistent(path)
+        .expect_err("duplicate v4 identities must fail explicitly");
+    assert!(
+        error.contains("duplicate provider key health identity"),
+        "{error}"
+    );
 }
 
 #[test]

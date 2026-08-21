@@ -29,6 +29,8 @@
     "verify:v3-rust-only-server-entry": "node scripts/architecture/verify-v3-rust-only-server-entry.mjs",
     "verify:v3-file-size": "node scripts/architecture/verify-v3-file-size.mjs",
     "verify:v3-resource-map": "node scripts/architecture/verify-v3-resource-map.mjs",
+    "verify:v3-provider-key-health-model-binding": "node scripts/architecture/verify-v3-provider-key-health-model-binding.mjs",
+    "test:v3-provider-key-health-model-binding-red-fixtures": "node tests/scripts/v3-provider-key-health-model-binding-red-fixtures.mjs",
     "verify:v3-resource-relation-edge-lock": "node scripts/architecture/verify-v3-resource-relation-edge-lock.mjs",
     "test:v3-resource-relation-edge-lock-red-fixtures": "node scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs",
     "verify:v3-module-boundaries": "node scripts/architecture/verify-v3-module-boundaries.mjs",

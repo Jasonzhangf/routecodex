@@ -20,11 +20,15 @@ features:
   - legacy model-specific entries remain isolated during migration
   required_negative:
   - v3 persistence without probe_model_id fails explicitly
+  - duplicate v4 key health identities fail instead of silently overwriting control truth
+  - mainline caller/callee symbols, edge owners, and resource writer/reader bindings must resolve to the registered modules
   - key health state never enters provider or client payload
   required_gates:
   - npm run test:v3-provider-health-contract
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
+  - npm run verify:v3-provider-key-health-model-binding
+  - npm run test:v3-provider-key-health-model-binding-red-fixtures
   - git diff --check
   completion_boundary:
     source_controlled: true

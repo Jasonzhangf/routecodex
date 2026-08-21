@@ -34,6 +34,8 @@ features:
   - npm run test:v3-provider-health-contract
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
+  - npm run verify:v3-provider-key-health-model-binding
+  - npm run test:v3-provider-key-health-model-binding-red-fixtures
   - git diff --check
 - feature_id: v3.provider_global_cooldown_persistence
   owner_crate: routecodex-v3-provider-responses

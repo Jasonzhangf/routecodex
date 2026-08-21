@@ -23,6 +23,8 @@ const STEPS = [
   ['verify:v3-resource-map', 'V3 resource-operation-map parseable + bound'],
   ['verify:v3-resource-relation-edge-lock', 'V3 resource relation edge lock'],
   ['test:v3-resource-relation-edge-lock-red-fixtures', 'V3 resource relation mutations are rejected'],
+  ['verify:v3-provider-key-health-model-binding', 'Provider key health model identity source binding'],
+  ['test:v3-provider-key-health-model-binding-red-fixtures', 'Provider key health model binding mutations are rejected'],
   ['verify:v3-provider-action-gate', 'Provider failures enter typed Error05 action policy'],
   ['verify:v3-provider-session-cooldown', 'Provider failure cooldown and recovery are session-isolated'],
   ['test:v3-provider-session-cooldown-red-fixtures', 'Session cooldown architecture mutations are rejected'],

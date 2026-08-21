@@ -172,6 +172,8 @@
     "verify:v3-static-hook-registry": "node scripts/architecture/verify-v3-static-hook-registry.mjs",
     "test:v3-h1-source-red-fixtures": "node scripts/tests/v3-h1-source-red-fixtures.mjs",
     "verify:v3-resource-map": "node v3/scripts/architecture/verify-v3-resource-map.mjs",
+    "verify:v3-provider-key-health-model-binding": "node v3/scripts/architecture/verify-v3-provider-key-health-model-binding.mjs",
+    "test:v3-provider-key-health-model-binding-red-fixtures": "node v3/tests/scripts/v3-provider-key-health-model-binding-red-fixtures.mjs",
     "test:v3-compile-fail": "node scripts/tests/v3-compile-fail-boundaries.mjs",
     "verify:v3-cargo-fmt": "cargo +stable fmt --manifest-path v3/Cargo.toml --all -- --check",
     "verify:v3-clippy": "CARGO_NET_OFFLINE=true cargo +stable clippy --manifest-path v3/Cargo.toml --workspace --all-targets -- -D warnings",

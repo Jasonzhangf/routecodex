@@ -846,6 +846,18 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.provider.failure_action
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-error
+    owner_node: V3ProviderFailureAction
+    identity: [recovery, scope, classCode, cooldownMs]
+    allowed_writers: [build_v3_provider_failure_action_from_v3_error_02]
+    allowed_readers: [V3ProviderFailureRuntimeHealth::record_provider_key_failure_action]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.error.action_plan
     resource_kind: side_channel
     lifecycle: v3.debug_error_foundation.mainline
@@ -932,13 +944,13 @@ resources:
       v3_migration: probeModelIdRequired
       revival_rule: only matching-model probe success removes cooldown
     allowed_writers: [V3ProviderKeyHealthStore::record_provider_failure_action, V3ProviderKeyHealthStore::record_provider_success, V3ProviderKeyHealthStore::complete_probe_success, V3ProviderKeyHealthStore::complete_probe_failure]
-    allowed_readers: [V3ProviderKeyHealthStore::scheduling_projection, V3ProviderKeyHealthStore::provider_key_health_probe_keys, V3ProviderKeyHealthStore::acquire_provider_key_health_probe, routecodex-v3-target]
+    allowed_readers: [V3ProviderKeyHealthStore::scheduling_projection, V3ProviderKeyHealthStore::provider_key_health_probe_keys, V3ProviderKeyHealthStore::acquire_provider_key_health_probe]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: source_controlled
-    required_gates: [npm run test:v3-provider-health-contract, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]
+    required_gates: [npm run test:v3-provider-health-contract, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries, npm run verify:v3-provider-key-health-model-binding, npm run test:v3-provider-key-health-model-binding-red-fixtures]
   - resource_id: v3.provider.cooldown_probe_state
     resource_kind: side_channel
     lifecycle: v3.provider_cooldown_rescue_probe
@@ -995,6 +1007,25 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.provider.scheduling_projection
+    resource_kind: side_channel
+    lifecycle: v3.provider_key_health_model_granularity
+    owner_feature_id: v3.provider_key_health_model_granularity
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3ProviderSchedulingProjection
+    identity: [providerId, authAlias, modelId, priority, scoreMilli, baseWeight, effectiveWeightMilli, available, scoreGeneration]
+    semantic_contract:
+      source_state: v3.provider.key_health_state
+      cross_model_same_key: isolated
+      forbidden_consumers: [request.normal_payload, response.client_payload, MetadataCenter]
+    allowed_writers: [V3ProviderKeyHealthStore::scheduling_projection]
+    allowed_readers: [V3TargetInterpreter::select_available_with_health]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [npm run verify:v3-provider-key-health-model-binding, npm run test:v3-provider-key-health-model-binding-red-fixtures]
   - resource_id: v3.lifecycle.instance_declaration
     resource_kind: runtime_control_truth
     lifecycle: v3.server.managed_lifecycle
