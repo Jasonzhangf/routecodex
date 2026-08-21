@@ -20,7 +20,7 @@ const REQUIRED_PLAN_TOKENS = [
 
 const REQUIRED_RUNTIME_SYMBOLS = [
   'pub fn execute_mock_transport_slice',
-  'pub fn execute_mock_response_scoped',
+  'pub fn execute_provider_response_scoped',
   'pub fn execute_request_fixture_scoped',
   'pub struct MockTransportReport',
   'pub struct MockTransportError',

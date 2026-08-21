@@ -483,8 +483,13 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 23) {
-      failures.push(`${MODULE}: expected 23 active standard descriptors, got ${activeDescriptors.length}`);
+    if (activeDescriptors.length !== 24) {
+      failures.push(`${MODULE}: expected 24 active standard descriptors, got ${activeDescriptors.length}`);
+    }
+    if (!activeDescriptors.some(
+      (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',
+    )) {
+      failures.push(`${MODULE}: missing required response tool harvest descriptor`);
     }
     if (testDescriptors.length !== 0) {
       failures.push(`${MODULE}: unexpected test-only response descriptors`);
@@ -635,6 +640,12 @@ function runSelfTest() {
     }],
     ['category module removed', (state) => {
       state.source = source.replace('pub mod provider', 'mod provider');
+    }],
+    ['response tool harvest descriptor removed', (state) => {
+      state.source = source.replace(
+        '"v4.std.chat_process.tool_harvest",',
+        '"v4.std.chat_process.tool_harvest.removed",',
+      );
     }],
     ['fallback handler reintroduced', (state) => {
       state.source = `${source}\nfn fallback() {}`;

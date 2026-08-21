@@ -15,6 +15,7 @@ use routecodex_v4_base_node::Scope;
 use routecodex_v4_runtime::SkeletonRuntime;
 
 const CONTRACT_JSON: &str = include_str!("../../../contracts/skeleton-plan.contract.json");
+const TEST_PORT: u16 = 5555;
 
 fn load_runtime() -> SkeletonRuntime {
     SkeletonRuntime::load(CONTRACT_JSON).expect("runtime must load contract")
@@ -52,7 +53,7 @@ fn positive_keyless_fixture_carries_fixture_identity_through_request_chain() {
         mock_provider_frame_ok(),
         "srv-m8",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-a",
         "conv-a",
         "chat",
@@ -61,7 +62,10 @@ fn positive_keyless_fixture_carries_fixture_identity_through_request_chain() {
     .expect("mock transport slice must succeed");
     assert_eq!(first.request_id, "mock.srv-m8-2026-08-17-00000001");
     assert_eq!(first.request_binding, bound);
-    assert!(first.client_frame.starts_with("frame:client:"));
+    let frame: serde_json::Value =
+        serde_json::from_str(&first.client_frame).expect("client frame must be JSON");
+    assert_eq!(frame["object"], "chat.completion");
+    assert_eq!(frame["choices"][0]["message"]["role"], "assistant");
     assert!(first.provider_wire.starts_with("wire:semantic:mock-model:"));
     assert!(first.continuation_committed, "chat/relay commits");
     assert_eq!(first.continuation_owner, "relay");
@@ -79,7 +83,7 @@ fn positive_keyless_fixture_carries_fixture_identity_through_request_chain() {
         mock_provider_frame_ok(),
         "srv-m8",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-b",
         "conv-b",
         "chat",
@@ -105,7 +109,7 @@ fn positive_trace_entries_follows_request_then_response_chains() {
         mock_provider_frame_ok(),
         "srv-m8",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-trace",
         "conv-trace",
         "chat",
@@ -127,14 +131,14 @@ fn positive_responses_direct_operator_accepted() {
         mock_provider_frame_ok(),
         "srv-m8",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-direct",
         "conv-direct",
         "responses",
         "direct",
     )
     .expect("responses + direct must succeed");
-    assert!(report.error.is_none(), "no fault expected");
+    assert!(report.error.is_none(), "no fault expected: {:?}", report.error);
     assert!(report.relay_operator_accepted, "responses+direct selects Direct operator");
     assert_eq!(report.fixture_path, "/v1/responses");
     assert_eq!(report.fixture_model, "responses-model");
@@ -154,7 +158,7 @@ fn red_responses_relay_operator_rejected() {
         mock_provider_frame_ok(),
         "srv-m8",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-r",
         "conv-r",
         "responses",
@@ -178,7 +182,7 @@ fn red_chat_direct_operator_rejected() {
         mock_provider_frame_ok(),
         "srv-m8",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-cd",
         "conv-cd",
         "chat",
@@ -201,7 +205,7 @@ fn red_chat_fixture_with_responses_entry_rejected() {
         mock_provider_frame_ok(),
         "srv-m8",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-m",
         "conv-m",
         "responses", // expects /v1/responses but fixture path is /v1/chat/completions
@@ -232,7 +236,7 @@ fn red_responses_path_with_chat_body_rejected() {
         mock_provider_frame_ok(),
         "srv-m8",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-body",
         "conv-body",
         "responses",
@@ -255,7 +259,7 @@ fn red_empty_server_id_fails_fast() {
         mock_provider_frame_ok(),
         "",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-z",
         "conv-z",
         "chat",
@@ -279,7 +283,7 @@ fn red_empty_fixture_model_fails_fast() {
         mock_provider_frame_ok(),
         "srv-m8",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-model",
         "conversation-model",
         "chat",
@@ -301,7 +305,7 @@ fn red_empty_continuation_scope_fails_fast() {
         mock_provider_frame_ok(),
         "srv-m8",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-scope",
         "",
         "chat",
@@ -323,7 +327,7 @@ fn red_malformed_provider_frame_flows_error_chain_with_real_scope() {
         "this-is-not-json",
         "srv-m8",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-err",
         "conv-err",
         "chat",
@@ -342,8 +346,8 @@ fn red_malformed_provider_frame_flows_error_chain_with_real_scope() {
     assert!(
         error
             .client_projection_message
-            .contains("malformed provider frame"),
-        "client projection must carry the raw_parse reason: {:?}",
+            .contains("malformed provider JSON"),
+        "client projection must carry the json_parse reason: {:?}",
         error.client_projection_message
     );
     assert_eq!(report.continuation_committed, false);
@@ -359,7 +363,7 @@ fn red_malformed_provider_frame_flows_error_chain_with_real_scope() {
         &Scope::new(
             &report.request_id,
             "v4-skeleton",
-            0,
+            TEST_PORT,
             "session-err",
             "conv-err",
         ),
@@ -379,7 +383,7 @@ fn red_blank_provider_frame_fails_fast() {
         "   \n  ",
         "srv-m8",
         "2026-08-17",
-        0,
+        TEST_PORT,
         "session-blank",
         "conv-blank",
         "chat",

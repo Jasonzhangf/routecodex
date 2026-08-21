@@ -1058,6 +1058,116 @@
         "validate"
       ],
       "status": "active"
+    },
+    {
+      "resource_id": "v4.runtime.admission_manifest",
+      "owner": "routecodex-v4-config::RuntimeConfigManifest",
+      "truth_store": "contracts/real-runtime-admission.manifest.json",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.runtime.compiled_manifest",
+      "owner": "routecodex-v4-config::RuntimeConfigManifest",
+      "truth_store": "crates/routecodex-v4-config/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.runtime.binary_identity",
+      "owner": "routecodex-v4-runtime-bin::RCCV4_BINARY_IDENTITY",
+      "truth_store": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "allowed_operations": [
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.provider.real_transport",
+      "owner": "routecodex-v4-provider::ProviderResponseStream",
+      "truth_store": "crates/routecodex-v4-provider/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.server.http_listener",
+      "owner": "routecodex-v4-server::V4HttpServer",
+      "truth_store": "crates/routecodex-v4-server/src/lib.rs",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.cli.command_intent",
+      "owner": "routecodex-v4-cli::V4CommandIntent",
+      "truth_store": "crates/routecodex-v4-cli/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.lifecycle.instance_state",
+      "owner": "routecodex-v4-lifecycle::ManagedInstanceRecord",
+      "truth_store": "crates/routecodex-v4-lifecycle/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate",
+        "remove"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.lifecycle.control_socket",
+      "owner": "routecodex-v4-lifecycle::ManagedControlPlane",
+      "truth_store": "crates/routecodex-v4-lifecycle/src/lib.rs",
+      "allowed_operations": [
+        "bind",
+        "request",
+        "acknowledge",
+        "remove"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.servertool.cli_projection",
+      "owner": "routecodex-v4-servertool::ServertoolRunOutput",
+      "truth_store": "crates/routecodex-v4-servertool/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.servertool.cli_control",
+      "owner": "routecodex-v4-servertool::ServertoolRunControl",
+      "truth_store": "crates/routecodex-v4-servertool/src/lib.rs",
+      "allowed_operations": [
+        "create",
+        "read",
+        "validate"
+      ],
+      "status": "active"
     }
   ]
 }

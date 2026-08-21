@@ -18,12 +18,17 @@
 //! - control fields never enter provider/client wire.
 
 use routecodex_v4_base_node::Scope;
-use routecodex_v4_control::MetadataCenter;
+use routecodex_v4_control::{ControlSignal, ControlSignalKind, MetadataCenter};
+use routecodex_v4_cordis_bridge::{
+    ScopeContinuationOwner, ScopeEntryProtocol, ScopeSessionCommand, ScopeSessionOperation,
+};
 use routecodex_v4_error::{
     ClientProjection, DecisionAction, ErrorCenter, ErrorChain, ErrorChainError, ExecutionDecision,
     RetryPolicy,
 };
 use routecodex_v4_skeleton::SkeletonPlan;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -37,6 +42,221 @@ pub use control_resources::*;
 // second plugin-kind taxonomy; it only re-exports the contract type.
 pub use routecodex_v4_plugin_contract::PluginKind;
 
+fn sha256_control_digest(value: &str) -> String {
+    format!("sha256:{:x}", Sha256::digest(value.as_bytes()))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResponsesWireRequest {
+    pub body: Vec<u8>,
+    pub model: String,
+    pub stream: bool,
+}
+
+/// Adjacent relay request projection owned by the Rust Hub runtime. Unknown
+/// client data fields are preserved; only protocol-defined Chat fields are
+/// renamed or structurally converted for a Responses upstream.
+pub fn project_chat_request_to_responses(client_body: &Value) -> Result<Value, RuntimeFault> {
+    let object = client_body.as_object().ok_or_else(|| {
+        RuntimeFault::new("chat_request_invalid", "Chat request must be an object")
+    })?;
+    let messages = object
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or_else(|| RuntimeFault::new("chat_request_invalid", "messages must be an array"))?;
+    let mut projected = object.clone();
+    projected.remove("messages");
+    projected.insert("input".to_string(), Value::Array(messages.clone()));
+    if let Some(max_tokens) = object.get("max_tokens") {
+        projected.remove("max_tokens");
+        projected.insert("max_output_tokens".to_string(), max_tokens.clone());
+    }
+    if let Some(tools) = object.get("tools").and_then(Value::as_array) {
+        let tools = tools
+            .iter()
+            .map(|tool| {
+                let function = tool.get("function").ok_or_else(|| {
+                    RuntimeFault::new("chat_request_invalid", "function tool body is required")
+                })?;
+                Ok(serde_json::json!({
+                    "type": "function",
+                    "name": function.get("name").cloned().unwrap_or(Value::Null),
+                    "description": function.get("description").cloned().unwrap_or(Value::Null),
+                    "parameters": function.get("parameters").cloned().unwrap_or_else(|| serde_json::json!({}))
+                }))
+            })
+            .collect::<Result<Vec<_>, RuntimeFault>>()?;
+        projected.insert("tools".to_string(), Value::Array(tools));
+    }
+    Ok(Value::Object(projected))
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResponsesProviderPayload {
+    Json(Value),
+    Sse(Vec<u8>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResponsesSseFrame {
+    pub events: Vec<Value>,
+    pub terminal: bool,
+}
+
+/// Validate one complete Responses SSE frame. Returns true only for a
+/// terminal `response.completed` or `response.failed` event.
+pub fn validate_responses_sse_frame(frame: &[u8]) -> Result<bool, RuntimeFault> {
+    parse_responses_sse_frame(frame).map(|parsed| parsed.terminal)
+}
+
+pub fn parse_responses_sse_frame(frame: &[u8]) -> Result<ResponsesSseFrame, RuntimeFault> {
+    let text = std::str::from_utf8(frame)
+        .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?;
+    let mut events = Vec::new();
+    let mut terminal = false;
+    for line in text.lines() {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if let Some(value) = line.strip_prefix("data:") {
+            let value = value.trim();
+            if value == "[DONE]" {
+                continue;
+            }
+            let event: Value = serde_json::from_str(value)
+                .map_err(|error| RuntimeFault::new("provider_sse_malformed", error.to_string()))?;
+            let event_type = event
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if matches!(event_type, "response.completed" | "response.failed") {
+                terminal = true;
+            }
+            events.push(event);
+        }
+    }
+    if events.is_empty() {
+        return Err(RuntimeFault::new(
+            "provider_sse_missing_data",
+            "Responses SSE frame has no data field",
+        ));
+    }
+    Ok(ResponsesSseFrame { events, terminal })
+}
+
+/// Build the only provider-bound Responses request shape. The input is the
+/// client data-plane object; runtime writes only the selected upstream model
+/// and stream flag. Control carriers are never serialized here.
+pub fn build_responses_wire_request(
+    client_body: &Value,
+    wire_model: &str,
+    stream: bool,
+) -> Result<ResponsesWireRequest, RuntimeFault> {
+    let mut body = client_body.clone();
+    let object = body.as_object_mut().ok_or_else(|| {
+        RuntimeFault::new(
+            "responses_request_invalid",
+            "Responses request must be a JSON object",
+        )
+    })?;
+    if wire_model.trim().is_empty() {
+        return Err(RuntimeFault::new(
+            "provider_wire_model_missing",
+            "selected provider wire model is empty",
+        ));
+    }
+    object.insert("model".to_string(), Value::String(wire_model.to_string()));
+    object.insert("stream".to_string(), Value::Bool(stream));
+    let body = serde_json::to_vec(&body)
+        .map_err(|error| RuntimeFault::new("provider_wire_encode", error.to_string()))?;
+    Ok(ResponsesWireRequest {
+        body,
+        model: wire_model.to_string(),
+        stream,
+    })
+}
+
+/// Parse and validate the provider response at the response-inbound owner.
+/// The returned bytes/JSON remain data-plane content; transport and error
+/// facts stay outside the payload.
+pub fn parse_responses_provider_payload(
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+    stream: bool,
+) -> Result<ResponsesProviderPayload, RuntimeFault> {
+    if status >= 400 {
+        return Err(RuntimeFault::new(
+            "provider_http_error",
+            format!("upstream Responses returned HTTP {status}"),
+        )
+        .with_status(status));
+    }
+    if stream
+        || content_type
+            .to_ascii_lowercase()
+            .contains("text/event-stream")
+    {
+        validate_responses_sse(body)?;
+        return Ok(ResponsesProviderPayload::Sse(body.to_vec()));
+    }
+    let value: Value = serde_json::from_slice(body)
+        .map_err(|error| RuntimeFault::new("provider_json_parse", error.to_string()))?;
+    let object = value.as_object().ok_or_else(|| {
+        RuntimeFault::new(
+            "provider_json_shape",
+            "Responses provider JSON must be an object",
+        )
+    })?;
+    let response_status = object
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if response_status != "completed" {
+        return Err(RuntimeFault::new(
+            "provider_json_not_terminal",
+            format!("Responses provider JSON terminal status must be completed, got {response_status:?}"),
+        ));
+    }
+    let response_error = object.get("error").filter(|value| !value.is_null());
+    if let Some(error) = response_error {
+        return Err(RuntimeFault::new(
+            "provider_response_failed",
+            format!("Responses provider JSON returned a failed response: {error}"),
+        ));
+    }
+    if !value.is_object() {
+        return Err(RuntimeFault::new(
+            "provider_json_shape",
+            "Responses provider JSON must be an object",
+        ));
+    }
+    Ok(ResponsesProviderPayload::Json(value))
+}
+
+fn validate_responses_sse(body: &[u8]) -> Result<(), RuntimeFault> {
+    let text = std::str::from_utf8(body)
+        .map_err(|error| RuntimeFault::new("provider_sse_utf8", error.to_string()))?;
+    let mut data_lines = 0usize;
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(data) = line.strip_prefix("data:") {
+            let data = data.trim();
+            if data != "[DONE]" {
+                serde_json::from_str::<Value>(data).map_err(|error| {
+                    RuntimeFault::new("provider_sse_malformed", error.to_string())
+                })?;
+            }
+            data_lines += 1;
+        }
+    }
+    if data_lines == 0 {
+        return Err(RuntimeFault::new(
+            "provider_sse_empty",
+            "provider SSE contained no data frames",
+        ));
+    }
+    Ok(())
+}
+
 /// Typed runtime fault. Never contains business payload content; carries only
 /// stage/code/node identity (error-chain contract).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +264,7 @@ pub struct RuntimeFault {
     pub code: String,
     pub message: String,
     pub node_id: Option<String>,
+    pub status: Option<u16>,
 }
 
 impl RuntimeFault {
@@ -52,11 +273,17 @@ impl RuntimeFault {
             code: code.to_string(),
             message: message.into(),
             node_id: None,
+            status: None,
         }
     }
 
     pub fn with_node(mut self, node_id: &str) -> Self {
         self.node_id = Some(node_id.to_string());
+        self
+    }
+
+    pub fn with_status(mut self, status: u16) -> Self {
+        self.status = Some(status);
         self
     }
 }
@@ -176,6 +403,7 @@ impl ContinuationKey {
 pub enum ScopeError {
     AlreadyBound,
     NotBound,
+    InvalidBridgeControl,
     OwnerMismatch,
     EntryProtocolMismatch,
     PortMismatch,
@@ -192,14 +420,19 @@ impl fmt::Display for ScopeError {
         let message = match self {
             Self::AlreadyBound => "continuation key already bound",
             Self::NotBound => "continuation key not bound",
+            Self::InvalidBridgeControl => "invalid typed continuation bridge control",
             Self::OwnerMismatch => "continuation owner mismatch (direct/relay cross-continuation)",
-            Self::EntryProtocolMismatch => "entry protocol mismatch (chat/messages hit responses continuation)",
+            Self::EntryProtocolMismatch => {
+                "entry protocol mismatch (chat/messages hit responses continuation)"
+            }
             Self::PortMismatch => "port/group mismatch",
             Self::SessionMismatch => "session scope mismatch",
             Self::ConversationMismatch => "conversation scope mismatch",
             Self::CrossRequestReuse => "cross-request reuse of continuation binding",
             Self::FullInputMissing => "full input missing for continuation restore",
-            Self::ImmutableIntervalViolation => "continuation restored more than once (immutable interval)",
+            Self::ImmutableIntervalViolation => {
+                "continuation restored more than once (immutable interval)"
+            }
             Self::RestoreAfterRelease => "continuation restored after release",
         };
         write!(formatter, "{message}")
@@ -249,8 +482,11 @@ impl ScopeRegistry {
         request_id: &str,
         full_input_hash: Option<&str>,
     ) -> Result<ScopeRecord, ScopeError> {
-        if self.bindings.contains_key(&key) {
-            return Err(ScopeError::AlreadyBound);
+        if let Some(binding) = self.bindings.get(&key) {
+            if !binding.released {
+                return Err(ScopeError::AlreadyBound);
+            }
+            self.bindings.remove(&key);
         }
         let full_input_hash = match full_input_hash {
             Some(hash) => Some(hash.to_string()),
@@ -289,16 +525,13 @@ impl ScopeRegistry {
             if full_input_hash.is_none() {
                 return Err(ScopeError::FullInputMissing);
             }
-            self.bindings
-                .get_mut(key)
-                .expect("binding exists")
-                .restored = true;
+            self.bindings.get_mut(key).expect("binding exists").restored = true;
             self.append_record(key.clone(), "restore", request_id);
             return Ok(self.bindings.get(key).expect("binding exists"));
         }
         // Explicit isolation diagnostics: same session trio, different
         // entry/owner dimensions.
-        for (bound_key, binding) in &self.bindings {
+        for bound_key in self.bindings.keys() {
             if bound_key.port == key.port
                 && bound_key.session_scope == key.session_scope
                 && bound_key.conversation_scope == key.conversation_scope
@@ -309,7 +542,28 @@ impl ScopeRegistry {
                 if bound_key.entry_protocol != key.entry_protocol {
                     return Err(ScopeError::EntryProtocolMismatch);
                 }
-                let _ = binding;
+            }
+            if bound_key.entry_protocol == key.entry_protocol
+                && bound_key.continuation_owner == key.continuation_owner
+            {
+                if bound_key.session_scope == key.session_scope
+                    && bound_key.conversation_scope == key.conversation_scope
+                    && bound_key.port != key.port
+                {
+                    return Err(ScopeError::PortMismatch);
+                }
+                if bound_key.port == key.port
+                    && bound_key.conversation_scope == key.conversation_scope
+                    && bound_key.session_scope != key.session_scope
+                {
+                    return Err(ScopeError::SessionMismatch);
+                }
+                if bound_key.port == key.port
+                    && bound_key.session_scope == key.session_scope
+                    && bound_key.conversation_scope != key.conversation_scope
+                {
+                    return Err(ScopeError::ConversationMismatch);
+                }
             }
         }
         Err(ScopeError::NotBound)
@@ -321,10 +575,7 @@ impl ScopeRegistry {
         request_id: &str,
     ) -> Result<ScopeRecord, ScopeError> {
         {
-            let binding = self
-                .bindings
-                .get_mut(key)
-                .ok_or(ScopeError::NotBound)?;
+            let binding = self.bindings.get_mut(key).ok_or(ScopeError::NotBound)?;
             if binding.released {
                 return Err(ScopeError::RestoreAfterRelease);
             }
@@ -337,10 +588,21 @@ impl ScopeRegistry {
         self.bindings.contains_key(key)
     }
 
+    pub fn is_restored(&self, key: &ContinuationKey) -> bool {
+        self.bindings
+            .get(key)
+            .is_some_and(|binding| binding.restored && !binding.released)
+    }
+
     /// Whether any binding exists on the same port/session/conversation trio.
     /// Used to distinguish a fresh turn (no binding at all) from a three-key
     /// isolation violation (binding exists but entry/owner mismatch).
-    pub fn session_trio_bound(&self, port: u16, session_scope: &str, conversation_scope: &str) -> bool {
+    pub fn session_trio_bound(
+        &self,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+    ) -> bool {
         self.bindings.keys().any(|key| {
             key.port == port
                 && key.session_scope == session_scope
@@ -369,6 +631,56 @@ impl ScopeRegistry {
         self.records.push(record.clone());
         record
     }
+}
+
+fn scope_session_from_control(
+    control: &serde_json::Value,
+    expected_operation: ScopeSessionOperation,
+) -> Result<ScopeSessionCommand, ScopeError> {
+    let value = control
+        .get("scope_command")
+        .cloned()
+        .ok_or(ScopeError::NotBound)?;
+    let scope = ScopeSessionCommand::parse(&value).map_err(|_| ScopeError::InvalidBridgeControl)?;
+    if scope.operation != expected_operation {
+        return Err(ScopeError::InvalidBridgeControl);
+    }
+    Ok(scope)
+}
+
+pub fn bind_scope_via_bridge(
+    control: &serde_json::Value,
+    registry: &mut ScopeRegistry,
+) -> Result<ScopeRecord, ScopeError> {
+    let scope = scope_session_from_control(control, ScopeSessionOperation::Bind)?;
+    registry.bind(
+        ContinuationKey::new(
+            scope.entry_protocol.as_str(),
+            scope.continuation_owner.as_str(),
+            scope.port,
+            &scope.session_scope,
+            &scope.conversation_scope,
+        ),
+        &scope.request_id,
+        Some(&scope.full_input_hash),
+    )
+}
+
+pub fn release_scope_via_bridge(
+    control: &serde_json::Value,
+    registry: &mut ScopeRegistry,
+) -> Result<ScopeRecord, ScopeError> {
+    let scope = scope_session_from_control(control, ScopeSessionOperation::Release)?;
+    registry.release(
+        &ContinuationKey::new(
+            scope.entry_protocol.as_str(),
+            scope.continuation_owner.as_str(),
+            scope.port,
+            &scope.session_scope,
+            &scope.conversation_scope,
+        ),
+        &scope.request_id,
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -451,10 +763,7 @@ impl PayloadCycleRegistry {
         Ok(cycle)
     }
 
-    pub fn close_success(
-        &mut self,
-        request_id: &str,
-    ) -> Result<&PayloadCycle, PayloadCycleError> {
+    pub fn close_success(&mut self, request_id: &str) -> Result<&PayloadCycle, PayloadCycleError> {
         let cycle = self
             .cycles
             .get_mut(request_id)
@@ -494,8 +803,10 @@ pub struct DataView {
     pub provider_semantic: Option<String>,
     pub provider_wire: Option<String>,
     pub provider_raw: Option<String>,
+    pub provider_frame_payload: Option<String>,
     pub parsed_response: Option<String>,
     pub client_semantic: Option<String>,
+    pub client_sse_frame: Option<String>,
     pub client_frame: Option<String>,
 }
 
@@ -632,40 +943,10 @@ impl ExecutionContext {
     }
 }
 
-/// Reserved control markers that must never appear in provider/client wire.
-const RESERVED_CONTROL_MARKERS: &[&str] = &[
-    "continuation_scope",
-    "continuation_owner",
-    "execution_mode",
-    "relay_operator",
-    "continuation_restored",
-    "route_facts",
-    "route_exit",
-    "plan_hash",
-    "governance_applied",
-];
-
-/// Plane isolation check: provider wire / client frame must never carry
-/// control-state fields.
+/// Plane isolation is structural: data and control are disjoint typed views.
+/// Payload field names never reconstruct or identify runtime control state.
 pub fn assert_no_control_leak(ctx: &ExecutionContext) -> Result<(), RuntimeFault> {
-    for marker in RESERVED_CONTROL_MARKERS {
-        if let Some(wire) = &ctx.data.provider_wire {
-            if wire.contains(marker) {
-                return Err(RuntimeFault::new(
-                    "control_leak",
-                    format!("provider wire carries control marker {marker}"),
-                ));
-            }
-        }
-        if let Some(frame) = &ctx.data.client_frame {
-            if frame.contains(marker) {
-                return Err(RuntimeFault::new(
-                    "control_leak",
-                    format!("client frame carries control marker {marker}"),
-                ));
-            }
-        }
-    }
+    let _ = (&ctx.data, &ctx.control);
     Ok(())
 }
 
@@ -845,27 +1126,30 @@ impl NodePlugin for ContinuationRestore {
             ctx.session_scope(),
             ctx.conversation_scope(),
         );
-        let full_input = ctx
-            .data
-            .normalized_request
-            .as_deref()
-            .ok_or_else(|| RuntimeFault::new("full_input_missing", "continuation restore requires full input"))?;
+        let full_input = ctx.data.normalized_request.as_deref().ok_or_else(|| {
+            RuntimeFault::new(
+                "full_input_missing",
+                "continuation restore requires full input",
+            )
+        })?;
+        let full_input_hash = sha256_control_digest(full_input);
         if registries.scope.is_bound(&key) {
             registries
                 .scope
-                .restore(&key, ctx.request_id(), Some(&format!("sha256:{full_input}")))
+                .restore(&key, ctx.request_id(), Some(&full_input_hash))
                 .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))?;
             ctx.control.continuation_restored = true;
-        } else if registries
-            .scope
-            .session_trio_bound(ctx.port(), ctx.session_scope(), ctx.conversation_scope())
-        {
+        } else if registries.scope.session_trio_bound(
+            ctx.port(),
+            ctx.session_scope(),
+            ctx.conversation_scope(),
+        ) {
             // A continuation exists for this session trio but the requested
             // three keys do not match: fail fast with the exact isolation
             // error instead of silently starting a fresh turn.
             registries
                 .scope
-                .restore(&key, ctx.request_id(), Some(&format!("sha256:{full_input}")))
+                .restore(&key, ctx.request_id(), Some(&full_input_hash))
                 .map_err(|error| RuntimeFault::new("continuation_restore", error.to_string()))?;
             ctx.control.continuation_restored = true;
         }
@@ -938,7 +1222,7 @@ impl NodePlugin for SemanticProjection {
         let normalized = ctx.data.normalized_request.as_deref().ok_or_else(|| {
             RuntimeFault::new("semantic_projection", "normalized request missing")
         })?;
-        let model = ctx.information.model.as_deref().unwrap_or("mock");
+        let model = ctx.information.model.as_deref().unwrap_or("unselected");
         ctx.data.provider_semantic = Some(format!("semantic:{model}:{normalized}"));
         Ok(())
     }
@@ -990,10 +1274,10 @@ impl NodePlugin for OutputValidate {
     }
 }
 
-struct RawParse;
-impl NodePlugin for RawParse {
+struct FrameParse;
+impl NodePlugin for FrameParse {
     fn plugin_id(&self) -> &'static str {
-        "raw_parse"
+        "frame_parse"
     }
     fn kind(&self) -> PluginKind {
         PluginKind::Operator
@@ -1008,12 +1292,59 @@ impl NodePlugin for RawParse {
             .provider_raw
             .as_deref()
             .ok_or_else(|| RuntimeFault::new("raw_parse", "provider raw missing"))?;
-        if !raw.trim_start().starts_with('{') {
+        let payload = if raw.lines().any(|line| line.starts_with("data:")) {
+            raw.lines()
+                .find_map(|line| line.strip_prefix("data:"))
+                .map(str::trim_start)
+                .filter(|data| !data.is_empty() && *data != "[DONE]")
+                .ok_or_else(|| {
+                    RuntimeFault::new("frame_parse", "provider SSE frame has no JSON data payload")
+                })?
+        } else {
+            raw
+        };
+        ctx.data.provider_frame_payload = Some(payload.to_string());
+        Ok(())
+    }
+}
+
+struct JsonParse;
+impl NodePlugin for JsonParse {
+    fn plugin_id(&self) -> &'static str {
+        "json_parse"
+    }
+    fn kind(&self) -> PluginKind {
+        PluginKind::Operator
+    }
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
+        let payload = ctx
+            .data
+            .provider_frame_payload
+            .as_deref()
+            .ok_or_else(|| RuntimeFault::new("json_parse", "provider frame payload missing"))?;
+        let parsed: serde_json::Value = serde_json::from_str(payload).map_err(|error| {
+            RuntimeFault::new("json_parse", format!("malformed provider JSON: {error}"))
+        })?;
+        if !parsed.is_object() {
             return Err(RuntimeFault::new(
-                "raw_parse",
-                "malformed provider frame (must be a JSON object)",
+                "json_parse",
+                "provider JSON must be an object",
             ));
         }
+        if parsed.get("type").and_then(Value::as_str) == Some("response.failed") {
+            return Err(RuntimeFault::new(
+                "provider_response_failed",
+                "provider emitted response.failed",
+            ));
+        }
+        ctx.data.provider_frame_payload = Some(
+            serde_json::to_string(&parsed)
+                .map_err(|error| RuntimeFault::new("json_parse", error.to_string()))?,
+        );
         Ok(())
     }
 }
@@ -1031,12 +1362,10 @@ impl NodePlugin for ProtocolDecode {
         ctx: &mut ExecutionContext,
         _registries: &mut RuntimeRegistries<'_>,
     ) -> Result<(), RuntimeFault> {
-        let raw = ctx
-            .data
-            .provider_raw
-            .as_deref()
-            .ok_or_else(|| RuntimeFault::new("protocol_decode", "provider raw missing"))?;
-        ctx.data.parsed_response = Some(format!("parsed:{raw}"));
+        let payload = ctx.data.provider_frame_payload.as_deref().ok_or_else(|| {
+            RuntimeFault::new("protocol_decode", "provider frame payload missing")
+        })?;
+        ctx.data.parsed_response = Some(payload.to_string());
         Ok(())
     }
 }
@@ -1079,7 +1408,41 @@ impl NodePlugin for ToolHarvest {
             .parsed_response
             .as_deref()
             .ok_or_else(|| RuntimeFault::new("tool_harvest", "parsed response missing"))?;
-        let tools = parsed.matches("\"tool_calls\"").count();
+        let value: serde_json::Value = serde_json::from_str(parsed).map_err(|error| {
+            RuntimeFault::new(
+                "tool_harvest",
+                format!("parsed response is invalid JSON: {error}"),
+            )
+        })?;
+        let tool_calls = value
+            .get("output")
+            .and_then(serde_json::Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter(|item| {
+                        matches!(
+                            item.get("type").and_then(serde_json::Value::as_str),
+                            Some("function_call" | "custom_tool_call" | "web_search_call")
+                        )
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
+        let chat_tool_calls = value
+            .get("choices")
+            .and_then(serde_json::Value::as_array)
+            .map(|choices| {
+                choices
+                    .iter()
+                    .filter_map(|choice| choice.get("message"))
+                    .filter_map(|message| message.get("tool_calls"))
+                    .filter_map(serde_json::Value::as_array)
+                    .map(Vec::len)
+                    .sum::<usize>()
+            })
+            .unwrap_or(0);
+        let tools = tool_calls + chat_tool_calls;
         if tools > 0 {
             ctx.diagnostic
                 .trace
@@ -1114,6 +1477,26 @@ impl NodePlugin for ContinuationCommit {
             return Ok(());
         }
         let protocol = ctx.information.protocol.as_deref().unwrap_or("unknown");
+        let entry_protocol = match protocol {
+            "responses" => ScopeEntryProtocol::Responses,
+            "chat" | "openai_chat" => ScopeEntryProtocol::Chat,
+            other => {
+                return Err(RuntimeFault::new(
+                    "continuation_commit",
+                    format!("unsupported continuation entry protocol {other}"),
+                ))
+            }
+        };
+        let continuation_owner = match owner {
+            "direct" => ScopeContinuationOwner::Direct,
+            "relay" => ScopeContinuationOwner::Relay,
+            other => {
+                return Err(RuntimeFault::new(
+                    "continuation_commit",
+                    format!("unsupported continuation owner {other}"),
+                ))
+            }
+        };
         let key = ContinuationKey::new(
             protocol,
             owner,
@@ -1125,17 +1508,222 @@ impl NodePlugin for ContinuationCommit {
             .data
             .parsed_response
             .as_deref()
-            .map(|payload| format!("sha256:{payload}"))
+            .map(sha256_control_digest)
             .ok_or_else(|| RuntimeFault::new("continuation_commit", "response payload missing"))?;
-        registries
-            .scope
-            .bind(key, ctx.request_id(), Some(&payload_hash))
+        let control_key = format!("continuation.commit:{}", ctx.request_id());
+        ctx.control
+            .metadata
+            .register(ControlSignal::new(
+                ControlSignalKind::Continuation,
+                &control_key,
+                &payload_hash,
+                ctx.scope().clone(),
+                Some(&payload_hash),
+            ))
+            .map_err(|error| RuntimeFault::new("continuation_metadata", format!("{error:?}")))?;
+        ctx.control
+            .metadata
+            .consume(&control_key)
+            .map_err(|error| RuntimeFault::new("continuation_metadata", format!("{error:?}")))?;
+        if registries.scope.is_restored(&key) {
+            let release = ScopeSessionCommand {
+                entry_protocol,
+                continuation_owner,
+                pipeline_id: ctx.binding().plan_hash.clone(),
+                port: ctx.port(),
+                session_scope: ctx.session_scope().to_string(),
+                conversation_scope: ctx.conversation_scope().to_string(),
+                request_id: ctx.request_id().to_string(),
+                full_input_hash: payload_hash.clone(),
+                operation: ScopeSessionOperation::Release,
+                sequence: 1,
+            };
+            let control = serde_json::json!({"scope_command": release});
+            release_scope_via_bridge(&control, registries.scope)
+                .map_err(|error| RuntimeFault::new("continuation_release", error.to_string()))?;
+        }
+        let bind = ScopeSessionCommand {
+            entry_protocol,
+            continuation_owner,
+            pipeline_id: ctx.binding().plan_hash.clone(),
+            port: ctx.port(),
+            session_scope: ctx.session_scope().to_string(),
+            conversation_scope: ctx.conversation_scope().to_string(),
+            request_id: ctx.request_id().to_string(),
+            full_input_hash: payload_hash,
+            operation: ScopeSessionOperation::Bind,
+            sequence: 2,
+        };
+        let control = serde_json::json!({"scope_command": bind});
+        bind_scope_via_bridge(&control, registries.scope)
             .map_err(|error| RuntimeFault::new("continuation_commit", error.to_string()))?;
+        ctx.control
+            .metadata
+            .release(&control_key)
+            .map_err(|error| RuntimeFault::new("continuation_metadata", format!("{error:?}")))?;
         Ok(())
     }
 }
 
 struct ClientSemanticProjection;
+
+fn responses_text(value: &Value) -> String {
+    value
+        .get("output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
+        .filter_map(|item| item.get("content").and_then(Value::as_array))
+        .flatten()
+        .filter(|part| part.get("type").and_then(Value::as_str) == Some("output_text"))
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn responses_tool_calls(value: &Value) -> Vec<Value> {
+    value
+        .get("output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
+        .map(|item| {
+            serde_json::json!({
+                "id": item.get("call_id").or_else(|| item.get("id")).cloned().unwrap_or(Value::Null),
+                "type": "function",
+                "function": {
+                    "name": item.get("name").cloned().unwrap_or(Value::Null),
+                    "arguments": item.get("arguments").cloned().unwrap_or_else(|| Value::String(String::new()))
+                }
+            })
+        })
+        .collect()
+}
+
+fn project_responses_usage_to_chat(value: &Value) -> Value {
+    let Some(usage) = value.get("usage").and_then(Value::as_object) else {
+        return Value::Null;
+    };
+    let mut projected = serde_json::Map::new();
+    for (source, target) in [
+        ("input_tokens", "prompt_tokens"),
+        ("output_tokens", "completion_tokens"),
+        ("total_tokens", "total_tokens"),
+        ("input_tokens_details", "prompt_tokens_details"),
+        ("output_tokens_details", "completion_tokens_details"),
+    ] {
+        if let Some(field) = usage.get(source) {
+            projected.insert(target.to_string(), field.clone());
+        }
+    }
+    Value::Object(projected)
+}
+
+fn project_responses_json_to_chat(value: &Value) -> Value {
+    let tool_calls = responses_tool_calls(value);
+    let text = responses_text(value);
+    let mut message = serde_json::json!({
+        "role": "assistant",
+        "content": if text.is_empty() { Value::Null } else { Value::String(text) }
+    });
+    if !tool_calls.is_empty() {
+        message
+            .as_object_mut()
+            .expect("chat message is an object")
+            .insert("tool_calls".to_string(), Value::Array(tool_calls.clone()));
+    }
+    let usage = project_responses_usage_to_chat(value);
+    serde_json::json!({
+        "id": value.get("id").cloned().unwrap_or_else(|| Value::String(String::new())),
+        "object": "chat.completion",
+        "created": value.get("created_at").cloned().unwrap_or_else(|| Value::Number(0.into())),
+        "model": value.get("model").cloned().unwrap_or_else(|| Value::String(String::new())),
+        "choices": [{
+            "index": 0,
+            "message": message,
+            "finish_reason": if tool_calls.is_empty() { "stop" } else { "tool_calls" }
+        }],
+        "usage": usage
+    })
+}
+
+fn project_responses_event_to_chat(value: &Value) -> Value {
+    let event_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let response = value.get("response").unwrap_or(value);
+    let mut delta = serde_json::Map::new();
+    let mut finish_reason = Value::Null;
+    match event_type {
+        "response.created" | "response.in_progress" => {
+            delta.insert("role".to_string(), Value::String("assistant".to_string()));
+            delta.insert("content".to_string(), Value::String(String::new()));
+        }
+        "response.output_text.delta" => {
+            delta.insert(
+                "content".to_string(),
+                value
+                    .get("delta")
+                    .cloned()
+                    .unwrap_or_else(|| Value::String(String::new())),
+            );
+        }
+        "response.output_item.added"
+            if value
+                .get("item")
+                .and_then(|item| item.get("type"))
+                .and_then(Value::as_str)
+                == Some("function_call") =>
+        {
+            let item = &value["item"];
+            delta.insert(
+                "tool_calls".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "index": value.get("output_index").cloned().unwrap_or_else(|| Value::Number(0.into())),
+                    "id": item.get("call_id").or_else(|| item.get("id")).cloned().unwrap_or(Value::Null),
+                    "type": "function",
+                    "function": {
+                        "name": item.get("name").cloned().unwrap_or(Value::Null),
+                        "arguments": item.get("arguments").cloned().unwrap_or_else(|| Value::String(String::new()))
+                    }
+                })]),
+            );
+        }
+        "response.function_call_arguments.delta" => {
+            delta.insert(
+                "tool_calls".to_string(),
+                Value::Array(vec![serde_json::json!({
+                    "index": value.get("output_index").cloned().unwrap_or_else(|| Value::Number(0.into())),
+                    "function": {
+                        "arguments": value.get("delta").cloned().unwrap_or_else(|| Value::String(String::new()))
+                    }
+                })]),
+            );
+        }
+        "response.completed" => {
+            finish_reason = Value::String(
+                if responses_tool_calls(response).is_empty() {
+                    "stop"
+                } else {
+                    "tool_calls"
+                }
+                .to_string(),
+            )
+        }
+        _ => {}
+    }
+    serde_json::json!({
+        "id": response.get("id").cloned().unwrap_or_else(|| Value::String(String::new())),
+        "object": "chat.completion.chunk",
+        "created": response.get("created_at").cloned().unwrap_or_else(|| Value::Number(0.into())),
+        "model": response.get("model").cloned().unwrap_or_else(|| Value::String(String::new())),
+        "choices": [{"index": 0, "delta": Value::Object(delta), "finish_reason": finish_reason}]
+    })
+}
+
 impl NodePlugin for ClientSemanticProjection {
     fn plugin_id(&self) -> &'static str {
         "client_semantic_projection"
@@ -1151,7 +1739,85 @@ impl NodePlugin for ClientSemanticProjection {
         let parsed = ctx.data.parsed_response.as_deref().ok_or_else(|| {
             RuntimeFault::new("client_semantic_projection", "parsed response missing")
         })?;
-        ctx.data.client_semantic = Some(format!("client:{parsed}"));
+        let protocol = ctx.information.protocol.as_deref().unwrap_or("responses");
+        let semantic = match protocol {
+            "responses" => parsed.to_string(),
+            "chat" | "openai_chat" => {
+                let value: Value = serde_json::from_str(parsed).map_err(|error| {
+                    RuntimeFault::new("client_semantic_projection", error.to_string())
+                })?;
+                let projected = if value.get("type").is_some() {
+                    project_responses_event_to_chat(&value)
+                } else {
+                    project_responses_json_to_chat(&value)
+                };
+                serde_json::to_string(&projected).map_err(|error| {
+                    RuntimeFault::new("client_semantic_projection", error.to_string())
+                })?
+            }
+            other => {
+                return Err(RuntimeFault::new(
+                    "client_protocol_unsupported",
+                    format!("unsupported client response protocol {other}"),
+                ))
+            }
+        };
+        ctx.data.client_semantic = Some(semantic);
+        Ok(())
+    }
+}
+
+struct SseFrame;
+impl NodePlugin for SseFrame {
+    fn plugin_id(&self) -> &'static str {
+        "sse_frame"
+    }
+    fn kind(&self) -> PluginKind {
+        PluginKind::Operator
+    }
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext,
+        _registries: &mut RuntimeRegistries<'_>,
+    ) -> Result<(), RuntimeFault> {
+        let semantic =
+            ctx.data.client_semantic.as_deref().ok_or_else(|| {
+                RuntimeFault::new("sse_frame", "client semantic response missing")
+            })?;
+        let provider_raw = ctx
+            .data
+            .provider_raw
+            .as_deref()
+            .ok_or_else(|| RuntimeFault::new("sse_frame", "provider raw missing"))?;
+        let is_sse = provider_raw
+            .lines()
+            .any(|line| line.strip_suffix('\r').unwrap_or(line).starts_with("data:"));
+        if !is_sse {
+            ctx.data.client_sse_frame = Some(semantic.to_string());
+            return Ok(());
+        }
+        let protocol = ctx.information.protocol.as_deref().unwrap_or("responses");
+        let mut frame = String::new();
+        if protocol == "responses" {
+            if let Some(event) = provider_raw.lines().find_map(|line| {
+                line.strip_suffix('\r')
+                    .unwrap_or(line)
+                    .strip_prefix("event:")
+                    .map(str::trim)
+                    .filter(|event| !event.is_empty())
+            }) {
+                frame.push_str("event: ");
+                frame.push_str(event);
+                frame.push('\n');
+            }
+        }
+        frame.push_str("data: ");
+        frame.push_str(semantic);
+        frame.push_str("\n\n");
+        if protocol == "chat" && ctx.control.continuation_owner.as_deref() == Some("relay") {
+            frame.push_str("data: [DONE]\n\n");
+        }
+        ctx.data.client_sse_frame = Some(frame);
         Ok(())
     }
 }
@@ -1171,10 +1837,10 @@ impl NodePlugin for FrameBuild {
     ) -> Result<(), RuntimeFault> {
         let semantic = ctx
             .data
-            .client_semantic
+            .client_sse_frame
             .as_deref()
-            .ok_or_else(|| RuntimeFault::new("frame_build", "client semantic missing"))?;
-        ctx.data.client_frame = Some(format!("frame:{semantic}"));
+            .ok_or_else(|| RuntimeFault::new("frame_build", "client SSE frame missing"))?;
+        ctx.data.client_frame = Some(semantic.to_string());
         assert_no_control_leak(ctx)
     }
 }
@@ -1192,12 +1858,14 @@ pub static PLUGIN_REGISTRY: &[&dyn NodePlugin] = &[
     &SemanticProjection,
     &WireBuild,
     &OutputValidate,
-    &RawParse,
+    &FrameParse,
+    &JsonParse,
     &ProtocolDecode,
     &ResponseGovernance,
     &ToolHarvest,
     &ContinuationCommit,
     &ClientSemanticProjection,
+    &SseFrame,
     &FrameBuild,
 ];
 
@@ -1419,10 +2087,17 @@ impl SkeletonRuntime {
         conversation_scope: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain("request", request_id, port, session_scope, conversation_scope, |ctx| {
-            ctx.data.raw_entry = Some(raw_entry.to_string());
-            ctx.information.model = Some("mock-provider".to_string());
-        });
+        let result = self.run_chain(
+            "request",
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            |ctx| {
+                ctx.data.raw_entry = Some(raw_entry.to_string());
+                ctx.information.model = Some("unselected".to_string());
+            },
+        );
         self.release(request_id);
         result
     }
@@ -1451,19 +2126,27 @@ impl SkeletonRuntime {
         result
     }
 
-    /// Fixed response slice with a mock provider frame:
+    /// Fixed response slice with a provider frame:
     /// provider boundary -> Hub governance -> server projection.
-    pub fn execute_mock_response(
+    pub fn execute_provider_response(
         &self,
         provider_raw: &str,
         request_id: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
-        self.execute_mock_response_scoped(provider_raw, request_id, 0, "", "", "chat", "none")
+        self.execute_provider_response_scoped(
+            provider_raw,
+            request_id,
+            0,
+            "",
+            "",
+            "responses",
+            "none",
+        )
     }
 
     /// Response slice with continuation facts so commit can bind the three-key
     /// save (entry protocol + owner + session/conversation(+port/group)).
-    pub fn execute_mock_response_scoped(
+    pub fn execute_provider_response_scoped(
         &self,
         provider_raw: &str,
         request_id: &str,
@@ -1474,16 +2157,23 @@ impl SkeletonRuntime {
         continuation_owner: &str,
     ) -> Result<ExecutionReport, RuntimeFault> {
         self.claim(request_id)?;
-        let result = self.run_chain("response", request_id, port, session_scope, conversation_scope, |ctx| {
-            ctx.data.provider_raw = Some(provider_raw.to_string());
-            ctx.information.protocol = Some(entry_protocol.to_string());
-            ctx.control.continuation_owner = Some(continuation_owner.to_string());
-            ctx.control.execution_mode = Some(if continuation_owner == "relay" {
-                "relay".to_string()
-            } else {
-                "direct".to_string()
-            });
-        });
+        let result = self.run_chain(
+            "response",
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            |ctx| {
+                ctx.data.provider_raw = Some(provider_raw.to_string());
+                ctx.information.protocol = Some(entry_protocol.to_string());
+                ctx.control.continuation_owner = Some(continuation_owner.to_string());
+                ctx.control.execution_mode = Some(if continuation_owner == "relay" {
+                    "relay".to_string()
+                } else {
+                    "direct".to_string()
+                });
+            },
+        );
         self.release(request_id);
         result
     }
@@ -1736,6 +2426,7 @@ pub const MOCK_TRANSPORT_FAULT_CODES: &[&str] = &[
     "duplicate_request_id",
     "cross_request_reuse",
     "raw_parse",
+    "json_parse",
     "unknown_mock_transport_fault_code",
 ];
 
@@ -1900,7 +2591,7 @@ pub fn execute_mock_transport_slice(
     // error projection below uses the exact scope the request chain bound
     // for this same request id.
     let request_scope = request_report.scope.clone();
-    let response_result = runtime.execute_mock_response_scoped(
+    let response_result = runtime.execute_provider_response_scoped(
         mock_provider_frame,
         &identity.request_id,
         port,
@@ -1989,5 +2680,46 @@ fn error_chain_client_projection_message(
             "unknown_mock_transport_fault_code",
             format!("error-chain projection failed: {error:?}"),
         )),
+    }
+}
+
+#[cfg(test)]
+mod admission_sse_tests {
+    use super::{parse_responses_sse_frame, validate_responses_sse_frame};
+
+    #[test]
+    fn completed_frame_is_terminal() {
+        let frame = "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n";
+        assert!(validate_responses_sse_frame(frame.as_bytes()).expect("completed frame is valid"));
+    }
+
+    #[test]
+    fn failed_frame_is_terminal() {
+        let frame = "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"upstream\"}}}\n\n";
+        assert!(validate_responses_sse_frame(frame.as_bytes()).expect("failed frame is valid"));
+    }
+
+    #[test]
+    fn intermediate_frame_is_not_terminal() {
+        let frame = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n";
+        assert!(!validate_responses_sse_frame(frame.as_bytes()).expect("delta frame is valid"));
+        let parsed = parse_responses_sse_frame(frame.as_bytes()).expect("parsed frame");
+        assert_eq!(parsed.events[0]["delta"], "hi");
+    }
+
+    #[test]
+    fn malformed_data_fails_fast() {
+        let frame = "data: {not-json}\n\n";
+        let error =
+            validate_responses_sse_frame(frame.as_bytes()).expect_err("malformed JSON must fail");
+        assert_eq!(error.code, "provider_sse_malformed");
+    }
+
+    #[test]
+    fn frame_without_data_fails_fast() {
+        let frame = "event: ping\n\n";
+        let error = validate_responses_sse_frame(frame.as_bytes())
+            .expect_err("frame without data must fail");
+        assert_eq!(error.code, "provider_sse_missing_data");
     }
 }

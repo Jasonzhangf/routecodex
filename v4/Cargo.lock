@@ -256,6 +256,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v4-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "routecodex-v4-cli-plugin"
 version = "0.1.0"
 dependencies = [
@@ -272,6 +279,16 @@ dependencies = [
  "routecodex-v4-plugin-plan",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "routecodex-v4-lifecycle"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -337,6 +354,15 @@ dependencies = [
  "routecodex-v4-plugin-plan",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "routecodex-v4-servertool"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

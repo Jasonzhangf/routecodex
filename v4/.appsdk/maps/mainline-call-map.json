@@ -9,7 +9,20 @@
     "compile",
     "active",
     "protected",
-    "verify"
+    "verify",
+    "V4RuntimeAdmission00CompiledManifest",
+    "V4ServerReqInbound01ClientRaw",
+    "V4HubReqInbound02Standardized",
+    "V4HubReqChatProcess03Governed",
+    "V4Router04SelectedTarget",
+    "V4HubReqOutbound05ProviderSemantic",
+    "V4ProviderReqOutbound06WirePayload",
+    "V4ProviderReqOutbound07TransportRequest",
+    "V4ProviderRespInbound01Raw",
+    "V4HubRespInbound02Parsed",
+    "V4HubRespChatProcess03Governed",
+    "V4HubRespOutbound04ClientSemantic",
+    "V4ServerRespOutbound05ClientFrame"
   ],
   "edges": [
     {
@@ -900,6 +913,112 @@
         "standard_node_allowed_writes"
       ],
       "path": "crates/routecodex-v4-cli-plugin/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-server",
+      "owner": "routecodex-v4-runtime-bin::spawn_servers",
+      "edge_type": "configured_listener_dispatch",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-base-node",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-error",
+      "owner": "routecodex-v4-build-link",
+      "edge_type": "active_artifact_link",
+      "path": "crates/routecodex-v4-build-link",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-runtime",
+      "owner": "routecodex-v4-runtime-bin::PipelineHandler",
+      "edge_type": "typed_pipeline_execution",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-router",
+      "owner": "routecodex-v4-runtime-bin::handle_responses",
+      "edge_type": "typed_target_selection",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-provider",
+      "owner": "routecodex-v4-runtime-bin::handle_responses",
+      "edge_type": "provider_transport",
+      "caller_feature_id": "v4.runtime.independent_admission",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-cli",
+      "owner": "routecodex-v4-cli::V4CommandIntent",
+      "edge_type": "typed_command_parse",
+      "caller_feature_id": "v4.runtime.binary_cold_start",
+      "callee_feature_id": "v4.cli.command_dispatch",
+      "path": "crates/routecodex-v4-cli/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-config",
+      "owner": "routecodex-v4-config::compile_runtime_config",
+      "edge_type": "config_manifest_compile",
+      "caller_feature_id": "v4.runtime.binary_cold_start",
+      "callee_feature_id": "v4.config.runtime_manifest",
+      "path": "crates/routecodex-v4-config/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-lifecycle",
+      "owner": "routecodex-v4-lifecycle::ManagedControlPlane",
+      "edge_type": "managed_lifecycle_dispatch",
+      "caller_feature_id": "v4.runtime.binary_cold_start",
+      "callee_feature_id": "v4.lifecycle.managed_instance",
+      "path": "crates/routecodex-v4-lifecycle/src/lib.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-server",
+      "owner": "routecodex-v4-runtime-bin::run_managed_child",
+      "edge_type": "graceful_listener_control",
+      "caller_feature_id": "v4.lifecycle.managed_instance",
+      "callee_feature_id": "v4.runtime.independent_admission",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
+      "status": "active"
+    },
+    {
+      "from": "routecodex-v4-runtime-bin",
+      "to": "routecodex-v4-servertool",
+      "owner": "routecodex-v4-runtime-bin::run_servertool",
+      "edge_type": "typed_servertool_cli_projection",
+      "caller_feature_id": "v4.runtime.binary_cold_start",
+      "callee_feature_id": "v4.servertool.cli_projection",
+      "path": "crates/routecodex-v4-runtime-bin/src/main.rs",
       "status": "active"
     }
   ]

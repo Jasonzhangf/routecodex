@@ -9,5 +9,7 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
+routecodex-v4-config = { path = "../routecodex-v4-config" }
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

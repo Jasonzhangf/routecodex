@@ -33,7 +33,10 @@
         "v4_build_verify_positive",
         "v4_build_verify_red",
         "v4_build_verify_ci",
-        "v4_isolation_positive"
+        "v4_isolation_positive",
+        "v4_parity_gate_real_runtime_admission",
+        "v4_parity_gate_real_runtime_admission_red",
+        "v4_real_runtime_admission_red"
       ]
     },
     {
@@ -248,6 +251,7 @@
       ],
       "verification_gates": [
         "v4_standard_plugins_l2_regression",
+        "v4_response_inbound_outbound_l2",
         "v4_standard_plugins_test_consumer",
         "v4_parity_gate_standard_plugins",
         "v4_parity_gate_standard_plugins_red"
@@ -513,6 +517,89 @@
         "v4_node_container_test_consumer",
         "v4_parity_gate_node_container",
         "v4_parity_gate_node_container_red"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-runtime-bin",
+      "status": "active",
+      "owner": "routecodex-v4-runtime-bin",
+      "owned_paths": [
+        "crates/routecodex-v4-runtime-bin/**"
+      ],
+      "forbidden_paths": [
+        "active/lib/**",
+        "protected/**",
+        "generated/**",
+        "v3/**",
+        "~/.rcc/**",
+        "~/.local/bin/**"
+      ],
+      "verification_gates": [
+        "v4_real_runtime_admission_red",
+        "v4_real_runtime_compiled_manifest",
+        "v4_real_runtime_v3_isolation",
+        "v4_runtime_bin_l2_regression",
+        "v4_infrastructure_contract"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-cli",
+      "status": "active",
+      "owner": "routecodex-v4-cli",
+      "owned_paths": [
+        "crates/routecodex-v4-cli/**"
+      ],
+      "forbidden_paths": [
+        "crates/routecodex-v4-config/**",
+        "crates/routecodex-v4-lifecycle/**",
+        "crates/routecodex-v4-server/**",
+        "crates/routecodex-v4-provider/**",
+        "v3/**",
+        "~/.rcc/**"
+      ],
+      "verification_gates": [
+        "v4_cli_l2_regression",
+        "v4_infrastructure_contract",
+        "v4_infrastructure_contract_red"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-lifecycle",
+      "status": "active",
+      "owner": "routecodex-v4-lifecycle",
+      "owned_paths": [
+        "crates/routecodex-v4-lifecycle/**"
+      ],
+      "forbidden_paths": [
+        "crates/routecodex-v4-cli/**",
+        "crates/routecodex-v4-config/**",
+        "crates/routecodex-v4-server/**",
+        "crates/routecodex-v4-provider/**",
+        "v3/**",
+        "~/.rcc/config.v3.toml"
+      ],
+      "verification_gates": [
+        "v4_lifecycle_l2_regression",
+        "v4_infrastructure_contract",
+        "v4_infrastructure_contract_red"
+      ]
+    },
+    {
+      "module_id": "routecodex-v4-servertool",
+      "status": "active",
+      "owner": "routecodex-v4-servertool",
+      "owned_paths": [
+        "crates/routecodex-v4-servertool/**"
+      ],
+      "forbidden_paths": [
+        "crates/routecodex-v4-cli/**",
+        "crates/routecodex-v4-runtime-bin/**",
+        "crates/routecodex-v4-provider/**",
+        "v3/**"
+      ],
+      "verification_gates": [
+        "v4_servertool_l2_regression",
+        "v4_infrastructure_contract"
       ]
     }
   ]

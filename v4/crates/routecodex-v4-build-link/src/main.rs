@@ -7,6 +7,8 @@
 //!   verify-index    re-derive and compare the on-disk Active index
 //!   build-consumer  build a consumer lib via resolver-emitted rustc flags
 //!   test-consumer   build and run a consumer regression via rustc flags
+//!   build-binary    build a binary with Active and explicit source artifacts
+//!   test-binary     build and run binary unit tests through the same link surface
 
 use routecodex_v4_build_link::resolver::assert_outside_active;
 use routecodex_v4_build_link::resolver::{
@@ -122,9 +124,13 @@ fn resolve_dependencies(
     Ok(resolutions)
 }
 
-fn run_rustc(args: &[String]) -> Result<(), ActiveLinkError> {
-    let output = Command::new("rustc")
-        .args(args)
+fn run_rustc(args: &[String], package_version: Option<&str>) -> Result<(), ActiveLinkError> {
+    let mut command = Command::new("rustc");
+    command.args(args);
+    if let Some(package_version) = package_version {
+        command.env("CARGO_PKG_VERSION", package_version);
+    }
+    let output = command
         .output()
         .map_err(|e| ActiveLinkError::LinkFailed(format!("spawn rustc: {e}")))?;
     if !output.status.success() {
@@ -135,6 +141,28 @@ fn run_rustc(args: &[String]) -> Result<(), ActiveLinkError> {
         )));
     }
     Ok(())
+}
+
+fn consumer_package_version(root: &Path, consumer: &str) -> Result<String, ActiveLinkError> {
+    let manifest = root.join("crates").join(consumer).join("Cargo.toml");
+    let text = fs::read_to_string(&manifest).map_err(|error| {
+        ActiveLinkError::ManifestInvalid(format!("read {}: {error}", manifest.display()))
+    })?;
+    let value: toml::Value = toml::from_str(&text).map_err(|error| {
+        ActiveLinkError::ManifestInvalid(format!("parse {}: {error}", manifest.display()))
+    })?;
+    value
+        .get("package")
+        .and_then(|package| package.get("version"))
+        .and_then(toml::Value::as_str)
+        .filter(|version| !version.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            ActiveLinkError::ManifestInvalid(format!(
+                "{} missing non-empty package.version",
+                manifest.display()
+            ))
+        })
 }
 
 /// `-L dependency=<dir>` search arguments for every rlib in the closure.
@@ -320,6 +348,7 @@ fn build_consumer(
     out_override: Option<&Path>,
     external: &ExternalLink,
     source_args: &[String],
+    rlib_deps: &[(String, PathBuf)],
 ) -> Result<PathBuf, ActiveLinkError> {
     let dep_resolutions = resolve_dependencies(root, deps, target)?;
     let src = root.join("crates").join(consumer).join("src/lib.rs");
@@ -354,13 +383,123 @@ fn build_consumer(
     ];
     rustc_args.extend(extern_args(&dep_resolutions));
     rustc_args.extend(dependency_search_args(&dep_resolutions));
+    for (name, path) in rlib_deps {
+        rustc_args.push("--extern".to_string());
+        rustc_args.push(format!("{name}={}", path.display()));
+        if let Some(parent) = path.parent() {
+            rustc_args.push("-L".to_string());
+            rustc_args.push(format!("dependency={}", parent.display()));
+        }
+    }
+    rustc_args.push("-L".to_string());
+    rustc_args.push(format!(
+        "dependency={}",
+        root.join("target/release/deps").display()
+    ));
     rustc_args.extend(external.extern_args.iter().cloned());
     rustc_args.extend(external.search_args.iter().cloned());
     rustc_args.extend(source_args.iter().cloned());
     rustc_args.push("-o".to_string());
     rustc_args.push(out.to_str().unwrap_or("").to_string());
-    run_rustc(&rustc_args)?;
+    run_rustc(&rustc_args, None)?;
     Ok(out)
+}
+
+fn parse_rlib_deps(args: &[String]) -> Result<Vec<(String, PathBuf)>, ActiveLinkError> {
+    let mut deps = Vec::new();
+    for (index, arg) in args.iter().enumerate() {
+        if arg != "--rlib-deps" {
+            continue;
+        }
+        let value = args.get(index + 1).ok_or_else(|| {
+            ActiveLinkError::LinkFailed("missing value for --rlib-deps".to_string())
+        })?;
+        for item in value.split(',') {
+            let (name, path) = item.split_once('=').ok_or_else(|| {
+                ActiveLinkError::LinkFailed(format!(
+                    "invalid --rlib-deps entry {item:?}; expected crate=path"
+                ))
+            })?;
+            if name.is_empty() || path.is_empty() {
+                return Err(ActiveLinkError::LinkFailed(
+                    "--rlib-deps crate and path must be non-empty".to_string(),
+                ));
+            }
+            let path = PathBuf::from(path);
+            if !path.is_file() {
+                return Err(ActiveLinkError::LinkFailed(format!(
+                    "--rlib-deps artifact missing: {}",
+                    path.display()
+                )));
+            }
+            deps.push((name.replace('-', "_"), path));
+        }
+    }
+    deps.sort_by(|left, right| left.0.cmp(&right.0));
+    deps.dedup_by(|left, right| left.0 == right.0);
+    Ok(deps)
+}
+
+fn build_binary(
+    root: &Path,
+    consumer: &str,
+    deps: &[String],
+    target: &str,
+    out_override: &Path,
+    external: &ExternalLink,
+    source_args: &[String],
+    rlib_deps: &[(String, PathBuf)],
+    test_mode: bool,
+) -> Result<(), ActiveLinkError> {
+    let dep_resolutions = resolve_dependencies(root, deps, target)?;
+    let package_version = consumer_package_version(root, consumer)?;
+    let src = root.join("crates").join(consumer).join("src/main.rs");
+    if !src.is_file() {
+        return Err(ActiveLinkError::LinkFailed(format!(
+            "binary source {} missing",
+            src.display()
+        )));
+    }
+    assert_outside_active(root, out_override)?;
+    if let Some(parent) = out_override.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            ActiveLinkError::LinkFailed(format!("create {}: {e}", parent.display()))
+        })?;
+    }
+    let mut rustc_args = vec![
+        "--edition".to_string(),
+        "2021".to_string(),
+        "--crate-name".to_string(),
+        crate_name(consumer),
+    ];
+    if test_mode {
+        rustc_args.push("--test".to_string());
+    } else {
+        rustc_args.push("--crate-type".to_string());
+        rustc_args.push("bin".to_string());
+    }
+    rustc_args.push(src.to_string_lossy().into_owned());
+    rustc_args.extend(extern_args(&dep_resolutions));
+    rustc_args.extend(dependency_search_args(&dep_resolutions));
+    for (name, path) in rlib_deps {
+        rustc_args.push("--extern".to_string());
+        rustc_args.push(format!("{name}={}", path.display()));
+        if let Some(parent) = path.parent() {
+            rustc_args.push("-L".to_string());
+            rustc_args.push(format!("dependency={}", parent.display()));
+        }
+    }
+    rustc_args.push("-L".to_string());
+    rustc_args.push(format!(
+        "dependency={}",
+        root.join("target/release/deps").display()
+    ));
+    rustc_args.extend(external.extern_args.iter().cloned());
+    rustc_args.extend(external.search_args.iter().cloned());
+    rustc_args.extend(source_args.iter().cloned());
+    rustc_args.push("-o".to_string());
+    rustc_args.push(out_override.to_string_lossy().into_owned());
+    run_rustc(&rustc_args, Some(&package_version))
 }
 
 fn test_consumer(
@@ -369,11 +508,21 @@ fn test_consumer(
     deps: &[String],
     target: &str,
     source_args: &[String],
+    rlib_deps: &[(String, PathBuf)],
 ) -> Result<(), ActiveLinkError> {
     let dep_resolutions = resolve_dependencies(root, deps, target)?;
     let external_crates = parse_external_deps(&root.join("crates").join(consumer))?;
     let external = build_external_deps(root, &external_crates)?;
-    let consumer_lib = build_consumer(root, consumer, deps, target, None, &external, source_args)?;
+    let consumer_lib = build_consumer(
+        root,
+        consumer,
+        deps,
+        target,
+        None,
+        &external,
+        source_args,
+        rlib_deps,
+    )?;
     let tests_dir = root.join("crates").join(consumer).join("tests");
     let mut test_files = fs::read_dir(&tests_dir)
         .map_err(|e| ActiveLinkError::LinkFailed(format!("read {}: {e}", tests_dir.display())))?
@@ -405,12 +554,20 @@ fn test_consumer(
         ];
         rustc_args.extend(extern_args(&dep_resolutions));
         rustc_args.extend(dependency_search_args(&dep_resolutions));
+        for (name, path) in rlib_deps {
+            rustc_args.push("--extern".to_string());
+            rustc_args.push(format!("{name}={}", path.display()));
+            if let Some(parent) = path.parent() {
+                rustc_args.push("-L".to_string());
+                rustc_args.push(format!("dependency={}", parent.display()));
+            }
+        }
         rustc_args.extend(external.extern_args.iter().cloned());
         rustc_args.extend(external.search_args.iter().cloned());
         rustc_args.extend(source_args.iter().cloned());
         rustc_args.push("-o".to_string());
         rustc_args.push(test_bin.to_str().unwrap_or("").to_string());
-        run_rustc(&rustc_args)?;
+        run_rustc(&rustc_args, None)?;
         let run = Command::new(&test_bin)
             // L2 consumer tests may read cwd-relative contracts (for example
             // routecodex-v4-runtime's skeleton-plan contract default path).
@@ -433,7 +590,7 @@ fn test_consumer(
 
 fn run(args: &[String]) -> Result<(), ActiveLinkError> {
     let Some(command) = args.first() else {
-        eprintln!("usage: routecodex-v4-build-link <resolve|emit-link-flags|gen-index|verify-index|build-consumer|test-consumer> ...");
+        eprintln!("usage: routecodex-v4-build-link <resolve|emit-link-flags|gen-index|verify-index|build-consumer|test-consumer|build-binary|test-binary> ...");
         return Err(ActiveLinkError::IdentityMissing("no subcommand".into()));
     };
     match command.as_str() {
@@ -510,6 +667,7 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
             let source_deps = parse_source_deps(args).map_err(ActiveLinkError::LinkFailed)?;
             let frozen = frozen_module_ids(&root)?;
             let source_args = source_dep_link_args_all(&root, &source_deps, &frozen)?;
+            let rlib_deps = parse_rlib_deps(args)?;
             let external_crates = parse_external_deps(&root.join("crates").join(&consumer))?;
             let external = build_external_deps(&root, &external_crates)?;
             let out = build_consumer(
@@ -520,6 +678,7 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
                 out_override.as_deref(),
                 &external,
                 &source_args,
+                &rlib_deps,
             )?;
             println!(
                 "{consumer} lib built via Active link surface: {}",
@@ -537,7 +696,64 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
             let source_deps = parse_source_deps(args).map_err(ActiveLinkError::LinkFailed)?;
             let frozen = frozen_module_ids(&root)?;
             let source_args = source_dep_link_args_all(&root, &source_deps, &frozen)?;
-            test_consumer(&root, &consumer, &deps, &target, &source_args)
+            let rlib_deps = parse_rlib_deps(args)?;
+            test_consumer(&root, &consumer, &deps, &target, &source_args, &rlib_deps)
+        }
+        "build-binary" | "test-binary" => {
+            let root = root_from(args).map_err(ActiveLinkError::ManifestInvalid)?;
+            let target = target_from(args)?;
+            let consumer =
+                arg_value(args, "--consumer").map_err(ActiveLinkError::IdentityMissing)?;
+            let deps = arg_value(args, "--deps").map_err(ActiveLinkError::IdentityMissing)?;
+            let deps = deps.split(',').map(str::to_string).collect::<Vec<_>>();
+            let out =
+                PathBuf::from(arg_value(args, "--out").map_err(ActiveLinkError::IdentityMissing)?);
+            let source_deps = parse_source_deps(args).map_err(ActiveLinkError::LinkFailed)?;
+            let frozen = frozen_module_ids(&root)?;
+            let source_args = source_dep_link_args_all(&root, &source_deps, &frozen)?;
+            let rlib_deps = parse_rlib_deps(args)?;
+            let external_crates = parse_external_deps(&root.join("crates").join(&consumer))?;
+            let external = build_external_deps(&root, &external_crates)?;
+            build_binary(
+                &root,
+                &consumer,
+                &deps,
+                &target,
+                &out,
+                &external,
+                &source_args,
+                &rlib_deps,
+                command == "test-binary",
+            )?;
+            if command == "test-binary" {
+                let run = Command::new(&out)
+                    .current_dir(&root)
+                    .output()
+                    .map_err(|error| {
+                        ActiveLinkError::LinkFailed(format!(
+                            "run binary tests {}: {error}",
+                            out.display()
+                        ))
+                    })?;
+                if !run.status.success() {
+                    return Err(ActiveLinkError::LinkFailed(format!(
+                        "{consumer} binary tests failed:\nstdout: {}\nstderr: {}",
+                        String::from_utf8_lossy(&run.stdout),
+                        String::from_utf8_lossy(&run.stderr)
+                    )));
+                }
+                print!("{}", String::from_utf8_lossy(&run.stdout));
+            }
+            println!(
+                "{consumer} binary {} via Active link surface: {}",
+                if command == "test-binary" {
+                    "tested"
+                } else {
+                    "built"
+                },
+                out.display()
+            );
+            Ok(())
         }
         _ => {
             eprintln!("unknown command {command:?}");
@@ -569,5 +785,75 @@ fn main() -> ExitCode {
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => fail(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn probe_root(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "routecodex-v4-build-link-{label}-{}-{nonce}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn binary_build_uses_consumer_manifest_version() {
+        let root = probe_root("package-version");
+        let consumer = "version-probe";
+        let consumer_dir = root.join("crates").join(consumer);
+        fs::create_dir_all(consumer_dir.join("src")).expect("create probe source");
+        fs::write(
+            consumer_dir.join("Cargo.toml"),
+            "[package]\nname = \"version-probe\"\nversion = \"9.8.7\"\nedition = \"2021\"\n",
+        )
+        .expect("write probe manifest");
+        fs::write(
+            consumer_dir.join("src/main.rs"),
+            "fn main() { print!(\"{}\", env!(\"CARGO_PKG_VERSION\")); }\n",
+        )
+        .expect("write probe source");
+        let output = root.join("target/version-probe");
+        build_binary(
+            &root,
+            consumer,
+            &[],
+            "unused-target",
+            &output,
+            &ExternalLink::default(),
+            &[],
+            &[],
+            false,
+        )
+        .expect("build probe binary");
+        let run = Command::new(&output).output().expect("run probe binary");
+        assert!(run.status.success());
+        assert_eq!(String::from_utf8_lossy(&run.stdout), "9.8.7");
+        fs::remove_dir_all(root).expect("remove probe root");
+    }
+
+    #[test]
+    fn binary_build_rejects_missing_consumer_manifest_version() {
+        let root = probe_root("missing-version");
+        let consumer_dir = root.join("crates/version-probe");
+        fs::create_dir_all(&consumer_dir).expect("create probe manifest directory");
+        fs::write(
+            consumer_dir.join("Cargo.toml"),
+            "[package]\nname = \"version-probe\"\nedition = \"2021\"\n",
+        )
+        .expect("write invalid probe manifest");
+        let error = consumer_package_version(&root, "version-probe")
+            .expect_err("missing package version must fail");
+        assert!(error
+            .to_string()
+            .contains("missing non-empty package.version"));
+        fs::remove_dir_all(root).expect("remove probe root");
     }
 }

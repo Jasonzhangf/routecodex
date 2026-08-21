@@ -556,12 +556,25 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             "V4HubRespChatProcess03Governed",
             "response_chat_process",
             Some(3),
-            PluginKind::Operator,
-            PluginEffect::Semantic,
+            PluginKind::Validator,
+            PluginEffect::ReadOnly,
             PluginPhase::Semantic,
             300,
             vec!["v4.response.normal_payload"],
-            vec!["v4.response.normal_payload", "v4.control.metadata_center"],
+            vec![],
+        ),
+        plugin(
+            "v4.std.chat_process.tool_harvest",
+            PluginCategory::ChatProcess,
+            "V4HubRespChatProcess03Governed",
+            "response_chat_process",
+            Some(3),
+            PluginKind::Observer,
+            PluginEffect::ReadOnly,
+            PluginPhase::Semantic,
+            350,
+            vec!["v4.response.normal_payload"],
+            vec![],
         ),
         plugin(
             "v4.std.routing.route_facts_producer",
@@ -859,16 +872,109 @@ fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn response_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let mut data = ctx.read_data().clone();
-    if let Some(object) = data.as_object_mut() {
-        object.insert("governance".to_string(), json!("response_governance"));
+    ctx.read_data()
+        .as_object()
+        .ok_or_else(|| "response governance requires an object".to_string())?;
+    ctx.emit("response_governance", "response payload governed");
+    Ok(())
+}
+
+fn tool_harvest(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let object = ctx
+        .read_data()
+        .as_object()
+        .ok_or_else(|| "tool harvest requires an object".to_string())?;
+
+    let mut calls = Vec::new();
+    collect_tool_calls(object.get("tool_calls"), &mut calls)?;
+    if let Some(choices) = object.get("choices").and_then(Value::as_array) {
+        for choice in choices {
+            collect_tool_calls(
+                choice.get("message").and_then(|message| message.get("tool_calls")),
+                &mut calls,
+            )?;
+        }
     }
-    ctx.write_data(data).map_err(|error| error.to_string())?;
-    ctx.write_control_resource(
-        "v4.control.metadata_center",
-        json!({"governance_applied": "response_governance"}),
-    )
-    .map_err(|error| error.to_string())
+
+    let mut outputs = Vec::new();
+    collect_tool_outputs(object.get("tool_outputs"), &mut outputs)?;
+    if let Some(choices) = object.get("choices").and_then(Value::as_array) {
+        for choice in choices {
+            collect_tool_outputs(
+                choice.get("message").and_then(|message| message.get("tool_outputs")),
+                &mut outputs,
+            )?;
+        }
+    }
+
+    ctx.emit(
+        "tool_harvest_count",
+        format!("tool_calls={} tool_outputs={}", calls.len(), outputs.len()),
+    );
+    Ok(())
+}
+
+fn collect_tool_calls(value: Option<&Value>, calls: &mut Vec<String>) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let Some(items) = value.as_array() else {
+        return Err("tool_calls must be an array".to_string());
+    };
+    for item in items {
+        let Some(item) = item.as_object() else {
+            return Err("tool call must be an object".to_string());
+        };
+        let id = required_string(item, "id")?;
+        let function = item
+            .get("function")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "tool call function must be an object".to_string())?;
+        required_string(function, "name")?;
+        if function.get("arguments").is_none() {
+            return Err("tool call arguments are required".to_string());
+        }
+        if calls.contains(&id) {
+            return Err(format!("duplicate tool call id {id}"));
+        }
+        calls.push(id);
+    }
+    Ok(())
+}
+
+fn collect_tool_outputs(value: Option<&Value>, outputs: &mut Vec<String>) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let Some(items) = value.as_array() else {
+        return Err("tool_outputs must be an array".to_string());
+    };
+    for item in items {
+        let Some(item) = item.as_object() else {
+            return Err("tool output must be an object".to_string());
+        };
+        let call_id = required_string(item, "call_id")?;
+        if item.get("output").is_none() {
+            return Err("tool output is required".to_string());
+        }
+        if outputs.contains(&call_id) {
+            return Err(format!("duplicate tool output call_id {call_id}"));
+        }
+        outputs.push(call_id);
+    }
+    Ok(())
+}
+
+fn required_string(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<String, String> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| format!("{key} must be a non-empty string"))
 }
 
 fn route_facts_produce(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -955,6 +1061,7 @@ impl StandardHandleRegistry {
                 "v4.std.chat_process.response_governance",
                 response_governance,
             ),
+            ("v4.std.chat_process.tool_harvest", tool_harvest),
             ("v4.std.routing.route_facts_producer", route_facts_produce),
             ("v4.std.routing.route_facts_consumer", route_facts_consume),
             ("v4.std.provider.capability_mock", capability_mock),
@@ -1054,6 +1161,7 @@ mod tests {
             "v4.std.protocol.wire_codec_proto",
             "v4.std.chat_process.request_governance",
             "v4.std.chat_process.response_governance",
+            "v4.std.chat_process.tool_harvest",
             "v4.std.routing.route_facts_producer",
             "v4.std.routing.route_facts_consumer",
             "v4.std.provider.capability_mock",
