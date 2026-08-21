@@ -48,13 +48,19 @@ fn configured_retry_backoff_ms(
 
 fn configured_retry_mode(
     matched_policy: Option<&V3ProviderErrorActionPolicyManifest>,
+    default_same_candidate_retries: usize,
 ) -> Option<V3ProviderErrorRetryMode> {
-    matched_policy.and_then(|policy| {
-        policy.path.iter().find_map(|step| match step {
-            V3ProviderDispositionStepManifest::WaitRetry { retry_mode, .. } => Some(*retry_mode),
-            _ => None,
+    matched_policy
+        .and_then(|policy| {
+            policy.path.iter().find_map(|step| match step {
+                V3ProviderDispositionStepManifest::WaitRetry { retry_mode, .. } => Some(*retry_mode),
+                _ => None,
+            })
         })
-    })
+        .or_else(|| {
+            (default_same_candidate_retries > 0)
+                .then_some(V3ProviderErrorRetryMode::RetrySame)
+        })
 }
 
 fn configured_health_policy_for_failure(
