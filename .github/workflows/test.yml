@@ -117,10 +117,9 @@ jobs:
       - name: Install global AppSDK from release artifact
         run: |
           mkdir -p "$HOME/.local/bin"
-          git clone --depth 1 --branch v0.1.5 \
-            https://github.com/Jasonzhangf/appsdk.git "$RUNNER_TEMP/appsdk-0.1.5"
-          cargo build --release --manifest-path "$RUNNER_TEMP/appsdk-0.1.5/rust/Cargo.toml"
-          install -m 755 "$RUNNER_TEMP/appsdk-0.1.5/rust/target/release/appsdk" "$HOME/.local/bin/appsdk"
+          curl -fsSL -o "$HOME/.local/bin/appsdk" \
+            https://github.com/Jasonzhangf/appsdk/releases/download/v0.1.2/appsdk-0.1.2-macos-arm64
+          chmod +x "$HOME/.local/bin/appsdk"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: V4 AppSDK admission
         run: |
@@ -128,4 +127,4 @@ jobs:
           appsdk version
           test -x "$(command -v appsdk)"
           test "sha256:$(shasum -a 256 "$(command -v appsdk)" | cut -d ' ' -f 1)" = "$(jq -r .digest v4/.appsdk/sdk.lock)"
-          appsdk verify --review-admission v4 --module routecodex-v4-base-node
+          appsdk verify --admission v4
