@@ -539,7 +539,7 @@
         "suite_id": "v4-config-l2-regression"
       },
       "source_owner": "routecodex-v4-config",
-      "stage": "source_implemented"
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-skeleton/**",
