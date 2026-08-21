@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
 export const V3_PROTOCOL_SEMANTIC_FIELD_MATRIX_PATH = 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml';
@@ -746,7 +747,7 @@ function escapeAttr(value) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const root = process.cwd();
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
   const expected = renderV3ProtocolSemanticFieldMatrix(root);
   const outputPath = path.join(root, V3_PROTOCOL_SEMANTIC_FIELD_MATRIX_HTML_PATH);
   if (process.argv.includes('--check')) {

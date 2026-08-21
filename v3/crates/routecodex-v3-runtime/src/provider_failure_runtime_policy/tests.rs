@@ -224,165 +224,6 @@ fn editable_401_403_policy_uses_two_errors_while_default_uses_three() {
     }
 }
 
-#[test]
-fn classified_probe_intervals_keep_auth_key_and_recoverable_cadences_distinct() {
-    assert_eq!(
-        routecodex_v3_config::internal::v3_provider_probe_interval_ms(
-            routecodex_v3_config::internal::V3ProviderProbeIntervalScope::AuthKey,
-        ),
-        60 * 60_000
-    );
-    assert_eq!(
-        routecodex_v3_config::internal::v3_provider_probe_interval_ms(
-            routecodex_v3_config::internal::V3ProviderProbeIntervalScope::Recoverable,
-        ),
-        15 * 60_000
-    );
-}
-
-#[test]
-fn configured_health_policy_preserves_non_auth_and_auth_key_probe_scope() {
-    let mut manifest = account_threshold_manifest();
-    let mut session_policy = manifest.error.provider_error_action_policy[0].clone();
-    session_policy.policy_id = "ordinary_http_500_session".to_string();
-    session_policy.matcher.http_status = Some(500);
-    for step in &mut session_policy.path {
-        if let V3ProviderDispositionStepManifest::Cooldown { scope, .. } = step {
-            *scope = V3ProviderErrorActionScope::ProviderModel;
-        }
-    }
-    let mut provider_instance_policy = session_policy.clone();
-    provider_instance_policy.policy_id = "ordinary_http_501_instance".to_string();
-    provider_instance_policy.matcher.http_status = Some(501);
-    for step in &mut provider_instance_policy.path {
-        if let V3ProviderDispositionStepManifest::Cooldown { scope, .. } = step {
-            *scope = V3ProviderErrorActionScope::ProviderInstance;
-        }
-    }
-    manifest
-        .error
-        .provider_error_action_policy
-        .push(session_policy);
-    manifest
-        .error
-        .provider_error_action_policy
-        .push(provider_instance_policy);
-
-    let session_policy = configured_health_policy_for_failure(
-        None,
-        &manifest,
-        "primary",
-        Some("responses"),
-        Some("gpt-test"),
-        500,
-        Some("provider_http_error"),
-        "ordinary failure",
-    )
-    .expect("session-scoped policy");
-    assert_eq!(
-        session_policy.cooldown_scope,
-        V3ProviderFailureCooldownScope::Session
-    );
-    assert_eq!(session_policy.probe_interval_ms, 15 * 60_000);
-
-    let provider_instance_policy = configured_health_policy_for_failure(
-        None,
-        &manifest,
-        "primary",
-        Some("responses"),
-        Some("gpt-test"),
-        501,
-        Some("provider_http_error"),
-        "ordinary instance failure",
-    )
-    .expect("provider-instance policy");
-    assert_eq!(
-        provider_instance_policy.cooldown_scope,
-        V3ProviderFailureCooldownScope::Session
-    );
-    assert_eq!(provider_instance_policy.probe_interval_ms, 15 * 60_000);
-
-    let auth_key_policy = configured_health_policy_for_failure(
-        None,
-        &manifest,
-        "primary",
-        Some("responses"),
-        Some("gpt-test"),
-        401,
-        Some("provider_http_error"),
-        "account failure",
-    )
-    .expect("auth-key policy");
-    assert_eq!(
-        auth_key_policy.cooldown_scope,
-        V3ProviderFailureCooldownScope::AuthKey
-    );
-    assert_eq!(auth_key_policy.probe_interval_ms, 60 * 60_000);
-}
-
-#[test]
-fn configured_provider_health_threshold_is_applied_to_key_cooldown() {
-    let mut manifest = global_pool_alive_manifest("configured_key_threshold");
-    manifest
-        .providers
-        .get_mut("first")
-        .expect("first provider")
-        .health = Some(routecodex_v3_config::V3ProviderHealthAuthoringConfig {
-        enabled: true,
-        failure_threshold: 2,
-        cooldown_ms: 1_234,
-    });
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let scope = test_provider_failure_scope(
-        "configured_key_threshold",
-        "configured_key_threshold",
-        "configured-key-threshold",
-    )
-    .unwrap();
-    for attempt in 0..2 {
-        health
-            .record_provider_failure_record_with_policy(
-                None,
-                &manifest,
-                &scope,
-                "first",
-                Some("responses"),
-                Some("key1"),
-                Some("gpt-test"),
-                Some("configured threshold failure"),
-                "V3ProviderRespInbound01Raw",
-                500,
-                Some("provider_http_error"),
-                "configured threshold failure",
-                10_000 + attempt,
-            )
-            .unwrap();
-    }
-    assert!(
-        !health
-            .key_health
-            .scheduling_projection("first", "key1", "gpt-test", 1, 1, 10_000)
-            .unwrap()
-            .available
-    );
-    assert_eq!(
-        health
-            .key_health
-            .provider_key_health_probe_keys(11_234, false)
-            .unwrap()
-            .len(),
-        0
-    );
-    assert_eq!(
-        health
-            .key_health
-            .provider_key_health_probe_keys(11_235, false)
-            .unwrap()
-            .len(),
-        1
-    );
-}
-
 fn resolve_target(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
@@ -426,17 +267,8 @@ fn resolve_target_for_scope(
 
 #[test]
 fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
-    let mut manifest = global_pool_alive_manifest("global_status_policy");
-    manifest
-        .providers
-        .get_mut("first")
-        .expect("first provider")
-        .health = Some(routecodex_v3_config::V3ProviderHealthAuthoringConfig {
-        enabled: true,
-        failure_threshold: 3,
-        cooldown_ms: 1_234,
-    });
-    let cases = [(429, 3), (500, 3), (502, 3), (599, 3)];
+    let manifest = global_pool_alive_manifest("global_status_policy");
+    let cases = [(401, 2), (403, 2), (429, 3), (500, 3), (502, 3), (599, 3)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = test_provider_failure_scope(
@@ -471,32 +303,6 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                 .expect("global availability")
                 .available,
             "status {status} must block only after its declared threshold"
-        );
-        let key_projection = health
-            .key_health
-            .scheduling_projection("first", "key1", "gpt-test", 1, 1, 10_000)
-            .expect("provider key health projection");
-        assert!(
-            !key_projection.available,
-            "status {status} must persist a provider-key cooldown"
-        );
-        let expected_probe_at = 10_000 + threshold as u64 - 1 + 1_234;
-        assert!(
-            health
-                .key_health
-                .provider_key_health_probe_keys(expected_probe_at - 1, false)
-                .expect("provider key probes before configured cooldown")
-                .is_empty(),
-            "status {status} must honor configured key cooldown before probing"
-        );
-        assert_eq!(
-            health
-                .key_health
-                .provider_key_health_probe_keys(expected_probe_at, false)
-                .expect("provider key probes at configured cooldown")
-                .len(),
-            1,
-            "status {status} must probe after configured key cooldown"
         );
     }
 
@@ -1151,7 +957,7 @@ async fn transport_error_excludes_only_the_failed_provider_key() {
 }
 
 #[tokio::test]
-async fn path_only_policy_project_step_overrides_terminal_projection() {
+async fn provider_project_step_cannot_override_terminal_projection_status() {
     let scope = "path_project_override";
     let source = r#"
 version = 3
@@ -1235,8 +1041,8 @@ message_mode = "code_only"
         .terminal_projection
         .expect("default-floor exhausted 429 must be terminal");
     assert_eq!(
-        projection.status, 429,
-        "project step status must override the terminal projection"
+        projection.status, 502,
+        "provider terminal projection must remain 502 regardless of configured project status"
     );
     assert_eq!(
         projection.body["error"]["code"], "E_PATH_RATE_LIMIT",

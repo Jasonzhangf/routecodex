@@ -44,6 +44,17 @@ pub(crate) fn responses_effective_execution_mode_for_entry_facts(
     }
 }
 
+pub(crate) fn responses_effective_execution_mode_for_request_purpose(
+    configured_mode: V3EntryProtocolExecutionMode,
+    entry_facts: &V3ResponsesContinuationEntryFacts,
+    request_purpose: V3RequestPurpose,
+) -> V3EntryProtocolExecutionMode {
+    if request_purpose.is_compaction() {
+        return configured_mode;
+    }
+    responses_effective_execution_mode_for_entry_facts(configured_mode, entry_facts)
+}
+
 pub(crate) fn responses_payload_previous_response_id(payload: &Value) -> Option<String> {
     payload
         .get("previous_response_id")

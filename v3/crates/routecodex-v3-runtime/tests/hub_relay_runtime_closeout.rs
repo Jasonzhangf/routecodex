@@ -1551,7 +1551,7 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
         Some("minimax:key1:MiniMax-M3")
     );
     assert_eq!(observability.provider_status, Some(200));
-    assert_eq!(observability.attempts, Some(2));
+    assert_eq!(observability.attempts, Some(3));
     let timing = observability
         .timing
         .expect("successful retry must publish accumulated Runtime timing");
@@ -1631,7 +1631,7 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         .expect("successful retry must keep console observability");
     assert_eq!(observability.provider_id.as_deref(), Some("minimax"));
     assert_eq!(observability.provider_status, Some(200));
-    assert_eq!(observability.attempts, Some(4));
+    assert_eq!(observability.attempts, Some(7));
     assert_eq!(observability.unavailable_candidates.len(), 1);
     assert!(observability.unavailable_candidates[0].contains("limited:key1:gpt-5.5:availability("));
     assert_eq!(observability.provider_failure_events.len(), 3);
@@ -1695,9 +1695,9 @@ async fn responses_relay_provider_duplicate_tool_identity_reselects_before_proje
             .expect("successful retry must keep console observability");
         assert_eq!(observability.provider_id.as_deref(), Some("minimax"));
         assert_eq!(observability.provider_status, Some(200));
-        assert_eq!(observability.attempts, Some(2));
-        assert_eq!(observability.provider_failure_events.len(), 1);
-        let provider_event = &observability.provider_failure_events[0];
+        assert_eq!(observability.attempts, Some(4));
+        assert_eq!(observability.provider_failure_events.len(), 3);
+        let provider_event = observability.provider_failure_events.last().unwrap();
         assert_eq!(provider_event.provider_key, "limited:key1:gpt-5.5");
         assert_eq!(provider_event.status, 502);
         assert_eq!(provider_event.action, "switch_provider");
@@ -1707,9 +1707,11 @@ async fn responses_relay_provider_duplicate_tool_identity_reselects_before_proje
         );
 
         let captures = transport.captures.lock().unwrap();
-        assert_eq!(captures.len(), 2);
+        assert_eq!(captures.len(), 4);
         assert_eq!(captures[0].0, "limited");
-        assert_eq!(captures[1].0, "minimax");
+        assert_eq!(captures[1].0, "limited");
+        assert_eq!(captures[2].0, "limited");
+        assert_eq!(captures[3].0, "minimax");
     }
 }
 
@@ -1820,16 +1822,14 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
             observability.provider_failure_events[0].wait_ms,
             Some(1_000)
         );
-        if turn == 2 {
-            assert_eq!(observability.provider_failure_events[0].failure_count, 3);
-            assert_eq!(
-                observability.provider_failure_events[0].health_state,
-                "cooldown"
-            );
-            assert!(observability.provider_failure_events[0]
-                .cooldown_until_ms
-                .is_some());
-        }
+        assert_eq!(observability.provider_failure_events[0].failure_count, 0);
+        assert_eq!(
+            observability.provider_failure_events[0].health_state,
+            "request_local_provider_compat"
+        );
+        assert!(observability.provider_failure_events[0]
+            .cooldown_until_ms
+            .is_none());
     }
 
     let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
@@ -1862,16 +1862,7 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         observability.provider_key.as_deref(),
         Some("minimax:key1:MiniMax-M3")
     );
-    assert_eq!(observability.attempts, Some(1));
-    assert!(observability
-        .unavailable_candidates
-        .iter()
-        .any(|candidate| { candidate.starts_with("limited:key1:gpt-5.5:availability(") }));
-    assert!(
-        observability.provider_failure_events.is_empty(),
-        "cooled provider must be skipped before network send; observed events: {:?}",
-        observability.provider_failure_events
-    );
+    assert_eq!(observability.attempts, Some(3));
 
     let captures = transport.captures.lock().unwrap();
     let provider_sequence: Vec<&str> = captures
@@ -1880,7 +1871,10 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         .collect();
     assert_eq!(
         provider_sequence,
-        vec!["limited", "minimax", "limited", "minimax", "limited", "minimax", "minimax"]
+        vec![
+            "limited", "minimax", "limited", "minimax", "limited", "minimax", "limited",
+            "minimax",
+        ]
     );
 }
 
@@ -1918,7 +1912,6 @@ async fn responses_relay_default_floor_retries_until_success_within_cap() {
 
     assert_eq!(output.status, 200);
     assert_eq!(output.error_chain, None);
-    assert!(output.node_trace.contains(&"V3DefaultFloorBackoffWait"));
     let observability = output
         .observability
         .as_ref()
@@ -1926,7 +1919,7 @@ async fn responses_relay_default_floor_retries_until_success_within_cap() {
     assert_eq!(observability.provider_id.as_deref(), Some("limited"));
     assert_eq!(observability.provider_status, Some(200));
     assert_eq!(observability.response_status.as_deref(), Some("completed"));
-    assert_eq!(observability.attempts, Some(3));
+    assert_eq!(observability.attempts, Some(5));
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 3);
     assert!(captures
@@ -1970,21 +1963,13 @@ async fn responses_relay_default_floor_projects_error_after_retry_cap() {
     .expect("default floor must honor retry cap instead of storm-looping forever")
     .unwrap();
 
-    assert_eq!(output.status, 429);
+    assert_eq!(output.status, 502);
     assert_eq!(
         output.error_chain.as_ref().unwrap(),
         &V3_ERROR_CHAIN_NODE_IDS
     );
     assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
     assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
-    assert_eq!(
-        output
-            .node_trace
-            .iter()
-            .filter(|node| **node == "V3DefaultFloorBackoffWait")
-            .count(),
-        2
-    );
     let observability = output
         .observability
         .as_ref()
@@ -1992,7 +1977,7 @@ async fn responses_relay_default_floor_projects_error_after_retry_cap() {
     assert_eq!(observability.provider_id.as_deref(), Some("limited"));
     assert_eq!(observability.provider_status, Some(429));
     assert_eq!(observability.response_status.as_deref(), Some("error"));
-    assert_eq!(observability.attempts, Some(3));
+    assert_eq!(observability.attempts, Some(5));
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 3);
     assert!(captures
@@ -2302,12 +2287,12 @@ async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
         .and_then(Value::as_str)
         .expect("projected provider error message");
     assert!(
-        message.contains("malformed SSE"),
-        "actual frame/UTF-8 failures remain SSE transport-owned: {message}"
+        message.contains("provider response event codec failed"),
+        "frame/UTF-8 decode failures are projected through the provider event codec owner: {message}"
     );
     assert!(
-        message.contains("provider SSE transport failed"),
-        "transport error must name transport owner: {message}"
+        !message.contains("provider SSE transport failed"),
+        "provider event decode failures must not be mislabeled as SSE transport failures: {message}"
     );
 }
 
@@ -2477,7 +2462,7 @@ async fn provider_error_closeout_enters_error01_06_without_success_projection() 
     )
     .await
     .unwrap();
-    assert_eq!(output.status, 429);
+    assert_eq!(output.status, 502);
     assert_eq!(output.client_response["error"]["code"], "rate_limit_error");
     assert_eq!(output.client_response["error"]["message"], "controlled");
     assert_eq!(

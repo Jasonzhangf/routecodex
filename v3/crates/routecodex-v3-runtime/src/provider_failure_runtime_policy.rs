@@ -1,7 +1,5 @@
 use routecodex_v3_config::internal::classify_v3_internal_provider_error;
-use routecodex_v3_config::internal::{
-    v3_provider_probe_interval_ms, V3ProviderProbeIntervalScope,
-};
+use routecodex_v3_config::internal::v3_internal_error_handling;
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ProviderDispositionStepManifest,
     V3ProviderErrorActionPolicyManifest, V3ProviderErrorActionScope, V3ProviderErrorRetryMode,
@@ -34,7 +32,6 @@ use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
-
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -581,7 +578,7 @@ impl V3ProviderFailureRuntimeHealth {
                         auth_alias.as_deref(),
                         model_id.as_deref(),
                         now_ms,
-                        v3_provider_probe_interval_ms(V3ProviderProbeIntervalScope::AuthKey),
+                        v3_internal_error_handling().unrecoverable_probe_interval_ms,
                     )?;
                     return Err(format!(
                         "startup provider cooldown probe failed for {provider_id}: {error}"
@@ -635,7 +632,7 @@ impl V3ProviderFailureRuntimeHealth {
                         auth_alias.as_deref(),
                         model_id.as_deref(),
                         now_ms,
-                        v3_provider_probe_interval_ms(V3ProviderProbeIntervalScope::AuthKey),
+                        v3_internal_error_handling().unrecoverable_probe_interval_ms,
                     )?;
                     probe_errors.push(format!(
                         "persistent provider probe failed for {provider_id}: {error}"
@@ -697,7 +694,7 @@ impl V3ProviderFailureRuntimeHealth {
                         permit.auth_alias(),
                         permit.model_id(),
                         now_ms,
-                        v3_provider_probe_interval_ms(V3ProviderProbeIntervalScope::Recoverable),
+                        v3_internal_error_handling().recoverable_probe_interval_ms,
                     )?;
                     probe_errors.push(format!(
                         "persistent provider key probe failed for {}:{}:{}: {error}",
@@ -719,6 +716,32 @@ impl V3ProviderFailureRuntimeHealth {
         self.default_same_provider_retries
     }
 
+    pub(crate) fn record_provider_global_cooldown_failure(
+        &self,
+        _failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        _fingerprint: routecodex_v3_error::V3ProviderErrorFingerprint,
+        cooldown_ms: Option<u64>,
+        now_ms: u64,
+    ) -> Result<(), String> {
+        self.global_cooldown
+            .lock()
+            .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
+            .record_failure(
+                provider_id,
+                auth_alias,
+                model_id,
+                V3ProviderCooldownFailureClass::Semantic,
+                now_ms,
+                V3ProviderCooldownObservation {
+                    retry_after_ms: cooldown_ms,
+                    ..Default::default()
+                },
+            )
+    }
+
     pub(crate) fn record_provider_failure_record(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
@@ -738,6 +761,69 @@ impl V3ProviderFailureRuntimeHealth {
                 now_ms,
             )
             .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn record_provider_failure_record_from_source(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        source: &V3Error01SourceRaised,
+        now_ms: u64,
+    ) -> Result<V3ProviderFailureRecord, String> {
+        let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
+        self.record_provider_global_health_for_classified_error(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            &classified,
+            now_ms,
+        )?;
+        let action = build_v3_provider_failure_action_from_v3_error_02(&classified);
+        self.record_provider_key_failure_action(
+            provider_id,
+            auth_alias,
+            model_id,
+            &action,
+            now_ms,
+        )?;
+        self.store
+            .record_provider_failure_in_session(
+                failure_session_scope,
+                provider_id,
+                auth_alias,
+                model_id,
+                Some(&source.message),
+                now_ms,
+            )
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn record_provider_failure_record_with_action(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        reason: Option<&str>,
+        now_ms: u64,
+        action: &V3ProviderFailureAction,
+    ) -> Result<V3ProviderFailureRecord, String> {
+        self.record_provider_key_failure_action(provider_id, auth_alias, model_id, action, now_ms)?;
+        let record = self
+            .store
+            .record_provider_failure_in_session(
+                failure_session_scope,
+                provider_id,
+                auth_alias,
+                model_id,
+                reason,
+                now_ms,
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(record)
     }
 
     pub(crate) fn record_provider_failure_record_with_policy(
@@ -780,12 +866,7 @@ impl V3ProviderFailureRuntimeHealth {
             &classified,
             now_ms,
         )?;
-        let mut action = build_v3_provider_failure_action_from_v3_error_02(&classified);
-        if action.recovery == V3ProviderRecoveryKind::RecoverableCounted {
-            let policy = self.store.configured_failure_policy(provider_id)?;
-            action.failure_threshold = policy.failure_threshold;
-            action.cooldown_ms = policy.cooldown_ms;
-        }
+        let action = build_v3_provider_failure_action_from_v3_error_02(&classified);
         self.record_provider_key_failure_action(
             provider_id,
             auth_alias,
@@ -913,7 +994,7 @@ impl V3ProviderFailureRuntimeHealth {
         error_family: &str,
     ) -> Result<V3ProviderActionAdmission, String> {
         self.action_gate
-            .record_failure_and_wait_for_terminal_projection(V3ProviderActionGateKey::new(
+            .record_failure_and_wait(V3ProviderActionGateKey::new(
                 failure_session_scope,
                 v3_relay_provider_candidate_key_parts(provider_id, auth_alias, model_id),
                 error_family,
@@ -990,18 +1071,16 @@ impl V3ProviderFailureRuntimeHealth {
         witness: &V3Error05RecoveryAdmissionWitness,
         selected: &V3Target10ConcreteProviderSelected,
     ) -> Result<V3ProviderActionRecoveryTransition, String> {
+        let provider_scope = V3ProviderActionProviderScope::new(
+            witness.failure_session_scope(),
+            v3_relay_provider_candidate_key_parts(
+                &selected.candidate.provider_id,
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+            ),
+        )?;
         self.action_gate
-            .wait_for_recovery_witness(
-                witness,
-                V3ProviderActionProviderScope::new(
-                    witness.failure_session_scope(),
-                    v3_relay_provider_candidate_key_parts(
-                        &selected.candidate.provider_id,
-                        Some(&selected.candidate.auth_alias),
-                        Some(&selected.candidate.model_id),
-                    ),
-                )?,
-            )
+            .wait_for_recovery_witness(witness, provider_scope)
             .await
     }
 
@@ -1120,7 +1199,6 @@ fn reselect_from_captured_target_plan(
         context.provider_health,
         request_local_excluded_candidates,
         now_ms,
-        context.deterministic_sample,
         context.deterministic_sample,
     ) {
         Ok(selected) => V3RelayProviderTargetResolution::Selected(selected),
@@ -1641,19 +1719,15 @@ fn terminal_projection_for(
         .try_into_terminal()
         .ok()
         .map(V3ErrorHandlingCenter::project_terminal_decision)?;
-    if let Some(V3ProviderDispositionStepManifest::Project {
-        status,
-        public_code,
-        ..
-    }) = matched_policy.and_then(|policy| {
-        policy.path.iter().rev().find_map(|step| match step {
-            V3ProviderDispositionStepManifest::Project { .. } => Some(step),
-            _ => None,
-        })
-    }) {
-        // project step 只影响 Error06 显示层（status/public_code），
-        // 不得反向影响 Error02-05 语义或 health。
-        projected.status = *status;
+    if let Some(V3ProviderDispositionStepManifest::Project { public_code, .. }) =
+        matched_policy.and_then(|policy| {
+            policy.path.iter().rev().find_map(|step| match step {
+                V3ProviderDispositionStepManifest::Project { .. } => Some(step),
+                _ => None,
+            })
+        }) {
+        // Error06 owns the terminal HTTP status. Policy projection may only
+        // customize the public error code without changing routing truth.
         if let Some(public_code) = public_code {
             if let Some(error) = projected
                 .body

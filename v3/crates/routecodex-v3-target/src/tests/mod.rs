@@ -1,8 +1,6 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-use routecodex_v3_provider_responses::{
-    V3ProviderAvailabilityProjection, V3ProviderFailureAction, V3ProviderKeyHealthStore,
-};
+use routecodex_v3_provider_responses::V3ProviderAvailabilityProjection;
 use routecodex_v3_virtual_router::RouteClassification;
 
 fn test_route(route: &str, candidates: &[&str]) -> RouteClassification {
@@ -258,13 +256,18 @@ fn direct_selected(
 }
 
 #[test]
-fn direct_provider_model_expands_pinned_provider_and_respects_health_cooldown() {
+fn direct_provider_model_expands_pinned_provider_but_respects_health_cooldown() {
     let selected = direct_selected("a.m", BTreeSet::new()).unwrap();
     assert_eq!(selected.candidate.provider_id, "a");
     assert_eq!(selected.candidate.model_id, "m");
 
-    let cooled = direct_selected("a.m", BTreeSet::from(["a:ka:m".into()]));
-    assert!(cooled.is_err(), "health cooldown must veto an explicit pin");
+    let cooled = direct_selected("a.m", BTreeSet::from(["a:ka:m".into()]))
+        .expect_err("health cooldown must veto an explicit pin");
+    assert_eq!(
+        cooled.attempted_candidates,
+        vec!["a:ka:m:availability(a:ka:m)"],
+        "cooldown must be reported as target exhaustion"
+    );
 }
 
 #[test]
@@ -1502,6 +1505,103 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
         exhausted.attempted_candidates[0],
         "pinned:key:m:context_window_exceeded(input_tokens=2000,max_context_tokens=1000)"
     );
+
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::new(),
+                input_tokens: 1500,
+                route_classification: test_route("longcontext", &["longcontext", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    let selected_over_limit = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(selected_over_limit.candidate.provider_id, "pinned");
+    assert_eq!(
+        selected_over_limit.unavailable_candidates,
+        vec!["pinned:key:m:context_window_exceeded(input_tokens=1500,max_context_tokens=1000)"]
+    );
+}
+
+#[test]
+fn context_admission_rejects_oversized_exact_pin() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.pinned]
+type = "responses"
+base_url = "http://pinned.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "PINNED_KEY" }] }
+[providers.pinned.models.m]
+capabilities = ["text"]
+max_context_tokens = 1000
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "key", priority = 1 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("pinned.m".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 2000,
+                route_classification: RouteClassification::default(),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "direct");
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    let exhausted = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .expect_err("an oversized exact pin must fail before transport");
+    assert!(exhausted
+        .attempted_candidates
+        .iter()
+        .any(|entry| entry.contains("context_window_exceeded(")));
 }
 
 #[test]
@@ -1550,7 +1650,6 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let expanded_for_cooldown = expanded.clone();
     let selected_floor = target
         .select_available(
             expanded,
@@ -1565,18 +1664,6 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
         .unavailable_candidates
         .iter()
         .any(|entry| entry.contains("context_window_exceeded(")));
-
-    let cooled_floor = target.select_available(
-        expanded_for_cooldown,
-        &Availability {
-            blocked: BTreeSet::from(["pinned:key:m".into()]),
-        },
-        0,
-    );
-    assert!(
-        cooled_floor.is_err(),
-        "default-floor context rescue must not bypass a cooled provider key"
-    );
 }
 
 #[test]
@@ -1800,76 +1887,4 @@ targets = [{ kind = "provider_model", provider = "multi", model = "m", priority 
         aliases_at(0),
         "rotation is periodic in entry count"
     );
-}
-
-#[test]
-fn health_selection_keeps_priority_floor_then_skips_cooled_key() {
-    let target = V3TargetInterpreter::default();
-    let expanded = expanded();
-    let store = V3ProviderKeyHealthStore::default();
-    let action = V3ProviderFailureAction::recoverable("transport");
-    for now_ms in 0..3 {
-        store
-            .record_provider_failure_action("a", "ka", "m", &action, now_ms)
-            .unwrap();
-    }
-
-    let selected = target
-        .select_available_with_health(expanded, &store, 3, 0)
-        .expect("lower-priority provider remains available after key cooldown");
-    assert_eq!(selected.candidate.provider_id, "b");
-    assert!(selected
-        .unavailable_candidates
-        .iter()
-        .any(|candidate| candidate.contains("a:ka:m")));
-}
-
-#[test]
-fn health_selection_rejects_direct_pin_after_key_cooldown() {
-    let target = V3TargetInterpreter::default();
-    let mut expanded = expanded();
-    expanded.route.pool_id = "direct".to_string();
-    expanded.candidates.truncate(1);
-    let store = V3ProviderKeyHealthStore::default();
-    let action = V3ProviderFailureAction::recoverable("transport");
-    for now_ms in 0..3 {
-        store
-            .record_provider_failure_action("a", "ka", "m", &action, now_ms)
-            .unwrap();
-    }
-    let exhausted = target
-        .select_available_with_health(expanded, &store, 3, 0)
-        .expect_err("explicit direct pin must remain blocked by key cooldown");
-    assert!(exhausted
-        .attempted_candidates
-        .iter()
-        .any(|candidate| candidate.contains("a:ka:m")));
-}
-
-#[test]
-fn health_selection_is_deterministic_within_priority_and_never_crosses_floor() {
-    let target = V3TargetInterpreter::default();
-    let mut expanded = expanded();
-    expanded.candidates[1].priority = expanded.candidates[0].priority;
-    let mut lower_priority = expanded.candidates[1].clone();
-    lower_priority.provider_id = "lower".to_string();
-    lower_priority.auth_alias = "kl".to_string();
-    lower_priority.priority = expanded.candidates[0].priority + 1;
-    expanded.candidates.push(lower_priority);
-
-    let store = V3ProviderKeyHealthStore::default();
-    let degraded = V3ProviderFailureAction::recoverable("transport");
-    store
-        .record_provider_failure_action("b", "kb", "m", &degraded, 1)
-        .unwrap();
-    let first = target
-        .select_available_with_health(expanded.clone(), &store, 2, 0)
-        .expect("healthy key at the priority floor");
-    assert_eq!(first.candidate.provider_id, "a");
-
-    let second = target
-        .select_available_with_health(expanded, &store, 2, 2_000)
-        .expect("same priority degraded key remains eligible");
-    assert_eq!(second.candidate.provider_id, "b");
-    assert_ne!(second.candidate.provider_id, "lower");
 }

@@ -271,7 +271,7 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
     standardized: &V3Req04StandardizedResponses,
     manifest: &routecodex_v3_config::V3Config05ManifestPublished,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-    build_v3_router_request_facts_for_entry_with_control(
+    let mut facts = build_v3_router_request_facts_for_entry_with_control(
         &standardized.body,
         "responses",
         configured_v3_longcontext_threshold_tokens(
@@ -280,9 +280,15 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
         ),
         false,
         standardized.protocol_context.request_purpose.is_compaction()
-            || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
+        || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint),
         Some(manifest),
-    )
+    );
+    if standardized.protocol_context.request_purpose.is_compaction()
+        || is_v3_compaction_endpoint(&standardized.protocol_context.endpoint)
+    {
+        facts.client_model = None;
+    }
+    facts
 }
 
 pub fn build_v3_router_request_facts_for_entry(
@@ -302,6 +308,29 @@ pub fn build_v3_router_request_facts_for_entry(
         false,
         None,
     )
+}
+
+pub(crate) fn build_v3_router_request_facts_for_entry_and_endpoint(
+    body: &Value,
+    entry_protocol: &str,
+    endpoint: &str,
+    longcontext_threshold_tokens: Option<u64>,
+    manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
+) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
+    let mut normalized = body.clone();
+    crate::hub_v1::normalize_v3_history_image_placeholders(&mut normalized);
+    let mut facts = build_v3_router_request_facts_for_entry_with_control(
+        &normalized,
+        entry_protocol,
+        longcontext_threshold_tokens,
+        false,
+        is_v3_compaction_endpoint(endpoint),
+        manifest,
+    );
+    if is_v3_compaction_endpoint(endpoint) {
+        facts.client_model = None;
+    }
+    facts
 }
 
 /// relay 目标解析（provider_failure_runtime_policy）使用的 facts 构建：

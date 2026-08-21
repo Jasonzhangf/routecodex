@@ -151,13 +151,6 @@ pub(super) async fn execute_responses_direct_server_outcome(
         }
     };
     if let Some(handoff) = output.protocol_relay_handoff {
-        if request_purpose.is_compaction() {
-            let frame = build_v3_server_16_http_frame_from_v3_error_06(project_http_input_error(
-                V3HttpBoundaryErrorKind::EndpointNotEnabled,
-                "Responses compact cannot cross into Hub Relay",
-            ));
-            return V3ResponsesDirectServerOutcome::DirectFrame(frame);
-        }
         let runtime_input = V3ResponsesRelayRuntimeInput {
             server_id: state.server.id.clone(),
             failure_session_scope: provider_failure_session_scope,

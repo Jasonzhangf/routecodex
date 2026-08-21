@@ -562,12 +562,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
     let request_web_search_state = request_outcome.web_search_state().cloned();
+    let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
     let mut response_hook_profile = response_hook_profile.with_tool_thinking_enabled(
-        manifest
-            .features
-            .get("tool_thinking")
-            .copied()
-            .unwrap_or(false),
+        request_tool_thinking_enabled,
     );
     if request_web_search_execution_mode.is_metadata_center_local_search() {
         response_hook_profile =

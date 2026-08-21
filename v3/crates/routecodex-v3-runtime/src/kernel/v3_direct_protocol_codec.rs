@@ -41,6 +41,7 @@ pub(crate) type V3DirectResponseProjectionFuture = Pin<
 
 pub(crate) fn build_direct_response_compat_context(
     target: &V3Target10ConcreteProviderSelected,
+    tool_thinking_enabled: bool,
 ) -> Result<V3DirectResponseCompatContext, String> {
     Ok(V3DirectResponseCompatContext {
         provider_protocol: crate::hub_v1::provider_wire_protocol_for_selected_candidate(
@@ -49,6 +50,7 @@ pub(crate) fn build_direct_response_compat_context(
         canonical_model_id: target.candidate.model_id.clone(),
         model_capabilities: target.candidate.model_capabilities.clone(),
         compatibility_profile: target.candidate.compatibility_profile.clone(),
+        tool_thinking_enabled,
     })
 }
 
@@ -233,7 +235,16 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         standardized: &Self::Standardized,
         manifest: &routecodex_v3_config::V3Config05ManifestPublished,
     ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-        crate::nodes::build_v3_router_request_facts_from_v3_req_04(standardized, manifest)
+        crate::nodes::build_v3_router_request_facts_for_entry_and_endpoint(
+            &standardized.body,
+            "responses",
+            &standardized.protocol_context.endpoint,
+            crate::configured_v3_longcontext_threshold_tokens(
+                manifest,
+                &standardized.protocol_context.server_id,
+            ),
+            Some(manifest),
+        )
     }
 
     fn run_route(
@@ -263,6 +274,33 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         context: V3DirectResponseCompatContext,
     ) -> V3DirectResponseProjectionFuture {
         crate::hooks::responses_direct_response_projection_hook_with_context(raw, context)
+    }
+
+    fn prepare_before_send(
+        _control: &mut Self::Control,
+        manifest: &routecodex_v3_config::V3Config05ManifestPublished,
+        _server_id: &str,
+        standardized: &mut Self::Standardized,
+        _request_id: &str,
+        _now_epoch_ms: u64,
+        _trace: &mut Vec<&'static str>,
+    ) -> Result<bool, V3Error01SourceRaised> {
+        let enabled = manifest.features.get("tool_thinking").copied().unwrap_or(false);
+        crate::hub_v1::inject_v3_tool_thinking_guidance_at_req04(
+            &mut standardized.body,
+            0,
+            enabled,
+        )
+        .map_err(|error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Req04StandardizedResponses",
+                "direct_tool_thinking_req04_injection_failed",
+                error.to_string(),
+                V3InternalErrorCode::V3Req04StandardizedResponses,
+            )
+        })?;
+        Ok(enabled)
     }
 
     fn run_error(
@@ -359,6 +397,38 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
         context: V3DirectResponseCompatContext,
     ) -> V3DirectResponseProjectionFuture {
         crate::hooks::chat_direct_response_projection_hook(raw, context)
+    }
+
+    fn prepare_before_send(
+        _control: &mut Self::Control,
+        manifest: &routecodex_v3_config::V3Config05ManifestPublished,
+        _server_id: &str,
+        standardized: &mut Self::Standardized,
+        _request_id: &str,
+        _now_epoch_ms: u64,
+        _trace: &mut Vec<&'static str>,
+    ) -> Result<bool, V3Error01SourceRaised> {
+        let enabled = manifest.features.get("tool_thinking").copied().unwrap_or(false);
+        let current_payload_start = standardized
+            .body
+            .get("messages")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        crate::hub_v1::inject_v3_tool_thinking_guidance_at_req04(
+            &mut standardized.body,
+            current_payload_start,
+            enabled,
+        )
+        .map_err(|error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Req04StandardizedChat",
+                "direct_tool_thinking_req04_injection_failed",
+                error.to_string(),
+                V3InternalErrorCode::V3Req04StandardizedChat,
+            )
+        })?;
+        Ok(enabled)
     }
 
     fn run_error(

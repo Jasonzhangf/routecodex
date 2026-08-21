@@ -39,6 +39,7 @@ pub struct V3DirectResponseCompatContext {
     pub canonical_model_id: String,
     pub model_capabilities: Vec<String>,
     pub compatibility_profile: Option<String>,
+    pub tool_thinking_enabled: bool,
 }
 
 impl V3DirectResponseCompatContext {

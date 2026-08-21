@@ -80,7 +80,6 @@ pub struct V3ProviderGlobalSubscriptionHealthStore {
 }
 
 impl V3ProviderGlobalSubscriptionHealthStore {
-    #[allow(clippy::too_many_arguments)]
     pub fn record_invalid_subscription_response(
         &self,
         _session_scope: &V3ProviderFailureSessionScope,
@@ -190,7 +189,6 @@ impl V3ProviderGlobalSubscriptionHealthStore {
         }))
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn provider_keys_with_probe_due(
         &self,
         now_ms: u64,

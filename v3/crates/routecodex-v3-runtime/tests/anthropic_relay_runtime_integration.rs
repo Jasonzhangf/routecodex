@@ -579,7 +579,7 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
 
     assert_eq!(
         transport.provider_ids.lock().unwrap().as_slice(),
-        ["primary", "secondary"]
+        ["primary", "primary", "primary", "secondary"]
     );
     assert_eq!(output.status, 200);
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
@@ -617,7 +617,7 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     )
     .await
     .unwrap();
-    assert_eq!(output.status, 429);
+    assert_eq!(output.status, 502);
     assert_eq!(
         output.client_response["error"]["message"],
         "controlled rate limit"

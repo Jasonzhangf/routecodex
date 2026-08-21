@@ -5730,3 +5730,15 @@ Tags: #v3 #historical-samples #error-samples #provider-debug
 - DSH final review `dsh-1787250238007-09ba021b` returned literal `VERDICT: PASS`. Remaining P2 recommendation: add a direct configured-path regression test for `configured_health_policy_for_failure` scope selection; it is a coverage improvement, not a P1 blocker. Full workspace has unrelated pre-existing integration compile/test failures and format drift; do not claim full workspace green from this slice.
 - Durable verification rule: never claim provider health/cooldown/score/probe completion from unit/build evidence alone; install the exact artifact, compare hashes/version, run config check, use managed aggregate restart, verify every configured listener, then replay real failure/probe/scheduling samples. Keep other workers' dirty changes untouched.
 - Final coverage closeout: direct configured-path regression now locks ProviderModel/ProviderInstance→Session/recoverable 15m and AuthKey→60m; exact final commit is `d5f83ca7c188fc048fe7b59073922a468d71f2bb`, pushed to `origin/main`, with DSH `dsh-1787251069865-d509d663` literal `VERDICT: PASS`. The shared main worktree remains dirty from other work and was not reset, checked out, or cleaned.
+## 2026-08-20 - Responses/Chat SSE hook contract
+
+- SSE hook scope is two functions only: external typed-node notification and typed content rewrite.
+- Responses item tree must split message, reasoning, function_call, custom_tool_call, function_call_output, web/file/code/computer/MCP/tool-search/apply-patch items into independent typed owners; generic item Value is not a durable design.
+- Hook input separates TransportObject, ProtocolMetadata, and SemanticObject. ProtocolMetadata is protocol side-channel metadata, not client/provider `metadata` and not MetadataCenter control state.
+- Rewrite hooks may change business content only; identity, indexes, event/item/part types, terminal/control fields, transport framing, routing, retry, continuation, and health remain immutable or owned by their canonical chains.
+
+## 2026-08-21 - SSE object normalization correction
+
+- Bidirectional inbound/outbound conversion must use fully normalized typed objects. Do not retain or replay raw JSON as a hidden round-trip mechanism; otherwise Inbound normalization is not the semantic source of truth.
+- Unknown protocol/provider fields must be represented by explicit typed extension fields owned by the normalized object. Outbound must rebuild JSON/SSE from the normalized tree plus extensions, preserving semantic order/identity without raw payload fallback.
+- Same-protocol contract is semantic round-trip: `decode(encode(tree)) == tree`; wire byte identity is not a reason to preserve raw JSON. Cross-protocol projection is explicit and may not be falsely claimed invertible.

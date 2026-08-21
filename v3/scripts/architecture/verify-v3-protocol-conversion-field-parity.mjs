@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';import YAML from 'yaml';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import YAML from 'yaml';
 import { attachParityHelpers } from './v3-protocol-conversion-field-parity-lib.mjs';
 import {
   renderV3ProtocolSemanticFieldMatrix,
@@ -24,7 +27,6 @@ const paths = {
   requestOutboundMetadata: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   requestOutboundFormatExtraTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
   providerReqCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
-  providerCompatCore: 'v3/crates/provider-compat-core/src/lib.rs',
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesRuntimeInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
@@ -60,7 +62,9 @@ const paths = {
   fieldMatrixRenderer: 'v3/scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
 };
 
-const text = Object.fromEntries(Object.entries(paths).map(([key, path]) => [key, readFileSync(path, 'utf8')]));
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const repoPath = (relativePath) => resolve(repoRoot, relativePath);
+const text = Object.fromEntries(Object.entries(paths).map(([key, path]) => [key, readFileSync(repoPath(path), 'utf8')]));
 const failures = [];
 const {
   addUnique,
@@ -716,7 +720,7 @@ const outboundAllowedFields = functionSlice(
 // 出站顶层字段白名单真源已收敛为查表（request_field_map.json，allowed_top_level_outbound_fields
 // 只做协议名查表）；openai_chat 允许字段改为校验 JSON 表，不再扫描源码数组字面量。
 const requestFieldMapRel = 'v3/crates/routecodex-v3-runtime/tables/request_field_map.json';
-const requestFieldMap = JSON.parse(readFileSync(requestFieldMapRel, 'utf8'));
+const requestFieldMap = JSON.parse(readFileSync(repoPath(requestFieldMapRel), 'utf8'));
 const openAiChatAllowedFields = (requestFieldMap?.whitelists?.openai_chat ?? []).join('\n');
 for (const field of [
   'audio',
@@ -751,7 +755,7 @@ for (const phrase of [
   '--lib responses_openai_chat_field_parity',
   '--test responses_direct_tool_passthrough responses_openai_chat_field_parity',
   '--test responses_relay_local_continuation_integration responses_openai_chat_field_parity',
-]) requireText(`${text.packageJson}\n${text.v3PackageJson}`, 'package.json + v3/package.json::test:v3-protocol-conversion-field-parity', phrase);
+]) requireText(String(JSON.parse(text.v3PackageJson).scripts?.['test:v3-protocol-conversion-field-parity'] ?? ''), 'v3/package.json::test:v3-protocol-conversion-field-parity', phrase);
 
 const unpairedMalformedOpenAiChatTest = functionSlice(
   text.responsesTests,
@@ -814,10 +818,7 @@ for (const [owner, body, phrases] of [
     'Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire',
     'Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect',
     'Anthropic request thinking.type, thinking.budget_tokens, and thinking.display decode into separate registered Chat fields',
-    'Responses reasoning.effort is preserved until concrete target selection',
-    'DeepSeek active lower/unknown -> high and xhigh/max -> max',
-    'MiniMax active effort',
-    'thinking.type=adaptive without output_config.effort',
+    'Responses reasoning.effort is preserved until concrete target selection; DeepSeek lower/unknown values project to high and xhigh/max values project to max; MiniMax active effort uses adaptive thinking without `output_config.effort`.',
     'Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions',
     'responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect',
     'responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect',
@@ -832,6 +833,21 @@ for (const [owner, body, phrases] of [
     'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
     'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
   ]],
+]) for (const phrase of phrases) requireText(body, owner, phrase);
+
+for (const [owner, body, phrases] of [
+  [paths.responsesToAnthropicCodec, text.responsesToAnthropicCodec, [
+    'Some(Value::Object(extension)) => Ok(extension.get("responses_tool_output_status"))',
+    'Some(Value::String(status)) if status == "incomplete" => true',
+  ]],
+  [paths.responsesOpenaiCodec, text.responsesOpenaiCodec, ['"responses_tool_output_status".to_string()']],
+  ['v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs'), 'utf8'), ['responses_tool_result_status_survives_chat_canonical_carrier']],
+  [paths.responsesAnthropicProviderTests, text.responsesAnthropicProviderTests, ['responses_relay_anthropic_wire_preserves_typed_tool_result_error_status']],
+  ['v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs'), 'utf8'), ['"container_upload" => Ok(Self::ContainerUpload),']],
+  [paths.anthropicTests, text.anthropicTests, ['anthropic_json_and_sse_materialization_share_terminal_projection_owner']],
+  ['v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json'), 'utf8'), ['"hub": "content_filter"', '"anthropic": "refusal"']],
+  ['v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs'), 'utf8'), ['responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details']],
+  [paths.fieldMatrix, text.fieldMatrix, ['    - SSE transport']],
 ]) for (const phrase of phrases) requireText(body, owner, phrase);
 
 const parityFeature = (functionMap?.features ?? []).find(
@@ -1004,12 +1020,12 @@ for (const phrase of [
   'Source field inventory',
   'Canonical textual truth for the field-matrix audit',
   'Audited status legend and counts',
-  '`extension_declared` | 221',
+  '`extension_declared` | 219',
   '`semantic_declared` | 50',
   '`source_inventory_only` | 0',
   '`shape_branch_gap` | 18',
   '`codec_shape_only` | 14',
-  '`runtime_conformance_pending` | 1',
+  '`runtime_conformance_pending` | 3',
   '`partial` | 112',
   'Gap audit for runtime closeout',
   'gap.runtime_extension_declared',
@@ -1104,7 +1120,7 @@ requireGeminiThinkingConfigSemanticContract(fieldMatrix);
 requireGeminiGenerationConfigScalarSemanticContract(fieldMatrix);
 requireExtendedOpenAiChatSemanticSuperset(fieldMatrix);
 
-const expectedFieldMatrixHtml = renderV3ProtocolSemanticFieldMatrix();
+const expectedFieldMatrixHtml = renderV3ProtocolSemanticFieldMatrix(repoRoot);
 if (text.fieldMatrixHtml !== expectedFieldMatrixHtml) {
   failures.push(`${paths.fieldMatrixHtml}: out of sync with ${paths.fieldMatrix}; run npm run render:v3-protocol-semantic-field-matrix`);
 }
@@ -1193,33 +1209,37 @@ for (const token of [
 ]) requireText(text.fieldMatrixRenderer, paths.fieldMatrixRenderer, token);
 
 const pkg = JSON.parse(text.packageJson);
+const v3Pkg = JSON.parse(text.v3PackageJson);
+if (pkg.scripts?.['test:v3-protocol-conversion-field-parity'] !== 'npm --prefix v3 run test:v3-protocol-conversion-field-parity') {
+  failures.push(`${paths.packageJson}: test:v3-protocol-conversion-field-parity must dispatch exactly to the V3 package script`);
+}
 for (const scriptName of [
   'render:v3-protocol-semantic-field-matrix',
   'test:v3-protocol-conversion-field-parity',
   'verify:v3-protocol-conversion-field-parity',
   'test:v3-protocol-conversion-field-parity-red-fixtures',
 ]) {
-  if (!pkg.scripts?.[scriptName]) failures.push(`${paths.packageJson}: missing script ${scriptName}`);
+  if (!v3Pkg.scripts?.[scriptName]) failures.push(`${paths.v3PackageJson}: missing script ${scriptName}`);
 }
-const parityCiScript = String(pkg.scripts?.['verify:v3-protocol-conversion-field-parity-ci'] ?? '');
+const parityCiScript = String(v3Pkg.scripts?.['verify:v3-protocol-conversion-field-parity-ci'] ?? '');
 for (const command of [
   'npm run verify:v3-protocol-conversion-field-parity',
   'npm run test:v3-protocol-conversion-field-parity-red-fixtures',
   'npm run test:v3-protocol-conversion-field-parity',
 ]) {
   if (!parityCiScript.includes(command)) {
-    failures.push(`${paths.packageJson}: verify:v3-protocol-conversion-field-parity-ci must include ${command}`);
+    failures.push(`${paths.v3PackageJson}: verify:v3-protocol-conversion-field-parity-ci must include ${command}`);
   }
 }
 if (!String(text.v3ArchitectureCi ?? '').includes("'verify:v3-protocol-conversion-field-parity-ci'")) {
   failures.push(`${paths.v3ArchitectureCi}: verify:v3-architecture-ci must run verify:v3-protocol-conversion-field-parity-ci`);
 }
-if (pkg.scripts?.['render:v3-protocol-semantic-field-matrix'] !== 'node v3/scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs') {
-  failures.push(`${paths.packageJson}: render:v3-protocol-semantic-field-matrix must run node v3/scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs`);
+if (v3Pkg.scripts?.['render:v3-protocol-semantic-field-matrix'] !== 'node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs') {
+  failures.push(`${paths.v3PackageJson}: render:v3-protocol-semantic-field-matrix must run node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs`);
 }
 for (const scriptName of ['test:v3-protocol-conversion-field-parity', 'test:v3-anthropic-codec-characterization', 'test:v3-gemini-codec-characterization', 'verify:v3-cargo-fmt']) {
-  if (/\+\s*(?:stable|nightly|\d+(?:\.\d+){1,2})\b/u.test(String(pkg.scripts?.[scriptName] ?? ''))) {
-    failures.push(`${paths.packageJson}: ${scriptName} must use the V3-local pinned rust-toolchain.toml without an explicit toolchain override`);
+  if (/\+\s*(?:stable|nightly|\d+(?:\.\d+){1,2})\b/u.test(String(v3Pkg.scripts?.[scriptName] ?? ''))) {
+    failures.push(`${paths.v3PackageJson}: ${scriptName} must use the V3-local pinned rust-toolchain.toml without an explicit toolchain override`);
   }
 }
 

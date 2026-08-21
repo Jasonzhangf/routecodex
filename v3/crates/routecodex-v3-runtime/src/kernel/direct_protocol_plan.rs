@@ -12,7 +12,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
             return Err(protocol_plan_failure(
                 runtime_source("V3Req04StandardizedResponses", error),
                 trace,
-            ));
+            ))
         }
     };
     trace.push("V3Req04StandardizedResponses");
@@ -65,18 +65,10 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     let route_policy_scope = crate::route_policy::V3RoutePolicyScope::without_conversation(
         &standardized.protocol_context.server_id,
         &classified.routing_group_id,
-        standardized
-            .protocol_context
-            .failure_session_scope
-            .session_id(),
+        standardized.protocol_context.failure_session_scope.session_id(),
         &standardized.protocol_context.server_id,
     )
-    .with_conversation(
-        standardized
-            .protocol_context
-            .failure_session_scope
-            .session_id(),
-    );
+    .with_conversation(standardized.protocol_context.failure_session_scope.session_id());
     let route_policy_observation = crate::route_policy::observe_route_turn(
         &standardized.body,
         &classified.facts.route_classification.route_name,
@@ -96,16 +88,23 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
             ))
         }
     };
+    let request_is_compaction = standardized.protocol_context.request_purpose.is_compaction()
+        || standardized
+            .protocol_context
+            .endpoint
+            .trim_end_matches('/')
+            .ends_with("/responses/compact");
+    let classified = if request_is_compaction {
+        V3VirtualRouter::with_route_policy_pool(classified, Some("compact".to_string()))
+    } else {
+        classified
+    };
     trace.push("V3Router05RequestClassified");
     let plan = match router.resolve_route_pool_plan(manifest, classified) {
         Ok(value) => value,
         Err(error) => {
             return Err(protocol_plan_failure(
-                crate::shared::v3_route_plan_error_source(
-                    "V3Router06RoutePoolResolved",
-                    "v3_route_target_runtime_failure",
-                    error,
-                ),
+                crate::shared::v3_route_plan_error_source("V3Router06RoutePoolResolved", "v3_route_target_runtime_failure", error),
                 trace,
             ))
         }

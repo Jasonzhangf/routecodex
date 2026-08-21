@@ -7,7 +7,11 @@ Date: 2026-08-20
 ## 1. Objective
 
 Add a config-driven `tool-thinking` Hook Skeleton feature for the V3 Chat Process.
-The request hook adds a tool-use reason contract to the provider-facing tool list.
+The first guidance experiment uses the canonical system-instructions surface only;
+tool descriptions are intentionally not modified. Further placement variants are
+not introduced unless measured live samples show this placement is ineffective.
+The request hook adds a tool-use reason contract to the canonical provider-facing
+system instructions. It does not modify tool descriptions or tool schemas.
 The response hook handles imperfect model output, maps a recovered reason to
 `reasoning_content`, and removes the raw `<toolreason>` marker before the response
 leaves Resp03.
@@ -35,8 +39,10 @@ The implementation is acceptable only when all conditions hold:
    implementation details.
 4. Resp03 is the only semantic response owner for collecting, associating,
    normalizing, and redacting tool reasons.
-5. A valid reason maps to exactly one sentence in `reasoning_content`:
-   `调用工具 <tool_name>，因为 <reason>`.
+5. A valid reason maps to exactly one marked sentence in `reasoning_content`:
+   `🟢 调用工具 <tool_name>[、<tool_name>...]，因为 <reason>`. The green-dot prefix is the
+   visible provenance marker for a RouteCodex toolreason projection; native model
+   reasoning is not given this prefix.
 6. Original tool name, call id, arguments, tool parameters, status, finish reason,
    and ordinary response content semantics remain unchanged.
 7. Raw `<toolreason>` content never reaches the client, regardless of whether
@@ -46,8 +52,13 @@ The implementation is acceptable only when all conditions hold:
    and omits the synthesized field from the client projection.
 10. Malformed, incomplete, duplicated, missing, misplaced, and multi-tool output
     has deterministic behavior covered by positive and negative tests.
-11. SSE, handler, inbound/outbound transport, provider runtime, and continuation
-    transport do not parse or repair tool-thinking semantics.
+11. Handler, inbound/outbound transport, provider runtime, and continuation
+    transport do not own tool-thinking semantics. Relay uses the Req04 and Resp03
+    Chat Process hooks. Direct uses a separately registered Direct response
+    projection hook for its SSE lifecycle; that hook may parse canonicalized
+    Responses SSE data frames only at the Resp03 projection boundary and delegates
+    association, normalization, and redaction to the Resp03 owner. The two paths
+    are behaviorally equivalent but remain separate lifecycle bindings.
 12. No control state, parser status, recovery status, hook identity, or scope is
     written to normal request/response payload, provider metadata, client metadata,
     or tool arguments.
@@ -75,7 +86,8 @@ The implementation is acceptable only when all conditions hold:
 - Adding `toolreason` to tool parameters or function arguments.
 - Adding a synthetic tool solely to carry the reason.
 - Writing the reason to MetadataCenter control state.
-- Parsing provider raw SSE in the SSE transport layer.
+- Adding an independent SSE semantic owner outside the registered Resp03 Direct
+  response projection hook.
 - Parsing user text, historical text, tool output, or tool arguments as reasons.
 - Changing StoplessCenter, `reasoningStop`, `stop_schema`, or Stopless budgets.
 - Changing provider selection, routing, retry, health, or error policy.
@@ -83,9 +95,10 @@ The implementation is acceptable only when all conditions hold:
 - Rewriting client history or cleaning historical payloads.
 - Enabling Phase 2 private projection before Phase 1 monitoring evidence exists.
 
-Direct same-protocol paths that bypass Chat Process are not covered by this hook
-bundle. They must not silently reroute to Relay. Direct support requires a separate
-registered direct semantic hook with the same parser contract.
+Direct same-protocol paths that bypass the Relay Chat Process are covered by a
+separately registered Direct semantic hook. Direct must not silently reroute to
+Relay. The Direct hook reuses the same Req04 injector and Resp03 mapper contract;
+it only adds the Direct lifecycle edge at the existing response projection hook.
 
 ## 4. Architecture constraints
 
@@ -149,7 +162,7 @@ compiled manifest and does not read TOML dynamically.
 Logical bundle:
 
 ```text
-tool-thinking.req04.tool_list_prompt
+tool-thinking.req04.system_prompt
 tool-thinking.resp03.harvest_normalize_redact
 tool-thinking.resp04.visibility_projection
 ```
@@ -226,35 +239,37 @@ The implementation must keep one canonical prompt constant. Formatting changes
 require fixture updates because the marker grammar is part of the response parser
 contract.
 
-Chinese contract:
+Chinese model-visible instruction:
 
 ```text
-调用此工具前，先输出一个工具调用动机，格式必须是：
-<toolreason>动机</toolreason>
+下面内容只说明工具调用部分，不适用于普通回答：
+工具调用时必须先输出原因标签：在这一轮第一个结构化工具调用之前，输出且只输出一个原因标签。标签内部填写这一轮调用工具的直接动机，只说现在为什么要调用，不说计划、步骤、结果或总结。多个工具调用共用这一轮唯一原因，不要重复标签。规则不适用于普通回答、解释、代码块或工具结果。
 
-格式规则：
-- 只输出调用该工具的直接动机。
-- 使用简洁、直接的短句；类似 caveman 风格。
-- 每个工具调用只输出一个 toolreason。
-- toolreason 必须位于对应工具调用附近。
-- 不输出计划、步骤、推理过程、工具结果或任务总结。
-- 不重复工具参数，不复制用户原文。
-- 不输出 RouteCodex、Proxy、hook、注入、过滤、客户端或内部策略信息。
-- 不在 toolreason 外增加工具调用说明。
-- 没有明确动机时，仍只给最短、事实性的动机；不要编造结果。
+格式示例：`<toolreason>确认当前工作目录</toolreason>`。实际调用时，标签内部必须换成这一轮真实的直接动机；不要输出示例原文、占位词、加号、反引号、角色说明或格式说明。
+
+工具调用必须使用当前工具接口的结构化调用能力，不要把工具名、参数或“调用工具”写成普通文本。`toolreason` 是文本 fence，必须紧跟在第一个结构化调用之前。工具调用发出后，模型可能因协议结束本轮，不能依赖后置文本补原因。
+
+正例：模型先输出 `<toolreason>确认当前工作目录</toolreason>`，然后立即使用结构化工具接口调用 `exec_command`，参数为 `{"cmd":"pwd"}`。
+
+正例：模型先输出 `<toolreason>读取配置核对端口</toolreason>`，然后立即使用结构化工具接口调用 `read_file`，参数为 `{"path":"config.toml"}`。
+
+反例：输出占位词或加号、复述规则、标签外的普通解释、工具调用之间插入普通文本、一个 turn 输出多个标签。实际发起工具调用时，只输出当前 turn 的唯一原因标签，然后立即发出第一个结构化工具调用。模型未输出标签时仍照常发起工具调用。
 ```
+
+这是模型生成提示，不是拒绝工具调用的协议校验。模型缺失或违反该
+提示时，响应 hook 必须继续兼容处理，不能因为缺少标签而拒绝工具调用。
 
 English contract for English-model profiles:
 
 ```text
-Before each tool call, output exactly one tool-call motive in this form:
+For every tool-call turn, you MUST output exactly one tool-call motive immediately before the first structured tool call:
 <toolreason>motive</toolreason>
 
 Format rules:
 - State only the direct motive for calling this tool.
 - Use a short, direct caveman-style sentence.
-- Emit exactly one toolreason for each tool call.
-- Keep the toolreason next to its corresponding tool call.
+- Emit exactly one toolreason for the whole tool-call turn.
+- Put no ordinary explanation between tool calls. Do not rely on text after a tool call; the provider may end the assistant turn at `tool_calls`. Multiple tool calls share one motive.
 - Do not output a plan, steps, chain of thought, result, or task summary.
 - Do not repeat tool arguments or copy the user message.
 - Do not mention RouteCodex, Proxy, hooks, injection, filtering, client state,
@@ -313,7 +328,7 @@ Output:
 
 ```text
 reasoning_content:
-  调用工具 read_file，因为 Need inspect config.
+  🟢 调用工具 read_file，因为 Need inspect config.
 ```
 
 Existing model `reasoning_content` is preserved and the normalized sentence is
@@ -356,7 +371,7 @@ Phase 1 response example:
 ```json
 {
   "content": "",
-  "reasoning_content": "调用工具 read_file，因为需要读取配置文件",
+  "reasoning_content": "🟢 调用工具 read_file，因为需要读取配置文件",
   "tool_calls": [
     {
       "id": "call_1",
@@ -507,13 +522,19 @@ and verification maps. Expected owner surfaces:
 | Config declaration/validation/compile | `v3/crates/routecodex-v3-config` |
 | Static hook declaration | V3 Hub manifest/static hook registry |
 | Req04 tool-list mutation | `v3/crates/routecodex-v3-runtime/src/hub_v1` Req04/servertool hook owner |
-| Resp03 parser/association/redaction | `v3/crates/routecodex-v3-runtime/src/hub_v1` Resp03/servertool hook owner |
+| Relay Req04/Resp03 hook | `v3/crates/routecodex-v3-runtime/src/hub_v1` Chat Process hook owner |
+| Direct SSE response hook | registered Direct response projection hook; lifecycle adapter only |
+| Resp03 parser/association/redaction | `v3/crates/routecodex-v3-runtime/src/hub_v1` Resp03 owner |
 | Resp04 visible/private projection | existing Resp04 continuation owner plus declared hook resource |
 | Canonical protocol parity | adjacent Hub protocol projection tests |
 | Client monitoring evidence | Resp05/client projection black-box tests |
 
-Do not create a new provider codec, server handler, SSE semantic parser, or
-parallel tool-governance implementation.
+Do not create a new provider codec, server handler, or parallel tool-governance
+implementation. The registered Direct response projection hook is the only
+Direct streaming adapter and delegates toolreason semantics to Resp03. Relay
+must remain on the Req04/Resp03 Chat Process hooks. When the model omits a reason,
+the response remains protocol-clean; only a console observation sample is emitted,
+with no synthetic `reasoning_content` field added to the client payload.
 
 ## 14. Test design
 
@@ -532,7 +553,7 @@ parallel tool-governance implementation.
 
 - complete marker maps to the correct tool's `reasoning_content`;
 - existing reasoning content is preserved and normalized reason appended;
-- multiple tools map in stable order;
+   - one tool-call turn emits one reason and maps the complete tool batch in stable order;
 - marker is removed from content;
 - tool calls and arguments remain identical;
 - Phase 1 client payload exposes normalized reasoning_content;
@@ -609,8 +630,8 @@ parallel tool-governance implementation.
 | Description injection changes provider validation | only legal description surface; target validation after projection |
 | Stopless treats toolreason as stop evidence | separate parser and evidence types |
 | Phase 2 changes continuation history | private projection must exist before Resp04 commit |
-| Direct path bypasses Chat Process | explicit scope; no reroute/fallback |
-| Streaming parser sees partial frames | parse canonical response after semantic materialization, not SSE transport |
+| Direct path bypasses Chat Process | separate registered Direct semantic hook; no reroute/fallback |
+| Streaming parser sees partial frames | preserve framing in the registered Direct projection hook, parse only complete canonicalized data frames, and delegate semantics to Resp03 |
 
 ## 17. Definition of Done
 

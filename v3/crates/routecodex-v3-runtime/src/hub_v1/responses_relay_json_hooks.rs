@@ -143,9 +143,13 @@ pub(crate) fn responses_relay_request_hook_profile(
         V3HubServertoolRequestProfile::enabled(["servertool.request"])
             .with_web_search_execution_mode(web_search_execution_mode)
             .with_tool_thinking_enabled(tool_thinking_enabled)
+    } else if tool_thinking_enabled {
+        // Tool-thinking is a request hook even when no servertool/web-search
+        // surface is active. Keep the profile enabled so Req04 can inject the
+        // shared guidance; response validation remains permissive.
+        V3HubServertoolRequestProfile::enabled([]).with_tool_thinking_enabled(true)
     } else {
         V3HubServertoolRequestProfile::disabled()
-            .with_tool_thinking_enabled(tool_thinking_enabled)
     };
     if !v3_stopless_center_enabled_for_server(manifest, server_id)
         || !stopless_control_has_client_session_scope

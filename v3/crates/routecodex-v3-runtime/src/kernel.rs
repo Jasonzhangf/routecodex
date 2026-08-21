@@ -17,8 +17,8 @@ use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecove
 use crate::provider_failure_runtime_policy::{
     build_v3_transient_failure_record, build_v3_transient_recovery_witness,
     select_v3_expanded_target_with_exhaustion_rescue, select_v3_target_with_session_then_global,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3ProviderFailureRuntimeHealth, V3TargetSelectionAfterRescue, V3_TRANSIENT_RETRY_BUDGET,
+    v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
+    V3TargetSelectionAfterRescue, V3_TRANSIENT_RETRY_BUDGET,
 };
 use crate::remote_continuation::{
     V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,
@@ -57,8 +57,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 mod direct_sse_provider_outcome;
 use direct_sse_provider_outcome::{
-    wrap_direct_sse_provider_outcome_stream,
-    wrap_direct_sse_provider_outcome_stream_with_terminal_commit, V3DirectSseProviderOutcome,
+    wrap_direct_sse_provider_outcome_stream, wrap_direct_sse_provider_outcome_stream_with_terminal_commit,
+    V3DirectSseProviderOutcome,
 };
 mod direct_runtime_helpers_stream;
 mod v3_direct_protocol_codec;
@@ -384,6 +384,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 )
             }
         };
+        let request_is_compaction = standardized.protocol_context.request_purpose.is_compaction()
+            || standardized
+                .protocol_context
+                .endpoint
+                .trim_end_matches('/')
+                .ends_with("/responses/compact");
+        let classified = if request_is_compaction {
+            V3VirtualRouter::with_route_policy_pool(classified, Some("compact".to_string()))
+        } else {
+            classified
+        };
         trace.push("V3Router05RequestClassified");
         let plan = match router.resolve_route_pool_plan(manifest, classified) {
             Ok(value) => value,
@@ -454,10 +465,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             )
         })
     };
+    let standardized_request_id = standardized.protocol_context.request_id.clone();
+    let standardized_server_id = standardized.protocol_context.server_id.clone();
     let commit_route_policy = || -> Result<(), String> {
         route_policy_state.commit_request(
             &route_policy_scope,
-            &standardized.protocol_context.request_id,
+            &standardized_request_id,
             &route_policy_policies,
         )
     };
@@ -499,9 +512,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             &provider_health,
                             &failed_candidates,
                             now_epoch_ms,
-                            v3_relay_provider_target_selection_sample(
-                                &standardized.protocol_context.request_id,
-                            ),
                             allow_exhaustion_rescue_probe,
                         )
                         .await
@@ -847,6 +857,24 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             }
         }
 
+        // Responses direct has a protocol-specific kernel, so it must enter the
+        // same Req04 tool-thinking hook explicitly as the generic direct kernel.
+        // Keep the injection owner in the shared Req04 hook; this call only wires
+        // the direct lifecycle edge before policy and provider wire projection.
+        if let Err(source) =
+            crate::kernel::v3_direct_protocol_codec::V3ResponsesDirectCodec::prepare_before_send(
+                &mut (),
+                manifest,
+                &standardized_server_id,
+                &mut standardized,
+                &standardized_request_id,
+                now_epoch_ms,
+                &mut trace,
+            )
+        {
+            return error_output(source, trace, &hook_registry);
+        }
+
         let selected_capability_revision =
             match capability_revision_for_pin(manifest, &selected_pin) {
                 Ok(revision) => revision,
@@ -1083,6 +1111,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         let direct_response_compat_context =
             match crate::kernel::v3_direct_protocol_codec::build_direct_response_compat_context(
                 &policy.target,
+                manifest.features.get("tool_thinking").copied().unwrap_or(false),
             ) {
                 Ok(context) => context,
                 Err(error) => {

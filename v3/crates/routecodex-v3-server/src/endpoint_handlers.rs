@@ -48,6 +48,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             "path": path.clone(),
             "entry_protocol": entry_protocol.clone(),
             "execution_mode": execution_mode.as_str(),
+            "request_purpose": if request_purpose.is_compaction() {
+                "compaction"
+            } else {
+                "conversation"
+            },
             "server_id": state.server.id.clone()
         })),
     ) {
@@ -55,17 +60,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             "V3Server03HttpRequestRaw",
             error,
         ));
-    }
-    if request_purpose.is_compaction() && execution_mode == V3EntryProtocolExecutionMode::Relay {
-        return error_output_response_for_server(
-            &state.server,
-            &path,
-            &request_id,
-            project_http_input_error(
-                V3HttpBoundaryErrorKind::EndpointNotEnabled,
-                "compaction request requires a Direct entry binding",
-            ),
-        );
     }
     if entry_protocol == "responses" {
         let owner_resolution_context =
@@ -188,8 +182,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     let responses_protocol_plan = None;
     if entry_protocol == "responses" {
         if let Some(entry_facts) = responses_entry_facts.as_ref() {
-            execution_mode =
-                responses_effective_execution_mode_for_entry_facts(execution_mode, entry_facts);
+            execution_mode = responses_effective_execution_mode_for_request_purpose(
+                execution_mode,
+                entry_facts,
+                request_purpose,
+            );
         }
     }
     if execution_mode == V3EntryProtocolExecutionMode::Relay {

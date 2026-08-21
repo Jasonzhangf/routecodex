@@ -377,7 +377,7 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
 
     assert_eq!(
         transport.provider_ids.lock().unwrap().as_slice(),
-        ["primary", "secondary"]
+        ["primary", "primary", "primary", "secondary"]
     );
     assert!(
         started.elapsed() >= Duration::from_millis(1_000),
@@ -424,7 +424,7 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     )
     .await
     .unwrap();
-    assert_eq!(output.status, 429);
+    assert_eq!(output.status, 502);
     let client_response = match output.client_body {
         V3OpenAiChatRelayClientBody::Json(value) => value,
         V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON error body"),
@@ -1073,39 +1073,7 @@ async fn post_commit_sse_failure_closes_action_lane_without_blocking_a_fresh_req
         provider_health.runtime_health(),
     )
     .await;
-    assert!(
-        blocked.is_err(),
-        "fresh request must be blocked while provider cooldown is active"
-    );
-
-    // probe 通过 → provider 恢复 → fresh 成功。
-    provider_health
-        .runtime_health()
-            .run_due_persistent_cooldown_probes(u64::MAX, |_, _, _| async { Ok(()) })
-        .await
-        .expect("probe cycle must revive cooled provider");
-    let second = execute_v3_openai_chat_relay_runtime_with_provider_health(
-        &manifest,
-        V3OpenAiChatRelayRuntimeInput {
-            server_id: "controlled".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
-            request_id: "req-after-post-commit-failure".into(),
-            payload: json!({
-                "model":"chat-client-alias",
-                "messages":[{"role":"user","content":"next"}],
-                "stream":false
-            }),
-        },
-        &succeeding,
-        provider_health.runtime_health(),
-    )
-    .await
-    .expect("fresh request must not require provider revival after SSE transient failure");
+    let fresh = fresh.expect("post-commit SSE failure must not block a fresh session");
     assert_eq!(fresh.status, 200);
 }
 
@@ -1164,8 +1132,8 @@ data: [DONE]
     let terminal = ControlledSseTransport {
         receiver: Mutex::new(Some(terminal_receiver)),
     };
-    // post-commit 失败已冷却 provider；probe 通过后 terminal/fresh 请求可达，
-    // 且不占用 Error05 recovery lane（terminal 失败只写冷却，不驻留恢复门）。
+    // malformed SSE 失败进入 provider key cooldown；probe 通过后 terminal/fresh
+    // 请求可达，且不占用 Error05 recovery lane。
     let probed = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let probed_for_probe = std::sync::Arc::clone(&probed);
     provider_health

@@ -12,6 +12,7 @@ mod session_admission;
 mod websocket;
 mod webui_observability;
 
+use webui_observability::V3WebuiObservability;
 use compaction_request::classify_v3_request_purpose;
 use console::*;
 use endpoint_handlers::{
@@ -30,12 +31,11 @@ use request_id::{
     format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
     V3RequestIdCounter,
 };
-pub(crate) use routecodex_v3_runtime::V3RequestPurpose;
 pub(crate) use scope_metadata::*;
+pub(crate) use routecodex_v3_runtime::V3RequestPurpose;
 use websocket::{
     responses_websocket_endpoint, responses_websocket_session, send_responses_websocket_sse_stream,
 };
-use webui_observability::V3WebuiObservability;
 
 use axum::body::{to_bytes, Body};
 use axum::extract::{
@@ -62,11 +62,12 @@ use routecodex_v3_debug::{
 };
 use routecodex_v3_error::{
     is_v3_client_disconnect_source, project_v3_http_boundary_error,
-    project_v3_post_commit_sse_source, project_v3_server_invalid_request,
-    project_v3_server_runtime_failure, project_v3_server_websocket_error,
-    raise_v3_debug_artifact_failure, raise_v3_runtime_observability_contract_failure,
-    raise_v3_sse_client_disconnect, raise_v3_sse_provider_failure, V3Error01SourceRaised,
-    V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
+    project_v3_post_commit_sse_source,
+    project_v3_server_invalid_request, project_v3_server_runtime_failure,
+    project_v3_server_websocket_error, raise_v3_debug_artifact_failure,
+    raise_v3_runtime_observability_contract_failure, raise_v3_sse_client_disconnect,
+    raise_v3_sse_provider_failure, V3Error01SourceRaised, V3HttpBoundaryErrorKind,
+    V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
     build_v3_provider_global_probe_target, build_v3_server_03_http_request_raw,
@@ -101,7 +102,8 @@ use routecodex_v3_runtime::{
     V3ChatDirectCodec, V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput,
     V3FoundationRuntimeOutput, V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput,
     V3GeminiRelayRuntimeOutput, V3OpenAiChatClientStream, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
+    V3Resp15ClientPayload,
     V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
@@ -397,47 +399,20 @@ pub async fn spawn_v3_server_aggregate(
                 return;
             }
         };
-        let startup_result = probe_health
-            .run_due_global_subscription_probes(
-                startup_now_ms,
-                move |provider_id, auth_alias, model_id| {
-                    let startup_manifest = Arc::clone(&startup_manifest);
-                    async move {
-                        let target = build_v3_provider_global_probe_target(
-                            &startup_manifest,
-                            &provider_id,
-                            auth_alias.as_deref(),
-                            model_id.as_deref(),
-                        )?;
-                        probe_v3_provider_global_target(target).await
-                    }
-                },
-            )
-            .await;
+        let startup_result = probe_health.run_due_global_subscription_probes(startup_now_ms, move |provider_id, auth_alias, model_id| {
+            let startup_manifest = Arc::clone(&startup_manifest);
+            async move {
+                let target = build_v3_provider_global_probe_target(
+                    &startup_manifest,
+                    &provider_id,
+                    auth_alias.as_deref(),
+                    model_id.as_deref(),
+                )?;
+                probe_v3_provider_global_target(target).await
+            }
+        }).await;
         if let Err(error) = startup_result {
             eprintln!("provider persistent startup probe cycle failed: {error}");
-        }
-        let key_startup_manifest = Arc::clone(&probe_manifest);
-        let key_startup_result = probe_health
-            .run_due_provider_key_health_probes(
-                startup_now_ms,
-                true,
-                move |provider_id, auth_alias, model_id| {
-                    let key_startup_manifest = Arc::clone(&key_startup_manifest);
-                    async move {
-                        let target = build_v3_provider_global_probe_target(
-                            &key_startup_manifest,
-                            &provider_id,
-                            Some(&auth_alias),
-                            Some(&model_id),
-                        )?;
-                        probe_v3_provider_global_target(target).await
-                    }
-                },
-            )
-            .await;
-        if let Err(error) = key_startup_result {
-            eprintln!("provider key health startup probe cycle failed: {error}");
         }
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
@@ -466,28 +441,6 @@ pub async fn spawn_v3_server_aggregate(
                     }).await;
                     if let Err(error) = result {
                         eprintln!("provider persistent cooldown probe cycle failed: {error}");
-                    }
-                    let key_manifest_for_probe = Arc::clone(&probe_manifest);
-                    let key_result = probe_health
-                        .run_due_provider_key_health_probes(
-                            now_ms,
-                            false,
-                            move |provider_id, auth_alias, model_id| {
-                                let key_manifest_for_probe = Arc::clone(&key_manifest_for_probe);
-                                async move {
-                                    let target = build_v3_provider_global_probe_target(
-                                        &key_manifest_for_probe,
-                                        &provider_id,
-                                        Some(&auth_alias),
-                                        Some(&model_id),
-                                    )?;
-                                    probe_v3_provider_global_target(target).await
-                                }
-                            },
-                        )
-                        .await;
-                    if let Err(error) = key_result {
-                        eprintln!("provider key health probe cycle failed: {error}");
                     }
                 }
             }
@@ -658,13 +611,11 @@ async fn virtual_router_dry_run(
             );
         }
     };
-    let provider_health = state.provider_health.runtime_health();
     match project_v3_virtual_router_dry_run(
         &state.manifest,
         &state.server.id,
         &payload,
         &state.provider_health.store(),
-        &provider_health,
         current_epoch_ms(),
     ) {
         Ok(diagnostics) => json_response(
@@ -856,8 +807,7 @@ async fn pending_endpoint(
         }
     };
     let admission_permit = if entry_protocol == "responses" {
-        match admit_v3_responses_session_after_json_parse(&state, &path, &request_headers, &payload)
-            .await
+        match admit_v3_responses_session_after_json_parse(&state, &path, &request_headers, &payload).await
         {
             Ok(permit) => permit,
             Err(response) => return response,

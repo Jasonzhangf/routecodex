@@ -16,19 +16,20 @@ use std::sync::Arc;
 const STOPLESS_CALL_ID: &str = "call_stopless_reasoning";
 const STOPLESS_CLI_COMMAND: &str = "routecodex hook run reasoningStop";
 
-pub(crate) const V3_TOOL_THINKING_GUIDANCE: &str = r#"调用工具前，先输出一个工具调用动机，格式必须是：
-<toolreason>动机</toolreason>
+pub(crate) const V3_TOOL_THINKING_GUIDANCE: &str = r#"下面内容只说明工具调用部分，不适用于普通回答：
+工具调用时必须先输出原因标签：在这一轮第一个结构化工具调用之前，输出且只输出一个原因标签。标签内部填写这一轮调用工具的直接动机，只说现在为什么要调用，不说计划、步骤、结果或总结。多个工具调用共用这一轮唯一原因，不要重复标签。规则不适用于普通回答、解释、代码块或工具结果。
 
-格式规则：
-- 只输出调用该工具的直接动机。
-- 使用简洁、直接的短句；类似 caveman 风格。
-- 每个工具调用只输出一个 toolreason。
-- toolreason 必须位于对应工具调用附近。
-- 不输出计划、步骤、推理过程、工具结果或任务总结。
-- 不重复工具参数，不复制用户原文。
-- 不输出 RouteCodex、Proxy、hook、注入、过滤、客户端或内部策略信息。
-- 不在 toolreason 外增加工具调用说明。
-- 没有明确动机时，仍只给最短、事实性的动机；不要编造结果。"#;
+格式示例：<toolreason>确认当前工作目录</toolreason>。实际调用时，标签内部必须换成这一轮真实的直接动机；不要输出示例原文、占位词、加号、反引号、角色说明或格式说明。
+
+工具调用必须使用当前工具接口的结构化调用能力，不要把工具名、参数或“调用工具”写成普通文本。`toolreason` 是文本 fence，必须紧跟在第一个结构化调用之前。工具调用发出后，模型可能因协议结束本轮，不能依赖后置文本补原因。
+
+正例：模型先输出 `<toolreason>确认当前工作目录</toolreason>`，然后立即使用结构化工具接口调用 `exec_command`，参数为 `{"cmd":"pwd"}`。
+
+正例：模型先输出 `<toolreason>读取配置核对端口</toolreason>`，然后立即使用结构化工具接口调用 `read_file`，参数为 `{"path":"config.toml"}`。
+
+反例：输出占位词或加号、复述规则、标签外的普通解释、工具调用之间插入普通文本、一个 turn 输出多个标签。实际发起工具调用时，只输出当前 turn 的唯一原因标签，然后立即发出第一个结构化工具调用。模型未输出标签时仍照常发起工具调用。
+
+"#;
 
 pub(crate) fn inject_v3_tool_thinking_guidance_at_req04(
     payload: &mut Value,
@@ -46,58 +47,29 @@ pub(crate) fn inject_v3_tool_thinking_guidance_at_req04(
             });
         }
     }
-    if let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) {
-        inject_tool_thinking_into_tools(tools);
-    }
-    if let Some(tools) = payload
-        .pointer_mut("/additional_tools/tools")
-        .and_then(Value::as_array_mut)
-    {
-        inject_tool_thinking_into_tools(tools);
-    }
+    inject_tool_thinking_into_system_prompt(payload);
     Ok(())
 }
 
-fn inject_tool_thinking_into_tools(tools: &mut Vec<Value>) {
-    for tool in tools {
-        if let Some(declarations) = tool
-            .get_mut("function_declarations")
-            .and_then(Value::as_array_mut)
-        {
-            inject_tool_thinking_into_tools(declarations);
-            continue;
-        }
-        let name = tool
-            .get("name")
-            .and_then(Value::as_str)
-            .or_else(|| tool.pointer("/function/name").and_then(Value::as_str))
-            .unwrap_or_default()
-            .trim();
-        if name.is_empty()
-            || matches!(
-                name,
-                "reasoningStop" | "noop" | "web_search" | "web_search_preview"
-            )
-        {
-            continue;
-        }
-        let description = if tool.get("function").is_some() {
-            tool.pointer_mut("/function/description")
-        } else {
-            tool.get_mut("description")
-        };
-        let Some(description) = description else {
-            continue;
-        };
-        let Some(existing) = description.as_str() else {
-            continue;
-        };
-        if existing.contains("<toolreason>动机</toolreason>") {
-            continue;
-        }
-        *description = Value::String(format!("{existing}\n\n{V3_TOOL_THINKING_GUIDANCE}"));
+fn inject_tool_thinking_into_system_prompt(payload: &mut Value) {
+    let Some(object) = payload.as_object_mut() else {
+        return;
+    };
+    let instructions = object
+        .entry("instructions")
+        .or_insert_with(|| Value::String(String::new()));
+    let Value::String(existing) = instructions else {
+        return;
+    };
+    if existing.contains("<toolreason>") && existing.contains("工具调用时必须先输出原因标签") {
+        return;
     }
+    if !existing.trim().is_empty() {
+        existing.push_str("\n\n");
+    }
+    existing.push_str(V3_TOOL_THINKING_GUIDANCE);
 }
+
 pub(crate) fn is_v3_stopless_internal_call_id(call_id: &str) -> bool {
     call_id == STOPLESS_CALL_ID
 }

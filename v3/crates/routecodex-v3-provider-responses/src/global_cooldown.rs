@@ -2,10 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 const PROBE_RETRY_INTERVAL_MS: u64 = 60_000;
-static PERSIST_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum V3ProviderCooldownFailureClass {
@@ -142,19 +140,11 @@ impl V3ProviderCooldownCoordinator {
                 .collect(),
         })
         .map_err(|error| format!("encode provider cooldown state: {error}"))?;
-        let sequence = PERSIST_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let temp =
-            self.path
-                .with_extension(format!("json.tmp.{}.{}", std::process::id(), sequence));
+        let temp = self.path.with_extension("json.tmp");
         fs::write(&temp, bytes)
             .map_err(|error| format!("write provider cooldown state: {error}"))?;
-        match fs::rename(&temp, &self.path) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                let _ = fs::remove_file(&temp);
-                Err(format!("commit provider cooldown state: {error}"))
-            }
-        }
+        fs::rename(&temp, &self.path)
+            .map_err(|error| format!("commit provider cooldown state: {error}"))
     }
 
     pub fn availability(

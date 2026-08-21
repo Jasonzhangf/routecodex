@@ -147,6 +147,75 @@ async fn direct_continues_relay_handoff_attempts_and_timing_without_payload_leak
 }
 
 #[test]
+fn compact_direct_protocol_plan_keeps_typed_compact_pool_after_route_policy() {
+    let authoring = routecodex_v3_config::parse_v3_config_02_authoring(
+        r#"
+version = 3
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client"]
+allowed_transports = ["json"]
+continuation = { allowed_owners = ["none"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+[providers.primary]
+type = "responses"
+base_url = "http://primary.invalid/v1"
+default_model = "primary-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "PRIMARY_KEY" }] }
+[providers.primary.models.primary-model]
+capabilities = ["text"]
+[route_groups.default]
+compact_route_object = "compact"
+[[route_groups.default.route_policies]]
+id = "compact-purpose"
+precedence = 10
+condition = { kind = "current_compaction" }
+action = { select_route_pool = "compact" }
+[[route_groups.default.route_policies]]
+id = "search-history"
+precedence = 20
+condition = { kind = "search_pool_turn_ratio_at_least", window_turns = 10, numerator = 8, denominator = 10 }
+action = { select_route_pool = "thinking" }
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "primary", model = "primary-model", key = "key", priority = 1 }]
+[route_groups.default.pools.compact]
+route_object = "compact"
+selection = { strategy = "priority" }
+match = { precedence = 5, entry_protocol = "responses" }
+targets = [{ kind = "provider_model", provider = "primary", model = "primary-model", key = "key", priority = 1 }]
+[route_groups.default.pools.thinking]
+selection = { strategy = "priority" }
+match = { precedence = 6, entry_protocol = "responses" }
+targets = [{ kind = "provider_model", provider = "primary", model = "primary-model", key = "key", priority = 1 }]
+"#,
+    )
+    .expect("compact test config");
+    let manifest = routecodex_v3_config::compile_v3_config_05_manifest(authoring)
+        .expect("compact test manifest");
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        V3Server03HttpRequestRaw {
+            request_purpose: V3RequestPurpose::NativeCompaction,
+            server_id: "test".to_string(),
+            failure_session_scope: test_failure_session_scope("default"),
+            request_id: "compact-plan".to_string(),
+            execution_id: "compact-plan-exec".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses/compact".to_string(),
+            body: json!({"model":"primary-model","input":"compact"}),
+        },
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        0,
+    )
+    .expect("compact protocol plan");
+    assert_eq!(plan.decision.target.route.pool_id, "compact");
+}
+
+#[test]
 fn relay_only_same_protocol_responses_is_planned_as_hub_relay() {
     let mut manifest = test_manifest();
     manifest

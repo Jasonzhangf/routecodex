@@ -134,19 +134,15 @@ fn configured_health_policy_for_failure(
     if cooldown_ms.is_none() && !until_restart {
         return None;
     }
+    let internal_policy = v3_internal_error_handling();
     Some(V3ProviderFailurePolicy {
         failure_threshold: threshold,
         cooldown_ms: cooldown_ms.unwrap_or(1),
-        probe_interval_ms: routecodex_v3_config::internal::v3_provider_probe_interval_ms(
-            match cooldown_scope {
-                V3ProviderFailureCooldownScope::AuthKey => {
-                    routecodex_v3_config::internal::V3ProviderProbeIntervalScope::AuthKey
-                }
-                V3ProviderFailureCooldownScope::Session => {
-                    routecodex_v3_config::internal::V3ProviderProbeIntervalScope::Recoverable
-                }
-            },
-        ),
+        probe_interval_ms: if cooldown_scope == V3ProviderFailureCooldownScope::AuthKey {
+            internal_policy.unrecoverable_probe_interval_ms
+        } else {
+            internal_policy.recoverable_probe_interval_ms
+        },
         until_restart,
         cooldown_scope,
     })

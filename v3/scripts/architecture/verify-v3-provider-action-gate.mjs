@@ -45,7 +45,7 @@ const files = {
   manifest: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
   wiki: 'docs/architecture/wiki/v3-provider-action-gate.md',
   plan: 'docs/goals/direct-relay-cross-request-error-storm-control-plan.md',
-  packageJson: 'v3/package.json',
+  packageJson: 'package.json',
   workflow: '.github/workflows/test.yml',
 };
 const {

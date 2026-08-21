@@ -116,8 +116,8 @@ fn manifest() -> V3Config05ManifestPublished {
                         V3RoutePoolManifest {
                             id: "default".into(),
                             selection: V3SelectionPolicy::default(),
-                            route_object: None,
                             match_rule: None,
+                            route_object: None,
                             features: BTreeMap::new(),
                             targets: vec![target("default-target")],
                         },
@@ -127,7 +127,6 @@ fn manifest() -> V3Config05ManifestPublished {
                         V3RoutePoolManifest {
                             id: "compact".into(),
                             selection: V3SelectionPolicy::default(),
-                            route_object: Some("compact".into()),
                             match_rule: Some(V3RoutePoolMatchManifest {
                                 precedence: 0,
                                 entry_protocol: Some("responses".into()),
@@ -136,6 +135,7 @@ fn manifest() -> V3Config05ManifestPublished {
                                 min_input_tokens: None,
                                 max_input_tokens: None,
                             }),
+                            route_object: Some("compact".into()),
                             features: BTreeMap::new(),
                             targets: vec![target("compact-target")],
                         },
@@ -173,4 +173,27 @@ fn compact_pool_precedes_dotted_direct_model() {
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "compact");
+}
+
+#[test]
+fn compact_endpoint_precedes_thinking_route_policy_pool() {
+    let manifest = manifest();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses/compact",
+            V3RouterRequestFacts::from_endpoint("/v1/responses/compact"),
+        )
+        .unwrap();
+    let classified = V3VirtualRouter::with_route_policy_pool(
+        classified,
+        Some("thinking".to_string()),
+    );
+    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    assert_eq!(
+        router.hit_opaque_target_plan_once(plan, 0).unwrap().pool_id,
+        "compact"
+    );
 }

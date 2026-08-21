@@ -4,6 +4,53 @@ use std::collections::BTreeSet;
 use std::ops::Deref;
 use std::sync::Arc;
 
+const V3_TOOLREASON_VISIBLE_PREFIX: &str = "◦ ";
+
+fn log_v3_toolreason_observation_at_resp03(tool_name: &str, reason: Option<&str>, stage: &str) {
+    match reason.and_then(normalize_v3_toolreason_reason_at_resp03) {
+        Some(reason) => eprintln!(
+            "\x1b[1;42;30m TOOLREASON OK \x1b[0m stage={stage} tool={tool_name} reason={reason}"
+        ),
+        None => eprintln!(
+            "\x1b[1;43;30m TOOLREASON MISSING \x1b[0m stage={stage} tool={tool_name} reason=<none>"
+        ),
+    }
+}
+
+fn normalize_v3_toolreason_reason_at_resp03(reason: &str) -> Option<&str> {
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return None;
+    }
+    let lowered = reason.to_ascii_lowercase();
+    let placeholder = [
+        "一句真实",
+        "一句原因",
+        "当前动机",
+        "实际动机",
+        "tool-call motive",
+        "motive",
+        "...",
+    ];
+    if placeholder.iter().any(|marker| lowered.contains(marker)) {
+        return None;
+    }
+    Some(reason)
+}
+
+fn emit_v3_toolreason_observation_at_resp03(
+    tool_name: &str,
+    reason: Option<&str>,
+    stage: &str,
+    emitted: &mut bool,
+) {
+    if *emitted {
+        return;
+    }
+    log_v3_toolreason_observation_at_resp03(tool_name, reason, stage);
+    *emitted = true;
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRespChatProcess03Governed {
     pub(crate) previous: V3HubRespInbound02Normalized,
@@ -1067,7 +1114,7 @@ fn append_v3_resp03_openai_chat_reasoning_content(
     let mut joined = message
         .get("reasoning_content")
         .and_then(Value::as_str)
-        .map(str::trim)
+        .map(|name| name.trim())
         .filter(|text| !text.is_empty())
         .map(str::to_string)
         .unwrap_or_default();
@@ -1086,8 +1133,26 @@ fn append_v3_resp03_openai_chat_reasoning_content(
 }
 
 pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03(payload: &mut Value, enabled: bool) {
+    map_v3_toolreason_to_reasoning_content_at_resp03_impl(payload, enabled, true);
+}
+
+fn map_v3_toolreason_to_reasoning_content_at_resp03_without_observation(
+    payload: &mut Value,
+    enabled: bool,
+) {
+    map_v3_toolreason_to_reasoning_content_at_resp03_impl(payload, enabled, false);
+}
+
+fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
+    payload: &mut Value,
+    enabled: bool,
+    observe: bool,
+) {
     if !enabled {
         return;
+    }
+    if observe {
+        observe_v3_toolreason_json_at_resp03(payload);
     }
     if let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) {
         for choice in choices {
@@ -1100,12 +1165,7 @@ pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03(payload: &mut Val
                 .map(|calls| {
                     calls
                         .iter()
-                        .filter_map(|call| {
-                            call.pointer("/function/name")
-                                .and_then(Value::as_str)
-                                .or_else(|| call.get("name").and_then(Value::as_str))
-                                .map(str::to_owned)
-                        })
+                        .filter_map(|call| call.as_object().and_then(toolreason_display_name_from_object))
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
@@ -1113,20 +1173,18 @@ pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03(payload: &mut Val
         }
     }
     if let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) {
-        let tool_name = output
+        let tool_names = output
             .iter()
-            .find_map(|item| {
+            .filter_map(|item| {
                 if !matches!(
                     item.get("type").and_then(Value::as_str),
                     Some("function_call" | "tool_call" | "custom_tool_call")
                 ) {
                     return None;
                 }
-                item.get("name")
-                    .and_then(Value::as_str)
-                    .or_else(|| item.pointer("/function/name").and_then(Value::as_str))
+                item.as_object().and_then(toolreason_display_name_from_object)
             })
-            .map(str::to_owned);
+            .collect::<Vec<_>>();
         for item in output {
             if item.get("type").and_then(Value::as_str) == Some("message") {
                 let mut mapped_reason = None;
@@ -1139,14 +1197,10 @@ pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03(payload: &mut Val
                             if let Some(object) = part.as_object_mut() {
                                 object.insert("text".to_string(), Value::String(visible));
                             }
-                            if let (Some(tool_name), Some(reason)) = (tool_name.as_deref(), reason)
-                            {
-                                if !tool_name.trim().is_empty() && !reason.trim().is_empty() {
-                                    mapped_reason = Some(format!(
-                                        "调用工具 {}，因为 {}",
-                                        tool_name.trim(),
-                                        reason.trim()
-                                    ));
+                            if let Some(reason) = reason {
+                                if mapped_reason.is_none() && !reason.trim().is_empty() {
+                                    mapped_reason =
+                                        format_toolreason_reasoning(&tool_names, &reason);
                                 }
                             }
                         }
@@ -1190,15 +1244,707 @@ pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03(payload: &mut Val
             reasons.append(&mut part_reasons);
         }
         if !reasons.is_empty() && !tool_names.is_empty() {
-            let mapped = reasons
-                .into_iter()
-                .zip(tool_names)
-                .map(|(reason, name)| format!("调用工具 {name}，因为 {reason}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            payload["reasoning_content"] = Value::String(mapped);
+            if let Some(mapped) = format_toolreason_reasoning(&tool_names, &reasons[0]) {
+                payload["reasoning_content"] = Value::String(mapped);
+            }
         }
     }
+}
+
+fn observe_v3_toolreason_json_at_resp03(payload: &Value) {
+    let mut tool_names = Vec::new();
+    let mut reasons = Vec::new();
+    collect_v3_toolreason_json_observations_at_resp03(payload, &mut tool_names, &mut reasons);
+    if !tool_names.is_empty() {
+        let tool_label = format_toolreason_tool_label(&tool_names);
+        let mut emitted = false;
+        emit_v3_toolreason_observation_at_resp03(
+            &tool_label,
+            reasons.first().map(String::as_str),
+            "resp03_json",
+            &mut emitted,
+        );
+    }
+}
+
+fn collect_v3_toolreason_json_observations_at_resp03(
+    value: &Value,
+    tool_names: &mut Vec<String>,
+    reasons: &mut Vec<String>,
+) {
+    match value {
+        Value::String(text) => {
+            let (_, mut found) = extract_toolreasons(text);
+            reasons.append(&mut found);
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_v3_toolreason_json_observations_at_resp03(value, tool_names, reasons);
+            }
+        }
+        Value::Object(object) => {
+            let is_tool_call = v3_is_tool_call_object_at_resp03(object);
+            if is_tool_call {
+                if let Some(name) = toolreason_display_name_from_object(object) {
+                    tool_names.push(name);
+                }
+            }
+            for value in object.values() {
+                collect_v3_toolreason_json_observations_at_resp03(value, tool_names, reasons);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+/// Map a complete Responses SSE semantic event after the stream collector has
+/// already observed the corresponding function-call name.  Responses emits
+/// the assistant text and the function-call item as separate events, so the
+/// normal whole-payload mapper cannot associate them one frame at a time.
+pub(crate) fn map_v3_toolreason_stream_event_at_resp03(
+    payload: &mut Value,
+    enabled: bool,
+    tool_names: &[String],
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+) {
+    if !enabled {
+        return;
+    }
+    let event_output_index = payload
+        .get("output_index")
+        .and_then(Value::as_u64)
+        .and_then(|index| usize::try_from(index).ok());
+    let tool_name = event_output_index
+        .and_then(|index| tool_names.get(index))
+        .or_else(|| tool_names.iter().find(|name| !name.trim().is_empty()))
+        .and_then(|name| toolreason_stream_display_name(name));
+    let event_type = payload
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let reason_for = |reason: Option<String>| {
+        reason.and_then(|reason| {
+            let name = tool_name.clone()?;
+            let reason = reason.trim();
+            (!reason.is_empty()).then(|| {
+                format!(
+                    "{V3_TOOLREASON_VISIBLE_PREFIX}调用工具 {}，因为 {}",
+                    name.trim(),
+                    reason
+                )
+            })
+        })
+    };
+    let remember_reason = |reason: Option<String>, pending_reasons: &mut Vec<Option<String>>| {
+        let Some(index) = event_output_index else {
+            return;
+        };
+        let Some(reason) = reason else {
+            return;
+        };
+        let reason = reason.trim();
+        if reason.is_empty() {
+            return;
+        }
+        if pending_reasons.len() <= index {
+            pending_reasons.resize(index + 1, None);
+        }
+        pending_reasons[index] = Some(reason.to_string());
+    };
+
+    match event_type {
+        "response.output_text.delta" | "response.content_part.delta" => {
+            if let Some(delta) = payload
+                .get("delta")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+            {
+                payload["delta"] = Value::String(strip_v3_toolreason_markers_at_resp03(&delta));
+            }
+        }
+        "response.output_text.done" => {
+            let text = payload
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if let Some(text) = text {
+                let (visible, reason) = extract_toolreason(&text);
+                payload["text"] = Value::String(visible);
+                remember_reason(reason, pending_reasons);
+            }
+        }
+        "response.content_part.done" => {
+            let text = payload
+                .pointer("/part/text")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if let Some(text) = text {
+                let (visible, reason) = extract_toolreason(&text);
+                if let Some(part) = payload.get_mut("part").and_then(Value::as_object_mut) {
+                    part.insert("text".to_string(), Value::String(visible));
+                }
+                remember_reason(reason, pending_reasons);
+            }
+        }
+        "response.output_item.done" => {
+            let is_message =
+                payload.pointer("/item/type").and_then(Value::as_str) == Some("message");
+            if !is_message {
+                if matches!(
+                    payload.pointer("/item/type").and_then(Value::as_str),
+                    Some("function" | "function_call" | "tool_call" | "custom_tool_call")
+                ) {
+                    let pending = if *reason_emitted {
+                        None
+                    } else {
+                        pending_reasons
+                            .iter_mut()
+                            .find_map(Option::take)
+                            .and_then(|reason| format_toolreason_reasoning(tool_names, &reason))
+                    };
+                    if let Some(reasoning) = pending {
+                        let tool_label = format_toolreason_tool_label(tool_names);
+                        emit_v3_toolreason_observation_at_resp03(
+                            &tool_label,
+                            Some(reasoning.as_str()),
+                            "resp03_direct_sse",
+                            reason_emitted,
+                        );
+                        if let Some(item) = payload.get_mut("item").and_then(Value::as_object_mut) {
+                            item.insert("reasoning_content".to_string(), Value::String(reasoning));
+                        }
+                    }
+                }
+                return;
+            }
+            let mut item_reasoning = None;
+            {
+                let Some(parts) = payload
+                    .get_mut("item")
+                    .and_then(Value::as_object_mut)
+                    .and_then(|item| item.get_mut("content"))
+                    .and_then(Value::as_array_mut)
+                else {
+                    return;
+                };
+                for part in parts {
+                    let Some(text) = part.get("text").and_then(Value::as_str).map(str::to_owned)
+                    else {
+                        continue;
+                    };
+                    let (visible, reason) = extract_toolreason(&text);
+                    part["text"] = Value::String(visible);
+                    if let Some(reason) = reason {
+                        item_reasoning = reason_for(Some(reason.clone()));
+                        if item_reasoning.is_none() {
+                            remember_reason(Some(reason), pending_reasons);
+                        }
+                    }
+                }
+            }
+            if item_reasoning.is_none() && tool_name.is_some() {
+                if let Some(index) = event_output_index {
+                    item_reasoning = pending_reasons
+                        .get_mut(index)
+                        .and_then(Option::take)
+                        .and_then(|reason| reason_for(Some(reason)));
+                }
+            }
+            if let Some(reasoning) = item_reasoning {
+                let tool_label = format_toolreason_tool_label(tool_names);
+                emit_v3_toolreason_observation_at_resp03(
+                    &tool_label,
+                    Some(reasoning.as_str()),
+                    "resp03_direct_sse",
+                    reason_emitted,
+                );
+                if let Some(item) = payload.get_mut("item").and_then(Value::as_object_mut) {
+                    item.insert("reasoning_content".to_string(), Value::String(reasoning));
+                    let visible_reasoning = item
+                        .get("reasoning_content")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    item.insert("type".to_string(), Value::String("reasoning".to_string()));
+                    item.insert(
+                        "summary".to_string(),
+                        json!([{"type": "summary_text", "text": visible_reasoning}]),
+                    );
+                    item.remove("content");
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Resp03 owns the complete toolreason stream projection. The shared stream
+/// lifecycle only carries bytes and typed projection state into this function;
+/// it does not parse, associate, or redact toolreason semantics.
+pub(crate) fn project_v3_toolreason_sse_chunk_at_resp03(
+    buffer: &mut Vec<u8>,
+    tool_names: &mut Vec<String>,
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    chunk: &[u8],
+) -> Vec<u8> {
+    buffer.extend_from_slice(chunk);
+    let mut output = Vec::new();
+    while let Some((end, delimiter_len)) = find_v3_sse_frame_end_at_resp03(buffer) {
+        let frame_end = end + delimiter_len;
+        let frame: Vec<u8> = buffer.drain(..frame_end).collect();
+        output.extend(project_v3_toolreason_sse_frame_at_resp03(
+            &frame,
+            tool_names,
+            pending_reasons,
+            reason_emitted,
+        ));
+    }
+    output
+}
+
+pub(crate) fn project_v3_toolreason_sse_final_buffer_at_resp03(
+    buffer: &[u8],
+    tool_names: &mut Vec<String>,
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+) -> Vec<u8> {
+    project_v3_toolreason_sse_frame_at_resp03(buffer, tool_names, pending_reasons, reason_emitted)
+}
+
+/// Resp03 唯一的 Direct SSE turn closeout。工具调用已经被观察但模型没有
+/// 提供可映射的 `<toolreason>` 时，也必须在流真正收口时记录 MISSING；不能
+/// 依赖某一种 `response.*.done` 事件，否则不同 provider 的 canonical SSE
+/// 事件形状会产生“没有打印”这一不可观测状态。
+pub(crate) fn finalize_v3_toolreason_observation_at_resp03(
+    tool_names: &[String],
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+) {
+    if *reason_emitted || tool_names.is_empty() {
+        return;
+    }
+    let reason = pending_reasons.iter_mut().find_map(Option::take);
+    let tool_label = format_toolreason_tool_label(tool_names);
+    emit_v3_toolreason_observation_at_resp03(
+        &tool_label,
+        reason.as_deref().and_then(|reason| {
+            let reason = reason.trim();
+            (!reason.is_empty()).then_some(reason)
+        }),
+        "resp03_direct_sse",
+        reason_emitted,
+    );
+}
+
+fn find_v3_sse_frame_end_at_resp03(buffer: &[u8]) -> Option<(usize, usize)> {
+    let lf = buffer
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|index| (index, 2));
+    let crlf = buffer
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| (index, 4));
+    match (lf, crlf) {
+        (Some(left), Some(right)) => Some(if left.0 <= right.0 { left } else { right }),
+        (Some(found), None) | (None, Some(found)) => Some(found),
+        (None, None) => None,
+    }
+}
+
+fn project_v3_toolreason_sse_frame_at_resp03(
+    chunk: &[u8],
+    tool_names: &mut Vec<String>,
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(chunk) else {
+        return chunk.to_vec();
+    };
+    let mut output = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let Some(data) = line.strip_prefix("data:") else {
+            output.push_str(line);
+            continue;
+        };
+        let data = data.strip_prefix(' ').unwrap_or(data);
+        let data = data.trim_end_matches(['\r', '\n']);
+        let Ok(mut payload) = serde_json::from_str::<Value>(data) else {
+            output.push_str(line);
+            continue;
+        };
+        collect_v3_responses_sse_tool_name_at_resp03(&payload, tool_names);
+        let event_type = payload
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let has_marker = v3_json_contains_toolreason_marker_at_resp03(&payload);
+        let is_toolreason_text_delta = matches!(
+            event_type,
+            "response.output_text.delta" | "response.content_part.delta"
+        );
+        let is_completed_with_tool_call =
+            event_type == "response.completed" && v3_json_contains_tool_call_at_resp03(&payload);
+        let has_pending_message_reason = event_type == "response.output_item.done"
+            && payload.pointer("/item/type").and_then(Value::as_str) == Some("message")
+            && payload
+                .get("output_index")
+                .and_then(Value::as_u64)
+                .and_then(|index| usize::try_from(index).ok())
+                .and_then(|index| pending_reasons.get(index))
+                .is_some_and(Option::is_some);
+        let is_tool_call_done = event_type == "response.output_item.done"
+            && matches!(
+                payload.pointer("/item/type").and_then(Value::as_str),
+                Some("function" | "function_call" | "tool_call" | "custom_tool_call")
+            );
+        if !has_marker
+            && !has_pending_message_reason
+            && !is_tool_call_done
+            && !is_completed_with_tool_call
+            && !is_toolreason_text_delta
+        {
+            output.push_str(line);
+            continue;
+        }
+        if is_completed_with_tool_call {
+            // Some Responses providers collapse the whole assistant turn into
+            // response.completed and omit output_item.done. Resp03 must still
+            // validate every tool call and remove the private marker here.
+            if let Some(response) = payload.get_mut("response") {
+                map_v3_toolreason_to_reasoning_content_at_resp03_without_observation(
+                    response, true,
+                );
+                append_v3_toolreason_completed_visible_text_at_resp03(response, &mut output);
+                if !*reason_emitted {
+                    let mut response_tools = Vec::new();
+                    let mut response_reasons = Vec::new();
+                    collect_v3_toolreason_json_observations_at_resp03(
+                        response,
+                        &mut response_tools,
+                        &mut response_reasons,
+                    );
+                    let tool_label = format_toolreason_tool_label(&response_tools);
+                    emit_v3_toolreason_observation_at_resp03(
+                        &tool_label,
+                        response_reasons.first().map(String::as_str),
+                        "resp03_direct_sse",
+                        reason_emitted,
+                    );
+                }
+            } else {
+                map_v3_toolreason_to_reasoning_content_at_resp03_without_observation(
+                    &mut payload,
+                    true,
+                );
+                append_v3_toolreason_completed_visible_text_at_resp03(&mut payload, &mut output);
+                if !*reason_emitted {
+                    let mut response_tools = Vec::new();
+                    let mut response_reasons = Vec::new();
+                    collect_v3_toolreason_json_observations_at_resp03(
+                        &payload,
+                        &mut response_tools,
+                        &mut response_reasons,
+                    );
+                    let tool_label = format_toolreason_tool_label(&response_tools);
+                    emit_v3_toolreason_observation_at_resp03(
+                        &tool_label,
+                        response_reasons.first().map(String::as_str),
+                        "resp03_direct_sse",
+                        reason_emitted,
+                    );
+                }
+            }
+        } else {
+            map_v3_toolreason_stream_event_at_resp03(
+                &mut payload,
+                true,
+                tool_names,
+                pending_reasons,
+                reason_emitted,
+            );
+        }
+        if is_tool_call_done {
+            if let Some(reasoning) = payload
+                .pointer("/item/reasoning_content")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+            {
+                output.push_str(&build_v3_toolreason_visible_text_sse_events_at_resp03(
+                    &payload,
+                    &reasoning,
+                ));
+                if let Some(item) = payload.get_mut("item").and_then(Value::as_object_mut) {
+                    item.remove("reasoning_content");
+                }
+            }
+        }
+        strip_v3_toolreason_markers_from_json_at_resp03(&mut payload);
+        let Ok(encoded) = serde_json::to_string(&payload) else {
+            output.push_str(line);
+            continue;
+        };
+        output.push_str("data:");
+        if line.strip_prefix("data: ").is_some() {
+            output.push(' ');
+        }
+        output.push_str(&encoded);
+        if line.ends_with('\n') {
+            output.push('\n');
+        }
+    }
+    output.into_bytes()
+}
+
+fn append_v3_toolreason_completed_visible_text_at_resp03(
+    response: &mut Value,
+    output: &mut String,
+) {
+    let Some(items) = response.get_mut("output").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for (index, item) in items.iter_mut().enumerate() {
+        let Some(reasoning) = item
+            .get("reasoning_content")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        output.push_str(&build_v3_toolreason_visible_text_sse_events_at_resp03(
+            &json!({"output_index": index}),
+            &reasoning,
+        ));
+        if let Some(object) = item.as_object_mut() {
+            object.remove("reasoning_content");
+        }
+        break;
+    }
+}
+
+fn build_v3_toolreason_visible_text_sse_events_at_resp03(
+    payload: &Value,
+    reasoning: &str,
+) -> String {
+    let output_index = payload.get("output_index").cloned().unwrap_or_else(|| json!(0));
+    let item_id = payload
+        .pointer("/item/call_id")
+        .or_else(|| payload.pointer("/item/id"))
+        .and_then(Value::as_str)
+        .map(|id| format!("rcc_reason_{id}"))
+        .unwrap_or_else(|| "rcc_reason_tool_call".to_string());
+    let events = [
+        json!({"type":"response.output_item.added","output_index":output_index.clone(),"item":{"id":item_id.clone(),"type":"message","status":"in_progress","role":"assistant","content":[]}}),
+        json!({"type":"response.content_part.added","output_index":output_index.clone(),"item_id":item_id.clone(),"content_index":0,"part":{"type":"output_text","text":""}}),
+        json!({"type":"response.output_text.delta","output_index":output_index.clone(),"item_id":item_id.clone(),"content_index":0,"delta":reasoning}),
+        json!({"type":"response.output_text.done","output_index":output_index.clone(),"item_id":item_id.clone(),"content_index":0,"text":reasoning}),
+        json!({"type":"response.content_part.done","output_index":output_index.clone(),"item_id":item_id.clone(),"content_index":0,"part":{"type":"output_text","text":reasoning}}),
+        json!({"type":"response.output_item.done","output_index":output_index,"item":{"id":item_id,"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":reasoning}]}}),
+    ];
+    let mut output = String::new();
+    for event in events {
+        output.push_str("event: ");
+        output.push_str(event["type"].as_str().unwrap_or_default());
+        output.push_str("\ndata: ");
+        if let Ok(encoded) = serde_json::to_vec(&event) {
+            output.push_str(&String::from_utf8_lossy(&encoded));
+        }
+        output.push_str("\n\n");
+    }
+    output
+}
+
+fn collect_v3_responses_sse_tool_name_at_resp03(payload: &Value, tool_names: &mut Vec<String>) {
+    let output_index = payload
+        .get("output_index")
+        .and_then(Value::as_u64)
+        .and_then(|index| usize::try_from(index).ok());
+    let stream_index = output_index.or_else(|| {
+        payload
+            .get("index")
+            .and_then(Value::as_u64)
+            .and_then(|index| usize::try_from(index).ok())
+    });
+    if let Some(index) = stream_index {
+        let call_object = payload
+            .get("content_block")
+            .or_else(|| payload.get("item"))
+            .or_else(|| payload.pointer("/response/output/0"))
+            .and_then(Value::as_object);
+        if let Some(call_object) = call_object.filter(|object| {
+            v3_is_tool_call_object_at_resp03(object)
+                || object.get("name").and_then(Value::as_str).is_some()
+        }) {
+            let display_name = toolreason_display_name_from_object(call_object)
+                .unwrap_or_else(|| "exec_command".to_string());
+            if tool_names.len() <= index {
+                tool_names.resize(index + 1, String::new());
+            }
+            if display_name == "exec_command" {
+                if tool_names[index].is_empty() || tool_names[index] == "exec_command" {
+                    tool_names[index] = "exec_command|".to_string();
+                }
+            } else {
+                tool_names[index] = display_name;
+            }
+        }
+        if let Some(fragment) = payload
+            .pointer("/delta/partial_json")
+            .and_then(Value::as_str)
+            .or_else(|| payload.pointer("/delta/input_json").and_then(Value::as_str))
+        {
+            if tool_names.len() > index && tool_names[index].starts_with("exec_command|") {
+                tool_names[index].push_str(fragment);
+            }
+        }
+        return;
+    }
+    if v3_json_contains_tool_call_at_resp03(payload) {
+        collect_v3_tool_call_names_at_resp03(payload, tool_names);
+        if tool_names.iter().any(|name| name.starts_with("exec_command|")) {
+            tool_names.retain(|name| name != "exec_command");
+        }
+        return;
+    }
+    let candidates = [
+        payload.pointer("/item/name").and_then(Value::as_str),
+        payload
+            .pointer("/response/output/0/name")
+            .and_then(Value::as_str),
+    ];
+    for name in candidates.into_iter().flatten() {
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        if let Some(index) = output_index {
+            if tool_names.len() <= index {
+                tool_names.resize(index + 1, String::new());
+            }
+            if tool_names[index].is_empty() {
+                tool_names[index] = if name == "exec_command" {
+                    "exec_command|".to_string()
+                } else {
+                    name.to_string()
+                };
+            }
+        } else if !tool_names.iter().any(|existing| existing == name) {
+            tool_names.push(name.to_string());
+        }
+    }
+}
+
+fn collect_v3_tool_call_names_at_resp03(value: &Value, tool_names: &mut Vec<String>) {
+    match value {
+        Value::Object(object) => {
+            if v3_is_tool_call_object_at_resp03(object) {
+                if let Some(name) = toolreason_display_name_from_object(object) {
+                    if !tool_names.iter().any(|existing| existing == &name) {
+                        tool_names.push(name);
+                    }
+                }
+            }
+            for child in object.values() {
+                collect_v3_tool_call_names_at_resp03(child, tool_names);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_v3_tool_call_names_at_resp03(value, tool_names);
+            }
+        }
+        Value::String(_) | Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn v3_json_contains_toolreason_marker_at_resp03(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text.contains("<toolreason>") || text.contains("</toolreason>"),
+        Value::Array(values) => values
+            .iter()
+            .any(v3_json_contains_toolreason_marker_at_resp03),
+        Value::Object(values) => values
+            .values()
+            .any(v3_json_contains_toolreason_marker_at_resp03),
+        Value::Null | Value::Bool(_) | Value::Number(_) => false,
+    }
+}
+
+fn v3_json_contains_tool_call_at_resp03(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => {
+            v3_is_tool_call_object_at_resp03(object)
+                || object.values().any(v3_json_contains_tool_call_at_resp03)
+        }
+        Value::Array(values) => values.iter().any(v3_json_contains_tool_call_at_resp03),
+        Value::String(_) | Value::Null | Value::Bool(_) | Value::Number(_) => false,
+    }
+}
+
+fn v3_is_tool_call_object_at_resp03(object: &serde_json::Map<String, Value>) -> bool {
+    let object_type = object.get("type").and_then(Value::as_str);
+    if matches!(
+        object_type,
+        Some("tool_use" | "tool_call" | "function_call" | "custom_tool_call")
+    ) {
+        return true;
+    }
+    if object_type == Some("function") {
+        return object.contains_key("arguments")
+            || object.contains_key("call_id")
+            || object.contains_key("id");
+    }
+    object
+        .get("function")
+        .and_then(Value::as_object)
+        .and_then(|function| function.get("name"))
+        .and_then(Value::as_str)
+        .is_some()
+        && (object.contains_key("arguments")
+            || object.contains_key("call_id")
+            || object.contains_key("id"))
+}
+
+fn strip_v3_toolreason_markers_from_json_at_resp03(value: &mut Value) {
+    match value {
+        Value::String(text) => *text = strip_v3_toolreason_markers_at_resp03(text),
+        Value::Array(values) => {
+            for value in values {
+                strip_v3_toolreason_markers_from_json_at_resp03(value);
+            }
+        }
+        Value::Object(values) => {
+            for value in values.values_mut() {
+                strip_v3_toolreason_markers_from_json_at_resp03(value);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn strip_v3_toolreason_markers_at_resp03(text: &str) -> String {
+    let text = text
+        .find("下面内容只说明工具调用部分，不适用于普通回答：")
+        .or_else(|| text.find("工具调用要求（请严格遵守）："))
+        .map(|start| &text[..start])
+        .unwrap_or(text);
+    let mut visible = String::with_capacity(text.len());
+    let mut remaining = text;
+    loop {
+        let Some(start) = remaining.find("<toolreason>") else {
+            visible.push_str(&remaining.replace("</toolreason>", ""));
+            break;
+        };
+        visible.push_str(&remaining[..start].replace("</toolreason>", ""));
+        let rest = &remaining[start + "<toolreason>".len()..];
+        let Some(end) = rest.find("</toolreason>") else {
+            break;
+        };
+        remaining = &rest[end + "</toolreason>".len()..];
+    }
+    visible
 }
 
 fn map_toolreason_in_text_object(message: &mut Map<String, Value>, tool_names: &[String]) {
@@ -1211,13 +1957,10 @@ fn map_toolreason_in_text_object(message: &mut Map<String, Value>, tool_names: &
     };
     let (visible, reasons) = extract_toolreasons(&content);
     message.insert("content".to_string(), Value::String(visible));
-    let Some(reason) = reasons.first() else {
-        return;
-    };
-    if tool_names.is_empty() {
+    if reasons.is_empty() {
         return;
     }
-    if reason.is_empty() {
+    if tool_names.is_empty() {
         return;
     }
     let mut existing = message
@@ -1226,16 +1969,85 @@ fn map_toolreason_in_text_object(message: &mut Map<String, Value>, tool_names: &
         .unwrap_or_default()
         .trim()
         .to_string();
-    for (index, reason) in reasons.into_iter().enumerate() {
-        let Some(tool_name) = tool_names.get(index).map(String::as_str) else {
-            break;
-        };
+    if let Some(reasoning) = reasons
+        .first()
+        .and_then(|reason| format_toolreason_reasoning(tool_names, reason))
+    {
         if !existing.is_empty() {
             existing.push('\n');
         }
-        existing.push_str(&format!("调用工具 {tool_name}，因为 {reason}"));
+        existing.push_str(&reasoning);
     }
     message.insert("reasoning_content".to_string(), Value::String(existing));
+}
+
+fn format_toolreason_reasoning(tool_names: &[String], reason: &str) -> Option<String> {
+    let names = format_toolreason_tool_label(tool_names);
+    let reason = normalize_v3_toolreason_reason_at_resp03(reason)?;
+    if names.is_empty() || reason.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{V3_TOOLREASON_VISIBLE_PREFIX}调用工具 {names}，因为 {reason}"
+    ))
+}
+
+fn format_toolreason_tool_label(tool_names: &[String]) -> String {
+    tool_names
+        .iter()
+        .filter_map(|name| toolreason_stream_display_name(name))
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>()
+        .join("、")
+}
+
+fn toolreason_stream_display_name(name: &str) -> Option<String> {
+    let name = name.trim();
+    if !name.starts_with("exec_command|") {
+        return (!name.is_empty()).then(|| name.to_string());
+    }
+    let fragment = name.strip_prefix("exec_command|").unwrap_or_default();
+    let value = serde_json::from_str::<Value>(fragment).ok();
+    value
+        .and_then(|value| value.get("cmd").and_then(Value::as_str).map(str::to_owned))
+        .and_then(|command| command.split_whitespace().next().map(str::to_owned))
+        .or_else(|| Some("exec_command".to_string()))
+}
+
+fn toolreason_display_name_from_object(object: &serde_json::Map<String, Value>) -> Option<String> {
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            object
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|name| !name.is_empty())?;
+    if name != "exec_command" {
+        return Some(name.to_string());
+    }
+    let arguments = object
+        .get("arguments")
+        .or_else(|| object.get("input"))
+        .or_else(|| {
+            object
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("arguments"))
+        });
+    let command = match arguments {
+        Some(Value::String(raw)) => serde_json::from_str::<Value>(raw).ok(),
+        Some(value @ Value::Object(_)) => Some(value.clone()),
+        _ => None,
+    }
+    .and_then(|value| value.get("cmd").and_then(Value::as_str).map(str::to_owned));
+    command
+        .and_then(|command| command.split_whitespace().find(|token| !token.is_empty()).map(str::to_owned))
+        .or_else(|| Some(name.to_string()))
 }
 
 fn extract_toolreason(text: &str) -> (String, Option<String>) {
@@ -1258,12 +2070,42 @@ fn extract_toolreasons(text: &str) -> (String, Vec<String>) {
             break;
         };
         let reason = rest[..end].trim();
-        if !reason.is_empty() {
+        if !reason.is_empty() && !is_v3_toolreason_placeholder(reason) {
             reasons.push(reason.to_string());
         }
         remaining = &rest[end + "</toolreason>".len()..];
     }
     (visible, reasons)
+}
+
+fn is_v3_toolreason_placeholder(reason: &str) -> bool {
+    let normalized = reason.trim().to_ascii_lowercase();
+    if matches!(
+        normalized.as_str(),
+        "..."
+            | "…"
+            | "具体原因"
+            | "直接动机"
+            | "真实当前动机"
+            | "理由文本"
+            | "reason"
+            | "reason text"
+            | "your reason"
+    ) {
+        return true;
+    }
+    normalized.starts_with("◦ 调用工具")
+        || normalized.starts_with("#tool 调用工具")
+        || normalized.starts_with("· 调用工具")
+        || normalized.starts_with("🟢 调用工具")
+        || normalized.contains("<toolreason")
+        || normalized.contains("</toolreason")
+        || normalized.contains("开始标签")
+        || normalized.contains("结束标签")
+        || normalized.contains("具体动机")
+        || normalized.contains("真实当前动机")
+        || normalized.contains("工具调用要求")
+        || normalized.contains("不适用于普通回答")
 }
 
 fn harvest_v3_gemini_think_blocks(payload: &mut Value) -> bool {

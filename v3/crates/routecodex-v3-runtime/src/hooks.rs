@@ -389,7 +389,12 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
                 V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
             )
         })?;
-        project_provider_raw_to_client_payload_with_plan(raw, &plan).await
+        project_provider_raw_to_client_payload_with_plan(
+            raw,
+            &plan,
+            context.tool_thinking_enabled,
+        )
+        .await
     })
 }
 
@@ -407,7 +412,12 @@ pub(crate) fn chat_direct_response_projection_hook(
                 V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
             )
         })?;
-        project_provider_raw_to_client_payload_with_plan(raw, &plan).await
+        project_provider_raw_to_client_payload_with_plan(
+            raw,
+            &plan,
+            context.tool_thinking_enabled,
+        )
+        .await
     })
 }
 
@@ -834,8 +844,6 @@ mod tests {
                     secret_key: None,
                     api_key: None,
                     required_capabilities: Vec::new(),
-                    priority: 0,
-                    weight: 1,
                     pool_ids: vec!["default".to_string()],
                     default_pool_member: true,
                     path: vec!["selected-provider".to_string()],
@@ -987,6 +995,7 @@ mod tests {
                     canonical_model_id: "test-model".to_string(),
                     model_capabilities: vec!["text".to_string()],
                     compatibility_profile: None,
+                    tool_thinking_enabled: false,
                 },
             )
             .await;

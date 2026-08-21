@@ -11,7 +11,7 @@ use tokio::time::Instant;
 
 pub const V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000;
 pub const V3_PROVIDER_ACTION_MEDIUM_DELAY_MS: u64 = 3_000;
-pub const V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 5_000;
+pub const V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 1_000;
 const V3_PROVIDER_ACTION_IDLE_TTL_MS: u64 = 10 * 60_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -268,9 +268,6 @@ impl V3ProviderActionGate {
             let admission = self.wait_for_active_failure(key.clone()).await?;
             if admission.released_by_success {
                 self.record_failure(&key)?;
-                continue;
-            }
-            if admission.reevaluate_after_terminal {
                 continue;
             }
             if self.commit_terminal_admission(&key, &admission)? {

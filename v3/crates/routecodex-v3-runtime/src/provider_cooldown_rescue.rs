@@ -103,7 +103,6 @@ pub(crate) async fn resolve_v3_relay_target_outcome_with_rescue(
         input.provider_health,
         input.request_local_excluded_candidates,
         input.now_ms,
-        input.deterministic_sample,
         true,
     )
     .await
@@ -129,7 +128,6 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
     provider_health: &V3ProviderFailureRuntimeHealth,
     request_local_excluded_candidates: &BTreeSet<String>,
     now_ms: u64,
-    deterministic_sample: u64,
     allow_exhaustion_rescue_probe: bool,
 ) -> V3TargetSelectionAfterRescue {
     let target = V3TargetInterpreter::default();
@@ -142,7 +140,6 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         request_local_excluded_candidates,
         now_ms,
         0,
-        deterministic_sample,
     ) {
         Ok(selected) => return V3TargetSelectionAfterRescue::Selected(selected),
         Err(exhausted) => exhausted,
@@ -179,7 +176,6 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         request_local_excluded_candidates,
         retry_now_ms,
         0,
-        deterministic_sample,
     ) {
         Ok(selected) => V3TargetSelectionAfterRescue::Selected(selected),
         Err(exhausted) => V3TargetSelectionAfterRescue::Exhausted(exhausted),

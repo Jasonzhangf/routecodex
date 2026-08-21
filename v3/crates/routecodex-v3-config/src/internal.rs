@@ -172,23 +172,6 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
     &POLICY
 }
 
-pub const V3_RECOVERABLE_PROBE_INTERVAL_MS: u64 = 15 * 60_000;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum V3ProviderProbeIntervalScope {
-    AuthKey,
-    Recoverable,
-}
-
-pub fn v3_provider_probe_interval_ms(scope: V3ProviderProbeIntervalScope) -> u64 {
-    let policy = v3_internal_error_handling();
-    if scope == V3ProviderProbeIntervalScope::AuthKey {
-        policy.unrecoverable_probe_interval_ms
-    } else {
-        policy.recoverable_probe_interval_ms
-    }
-}
-
 pub fn classify_v3_internal_provider_error(
     stage: &str,
     status: u16,

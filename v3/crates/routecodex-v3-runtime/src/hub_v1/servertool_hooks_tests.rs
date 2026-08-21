@@ -10,7 +10,7 @@ use crate::hub_v1::stopless_injection::{
 use serde_json::json;
 
 #[test]
-fn req04_tool_thinking_appends_detailed_guidance_only_to_legal_tool_descriptions() {
+fn req04_tool_thinking_injects_detailed_guidance_into_system_instructions() {
     let mut payload = json!({
         "tools": [
             {"type":"function","name":"exec","description":"run command","parameters":{"type":"object"}},
@@ -20,11 +20,16 @@ fn req04_tool_thinking_appends_detailed_guidance_only_to_legal_tool_descriptions
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must inject");
-    let description = payload["tools"][0]["description"].as_str().unwrap();
-    assert!(description.contains("<toolreason>动机</toolreason>"));
-    assert!(description.contains("每个工具调用只输出一个 toolreason"));
+    let instructions = payload["instructions"].as_str().unwrap();
+    assert!(instructions.contains("工具调用时必须先输出原因标签"));
+    assert!(instructions.contains("当前工具接口的结构化调用能力"));
+    assert!(instructions.contains("这一轮唯一原因"));
+    assert!(instructions.contains("在这一轮第一个结构化工具调用之前"));
+    assert!(instructions.contains("确认当前工作目录"));
+    assert!(instructions.contains("加号"));
+    assert!(!payload["tools"][0]["description"].as_str().unwrap().contains("toolreason"));
     assert_eq!(payload["tools"][1]["description"], "internal");
-    assert_eq!(payload["instructions"], "client instructions");
+    assert!(instructions.starts_with("client instructions"));
 }
 
 #[test]
@@ -37,18 +42,17 @@ fn req04_tool_thinking_disabled_is_payload_identity() {
 }
 
 #[test]
-fn req04_tool_thinking_supports_gemini_function_declaration_surface() {
+fn req04_tool_thinking_does_not_modify_tool_declarations() {
     let mut payload = json!({
         "tools":[{"function_declarations":[{"name":"lookup","description":"find data"}]}]
     });
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
         .expect("enabled tool-thinking must cover Gemini declarations");
-    assert!(
-        payload["tools"][0]["function_declarations"][0]["description"]
-            .as_str()
-            .unwrap()
-            .contains("<toolreason>动机</toolreason>")
-    );
+    assert!(!payload["tools"][0]["function_declarations"][0]["description"]
+        .as_str()
+        .unwrap()
+        .contains("<toolreason>"));
+    assert!(payload["instructions"].as_str().unwrap().contains("<toolreason>"));
 }
 
 const CMD_ARGS: &str = "{\"cmd\":\"routecodex hook run reasoningStop\"}";

@@ -3,7 +3,7 @@ use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ForwarderManifest, V3ForwarderTargetManifest,
     V3RoutePoolManifest, V3RoutePoolTargetManifest, V3RouteTargetKind,
 };
-use routecodex_v3_provider_responses::{V3ProviderAvailabilityReader, V3ProviderSchedulingReader};
+use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
 use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
@@ -50,25 +50,23 @@ pub fn project_v3_virtual_router_status<R: V3ProviderAvailabilityReader>(
     }))
 }
 
-pub fn project_v3_virtual_router_dry_run<
-    R: V3ProviderAvailabilityReader,
-    S: V3ProviderSchedulingReader,
->(
+pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
     input: &Value,
     availability: &R,
-    scheduling: &S,
     now_ms: u64,
 ) -> Result<Value, String> {
     let request = input.get("request").unwrap_or(input);
     let metadata = input.get("metadata").unwrap_or(&Value::Null);
     let endpoint = read_dry_run_endpoint(input, metadata).unwrap_or("/v1/responses");
     let entry_protocol = entry_protocol_from_endpoint(endpoint);
-    let facts = crate::build_v3_router_request_facts_for_entry(
+    let facts = crate::build_v3_router_request_facts_for_entry_and_endpoint(
         request,
         entry_protocol,
+        endpoint,
         crate::configured_v3_longcontext_threshold_tokens(manifest, server_id),
+        None,
     );
     let request_input_tokens = facts.input_tokens;
     let request_capabilities = facts.capabilities.iter().cloned().collect::<Vec<_>>();
@@ -110,12 +108,7 @@ pub fn project_v3_virtual_router_dry_run<
             })
         })
         .collect::<Vec<Value>>();
-    let selection = target.select_available_with_health(
-        expanded,
-        scheduling,
-        now_ms,
-        deterministic_sample_from_metadata(metadata),
-    );
+    let selection = target.select_available(expanded, availability, now_ms);
     let decision = match selection {
         Ok(selected) => {
             let reasoning = if selected.route.pool_id == "direct" {
@@ -474,7 +467,6 @@ mod tests {
     use routecodex_v3_provider_responses::{
         V3ProviderAllAvailable, V3ProviderAvailabilityProjection,
     };
-    use routecodex_v3_target::V3AvailabilitySchedulingAdapter;
 
     #[test]
     fn virtual_router_status_projects_route_group_pools_and_forwarders() {
@@ -648,14 +640,11 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
                 "providerKey": "must-not-become-provider-payload"
             }
         });
-        let availability = V3ProviderAllAvailable;
-        let scheduling = V3AvailabilitySchedulingAdapter::new(&availability);
         let output = project_v3_virtual_router_dry_run(
             &manifest,
             "a",
             &input,
-            &availability,
-            &scheduling,
+            &V3ProviderAllAvailable,
             1_000,
         )
         .expect("dry-run");
@@ -712,15 +701,12 @@ targets = [
             "request": {"model": "a", "input": "probe"},
             "metadata": {"requestId": "diag-rr", "entryEndpoint": "/v1/responses"}
         });
-        let availability = V3ProviderAllAvailable;
-        let scheduling = V3AvailabilitySchedulingAdapter::new(&availability);
         let dry_run = |label: &str| {
             project_v3_virtual_router_dry_run(
                 &manifest,
                 "dry-run-rr",
                 &input,
-                &availability,
-                &scheduling,
+                &V3ProviderAllAvailable,
                 1_000,
             )
             .unwrap_or_else(|error| panic!("dry-run {label}: {error}"))["decision"]

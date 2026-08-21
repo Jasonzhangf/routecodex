@@ -246,7 +246,7 @@
     <thead><tr><th>status</th><th>count</th><th>meaning</th></tr></thead>
     <tbody><tr>
     <td><span class="badge covered">covered</span></td>
-    <td><code>162</code></td>
+    <td><code>160</code></td>
     <td>Runtime/test owner currently implements the audited semantic for the named path.</td>
   </tr>
 <tr>
@@ -261,12 +261,12 @@
   </tr>
 <tr>
     <td><span class="badge partial">partial</span></td>
-    <td><code>112</code></td>
+    <td><code>113</code></td>
     <td>Some runtime path or direction is covered, but cross-protocol or value-shape parity is incomplete.</td>
   </tr>
 <tr>
     <td><span class="badge extension_declared">extension_declared</span></td>
-    <td><code>219</code></td>
+    <td><code>220</code></td>
     <td>The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed.</td>
   </tr>
 <tr>
@@ -308,7 +308,7 @@
 <tr>
     <td><code>gap.runtime_extension_declared</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>219</code></div></td>
+    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>220</code></div></td>
     <td>Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime conversion completion claim.</td>
     <td><code>v3 protocol codec owner selected per field family</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Add red fixture, implement adjacent codec/Chat Process owner, add source/blackbox/live evidence before changing status to covered or partial.</span></td>
   </tr>
@@ -322,7 +322,7 @@
 <tr>
     <td><code>gap.partial_cross_protocol_semantics</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>112</code></div></td>
+    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>113</code></div></td>
     <td>Main protocol paths cover some directions, but not all equivalent request/response transforms across Responses, OpenAI Chat, Anthropic, and Gemini.</td>
     <td><code>v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Close request and response directions together; no server/SSE/provider-transport repair owner.</span></td>
   </tr>
@@ -353,13 +353,6 @@
     <td><ul class="field-list"><li><code>edge_only</code></li></ul><div>count: <code>3</code></div></td>
     <td>Edge rows describe stream/event transport state and must stay outside Chat Process business payload semantics.</td>
     <td><code>SSE/edge transport docs and gate only</code><br><span class="badge no_business_runtime_closeout">no_business_runtime_closeout</span><br><span class="muted">Keep edge fields out of provider/client normal payload; do not reclassify them as Chat semantic fields.</span></td>
-  </tr>
-<tr>
-    <td><code>gap.anthropic_response_projection_completion</code></td>
-    <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>covered</code></li></ul><div>count: <code>3</code></div></td>
-    <td>Anthropic terminal value mapping, typed tool-result error projection, and the duplicate terminal classification row are source-closed by the 74/7 red baseline, 81/0 focused green suite, and JSON/SSE shared-owner integration regressions.</td>
-    <td><code>docs/goals/v3-anthropic-protocol-matrix-projection-completion-plan.md</code><br><span class="badge source_closed_runtime_live_pending">source_closed_runtime_live_pending</span><br><span class="muted">Close only in the adjacent Anthropic codec and generic typed terminality owner; Direct, handler, SSE, provider transport, Virtual Router, MetadataCenter, continuation, and request cleanup remain forbidden.</span></td>
   </tr></tbody>
   </table></div>
     </section>
@@ -370,164 +363,33 @@
       <p>终止原因、tool-result 错误状态和 response content block 只由相邻 Rust codec 与通用 typed terminality owner 处理；Direct 保持同协议原样，SSE/handler/provider transport 不拥有第二套语义。</p>
       <div class="grid">
     <article class="card"><h3>Owners and policy</h3><div class="source-meta">
-      <div>contract: <code>v3.anthropic_response_projection.closed_matrix.v1</code></div>
-      <div>terminal owner: <code>v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs</code></div>
-      <div>typed terminality owner: <code>v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</code></div>
-      <div>tool-result owner: <code>v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs</code></div>
-      <div>Direct policy: <span class="badge source_roundtrip_only">source_roundtrip_only</span></div>
+      <div>contract: <code>missing</code></div>
+      <div>terminal owner: <code>missing</code></div>
+      <div>typed terminality owner: <code>missing</code></div>
+      <div>tool-result owner: <code>missing</code></div>
+      <div>Direct policy: <span class="badge missing">missing</span></div>
     </div></article>
-    <article class="card"><h3>Forbidden semantic owners</h3><ul class="field-list"><li><code>handler</code></li><li><code>SSE transport</code></li><li><code>provider transport</code></li><li><code>Virtual Router</code></li><li><code>MetadataCenter</code></li><li><code>continuation</code></li><li><code>request cleanup</code></li></ul></article>
+    <article class="card"><h3>Forbidden semantic owners</h3><span class="muted">—</span></article>
     <article class="card"><h3>Unknown-value policies</h3><div class="source-meta">
-      <div>missing, null final, non-string, and unknown stop_reason fail at terminal_owner</div>
-      <div>missing type and unknown type are distinct fail-fast diagnostics with response.content[index].type</div>
+      <div>missing</div>
+      <div>missing</div>
     </div></article>
-    <article class="card"><h3>Required regressions</h3><ul class="field-list"><li><code>anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix</code></li><li><code>anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_values</code></li><li><code>anthropic_model_context_window_stop_is_explicitly_unsupported_for_responses</code></li><li><code>responses_tool_result_status_projects_only_registered_anthropic_is_error_semantic</code></li><li><code>responses_tool_result_status_rejects_nonterminal_or_unknown_values</code></li><li><code>responses_tool_result_status_survives_chat_canonical_carrier</code></li><li><code>responses_tool_result_status_rejects_unregistered_value_before_chat_canonical</code></li><li><code>responses_relay_anthropic_wire_preserves_typed_tool_result_error_status</code></li><li><code>responses_relay_anthropic_wire_omits_is_error_for_registered_success_statuses</code></li><li><code>responses_relay_anthropic_rejects_unregistered_tool_result_status_before_transport</code></li><li><code>anthropic_response_content_block_enum_is_closed_and_diagnostic</code></li><li><code>anthropic_web_search_result_requires_exact_pairing</code></li><li><code>anthropic_json_and_sse_materialization_share_terminal_projection_owner</code></li><li><code>anthropic_json_and_sse_reject_unknown_terminal_without_success_projection</code></li><li><code>responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details</code></li></ul></article>
+    <article class="card"><h3>Required regressions</h3><span class="muted">—</span></article>
   </div>
   <div class="protocol-title"><h3>Closed stop_reason matrix</h3><span class="muted">JSON and SSE materialization share this owner</span></div>
   <div class="table-wrap"><table>
     <thead><tr><th>Anthropic stop_reason</th><th>Hub terminal</th><th>Responses status</th><th>mapping</th><th>supplemental contract</th></tr></thead>
-    <tbody><tr>
-    <td><code>end_turn</code></td>
-    <td><code>stop</code></td>
-    <td><code>completed</code></td>
-    <td><span class="badge mapped_exact">mapped_exact</span></td>
-    <td>finish_reason=end_turn</td>
-  </tr>
-<tr>
-    <td><code>tool_use</code></td>
-    <td><code>tool_calls</code></td>
-    <td><code>requires_action</code></td>
-    <td><span class="badge mapped_compatible_registered">mapped_compatible_registered</span></td>
-    <td>typed tool call required</td>
-  </tr>
-<tr>
-    <td><code>max_tokens</code></td>
-    <td><code>max_tokens</code></td>
-    <td><code>incomplete</code></td>
-    <td><span class="badge mapped_exact">mapped_exact</span></td>
-    <td>incomplete_details.reason=max_output_tokens</td>
-  </tr>
-<tr>
-    <td><code>stop_sequence</code></td>
-    <td><code>stop_sequence</code></td>
-    <td><code>completed</code></td>
-    <td><span class="badge mapped_exact">mapped_exact</span></td>
-    <td>exact non-empty stop_sequence required</td>
-  </tr>
-<tr>
-    <td><code>pause_turn</code></td>
-    <td><code>pause_turn</code></td>
-    <td><code>in_progress</code></td>
-    <td><span class="badge mapped_compatible_registered">mapped_compatible_registered</span></td>
-    <td>preserve finish_reason=pause_turn without fabricating tool output</td>
-  </tr>
-<tr>
-    <td><code>refusal</code></td>
-    <td><code>content_filter</code></td>
-    <td><code>incomplete</code></td>
-    <td><span class="badge mapped_compatible_registered">mapped_compatible_registered</span></td>
-    <td>incomplete_details.reason=content_filter and exact optional stop_details</td>
-  </tr>
-<tr>
-    <td><code>model_context_window_exceeded</code></td>
-    <td><code>context_window_exceeded</code></td>
-    <td><code>unsupported</code></td>
-    <td><span class="badge unsupported_fail_fast">unsupported_fail_fast</span></td>
-    <td>never relabel input context exhaustion as max_output_tokens</td>
-  </tr></tbody>
+    <tbody></tbody>
   </table></div>
   <div class="protocol-title"><h3>Typed tool-result error projection</h3><span class="muted">no text or HTTP inference</span></div>
   <div class="table-wrap"><table>
     <thead><tr><th>Responses status</th><th>Anthropic is_error</th><th>mapping</th></tr></thead>
-    <tbody><tr>
-    <td><code>absent</code></td>
-    <td><code>omitted</code></td>
-    <td><span class="badge mapped_exact">mapped_exact</span></td>
-  </tr>
-<tr>
-    <td><code>completed</code></td>
-    <td><code>omitted</code></td>
-    <td><span class="badge mapped_exact">mapped_exact</span></td>
-  </tr>
-<tr>
-    <td><code>incomplete</code></td>
-    <td><code>true</code></td>
-    <td><span class="badge mapped_compatible_registered">mapped_compatible_registered</span></td>
-  </tr>
-<tr>
-    <td><code>in_progress</code></td>
-    <td><code>unsupported</code></td>
-    <td><span class="badge unsupported_fail_fast">unsupported_fail_fast</span></td>
-  </tr>
-<tr>
-    <td><code>unknown_or_malformed</code></td>
-    <td><code>unsupported</code></td>
-    <td><span class="badge unsupported_fail_fast">unsupported_fail_fast</span></td>
-  </tr></tbody>
+    <tbody></tbody>
   </table></div>
   <div class="protocol-title"><h3>Closed response content block enum</h3><span class="muted">unsupported values fail with exact content path</span></div>
   <div class="table-wrap"><table>
     <thead><tr><th>Anthropic content block</th><th>mapping</th><th>Relay policy</th></tr></thead>
-    <tbody><tr>
-    <td><code>text</code></td>
-    <td><span class="badge mapped_exact">mapped_exact</span></td>
-    <td>ordered Responses output_text</td>
-  </tr>
-<tr>
-    <td><code>thinking</code></td>
-    <td><span class="badge mapped_compatible_registered">mapped_compatible_registered</span></td>
-    <td>Responses reasoning summary plus opaque signature</td>
-  </tr>
-<tr>
-    <td><code>redacted_thinking</code></td>
-    <td><span class="badge mapped_compatible_registered">mapped_compatible_registered</span></td>
-    <td>Responses reasoning encrypted_content</td>
-  </tr>
-<tr>
-    <td><code>tool_use</code></td>
-    <td><span class="badge mapped_exact">mapped_exact</span></td>
-    <td>typed Responses function call or governed custom wrapper</td>
-  </tr>
-<tr>
-    <td><code>server_tool_use</code></td>
-    <td><span class="badge mapped_compatible_registered">mapped_compatible_registered</span></td>
-    <td>registered web_search subset only; other names fail explicitly</td>
-  </tr>
-<tr>
-    <td><code>web_search_tool_result</code></td>
-    <td><span class="badge mapped_compatible_registered">mapped_compatible_registered</span></td>
-    <td>exact paired registered web_search result only</td>
-  </tr>
-<tr>
-    <td><code>web_fetch_tool_result</code></td>
-    <td><span class="badge source_roundtrip_only">source_roundtrip_only</span></td>
-    <td>unsupported_fail_fast</td>
-  </tr>
-<tr>
-    <td><code>code_execution_tool_result</code></td>
-    <td><span class="badge source_roundtrip_only">source_roundtrip_only</span></td>
-    <td>unsupported_fail_fast</td>
-  </tr>
-<tr>
-    <td><code>bash_code_execution_tool_result</code></td>
-    <td><span class="badge source_roundtrip_only">source_roundtrip_only</span></td>
-    <td>unsupported_fail_fast</td>
-  </tr>
-<tr>
-    <td><code>text_editor_code_execution_tool_result</code></td>
-    <td><span class="badge source_roundtrip_only">source_roundtrip_only</span></td>
-    <td>unsupported_fail_fast</td>
-  </tr>
-<tr>
-    <td><code>tool_search_tool_result</code></td>
-    <td><span class="badge source_roundtrip_only">source_roundtrip_only</span></td>
-    <td>unsupported_fail_fast</td>
-  </tr>
-<tr>
-    <td><code>container_upload</code></td>
-    <td><span class="badge source_roundtrip_only">source_roundtrip_only</span></td>
-    <td>unsupported_fail_fast</td>
-  </tr></tbody>
+    <tbody></tbody>
   </table></div>
     </section>
 
@@ -1669,7 +1531,7 @@
       <code>request.messages[].tool_result.is_error</code>
       <div class="muted">group <code>tool.result.error_status</code></div>
       <div><ul class="field-list"><li><code>request.messages[].tool_result.is_error</code></li></ul></div>
-      <ul class="field-list"><li><code>request.messages[].routecodex_chat_extension.responses_tool_output_status</code></li></ul>
+      <span class="muted">— native Chat field only</span>
     </td>
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
@@ -1677,14 +1539,14 @@
       <details><summary>Chat shape / value rule</summary><div>Added Chat extension. Error status is not call_id and not output text.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge covered">covered</span><br><span class="muted">Closed by the registered Responses-to-Chat carrier and the shared Anthropic status projector; absent/completed remain success, incomplete becomes is_error=true, and every other value fails before wire build</span></td>
+    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses/Gemini value mapping requires runtime contract</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.input[].function_call_output.status</code></li></ul>
     <h4>response fields</h4>
     <ul class="field-list"><li><code>response.output[].function_call.status</code></li></ul>
     <h4>transform</h4>
-    <div>Absent/completed remain success, incomplete maps to Anthropic is_error=true, and every other value fails before provider transport.</div>
+    <div>Responses status may map to error/success after explicit value contract; not yet exact.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -2391,7 +2253,7 @@
       <details><summary>Chat shape / value rule</summary><div>Finish reason/status decides terminality; it is not provider transport close state.</div></details>
 
     </td>
-    <td><span class="badge response">response</span><br><span class="badge covered">covered</span><br><span class="muted">Closed by one Anthropic terminal projector shared by JSON and SSE materialization, with exact registered status/details and fail-fast unknown handling</span></td>
+    <td><span class="badge response">response</span><br><span class="badge partial">partial</span><br><span class="muted">value table needs full runtime gate before conversion edits</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>

@@ -284,6 +284,31 @@ fn fresh_responses_preserves_pending_binding_and_wraps_implemented_modes() {
 }
 
 #[test]
+fn compaction_preserves_direct_binding_for_route_pool_selection() {
+    let fresh = V3ResponsesContinuationEntryFacts::project(&json!({
+        "model": "deepseek-v4-local",
+        "input": "compact"
+    }));
+
+    assert_eq!(
+        responses_effective_execution_mode_for_request_purpose(
+            V3EntryProtocolExecutionMode::Direct,
+            &fresh,
+            V3RequestPurpose::NativeCompaction,
+        ),
+        V3EntryProtocolExecutionMode::Direct,
+    );
+    assert_eq!(
+        responses_effective_execution_mode_for_request_purpose(
+            V3EntryProtocolExecutionMode::Relay,
+            &fresh,
+            V3RequestPurpose::AuxiliaryCompaction,
+        ),
+        V3EntryProtocolExecutionMode::Relay,
+    );
+}
+
+#[test]
 fn codex_sample_scope_blocks_direct_and_preserves_relay() {
     let log_file = std::env::temp_dir().join(format!(
         "routecodex-v3-sample-scope-{}.log",

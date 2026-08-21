@@ -208,33 +208,39 @@ impl V3VirtualRouter {
         manifest: &V3Config05ManifestPublished,
         classified: V3Router05RequestClassified,
     ) -> Result<V3Router06RoutePoolResolved, V3VirtualRouterError> {
-        if let Some(route_pool_id) = classified.route_policy_pool.as_deref() {
-            let group = manifest
-                .route_groups
-                .get(&classified.routing_group_id)
-                .ok_or_else(|| {
-                    V3VirtualRouterError::RouteGroupMissing(classified.routing_group_id.clone())
+        let is_compaction = classified.facts.route_classification.route_name == "compact"
+            || classified
+                .endpoint
+                .trim_end_matches('/')
+                .ends_with("/responses/compact");
+        if !is_compaction {
+            if let Some(route_pool_id) = classified.route_policy_pool.as_deref() {
+                let group = manifest
+                    .route_groups
+                    .get(&classified.routing_group_id)
+                    .ok_or_else(|| {
+                        V3VirtualRouterError::RouteGroupMissing(classified.routing_group_id.clone())
+                    })?;
+                let pool = group.pools.get(route_pool_id).ok_or_else(|| {
+                    V3VirtualRouterError::PoolMissing {
+                        group_id: classified.routing_group_id.clone(),
+                        pool_id: route_pool_id.to_string(),
+                    }
                 })?;
-            let pool = group.pools.get(route_pool_id).ok_or_else(|| {
-                V3VirtualRouterError::PoolMissing {
-                    group_id: classified.routing_group_id.clone(),
-                    pool_id: route_pool_id.to_string(),
+                if pool.targets.is_empty() {
+                    return Err(V3VirtualRouterError::PoolEmpty {
+                        group_id: classified.routing_group_id.clone(),
+                        pool_id: route_pool_id.to_string(),
+                    });
                 }
-            })?;
-            if pool.targets.is_empty() {
-                return Err(V3VirtualRouterError::PoolEmpty {
-                    group_id: classified.routing_group_id.clone(),
-                    pool_id: route_pool_id.to_string(),
+                return Ok(V3Router06RoutePoolResolved {
+                    server_id: classified.server_id,
+                    routing_group_id: classified.routing_group_id,
+                    facts: classified.facts,
+                    tiers: vec![build_plan_tier(pool)],
                 });
             }
-            return Ok(V3Router06RoutePoolResolved {
-                server_id: classified.server_id,
-                routing_group_id: classified.routing_group_id,
-                facts: classified.facts,
-                tiers: vec![build_plan_tier(pool)],
-            });
         }
-        let is_compaction = classified.facts.route_classification.route_name == "compact";
         if is_compaction {
             let group = manifest
                 .route_groups

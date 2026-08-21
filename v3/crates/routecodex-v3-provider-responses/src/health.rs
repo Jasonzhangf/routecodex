@@ -258,7 +258,7 @@ impl V3ProviderHealthStore {
                             cooldown_ms: health.cooldown_ms.max(1),
                             probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
                             until_restart: false,
-                            cooldown_scope: V3ProviderFailureCooldownScope::Session,
+                            cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
                         },
                     );
                 }
@@ -995,7 +995,7 @@ fn default_failure_policy_from_manifest(
         cooldown_ms,
         probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
         until_restart,
-        cooldown_scope: V3ProviderFailureCooldownScope::Session,
+        cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
     }
 }
 

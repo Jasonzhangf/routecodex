@@ -43,6 +43,7 @@ const STEPS = [
   ['test:v3-selected-provider-model-binding-red-fixtures', 'Selected provider/model binding mutations are rejected'],
   ['verify:v3-protocol-conversion-field-parity', 'V3 protocol conversion field parity'],
   ['test:v3-protocol-conversion-field-parity-red-fixtures', 'Protocol field parity mutations are rejected'],
+  ['verify:v3-protocol-conversion-field-parity-ci', 'V3 protocol conversion parity aggregate gate'],
   ['verify:v3-stopless-resource-control', 'V3 stopless resource control'],
   ['test:v3-stopless-resource-control-red-fixtures', 'Stopless resource-control mutations are rejected'],
   ['verify:v3-server-tool-center-audit', 'V3 servertool center writes carry written_by/reason/request_id audit'],

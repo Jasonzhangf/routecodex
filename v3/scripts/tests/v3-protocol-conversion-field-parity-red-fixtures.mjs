@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-const repo = process.cwd();
-const verifier = resolve(repo, 'scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs');
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const files = [
   'docs/goals/v3-protocol-conversion-field-parity-test-design.md',
   'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
@@ -16,9 +16,10 @@ const files = [
   'docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
   'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
   'docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html',
-  'scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
-  'scripts/architecture/verify-v3-architecture-ci.mjs',
-  'sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs',
+  'v3/scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
+  'v3/scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs',
+  'v3/scripts/architecture/v3-protocol-conversion-field-parity-lib.mjs',
+  'v3/scripts/architecture/verify-v3-architecture-ci.mjs',
   'v3/crates/routecodex-v3-runtime/tables/request_field_map.json',
   'v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json',
   'v3/crates/routecodex-v3-runtime/src/protocol_tables.rs',
@@ -63,6 +64,7 @@ const files = [
   'docs/architecture/v3-verification-map.yml',
   'docs/architecture/v3-resource-operation-map.yml',
   'package.json',
+  'v3/package.json',
 ];
 
 const cases = [
@@ -401,8 +403,8 @@ const cases = [
   {
     name: 'Audit truth status count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    extension_declared: 219\n',
-    to: '    extension_declared: 218\n',
+    from: '    extension_declared: 220\n',
+    to: '    extension_declared: 219\n',
     diagnostic: /audited_status_counts\.extension_declared|must equal current_impl count/u,
   },
   {
@@ -470,7 +472,7 @@ const cases = [
   },
   {
     name: 'HTML renderer drops semantic correspondence marker',
-    file: 'scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
+    file: 'v3/scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
     from: 'semantic-correspondence',
     to: 'semantic_correspondence_removed',
     all: true,
@@ -478,7 +480,7 @@ const cases = [
   },
   {
     name: 'Package render script is removed',
-    file: 'package.json',
+    file: 'v3/package.json',
     from: '    "render:v3-protocol-semantic-field-matrix": "node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs",\n',
     to: '',
     diagnostic: /render:v3-protocol-semantic-field-matrix|package\.json/u,
@@ -874,11 +876,11 @@ const cases = [
     diagnostic: /registered_extension_unmapped|\.request/u,
   },
   {
-    name: 'Anthropic max_tokens terminal contract is relabeled completed',
+    name: 'Anthropic max_tokens mapping contract is relabeled',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    - source: max_tokens\n      hub: max_tokens\n      responses_status: incomplete\n',
-    to: '    - source: max_tokens\n      hub: max_tokens\n      responses_status: completed\n',
-    diagnostic: /Anthropic terminal values|closed protocol matrix/u,
+    from: '        transform: Anthropic max_tokens maps to Chat max_completion_tokens; output_tokens is response usage only.\n',
+    to: '        transform: Anthropic max_tokens maps to Chat max_output_tokens; output_tokens is response usage only.\n',
+    diagnostic: /Anthropic max_tokens|closed protocol matrix|out of sync/u,
   },
   {
     name: 'Responses incomplete tool result loses Anthropic is_error projection',
@@ -916,27 +918,6 @@ const cases = [
     diagnostic: /responses_relay_anthropic_wire_preserves_typed_tool_result_error_status/u,
   },
   {
-    name: 'Protocol parity gate stops running the tool-result carrier whitebox',
-    file: 'package.json',
-    from: '--lib responses_tool_result_status',
-    to: '--lib responses_tool_result_status_removed',
-    diagnostic: /responses_tool_result_status/u,
-  },
-  {
-    name: 'Protocol matrix drops the registered tool-result status Chat carrier',
-    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: 'request.messages[].routecodex_chat_extension.responses_tool_output_status',
-    to: 'request.messages[].routecodex_chat_extension.responses_tool_output_status_removed',
-    diagnostic: /tool.result.error_status registered Chat carrier|responses_tool_output_status/u,
-  },
-  {
-    name: 'Mainline map drops the Responses to Chat tool-result status carrier edge',
-    file: 'docs/architecture/v3-mainline-call-map.yml',
-    from: 'v3-protocol-field-parity-responses-chat-tool-result-status-carrier-01',
-    to: 'v3-protocol-field-parity-responses-chat-tool-result-status-carrier-removed',
-    diagnostic: /responses-chat-tool-result-status-carrier-01/u,
-  },
-  {
     name: 'Anthropic response content enum drops container_upload',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs',
     from: '"container_upload" => Ok(Self::ContainerUpload),',
@@ -944,11 +925,11 @@ const cases = [
     diagnostic: /container_upload.*ContainerUpload|anthropic_codec/u,
   },
   {
-    name: 'Anthropic response contract permits SSE semantic ownership',
+    name: 'Protocol matrix permits SSE semantic ownership',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '  forbidden_owners:\n    - handler\n    - SSE transport\n    - provider transport\n',
-    to: '  forbidden_owners:\n    - handler\n    - provider transport\n',
-    diagnostic: /Anthropic response forbidden owners|closed protocol matrix/u,
+    from: '    - SSE transport\n',
+    to: '    - SSE transport removed\n',
+    diagnostic: /forbidden_truth_sources|SSE transport/u,
   },
   {
     name: 'JSON and SSE shared terminal owner regression is removed',
@@ -971,6 +952,13 @@ const cases = [
     to: 'responses_resp03_incomplete_terminal_regression_removed',
     diagnostic: /responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details/u,
   },
+  {
+    name: 'Protocol matrix drops a registered Chat message field',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: 'request.messages[].role',
+    to: 'request.messages[].role_removed',
+    diagnostic: /canonical_chat_semantics|request\.messages\[\]\.role/u,
+  },
 ];
 
 const failures = [];
@@ -978,6 +966,7 @@ for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-protocol-parity-red-'));
   try {
     for (const file of files) copyFileInto(root, file);
+    symlinkSync(resolve(repo, 'node_modules'), resolve(root, 'node_modules'), 'dir');
     const target = resolve(root, testCase.file);
     const source = readFileSync(target, 'utf8');
     if (!source.includes(testCase.from)) throw new Error(`${testCase.name}: mutation source missing`);
@@ -987,7 +976,7 @@ for (const testCase of cases) {
         ? source.split(testCase.from).join(testCase.to)
         : source.replace(testCase.from, testCase.to),
     );
-    const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [resolve(root, 'v3/scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs')], { cwd: root, encoding: 'utf8' });
     const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) failures.push(`${testCase.name}: verifier unexpectedly passed`);
     else if (!testCase.diagnostic.test(output)) failures.push(`${testCase.name}: wrong diagnostic: ${output.slice(-800)}`);

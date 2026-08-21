@@ -91,6 +91,11 @@ impl V3RoutePolicyRuntimeState {
         request_id: &str,
         observation: V3RouteTurnObservation,
     ) -> Result<V3Router05RequestClassified, String> {
+        let request_is_compaction = classified
+            .endpoint
+            .trim_end_matches('/')
+            .ends_with("/responses/compact")
+            || classified.facts.route_classification.route_name == "compact";
         let policies = compile_route_policies(manifest, &classified.routing_group_id)?;
         let key = V3RoutePolicyRequestKey {
             scope: scope.clone(),
@@ -105,7 +110,11 @@ impl V3RoutePolicyRuntimeState {
         {
             return Ok(V3VirtualRouter::with_route_policy_pool(
                 classified,
-                pending.action.map(|action| action.route_pool),
+                if request_is_compaction {
+                    Some("compact".to_string())
+                } else {
+                    pending.action.map(|action| action.route_pool)
+                },
             ));
         }
 
@@ -130,7 +139,11 @@ impl V3RoutePolicyRuntimeState {
             .insert(key, V3PendingRoutePolicyTurn { observation, action: action.clone() });
         Ok(V3VirtualRouter::with_route_policy_pool(
             classified,
-            action.map(|action| action.route_pool),
+            if request_is_compaction {
+                Some("compact".to_string())
+            } else {
+                action.map(|action| action.route_pool)
+            },
         ))
     }
 

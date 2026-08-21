@@ -167,14 +167,15 @@ pub(crate) fn strip_v3_response_id_from_json_body(body: &mut serde_json::Value) 
 pub(crate) async fn project_provider_raw_to_client_payload_with_plan(
     raw: V3ProviderResp14Raw,
     plan: &V3DirectResponseCompatPlan,
+    tool_thinking_enabled: bool,
 ) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
-    project_provider_raw_to_client_payload_inner(raw, plan).await
+    project_provider_raw_to_client_payload_inner(raw, plan, tool_thinking_enabled).await
 }
-
 
 async fn project_provider_raw_to_client_payload_inner(
     raw: V3ProviderResp14Raw,
     compat_plan: &V3DirectResponseCompatPlan,
+    tool_thinking_enabled: bool,
 ) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
     let provider_id = raw.provider_id().to_string();
     if raw.status() >= 400 {
@@ -237,6 +238,7 @@ async fn project_provider_raw_to_client_payload_inner(
                     sse_first_frame_timeout_ms,
                     thinking_tags,
                     deepseek_console_go,
+                    tool_thinking_enabled,
                 )
                 .await?
             }
@@ -287,6 +289,10 @@ async fn project_provider_raw_to_client_payload_inner(
         if deepseek_console_go {
             parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
         }
+        crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03(
+            &mut parsed,
+            tool_thinking_enabled,
+        );
         let observation = observe_json_remote_continuation(&provider_id, status, &parsed)?;
         (V3ClientBody::Json(parsed), observation, None)
     } else {
@@ -328,6 +334,7 @@ async fn process_direct_sse_stream(
     sse_first_frame_timeout_ms: Option<u64>,
     thinking_tags: bool,
     deepseek_console_go: bool,
+    tool_thinking_enabled: bool,
 ) -> Result<
     (
         V3ClientBody,
@@ -354,6 +361,7 @@ async fn process_direct_sse_stream(
         observation_state.clone(),
         usage_observation.clone(),
         compatibility_profile,
+        tool_thinking_enabled,
     );
     Ok((
         V3ClientBody::Sse(client_stream),
@@ -549,6 +557,7 @@ fn observed_sse_client_stream(
     observation_state: V3SseRemoteContinuationObservationState,
     usage_observation: V3RuntimeStreamObservation,
     compatibility_profile: Option<&str>,
+    tool_thinking_enabled: bool,
 ) -> V3ClientSseStream {
     observed_sse_client_stream_with_timeout(
         provider_id,
@@ -557,6 +566,7 @@ fn observed_sse_client_stream(
         usage_observation,
         V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT,
         compatibility_profile,
+        tool_thinking_enabled,
     )
 }
 
@@ -567,6 +577,7 @@ fn observed_sse_client_stream_with_timeout(
     usage_observation: V3RuntimeStreamObservation,
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
+    tool_thinking_enabled: bool,
 ) -> V3ClientSseStream {
     struct ObservedState {
         stream: V3ProviderSseStream,
@@ -579,7 +590,12 @@ fn observed_sse_client_stream_with_timeout(
         terminal_observed: bool,
         semantic_deadline: tokio::time::Instant,
         compatibility_profile: Option<String>,
+        tool_thinking_enabled: bool,
         compatibility_buffer: Vec<u8>,
+        tool_thinking_buffer: Vec<u8>,
+        tool_thinking_tool_names: Vec<String>,
+        tool_thinking_pending_reasons: Vec<Option<String>>,
+        tool_thinking_reason_emitted: bool,
     }
 
     Box::pin(stream::unfold(
@@ -594,7 +610,12 @@ fn observed_sse_client_stream_with_timeout(
             terminal_observed: false,
             semantic_deadline: tokio::time::Instant::now() + frame_interval_timeout,
             compatibility_profile: compatibility_profile.map(ToOwned::to_owned),
+            tool_thinking_enabled,
             compatibility_buffer: Vec::new(),
+            tool_thinking_buffer: Vec::new(),
+            tool_thinking_tool_names: Vec::new(),
+            tool_thinking_pending_reasons: Vec::new(),
+            tool_thinking_reason_emitted: false,
         },
         move |mut state| async move {
             if state.done {
@@ -605,6 +626,13 @@ fn observed_sse_client_stream_with_timeout(
             {
                 Ok(next) => next,
                 Err(_) if state.terminal_observed => {
+                    if state.tool_thinking_enabled {
+                        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03(
+                            &state.tool_thinking_tool_names,
+                            &mut state.tool_thinking_pending_reasons,
+                            &mut state.tool_thinking_reason_emitted,
+                        );
+                    }
                     return None;
                 }
                 Err(_) => {
@@ -635,7 +663,15 @@ fn observed_sse_client_stream_with_timeout(
                     // 非语义帧）都刷新帧间隔 deadline，避免"活着但语义安静"
                     // 的流被误杀；只有完全无字节的挂起流才超时。
                     state.semantic_deadline = tokio::time::Instant::now() + frame_interval_timeout;
-                    let client_chunk = if state.compatibility_profile.as_deref()
+                    let client_chunk = if state.tool_thinking_enabled {
+                        apply_toolreason_to_sse_chunk_buffered_with_state(
+                            &mut state.tool_thinking_buffer,
+                            &mut state.tool_thinking_tool_names,
+                            &mut state.tool_thinking_pending_reasons,
+                            &mut state.tool_thinking_reason_emitted,
+                            &chunk,
+                        )
+                    } else if state.compatibility_profile.as_deref()
                         == Some("responses:deepseek-console-go")
                     {
                         apply_deepseek_console_go_sse_chunk_buffered(
@@ -691,7 +727,21 @@ fn observed_sse_client_stream_with_timeout(
                     Some((Err(provider_body_source(error)), state))
                 }
                 None => {
-                    let buffered_client_chunk = if state
+                    let buffered_client_chunk = if state.tool_thinking_enabled {
+                        let buffered = std::mem::take(&mut state.tool_thinking_buffer);
+                        if buffered.is_empty() {
+                            None
+                        } else {
+                            Some(
+                                crate::hub_v1::project_v3_toolreason_sse_final_buffer_at_resp03(
+                                    &buffered,
+                                    &mut state.tool_thinking_tool_names,
+                                    &mut state.tool_thinking_pending_reasons,
+                                    &mut state.tool_thinking_reason_emitted,
+                                ),
+                            )
+                        }
+                    } else if state
                         .compatibility_profile
                         .as_deref()
                         .is_some_and(is_cc_sol_thinking_tags_profile)
@@ -706,8 +756,22 @@ fn observed_sse_client_stream_with_timeout(
                         None
                     };
                     if let Some(client_chunk) = buffered_client_chunk {
+                        if state.tool_thinking_enabled {
+                            crate::hub_v1::finalize_v3_toolreason_observation_at_resp03(
+                                &state.tool_thinking_tool_names,
+                                &mut state.tool_thinking_pending_reasons,
+                                &mut state.tool_thinking_reason_emitted,
+                            );
+                        }
                         state.done = true;
                         return Some((Ok(client_chunk), state));
+                    }
+                    if state.tool_thinking_enabled {
+                        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03(
+                            &state.tool_thinking_tool_names,
+                            &mut state.tool_thinking_pending_reasons,
+                            &mut state.tool_thinking_reason_emitted,
+                        );
                     }
                     let decoder = std::mem::replace(
                         &mut state.decoder,
@@ -763,6 +827,38 @@ fn apply_cc_sol_thinking_tags_to_sse_chunk(chunk: &[u8]) -> Vec<u8> {
         }
     }
     output.into_bytes()
+}
+
+fn apply_toolreason_to_sse_chunk_buffered(
+    buffer: &mut Vec<u8>,
+    tool_names: &mut Vec<String>,
+    pending_reasons: &mut Vec<Option<String>>,
+    chunk: &[u8],
+) -> Vec<u8> {
+    let mut reason_emitted = false;
+    apply_toolreason_to_sse_chunk_buffered_with_state(
+        buffer,
+        tool_names,
+        pending_reasons,
+        &mut reason_emitted,
+        chunk,
+    )
+}
+
+fn apply_toolreason_to_sse_chunk_buffered_with_state(
+    buffer: &mut Vec<u8>,
+    tool_names: &mut Vec<String>,
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    chunk: &[u8],
+) -> Vec<u8> {
+    crate::hub_v1::project_v3_toolreason_sse_chunk_at_resp03(
+        buffer,
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        chunk,
+    )
 }
 
 fn apply_cc_sol_thinking_tags_to_sse_chunk_buffered(buffer: &mut Vec<u8>, chunk: &[u8]) -> Vec<u8> {
@@ -1187,7 +1283,7 @@ pub(crate) async fn project_provider_raw_to_client_payload(
         },
     )
     .expect("test raw compatibility profile must compile");
-    project_provider_raw_to_client_payload_with_plan(raw, &plan).await
+    project_provider_raw_to_client_payload_with_plan(raw, &plan, false).await
 }
 
 #[cfg(test)]
@@ -1399,6 +1495,7 @@ mod tests {
             V3RuntimeStreamObservation::default(),
             std::time::Duration::from_millis(20),
             None,
+            false,
         );
         let first = stream
             .next()
@@ -1480,6 +1577,7 @@ mod tests {
             observation_state,
             usage_observation.clone(),
             None,
+            false,
         );
         while client_stream.next().await.is_some() {}
 
@@ -1645,4 +1743,127 @@ mod tests {
         assert!(text.contains("\"reasoning_content\":\"plan\""));
     }
 
+    #[test]
+    fn direct_sse_toolreason_associates_split_responses_events_and_redacts_marker() {
+        let mut buffer = Vec::new();
+        let mut tool_names = Vec::new();
+        let mut pending_reasons = Vec::new();
+        let first = b"event: response.output_item.added\ndata: {\"output_index\":2,\"type\":\"response.output_item.added\",\"item\":{\"name\":\"write_stdin\",\"type\":\"function_call\"}}\n";
+        assert!(apply_toolreason_to_sse_chunk_buffered(
+            &mut buffer,
+            &mut tool_names,
+            &mut pending_reasons,
+            first,
+        )
+        .is_empty());
+        let message = format!(
+            "\nevent: response.output_item.done\ndata: {{\"output_index\":2,\"type\":\"response.output_item.done\",\"item\":{{\"content\":[{{\"text\":\"<toolreason>关闭隔离进程</toolreason>\",\"type\":\"output_text\"}}],\"type\":\"message\"}}}}\n\n"
+        );
+        let projected = apply_toolreason_to_sse_chunk_buffered(
+            &mut buffer,
+            &mut tool_names,
+            &mut pending_reasons,
+            message.as_bytes(),
+        );
+        let text = String::from_utf8(projected).expect("projected SSE must be UTF-8");
+        assert!(!text.contains("<toolreason>"));
+        assert!(text.contains("◦ 调用工具 write_stdin，因为 关闭隔离进程"));
+        assert!(text.contains("reasoning_content"));
+        assert!(text.contains("\"type\":\"reasoning\""));
+        assert!(text.contains("summary_text"));
+    }
+
+    #[test]
+    fn direct_sse_toolreason_accepts_crlf_and_associates_content_part_reason() {
+        let mut buffer = Vec::new();
+        let mut tool_names = vec!["read_file".to_string()];
+        let mut pending_reasons = Vec::new();
+        let chunk = b"data: {\"output_index\":0,\"type\":\"response.content_part.done\",\"part\":{\"text\":\"<toolreason>need context</toolreason>\",\"type\":\"output_text\"}}\r\n\r\n";
+        assert!(!apply_toolreason_to_sse_chunk_buffered(
+            &mut buffer,
+            &mut tool_names,
+            &mut pending_reasons,
+            chunk,
+        )
+        .is_empty());
+        let final_chunk = b"data: {\"output_index\":0,\"type\":\"response.output_item.done\",\"item\":{\"content\":[{\"text\":\"answer\",\"type\":\"output_text\"}],\"type\":\"message\"}}\r\n\r\n";
+        let projected = apply_toolreason_to_sse_chunk_buffered(
+            &mut buffer,
+            &mut tool_names,
+            &mut pending_reasons,
+            final_chunk,
+        );
+        let text = String::from_utf8(projected).expect("projected SSE must be UTF-8");
+        assert!(!text.contains("<toolreason>"));
+        assert!(text.contains("◦ 调用工具 read_file，因为 need context"));
+    }
+
+    #[test]
+    fn direct_sse_toolreason_handles_reason_before_later_tool_name_and_json_escapes() {
+        let mut buffer = Vec::new();
+        let mut tool_names = Vec::new();
+        let mut pending_reasons = Vec::new();
+        let message = b"data: {\"output_index\":1,\"type\":\"response.output_item.done\",\"item\":{\"content\":[{\"text\":\"\\u003ctoolreason\\u003eInspect file.\\u003c/toolreason\\u003e\",\"type\":\"output_text\"}],\"type\":\"message\"}}\n\n";
+        let projected_message = apply_toolreason_to_sse_chunk_buffered(
+            &mut buffer,
+            &mut tool_names,
+            &mut pending_reasons,
+            message,
+        );
+        let message_text = String::from_utf8(projected_message).expect("projected message");
+        assert!(!message_text.contains("toolreason"));
+        assert!(!message_text.contains("reasoning_content"));
+        let function_call = b"data: {\"output_index\":2,\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"name\":\"read_file\"}}\n\n";
+        let projected_function_call = apply_toolreason_to_sse_chunk_buffered(
+            &mut buffer,
+            &mut tool_names,
+            &mut pending_reasons,
+            function_call,
+        );
+        let function_text = String::from_utf8(projected_function_call).expect("projected call");
+        assert!(function_text.contains("◦ 调用工具 read_file，因为 Inspect file."));
+        assert!(function_text.contains("response.output_text.delta"));
+        assert!(!function_text.contains("toolreason"));
+    }
+
+    #[test]
+    fn direct_sse_toolreason_validates_completed_frame_with_tool_call() {
+        let mut buffer = Vec::new();
+        let mut tool_names = Vec::new();
+        let mut pending_reasons = Vec::new();
+        let completed = format!(
+            "data: {}\n\n",
+            serde_json::json!({
+                "type": "response.completed",
+                "response": {
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{
+                                "type": "output_text",
+                                "text": "<toolreason>locate workspace</toolreason>"
+                            }]
+                        },
+                        {
+                            "type": "function_call",
+                            "name": "exec_command",
+                            "arguments": "{\\\"cmd\\\":\\\"pwd\\\"}"
+                        }
+                    ]
+                }
+            })
+        )
+        .into_bytes();
+        let projected = apply_toolreason_to_sse_chunk_buffered(
+            &mut buffer,
+            &mut tool_names,
+            &mut pending_reasons,
+            &completed,
+        );
+        let text = String::from_utf8(projected).expect("projected completed frame");
+        assert!(!text.contains("<toolreason>"));
+        assert!(!text.contains("</toolreason>"));
+        assert!(text.contains("response.output_text.delta"));
+        assert!(text.contains("locate workspace"));
+    }
 }

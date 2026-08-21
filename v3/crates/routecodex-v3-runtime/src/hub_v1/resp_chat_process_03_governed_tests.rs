@@ -16,7 +16,7 @@ fn resp03_toolreason_maps_to_visible_reasoning_content_and_is_removed_from_text(
     let message = &payload["choices"][0]["message"];
     assert_eq!(
         message["reasoning_content"],
-        "调用工具 exec，因为 Need inspect the file."
+        "◦ 调用工具 exec，因为 Need inspect the file."
     );
     assert_eq!(message["content"], "");
     assert!(!payload.to_string().contains("toolreason"));
@@ -55,11 +55,52 @@ fn resp03_multiple_toolreasons_pair_by_tool_call_order_and_strip_duplicates() {
     let message = &payload["choices"][0]["message"];
     assert_eq!(
         message["reasoning_content"],
-        "调用工具 cat，因为 Inspect file.\n调用工具 test，因为 Run test."
+        "◦ 调用工具 cat、test，因为 Inspect file."
     );
     assert_eq!(message["content"], "");
     assert!(!payload.to_string().contains("toolreason"));
     assert!(!payload.to_string().contains("duplicate."));
+}
+
+#[test]
+fn resp03_responses_post_call_toolreason_maps_once_and_preserves_calls() {
+    let mut payload = json!({
+        "id": "resp_post_reason",
+        "output": [
+            {"type":"function_call","call_id":"call_1","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"},
+            {"type":"function_call","call_id":"call_2","name":"read_file","arguments":"{\"path\":\"config.toml\"}"},
+            {"type":"message","role":"assistant","content":[
+                {"type":"output_text","text":"<toolreason>确认工具结果所需的工作状态</toolreason>"}
+            ]}
+        ]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    assert_eq!(
+        payload["output"][2]["reasoning_content"],
+        "◦ 调用工具 pwd、read_file，因为 确认工具结果所需的工作状态"
+    );
+    assert_eq!(payload["output"][2]["content"][0]["text"], "");
+    assert_eq!(payload["output"][0]["name"], "exec_command");
+    assert_eq!(payload["output"][1]["name"], "read_file");
+    assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
+fn resp03_toolreason_uses_shell_command_as_display_tool_for_exec_command() {
+    let mut payload = json!({
+        "output": [
+            {"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"curl -fsS http://127.0.0.1:7777/health\"}"},
+            {"type":"message","content":[{"type":"output_text","text":"<toolreason>检查服务健康状态</toolreason>"}]}
+        ]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+    assert_eq!(
+        payload["output"][1]["reasoning_content"],
+        "◦ 调用工具 curl，因为 检查服务健康状态"
+    );
+    assert!(!payload.to_string().contains("调用工具 exec_command"));
 }
 
 #[test]
@@ -99,6 +140,260 @@ fn resp03_toolreason_without_tool_call_is_hard_stripped_without_reasoning_guess(
 }
 
 #[test]
+fn resp03_toolreason_placeholder_is_missing_not_visible_reasoning() {
+    let mut payload = json!({
+        "choices": [{
+            "message": {
+                "content": "<toolreason>...</toolreason>",
+                "tool_calls": [{"function": {"name": "exec_command"}}]
+            }
+        }]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    let message = &payload["choices"][0]["message"];
+    assert_eq!(message.get("reasoning_content"), None);
+    assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
+fn resp03_toolreason_prompt_fragment_and_mapped_reasoning_are_missing() {
+    for reason in [
+        "，填入这一次调用的真实当前动机，再输出结束标签",
+        "具体动机、结束标签",
+        "◦ 调用工具 exec_command，因为 获取当前工作目录",
+    ] {
+        let mut payload = json!({
+            "choices": [{
+                "message": {
+                    "content": format!("<toolreason>{reason}</toolreason>"),
+                    "tool_calls": [{"function": {"name": "exec_command"}}]
+                }
+            }]
+        });
+
+        map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+        assert_eq!(
+            payload["choices"][0]["message"].get("reasoning_content"),
+            None
+        );
+    }
+}
+
+#[test]
+fn direct_sse_toolreason_maps_one_reason_per_turn_and_preserves_tool_calls() {
+    let reason_frame = format!(
+        "data: {}\r\n\r\n",
+        json!({
+            "type": "response.output_text.done",
+            "output_index": 0,
+            "text": "<toolreason>确认当前工作目录</toolreason>"
+        })
+    );
+    let first_tool_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"pwd\"}"
+            }
+        })
+    );
+    let second_tool_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.output_item.done",
+            "output_index": 1,
+            "item": {
+                "type": "function_call",
+                "call_id": "call_2",
+                "name": "read_file",
+                "arguments": "{\"path\":\"config.toml\"}"
+            }
+        })
+    );
+    let split = reason_frame
+        .find("<toolreason>")
+        .expect("reason frame must contain the marker");
+    let mut buffer = Vec::new();
+    let mut tool_names = Vec::new();
+    let mut pending_reasons = Vec::new();
+    let mut reason_emitted = false;
+    let mut output = project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        reason_frame[..split].as_bytes(),
+    );
+    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        reason_frame[split..].as_bytes(),
+    ));
+    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        first_tool_frame.as_bytes(),
+    ));
+    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        second_tool_frame.as_bytes(),
+    ));
+
+    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
+    assert!(!output.contains("toolreason"));
+    assert_eq!(output.matches("event: response.output_text.delta").count(), 1);
+    assert!(output.contains("\"type\":\"function_call\""));
+    assert!(output.contains("\"call_id\":\"call_1\""));
+    assert!(output.contains("\"call_id\":\"call_2\""));
+    assert!(output.contains("{\\\"cmd\\\":\\\"pwd\\\"}"));
+    assert!(output.contains("{\\\"path\\\":\\\"config.toml\\\"}"));
+}
+
+#[test]
+fn direct_sse_post_call_toolreason_waits_past_tool_done_and_maps_once() {
+    let tool_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {
+                "type": "function_call",
+                "call_id": "call_post_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"pwd\"}"
+            }
+        })
+    );
+    let message_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.output_item.done",
+            "output_index": 1,
+            "item": {
+                "type": "message",
+                "content": [{"type": "output_text", "text": "<toolreason>确认当前工作目录</toolreason>"}]
+            }
+        })
+    );
+    let mut buffer = Vec::new();
+    let mut tool_names = Vec::new();
+    let mut pending_reasons = Vec::new();
+    let mut reason_emitted = false;
+
+    let mut output = project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        tool_frame.as_bytes(),
+    );
+    output.extend(project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        message_frame.as_bytes(),
+    ));
+
+    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
+    assert!(!output.contains("toolreason"));
+    assert_eq!(output.matches("reasoning_content").count(), 1);
+    assert!(output.contains("确认当前工作目录"));
+    assert!(output.contains("call_post_1"));
+    assert!(
+        reason_emitted,
+        "post-call reason must be mapped when its message item closes"
+    );
+}
+
+#[test]
+fn direct_sse_toolreason_delta_is_stripped_before_client_projection() {
+    let delta_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.output_text.delta",
+            "delta": "<toolreason>Inspect workspace</toolreason>"
+        })
+    );
+    let mut buffer = Vec::new();
+    let mut tool_names = vec!["exec_command".to_string()];
+    let mut pending_reasons = Vec::new();
+    let mut reason_emitted = false;
+
+    let output = project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        delta_frame.as_bytes(),
+    );
+
+    let output = String::from_utf8(output).expect("projected SSE must remain UTF-8");
+    assert!(!output.contains("toolreason"));
+    assert!(!output.contains("Inspect workspace"));
+    assert!(output.contains("\"delta\":\"\""));
+}
+
+#[test]
+fn direct_sse_toolreason_closeout_logs_missing_when_no_done_event_arrives() {
+    let tool_frame = format!(
+        "data: {}\n\n",
+        json!({
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {
+                "type": "function_call",
+                "call_id": "call_closeout_1",
+                "name": "exec_command",
+                "arguments": "{}"
+            }
+        })
+    );
+    let mut buffer = Vec::new();
+    let mut tool_names = Vec::new();
+    let mut pending_reasons = Vec::new();
+    let mut reason_emitted = false;
+
+    let output = project_v3_toolreason_sse_chunk_at_resp03(
+        &mut buffer,
+        &mut tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+        tool_frame.as_bytes(),
+    );
+    assert!(String::from_utf8(output)
+        .expect("projected SSE must remain UTF-8")
+        .contains("call_closeout_1"));
+    assert_eq!(tool_names, vec!["exec_command|"]);
+    assert!(!reason_emitted);
+
+    finalize_v3_toolreason_observation_at_resp03(
+        &tool_names,
+        &mut pending_reasons,
+        &mut reason_emitted,
+    );
+    assert!(
+        reason_emitted,
+        "turn closeout must account for the tool call"
+    );
+}
+
+#[test]
 fn resp03_anthropic_text_toolreason_maps_against_tool_use() {
     let mut payload = json!({
         "role":"assistant",
@@ -110,10 +405,30 @@ fn resp03_anthropic_text_toolreason_maps_against_tool_use() {
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
     assert_eq!(
         payload["reasoning_content"],
-        "调用工具 lookup，因为 Need lookup."
+        "◦ 调用工具 lookup，因为 Need lookup."
     );
     assert_eq!(payload["content"][0]["text"], "");
     assert!(!payload.to_string().contains("toolreason"));
+}
+
+#[test]
+fn resp03_rejects_prompt_placeholder_as_toolreason() {
+    let mut payload = json!({
+        "output": [
+            {"type":"message", "content":[{"type":"output_text", "text":"<toolreason>+ 一句真实、具体、简短的当前动机 +</toolreason>"}]},
+            {"type":"function_call", "name":"exec_command", "call_id":"call_placeholder", "arguments":"{}"}
+        ]
+    });
+
+    map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
+
+    assert_eq!(payload.pointer("/output/0/reasoning_content"), None);
+    assert_eq!(
+        payload
+            .pointer("/output/0/content/0/text")
+            .and_then(Value::as_str),
+        Some("")
+    );
 }
 
 #[test]
