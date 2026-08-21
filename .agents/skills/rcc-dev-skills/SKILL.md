@@ -340,6 +340,14 @@ description: P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl�
 - The RouteCodex build version must be embedded during Cargo build through `ROUTECODEX_BUILD_VERSION`; runtime health and `--version` may not depend on a release directory.
 - Canonical restart is `routecodex restart -c ~/.rcc/config.v3.toml`. The removed `restart --port` syntax must not appear in V3 install or verification instructions.
 - Required proof: distribution test, owned Cargo target cleanup test, resource/module gates, direct installed path/hash/version, aggregate restart, every configured listener health, and physical absence of `~/.rcc/install`.
+
+## V3 provider key health closeout card
+
+- 触发：审查 provider key score、failure streak、cooldown、probe 或同 priority 调度；单测/源码通过不能作为完成证据。
+- 唯一 owner：Error 分类生成 typed failure action；`routecodex-v3-provider-responses` key health 修改 score/streak/cooldown/probe/persistence；Target 只读 scheduling projection；VR 不修改 health。
+- 分类不变量：recoverable 默认第 3 次才 key cooldown，AuthKey/不可恢复进入 global cooldown；Session/recoverable probe=15m，AuthKey probe=60m；probe failure 继续 blocked，probe success 才恢复且保留 recovery floor。
+- 强制动作：先查 resource/function/mainline/verification map；定向正反测试与 map gate 通过后，精确 release build/install，比较 repo/global hash 与版本，执行唯一 managed aggregate `routecodex restart -c <config> --timeout-ms ...`，检查全部成员 `/health`，再做真实旧样本 failure/probe/scheduling replay；最后才 DSH Review。
+- 反模式：把 `provider.health` 配置硬编码进 runtime、用 bool 替代 typed scope、只改 function map 不改 mainline/verification、把旧日志或源码静态阅读冒充 installed/live evidence、触碰共享 dirty worktree。
 - Installer preflight is scoped to this owner: distribution, resource map, module boundaries, and Cargo build. Full V3 architecture CI remains a build/release gate and must not make direct binary publication depend on unrelated in-progress feature claims.
 
 ## V3 unified error-path invariant
