@@ -123,6 +123,16 @@ fn config_rejects_unknown_node_reference() {
 }
 
 #[test]
+fn config_rejects_declared_node_outside_fixed_chain() {
+    let invalid = replace_once(
+        VALID,
+        "node_id = \"V4Config01AuthoringFileSource\"",
+        "node_id = \"V4Config99Forged\"",
+    );
+    assert_eq!(compile_authoring(&invalid), Err(ConfigError::UnknownNode));
+}
+
+#[test]
 fn config_rejects_unknown_operator_reference() {
     let invalid = replace_once(
         VALID,
