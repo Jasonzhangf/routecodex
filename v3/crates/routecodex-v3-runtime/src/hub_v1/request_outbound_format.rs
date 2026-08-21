@@ -102,7 +102,6 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
         "reasoning",
         "thinking",
         "metadata",
-        "client_metadata",
         "safety_identifier",
         "moderation",
         "stream_options",
@@ -128,8 +127,8 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
 
 fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<Value, String> {
     // The caller has already completed the adjacent Chat -> Responses projection.
-    // Re-running it here would erase client_metadata provenance and reapply public
-    // metadata limits to the provider-compatible slot.
+    // Re-running it here would reapply public metadata limits to the provider
+    // compatible slot. Client metadata is already consumed as local context.
     let mut normalized = payload.clone();
     let instructions = normalized
         .as_object_mut()
@@ -144,8 +143,46 @@ fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<
             object.insert("instructions".to_string(), Value::String(instructions));
         }
     }
+    normalize_responses_input_content_parts(&mut normalized);
     normalize_responses_target_token_and_logprob_fields(&mut normalized);
     Ok(normalized)
+}
+
+fn normalize_responses_input_content_parts(payload: &mut Value) {
+    let Some(items) = payload.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in items {
+        let is_non_assistant_message = item
+            .get("role")
+            .and_then(Value::as_str)
+            .is_some_and(|role| {
+                role.eq_ignore_ascii_case("user")
+                    || role.eq_ignore_ascii_case("system")
+                    || role.eq_ignore_ascii_case("developer")
+            });
+        if !is_non_assistant_message {
+            continue;
+        }
+        let Some(parts) = item.get_mut("content").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for part in parts {
+            let Some(row) = part.as_object_mut() else {
+                continue;
+            };
+            if row.get("type").and_then(Value::as_str) == Some("text") {
+                row.insert(
+                    "type".to_string(),
+                    Value::String("input_text".to_string()),
+                );
+            }
+        }
+    }
+}
+
+pub(crate) fn normalize_v3_openai_responses_provider_request_payload(payload: &mut Value) {
+    normalize_responses_input_content_parts(payload);
 }
 
 fn responses_input_accepts_system_instruction_prefix(payload: &Value) -> bool {
@@ -426,13 +463,7 @@ fn project_responses_request_chat_extension_to_openai_responses(
     let row = projected
         .as_object_mut()
         .ok_or_else(|| "OpenAI Responses projection requires an object".to_string())?;
-    for key in [
-        "metadata",
-        "client_metadata",
-        "prompt_cache_key",
-        "store",
-        "text",
-    ] {
+    for key in ["metadata", "prompt_cache_key", "store", "text"] {
         if let Some(value) = extension.get(key) {
             insert_unless_matching(row, key, value.clone(), "responses")?;
         }
@@ -887,7 +918,9 @@ fn normalize_responses_content_part_for_role(part: &Value, role: &str) -> Result
             .flatten()
             .unwrap_or(hub_type)
         };
-        if part_type == "text" || (!is_assistant && part_type.is_empty()) {
+        if is_assistant && part_type == "text" {
+            // Responses assistant content uses the registered `text` part type.
+        } else if part_type == "text" || (!is_assistant && part_type.is_empty()) {
             row.insert(
                 "type".to_string(),
                 Value::String(responses_part_type("input_text").to_string()),

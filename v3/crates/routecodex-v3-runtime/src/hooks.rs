@@ -7,7 +7,7 @@ use crate::kernel::direct_request_key_hooks::{
 use crate::kernel::V3DirectSseTypedHookCatalog;
 use crate::nodes::{
     build_v3_responses_direct_11_policy_from_v3_target_10, V3ChatDirect11Policy,
-    V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
+    V3ClientBody, V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
 };
 use crate::shared::{
     project_provider_raw_to_client_payload_with_plan_and_projection, V3ProviderResponseProjection,
@@ -235,16 +235,36 @@ pub(crate) fn register_responses_direct_hooks_with_key_catalog(
             output_node: "V3Error05ExecutionDecision",
         },
     ];
+    let direct_sse_typed_hooks = V3DirectSseTypedHookCatalog::new().with_toolreason(
+        apply_responses_toolreason_sse_hook,
+    );
     V3HookRegistry {
         hooks: HOOKS,
         route: responses_direct_route_hook,
         request_projection: responses_direct_request_projection_hook_with_key_catalog,
         request_key_catalog: *request_key_catalog,
-        direct_sse_typed_hooks: V3DirectSseTypedHookCatalog::default(),
+        direct_sse_typed_hooks,
         provider_transport: responses_direct_provider_transport_hook,
         contextual_response_projection: responses_direct_response_projection_hook_with_context,
         error: responses_direct_error_hook,
     }
+}
+
+fn apply_responses_toolreason_sse_hook(
+    value: &mut serde_json::Value,
+    tool_names: &[String],
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    project_to_client: bool,
+) {
+    crate::hub_v1::map_v3_toolreason_stream_event_at_resp03(
+        value,
+        true,
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        project_to_client,
+    );
 }
 
 fn responses_direct_route_hook(
@@ -319,6 +339,9 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog(
         }
         _ => request_body,
     };
+    if provider_protocol == crate::hub_v1::V3HubProviderWireProtocol::Responses {
+        crate::hub_v1::normalize_v3_openai_responses_provider_request_payload(&mut request_body);
+    }
     let direct_request_protocol = match provider_protocol {
         crate::hub_v1::V3HubProviderWireProtocol::Responses => V3DirectRequestProtocol::Responses,
         crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat => V3DirectRequestProtocol::OpenAiChat,
@@ -486,13 +509,23 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
                 V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
             )
         })?;
-        project_provider_raw_to_client_payload_with_plan_and_projection(
+        let mut projection = project_provider_raw_to_client_payload_with_plan_and_projection(
             raw,
             &plan,
             context.tool_thinking_enabled,
             context.toolreason_client_projection,
         )
-        .await
+        .await?;
+        if context.tool_thinking_enabled {
+            if let V3ClientBody::Json(payload) = &mut projection.client_payload.body {
+                crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(
+                    payload,
+                    true,
+                    context.toolreason_client_projection,
+                );
+            }
+        }
+        Ok(projection)
     })
 }
 
@@ -510,13 +543,23 @@ pub(crate) fn chat_direct_response_projection_hook(
                 V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
             )
         })?;
-        project_provider_raw_to_client_payload_with_plan_and_projection(
+        let mut projection = project_provider_raw_to_client_payload_with_plan_and_projection(
             raw,
             &plan,
             context.tool_thinking_enabled,
             context.toolreason_client_projection,
         )
-        .await
+        .await?;
+        if context.tool_thinking_enabled {
+            if let V3ClientBody::Json(payload) = &mut projection.client_payload.body {
+                crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(
+                    payload,
+                    true,
+                    context.toolreason_client_projection,
+                );
+            }
+        }
+        Ok(projection)
     })
 }
 
@@ -1025,6 +1068,27 @@ mod tests {
 
         assert_eq!(wire.body()["model"], "provider-wire-model");
         assert_ne!(wire.body()["model"], "client-route-alias");
+    }
+
+    #[test]
+    fn direct_responses_projection_normalizes_non_assistant_text_parts() {
+        let mut policy = direct_policy_with_models(
+            "client-route-alias",
+            "canonical-provider-model",
+            "provider-wire-model",
+        );
+        policy.request_body = json!({
+            "model": "client-route-alias",
+            "input": [{
+                "type": "message",
+                "role": "system",
+                "content": [{"type": "text", "text": "system guidance"}]
+            }]
+        });
+
+        let wire = responses_direct_request_projection_hook(&policy)
+            .expect("Direct Responses projection must normalize provider content types");
+        assert_eq!(wire.body()["input"][0]["content"][0]["type"], "input_text");
     }
 
     #[test]

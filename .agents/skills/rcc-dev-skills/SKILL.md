@@ -1,11 +1,13 @@
 ---
 name: rcc-dev-skills
-description: P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script 做跨文件或同一文件多位置语义批量替换；逐文件读取核实上下文后用 apply_patch hunk，formatter/canonical generator 只生成声明的机械产物，不得语义改写。P0 Architecture Guard：typed carrier / MetadataCenter 控制资源绝不能进入 payload，payload must not reconstruct control，必须 fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound 补偿。模块定义、owner、allowed/forbidden paths、相邻调用边、资源关系和方案越界审查先行，写完审 diff 越界，功能验证后最后 code review。
+description: 证据优先：任何归因必须由同一 requestId 的 raw request、provider-bound request、raw response、client projection 和 live replay 证明，禁止把 provider/context/model 当默认锅；先定位唯一 owner 和数据形状，再改唯一真源。P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script 做跨文件或同一文件多位置语义批量替换；逐文件读取核实上下文后用 apply_patch hunk，formatter/canonical generator 只生成声明的机械产物，不得语义改写。P0 Architecture Guard：typed carrier / MetadataCenter 控制资源绝不能进入 payload，payload must not reconstruct control，必须 fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound 补偿。模块定义、owner、allowed/forbidden paths、相邻调用边、资源关系和方案越界审查先行，写完审 diff 越界，功能验证后最后 code review。
 ---
 
 # RCC Dev Skills
 
 ## 概要硬规则（Agent 列表阶段也必须看到）
+
+- **请求形状优先归因（最高优先级）**：一个请求的响应错误，很大概率首先是请求形状问题，禁止先规避 provider、改路由或把错误归因给 provider/key。必须先完成两步证据：**(1) 失败请求可复现；(2) 同入口的最简请求正常**。确认后，必须从最近一次失败请求逐步回退：先去掉最近一轮请求，验证是否由该轮引起；再按字段做最小差分，定位第一个触发错误的字段/组合。修复必须回到生成该 provider-bound request 的唯一 owner，解决请求根因；禁止用改配置绕行、降低路由优先级、排除 provider、静默裁剪字段、fallback 或错误投影掩盖问题。最终必须用同一入口、同一真实样本在线重放证明原错误消失，并保留“完整失败、最简成功、最近一轮差分、字段差分”的证据链。
 
 - P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script，对跨文件或同一文件多位置做语义批量替换；逐文件读取核实上下文后，只能用明确、可审查的 `apply_patch` hunk 手工修改。formatter/canonical generator 只可生成其声明的机械产物，不得语义改写。
 - P0 控制面与业务 payload 物理隔离：routing、switching、continuation、retry、provider selection、health、debug、snapshot、error、scope、Stopless/servertool 状态只能走 typed carrier / MetadataCenter 控制资源 / Error 链，绝不能进入 request/response payload；payload 不得重建控制状态；发现泄漏必须 fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound/transport 补偿。
@@ -100,6 +102,27 @@ description: P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl�
 - 请求协议字段先验：HTTP headers、body 标准字段、`metadata`、`client_metadata`、`x-*` / `x-codex-*` 都是请求协议数据面，默认透传；不要搬进 `MetadataCenter`，不要因为名字含 metadata 就判成 RouteCodex 控制信号。`MetadataCenter` 只写 RouteCodex 内部控制信号。
 - 反模式：同一字段多次派生、多处 fallback、先从 payload 再从 metadata 回读、用上下文零散字段拼接原始数据。
 - 直通路径特例：provider-direct / same-protocol direct 若绕过 request-executor，必须在实际送给 provider 前把 `clientConnectionState` 生成的 `abortSignal` 写进 provider runtime metadata；只保留 state 不够，direct provider 会继续跑到自然结束。
+
+### 请求构造与 provider 归因诊断（强制）
+
+不要凭“线上没有字段”“模型没遵循”“上下文太长”把责任甩给 provider、模型或上下文。归因必须由同一 `requestId` 的实际字节和可重放样本证明；代码里“有注入函数”不等于本次请求真的注入。
+
+固定按以下顺序排查：
+
+1. 锁定同一请求的 `entry protocol`、`direct|relay`、provider、model、port、`requestId`，读取 canonical provider request、provider raw response、client projection；不要先看 console 摘要下结论。
+2. 在 provider-bound request 上检查真实形状：`messages`/content 数量和 role 顺序、system 数量及位置、当前轮边界 `current_payload_start`、工具数量、目标工具 schema、required 字段、guidance 实际落点。参数若只被校验却没有参与落点计算，直接标为请求构造缺陷。
+3. 对同一 provider/model/schema 做三组黑盒对照：
+   - A：最小直连 provider 请求；
+   - B：把 RouteCodex 生成的完整 provider request 原样直连同一 provider；
+   - C：同入口经过 RouteCodex 的真实在线请求。
+   A 成功、B 失败：请求历史、role、序列化或 guidance 位置是本地构造问题；A/B 成功、C 失败：传输、解析或客户端投影问题；A 失败：才可调查 provider/key/model/endpoint。
+4. 响应侧修改前先确认 raw provider response 是否已有目标字段。raw 有而 client 无，是 `RespInbound -> RespChatProcess -> RespOutbound` 的解析/投影 owner 问题；raw 没有，回到请求构造和 A/B 对照，禁止在响应端猜测、补值或 fallback。
+5. Direct 和 Relay 必须分别追 Req04 hook 到 provider-bound 输出，并分别验证；不能因为 Relay 命中就推断 Direct 命中，也不能因为 provider 名相同就跳过路径验证。
+6. 当前轮 guidance 只能写入当前 provider-facing slice；多 system message 禁止无条件 `.find()` 第一个 system。历史 system/tool/assistant 必须保持不变，并用“多历史 system + 当前边界”fixture 锁住这一点。
+
+归因记录至少写出：请求/响应实际形状、对照 A/B/C 结果、唯一 owner、排除的假设、下一步验证。缺任一证据，只能报告“尚未定位”，不能报告“provider 问题”或“已修复”。禁止 fallback、静默清洗、响应端补偿；原生 tool call 必须保持可执行，字段缺失必须作为可观测失败返回。
+
+本轮已确认的反模式：`current_payload_start` 曾经传入但只做边界校验，注入函数仍在全部 history 中寻找第一个 system，导致 guidance 落到历史位置；最小直连成功而完整 provider request 重放失败，证明不能归因 provider 能力。以后必须用上述 A/B/C 对照和边界 fixture 阻断回归。
 
 ### Virtual Router 在线诊查优先
 

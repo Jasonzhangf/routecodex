@@ -32,6 +32,25 @@ fn responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids() {
 }
 
 #[test]
+fn responses_wire_normalizes_system_text_parts_to_input_text() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{
+            "role": "system",
+            "content": [{"type": "text", "text": "system guidance"}]
+        }, {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "assistant output"}]
+        }]
+    });
+
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Responses wire must normalize system content parts");
+    assert_eq!(request["input"][0]["content"][0]["type"], "input_text");
+    assert_eq!(request["input"][1]["content"][0]["type"], "text");
+}
+
+#[test]
 fn responses_openai_chat_field_parity_responses_wire_generates_collision_resistant_fc_ids() {
     let repeated_prefix = "call_abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv";
     let payload = json!({
@@ -900,7 +919,7 @@ fn responses_openai_chat_field_parity_responses_wire_preserves_include_projectio
 }
 
 #[test]
-fn openai_responses_wire_preserves_client_metadata_and_projects_reasoning_effort() {
+fn openai_responses_wire_does_not_leak_client_metadata_and_projects_reasoning_effort() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
@@ -909,10 +928,7 @@ fn openai_responses_wire_preserves_client_metadata_and_projects_reasoning_effort
     });
     let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
         .expect("Responses wire projection must preserve supported protocol fields");
-    assert_eq!(
-        request["client_metadata"],
-        json!({"session_id":"codex-review"})
-    );
+    assert!(request.get("client_metadata").is_none(), "{request}");
     assert!(request.get("reasoning_effort").is_none(), "{request}");
     assert!(request.get("metadata").is_none(), "{request}");
     assert_eq!(request["reasoning"], json!({"effort":"medium"}));
@@ -1038,7 +1054,7 @@ fn openai_responses_metadata_limits_fail_before_wire() {
 }
 
 #[test]
-fn codex_client_metadata_remains_client_metadata_on_responses_wire() {
+fn codex_client_metadata_does_not_reach_responses_wire() {
     let turn_metadata = json!({
         "installation_id": "15252310-9634-460d-9809-64a631ebd187",
         "session_id": "019fbd31-bb6e-7a43-bfb2-17a1e46ec23b",
@@ -1073,16 +1089,9 @@ fn codex_client_metadata_remains_client_metadata_on_responses_wire() {
     });
 
     let wire = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-        .expect("Responses outbound must preserve the distinct client_metadata field");
+        .expect("Responses outbound must keep client_metadata local");
 
-    assert_eq!(
-        wire["client_metadata"]["x-codex-turn-metadata"],
-        turn_metadata
-    );
-    assert_eq!(
-        wire["client_metadata"]["session_id"],
-        "019fbd31-bb6e-7a43-bfb2-17a1e46ec23b"
-    );
+    assert!(wire.get("client_metadata").is_none(), "{wire}");
     assert!(wire.get("metadata").is_none(), "{wire}");
 }
 
