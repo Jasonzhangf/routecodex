@@ -1,8 +1,9 @@
 {
-  "binary_ref": "project-sdk",
-  "bundle_digest": "sha256:ddb43f02b4e23b5b59fb5f047a331a371c1bd55c48aa979620e6fcc9bebd7751",
-  "bundle_manifest_digest": "sha256:cf083c7ff083015d0c7db2e2efd0297555a6c459cc84ed2e9a795081c7a89d48",
-  "bundle_resources": {
+  "schema_version": 1,
+  "sdk": "appsdk",
+  "version": "0.1.5",
+  "runtime_entrypoint": "rust-binary",
+  "resources": {
     "contracts": [
       "contracts/sdk-bundle.manifest.json",
       "contracts/project.schema.json",
@@ -41,9 +42,13 @@
       "skills/appsdk-project-governance/SKILL.md"
     ]
   },
-  "compiler_digest": "sha256:069c1b40071579432dacc30d5b731ea7e9a1c39c4062f07ced723b5c3858cbaf",
-  "contract_schema": 1,
-  "digest": "sha256:069c1b40071579432dacc30d5b731ea7e9a1c39c4062f07ced723b5c3858cbaf",
-  "sdk": "appsdk",
-  "version": "0.1.5"
+  "install": {
+    "project_roots": {
+      "contracts": ".appsdk/contracts",
+      "docs": ".appsdk/docs",
+      "rules": ".appsdk/rules",
+      "skills": ".appsdk/skills"
+    },
+    "generated_record": ".appsdk/sdk-resources.json"
+  }
 }
