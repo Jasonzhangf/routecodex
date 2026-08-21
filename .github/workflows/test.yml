@@ -29,8 +29,6 @@ jobs:
         run: npm run verify:repo-sanity
       - name: V3 architecture CI umbrella
         run: npm run verify:v3-architecture-ci
-      - name: V3 package CI verification
-        run: npm --prefix v3 run verify:ci
       - name: V3 compaction request routing
         run: npm run test:v3-compaction-request-routing
       - name: V3 Responses session admission
@@ -119,9 +117,10 @@ jobs:
       - name: Install global AppSDK from release artifact
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -fsSL -o "$HOME/.local/bin/appsdk" \
-            https://github.com/Jasonzhangf/appsdk/releases/download/v0.1.2/appsdk-0.1.2-macos-arm64
-          chmod +x "$HOME/.local/bin/appsdk"
+          git clone --depth 1 --branch v0.1.5 \
+            https://github.com/Jasonzhangf/appsdk.git "$RUNNER_TEMP/appsdk-0.1.5"
+          cargo build --release --manifest-path "$RUNNER_TEMP/appsdk-0.1.5/rust/Cargo.toml"
+          install -m 755 "$RUNNER_TEMP/appsdk-0.1.5/rust/target/release/appsdk" "$HOME/.local/bin/appsdk"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: V4 AppSDK admission
         run: |
@@ -129,4 +128,4 @@ jobs:
           appsdk version
           test -x "$(command -v appsdk)"
           test "sha256:$(shasum -a 256 "$(command -v appsdk)" | cut -d ' ' -f 1)" = "$(jq -r .digest v4/.appsdk/sdk.lock)"
-          appsdk verify --admission v4
+          appsdk verify --review-admission v4 --module routecodex-v4-base-node
