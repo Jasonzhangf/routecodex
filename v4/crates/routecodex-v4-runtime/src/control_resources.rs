@@ -107,7 +107,11 @@ impl V4Control02RecordLedger {
     }
 
     pub fn append(&mut self, record: ControlLedgerRecord) -> Result<(), ControlLedgerError> {
-        if self.records.iter().any(|existing| existing.record_id == record.record_id) {
+        if self
+            .records
+            .iter()
+            .any(|existing| existing.record_id == record.record_id)
+        {
             return Err(ControlLedgerError::ImmutableRecord);
         }
         self.records.push(record);
@@ -169,7 +173,11 @@ impl V4Control03NodeStatistics {
         scope_key: &str,
         error: bool,
     ) -> Result<(), NodeStatisticsError> {
-        let key = (node_id.to_string(), operator_id.to_string(), scope_key.to_string());
+        let key = (
+            node_id.to_string(),
+            operator_id.to_string(),
+            scope_key.to_string(),
+        );
         let entry = self.by_key.entry(key).or_insert_with(|| NodeStatistic {
             node_id: node_id.to_string(),
             operator_id: operator_id.to_string(),
@@ -340,7 +348,10 @@ impl V4RuntimeTimingState {
     }
 
     pub fn total_micros(&self, phase: &str) -> u128 {
-        self.by_phase.get(phase).map(|values| values.iter().sum()).unwrap_or(0)
+        self.by_phase
+            .get(phase)
+            .map(|values| values.iter().sum())
+            .unwrap_or(0)
     }
 }
 

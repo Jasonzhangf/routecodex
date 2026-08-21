@@ -174,7 +174,7 @@ fn positive_error_plugin_writes_typed_error_side_channel_only() {
 }
 
 #[test]
-fn positive_response_governance_writes_governed_data_and_control() {
+fn positive_response_governance_preserves_response_data() {
     let plan = compile_standard_plan(
         "V4HubRespChatProcess03Governed",
         "response_chat_process",
@@ -193,29 +193,21 @@ fn positive_response_governance_writes_governed_data_and_control() {
     container = publish_container(container);
 
     let registry = StandardHandleRegistry::new();
+    let input = request_data();
     let output = container
         .execute_with_plan_hash(
             &hash,
             NodeExecutionInput {
-                data: request_data(),
+                data: input.clone(),
                 control: json!({}),
             },
             &registry,
         )
         .expect("response governance executes");
 
-    let data = output.data.as_object().expect("data is object");
-    let control = output.control.as_object().expect("control is object");
-    assert_eq!(
-        control["metadata_center"]["governance_applied"],
-        json!("response_governance")
-    );
-    assert!(
-        data.get("control").is_none(),
-        "control never enters response data"
-    );
-    assert_eq!(data["governance"], json!("response_governance"));
-    assert!(output.diagnostics.is_empty());
+    assert_eq!(output.data, input);
+    assert_eq!(output.control, json!({}));
+    assert_eq!(output.diagnostics[0].kind, "response_governance");
 
     container.drain().unwrap();
     container.dispose().unwrap();

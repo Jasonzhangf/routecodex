@@ -253,13 +253,20 @@
         "standard_node_allowed_reads",
         "standard_node_allowed_writes",
         "register_standard_library",
-        "compile_standard_plan"
+        "compile_standard_plan",
+        "protocol_decode",
+        "response_governance",
+        "tool_harvest",
+        "client_semantic_projection",
+        "sse_frame_boundary",
+        "frame_build"
       ],
       "required_gates": [
         "v4_standard_plugins_l2_regression",
         "v4_standard_plugins_test_consumer",
         "v4_parity_gate_standard_plugins",
-        "v4_parity_gate_standard_plugins_red"
+        "v4_parity_gate_standard_plugins_red",
+        "v4_response_inbound_outbound_l2"
       ]
     },
     {
@@ -308,7 +315,9 @@
         "ExecCtx::read_control_resource",
         "ExecCtx::emit",
         "ExecCtx::write_data",
-        "ExecCtx::write_control_resource"
+        "ExecCtx::write_control_resource",
+        "ScopeSessionCommand",
+        "ScopeSessionOperation"
       ],
       "required_gates": [
         "v4_plugin_bridge_l2_regression",
@@ -322,7 +331,8 @@
       "entry_symbols": [
         "SkeletonRuntime::load",
         "SkeletonRuntime::execute_request",
-        "SkeletonRuntime::execute_mock_response",
+        "SkeletonRuntime::execute_provider_response",
+        "SkeletonRuntime::execute_provider_response_scoped",
         "SkeletonRuntime::execute_chain",
         "SkeletonRuntime::claim",
         "SkeletonRuntime::release",
@@ -331,7 +341,19 @@
         "ExecutionContext::new",
         "ExecutionContext::scope",
         "assert_no_control_leak",
-        "PLUGIN_REGISTRY"
+        "project_chat_request_to_responses",
+        "FrameParse",
+        "JsonParse",
+        "ProtocolDecode",
+        "ResponseGovernance",
+        "ToolHarvest",
+        "ContinuationCommit",
+        "ClientSemanticProjection",
+        "SseFrame",
+        "FrameBuild",
+        "PLUGIN_REGISTRY",
+        "bind_scope_via_bridge",
+        "release_scope_via_bridge"
       ],
       "required_gates": [
         "v4_runtime_l2_regression",
@@ -488,6 +510,28 @@
       ],
       "required_gates": [
         "v4_active_link_resolver"
+      ]
+    },
+    {
+      "function_id": "v4.build_link.build_binary",
+      "owner": "routecodex-v4-build-link",
+      "status": "active",
+      "binding_status": "binding",
+      "entry_symbols": [
+        "build_binary",
+        "consumer_package_version",
+        "run_rustc"
+      ],
+      "entry_paths": [
+        "crates/routecodex-v4-build-link/src/main.rs"
+      ],
+      "required_gates": [
+        "v4_active_link_resolver",
+        "v4_infrastructure_contract"
+      ],
+      "resource_bindings": [
+        "v4.build.workspace_artifact_link",
+        "v4.runtime.binary_identity"
       ]
     },
     {
@@ -702,6 +746,148 @@
         "v4_cordis_host_l3_regression",
         "v4_parity_gate_node_container",
         "v4_parity_gate_node_container_red"
+      ]
+    },
+    {
+      "function_id": "v4.runtime.independent_admission",
+      "owner": "routecodex-v4-governance",
+      "status": "active",
+      "binding_status": "binding",
+      "entry_symbols": [],
+      "entry_paths": [
+        "contracts/real-runtime-admission.manifest.json",
+        "crates/routecodex-v4-runtime-bin/src/main.rs",
+        "scripts/architecture/verify-v4-real-runtime-admission.mjs"
+      ],
+      "required_gates": [
+        "v4_real_runtime_admission_red",
+        "v4_parity_gate_real_runtime_admission",
+        "v4_parity_gate_real_runtime_admission_red",
+        "v4_real_runtime_compiled_manifest",
+        "v4_real_runtime_provider_transport",
+        "v4_real_runtime_server_http",
+        "v4_real_runtime_responses_json",
+        "v4_real_runtime_responses_sse",
+        "v4_real_runtime_v3_isolation"
+      ],
+      "resource_bindings": [
+        "v4.runtime.admission_manifest"
+      ]
+    },
+    {
+      "function_id": "v4.runtime.binary_cold_start",
+      "owner": "routecodex-v4-runtime-bin",
+      "status": "active",
+      "binding_status": "binding",
+      "entry_symbols": [
+        "dispatch",
+        "run_managed_child",
+        "PipelineHandler::handle"
+      ],
+      "entry_paths": [
+        "crates/routecodex-v4-runtime-bin/src/main.rs"
+      ],
+      "required_gates": [
+        "v4_real_runtime_compiled_manifest",
+        "v4_real_runtime_v3_isolation"
+      ],
+      "resource_bindings": [
+        "v4.runtime.compiled_manifest",
+        "v4.runtime.binary_identity"
+      ]
+    },
+    {
+      "function_id": "v4.cli.command_dispatch",
+      "owner": "routecodex-v4-cli",
+      "status": "active",
+      "binding_status": "binding",
+      "entry_symbols": [
+        "Cli::parse_with_version",
+        "V4CommandIntent"
+      ],
+      "entry_paths": [
+        "crates/routecodex-v4-cli/src/lib.rs"
+      ],
+      "required_gates": [
+        "v4_cli_l2_regression",
+        "v4_infrastructure_contract",
+        "v4_infrastructure_contract_red"
+      ],
+      "resource_bindings": [
+        "v4.cli.command_intent"
+      ]
+    },
+    {
+      "function_id": "v4.config.runtime_manifest",
+      "owner": "routecodex-v4-config",
+      "status": "active",
+      "binding_status": "binding",
+      "entry_symbols": [
+        "compile_runtime_config",
+        "RuntimeConfigManifest::verify",
+        "write_runtime_authoring",
+        "write_runtime_manifest_atomic"
+      ],
+      "entry_paths": [
+        "crates/routecodex-v4-config/src/lib.rs"
+      ],
+      "required_gates": [
+        "v4_config_l2_regression",
+        "v4_infrastructure_contract"
+      ],
+      "resource_bindings": [
+        "v4.config.authoring",
+        "v4.runtime.compiled_manifest"
+      ]
+    },
+    {
+      "function_id": "v4.lifecycle.managed_instance",
+      "owner": "routecodex-v4-lifecycle",
+      "status": "active",
+      "binding_status": "binding",
+      "entry_symbols": [
+        "V4LifecyclePaths::resolve",
+        "start_managed",
+        "status_managed",
+        "request_stop",
+        "request_restart",
+        "exec_managed_restart"
+      ],
+      "entry_paths": [
+        "crates/routecodex-v4-lifecycle/src/lib.rs"
+      ],
+      "required_gates": [
+        "v4_lifecycle_l2_regression",
+        "v4_infrastructure_contract",
+        "v4_infrastructure_contract_red"
+      ],
+      "resource_bindings": [
+        "v4.lifecycle.instance_state",
+        "v4.lifecycle.control_socket"
+      ]
+    },
+    {
+      "function_id": "v4.servertool.cli_projection",
+      "owner": "routecodex-v4-servertool",
+      "status": "active",
+      "binding_status": "binding",
+      "entry_symbols": [
+        "build_run_projection",
+        "ServertoolRunInput",
+        "ServertoolRunOutput",
+        "ServertoolRunControl",
+        "ServertoolRunProjection"
+      ],
+      "entry_paths": [
+        "crates/routecodex-v4-servertool/src/lib.rs"
+      ],
+      "required_gates": [
+        "v4_servertool_l2_regression",
+        "v4_infrastructure_contract"
+      ],
+      "resource_bindings": [
+        "v4.servertool.cli_projection",
+        "v4.servertool.cli_control"
       ]
     }
   ]

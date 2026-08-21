@@ -1,4 +1,4 @@
-//! routecodex-v4-router — contract-bound route policy live override owner
+//! routecodex-v4-router — compiled target selection and live policy owner
 //! (`v4.control.route_policy_live`, V4Router08LivePolicyOverride).
 //!
 //! Hard boundaries:
@@ -7,6 +7,84 @@
 //! - session-scoped and immutable-history: every override set is appended,
 //!   never rewritten;
 //! - control fields never enter provider/client normal payload.
+
+use routecodex_v4_config::{RuntimeProviderCandidate, RuntimeRoute};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectedTarget {
+    pub provider_id: String,
+    pub config_path: String,
+    pub protocol: String,
+    pub wire_model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TargetSelectionError {
+    EmptyCandidates,
+    EmptyRoutes,
+    RouteTargetMissing(String),
+    ModelUnavailable(String),
+}
+
+impl std::fmt::Display for TargetSelectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyCandidates => write!(f, "compiled provider candidate set is empty"),
+            Self::ModelUnavailable(model) => {
+                write!(f, "no compiled provider candidate supports model {model}")
+            }
+            Self::EmptyRoutes => write!(f, "compiled route set is empty"),
+            Self::RouteTargetMissing(provider) => {
+                write!(f, "compiled route references missing provider {provider}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TargetSelectionError {}
+
+pub fn select_target(
+    candidates: &[RuntimeProviderCandidate],
+    routes: &[RuntimeRoute],
+    requested_model: &str,
+) -> Result<SelectedTarget, TargetSelectionError> {
+    if candidates.is_empty() {
+        return Err(TargetSelectionError::EmptyCandidates);
+    }
+    if routes.is_empty() {
+        return Err(TargetSelectionError::EmptyRoutes);
+    }
+    let route = routes
+        .iter()
+        .find(|route| route.models.iter().any(|model| model == requested_model))
+        .ok_or_else(|| TargetSelectionError::ModelUnavailable(requested_model.to_string()))?;
+    let mut eligible = route
+        .targets
+        .iter()
+        .map(|provider_id| {
+            candidates
+                .iter()
+                .find(|candidate| &candidate.provider_id == provider_id)
+                .ok_or_else(|| TargetSelectionError::RouteTargetMissing(provider_id.clone()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    eligible.sort_by_key(|candidate| candidate.priority);
+    eligible
+        .into_iter()
+        .find(|candidate| {
+            candidate
+                .entry_models
+                .iter()
+                .any(|model| model == requested_model)
+        })
+        .map(|candidate| SelectedTarget {
+            provider_id: candidate.provider_id.clone(),
+            config_path: candidate.config_path.clone(),
+            protocol: candidate.protocol.clone(),
+            wire_model: candidate.wire_model.clone(),
+        })
+        .ok_or_else(|| TargetSelectionError::ModelUnavailable(requested_model.to_string()))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyVersion {
@@ -72,7 +150,12 @@ impl V4Router08LivePolicyOverride {
         Ok(())
     }
 
-    pub fn current(&self, server_id: &str, route_group_id: &str, scope_key: &str) -> Option<&LivePolicyOverride> {
+    pub fn current(
+        &self,
+        server_id: &str,
+        route_group_id: &str,
+        scope_key: &str,
+    ) -> Option<&LivePolicyOverride> {
         self.history.iter().rev().find(|entry| {
             entry.server_id == server_id
                 && entry.route_group_id == route_group_id

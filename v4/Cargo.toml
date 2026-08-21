@@ -2,7 +2,9 @@
 members = [
   "crates/routecodex-v4-base-node",
   "crates/routecodex-v4-build-link",
+  "crates/routecodex-v4-cli",
   "crates/routecodex-v4-cordis-bridge",
+  "crates/routecodex-v4-lifecycle",
   "crates/routecodex-v4-node-container",
   "crates/routecodex-v4-plugin-catalog",
   "crates/routecodex-v4-plugin-contract",
@@ -12,6 +14,7 @@ members = [
   "crates/routecodex-v4-admin",
   "crates/routecodex-v4-skeleton",
   "crates/routecodex-v4-cli-plugin",
+  "crates/routecodex-v4-servertool",
   "crates/routecodex-v4-standard-plugins",
 ]
 resolver = "2"

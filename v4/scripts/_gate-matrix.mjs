@@ -11,6 +11,7 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-cordis-bridge.mjs',
   'verify-v4-execution-binding.mjs',
   'verify-v4-feature-gap.mjs',
+  'verify-v4-infrastructure.mjs',
   'verify-v4-node-graph.mjs',
   'verify-v4-plane-isolation.mjs',
   'verify-v4-plugin-plan.mjs',
@@ -28,12 +29,14 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-node-container.mjs',
   'verify-v4-standard-plugins.mjs',
   'verify-v4-cli-plugin.mjs',
+  'verify-v4-real-runtime-admission.mjs',
 ];
 
 export const RED_SUITES = [
   ['verify-v4-cordis-bridge.mjs', '--red-self-test'],
   ['verify-v4-execution-binding.mjs', '--red-self-test'],
   ['verify-v4-feature-gap.mjs', '--red-self-test'],
+  ['verify-v4-infrastructure.mjs', '--red-self-test'],
   ['verify-v4-node-graph.mjs', '--red-self-test'],
   ['verify-v4-plugin-plan.mjs', '--red-self-test'],
   ['verify-v4-relay-continuation.mjs', '--red-self-test'],
@@ -47,6 +50,7 @@ export const RED_SUITES = [
   ['verify-v4-node-container.mjs', '--red-self-test'],
   ['verify-v4-standard-plugins.mjs', '--red-self-test'],
   ['verify-v4-cli-plugin.mjs', '--red-self-test'],
+  ['verify-v4-real-runtime-admission.mjs', '--red-self-test'],
 ];
 
 export const CONSUMER_REGRESSIONS = [
@@ -54,9 +58,9 @@ export const CONSUMER_REGRESSIONS = [
   ['routecodex-v4-config', 'routecodex-v4-base-node,routecodex-v4-edge'],
   ['routecodex-v4-control', 'routecodex-v4-base-node'],
   ['routecodex-v4-error', 'routecodex-v4-base-node'],
-  ['routecodex-v4-runtime', 'routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control', '--source-deps', 'routecodex-v4-skeleton,routecodex-v4-plugin-contract'],
+  ['routecodex-v4-runtime', 'routecodex-v4-error,routecodex-v4-base-node,routecodex-v4-control', '--source-deps', 'routecodex-v4-cordis-bridge,routecodex-v4-skeleton,routecodex-v4-plugin-contract'],
   ['routecodex-v4-debug', 'routecodex-v4-base-node'],
-  ['routecodex-v4-router', 'routecodex-v4-base-node'],
+  ['routecodex-v4-router', 'routecodex-v4-base-node,routecodex-v4-edge', '--rlib-deps', 'routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib'],
   ['routecodex-v4-provider', 'routecodex-v4-base-node'],
   ['routecodex-v4-server', 'routecodex-v4-base-node'],
   ['routecodex-v4-plugin-manager', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog'],

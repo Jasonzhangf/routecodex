@@ -106,7 +106,7 @@ chains:
       checkpoint: {node_id: V4ProviderSseIn01FrameBoundary, semantic: provider_raw}
       resource: v4.response.provider_raw
       verification_gates: [v4_parity_gate_skeleton_topology, v4_parity_gate_semantic_parity, v4_parity_gate_plane_isolation]
-      checkpoint_evidence: "implemented: routecodex-v4-runtime RawParse (response chain, runtime test-consumer 9)"
+      checkpoint_evidence: "implemented: routecodex-v4-runtime FrameParse/JsonParse (response chain, runtime test-consumer)"
     - v3_stage: response.normalize
       v3_semantic: normalize provider response to hub semantic; no continuation save here
       container: {family: ResponseChainNode, role: response_inbound}

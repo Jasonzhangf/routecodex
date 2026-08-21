@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use routecodex_v4_cordis_bridge::{
     compile_node, execute_plan, BridgeError, ExecCtx, HandleRegistry, NodeExecutionInput,
-    PluginHandle,
+    PluginHandle, ScopeContinuationOwner, ScopeSessionCommand, ScopeSessionOperation,
 };
 use routecodex_v4_plugin_contract::{
     NodePluginDescriptor, NodeSelector, PluginEffect, PluginKind, PluginPhase, ResourceAxis,
@@ -41,6 +41,10 @@ fn registry() -> ResourceRegistry {
                 axis: ResourceAxis::Control,
             },
             ResourceEntry {
+                resource_id: "v4.control.scope_command".to_string(),
+                axis: ResourceAxis::Control,
+            },
+            ResourceEntry {
                 resource_id: "v4.debug.event_ledger".to_string(),
                 axis: ResourceAxis::Diagnostic,
             },
@@ -54,6 +58,7 @@ fn allowed_reads() -> Vec<String> {
         "v4.control.metadata_center".to_string(),
         "v4.control.error_chain".to_string(),
         "v4.control.route_facts".to_string(),
+        "v4.control.scope_command".to_string(),
         "v4.debug.event_ledger".to_string(),
     ]
 }
@@ -64,6 +69,7 @@ fn allowed_writes() -> Vec<String> {
         "v4.control.metadata_center".to_string(),
         "v4.control.error_chain".to_string(),
         "v4.control.route_facts".to_string(),
+        "v4.control.scope_command".to_string(),
     ]
 }
 
@@ -223,6 +229,41 @@ impl PluginHandle for ErrorWriteHandle {
             .insert("updated".to_string(), json!(true));
         ctx.write_control_resource("v4.control.error_chain", error_chain)
             .map_err(|error| error.to_string())
+    }
+}
+
+struct ScopeRoundtripHandle;
+
+impl PluginHandle for ScopeRoundtripHandle {
+    fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
+        let value = json!({
+            "entry_protocol": "responses",
+            "continuation_owner": "direct",
+            "pipeline_id": "pipeline-1",
+            "port": 5555,
+            "session_scope": "session-1",
+            "conversation_scope": "conversation-1",
+            "request_id": "request-1",
+            "full_input_hash": "sha256:full-input",
+            "operation": "bind",
+            "sequence": 1
+        });
+        ctx.write_control_resource("v4.control.scope_command", value)
+            .map_err(|error| error.to_string())?;
+        ctx.read_control_resource("v4.control.scope_command")
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "scope command slot missing after write".to_string())?;
+        Ok(())
+    }
+}
+
+struct UndeclaredScopeHandle;
+
+impl PluginHandle for UndeclaredScopeHandle {
+    fn execute(&self, ctx: &mut ExecCtx<'_>, _config: &Value) -> Result<(), String> {
+        let _ = ctx.read_control_resource("v4.control.scope_command");
+        let _ = ctx.write_control_resource("v4.control.scope_command", json!({}));
+        Ok(())
     }
 }
 
@@ -418,6 +459,85 @@ fn error_only_plugin_preserves_metadata_center() {
     assert_eq!(
         output.control["metadata_center"],
         json!({"scope": "request"})
+    );
+}
+
+#[test]
+fn scope_command_typed_roundtrip_uses_dedicated_control_slot() {
+    let authoring = vec![authoring_plugin(
+        "v4.request.scope",
+        PluginKind::Control,
+        PluginEffect::ControlOnly,
+        PluginPhase::Control,
+        100,
+        vec!["v4.control.scope_command".to_string()],
+        vec!["v4.control.scope_command".to_string()],
+    )];
+    let plan = compile_one_node(&authoring);
+    let handles = MapRegistry::new().register("v4.request.scope", ScopeRoundtripHandle);
+    let output = execute_plan(
+        &plan,
+        input(json!({"unchanged": true}), json!({})),
+        &handles,
+    )
+    .expect("typed scope command roundtrip succeeds");
+    let scope = ScopeSessionCommand::parse(&output.control["scope_command"])
+        .expect("scope command slot remains typed");
+    assert_eq!(scope.operation, ScopeSessionOperation::Bind);
+    assert_eq!(scope.continuation_owner, ScopeContinuationOwner::Direct);
+    assert_eq!(output.data, json!({"unchanged": true}));
+}
+
+#[test]
+fn scope_command_rejects_unknown_field_and_invalid_operation() {
+    let base = json!({
+        "entry_protocol": "responses",
+        "continuation_owner": "direct",
+        "pipeline_id": "pipeline-1",
+        "port": 5555,
+        "session_scope": "session-1",
+        "conversation_scope": "conversation-1",
+        "request_id": "request-1",
+        "full_input_hash": "sha256:full-input",
+        "operation": "bind",
+        "sequence": 1
+    });
+    let mut unknown = base.clone();
+    unknown["payload_hint"] = json!(true);
+    assert!(matches!(
+        ScopeSessionCommand::parse(&unknown),
+        Err(BridgeError::Protocol(_))
+    ));
+    let mut invalid_operation = base;
+    invalid_operation["operation"] = json!("replace");
+    assert!(matches!(
+        ScopeSessionCommand::parse(&invalid_operation),
+        Err(BridgeError::Protocol(_))
+    ));
+}
+
+#[test]
+fn undeclared_scope_command_read_write_fails_fast() {
+    let authoring = vec![authoring_plugin(
+        "v4.request.scope_undeclared",
+        PluginKind::Control,
+        PluginEffect::ControlOnly,
+        PluginPhase::Control,
+        100,
+        vec!["v4.control.metadata_center".to_string()],
+        vec!["v4.control.metadata_center".to_string()],
+    )];
+    let plan = compile_one_node(&authoring);
+    let handles = MapRegistry::new().register("v4.request.scope_undeclared", UndeclaredScopeHandle);
+    let error = execute_plan(&plan, input(json!({}), json!({})), &handles)
+        .expect_err("undeclared scope access must fail");
+    assert_eq!(
+        error,
+        BridgeError::ResourceAccessViolation {
+            plugin_id: "v4.request.scope_undeclared".to_string(),
+            resource_id: "v4.control.scope_command".to_string(),
+            operation: "read",
+        }
     );
 }
 

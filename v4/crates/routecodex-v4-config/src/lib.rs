@@ -4,8 +4,10 @@ use routecodex_v4_base_node::{BaseNode, NodeIdentity};
 use routecodex_v4_edge::{
     validate_edge, Axis, EdgeError, EdgeSpec, NodeRef, ResourceRef, ScopeRegistry,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 pub mod v2;
 
@@ -777,4 +779,419 @@ fn valid_handle_value(value: &str) -> bool {
 fn sorted<T: Ord>(mut values: Vec<T>) -> Vec<T> {
     values.sort();
     values
+}
+
+pub const RUNTIME_CONFIG_CHAIN_VERSION: &str = "v4-runtime-config-1";
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RuntimeConfigError {
+    #[error("runtime config path requires HOME or an explicit -c path")]
+    HomeMissing,
+    #[error("runtime config read failed for {path}: {message}")]
+    Read { path: String, message: String },
+    #[error("runtime config parse failed: {0}")]
+    Parse(String),
+    #[error("runtime identity must be rccv4")]
+    RuntimeIdentity,
+    #[error("runtime config requires at least one listener")]
+    ListenerMissing,
+    #[error("runtime listener id/address must be non-empty")]
+    ListenerInvalid,
+    #[error("runtime listener ids and addresses must be unique")]
+    ListenerDuplicate,
+    #[error("runtime config requires at least one provider candidate")]
+    ProviderMissing,
+    #[error("provider id/config_path/protocol/wire_model must be non-empty")]
+    ProviderInvalid,
+    #[error("provider ids must be unique")]
+    ProviderDuplicate,
+    #[error("provider entry_models must be non-empty and include only non-empty models")]
+    ProviderEntryModels,
+    #[error("runtime config requires at least one route")]
+    RouteMissing,
+    #[error("route id/models/targets must be non-empty")]
+    RouteInvalid,
+    #[error("route ids must be unique")]
+    RouteDuplicate,
+    #[error("route {route_id} references unknown provider target {target}")]
+    RouteTargetUnknown { route_id: String, target: String },
+    #[error("route {route_id} model {model} is not declared by any target")]
+    RouteModelUnserved { route_id: String, model: String },
+    #[error("runtime manifest encode failed: {0}")]
+    Encode(String),
+    #[error("runtime manifest digest drift: expected {expected}, actual {actual}")]
+    DigestDrift { expected: String, actual: String },
+    #[error("runtime manifest write failed for {path}: {message}")]
+    Write { path: String, message: String },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeAuthoring {
+    version: u32,
+    runtime: RuntimeAuthoringIdentity,
+    listeners: Vec<RuntimeListener>,
+    providers: Vec<RuntimeProviderCandidate>,
+    routes: Vec<RuntimeRoute>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeAuthoringIdentity {
+    id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeListener {
+    pub id: String,
+    pub address: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeProviderCandidate {
+    pub provider_id: String,
+    pub config_path: String,
+    pub protocol: String,
+    pub wire_model: String,
+    pub priority: u32,
+    pub entry_models: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeRoute {
+    pub id: String,
+    pub models: Vec<String>,
+    pub targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeConfigManifest {
+    pub schema_version: u32,
+    pub chain_version: String,
+    pub runtime_identity: String,
+    pub listeners: Vec<RuntimeListener>,
+    pub providers: Vec<RuntimeProviderCandidate>,
+    pub routes: Vec<RuntimeRoute>,
+    pub manifest_digest: String,
+}
+
+#[derive(Serialize)]
+struct UnsignedRuntimeConfigManifest<'a> {
+    schema_version: u32,
+    chain_version: &'a str,
+    runtime_identity: &'a str,
+    listeners: &'a [RuntimeListener],
+    providers: &'a [RuntimeProviderCandidate],
+    routes: &'a [RuntimeRoute],
+}
+
+impl RuntimeConfigManifest {
+    pub fn verify(&self) -> Result<(), RuntimeConfigError> {
+        let actual = runtime_manifest_digest(
+            self.schema_version,
+            &self.chain_version,
+            &self.runtime_identity,
+            &self.listeners,
+            &self.providers,
+            &self.routes,
+        )?;
+        if actual != self.manifest_digest {
+            return Err(RuntimeConfigError::DigestDrift {
+                expected: self.manifest_digest.clone(),
+                actual,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn to_json(&self) -> Result<Vec<u8>, RuntimeConfigError> {
+        serde_json::to_vec_pretty(self).map_err(|error| RuntimeConfigError::Encode(error.to_string()))
+    }
+}
+
+pub fn default_runtime_config_path() -> Result<PathBuf, RuntimeConfigError> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join(".rcc/config.v4.toml"))
+        .ok_or(RuntimeConfigError::HomeMissing)
+}
+
+pub fn compile_runtime_config_file(path: &Path) -> Result<RuntimeConfigManifest, RuntimeConfigError> {
+    let raw = fs::read_to_string(path).map_err(|error| RuntimeConfigError::Read {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    compile_runtime_config(&raw, path.parent())
+}
+
+pub fn compile_runtime_config(
+    raw: &str,
+    config_dir: Option<&Path>,
+) -> Result<RuntimeConfigManifest, RuntimeConfigError> {
+    let authoring: RuntimeAuthoring =
+        toml::from_str(raw).map_err(|error| RuntimeConfigError::Parse(error.to_string()))?;
+    if authoring.version != 4 || authoring.runtime.id != "rccv4" {
+        return Err(RuntimeConfigError::RuntimeIdentity);
+    }
+    validate_runtime_authoring(&authoring)?;
+    let mut listeners = authoring.listeners;
+    let mut providers = authoring.providers;
+    let mut routes = authoring.routes;
+    for provider in &mut providers {
+        provider.config_path = resolve_authoring_path(&provider.config_path, config_dir)?
+            .display()
+            .to_string();
+        provider.entry_models.sort();
+    }
+    listeners.sort_by(|left, right| left.id.cmp(&right.id));
+    providers.sort_by(|left, right| left.provider_id.cmp(&right.provider_id));
+    for route in &mut routes {
+        route.models.sort();
+    }
+    routes.sort_by(|left, right| left.id.cmp(&right.id));
+    let manifest_digest = runtime_manifest_digest(
+        authoring.version,
+        RUNTIME_CONFIG_CHAIN_VERSION,
+        &authoring.runtime.id,
+        &listeners,
+        &providers,
+        &routes,
+    )?;
+    Ok(RuntimeConfigManifest {
+        schema_version: authoring.version,
+        chain_version: RUNTIME_CONFIG_CHAIN_VERSION.to_string(),
+        runtime_identity: authoring.runtime.id,
+        listeners,
+        providers,
+        routes,
+        manifest_digest,
+    })
+}
+
+pub fn write_runtime_manifest_atomic(
+    manifest: &RuntimeConfigManifest,
+    path: &Path,
+) -> Result<(), RuntimeConfigError> {
+    manifest.verify()?;
+    let parent = path.parent().ok_or_else(|| RuntimeConfigError::Write {
+        path: path.display().to_string(),
+        message: "manifest path has no parent".to_string(),
+    })?;
+    fs::create_dir_all(parent).map_err(|error| RuntimeConfigError::Write {
+        path: parent.display().to_string(),
+        message: error.to_string(),
+    })?;
+    let temporary = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name().and_then(|name| name.to_str()).unwrap_or("manifest"),
+        std::process::id()
+    ));
+    let mut bytes = manifest.to_json()?;
+    bytes.push(b'\n');
+    fs::write(&temporary, bytes).map_err(|error| RuntimeConfigError::Write {
+        path: temporary.display().to_string(),
+        message: error.to_string(),
+    })?;
+    fs::rename(&temporary, path).map_err(|error| RuntimeConfigError::Write {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    })
+}
+
+pub fn load_runtime_manifest(path: &Path) -> Result<RuntimeConfigManifest, RuntimeConfigError> {
+    let bytes = fs::read(path).map_err(|error| RuntimeConfigError::Read {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    let manifest: RuntimeConfigManifest = serde_json::from_slice(&bytes)
+        .map_err(|error| RuntimeConfigError::Parse(error.to_string()))?;
+    manifest.verify()?;
+    Ok(manifest)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeInitOptions {
+    pub provider_id: String,
+    pub provider_config_path: String,
+    pub model: String,
+    pub port: u16,
+}
+
+pub fn write_runtime_authoring(
+    path: &Path,
+    options: &RuntimeInitOptions,
+    force: bool,
+) -> Result<RuntimeConfigManifest, RuntimeConfigError> {
+    if path.exists() && !force {
+        return Err(RuntimeConfigError::Write {
+            path: path.display().to_string(),
+            message: "runtime config already exists; pass --force to replace it".to_string(),
+        });
+    }
+    if options.port == 0 {
+        return Err(RuntimeConfigError::ListenerInvalid);
+    }
+    let authoring = RuntimeAuthoring {
+        version: 4,
+        runtime: RuntimeAuthoringIdentity {
+            id: "rccv4".to_string(),
+        },
+        listeners: vec![RuntimeListener {
+            id: "primary".to_string(),
+            address: format!("127.0.0.1:{}", options.port),
+        }],
+        providers: vec![RuntimeProviderCandidate {
+            provider_id: options.provider_id.clone(),
+            config_path: options.provider_config_path.clone(),
+            protocol: "responses".to_string(),
+            wire_model: options.model.clone(),
+            priority: 1,
+            entry_models: vec![options.model.clone()],
+        }],
+        routes: vec![RuntimeRoute {
+            id: "default".to_string(),
+            models: vec![options.model.clone()],
+            targets: vec![options.provider_id.clone()],
+        }],
+    };
+    let mut bytes = toml::to_string_pretty(&authoring)
+        .map_err(|error| RuntimeConfigError::Encode(error.to_string()))?
+        .into_bytes();
+    bytes.push(b'\n');
+    let raw = std::str::from_utf8(&bytes)
+        .map_err(|error| RuntimeConfigError::Encode(error.to_string()))?;
+    let manifest = compile_runtime_config(raw, path.parent())?;
+    let parent = path.parent().ok_or_else(|| RuntimeConfigError::Write {
+        path: path.display().to_string(),
+        message: "runtime config path has no parent".to_string(),
+    })?;
+    fs::create_dir_all(parent).map_err(|error| RuntimeConfigError::Write {
+        path: parent.display().to_string(),
+        message: error.to_string(),
+    })?;
+    let temporary = parent.join(format!(".config.v4.{}.tmp", std::process::id()));
+    fs::write(&temporary, bytes).map_err(|error| RuntimeConfigError::Write {
+        path: temporary.display().to_string(),
+        message: error.to_string(),
+    })?;
+    fs::rename(&temporary, path).map_err(|error| RuntimeConfigError::Write {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    Ok(manifest)
+}
+
+fn validate_runtime_authoring(authoring: &RuntimeAuthoring) -> Result<(), RuntimeConfigError> {
+    if authoring.listeners.is_empty() {
+        return Err(RuntimeConfigError::ListenerMissing);
+    }
+    if authoring.providers.is_empty() {
+        return Err(RuntimeConfigError::ProviderMissing);
+    }
+    if authoring.routes.is_empty() {
+        return Err(RuntimeConfigError::RouteMissing);
+    }
+    let mut listener_ids = BTreeSet::new();
+    let mut listener_addresses = BTreeSet::new();
+    for listener in &authoring.listeners {
+        if listener.id.trim().is_empty() || listener.address.trim().is_empty() {
+            return Err(RuntimeConfigError::ListenerInvalid);
+        }
+        if !listener_ids.insert(listener.id.as_str())
+            || !listener_addresses.insert(listener.address.as_str())
+        {
+            return Err(RuntimeConfigError::ListenerDuplicate);
+        }
+    }
+    let mut provider_ids = BTreeSet::new();
+    for provider in &authoring.providers {
+        if provider.provider_id.trim().is_empty()
+            || provider.config_path.trim().is_empty()
+            || provider.protocol.trim().is_empty()
+            || provider.wire_model.trim().is_empty()
+        {
+            return Err(RuntimeConfigError::ProviderInvalid);
+        }
+        if !provider_ids.insert(provider.provider_id.as_str()) {
+            return Err(RuntimeConfigError::ProviderDuplicate);
+        }
+        if provider.entry_models.is_empty()
+            || provider.entry_models.iter().any(|model| model.trim().is_empty())
+        {
+            return Err(RuntimeConfigError::ProviderEntryModels);
+        }
+    }
+    let mut route_ids = BTreeSet::new();
+    for route in &authoring.routes {
+        if route.id.trim().is_empty() || route.models.is_empty() || route.targets.is_empty() {
+            return Err(RuntimeConfigError::RouteInvalid);
+        }
+        if !route_ids.insert(route.id.as_str()) {
+            return Err(RuntimeConfigError::RouteDuplicate);
+        }
+        for target in &route.targets {
+            let provider = authoring
+                .providers
+                .iter()
+                .find(|provider| provider.provider_id == *target)
+                .ok_or_else(|| RuntimeConfigError::RouteTargetUnknown {
+                    route_id: route.id.clone(),
+                    target: target.clone(),
+                })?;
+            for model in &route.models {
+                if !provider.entry_models.contains(model)
+                    && !authoring.providers.iter().any(|candidate| {
+                        route.targets.contains(&candidate.provider_id)
+                            && candidate.entry_models.contains(model)
+                    })
+                {
+                    return Err(RuntimeConfigError::RouteModelUnserved {
+                        route_id: route.id.clone(),
+                        model: model.clone(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn resolve_authoring_path(value: &str, config_dir: Option<&Path>) -> Result<PathBuf, RuntimeConfigError> {
+    if let Some(rest) = value.strip_prefix("~/") {
+        return std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join(rest))
+            .ok_or(RuntimeConfigError::HomeMissing);
+    }
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(config_dir.unwrap_or_else(|| Path::new(".")).join(path))
+    }
+}
+
+fn runtime_manifest_digest(
+    schema_version: u32,
+    chain_version: &str,
+    runtime_identity: &str,
+    listeners: &[RuntimeListener],
+    providers: &[RuntimeProviderCandidate],
+    routes: &[RuntimeRoute],
+) -> Result<String, RuntimeConfigError> {
+    let unsigned = UnsignedRuntimeConfigManifest {
+        schema_version,
+        chain_version,
+        runtime_identity,
+        listeners,
+        providers,
+        routes,
+    };
+    let bytes = serde_json::to_vec(&unsigned)
+        .map_err(|error| RuntimeConfigError::Encode(error.to_string()))?;
+    Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
 }
