@@ -1,7 +1,7 @@
 use super::responses_relay_diagnostics::anthropic_cyber_refusal_error_from_payload;
 use super::*;
-use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 use crate::hub_v1::anthropic_sse_tree::{V3AnthropicSseReducerState, V3AnthropicSseTreeError};
+use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 
 pub(super) async fn build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
     mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
@@ -364,6 +364,9 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                     "OpenAI Chat provider event stream event is missing".to_string(),
                 )
             })?;
+            if !event.is_object() {
+                continue;
+            }
             if done_seen {
                 if is_v3_openai_chat_ping_tail_frame(
                     &serde_json::to_string(&event).unwrap_or_default(),
@@ -378,6 +381,15 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                 return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                     message,
                 ));
+            }
+            if let Some(message) = openai_chat_provider_network_error_message(&event) {
+                return Err(
+                    V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+                        status: 502,
+                        code: "network_error".to_owned(),
+                        message,
+                    },
+                );
             }
             if terminal_seen && is_v3_openai_chat_empty_sse_tail_sentinel(&event) {
                 continue;
@@ -394,24 +406,24 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                 object.event_name().map(ToOwned::to_owned),
                 event.clone(),
             );
-            let protocol = V3OpenAiChatSseProtocolMetadata::from_chunk(&event)
-                .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()))?;
-            let mut semantic = classify_v3_openai_chat_sse_chunk(&event)
-                .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()))?;
-            apply_v3_openai_chat_sse_semantic_hook(
-                &mut semantic,
-                &transport,
-                &protocol,
-                hook,
-            )
-            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()))?;
+            let protocol =
+                V3OpenAiChatSseProtocolMetadata::from_chunk(&event).map_err(|error| {
+                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+                })?;
+            let mut semantic = classify_v3_openai_chat_sse_chunk(&event).map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+            })?;
+            apply_v3_openai_chat_sse_semantic_hook(&mut semantic, &transport, &protocol, hook)
+                .map_err(|error| {
+                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+                })?;
             let projected = project_v3_openai_chat_sse_chunk_json(&semantic);
             observation
                 .record_provider_event_json(&projected)
                 .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-            reducer
-                .apply_chunk(&projected)
-                .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()))?;
+            reducer.apply_chunk(&projected).map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+            })?;
             terminal_seen = reducer.terminal.is_some();
         }
     }
@@ -419,13 +431,31 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
         .finish()
         .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
     if !terminal_seen {
-        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            "OpenAI Chat provider event stream ended without terminal finish_reason".to_string(),
-        ));
+        // Clean EOF without a tool call is the compatibility terminal boundary.
+        // A complete tool call remains semantic output even when this Chat
+        // gateway omits finish_reason; do not fabricate stop for that case.
+        // Incomplete tool-call data still fails in materialize_completion and is
+        // retried as an explicit codec/projection error.
+        let mut response = reducer.materialize_completion().map_err(|error| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+        })?;
+        if !reducer.has_tool_calls() {
+            if let Some(choices) = response.get_mut("choices").and_then(Value::as_array_mut) {
+                for choice in choices {
+                    if choice.get("finish_reason").is_none_or(Value::is_null) {
+                        choice["finish_reason"] = Value::String("stop".to_string());
+                    }
+                }
+            }
+        }
+        observation
+            .record_provider_event_json(&response)
+            .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+        return Ok(response);
     }
-    reducer
-        .materialize_completion()
-        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()))
+    reducer.materialize_completion().map_err(|error| {
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+    })
 }
 
 fn is_v3_openai_chat_ping_tail_frame(data: &str) -> bool {
@@ -462,6 +492,14 @@ fn is_v3_openai_chat_empty_sse_tail_sentinel(event: &Value) -> bool {
             .is_some_and(|choices| choices.is_empty())
 }
 
+fn openai_chat_provider_network_error_message(event: &Value) -> Option<String> {
+    let choices = event.get("choices").and_then(Value::as_array)?;
+    choices.iter().find_map(|choice| {
+        (choice.get("finish_reason").and_then(Value::as_str) == Some("network_error"))
+            .then(|| "OpenAI Chat provider emitted finish_reason=network_error".to_owned())
+    })
+}
+
 pub(super) fn read_v3_trimmed_string(value: Option<&Value>) -> Option<String> {
     value
         .and_then(Value::as_str)
@@ -472,8 +510,8 @@ pub(super) fn read_v3_trimmed_string(value: Option<&Value>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use futures_util::stream;
     use super::*;
+    use futures_util::stream;
 
     struct RewriteChatMaterializationHook {
         notifications: usize,
@@ -550,7 +588,73 @@ mod tests {
             .expect("typed Chat hook should materialize successfully");
 
         assert_eq!(hook.notifications, 3);
-        assert_eq!(output["choices"][0]["message"]["content"], "rewritten by relay hook");
+        assert_eq!(
+            output["choices"][0]["message"]["content"],
+            "rewritten by relay hook"
+        );
         assert_eq!(output["choices"][0]["finish_reason"], "stop");
+    }
+
+    #[tokio::test]
+    async fn clean_eof_without_finish_reason_is_stop_without_tool_call() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"data: {\"id\":\"chatcmpl_eof\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n".to_vec(),
+        )]));
+
+        let output = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect("clean EOF without a tool call is a stop completion");
+
+        assert_eq!(output["choices"][0]["finish_reason"], "stop");
+    }
+
+    #[tokio::test]
+    async fn clean_eof_with_complete_tool_call_preserves_tool_call_without_reason() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"data: {\"id\":\"chatcmpl_tool_eof\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n".to_vec(),
+        )]));
+
+        let output = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect("complete tool call must survive missing finish_reason");
+
+        assert_eq!(output["choices"][0]["finish_reason"], Value::Null);
+        assert_eq!(
+            output["choices"][0]["message"]["tool_calls"][0]["id"],
+            "call_1"
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_network_error_is_reported_as_provider_network_error() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"data: {\"id\":\"chatcmpl_network_error\",\"created\":7,\"model\":\"chat-model\",\"choices\":[{\"index\":0,\"finish_reason\":\"network_error\",\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}\n\n".to_vec(),
+        )]));
+
+        let error = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect_err("provider network_error must not become a successful completion");
+
+        assert!(matches!(
+            error,
+            V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+                status: 502,
+                ref code,
+                ref message,
+            } if code == "network_error"
+                && message.contains("finish_reason=network_error")
+        ));
     }
 }
