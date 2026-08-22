@@ -77,6 +77,98 @@ pub(crate) fn collect_v3_provider_sse_json_data(fields: &[SseField]) -> String {
     data
 }
 
+pub(crate) fn normalize_v3_provider_sse_json_data_for_event_name(
+    provider_protocol: V3HubProviderWireProtocol,
+    fields: &[SseField],
+) -> Result<String, String> {
+    let data = collect_v3_provider_sse_json_data(fields);
+    let event_name = fields.iter().find_map(|field| match field {
+        SseField::Named { name, value } if name == "event" => Some(value.as_str()),
+        _ => None,
+    });
+    normalize_v3_provider_sse_json_data_with_event_name(provider_protocol, &data, event_name)
+}
+
+pub(crate) fn normalize_v3_provider_sse_json_data_with_event_name(
+    provider_protocol: V3HubProviderWireProtocol,
+    data: &str,
+    event_name: Option<&str>,
+) -> Result<String, String> {
+    if provider_protocol != V3HubProviderWireProtocol::Responses {
+        return Ok(data.to_owned());
+    }
+    let Some(mut event) = parse_v3_provider_sse_json_data(data)? else {
+        return Ok(data.to_owned());
+    };
+    let arguments_normalized = normalize_v3_responses_function_call_arguments(&mut event)?;
+    let Some(object) = event.as_object_mut() else {
+        return Ok(data.to_owned());
+    };
+    let event_name = event_name
+        .or_else(|| object.get("event").and_then(Value::as_str))
+        .or_else(|| object.get("event_name").and_then(Value::as_str));
+    let Some(event_name) = event_name else {
+        if arguments_normalized {
+            return serde_json::to_string(&event).map_err(|error| error.to_string());
+        }
+        return Ok(data.to_owned());
+    };
+    if !event_name.starts_with("response.") {
+        if arguments_normalized {
+            return serde_json::to_string(&event).map_err(|error| error.to_string());
+        }
+        return Ok(data.to_owned());
+    }
+    if object
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        if arguments_normalized {
+            return serde_json::to_string(&event).map_err(|error| error.to_string());
+        }
+        return Ok(data.to_owned());
+    }
+    object.insert("type".to_owned(), Value::String(event_name.to_owned()));
+    serde_json::to_string(&event).map_err(|error| error.to_string())
+}
+
+fn normalize_v3_responses_function_call_arguments(event: &mut Value) -> Result<bool, String> {
+    let mut normalized = false;
+    let mut normalize_item = |item: &mut Value| -> Result<(), String> {
+        let Some(object) = item.as_object_mut() else {
+            return Ok(());
+        };
+        if object.get("type").and_then(Value::as_str) != Some("function_call") {
+            return Ok(());
+        }
+        let Some(arguments) = object.get_mut("arguments") else {
+            return Ok(());
+        };
+        if arguments.is_object() || arguments.is_array() {
+            *arguments = Value::String(serde_json::to_string(arguments).map_err(|error| error.to_string())?);
+            normalized = true;
+        }
+        Ok(())
+    };
+    if let Some(object) = event.as_object_mut() {
+        if let Some(item) = object.get_mut("item") {
+            normalize_item(item)?;
+        }
+        if let Some(output) = object
+            .get_mut("response")
+            .and_then(Value::as_object_mut)
+            .and_then(|response| response.get_mut("output"))
+            .and_then(Value::as_array_mut)
+        {
+            for item in output {
+                normalize_item(item)?;
+            }
+        }
+    }
+    Ok(normalized)
+}
+
 /// 把字符串值内未转义的 \u0000-\u001F 转义为 JSON 合法形式（\n/\r/\t 或
 /// \u00XX）。只在字符串值内转义：结构外（JSON 空白）的控制字符保持原样，
 /// 不改变 JSON 结构语义；已转义序列（\\n 文本）不含控制字节，天然安全。
@@ -132,6 +224,15 @@ pub(crate) fn classify_v3_provider_sse_json_data(
     let Some(event) = parse_v3_provider_sse_json_data(data)? else {
         return Ok(None);
     };
+    // A valid JSON scalar/array can be emitted by an upstream transport as a
+    // control/settlement frame.  It is not a semantic event for any registered
+    // provider protocol.  The shared relay codec already consumes these frames
+    // before semantic classification; keep the direct precommit classifier on
+    // the same boundary so it cannot manufacture a protocol failure from a
+    // non-object transport frame.
+    if !event.is_object() {
+        return Ok(None);
+    }
     if is_v3_provider_sse_protocol_neutral_keepalive_json_event(&event) {
         return Ok(None);
     }
@@ -159,7 +260,7 @@ pub(crate) fn classify_v3_provider_sse_json_data(
         V3HubProviderWireProtocol::Gemini => {
             return Err(
                 "provider Gemini SSE precommit classifier is not registered for Direct".to_string(),
-            )
+            );
         }
     };
     Ok(Some(outcome))
@@ -213,15 +314,12 @@ pub(crate) fn classify_v3_provider_json_error_body(
 /// settlement（Anthropic `type=ping`、Chat `choices=[]`）必须由对应 codec 判定，
 /// 不能在这里借 shape 重分类。
 fn is_v3_provider_sse_protocol_neutral_keepalive_json_event(event: &Value) -> bool {
+    if event.is_null() {
+        return true;
+    }
     let Some(object) = event.as_object() else {
         return false;
     };
-    if matches!(
-        object.get("choices").and_then(Value::as_array),
-        Some(choices) if choices.is_empty()
-    ) {
-        return true;
-    }
     object.get("type").and_then(Value::as_str) == Some("ping")
         || object.contains_key("ping")
         || object.is_empty()
@@ -524,6 +622,13 @@ fn response_output_item_has_client_output(item: &Value) -> Result<bool, String> 
     }
 }
 
+pub(crate) fn is_v3_provider_sse_transport_keepalive_data(data: &str) -> bool {
+    is_v3_provider_sse_keepalive_text(data)
+        || serde_json::from_str::<Value>(data.trim())
+            .ok()
+            .is_some_and(|value| value.is_null())
+}
+
 fn response_message_part_has_client_output(part: &Value) -> Result<bool, String> {
     if let Some(text) = part.as_str() {
         return Ok(!text.trim().is_empty());
@@ -542,7 +647,7 @@ fn response_message_part_has_client_output(part: &Value) -> Result<bool, String>
         other => {
             return Err(format!(
                 "provider Responses message content part type {other:?} is not registered"
-            ))
+            ));
         }
     };
     let text = part.get(field).and_then(Value::as_str).ok_or_else(|| {
@@ -661,7 +766,7 @@ fn classify_v3_provider_anthropic_json_event(
                 other => {
                     return Err(format!(
                         "provider Anthropic content_block_delta type {other:?} is not registered"
-                    ))
+                    ));
                 }
             };
             Ok(if has_output {
@@ -896,6 +1001,18 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
+    fn non_object_json_frames_are_transport_only_for_precommit() {
+        for data in [r#"null"#, r#""provider-control""#, r#"["provider-control"]"#] {
+            let outcome = classify_v3_provider_sse_json_data(
+                V3HubProviderWireProtocol::Responses,
+                data,
+            )
+            .expect("non-object transport frame must not be a semantic error");
+            assert_eq!(outcome, None, "unexpected semantic outcome for {data}");
+        }
+    }
+
+    #[test]
     fn responses_reasoning_content_part_events_are_registered() {
         let classify = |data| {
             classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, data)
@@ -1086,7 +1203,7 @@ mod provider_sse_json_codec_tests {
                 V3HubProviderWireProtocol::Responses,
                 r#"{"type":"ping"}"#,
             )
-                .expect("JSON ping must remain a keepalive"),
+            .expect("JSON ping must remain a keepalive"),
             None,
         );
     }
@@ -1275,6 +1392,61 @@ mod provider_sse_json_codec_tests {
             collect_v3_provider_sse_json_data(&fields),
             r#"{"type":"response.completed"}"#
         );
+    }
+
+    #[test]
+    fn responses_event_name_recovers_missing_json_type_before_precommit() {
+        let fields = vec![
+            SseField::Named {
+                name: "event".to_owned(),
+                value: "response.output_text.delta".to_owned(),
+            },
+            SseField::Named {
+                name: "data".to_owned(),
+                value: r#"{"delta":"recovered"}"#.to_owned(),
+            },
+        ];
+        let data = normalize_v3_provider_sse_json_data_for_event_name(
+            V3HubProviderWireProtocol::Responses,
+            &fields,
+        )
+        .expect("registered SSE event name must recover missing type");
+        assert_eq!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
+                .expect("recovered Responses frame must classify"),
+            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
+        );
+        assert!(data.contains(r#""type":"response.output_text.delta""#));
+    }
+
+    #[test]
+    fn responses_payload_event_field_recovers_missing_json_type() {
+        let data = normalize_v3_provider_sse_json_data_with_event_name(
+            V3HubProviderWireProtocol::Responses,
+            r#"{"event":"response.output_text.delta","delta":"recovered"}"#,
+            None,
+        )
+        .expect("registered payload event name must recover missing type");
+        assert_eq!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
+                .expect("recovered Responses frame must classify"),
+            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
+        );
+    }
+
+    #[test]
+    fn responses_function_call_object_arguments_are_projected_as_json_string() {
+        let data = normalize_v3_provider_sse_json_data_with_event_name(
+            V3HubProviderWireProtocol::Responses,
+            r#"{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":{"cmd":"pwd"}}}"#,
+            None,
+        )
+        .expect("structured function arguments must be normalized");
+        let value: Value = serde_json::from_str(&data).expect("normalized JSON");
+        assert_eq!(value["item"]["arguments"], r#"{"cmd":"pwd"}"#);
+        assert!(classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
+            .expect("normalized function_call must classify")
+            .is_some());
     }
 
     #[test]
