@@ -70,6 +70,26 @@
   ],
   "allowlist": [
     {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "v4/cordis/routecodex-v4-cordis-host/src/index.mjs",
+      "textContains": "return;"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "v3/crates/routecodex-v3-server/src/lib.rs",
+      "textContains": ".fallback(path_not_found)"
+    },
+    {
+      "ruleId": "degrade-keyword",
+      "pathContains": "v4/crates/routecodex-v4-provider/src/lib.rs",
+      "textContains": "Degraded,"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "v3/crates/routecodex-v3-provider-responses/src/transport.rs",
+      "textContains": "fallback-credit-2026-06-01"
+    },
+    {
       "ruleId": "fallback-keyword",
       "pathContains": ".rs",
       "textContains": "//"

@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
-const root = process.cwd();
+// npm --prefix v3 runs this script with the V3 package directory as cwd.
+// Architecture sources live at the repository root, so resolve from this
+// script's stable location instead of the caller's working directory.
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const failures = [];
 const files = {
   owner: 'v3/crates/routecodex-v3-config/src/provider_directory.rs',

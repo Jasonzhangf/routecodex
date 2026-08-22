@@ -7288,7 +7288,7 @@ chains:
 
 - chain_id: v3.tool_thinking_hook_skeleton.mainline
   owner_feature_id: v3.tool_thinking_hook_skeleton
-  summary: Req04 injects guidance into canonical system instructions without modifying tool declarations; Resp03 associates and redacts imperfect toolreason output.
+  summary: Req04 injects tool_thinking_json_v2 guidance and optional fields into the final non-Gemini provider-facing tool parameter schemas; Resp03 extracts and strips them, aggregates one turn, and projects reasoning_content.
   edges:
   - step_id: v3-tool-thinking-req04-direct-responses
     from_node: V3Req04StandardizedResponses
@@ -7766,6 +7766,43 @@ chains:
       consumes: [v3.sse.direct.typed_hook_catalog, v3.sse.responses.semantic_tree]
       produces: [v3.sse.responses.hook_effect]
       side_channel_reads: [v3.sse.direct.typed_hook_catalog]
+      side_channel_writes: []
+
+- chain_id: v3.runtime_restart_handoff_skeleton
+  owner_feature_id: v3.runtime_restart_handoff_skeleton
+  summary: Stable server response-body ownership drains or hands off in-flight requests across canonical Runtime Child replacement without changing the frozen execution plan or leaking provider frames.
+  manifest: docs/architecture/manifests/v3.runtime_restart_handoff_skeleton.yml
+  entry_contract:
+    node: V3Front01StableRequestOwner
+    owner_doc: docs/architecture/wiki/v3-runtime-restart-handoff-skeleton.md
+  edges:
+  - step_id: v3-runtime-restart-handoff-01
+    from_node: V3Front01StableRequestOwner
+    to_node: V3Front02RequestLeaseBound
+    caller_symbol: V3FrontRequestLease
+    caller_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    callee_symbol: V3FrontRequestLeaseKey
+    callee_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    status: design
+    owner_feature_id: v3.runtime_restart_handoff_skeleton
+    resource_flow:
+      consumes: [v3.front.request_lease]
+      produces: [v3.front.runtime_handoff_checkpoint]
+      side_channel_reads: []
+      side_channel_writes: [v3.front.request_lease]
+  - step_id: v3-runtime-restart-handoff-02
+    from_node: V3Front02RequestLeaseBound
+    to_node: V3Front08ClientTerminalOrError
+    caller_symbol: V3ServerAggregateHandle::prepare_for_exec
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3ServerRequestActivityGate::wait_for_quiescence
+    callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
+    status: source_controlled_runtime_pending_live_replay
+    owner_feature_id: v3.runtime_restart_handoff_skeleton
+    resource_flow:
+      consumes: [v3.front.request_activity_gate, v3.front.deadline_budget]
+      produces: [v3.error.chain]
+      side_channel_reads: [v3.front.request_activity_gate]
       side_channel_writes: []
 
 - chain_id: v3.direct_sse_accept_skeleton

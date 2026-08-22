@@ -1,13 +1,12 @@
 // feature_id: hub.servertool_stopless_cli_continuation
 use crate::stop_gateway_context;
+use crate::internal::stopless_defaults;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const DEFAULT_STOP_MESSAGE_MAX_REPEATS: i64 = 10;
 pub const STOP_MESSAGE_PERSISTED_LOOKUP_POLICY: &str = "strict_session_only";
 pub const STOPLESS_FLOW_ID: &str = "stop_message_flow";
 pub const STOPLESS_STATE_SOURCE: &str = "servertool.stop_message";
-pub const STOPLESS_DEFAULT_TEXT: &str = "继续执行";
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -319,7 +318,7 @@ fn resolve_runtime_stopless_control_snapshot(
     }
     let repeat_count = read_js_nonnegative_integer(stopless.get("repeatCount")).unwrap_or(0);
     let text = read_trimmed_string(stopless.get("continuationPrompt"))
-        .unwrap_or_else(|| STOPLESS_DEFAULT_TEXT.to_string());
+        .unwrap_or_else(|| stopless_defaults().text.clone());
 
     Some(RuntimeStopMessageStateSnapshot {
         text,
@@ -562,7 +561,7 @@ pub fn resolve_default_stop_message_snapshot(
     let options = input.options.as_ref();
     let text = options
         .and_then(|options| read_trimmed_string(options.text.as_ref()))
-        .unwrap_or_else(|| STOPLESS_DEFAULT_TEXT.to_string());
+        .unwrap_or_else(|| stopless_defaults().text.clone());
     let max_repeats = options
         .and_then(|options| read_positive_finite_floor_value(options.max_repeats.as_ref()))
         .unwrap_or(1);
@@ -614,7 +613,7 @@ pub fn resolve_implicit_gemini_stop_message_snapshot(
     }
 
     Some(RuntimeStopMessageStateSnapshot {
-        text: STOPLESS_DEFAULT_TEXT.to_string(),
+        text: stopless_defaults().text.clone(),
         provider_key: read_trimmed_string(input.record.get("providerKey"))
             .or_else(|| read_trimmed_string(input.record.get("providerId"))),
         max_repeats: 1,
@@ -1014,7 +1013,7 @@ fn resolve_stop_message_max_repeats(value: Option<&Value>, stage_mode: Option<&s
         return parsed;
     }
     if matches!(stage_mode, Some("on" | "auto")) {
-        return DEFAULT_STOP_MESSAGE_MAX_REPEATS;
+        return stopless_defaults().max_repeats as i64;
     }
     0
 }
@@ -1323,7 +1322,7 @@ mod tests {
         .expect("snapshot");
 
         assert_eq!(snapshot.text, "continue");
-        assert_eq!(snapshot.max_repeats, DEFAULT_STOP_MESSAGE_MAX_REPEATS);
+        assert_eq!(snapshot.max_repeats, stopless_defaults().max_repeats as i64);
         assert_eq!(snapshot.used, 2);
         assert_eq!(snapshot.stage_mode.as_deref(), Some("auto"));
         assert_eq!(snapshot.ai_mode, None);
@@ -2088,7 +2087,7 @@ mod tests {
         })
         .expect("default snapshot");
 
-        assert_eq!(snapshot.text, STOPLESS_DEFAULT_TEXT);
+        assert_eq!(snapshot.text, stopless_defaults().text);
         assert_eq!(snapshot.max_repeats, 1);
         assert_eq!(snapshot.used, 0);
         assert_eq!(snapshot.source.as_deref(), Some("default"));
@@ -2216,7 +2215,7 @@ mod tests {
         )
         .expect("implicit gemini snapshot");
 
-        assert_eq!(snapshot.text, STOPLESS_DEFAULT_TEXT);
+        assert_eq!(snapshot.text, stopless_defaults().text);
         assert_eq!(snapshot.max_repeats, 1);
         assert_eq!(snapshot.used, 0);
         assert_eq!(snapshot.source.as_deref(), Some("auto"));

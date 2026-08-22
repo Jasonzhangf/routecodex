@@ -149,7 +149,10 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
         let config = &INTERNAL_CONFIG.error_handling;
         assert!(!config.transient_stages.is_empty());
         assert_eq!(config.transient_wait_ms.len(), 3);
-        assert!(config.transient_wait_ms.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(config
+            .transient_wait_ms
+            .windows(2)
+            .all(|pair| pair[0] < pair[1]));
         assert!(config.recoverable_failure_threshold > 0);
         assert!(config.recoverable_cooldown_ms > 0);
         assert_eq!(config.recoverable_probe_interval_ms, 15 * 60_000);

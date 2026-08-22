@@ -176,6 +176,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
                 &provider_health,
                 &failed_candidates,
                 now_epoch_ms,
+                0,
                 allow_exhaustion_rescue_probe,
             )
             .await
@@ -667,6 +668,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
                 .get("toolreason_client_projection")
                 .copied()
                 .unwrap_or(true),
+            direct_failure_session_scope.session_id(),
         ) {
             Ok(context) => context,
             Err(error) => {
@@ -677,6 +679,8 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
                 )
             }
         };
+        let response_projection_context =
+            response_projection_context.with_runtime_timing(runtime_timing.clone());
         let response_projection = match C::run_response_projection(
             provider_raw,
             response_projection_context,

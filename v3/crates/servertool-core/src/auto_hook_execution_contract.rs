@@ -154,8 +154,8 @@ fn normalize_optional_text(value: Option<&str>) -> Option<String> {
     }
 }
 
-fn normalize_reason(value: Option<&str>, fallback: &str) -> String {
-    normalize_optional_text(value).unwrap_or_else(|| fallback.to_string())
+fn normalize_reason(value: Option<&str>, default_reason: &str) -> String {
+    normalize_optional_text(value).unwrap_or_else(|| default_reason.to_string())
 }
 
 #[cfg(test)]
