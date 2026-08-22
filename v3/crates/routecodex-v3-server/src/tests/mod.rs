@@ -254,6 +254,23 @@ fn responses_protocol_plan_only_accepts_fresh_requests() {
     ));
 }
 
+#[tokio::test]
+async fn restart_handoff_does_not_wait_for_active_client_body() {
+    let request_activity_gate = Arc::new(V3ServerRequestActivityGate::default());
+    let active_body = request_activity_gate.admit();
+    let handle = V3ServerAggregateHandle {
+        listeners: Vec::new(),
+        probe_shutdown: None,
+        request_activity_gate,
+        front_transport_broker: V3FrontTransportBroker::new(0),
+    };
+
+    tokio::time::timeout(Duration::from_millis(25), handle.prepare_for_exec())
+        .await
+        .expect("restart handoff must not wait for an active client body");
+    drop(active_body);
+}
+
 #[test]
 fn fresh_responses_preserves_pending_binding_and_wraps_implemented_modes() {
     let fresh = V3ResponsesContinuationEntryFacts::project(&json!({

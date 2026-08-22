@@ -263,10 +263,10 @@ impl V3ServerAggregateHandle {
         }
     }
 
-    /// Stop admitting new connections, then preserve existing response bodies
-    /// until their Runtime-owned terminal/error/timeout outcome is available.
-    /// The activity gate is held by the response Body, so SSE stays attached
-    /// while the managed process prepares its exec handoff.
+    /// Stop accepting new listener work without waiting for active client
+    /// bodies. Active bodies belong to Front/Transport handoff and must be
+    /// checkpointed/reattached by the lifecycle owner; waiting here would
+    /// deadlock restart on a provider stream that is already being replaced.
     pub async fn prepare_for_exec(mut self) {
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
@@ -276,7 +276,7 @@ impl V3ServerAggregateHandle {
                 let _ = shutdown.send(());
             }
         }
-        self.request_activity_gate.wait_for_quiescence().await;
+        let _ = &self.request_activity_gate;
     }
 
     pub async fn shutdown_listener_ports(&mut self, ports: &BTreeSet<u16>) -> Vec<u16> {
