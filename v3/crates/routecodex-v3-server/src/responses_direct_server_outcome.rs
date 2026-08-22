@@ -84,7 +84,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
     let provider_failure_session_scope =
         get_failure_session_scope(&state.server, request_headers, "responses", &request_id)
             .expect("responses continuation requires session-id for failure scope");
-    let raw = build_v3_server_03_http_request_raw_with_purpose(
+    let raw = build_v3_server_03_http_request_raw_with_purpose_and_port(
         state.server.id.clone(),
         provider_failure_session_scope.clone(),
         request_id.clone(),
@@ -92,6 +92,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
         method.clone(),
         path.clone(),
         request_purpose,
+        Some(state.server.port),
         payload.clone(),
     );
     let output = match responses_protocol_plan {

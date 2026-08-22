@@ -293,7 +293,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             .as_ref()
             .is_some_and(responses_entry_facts_allow_fresh_protocol_plan)
     {
-        let raw = build_v3_server_03_http_request_raw_with_purpose(
+        let raw = build_v3_server_03_http_request_raw_with_purpose_and_port(
             state.server.id.clone(),
             provider_failure_session_scope.clone(),
             request_id.clone(),
@@ -301,6 +301,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             method.clone(),
             path.clone(),
             request_purpose,
+            Some(state.server.port),
             payload.clone(),
         );
         let plan = match plan_v3_responses_protocol_execution_with_provider_health(
