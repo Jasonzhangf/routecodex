@@ -226,6 +226,7 @@ pub struct V3ServerAggregateHandle {
     pub listeners: Vec<V3ListenerHandle>,
     probe_shutdown: Option<oneshot::Sender<()>>,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
+    front_transport_broker: V3FrontTransportBroker,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -243,6 +244,10 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 }
 
 impl V3ServerAggregateHandle {
+    pub fn front_transport_broker(&self) -> &V3FrontTransportBroker {
+        &self.front_transport_broker
+    }
+
     pub async fn shutdown(mut self) {
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
@@ -499,6 +504,7 @@ pub async fn spawn_v3_server_aggregate(
         listeners,
         probe_shutdown: Some(probe_shutdown),
         request_activity_gate,
+        front_transport_broker: V3FrontTransportBroker::new(0),
     })
 }
 

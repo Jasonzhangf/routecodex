@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -201,6 +202,121 @@ impl V3FrontRequestLeaseRegistry {
     }
 }
 
+/// Stable Front/Transport Broker state.  Runtime Child code may only receive
+/// a checkpoint produced by this broker; it never owns the client socket or
+/// reconstructs a lease from payload/log data.
+#[derive(Debug, Clone, Default)]
+pub struct V3FrontTransportBroker {
+    generation: Arc<Mutex<u64>>,
+    checkpoints: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3BrokerCheckpoint>>>,
+}
+
+#[derive(Debug, Clone)]
+struct V3BrokerCheckpoint {
+    checkpoint: V3RuntimeHandoffCheckpoint,
+    captured_at: Instant,
+}
+
+impl V3FrontTransportBroker {
+    pub fn new(generation: u64) -> Self {
+        Self {
+            generation: Arc::new(Mutex::new(generation)),
+            checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+
+    pub fn generation(&self) -> u64 {
+        *self
+            .generation
+            .lock()
+            .expect("front broker generation lock")
+    }
+
+    pub fn register(&self, lease: &V3FrontRequestLease, now: Instant) {
+        self.checkpoints
+            .lock()
+            .expect("front broker checkpoint lock")
+            .insert(
+                lease.key.clone(),
+                V3BrokerCheckpoint {
+                    checkpoint: lease.checkpoint(now),
+                    captured_at: now,
+                },
+            );
+    }
+
+    pub fn refresh(&self, lease: &V3FrontRequestLease, now: Instant) {
+        self.register(lease, now);
+    }
+
+    pub fn freeze(&self, now: Instant) -> Vec<V3RuntimeHandoffCheckpoint> {
+        let mut checkpoints = self
+            .checkpoints
+            .lock()
+            .expect("front broker checkpoint lock");
+        let mut frozen = Vec::with_capacity(checkpoints.len());
+        for entry in checkpoints.values_mut() {
+            let elapsed = now.saturating_duration_since(entry.captured_at);
+            entry.checkpoint.absolute_remaining_ms = entry
+                .checkpoint
+                .absolute_remaining_ms
+                .saturating_sub(elapsed.as_millis().min(u64::MAX as u128) as u64);
+            entry.checkpoint.idle_remaining_ms = entry
+                .checkpoint
+                .idle_remaining_ms
+                .saturating_sub(elapsed.as_millis().min(u64::MAX as u128) as u64);
+            entry.captured_at = now;
+            frozen.push(entry.checkpoint.clone());
+        }
+        frozen
+    }
+
+    pub fn reattach(
+        &self,
+        checkpoint: &V3RuntimeHandoffCheckpoint,
+        now: Instant,
+    ) -> V3FrontRequestLease {
+        let mut generation = self
+            .generation
+            .lock()
+            .expect("front broker generation lock");
+        *generation = generation.saturating_add(1);
+        let mut checkpoint = checkpoint.clone();
+        if let Some(entry) = self
+            .checkpoints
+            .lock()
+            .expect("front broker checkpoint lock")
+            .get(&checkpoint.key)
+        {
+            let elapsed = now.saturating_duration_since(entry.captured_at);
+            let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+            checkpoint.absolute_remaining_ms =
+                checkpoint.absolute_remaining_ms.saturating_sub(elapsed_ms);
+            checkpoint.idle_remaining_ms = checkpoint.idle_remaining_ms.saturating_sub(elapsed_ms);
+        }
+        let lease = V3FrontRequestLease::reattach(&checkpoint, now, *generation);
+        self.checkpoints
+            .lock()
+            .expect("front broker checkpoint lock")
+            .insert(
+                lease.key.clone(),
+                V3BrokerCheckpoint {
+                    checkpoint: lease.checkpoint(now),
+                    captured_at: now,
+                },
+            );
+        lease
+    }
+
+    pub fn remove(&self, key: &V3FrontRequestLeaseKey) -> Option<V3RuntimeHandoffCheckpoint> {
+        self.checkpoints
+            .lock()
+            .expect("front broker checkpoint lock")
+            .remove(key)
+            .map(|entry| entry.checkpoint)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,5 +403,21 @@ mod tests {
             Some(V3FrontLeaseState::Running)
         );
         assert_eq!(registry.state(&lease.key), None);
+    }
+
+    #[test]
+    fn broker_reattach_increments_generation_without_resetting_deadline() {
+        let now = Instant::now();
+        let broker = V3FrontTransportBroker::new(4);
+        let lease = lease(now);
+        broker.register(&lease, now);
+        let checkpoint = broker.freeze(now).pop().expect("registered checkpoint");
+        let restored = broker.reattach(&checkpoint, now + Duration::from_secs(1));
+        assert_eq!(restored.runtime_generation, 5);
+        assert!(restored
+            .deadline
+            .remaining(now + Duration::from_secs(120))
+            .0
+            .is_zero());
     }
 }
