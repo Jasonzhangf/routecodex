@@ -392,11 +392,13 @@ pub async fn spawn_v3_server_aggregate(
                         let Ok((stream, remote_addr)) = accepted else { break };
                         let connection_identity = connection_broker.allocate_connection_identity();
                         let service = app.clone().into_service();
+                        let request_connection_broker = connection_broker.clone();
                         tokio::spawn(async move {
                             if let Err(error) = serve_v3_front_http_connection(
                                 stream,
                                 remote_addr,
                                 connection_identity,
+                                request_connection_broker,
                                 service,
                             ).await {
                                 eprintln!("V3 Front HTTP connection failed: {error}");

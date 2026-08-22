@@ -325,6 +325,8 @@ pub struct V3FrontTransportBroker {
     next_connection_id: Arc<Mutex<u64>>,
     checkpoints: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3BrokerCheckpoint>>>,
     connection_leases: Arc<Mutex<BTreeMap<V3FrontConnectionIdentity, V3FrontRequestLease>>>,
+    front_sockets: Arc<Mutex<BTreeMap<V3FrontConnectionIdentity, V3StableFrontSocket>>>,
+    client_sockets: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3StableFrontSocket>>>,
     client_connections: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3StableFrontConnection>>>,
 }
 
@@ -341,6 +343,8 @@ impl V3FrontTransportBroker {
             next_connection_id: Arc::new(Mutex::new(0)),
             checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
             connection_leases: Arc::new(Mutex::new(BTreeMap::new())),
+            front_sockets: Arc::new(Mutex::new(BTreeMap::new())),
+            client_sockets: Arc::new(Mutex::new(BTreeMap::new())),
             client_connections: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -379,6 +383,35 @@ impl V3FrontTransportBroker {
         self.register(lease, now);
     }
 
+    /// Register the accepted client socket before request admission. The
+    /// connection identity is only a temporary transport handle; it is moved
+    /// under the full request lease by `bind_connection_lease`.
+    pub fn register_front_socket(
+        &self,
+        connection: V3FrontConnectionIdentity,
+        socket: V3StableFrontSocket,
+    ) -> Result<(), String> {
+        let mut sockets = self
+            .front_sockets
+            .lock()
+            .expect("front broker accepted socket lock");
+        if sockets.insert(connection, socket).is_some() {
+            return Err("front connection identity already has a socket".to_string());
+        }
+        Ok(())
+    }
+
+    pub fn front_socket(
+        &self,
+        connection: V3FrontConnectionIdentity,
+    ) -> Option<V3StableFrontSocket> {
+        self.front_sockets
+            .lock()
+            .expect("front broker accepted socket lock")
+            .get(&connection)
+            .cloned()
+    }
+
     /// Bind the accepted Front connection to the complete request lease only
     /// after request admission has produced all typed scope components. The
     /// connection identity alone is never a recovery key.
@@ -397,6 +430,24 @@ impl V3FrontTransportBroker {
         }
         self.register(&lease, now);
         connections.insert(connection, lease);
+        if let Some(socket) = self
+            .front_sockets
+            .lock()
+            .expect("front broker accepted socket lock")
+            .remove(&connection)
+        {
+            self.client_sockets
+                .lock()
+                .expect("front broker client socket lock")
+                .insert(
+                    connections
+                        .get(&connection)
+                        .expect("front connection lease inserted")
+                        .key
+                        .clone(),
+                    socket,
+                );
+        }
         Ok(())
     }
 
@@ -588,6 +639,17 @@ impl V3FrontTransportBroker {
             .lock()
             .expect("front broker client connection lock")
             .remove(key)
+    }
+
+    pub fn client_socket(
+        &self,
+        key: &V3FrontRequestLeaseKey,
+    ) -> Option<V3StableFrontSocket> {
+        self.client_sockets
+            .lock()
+            .expect("front broker client socket lock")
+            .get(key)
+            .cloned()
     }
 
     pub fn reattach_client_connection(
@@ -859,6 +921,7 @@ pub async fn serve_v3_front_http_connection<S>(
     stream: TcpStream,
     remote_addr: SocketAddr,
     connection_identity: V3FrontConnectionIdentity,
+    front_transport_broker: V3FrontTransportBroker,
     service: S,
 ) -> Result<(), std::io::Error>
 where
@@ -870,6 +933,9 @@ where
 {
     let (read_half, write_half) = stream.into_split();
     let front_socket = V3StableFrontSocket::spawn(write_half);
+    front_transport_broker
+        .register_front_socket(connection_identity, front_socket.clone())
+        .map_err(std::io::Error::other)?;
     let request_front_socket = front_socket.clone();
     let hyper_service = hyper::service::service_fn(move |request: hyper::Request<Incoming>| {
         let mut service = service.clone();
@@ -1040,6 +1106,28 @@ mod tests {
     }
 
     #[test]
+    fn broker_moves_front_socket_from_connection_identity_to_request_lease() {
+        let now = Instant::now();
+        let broker = V3FrontTransportBroker::new(4);
+        let connection = broker.allocate_connection_identity();
+        let lease = lease(now);
+        let (write_tx, _write_rx) = mpsc::channel(1);
+        let socket = V3StableFrontSocket { write_tx };
+
+        broker
+            .register_front_socket(connection, socket)
+            .expect("front socket registration");
+        assert!(broker.front_socket(connection).is_some());
+
+        broker
+            .bind_connection_lease(connection, lease.clone(), now)
+            .expect("front connection lease binding");
+
+        assert!(broker.front_socket(connection).is_none());
+        assert!(broker.client_socket(&lease.key).is_some());
+    }
+
+    #[test]
     fn broker_restores_checkpoint_with_new_generation_and_same_deadline_budget() {
         let now = Instant::now();
         let source = V3FrontTransportBroker::new(4);
@@ -1188,7 +1276,13 @@ mod tests {
         );
         let accept = tokio::spawn(async move {
             let (stream, remote) = listener.accept().await.unwrap();
-            serve_v3_front_http_connection(stream, remote, connection_identity, app.into_service())
+            serve_v3_front_http_connection(
+                stream,
+                remote,
+                connection_identity,
+                V3FrontTransportBroker::new(0),
+                app.into_service(),
+            )
                 .await
                 .unwrap();
         });
