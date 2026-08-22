@@ -316,6 +316,26 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
                 )
             }
         };
+        let handoff_scope = match C::provider_transport_handoff_scope(&standardized) {
+            Ok(scope) => scope,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3Transport13ResponsesHttpRequest", error),
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                )
+            }
+        };
+        let transport_request = match transport_request.with_handoff_scope(handoff_scope) {
+            Ok(request) => request,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3Transport13ResponsesHttpRequest", error),
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                )
+            }
+        };
         trace.push("V3Transport13ResponsesHttpRequest");
         let mut provider_action_permit: Option<
             crate::provider_action_gate::V3ProviderActionPermit,

@@ -16,6 +16,7 @@ pub(crate) struct V3RequestCounterState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct V3AllocatedRequestIdentity {
     pub(crate) request_id: String,
+    pub(crate) pipeline_id: String,
     pub(crate) total_count: u64,
     pub(crate) daily_count: u64,
 }
@@ -64,6 +65,10 @@ impl V3RequestIdCounter {
             request_id: format!(
                 "{entry}-{provider}-{model}-{}-{}-{}",
                 clock.local_timestamp, self.state.total_count, self.state.window_count
+            ),
+            pipeline_id: format!(
+                "{entry}-pipeline-{}-{}",
+                self.state.total_count, self.state.window_count
             ),
             total_count: self.state.total_count,
             daily_count: self.state.window_count,

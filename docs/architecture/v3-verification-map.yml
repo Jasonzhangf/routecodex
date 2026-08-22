@@ -3262,8 +3262,8 @@ features:
 - feature_id: v3.direct_sse_accept_skeleton
   status: source_controlled_runtime_pending_live_replay
   change_risk: critical
-  owner_kind: rust_v3_server_direct_sse_client_accept_boundary
-  owner_scope: Fixed Direct Responses SSE client channel, transport heartbeat, background existing-runtime execution, and projected-frame-only return edge.
+  owner_kind: rust_v3_server_responses_sse_front_client_accept_boundary
+  owner_scope: Fixed Responses SSE Front client channel shared by Direct and Relay, transport heartbeat, background execution-plan runtime, and projected-frame-only return edge.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
@@ -3274,11 +3274,11 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
-  - Direct Responses SSE establishes the client channel and transport-only heartbeat before provider attempt completion.
+  - Responses SSE establishes the client channel and transport-only heartbeat before provider attempt completion for both Direct and Relay.
   - Provider failure before semantic client commitment remains in the existing Error chain and can reselect without closing the client channel.
-  - Only direct runtime projected client frames cross the channel; raw provider SSE does not.
+  - Only execution-plan-selected runtime projected client frames cross the channel; raw provider SSE does not.
   required_negative:
-  - Relay requests do not enter the Direct accept skeleton.
+  - Relay and Direct requests enter the same Front skeleton; the Front does not choose between them.
   - The accept skeleton does not parse provider business events or own routing, health, retry, or continuation.
   - A post-commit provider failure does not reroute or rebuild the current response.
   - New features cannot replace the accept channel, runtime worker, or projected-frame edge.

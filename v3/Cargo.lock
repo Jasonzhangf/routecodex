@@ -1204,6 +1204,8 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "routecodex-v3-config",
+ "routecodex-v3-provider-responses",
+ "routecodex-v3-runtime",
  "routecodex-v3-server",
  "serde",
  "serde_json",
@@ -1273,6 +1275,8 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures-util",
+ "hyper",
+ "hyper-util",
  "libc",
  "reqwest",
  "routecodex-v3-config",
@@ -1284,6 +1288,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite",
+ "tower-service",
 ]
 
 [[package]]

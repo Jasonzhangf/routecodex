@@ -1,8 +1,9 @@
 # V3 Direct SSE Accept Skeleton
 
-`v3.direct_sse_accept_skeleton` is the fixed client-side transport boundary for
-same-protocol Direct Responses SSE. It is deliberately smaller than Relay,
-but it still decouples the client connection from provider attempt lifetime.
+`v3.direct_sse_accept_skeleton` is the fixed Responses SSE Front transport
+boundary shared by Direct and Relay. The historical feature id remains for
+map compatibility; the Front does not choose Direct or Relay and never
+inspects provider response shape.
 
 ```mermaid
 sequenceDiagram
@@ -13,7 +14,7 @@ sequenceDiagram
 
   C->>A: Responses SSE request
   A-->>C: 200 text/event-stream + : keepalive
-  A->>W: start existing Direct pipeline
+  A->>W: start the execution-plan-selected Direct or Relay pipeline
   W->>P: provider attempt
   P-->>W: raw provider response
   W->>W: transport decode -> provider codec -> hooks -> client projection
@@ -25,14 +26,16 @@ sequenceDiagram
 
 The skeleton owner is `routecodex-v3-server/src/endpoint_handlers.rs`:
 
-1. `V3DirectSseAccept01ClientChannel` is selected only for Responses, Direct,
-   and client SSE intent.
+1. `V3DirectSseAccept01ClientChannel` is selected for Responses client SSE
+   intent before provider execution completes. The request-stage execution
+   plan owns Direct versus Relay; this Front boundary does not select it.
 2. The channel returns `text/event-stream` and owns the transport-only
    heartbeat through `v3_io_sse_body`.
-3. `V3DirectSseAccept02RuntimeWorker` runs the existing direct pipeline in the
-   background. It owns no provider semantics and does not select a provider.
+3. `V3DirectSseAccept02RuntimeWorker` runs the execution-plan-selected pipeline
+   in the background. It owns no provider semantics and does not select a
+   provider.
 4. `V3DirectSseAccept03ProjectedClientFrame` forwards only the response already
-   projected by the direct runtime. Provider raw SSE never crosses this edge.
+   projected by the selected runtime. Provider raw SSE never crosses this edge.
 
 The following are skeleton invariants and may not be changed by later hooks or
 compatibility features:
@@ -46,8 +49,8 @@ compatibility features:
   result, metadata field, or terminal marker;
 - feature work may extend typed hooks inside the runtime projection boundary,
   but may not replace the accept channel, worker, or projected-frame edge;
-- Relay remains owned by its own relay client stream and must not be routed
-  through this Direct skeleton.
+- Direct and Relay share this Front transport skeleton; only their typed runtime
+  codec/projector differs behind the worker edge.
 
 ## Allowed extension points
 

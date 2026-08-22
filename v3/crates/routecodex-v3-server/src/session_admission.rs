@@ -268,4 +268,25 @@ mod tests {
             .await
             .is_some());
     }
+
+    #[tokio::test]
+    async fn request_activity_gate_waits_for_response_body_terminal_or_timeout() {
+        let gate = Arc::new(V3ServerRequestActivityGate::default());
+        let permit = gate.admit();
+        let wait_gate = Arc::clone(&gate);
+        let mut waiter = tokio::spawn(async move {
+            wait_gate.wait_for_quiescence().await;
+        });
+
+        tokio::task::yield_now().await;
+        assert!(timeout(Duration::from_millis(25), &mut waiter)
+            .await
+            .is_err());
+
+        drop(permit);
+        timeout(Duration::from_secs(1), waiter)
+            .await
+            .expect("restart preparation must resume after the response body closes")
+            .expect("activity waiter must not panic");
+    }
 }

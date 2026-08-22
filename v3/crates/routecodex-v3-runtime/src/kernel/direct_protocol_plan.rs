@@ -384,6 +384,11 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         manifest,
         V3Server03HttpRequestRaw {
             server_id: fixture.server_id.clone(),
+            port: manifest
+                .servers
+                .get(&fixture.server_id)
+                .map(|server| server.port),
+            pipeline_id: None,
             failure_session_scope: V3ProviderFailureSessionScope::new(
                 &fixture.server_id,
                 manifest

@@ -4,8 +4,10 @@ mod endpoint_handlers;
 mod executors;
 mod frame_builders;
 mod live_snapshot;
+mod metadata_center;
 mod models_catalog;
 mod request_id;
+mod restart_handoff;
 mod responses_direct_server_outcome;
 mod scope_metadata;
 mod session_admission;
@@ -27,11 +29,13 @@ use endpoint_handlers::{
 pub use executors::*;
 pub(crate) use frame_builders::*;
 pub(crate) use live_snapshot::*;
+pub(crate) use metadata_center::*;
 use request_id::{
     format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
     V3RequestIdCounter,
 };
 pub(crate) use scope_metadata::*;
+pub use restart_handoff::*;
 pub(crate) use routecodex_v3_runtime::V3RequestPurpose;
 use websocket::{
     responses_websocket_endpoint, responses_websocket_session, send_responses_websocket_sse_stream,
@@ -72,6 +76,8 @@ use routecodex_v3_error::{
 use routecodex_v3_runtime::{
     build_v3_provider_global_probe_target, build_v3_server_03_http_request_raw,
     build_v3_server_03_http_request_raw_with_purpose,
+    build_v3_server_03_http_request_raw_with_purpose_and_port,
+    build_v3_server_03_http_request_raw_with_purpose_and_scope,
     execute_v3_anthropic_relay_dry_run_runtime_with_client_headers,
     execute_v3_anthropic_relay_runtime_with_default_transport,
     execute_v3_anthropic_relay_runtime_with_default_transport_and_client_headers,
@@ -94,9 +100,11 @@ use routecodex_v3_runtime::{
     probe_v3_provider_global_target, project_v3_anthropic_relay_runtime_failure,
     project_v3_debug_failure, project_v3_gemini_relay_runtime_failure,
     project_v3_openai_chat_relay_runtime_failure,
+    project_v3_protocol_execution_plan_failure,
     project_v3_responses_previous_response_owner_resolution_error,
     project_v3_responses_relay_runtime_failure, project_v3_virtual_router_dry_run,
     project_v3_virtual_router_status, register_responses_direct_hooks,
+    plan_v3_responses_protocol_execution_with_provider_health,
     resolve_v3_responses_previous_response_owner_execution_mode_at_req03,
     V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
     V3ChatDirectCodec, V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput,
@@ -106,7 +114,8 @@ use routecodex_v3_runtime::{
     V3Resp15ClientPayload,
     V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlState,
-    V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
+    V3Execution11ProtocolDecisionMode, V3ResponsesProtocolExecutionPlan,
+    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayDryRunOutcome, V3ResponsesRelayLocalContinuationScope,
     V3ResponsesRelayLocalContinuationState, V3ResponsesRelayLocalStoplessControlInput,
     V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
@@ -125,8 +134,9 @@ use routecodex_v3_sse::{
 };
 use serde_json::{json, Map, Value};
 use session_admission::{
-    hold_response_body_admission_permit, V3ResponsesSessionAdmissionGate,
-    V3ResponsesSessionAdmissionPermit, V3ResponsesSessionAdmissionScope,
+    hold_response_body_admission_permit, hold_response_body_request_activity_permit,
+    V3ResponsesSessionAdmissionGate, V3ResponsesSessionAdmissionPermit,
+    V3ResponsesSessionAdmissionScope, V3ServerRequestActivityGate,
 };
 use std::collections::BTreeSet;
 use std::env;
@@ -168,6 +178,8 @@ struct V3ListenerState {
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeSet<String>>>,
     responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
+    request_activity_gate: Arc<V3ServerRequestActivityGate>,
+    front_transport_broker: V3FrontTransportBroker,
     webui_observability: V3WebuiObservability,
 }
 
@@ -221,6 +233,8 @@ pub struct V3ListenerHandle {
 pub struct V3ServerAggregateHandle {
     pub listeners: Vec<V3ListenerHandle>,
     probe_shutdown: Option<oneshot::Sender<()>>,
+    request_activity_gate: Arc<V3ServerRequestActivityGate>,
+    front_transport_broker: V3FrontTransportBroker,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -238,6 +252,10 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 }
 
 impl V3ServerAggregateHandle {
+    pub fn front_transport_broker(&self) -> &V3FrontTransportBroker {
+        &self.front_transport_broker
+    }
+
     pub async fn shutdown(mut self) {
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
@@ -249,12 +267,12 @@ impl V3ServerAggregateHandle {
         }
     }
 
-    /// Restart handoff follows the V1 exec contract. Signal the listeners and
-    /// immediately return control to the lifecycle owner; waiting for request
-    /// activity here deadlocks under continuous traffic and prevents exec.
-    /// In-flight clients receive the existing stream/error-chain outcome and
-    /// may reconnect against the replacement runtime.
-    pub async fn prepare_for_exec(mut self) {
+    /// Stop accepting new listener work without waiting for active client
+    /// bodies. Active bodies belong to Front/Transport handoff and must be
+    /// checkpointed/reattached by the lifecycle owner; waiting here would
+    /// deadlock restart on a provider stream that is already being replaced.
+    pub async fn prepare_for_exec(mut self) -> Vec<V3RuntimeHandoffCheckpoint> {
+        let checkpoints = self.front_transport_broker.freeze(Instant::now());
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -263,6 +281,16 @@ impl V3ServerAggregateHandle {
                 let _ = shutdown.send(());
             }
         }
+        let _ = &self.request_activity_gate;
+        checkpoints
+    }
+
+    pub fn restore_front_checkpoints(
+        &self,
+        checkpoints: &[V3RuntimeHandoffCheckpoint],
+    ) -> Result<usize, String> {
+        self.front_transport_broker
+            .restore_checkpoints(checkpoints, Instant::now())
     }
 
     pub async fn shutdown_listener_ports(&mut self, ports: &BTreeSet<u16>) -> Vec<u16> {
@@ -330,6 +358,8 @@ pub async fn spawn_v3_server_aggregate(
 
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
     let webui_observability = V3WebuiObservability::new();
+    let request_activity_gate = Arc::new(V3ServerRequestActivityGate::default());
+    let front_transport_broker = V3FrontTransportBroker::new(0);
     let mut listeners = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
@@ -349,18 +379,36 @@ pub async fn spawn_v3_server_aggregate(
             provider_health: provider_health.clone(),
             realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
             responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
+            request_activity_gate: Arc::clone(&request_activity_gate),
+            front_transport_broker: front_transport_broker.clone(),
             webui_observability: webui_observability.clone(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let connection_broker = front_transport_broker.clone();
         tokio::spawn(async move {
-            let _ = axum::serve(
-                listener,
-                app.into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.await;
-            })
-            .await;
+            let mut shutdown_rx = shutdown_rx;
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => break,
+                    accepted = listener.accept() => {
+                        let Ok((stream, remote_addr)) = accepted else { break };
+                        let connection_identity = connection_broker.allocate_connection_identity();
+                        let service = app.clone().into_service();
+                        let request_connection_broker = connection_broker.clone();
+                        tokio::spawn(async move {
+                            if let Err(error) = serve_v3_front_http_connection(
+                                stream,
+                                remote_addr,
+                                connection_identity,
+                                request_connection_broker,
+                                service,
+                            ).await {
+                                eprintln!("V3 Front HTTP connection failed: {error}");
+                            }
+                        });
+                    }
+                }
+            }
         });
         listeners.push(V3ListenerHandle {
             server_id,
@@ -491,6 +539,8 @@ pub async fn spawn_v3_server_aggregate(
     Ok(V3ServerAggregateHandle {
         listeners,
         probe_shutdown: Some(probe_shutdown),
+        request_activity_gate,
+        front_transport_broker,
     })
 }
 
@@ -732,6 +782,10 @@ async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
+    let front_connection_identity = request
+        .extensions()
+        .get::<V3FrontConnectionIdentity>()
+        .copied();
     let request_headers = request.headers().clone();
     let method = request.method().as_str().to_string();
     let path = request.uri().path().to_string();
@@ -844,7 +898,7 @@ async fn pending_endpoint(
             };
             return responses_direct_output_response(
                 frame,
-                Duration::from_millis(state.server.http_sse_keepalive_ms),
+                Some(Duration::from_millis(state.server.http_sse_keepalive_ms)),
             );
         }
     };
@@ -857,8 +911,10 @@ async fn pending_endpoint(
     } else {
         None
     };
+    let request_activity_permit = state.request_activity_gate.admit();
     let response = pending_endpoint_after_responses_admission(
         state,
+        front_connection_identity,
         request_headers,
         method,
         path,
@@ -870,6 +926,7 @@ async fn pending_endpoint(
         payload,
     )
     .await;
+    let response = hold_response_body_request_activity_permit(response, request_activity_permit);
     match admission_permit {
         Some(permit) => hold_response_body_admission_permit(response, permit),
         None => response,

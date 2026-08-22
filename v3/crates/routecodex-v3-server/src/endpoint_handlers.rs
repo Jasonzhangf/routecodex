@@ -2,12 +2,117 @@ use crate::*;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, Response};
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub(crate) async fn pending_endpoint_after_responses_admission(
     state: Arc<V3ListenerState>,
+    front_connection_identity: Option<V3FrontConnectionIdentity>,
+    request_headers: HeaderMap,
+    method: String,
+    path: String,
+    started_at: Instant,
+    entry_protocol: String,
+    execution_mode: V3EntryProtocolExecutionMode,
+    pending_owner_symbol: Option<String>,
+    request_purpose: V3RequestPurpose,
+    payload: Value,
+) -> Response<Body> {
+    if entry_protocol == "responses" && v3_responses_request_wants_sse(&request_headers, &payload) {
+        return V3DirectSseAcceptSkeleton::accept(
+            state,
+            front_connection_identity,
+            request_headers,
+            method,
+            path,
+            started_at,
+            entry_protocol,
+            execution_mode,
+            pending_owner_symbol,
+            request_purpose,
+            payload,
+        )
+        .await;
+    }
+    pending_endpoint_after_responses_admission_inner(
+        state,
+        front_connection_identity,
+        request_headers,
+        method,
+        path,
+        started_at,
+        entry_protocol,
+        execution_mode,
+        pending_owner_symbol,
+        request_purpose,
+        payload,
+        false,
+    )
+    .await
+}
+
+struct V3DirectSseAcceptSkeleton;
+
+impl V3DirectSseAcceptSkeleton {
+    async fn accept(
+        state: Arc<V3ListenerState>,
+        front_connection_identity: Option<V3FrontConnectionIdentity>,
+        request_headers: HeaderMap,
+        method: String,
+        path: String,
+        started_at: Instant,
+        entry_protocol: String,
+        execution_mode: V3EntryProtocolExecutionMode,
+        pending_owner_symbol: Option<String>,
+        request_purpose: V3RequestPurpose,
+        payload: Value,
+    ) -> Response<Body> {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(32);
+        let keepalive_interval =
+            std::time::Duration::from_millis(state.server.http_sse_keepalive_ms);
+        tokio::spawn(async move {
+            let response = pending_endpoint_after_responses_admission_inner(
+                state,
+                front_connection_identity,
+                request_headers,
+                method,
+                path,
+                started_at,
+                entry_protocol,
+                execution_mode,
+                pending_owner_symbol,
+                request_purpose,
+                payload,
+                true,
+            )
+            .await;
+            let mut body = response.into_body().into_data_stream();
+            while let Some(chunk) = body.next().await {
+                let chunk = chunk
+                    .map(|bytes| bytes.to_vec())
+                    .map_err(std::io::Error::other);
+                if tx.send(chunk).await.is_err() {
+                    return;
+                }
+            }
+        });
+        let client_stream = futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        });
+        let body = v3_io_sse_body(Box::pin(client_stream), Some(keepalive_interval));
+        Response::builder()
+            .status(axum::http::StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(body)
+            .expect("Direct SSE accept response")
+    }
+}
+
+pub(crate) async fn pending_endpoint_after_responses_admission_inner(
+    state: Arc<V3ListenerState>,
+    front_connection_identity: Option<V3FrontConnectionIdentity>,
     request_headers: HeaderMap,
     method: String,
     path: String,
@@ -17,7 +122,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     pending_owner_symbol: Option<String>,
     request_purpose: V3RequestPurpose,
     payload: Value,
+    front_transport_owns_keepalive: bool,
 ) -> Response<Body> {
+    let client_keepalive_interval = (!front_transport_owns_keepalive)
+        .then_some(Duration::from_millis(state.server.http_sse_keepalive_ms));
     let request_identity = match allocate_v3_console_request_identity(&state, &path, Some(&payload))
     {
         Ok(request_identity) => request_identity,
@@ -53,7 +161,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             } else {
                 "conversation"
             },
-            "server_id": state.server.id.clone()
+            "server_id": state.server.id.clone(),
+            "front_connection_identity": front_connection_identity.map(|identity| identity.0)
         })),
     ) {
         return foundation_output_response(project_v3_debug_failure(
@@ -105,7 +214,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                     );
                     return responses_direct_output_response(
                         frame,
-                        Duration::from_millis(state.server.http_sse_keepalive_ms),
+                        client_keepalive_interval,
                     );
                 }
             };
@@ -157,7 +266,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                 );
                 return responses_direct_output_response(
                     frame,
-                    Duration::from_millis(state.server.http_sse_keepalive_ms),
+                    client_keepalive_interval,
                 );
             }
         }
@@ -179,14 +288,187 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             );
         }
     };
-    let responses_protocol_plan = None;
-    if entry_protocol == "responses" {
-        if let Some(entry_facts) = responses_entry_facts.as_ref() {
-            execution_mode = responses_effective_execution_mode_for_request_purpose(
-                execution_mode,
-                entry_facts,
-                request_purpose,
+    let provider_failure_session_scope = match provider_failure_session_scope
+        .with_transport_handoff_scope(
+            request_identity.pipeline_id.clone(),
+            state.server.port,
+            state.front_transport_broker.generation(),
+        ) {
+        Ok(scope) => scope,
+        Err(message) => {
+            return error_output_response_for_server_with_project_path(
+                &state.server,
+                &path,
+                &request_id,
+                project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                None,
             );
+        }
+    };
+    let responses_protocol_plan = if entry_protocol == "responses"
+        && responses_entry_facts
+            .as_ref()
+            .is_some_and(responses_entry_facts_allow_fresh_protocol_plan)
+    {
+        let raw = build_v3_server_03_http_request_raw_with_purpose_and_scope(
+            state.server.id.clone(),
+            provider_failure_session_scope.clone(),
+            request_id.clone(),
+            execution_id.clone(),
+            method.clone(),
+            path.clone(),
+            request_purpose,
+            Some(state.server.port),
+            Some(request_identity.pipeline_id.clone()),
+            payload.clone(),
+        );
+        let plan = match plan_v3_responses_protocol_execution_with_provider_health(
+            &state.manifest,
+            raw,
+            state.provider_health.runtime_health(),
+            current_epoch_ms(),
+        ) {
+            Ok(plan) => plan,
+            Err(failure) => {
+                let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                    project_v3_protocol_execution_plan_failure(failure),
+                );
+                return responses_direct_output_response(
+                    project_v3_responses_error_frame_for_request_if_sse(
+                        frame,
+                        &request_headers,
+                        Some(&payload),
+                    ),
+                    client_keepalive_interval,
+                );
+            }
+        };
+        execution_mode = match plan.decision.mode {
+            V3Execution11ProtocolDecisionMode::SameProtocolDirect => {
+                V3EntryProtocolExecutionMode::Direct
+            }
+            V3Execution11ProtocolDecisionMode::HubRelay => V3EntryProtocolExecutionMode::Relay,
+        };
+        let metadata_plan = V3MetadataCenterExecutionPlan::new(
+            request_id.clone(),
+            request_identity.pipeline_id.clone(),
+            state.server.id.clone(),
+            state.server.port,
+            provider_failure_session_scope.session_id().to_string(),
+            v3_responses_request_wants_sse(&request_headers, &payload),
+            plan,
+        );
+        if front_transport_owns_keepalive {
+            if let Some(connection_identity) = front_connection_identity {
+                // The request-stage plan is the only owner of the Front
+                // execution mode. The provider response is not consulted.
+                // The pipeline identity was allocated at request ingress and
+                // is carried beside the request id; it is not reconstructed
+                // from payload, provider response, or logs.
+                let lease = V3FrontRequestLease::from_responses_execution_plan(
+                    &metadata_plan,
+                    request_id.clone(),
+                    request_identity.pipeline_id.clone(),
+                    state.server.id.clone(),
+                    state.server.port,
+                    provider_failure_session_scope.session_id().to_string(),
+                    state.front_transport_broker.generation(),
+                    Instant::now(),
+                );
+                if let Err(error) = state.front_transport_broker.bind_connection_lease(
+                    connection_identity,
+                    lease,
+                    Instant::now(),
+                ) {
+                    let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                        project_v3_server_runtime_failure(
+                            "V3Server03HttpRequestRaw",
+                            "front_request_lease_binding_failed",
+                            error,
+                            598,
+                        ),
+                    );
+                    return responses_direct_output_response(
+                        project_v3_responses_error_frame_for_request_if_sse(
+                            frame,
+                            &request_headers,
+                            Some(&payload),
+                        ),
+                        client_keepalive_interval,
+                    );
+                }
+            }
+        }
+        Some(metadata_plan)
+    } else {
+        None
+    };
+    if entry_protocol == "responses"
+        && front_transport_owns_keepalive
+        && responses_protocol_plan.is_none()
+    {
+        if let Some(connection_identity) = front_connection_identity {
+            // Continuation owner resolution is a request-stage control
+            // decision too. It has no fresh provider target plan, so use the
+            // server's configured request deadline without consulting the
+            // provider response or reconstructing control state from payload.
+            let now = Instant::now();
+            let lease = V3FrontRequestLease::from_execution_mode(
+                match execution_mode {
+                    V3EntryProtocolExecutionMode::Direct => V3FrontExecutionMode::Direct,
+                    V3EntryProtocolExecutionMode::Relay => V3FrontExecutionMode::Relay,
+                    V3EntryProtocolExecutionMode::PendingNotImplemented => {
+                        return responses_direct_output_response(
+                            project_v3_responses_error_frame_for_request_if_sse(
+                                build_v3_server_16_http_frame_from_v3_error_06(
+                                    project_v3_server_runtime_failure(
+                                        "V3HubReqContinuation03Classified",
+                                        "front_execution_mode_missing",
+                                        "continuation request has no executable Direct/Relay mode",
+                                        598,
+                                    ),
+                                ),
+                                &request_headers,
+                                Some(&payload),
+                            ),
+                            client_keepalive_interval,
+                        );
+                    }
+                },
+                request_id.clone(),
+                request_identity.pipeline_id.clone(),
+                state.server.id.clone(),
+                state.server.port,
+                provider_failure_session_scope.session_id().to_string(),
+                state.front_transport_broker.generation(),
+                Duration::from_millis(
+                    routecodex_v3_config::default_provider_request_timeout_ms(),
+                ),
+                Duration::from_millis(
+                    routecodex_v3_config::default_provider_request_timeout_ms(),
+                ),
+                now,
+            );
+            if let Err(error) = state
+                .front_transport_broker
+                .bind_connection_lease(connection_identity, lease, now)
+            {
+                return responses_direct_output_response(
+                    project_v3_responses_error_frame_for_request_if_sse(
+                        build_v3_server_16_http_frame_from_v3_error_06(
+                            project_v3_server_runtime_failure(
+                                "V3Server03HttpRequestRaw",
+                                "front_request_lease_binding_failed",
+                                error,
+                                598,
+                            ),
+                        ),
+                        &request_headers,
+                        Some(&payload),
+                    ),
+                    client_keepalive_interval,
+                );
+            }
         }
     }
     if execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -971,7 +1253,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                     return responses_direct_output_response_with_console(
                         frame,
                         stream_console_finalizer,
-                        Duration::from_millis(state.server.http_sse_keepalive_ms),
+                        client_keepalive_interval,
                     );
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(mut relay_output) => {
@@ -995,6 +1277,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                         started_at,
                         request_console_project_path.as_deref(),
                         &console_payload,
+                        client_keepalive_interval,
                     );
                 }
             }
@@ -1011,6 +1294,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             started_at,
             request_console_project_path.as_deref(),
             &console_payload,
+            client_keepalive_interval,
         );
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
@@ -1034,7 +1318,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             request_id.clone(),
             execution_id,
             payload,
-            responses_protocol_plan.as_ref(),
+            responses_protocol_plan
+                .as_ref()
+                .map(V3MetadataCenterExecutionPlan::protocol_plan),
             None,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
@@ -1126,7 +1412,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                 responses_direct_output_response_with_console(
                     frame,
                     stream_console_finalizer,
-                    Duration::from_millis(state.server.http_sse_keepalive_ms),
+                    client_keepalive_interval,
                 )
             }
             V3ResponsesDirectServerOutcome::RelayOutput(output) => {
@@ -1142,6 +1428,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                     started_at,
                     request_console_project_path.as_deref(),
                     &raw_request_payload,
+                    client_keepalive_interval,
                 )
             }
         }

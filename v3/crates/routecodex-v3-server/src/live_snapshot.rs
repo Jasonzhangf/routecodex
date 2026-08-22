@@ -680,6 +680,7 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
     started_at: Instant,
     request_console_project_path: Option<&str>,
     raw_request_payload: &Value,
+    keepalive_interval: Option<Duration>,
 ) -> Response<Body> {
     let has_provider_failure = output
         .observability
@@ -821,7 +822,11 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
     responses_relay_output_response(
         output,
         stream_console_finalizer,
-        Duration::from_millis(state.server.http_sse_keepalive_ms),
+        keepalive_interval,
+        raw_request_payload
+            .get("stream")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     )
 }
 

@@ -71,8 +71,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:d4ea98cd469dd2c75d4ddf8b33a90ef158afe2dbb7663ff710e04f949bbeeb78
-    last_manual_authorization_id: auth-20260818-v3-direct-response-hook-generic-core-owner
+    fingerprint: sha256:77f60d9f59f40d3415c2f74e8c6bcb50f5aa2aabf28956f414a0c064c55a0952
+    last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-responses-direct
   - item_id: chain:v3.hub_pipeline.v1.request
     chain_id: v3.hub_pipeline.v1.request
     status: audited_locked
@@ -123,16 +123,16 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:5fa65d7b26e33870aedcd01fa6f12fa252659c4e7b4c1b104ae9bdc6765a24c1
-    last_manual_authorization_id: auth-20260816-v3-build-domain-path-migration-global-install
+    fingerprint: sha256:34c3f3e588a97ae6902a1ff6ebcc2dad7b8e05d855c661bcf11f76b489908158
+    last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-global-install
   - item_id: chain:v3.target.session_global_selection
     chain_id: v3.target.session_global_selection
     status: audited_locked
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:d3464c14e382058281cb6a37af01503f828e48d27a49b101181672e2f3532e74
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:ff56cb023f013272313c6aaafd46a4db185dc3fc7389e3e6d85609877266dde4
+    last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-session-selection
   - item_id: chain:v3.codex_sample_retention_snap_scope
     chain_id: v3.codex_sample_retention_snap_scope
     status: audited_locked
@@ -243,8 +243,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:d9133efd6bbed105c3bc7f2b3a55f96376460dfdef54267fb706e5a3f0baa87e
-    last_manual_authorization_id: auth-20260817-v3-direct-response-hook-context-plan-owner-final
+    fingerprint: sha256:74a1775d82edd711ecdb83fcf9683ad85abee514aef8085788147ef1fe3ed247
+    last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-continuation
   - item_id: chain:v3.anthropic_relay.controlled_runtime
     chain_id: v3.anthropic_relay.controlled_runtime
     status: audited_locked
@@ -323,8 +323,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:3ee32151963e1fbe2a739497e40165231ab83d5099db4f4dff7c8fbed4892061
-    last_manual_authorization_id: auth-20260816-v3-reasoning-effort-target-compat
+    fingerprint: sha256:5bd747d232db5fac3e28001be452c99e23f7b70211bb17fc533a31e158b88fe5
+    last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-protocol-parity
   - item_id: chain:v3.responses_relay.source_server_entry
     chain_id: v3.responses_relay.source_server_entry
     status: audited_locked
@@ -451,8 +451,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:c02a3c5b90ef525cb0c28281a88b5b464e0f8b0d63f5fcb990b5c128025961dd
-    last_manual_authorization_id: auth-20260817-v3-provider-action-gate-direct-global-health
+    fingerprint: sha256:a0d809d8352e7215a2d9361de56480ee07ec5ec2b83199ca540405c8aebcac22
+    last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-provider-action
   - item_id: chain:v3.build_test_artifact_budget
     chain_id: v3.build_test_artifact_budget
     status: audited_locked
@@ -491,8 +491,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:a6e4c276af7e2e93168d51158b5e72a414fc0acb8683f87229a733721ab7d21b
-    last_manual_authorization_id: auth-20260818-v3-provider-global-timeout-and-edge-correction
+    fingerprint: sha256:5e3eaa3e922006e328161993b3c9ea67aff6f4111fab1556c7342b7a93bb565e
+    last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-global-probe
 manual_authorizations:
   - authorization_id: auth-20260818-v3-provider-global-timeout-and-edge-correction
     item_id: chain:v3.provider_global_subscription_probe
@@ -830,3 +830,52 @@ manual_authorizations:
     reason: "Jason required provider-global health to consume the typed Error01 source rather than reconstruct control state from a bare HTTP status in runtime. This refresh registers the error-source fingerprint builder in the error owner and the runtime helper-to-health edge with the typed source carrier."
     fingerprint_before: sha256:645d2d8bcceb120df3365536cb01b2643f13acfd53282df94537080befceeb9e
     fingerprint_after: sha256:c21fb3bbd20f75c488a0d7feb3632334be3e1a39e1e9ba0ee54c1774635e9b53
+  - authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-responses-direct
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-08-22T09:20:00-07:00'
+    reason: "Jason authorized repairing the pre-existing audit-lock drift before the runtime restart handoff implementation. The current Responses Direct chain fingerprint was recalculated from the checked-in caller map; no runtime behavior is changed by this lock refresh."
+    fingerprint_before: sha256:d4ea98cd469dd2c75d4ddf8b33a90ef158afe2dbb7663ff710e04f949bbeeb78
+    fingerprint_after: sha256:77f60d9f59f40d3415c2f74e8c6bcb50f5aa2aabf28956f414a0c064c55a0952
+  - authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-continuation
+    item_id: chain:v3.responses_direct.remote_continuation.integration
+    approved_by: Jason
+    approved_at: '2026-08-22T09:20:00-07:00'
+    reason: "Jason authorized repairing the pre-existing audit-lock drift before the runtime restart handoff implementation. The current continuation chain fingerprint was recalculated from the checked-in caller map; no continuation behavior is changed by this lock refresh."
+    fingerprint_before: sha256:d9133efd6bbed105c3bc7f2b3a55f96376460dfdef54267fb706e5a3f0baa87e
+    fingerprint_after: sha256:74a1775d82edd711ecdb83fcf9683ad85abee514aef8085788147ef1fe3ed247
+  - authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-protocol-parity
+    item_id: chain:v3.protocol_conversion_field_parity
+    approved_by: Jason
+    approved_at: '2026-08-22T09:20:00-07:00'
+    reason: "Jason authorized repairing the pre-existing audit-lock drift before the runtime restart handoff implementation. The current protocol parity chain fingerprint was recalculated from the checked-in caller map; no protocol conversion behavior is changed by this lock refresh."
+    fingerprint_before: sha256:3ee32151963e1fbe2a739497e40165231ab83d5099db4f4dff7c8fbed4892061
+    fingerprint_after: sha256:5bd747d232db5fac3e28001be452c99e23f7b70211bb17fc533a31e158b88fe5
+  - authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-provider-action
+    item_id: chain:v3.provider_action_gate.mainline
+    approved_by: Jason
+    approved_at: '2026-08-22T09:20:00-07:00'
+    reason: "Jason authorized repairing the pre-existing audit-lock drift before the runtime restart handoff implementation. The current provider action chain fingerprint was recalculated from the checked-in caller map; no provider policy behavior is changed by this lock refresh."
+    fingerprint_before: sha256:c02a3c5b90ef525cb0c28281a88b5b464e0f8b0d63f5fcb990b5c128025961dd
+    fingerprint_after: sha256:a0d809d8352e7215a2d9361de56480ee07ec5ec2b83199ca540405c8aebcac22
+  - authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-global-probe
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-08-22T09:20:00-07:00'
+    reason: "Jason authorized repairing the pre-existing audit-lock drift before the runtime restart handoff implementation. The current provider global probe chain fingerprint was recalculated from the checked-in caller map; no health policy behavior is changed by this lock refresh."
+    fingerprint_before: sha256:a6e4c276af7e2e93168d51158b5e72a414fc0acb8683f87229a733721ab7d21b
+    fingerprint_after: sha256:5e3eaa3e922006e328161993b3c9ea67aff6f4111fab1556c7342b7a93bb565e
+  - authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-global-install
+    item_id: chain:v3.global_binary_install
+    approved_by: Jason
+    approved_at: '2026-08-22T09:20:00-07:00'
+    reason: "Jason authorized repairing the pre-existing audit-lock drift before the runtime restart handoff implementation. The current global install chain fingerprint was recalculated from the checked-in caller map; no install behavior is changed by this lock refresh."
+    fingerprint_before: sha256:5fa65d7b26e33870aedcd01fa6f12fa252659c4e7b4c1b104ae9bdc6765a24c1
+    fingerprint_after: sha256:34c3f3e588a97ae6902a1ff6ebcc2dad7b8e05d855c661bcf11f76b489908158
+  - authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-session-selection
+    item_id: chain:v3.target.session_global_selection
+    approved_by: Jason
+    approved_at: '2026-08-22T09:20:00-07:00'
+    reason: "Jason authorized repairing the pre-existing audit-lock drift before the runtime restart handoff implementation. The current session selection chain fingerprint was recalculated from the checked-in caller map; no session selection behavior is changed by this lock refresh."
+    fingerprint_before: sha256:d3464c14e382058281cb6a37af01503f828e48d27a49b101181672e2f3532e74
+    fingerprint_after: sha256:ff56cb023f013272313c6aaafd46a4db185dc3fc7389e3e6d85609877266dde4

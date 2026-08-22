@@ -74,12 +74,18 @@ pub async fn execute_v3_responses_relay_request(
 pub(crate) fn responses_relay_output_response(
     output: V3ResponsesRelayRuntimeOutput,
     stream_console_finalizer: Option<V3SseConsoleFinalizer>,
-    keepalive_interval: Duration,
+    keepalive_interval: Option<Duration>,
+    requested_stream: bool,
 ) -> Response<Body> {
     let successful_sse = output.error_chain.is_none() && output.status < 400;
     let content_type = match &output.client_body {
         V3ResponsesRelayClientBody::Json(_) => "application/json",
         V3ResponsesRelayClientBody::Sse(_) => "text/event-stream",
+    };
+    let content_type = if requested_stream && !successful_sse {
+        "text/event-stream"
+    } else {
+        content_type
     };
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(output.status).expect("typed V3 Responses Relay status"))
@@ -87,8 +93,30 @@ pub(crate) fn responses_relay_output_response(
     let body = match output.client_body {
         V3ResponsesRelayClientBody::Sse(client_stream) => v3_client_sse_body(
             wrap_v3_responses_relay_sse_console_stream(client_stream, stream_console_finalizer),
-            successful_sse.then_some(keepalive_interval),
+            successful_sse.then_some(keepalive_interval).flatten(),
         ),
+        V3ResponsesRelayClientBody::Json(client_response) if requested_stream && !successful_sse => {
+            let frame = V3Server16HttpFrame {
+                status: output.status,
+                content_type: "application/json".to_string(),
+                body: V3Server16Body::Json(client_response),
+                debug_node: "V3Debug01NodeEventRegistered",
+                error_node: "V3Error06ClientProjected",
+                error_chain: output.error_chain.unwrap_or_default(),
+                error_body: None,
+                node_trace: output.node_trace,
+                observability: output.observability,
+                stream_observation: output.stream_observation,
+            };
+            let frame = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
+            match frame.body {
+                V3Server16Body::Sse(stream) => v3_client_sse_body(stream, None),
+                V3Server16Body::Json(value) => Body::from(
+                    serde_json::to_vec(&value).expect("typed V3 Responses Relay error projection"),
+                ),
+                V3Server16Body::Bytes(bytes) => Body::from(bytes),
+            }
+        }
         V3ResponsesRelayClientBody::Json(client_response) => Body::from(
             serde_json::to_vec(&client_response).expect("typed V3 Responses Relay projection"),
         ),
@@ -535,7 +563,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
     );
     let provider_failure_event_sink = build_v3_provider_failure_event_sink(&console_context);
     let route_selection_event_sink = build_v3_route_selection_event_sink(&console_context);
-    let raw = build_v3_server_03_http_request_raw_with_purpose(
+    let raw = build_v3_server_03_http_request_raw_with_purpose_and_port(
         state.server.id.clone(),
         provider_failure_session_scope.clone(),
         request_id.clone(),
@@ -543,6 +571,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         method,
         path.clone(),
         request_purpose,
+        Some(state.server.port),
         payload.clone(),
     );
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
@@ -718,7 +747,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
     responses_direct_output_response_with_console(
         frame,
         stream_console_finalizer,
-        Duration::from_millis(state.server.http_sse_keepalive_ms),
+        Some(Duration::from_millis(state.server.http_sse_keepalive_ms)),
     )
 }
 

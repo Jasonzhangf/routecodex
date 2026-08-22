@@ -87,6 +87,21 @@ static DEFAULT_RESPONSES_TRANSPORT: OnceLock<ReqwestResponsesTransport> = OnceLo
 pub fn default_responses_transport() -> &'static ReqwestResponsesTransport {
     DEFAULT_RESPONSES_TRANSPORT.get_or_init(ReqwestResponsesTransport::default)
 }
+
+pub fn default_provider_transport_handoff_checkpoints(
+) -> Vec<routecodex_v3_provider_responses::V3ProviderTransportCheckpoint> {
+    default_responses_transport()
+        .transport_handoff_broker()
+        .checkpoints()
+}
+
+pub fn restore_default_provider_transport_handoff_checkpoints(
+    checkpoints: &[routecodex_v3_provider_responses::V3ProviderTransportCheckpoint],
+) -> Result<usize, String> {
+    default_responses_transport()
+        .transport_handoff_broker()
+        .restore_detached(checkpoints)
+}
 include!("kernel/direct_kernel_entrypoints.rs");
 include!("kernel/direct_state.rs");
 async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
@@ -928,6 +943,50 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     trace.push("V3HubRespContinuation04Committed");
                 }
                 return error_output(source, trace, &hook_registry);
+            }
+        };
+        let context = &standardized.protocol_context;
+        let handoff_scope = match (
+            context.pipeline_id.clone(),
+            context.port,
+            context
+                .failure_session_scope
+                .transport_handoff_scope()
+                .map(|(_, _, generation)| generation),
+        ) {
+            (Some(pipeline_id), Some(port), Some(runtime_generation)) => {
+                routecodex_v3_provider_responses::V3ProviderTransportHandoffScope {
+                    pipeline_id,
+                    server_id: context.server_id.clone(),
+                    port,
+                    session_scope: format!(
+                        "{}:{}:{}",
+                        context.failure_session_scope.server_id(),
+                        context.failure_session_scope.routing_group(),
+                        context.failure_session_scope.session_id()
+                    ),
+                    runtime_generation,
+                }
+            }
+            _ => {
+                return error_output(
+                    runtime_source(
+                        "V3Transport13ResponsesHttpRequest",
+                        "provider transport handoff scope is missing",
+                    ),
+                    trace,
+                    &hook_registry,
+                )
+            }
+        };
+        let transport_request = match transport_request.with_handoff_scope(handoff_scope) {
+            Ok(request) => request,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3Transport13ResponsesHttpRequest", error),
+                    trace,
+                    &hook_registry,
+                )
             }
         };
         trace.push("V3Transport13ResponsesHttpRequest");

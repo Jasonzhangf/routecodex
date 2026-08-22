@@ -214,7 +214,7 @@ fn record_direct_sse_provider_event_json_chunk(
         record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
         let original =
             build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame).into_bytes();
-        let projected = process_sse_object_frame(&frame, content_consumer)
+        let projected = process_sse_object_frame(&frame, &mut content_consumer)
             .map_err(|error| provider_sse_failure_source(error.to_string()))?
             .into_bytes();
         let toolreason_reasoning_projection =

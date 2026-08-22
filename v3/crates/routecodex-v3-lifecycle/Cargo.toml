@@ -8,6 +8,8 @@ publish.workspace = true
 [dependencies]
 routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-server = { path = "../routecodex-v3-server" }
+routecodex-v3-runtime = { path = "../routecodex-v3-runtime" }
+routecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses" }
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true

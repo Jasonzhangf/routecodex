@@ -187,6 +187,7 @@ fn test_v3_listener_state_with_debug(
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
         request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
+        front_transport_broker: V3FrontTransportBroker::new(0),
         webui_observability: V3WebuiObservability::new(),
     })
 }
@@ -251,6 +252,23 @@ fn responses_protocol_plan_only_accepts_fresh_requests() {
     assert!(responses_entry_facts_allow_fresh_protocol_plan(
         &paired_tool_turn
     ));
+}
+
+#[tokio::test]
+async fn restart_handoff_does_not_wait_for_active_client_body() {
+    let request_activity_gate = Arc::new(V3ServerRequestActivityGate::default());
+    let active_body = request_activity_gate.admit();
+    let handle = V3ServerAggregateHandle {
+        listeners: Vec::new(),
+        probe_shutdown: None,
+        request_activity_gate,
+        front_transport_broker: V3FrontTransportBroker::new(0),
+    };
+
+    tokio::time::timeout(Duration::from_millis(25), handle.prepare_for_exec())
+        .await
+        .expect("restart handoff must not wait for an active client body");
+    drop(active_body);
 }
 
 #[test]
@@ -391,7 +409,7 @@ async fn direct_sse_http_projection_injects_keepalive_and_preserves_provider_byt
     };
 
     let response =
-        responses_direct_output_response_with_console(frame, None, Duration::from_millis(3_000));
+        responses_direct_output_response_with_console(frame, None, Some(Duration::from_millis(3_000)));
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
 
     // Direct SSE 投影保真传输 provider 字节，同时由 server 注入 transport
@@ -634,6 +652,7 @@ fn test_v3_console_emission_context(
 ) -> V3ConsoleEmissionContext {
     let request_identity = V3AllocatedRequestIdentity {
         request_id: request_id.to_string(),
+        pipeline_id: format!("pipeline-{request_id}"),
         total_count: 1,
         daily_count: 1,
     };
@@ -1260,6 +1279,7 @@ fn startup_console_uses_the_same_layered_builder() {
 fn console_layering_keeps_request_debug_fields_off_human_headline() {
     let request_identity = V3AllocatedRequestIdentity {
         request_id: "openai-responses-router-gpt-5.5-sample-669944-7581".to_string(),
+        pipeline_id: "pipeline-sample-669944-7581".to_string(),
         total_count: 669_944,
         daily_count: 7_581,
     };
@@ -1299,16 +1319,19 @@ fn console_layering_keeps_request_debug_fields_off_human_headline() {
 fn console_request_count_keeps_following_human_fields_aligned() {
     let short = V3AllocatedRequestIdentity {
         request_id: "short".to_string(),
+        pipeline_id: "pipeline-short".to_string(),
         total_count: 1,
         daily_count: 1,
     };
     let current = V3AllocatedRequestIdentity {
         request_id: "current".to_string(),
+        pipeline_id: "pipeline-current".to_string(),
         total_count: 669_944,
         daily_count: 7_581,
     };
     let oversized = V3AllocatedRequestIdentity {
         request_id: "oversized".to_string(),
+        pipeline_id: "pipeline-oversized".to_string(),
         total_count: 12_345_678_901_234,
         daily_count: 123_456,
     };
@@ -1341,6 +1364,7 @@ fn console_request_count_keeps_following_human_fields_aligned() {
 fn console_layering_promotes_response_facts_before_debug_details() {
     let request_identity = V3AllocatedRequestIdentity {
         request_id: "openai-responses-router-gpt-5.5-sample-669944-7581".to_string(),
+        pipeline_id: "pipeline-sample-669944-7581".to_string(),
         total_count: 669_944,
         daily_count: 7_581,
     };
@@ -2092,7 +2116,7 @@ async fn direct_sse_console_closeout_fails_when_terminal_success_missing() {
     let response = responses_direct_output_response_with_console(
         frame,
         finalizer,
-        Duration::from_millis(3_000),
+        Some(Duration::from_millis(3_000)),
     );
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     assert!(std::str::from_utf8(&bytes)
@@ -2167,7 +2191,7 @@ async fn direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_a
     let response = responses_direct_output_response_with_console(
         frame,
         finalizer,
-        Duration::from_millis(3_000),
+        Some(Duration::from_millis(3_000)),
     );
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     assert!(std::str::from_utf8(&bytes)
@@ -2300,7 +2324,7 @@ async fn direct_sse_console_clean_eof_exposes_missing_runtime_timing_contract() 
     let response = responses_direct_output_response_with_console(
         frame,
         finalizer,
-        Duration::from_millis(3_000),
+        Some(Duration::from_millis(3_000)),
     );
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     assert!(std::str::from_utf8(&bytes)
@@ -2785,13 +2809,14 @@ async fn direct_sse_body_error_projects_standard_closeout_after_partial_stream()
     let response = responses_direct_output_response_with_console(
         frame,
         finalizer,
-        Duration::from_millis(3_000),
+        Some(Duration::from_millis(3_000)),
     );
     let result = to_bytes(response.into_body(), usize::MAX).await;
     let body = String::from_utf8(result.unwrap().to_vec()).unwrap();
     assert!(body.contains("response.output_text.delta"), "{body}");
     assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("provider_stream_error"), "{body}");
+    assert!(body.contains("response_stream_terminated"), "{body}");
+    assert!(!body.contains("provider_stream_error"), "{body}");
 
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap_or_default());
     assert!(log.contains("event=failed"), "{log}");
@@ -2834,7 +2859,8 @@ async fn direct_sse_body_does_not_parse_crlf_terminal_frame() {
     let body = String::from_utf8(result.to_vec()).unwrap();
     assert!(body.contains("response.completed"), "{body}");
     assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("late closeout failure"), "{body}");
+    assert!(body.contains("response_stream_terminated"), "{body}");
+    assert!(!body.contains("late closeout failure"), "{body}");
 }
 
 #[tokio::test]
@@ -2859,7 +2885,8 @@ async fn direct_sse_body_does_not_parse_terminal_frame() {
     let body = String::from_utf8(result.to_vec()).unwrap();
     assert!(body.contains("response.completed"), "{body}");
     assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("late closeout failure"), "{body}");
+    assert!(body.contains("response_stream_terminated"), "{body}");
+    assert!(!body.contains("late closeout failure"), "{body}");
 }
 
 #[tokio::test]
@@ -2883,7 +2910,8 @@ async fn direct_sse_body_does_not_parse_failed_terminal_across_chunks() {
     let body = String::from_utf8(result.to_vec()).unwrap();
     assert!(body.contains("response.failed"), "{body}");
     assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("late closeout failure"), "{body}");
+    assert!(body.contains("response_stream_terminated"), "{body}");
+    assert!(!body.contains("late closeout failure"), "{body}");
 }
 
 #[tokio::test]
@@ -2906,7 +2934,8 @@ async fn direct_sse_body_does_not_treat_terminal_text_as_terminal_event() {
     let body = String::from_utf8(body.to_vec()).unwrap();
     assert!(body.contains("response.completed"), "{body}");
     assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("provider failure after text"), "{body}");
+    assert!(body.contains("response_stream_terminated"), "{body}");
+    assert!(!body.contains("provider failure after text"), "{body}");
 }
 
 #[test]
@@ -3144,6 +3173,7 @@ fn error_projection_appends_human_console_failure_line() {
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
         request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
+        front_transport_broker: V3FrontTransportBroker::new(0),
         webui_observability: V3WebuiObservability::new(),
     };
     let trace_scope = state
@@ -3334,13 +3364,47 @@ async fn relay_sse_body_error_projects_standard_error_event() {
         protocol_direct_handoff: None,
     };
 
-    let response = responses_relay_output_response(output, None, Duration::from_millis(3_000));
+    let response = responses_relay_output_response(
+        output,
+        None,
+        Some(Duration::from_millis(3_000)),
+        true,
+    );
     assert_eq!(response.headers()["content-type"], "text/event-stream");
     let result = to_bytes(response.into_body(), usize::MAX).await;
     let body = String::from_utf8(result.unwrap().to_vec()).unwrap();
     assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("provider_response_sse_stream"), "{body}");
-    assert!(body.contains("provider relay boom"), "{body}");
+    assert!(body.contains("response_stream_terminated"), "{body}");
+    assert!(!body.contains("provider_response_sse_stream"), "{body}");
+    assert!(!body.contains("provider relay boom"), "{body}");
+}
+
+#[tokio::test]
+async fn relay_requested_sse_projects_terminal_json_error_as_sse() {
+    let output = V3ResponsesRelayRuntimeOutput {
+        status: 502,
+        client_body: V3ResponsesRelayClientBody::Json(json!({
+            "error": {
+                "code": "provider_response_sse_stream",
+                "message": "provider payload was not valid"
+            }
+        })),
+        node_trace: vec!["V3Error06ClientProjected"],
+        error_chain: Some(vec!["V3Error01SourceRaised", "V3Error06ClientProjected"]),
+        observability: None,
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+
+    let response = responses_relay_output_response(output, None, None, true);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let body = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec())
+        .unwrap();
+    assert!(body.contains("event: error"), "{body}");
+    assert!(body.contains("response_stream_terminated"), "{body}");
+    assert!(!body.contains("provider_response_sse_stream"), "{body}");
 }
 
 #[tokio::test]
@@ -3362,12 +3426,18 @@ async fn relay_sse_body_abrupt_failure_projects_standard_error_event() {
         protocol_direct_handoff: None,
     };
 
-    let response = responses_relay_output_response(output, None, Duration::from_millis(3_000));
+    let response = responses_relay_output_response(
+        output,
+        None,
+        Some(Duration::from_millis(3_000)),
+        true,
+    );
     assert_eq!(response.headers()["content-type"], "text/event-stream");
     let result = to_bytes(response.into_body(), usize::MAX).await;
     let body = String::from_utf8(result.unwrap().to_vec()).unwrap();
     assert!(body.contains("event: error"), "{body}");
-    assert!(body.contains("abrupt relay stream close"), "{body}");
+    assert!(body.contains("response_stream_terminated"), "{body}");
+    assert!(!body.contains("abrupt relay stream close"), "{body}");
 }
 
 #[tokio::test]
@@ -3386,7 +3456,12 @@ async fn relay_sse_body_client_disconnect_remains_transport_local() {
         protocol_direct_handoff: None,
     };
 
-    let response = responses_relay_output_response(output, None, Duration::from_millis(3_000));
+    let response = responses_relay_output_response(
+        output,
+        None,
+        Some(Duration::from_millis(3_000)),
+        true,
+    );
     let error = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect_err("client disconnect must not be projected as a provider SSE error event");
@@ -3578,9 +3653,13 @@ async fn responses_sse_relay_provider_stream_error_projects_standard_error_then_
     let error = client.next().await.unwrap().unwrap();
     let error = std::str::from_utf8(&error).unwrap();
     assert!(error.starts_with("event: error\n"), "{error}");
-    assert!(error.contains("provider_response_sse_stream"), "{error}");
-    assert!(error.contains("controlled error"), "{error}");
-    assert!(!error.contains("\"status\":"), "post-commit SSE event must not contradict the committed HTTP 200: {error}");
+    assert!(error.contains("response_stream_terminated"), "{error}");
+    assert!(!error.contains("provider_response_sse_stream"), "{error}");
+    assert!(!error.contains("controlled error"), "{error}");
+    assert!(
+        !error.contains("\"status\":"),
+        "post-commit SSE event must not contradict the committed HTTP 200: {error}"
+    );
     assert!(
         tokio::time::timeout(Duration::from_millis(50), client.next())
             .await
@@ -3664,7 +3743,7 @@ async fn successful_direct_responses_sse_injects_keepalive_then_preserves_provid
         observability: None,
         stream_observation: None,
     };
-    let response = responses_direct_output_response(frame, Duration::from_millis(3_000));
+    let response = responses_direct_output_response(frame, Some(Duration::from_millis(3_000)));
     let mut client = response.into_body().into_data_stream();
 
     // server 注入的 transport keepalive 是首个 chunk（客户端连接与 provider
@@ -3696,7 +3775,7 @@ async fn error06_responses_sse_starts_with_error_and_never_receives_keepalive() 
         observability: None,
         stream_observation: None,
     };
-    let response = responses_direct_output_response(frame, Duration::from_millis(10));
+    let response = responses_direct_output_response(frame, Some(Duration::from_millis(10)));
     let mut client = response.into_body().into_data_stream();
 
     let first = client.next().await.unwrap().unwrap();
