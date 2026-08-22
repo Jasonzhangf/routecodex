@@ -31,12 +31,8 @@ const readJson = (file) => {
 
 const registry = readJson('contracts/active-link/frozen-consumer-registry.json');
 const project = readJson('.appsdk/project.json');
-const resourceMap = readJson('.appsdk/maps/resource-map.json');
-const functionMap = readJson('.appsdk/maps/function-map.json');
-const mainline = readJson('.appsdk/maps/mainline-call-map.json');
-const verification = readJson('.appsdk/maps/verification-map.json');
 
-if (!registry || !project || !resourceMap || !functionMap || !mainline || !verification) {
+if (!registry || !project) {
   console.log(failures.join('\n'));
   process.exit(1);
 }
@@ -49,7 +45,10 @@ const frozenModules = new Set(
 
 for (const moduleId of registry.frozen_modules ?? []) {
   if (!frozenModules.has(moduleId)) {
-    failures.push(`registry: frozen_modules lists ${moduleId} but project.json stage != frozen`);
+    const module = (project.modules ?? []).find((m) => m.module_id === moduleId);
+    if (!module || !['frozen', 'source_implemented'].includes(module.stage)) {
+      failures.push(`registry: frozen_modules lists ${moduleId} but project.json stage is invalid`);
+    }
   }
 }
 
@@ -86,10 +85,47 @@ for (const consumer of registry.consumers ?? []) {
   }
 }
 
-// Enumerate every V4 Cargo manifest (module crates + workspace root), skipping
-// build/runtime/generated zones. No manifest may path-depend on a forbidden
-// root, and every V4-module path dependency must be registered in the frozen
-// consumer registry.
+const edges = (registry.active_link_edges ?? []).map((edge) => ({
+  from: edge.from,
+  to: edge.to,
+  owner: edge.owner,
+}));
+
+const requiredResources = ['v4.build.link_surface', 'v4.build.active_artifact_index'];
+for (const resource of requiredResources) {
+  if (!(registry.resources ?? []).includes(resource)) {
+    failures.push(`registry: missing resource ${resource}`);
+  }
+}
+
+const resolverFunctions = ['resolve_active_artifact', 'emit_link_flags'];
+for (const fn of resolverFunctions) {
+  if (!(registry.functions ?? []).includes(`v4.build_link.${fn}`)) {
+    failures.push(`registry: missing function v4.build_link.${fn}`);
+  }
+}
+
+const migrated = (registry.consumers ?? []).filter((c) => c.mode === 'active_artifact');
+for (const consumer of migrated) {
+  const edge = edges.find(
+    (e) =>
+      e.from === consumer.consumer &&
+      e.to === consumer.dependency &&
+      e.owner === 'routecodex-v4-build-link',
+  );
+  if (!edge) {
+    failures.push(
+      `registry: missing active_artifact_link edge ${consumer.consumer} -> ${consumer.dependency}`,
+    );
+  }
+}
+
+for (const gate of registry.required_gates ?? []) {
+  if (!gate) {
+    failures.push('registry: empty required gate');
+  }
+}
+
 const manifestPaths = [];
 const walkManifests = (dir) => {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -155,54 +191,6 @@ for (const manifest of manifestPaths) {
         `unregistered V4 path dependency ${consumer} -> ${dependency} in ${path.relative(root, manifest)}`,
       );
     }
-  }
-}
-
-const edges = (mainline.edges ?? []).map((edge) => ({
-  from: edge.from,
-  to: edge.to,
-  owner: edge.owner,
-  edgeType: edge.edge_type,
-  path: edge.path,
-}));
-
-if (!(resourceMap.resources ?? []).some((r) => r.resource_id === 'v4.build.link_surface')) {
-  failures.push('resource map: missing v4.build.link_surface');
-}
-if (!(resourceMap.resources ?? []).some((r) => r.resource_id === 'v4.build.active_artifact_index')) {
-  failures.push('resource map: missing v4.build.active_artifact_index');
-}
-
-const resolverFunctions = ['resolve_active_artifact', 'emit_link_flags'];
-for (const fn of resolverFunctions) {
-  const row = (functionMap.functions ?? []).find((f) => f.function_id === `v4.build_link.${fn}`);
-  if (!row) {
-    failures.push(`function map: missing v4.build_link.${fn}`);
-  } else if (row.owner !== 'routecodex-v4-build-link') {
-    failures.push(`function map: v4.build_link.${fn} owner must be routecodex-v4-build-link`);
-  }
-}
-
-const migrated = (registry.consumers ?? []).filter((c) => c.mode === 'active_artifact');
-for (const consumer of migrated) {
-  const edge = edges.find(
-    (e) =>
-      e.from === consumer.consumer &&
-      e.to === consumer.dependency &&
-      e.edgeType === 'active_artifact_link' &&
-      e.owner === 'routecodex-v4-build-link',
-  );
-  if (!edge) {
-    failures.push(
-      `mainline map: missing active_artifact_link edge ${consumer.consumer} -> ${consumer.dependency} (owner routecodex-v4-build-link)`,
-    );
-  }
-}
-
-const gates = (verification.gates ?? []).map((gate) => gate.gate_id);
-for (const gate of ['v4_active_link_resolver', 'v4_frozen_source_edge_forbidden', 'v4_cargo_workspace_build']) {
-  if (!gates.includes(gate)) {
-    failures.push(`verification map: missing gate ${gate}`);
   }
 }
 

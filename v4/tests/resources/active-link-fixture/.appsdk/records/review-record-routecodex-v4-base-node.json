@@ -16,7 +16,7 @@
   "review_id": "base-sdk013-architecture-review",
   "review_kind": "architecture",
   "reviewed_artifact_hash": "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd",
-  "reviewed_commit": "fdd46128479594611ed14ba6099247727bd16d4b",
+  "reviewed_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
   "reviewed_diff_hash": "sha256:80e687c2399584140aa406e61c9e5a5a96172d1c3c7c71b6ed4c1ff1839603e2",
   "reviewed_scope_hash": "sha256:7d1e6dda7043dedd559eb5c13df6ae94d7c49165b54e4602ecbd29ad5c6c6de9",
   "reviewed_tree_hash": "5e569af73f8d707e03918d2d91d041ffad5b5a23",
