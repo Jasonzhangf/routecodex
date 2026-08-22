@@ -517,6 +517,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             &provider_health,
                             &failed_candidates,
                             now_epoch_ms,
+                            0,
                             allow_exhaustion_rescue_probe,
                         )
                         .await

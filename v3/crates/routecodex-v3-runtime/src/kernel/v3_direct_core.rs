@@ -176,6 +176,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
                 &provider_health,
                 &failed_candidates,
                 now_epoch_ms,
+                0,
                 allow_exhaustion_rescue_probe,
             )
             .await

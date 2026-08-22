@@ -6,6 +6,7 @@ mod frame_builders;
 mod live_snapshot;
 mod models_catalog;
 mod request_id;
+mod restart_handoff;
 mod responses_direct_server_outcome;
 mod scope_metadata;
 mod session_admission;
@@ -32,6 +33,7 @@ use request_id::{
     V3RequestIdCounter,
 };
 pub(crate) use scope_metadata::*;
+pub use restart_handoff::*;
 pub(crate) use routecodex_v3_runtime::V3RequestPurpose;
 use websocket::{
     responses_websocket_endpoint, responses_websocket_session, send_responses_websocket_sse_stream,
@@ -125,8 +127,9 @@ use routecodex_v3_sse::{
 };
 use serde_json::{json, Map, Value};
 use session_admission::{
-    hold_response_body_admission_permit, V3ResponsesSessionAdmissionGate,
-    V3ResponsesSessionAdmissionPermit, V3ResponsesSessionAdmissionScope,
+    hold_response_body_admission_permit, hold_response_body_request_activity_permit,
+    V3ResponsesSessionAdmissionGate, V3ResponsesSessionAdmissionPermit,
+    V3ResponsesSessionAdmissionScope, V3ServerRequestActivityGate,
 };
 use std::collections::BTreeSet;
 use std::env;
@@ -168,6 +171,7 @@ struct V3ListenerState {
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeSet<String>>>,
     responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
+    request_activity_gate: Arc<V3ServerRequestActivityGate>,
     webui_observability: V3WebuiObservability,
 }
 
@@ -221,6 +225,7 @@ pub struct V3ListenerHandle {
 pub struct V3ServerAggregateHandle {
     pub listeners: Vec<V3ListenerHandle>,
     probe_shutdown: Option<oneshot::Sender<()>>,
+    request_activity_gate: Arc<V3ServerRequestActivityGate>,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -249,11 +254,10 @@ impl V3ServerAggregateHandle {
         }
     }
 
-    /// Restart handoff follows the V1 exec contract. Signal the listeners and
-    /// immediately return control to the lifecycle owner; waiting for request
-    /// activity here deadlocks under continuous traffic and prevents exec.
-    /// In-flight clients receive the existing stream/error-chain outcome and
-    /// may reconnect against the replacement runtime.
+    /// Stop admitting new connections, then preserve existing response bodies
+    /// until their Runtime-owned terminal/error/timeout outcome is available.
+    /// The activity gate is held by the response Body, so SSE stays attached
+    /// while the managed process prepares its exec handoff.
     pub async fn prepare_for_exec(mut self) {
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
@@ -263,6 +267,7 @@ impl V3ServerAggregateHandle {
                 let _ = shutdown.send(());
             }
         }
+        self.request_activity_gate.wait_for_quiescence().await;
     }
 
     pub async fn shutdown_listener_ports(&mut self, ports: &BTreeSet<u16>) -> Vec<u16> {
@@ -330,6 +335,7 @@ pub async fn spawn_v3_server_aggregate(
 
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
     let webui_observability = V3WebuiObservability::new();
+    let request_activity_gate = Arc::new(V3ServerRequestActivityGate::default());
     let mut listeners = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
@@ -349,6 +355,7 @@ pub async fn spawn_v3_server_aggregate(
             provider_health: provider_health.clone(),
             realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
             responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
+            request_activity_gate: Arc::clone(&request_activity_gate),
             webui_observability: webui_observability.clone(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -491,6 +498,7 @@ pub async fn spawn_v3_server_aggregate(
     Ok(V3ServerAggregateHandle {
         listeners,
         probe_shutdown: Some(probe_shutdown),
+        request_activity_gate,
     })
 }
 
@@ -857,6 +865,7 @@ async fn pending_endpoint(
     } else {
         None
     };
+    let request_activity_permit = state.request_activity_gate.admit();
     let response = pending_endpoint_after_responses_admission(
         state,
         request_headers,
@@ -870,6 +879,7 @@ async fn pending_endpoint(
         payload,
     )
     .await;
+    let response = hold_response_body_request_activity_permit(response, request_activity_permit);
     match admission_permit {
         Some(permit) => hold_response_body_admission_permit(response, permit),
         None => response,

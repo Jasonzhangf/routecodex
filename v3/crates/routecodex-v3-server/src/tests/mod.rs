@@ -186,6 +186,7 @@ fn test_v3_listener_state_with_debug(
         )),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
+        request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
         webui_observability: V3WebuiObservability::new(),
     })
 }
@@ -3122,6 +3123,7 @@ fn error_projection_appends_human_console_failure_line() {
         )),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
+        request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
         webui_observability: V3WebuiObservability::new(),
     };
     let trace_scope = state

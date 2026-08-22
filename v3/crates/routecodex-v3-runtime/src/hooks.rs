@@ -256,14 +256,20 @@ fn apply_responses_toolreason_sse_hook(
     pending_reasons: &mut Vec<Option<String>>,
     reason_emitted: &mut bool,
     project_to_client: bool,
+    session_id: Option<&str>,
+    request_id: Option<&str>,
+    argument_buffers: &mut Vec<String>,
 ) {
-    crate::hub_v1::map_v3_toolreason_stream_event_at_resp03(
+    crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers(
         value,
         true,
         tool_names,
         pending_reasons,
         reason_emitted,
         project_to_client,
+        session_id,
+        request_id,
+        Some(argument_buffers),
     );
 }
 

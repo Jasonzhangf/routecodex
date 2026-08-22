@@ -38,7 +38,19 @@ pub(crate) struct V3DirectSseTypedHookCatalog {
     chat_notify: for<'a> fn(&V3OpenAiChatSseHookInput<'a>),
     chat_rewrite:
         fn(&mut V3OpenAiChatSseSemanticObject) -> Result<(), V3OpenAiChatSseTreeError>,
+    toolreason: ToolreasonHook,
 }
+
+pub(crate) type ToolreasonHook = fn(
+    &mut serde_json::Value,
+    &[String],
+    &mut Vec<Option<String>>,
+    &mut bool,
+    bool,
+    Option<&str>,
+    Option<&str>,
+    &mut Vec<String>,
+);
 
 impl std::fmt::Debug for V3DirectSseTypedHookCatalog {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -48,6 +60,7 @@ impl std::fmt::Debug for V3DirectSseTypedHookCatalog {
             .field("responses_rewrite", &"registered")
             .field("chat_notify", &"registered")
             .field("chat_rewrite", &"registered")
+            .field("toolreason", &"registered")
             .finish()
     }
 }
@@ -59,6 +72,7 @@ impl V3DirectSseTypedHookCatalog {
             responses_rewrite: noop_responses_rewrite,
             chat_notify: noop_chat_notify,
             chat_rewrite: noop_chat_rewrite,
+            toolreason: noop_toolreason,
         }
     }
 
@@ -84,6 +98,34 @@ impl V3DirectSseTypedHookCatalog {
         self.chat_notify = notify;
         self.chat_rewrite = rewrite;
         self
+    }
+
+    pub(crate) const fn with_toolreason(mut self, hook: ToolreasonHook) -> Self {
+        self.toolreason = hook;
+        self
+    }
+
+    fn apply_toolreason(
+        &self,
+        value: &mut serde_json::Value,
+        tool_names: &[String],
+        pending_reasons: &mut Vec<Option<String>>,
+        reason_emitted: &mut bool,
+        project_to_client: bool,
+        session_id: Option<&str>,
+        request_id: Option<&str>,
+        argument_buffers: &mut Vec<String>,
+    ) {
+        (self.toolreason)(
+            value,
+            tool_names,
+            pending_reasons,
+            reason_emitted,
+            project_to_client,
+            session_id,
+            request_id,
+            argument_buffers,
+        );
     }
 
     fn apply_responses(
@@ -137,6 +179,18 @@ fn noop_chat_rewrite(
     _semantic: &mut V3OpenAiChatSseSemanticObject,
 ) -> Result<(), V3OpenAiChatSseTreeError> {
     Ok(())
+}
+
+fn noop_toolreason(
+    _value: &mut serde_json::Value,
+    _tool_names: &[String],
+    _pending_reasons: &mut Vec<Option<String>>,
+    _reason_emitted: &mut bool,
+    _project_to_client: bool,
+    _session_id: Option<&str>,
+    _request_id: Option<&str>,
+    _argument_buffers: &mut Vec<String>,
+) {
 }
 
 impl V3DirectSseContentConsumer {
