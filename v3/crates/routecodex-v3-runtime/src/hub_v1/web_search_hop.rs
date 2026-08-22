@@ -37,8 +37,7 @@ use super::{
 use crate::provider_failure_runtime_policy::{
     resolve_v3_relay_target_outcome, resolve_v3_relay_target_outcome_with_rescue,
     v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderTargetResolution,
-    V3RelayProviderTargetResolutionInput,
+    V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{V3ErrorSourceKind, V3ProviderFailureSessionScope};
@@ -268,7 +267,10 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
     // 约束（防止搜索后端挂起无限阻塞主响应），失败记录搜索 provider health
     // （冷却），错误显式上抛进入主请求错误链（禁止降级吞错）。
     let provider_raw = match tokio::time::timeout(
-        crate::hub_v1::relay_runtime_core::V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT,
+        crate::hub_v1::v3_relay_transport_response_timeout(
+            manifest,
+            &selected.candidate.provider_id,
+        ),
         transport.send(transport_request),
     )
     .await

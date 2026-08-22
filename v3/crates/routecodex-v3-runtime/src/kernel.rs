@@ -1,5 +1,4 @@
 use crate::hooks::{build_v3_provider_error_source, V3HookRegistry};
-use crate::sse_object_pipeline::process_sse_object_frame;
 use crate::hub_v1::{
     apply_v3_stop_servertool_hook_at_resp03, apply_v3_stopless_request_hook_at_req04,
     apply_v3_tool_call_servertool_hook_at_resp03,
@@ -27,6 +26,7 @@ use crate::remote_continuation::{
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
 use crate::shared::{V3RemoteContinuationObservation, V3SseRemoteContinuationObservationState};
+use crate::sse_object_pipeline::process_sse_object_frame;
 use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -47,9 +47,8 @@ use routecodex_v3_provider_responses::{
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
     build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
-    build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField,
-    SseIncrementalDecoder, SseTransportIn02DecodedFrame, SseTransportIn03ValidatedFrameStream,
-    SseTransportLimits,
+    build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField, SseIncrementalDecoder,
+    SseTransportIn02DecodedFrame, SseTransportIn03ValidatedFrameStream, SseTransportLimits,
 };
 use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
@@ -59,11 +58,12 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 mod direct_sse_provider_outcome;
 use direct_sse_provider_outcome::{
-    wrap_direct_sse_provider_outcome_stream, wrap_direct_sse_provider_outcome_stream_with_terminal_commit,
-    V3DirectSseProviderOutcome,
+    wrap_direct_sse_provider_outcome_stream,
+    wrap_direct_sse_provider_outcome_stream_with_terminal_commit, V3DirectSseProviderOutcome,
 };
-mod direct_runtime_helpers_stream;
 pub mod direct_request_key_hooks;
+mod direct_runtime_helpers_stream;
+pub(crate) use direct_runtime_helpers_stream::wrap_direct_sse_provider_event_json_observation_stream_with_compat as wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook;
 mod direct_sse_consumers;
 pub(crate) use direct_sse_consumers::V3DirectSseTypedHookCatalog;
 mod v3_direct_protocol_codec;
@@ -72,27 +72,15 @@ pub use v3_direct_protocol_codec::{
 };
 const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
 
-/// Responses direct transport 响应头等待上限：provider 在该窗口内未返回响应头
-/// 视为挂起，归一化为 transport 错误进入错误链（reselect 切 provider + health
-/// 记录 + 连续失败达到阈值拉黑 15 分钟）。120 秒覆盖深上下文 provider 的首响应
-/// 延迟；transport request 自身仍保留 provider 声明的 300 秒总超时。
-const V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(120);
 /// 挂起判定的固定 reason：只有响应头等待超时构造的 Transport 错误才进入
 /// health-neutral 瞬态重试；其余 transport 错误（连接失败等）保持原策略。
 const V3_DIRECT_TRANSPORT_HANG_REASON: &str = "provider response header timed out (suspected hang)";
 
-#[cfg(test)]
-mod response_header_timeout_contract_tests {
-    use super::V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT;
-
-    #[test]
-    fn responses_direct_transport_header_timeout_keeps_120_second_budget() {
-        assert_eq!(
-            V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT,
-            std::time::Duration::from_secs(120)
-        );
-    }
+fn responses_direct_transport_response_timeout(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+) -> std::time::Duration {
+    crate::hub_v1::v3_relay_transport_response_timeout(manifest, provider_id)
 }
 
 static DEFAULT_RESPONSES_TRANSPORT: OnceLock<ReqwestResponsesTransport> = OnceLock::new();
@@ -389,7 +377,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 )
             }
         };
-        let request_is_compaction = standardized.protocol_context.request_purpose.is_compaction()
+        let request_is_compaction = standardized
+            .protocol_context
+            .request_purpose
+            .is_compaction()
             || standardized
                 .protocol_context
                 .endpoint
@@ -517,6 +508,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             &provider_health,
                             &failed_candidates,
                             now_epoch_ms,
+                            0,
                             allow_exhaustion_rescue_probe,
                         )
                         .await
@@ -949,7 +941,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             );
         }
         let provider_raw = match tokio::time::timeout(
-            V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT,
+            responses_direct_transport_response_timeout(
+                manifest,
+                &policy.target.candidate.provider_id,
+            ),
             transport.send(transport_request),
         )
         .await
@@ -1116,12 +1111,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         let direct_response_compat_context =
             match crate::kernel::v3_direct_protocol_codec::build_direct_response_compat_context(
                 &policy.target,
-                manifest.features.get("tool_thinking").copied().unwrap_or(false),
+                manifest
+                    .features
+                    .get("tool_thinking")
+                    .copied()
+                    .unwrap_or(false),
                 manifest
                     .features
                     .get("toolreason_client_projection")
                     .copied()
                     .unwrap_or(true),
+                direct_failure_session_scope.session_id(),
             ) {
                 Ok(context) => context,
                 Err(error) => {
@@ -1479,6 +1479,19 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         policy.target.candidate.compatibility_profile.as_deref()
                             == Some("responses:thinking-tags"),
                         hook_registry.direct_sse_typed_hooks(),
+                        manifest
+                            .features
+                            .get("tool_thinking")
+                            .copied()
+                            .unwrap_or(false),
+                        manifest
+                            .features
+                            .get("toolreason_client_projection")
+                            .copied()
+                            .unwrap_or(true),
+                        Some(direct_failure_session_scope.session_id().to_owned()),
+                        Some(standardized.protocol_context.request_id.clone()),
+                        true,
                     );
                     V3ClientBody::Sse(stream)
                 }

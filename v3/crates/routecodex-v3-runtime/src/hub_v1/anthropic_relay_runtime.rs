@@ -1,10 +1,9 @@
 use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    project_v3_client_disconnect, provider_runtime_failure_stage,
-    resolve_v3_relay_target_outcome, resolve_v3_relay_target_outcome_with_rescue,
-    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample,
+    project_v3_client_disconnect, provider_runtime_failure_stage, resolve_v3_relay_target_outcome,
+    resolve_v3_relay_target_outcome_with_rescue, run_v3_relay_provider_failure_policy,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
     V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
@@ -13,7 +12,7 @@ use crate::{
     V3LocalContinuationError, V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey,
     V3LocalContinuationStore, V3LocalContinuationTerminalOutcome,
 };
-use futures_util::StreamExt;
+use futures_util::{stream, StreamExt};
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
@@ -27,8 +26,14 @@ use routecodex_v3_provider_responses::{
     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResponseBody,
     V3ProviderSseStream, V3ResponsesProviderTarget,
 };
+use routecodex_v3_sse::{
+    build_v3_sse_transport_in_02_from_fields,
+    build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
+    build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField,
+};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 const V3_ANTHROPIC_LOCAL_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
@@ -82,6 +87,50 @@ pub struct V3AnthropicRelayRuntimeOutput {
     pub servertool_followup_required: bool,
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
+    pub provider_snapshots: Option<V3RelayProviderSnapshots>,
+}
+
+pub fn project_v3_anthropic_client_sse_stream(
+    client_response: Value,
+) -> crate::nodes::V3ClientSseStream {
+    let events = client_response
+        .get("events")
+        .and_then(Value::as_array)
+        .cloned();
+    let stream: Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>> = match events {
+        Some(events) => Box::pin(stream::iter(events.into_iter().map(|event| {
+            build_v3_anthropic_client_sse_event_chunk(&event)
+        }))),
+        None => Box::pin(stream::iter(vec![Err(
+            "typed V3 Anthropic Relay SSE projection is missing events".to_string(),
+        )])),
+    };
+    crate::nodes::map_v3_client_sse_stream(stream, "V3HubRespOutbound05ClientSemantic")
+}
+
+fn build_v3_anthropic_client_sse_event_chunk(
+    event: &Value,
+) -> Result<Vec<u8>, String> {
+    let (Some(name), Some(data)) = (
+        event.get("event").and_then(Value::as_str),
+        event.get("data"),
+    ) else {
+        return Err("typed V3 Anthropic Relay SSE event is missing event or data".to_string());
+    };
+    let decoded = build_v3_sse_transport_in_02_from_fields(vec![
+        SseField::Named {
+            name: "event".to_string(),
+            value: name.to_string(),
+        },
+        SseField::Named {
+            name: "data".to_string(),
+            value: data.to_string(),
+        },
+    ])
+    .map_err(|error| error.to_string())?;
+    let validated = build_v3_sse_transport_in_03_from_v3_sse_transport_in_02(decoded)
+        .map_err(|error| error.to_string())?;
+    Ok(build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&validated).into_bytes())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -463,11 +512,14 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     transport: &T,
     client_headers: Vec<V3AnthropicRelayClientHeader>,
     local: Option<V3AnthropicRelayLocalContinuationExecution<'_>>,
-    response_hook_profile: V3HubRelayResponseHookProfile,
+    mut response_hook_profile: V3HubRelayResponseHookProfile,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     allow_exhaustion_rescue_probe: bool,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
+    response_hook_profile = response_hook_profile
+        .with_toolreason_observation_session_id(input.failure_session_scope.session_id().to_owned())
+        .with_toolreason_observation_request_id(input.request_id.clone());
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3AnthropicRelayRuntimeError::StaticRegistry(error.to_string()))?;
     let mut trace = Vec::with_capacity(17);
@@ -563,9 +615,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     trace.push("V3HubReqChatProcess04Governed");
     let request_web_search_state = request_outcome.web_search_state().cloned();
     let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
-    let mut response_hook_profile = response_hook_profile.with_tool_thinking_enabled(
-        request_tool_thinking_enabled,
-    );
+    let mut response_hook_profile =
+        response_hook_profile.with_tool_thinking_enabled(request_tool_thinking_enabled);
     if request_web_search_execution_mode.is_metadata_center_local_search() {
         response_hook_profile =
             response_hook_profile.with_web_search_execution_mode(request_web_search_execution_mode);
@@ -602,18 +653,18 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             selected
         } else {
             let target_resolution_input = V3RelayProviderTargetResolutionInput {
-                    manifest,
-                    server_id: &input.server_id,
-                    failure_session_scope: &input.failure_session_scope,
-                    entry_kind: "anthropic",
-                    endpoint_path: "/v1/messages",
-                    body: &route_facts_body,
-                    request_local_excluded_candidates: &failed_candidates,
-                    provider_health: &provider_health,
-                    now_ms: v3_relay_provider_policy_now_epoch_ms()
-                        .map_err(V3AnthropicRelayRuntimeError::Target)?,
-                    deterministic_sample,
-                };
+                manifest,
+                server_id: &input.server_id,
+                failure_session_scope: &input.failure_session_scope,
+                entry_kind: "anthropic",
+                endpoint_path: "/v1/messages",
+                body: &route_facts_body,
+                request_local_excluded_candidates: &failed_candidates,
+                provider_health: &provider_health,
+                now_ms: v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(V3AnthropicRelayRuntimeError::Target)?,
+                deterministic_sample,
+            };
             let target_resolution = if allow_exhaustion_rescue_probe {
                 resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await
             } else {
@@ -749,6 +800,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             }
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
+        let provider_request_snapshot = transport_request.provider_request_projection();
         let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
@@ -792,7 +844,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
         let transport_result = match tokio::time::timeout(
-            V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT,
+            v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
             transport.send(transport_request),
         )
         .await
@@ -895,6 +947,15 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         continue;
                     }
                 };
+                let provider_response_snapshot = json!({
+                    "object": "routecodex.v3.provider_response_snapshot",
+                    "stage": "provider-response",
+                    "bodyKind": "sse",
+                    "rawSse": chunks
+                        .iter()
+                        .map(|chunk| String::from_utf8_lossy(chunk).to_string())
+                        .collect::<String>(),
+                });
                 let resp01 = build_v3_provider_resp_inbound_01_raw_from_sse_chunks(
                     chunks,
                     V3ProviderRespInbound01RawContext::new(
@@ -994,6 +1055,10 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     servertool_followup_required,
                     observability: Some(observability),
                     stream_observation: None,
+                    provider_snapshots: Some(V3RelayProviderSnapshots {
+                        provider_request: Some(provider_request_snapshot.clone()),
+                        provider_response: Some(provider_response_snapshot),
+                    }),
                 });
             }
             V3ProviderResponseBody::Json(bytes) => {
@@ -1028,6 +1093,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         continue;
                     }
                 };
+                let provider_response_snapshot = provider_value.clone();
                 let hook_provider_value =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
                         match project_v3_anthropic_message_as_responses_response(&provider_value) {
@@ -1173,6 +1239,10 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     servertool_followup_required,
                     observability: Some(observability),
                     stream_observation: None,
+                    provider_snapshots: Some(V3RelayProviderSnapshots {
+                        provider_request: Some(provider_request_snapshot),
+                        provider_response: Some(provider_response_snapshot),
+                    }),
                 });
             }
         }

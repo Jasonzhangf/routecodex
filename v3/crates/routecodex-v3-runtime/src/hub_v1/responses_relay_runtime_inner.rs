@@ -483,7 +483,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             .start_external()
             .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
         let transport_result = match tokio::time::timeout(
-            V3_RELAY_TRANSPORT_RESPONSE_TIMEOUT,
+            v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
             transport.send(transport_request),
         )
         .await
@@ -803,6 +803,8 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     response_web_search_state,
                 ) = match run_json_response_hooks(
                     V3ResponsesRelayJsonResponseHookInput {
+                        session_id: input.failure_session_scope.session_id(),
+                        request_id: &input.request_id,
                         provider_value: &hook_provider_value,
                         provider_semantic_body: &provider_semantic_body,
                         manifest,
@@ -1129,6 +1131,8 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     response_web_search_state,
                 ) = match run_json_response_hooks(
                     V3ResponsesRelayJsonResponseHookInput {
+                        session_id: input.failure_session_scope.session_id(),
+                        request_id: &input.request_id,
                         provider_value: &provider_value,
                         provider_semantic_body: &provider_semantic_body,
                         manifest,
