@@ -124,6 +124,25 @@ impl V3ProviderTransportAttemptBroker {
         let attempt = attempts
             .get_mut(key)
             .ok_or_else(|| "provider transport attempt key is not registered".to_string())?;
+        let current = attempt.checkpoint.state;
+        let allowed = matches!(
+            (current, state),
+            (V3ProviderTransportAttemptState::Connecting, V3ProviderTransportAttemptState::Streaming)
+                | (V3ProviderTransportAttemptState::Connecting, V3ProviderTransportAttemptState::Detached)
+                | (V3ProviderTransportAttemptState::Connecting, V3ProviderTransportAttemptState::Terminal)
+                | (V3ProviderTransportAttemptState::Connecting, V3ProviderTransportAttemptState::Failed)
+                | (V3ProviderTransportAttemptState::Streaming, V3ProviderTransportAttemptState::Detached)
+                | (V3ProviderTransportAttemptState::Streaming, V3ProviderTransportAttemptState::Terminal)
+                | (V3ProviderTransportAttemptState::Streaming, V3ProviderTransportAttemptState::Failed)
+                | (V3ProviderTransportAttemptState::Detached, V3ProviderTransportAttemptState::Streaming)
+                | (V3ProviderTransportAttemptState::Detached, V3ProviderTransportAttemptState::Terminal)
+                | (V3ProviderTransportAttemptState::Detached, V3ProviderTransportAttemptState::Failed)
+        );
+        if !allowed {
+            return Err(format!(
+                "provider transport attempt cannot transition from {current:?} to {state:?}"
+            ));
+        }
         attempt.checkpoint.state = state;
         Ok(())
     }
@@ -212,5 +231,27 @@ mod tests {
         assert!(broker
             .begin(key, V3ProviderTransportKind::WebSocketV2, 4)
             .is_err());
+    }
+
+    #[test]
+    fn provider_transport_attempt_terminal_is_exactly_once() {
+        let broker = V3ProviderTransportAttemptBroker::default();
+        let key = key();
+        broker
+            .begin(key.clone(), V3ProviderTransportKind::Http, 3)
+            .unwrap();
+        broker
+            .transition(&key, V3ProviderTransportAttemptState::Terminal)
+            .unwrap();
+        assert!(broker
+            .transition(&key, V3ProviderTransportAttemptState::Failed)
+            .is_err());
+        assert!(broker
+            .transition(&key, V3ProviderTransportAttemptState::Terminal)
+            .is_err());
+        assert_eq!(
+            broker.state(&key),
+            Some(V3ProviderTransportAttemptState::Terminal)
+        );
     }
 }
