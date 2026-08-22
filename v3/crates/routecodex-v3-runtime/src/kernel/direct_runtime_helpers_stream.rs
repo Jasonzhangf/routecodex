@@ -79,6 +79,11 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
         false,
         false,
         V3DirectSseTypedHookCatalog::default(),
+        false,
+        false,
+        None,
+        None,
+        false,
     )
 }
 
@@ -91,6 +96,11 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     deepseek_console_go: bool,
     thinking_tags: bool,
     typed_hooks: V3DirectSseTypedHookCatalog,
+    tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
+    session_id: Option<String>,
+    request_id: Option<String>,
+    client_responses_projection: bool,
 ) -> V3ClientSseStream {
     struct StreamState {
         source: V3ClientSseStream,
@@ -100,7 +110,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
         strip_client_response_id: bool,
         retain_response_cipher: bool,
         deepseek_console_go: bool,
-        typed_hooks: V3DirectSseTypedHookCatalog,
+        content_consumer: V3DirectSseContentConsumer,
         done: bool,
     }
 
@@ -118,7 +128,17 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
             strip_client_response_id,
             retain_response_cipher,
             deepseek_console_go,
-            typed_hooks,
+            content_consumer: V3DirectSseContentConsumer {
+                retain_response_cipher,
+                strip_client_response_id,
+                deepseek_console_go,
+                session_id,
+                request_id,
+                ..Default::default()
+            }
+            .with_typed_hooks(typed_hooks)
+            .with_tool_thinking(tool_thinking_enabled, toolreason_client_projection)
+            .with_client_responses_projection(client_responses_projection),
             done: false,
         },
         |mut state| async move {
@@ -133,8 +153,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                         &state.stream_observation,
                         state.strip_client_response_id,
                         state.retain_response_cipher,
-                        state.deepseek_console_go,
-                        state.typed_hooks,
+                        &mut state.content_consumer,
                     )
                     .map(|out| out.unwrap_or(chunk));
                     if result.is_err() {
@@ -152,13 +171,14 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                         &mut state.decoder,
                         SseIncrementalDecoder::new(SseTransportLimits::default()),
                     );
-                    match decoder
+                    let decoder_result = decoder
                         .finish()
-                        .map_err(build_v3_sse_transport_error_source)
-                    {
+                        .map_err(build_v3_sse_transport_error_source);
+                    state.content_consumer.finalize_toolreason_observation();
+                    match decoder_result {
                         Ok(()) if state.runtime_timing.is_finished().unwrap_or(false) => None,
-                        Ok(()) => match state.runtime_timing.finish_external() {
-                            Ok(()) => None,
+                        Ok(()) => match state.runtime_timing.finish_external_if_active() {
+                            Ok(_) => None,
                             Err(error) => {
                                 Some((Err(runtime_source("V3RuntimeTimingExternal", error)), state))
                             }
@@ -180,8 +200,7 @@ fn record_direct_sse_provider_event_json_chunk(
     stream_observation: &V3RuntimeStreamObservation,
     strip_client_response_id: bool,
     retain_response_cipher: bool,
-    deepseek_console_go: bool,
-    typed_hooks: V3DirectSseTypedHookCatalog,
+    content_consumer: &mut V3DirectSseContentConsumer,
 ) -> Result<Option<Vec<u8>>, V3Error01SourceRaised> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
@@ -191,12 +210,6 @@ fn record_direct_sse_provider_event_json_chunk(
     }
     let mut rewritten = Vec::new();
     let mut any_rewritten = false;
-    let mut content_consumer = V3DirectSseContentConsumer {
-        retain_response_cipher,
-        strip_client_response_id,
-        deepseek_console_go,
-        typed_hooks,
-    };
     for frame in frames {
         record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
         let original =
@@ -204,8 +217,14 @@ fn record_direct_sse_provider_event_json_chunk(
         let projected = process_sse_object_frame(&frame, content_consumer)
             .map_err(|error| provider_sse_failure_source(error.to_string()))?
             .into_bytes();
+        let toolreason_reasoning_projection =
+            content_consumer.take_toolreason_reasoning_projection();
         if projected != original {
             any_rewritten = true;
+        }
+        if let Some(prefix) = toolreason_reasoning_projection {
+            any_rewritten = true;
+            rewritten.extend_from_slice(&prefix);
         }
         rewritten.extend_from_slice(&projected);
     }
