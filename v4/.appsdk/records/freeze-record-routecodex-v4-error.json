@@ -14,7 +14,7 @@
       "v4/target/**"
     ]
   },
-  "created_at": "2026-08-16T04:29:30Z",
+  "created_at": "2026-08-22T06:03:00Z",
   "freeze_id": "error-sdk013-freeze",
   "git_clean": true,
   "issue_id": "appsdk-013-migration",
@@ -30,7 +30,7 @@
   "previous_active_immutable": true,
   "previous_active_version": "active-v3",
   "promotion_id": "error-sdk013-promotion",
-  "promotion_record_hash": "sha256:82475bbdaecd74519873d5a5c47c873e4f46c2d83b4b9e052cde9a4342724c1c",
+  "promotion_record_hash": "sha256:6db91d87008b629998018f3018f4e66315976a64d4147e0ba2018b34f24e8138",
   "public_api_hash": "sha256:de339870034290ad3d70684a2355ff7c70a9315817744648a5d7cb0d66ed734d",
   "regression_report_hash": "sha256:cf92f3bab232ab3c82edfc10c99bc5761c8593ef1c17bae40564c02803d61456",
   "regression_report_id": "error-sdk013-regression",

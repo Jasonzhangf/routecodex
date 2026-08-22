@@ -14,7 +14,7 @@
       "v4/target/**"
     ]
   },
-  "created_at": "2026-08-16T04:27:30Z",
+  "created_at": "2026-08-22T05:59:00Z",
   "freeze_id": "control-sdk013-freeze",
   "git_clean": true,
   "issue_id": "appsdk-013-migration",
@@ -30,7 +30,7 @@
   "previous_active_immutable": true,
   "previous_active_version": "active-v2",
   "promotion_id": "control-sdk013-promotion",
-  "promotion_record_hash": "sha256:e362564805e48eaaf9122ac0e4a39245a3baf46b6478525a0060605e6c275442",
+  "promotion_record_hash": "sha256:c1dcafaf10dfb654fb022307ad89e9c0b427f865f7ff83062a91d2c0c1609c17",
   "public_api_hash": "sha256:43364e0f503e8721caebb31df47192e5dcf8e2501b4616203cf91f3f2f6b9902",
   "regression_report_hash": "sha256:9034bc4bf598fe2e25ce98cd7d4ce5702453eb41b6c8fb63103221cda465c767",
   "regression_report_id": "control-sdk013-regression",

@@ -14,7 +14,7 @@
       "v4/target/**"
     ]
   },
-  "created_at": "2026-08-16T04:25:30Z",
+  "created_at": "2026-08-22T05:54:00Z",
   "freeze_id": "edge-sdk013-freeze",
   "git_clean": true,
   "issue_id": "appsdk-013-migration",
@@ -30,7 +30,7 @@
   "previous_active_immutable": true,
   "previous_active_version": "active-v3",
   "promotion_id": "edge-sdk013-promotion",
-  "promotion_record_hash": "sha256:a39ae1ab14dedd14131bfac26ae77fb750dcb753ac7cabf2af184527c1c0a0d2",
+  "promotion_record_hash": "sha256:80ec34105aaf83dc73bec6938c6699783dd926f1ed2cadb55c59b2680728ceca",
   "public_api_hash": "sha256:14ee9e208a43bf907c1f353e1e170309e3e9e5062ea4e8bc5bb911ea82f1863a",
   "regression_report_hash": "sha256:865a71797ed3a24512c9b6c94cc863a26bd03376c654f352bf8839ebe3e079e6",
   "regression_report_id": "edge-sdk013-regression",
