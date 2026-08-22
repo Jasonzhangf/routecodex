@@ -1,7 +1,5 @@
 use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
 use super::*;
-// Relay→Direct handoff 时撤销 relay 注入的 stopless 合约（Direct 按自身配置决定注入）。
-use super::stopless_injection::strip_v3_stopless_contract_for_relay_direct_handoff;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 
@@ -50,8 +48,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             object.remove("previous_response_id");
         }
     }
-    let protocol_switch_allowed =
-        responses_relay_protocol_switch_allowed(&input.payload, &local_tool_output_ids);
     apply_v3_responses_relay_web_search_control_completion(
         manifest,
         &input.server_id,
@@ -62,9 +58,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         resolve_request_web_search_execution_mode(manifest, &input.payload);
     let request_web_search_backend_binding =
         resolve_request_web_search_backend_binding(manifest, &input.payload);
-    // SameProtocolDirect handoff 边界需要恢复原始 tool_choice；在 payload
-    // move 进 ReqInbound 之前保存引用值。
-    let original_tool_choice = input.payload.get("tool_choice").cloned();
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
         V3HubEntryProtocol::Responses,
@@ -202,7 +195,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         retry_policy: shared_retry_policy,
         deterministic_sample,
     };
-    let allowed_modes = allowed_execution_modes_for_relay_server(manifest, &input.server_id)?;
     loop {
         let selected = if let Some(selected) = retry_selected.take() {
             selected
@@ -269,78 +261,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 }
             }
         };
-        if protocol_switch_allowed {
-            let decision = build_v3_execution_11_protocol_decision_from_v3_target_10(
-                selected.clone(),
-                "responses",
-                &allowed_modes,
-            )
-            .map_err(|source| V3ResponsesRelayRuntimeError::Target(source.message.clone()))?;
-            if decision.mode == V3Execution11ProtocolDecisionMode::SameProtocolDirect {
-                trace.push("V3Execution11ProtocolDecision");
-                let expanded = match initial_expanded.clone() {
-                    Some(expanded) => expanded,
-                    None => expand_v3_relay_target_plan_for_selected(
-                        manifest,
-                        &selected,
-                        deterministic_sample,
-                    )
-                    .map_err(V3ResponsesRelayRuntimeError::Target)?,
-                };
-                clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
-                    manifest,
-                    &input.server_id,
-                    stopless_control.as_ref(),
-                    stopless_state.as_ref(),
-                )?;
-                return Ok(V3ResponsesRelayRuntimeOutput {
-                    status: 0,
-                    client_body: V3ResponsesRelayClientBody::Json(Value::Null),
-                    node_trace: Vec::new(),
-                    error_chain: None,
-                    observability: None,
-                    stream_observation: None,
-                    finalized_response: None,
-                    provider_snapshots: None,
-                    protocol_direct_handoff: Some(V3ResponsesProtocolDirectHandoff {
-                        request_payload: {
-                            // Relay 当前轮注入的 stopless 合约不得跨执行模式延续：
-                            // handoff 到 Direct 后由 Direct 按自身配置决定注入。
-                            let mut handoff_chat_payload = (*provider_semantic_body).clone();
-                            strip_v3_stopless_contract_for_relay_direct_handoff(
-                                &mut handoff_chat_payload,
-                                original_tool_choice.as_ref(),
-                            );
-                            build_v3_openai_responses_standard_request_from_chat_canonical(
-                                &handoff_chat_payload,
-                            )
-                            .map_err(V3ResponsesRelayRuntimeError::ProviderWireEncoding)?
-                        },
-                        plan: V3ResponsesProtocolExecutionPlan {
-                            decision,
-                            node_trace: vec![
-                                "V3Req04StandardizedResponses",
-                                "V3Router05RequestClassified",
-                                "V3Router06RoutePoolResolved",
-                                "V3Router07OpaqueTargetHitOnce",
-                                "V3Target08KindClassified",
-                                "V3Target09CandidateSetExpanded",
-                                "V3Target10ConcreteProviderSelected",
-                                "V3Execution11ProtocolDecision",
-                            ],
-                            expanded,
-                            protocol_candidate_keys: BTreeSet::new(),
-                            request_local_excluded_candidates: failed_candidates.clone(),
-                        },
-                        node_trace: trace,
-                        provider_failure_events: provider_failure_events.clone(),
-                        observability_accumulator: observability_accumulator
-                            .clone()
-                            .with_additional_attempts(provider_send_attempts),
-                    }),
-                });
-            }
-        }
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
         let selected_target_model_id = selected.candidate.model_id.clone();

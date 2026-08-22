@@ -328,8 +328,9 @@ fn normalize_openai_chat_custom_tool(
     // 协议形状，opencode-go 等上游以 `unknown variant 'custom'` 拒绝）。
     // custom -> function 扁平化：name/description 保留，parameters 用
     // `{"type":"object"}`（go 要求 parameters 必须是 type:object 的 JSON
-    // Schema，空对象会被拒）；format（grammar）是 Responses/扩展形状，chat
-    // wire 无法表达，按协议收窄丢弃（ds4 源码无 grammar 引擎，等价透传）。
+    // Schema）；freeform 的真实输入挂到唯一的 `input` 字符串字段，保证 Chat
+    // provider 不会把 apply_patch 误生成成空 object。format（grammar）是
+    // Responses/扩展形状，chat wire 无法表达，按协议收窄丢弃。
     for key in row.keys() {
         if !matches!(key.as_str(), "type" | "name" | "description" | "format") {
             return Err(format!(
