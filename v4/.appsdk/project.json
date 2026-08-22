@@ -7,11 +7,8 @@
     ]
   },
   "development_scenarios": {
-    "manifest": ".appsdk/contracts/development-scenarios.manifest.json",
-    "enabled": [
-      "multi_worker_collaboration",
-      "multi_worktree_merge_queue"
-    ]
+    "enabled": [],
+    "manifest": ".appsdk/contracts/development-scenarios.manifest.json"
   },
   "governance": {
     "active_kind": "immutable_consumable_library",
@@ -52,6 +49,7 @@
       "contracts/records/goal-clarification-record.schema.json",
       "contracts/records/review-record.schema.json",
       "contracts/records/effectiveness-record.schema.json",
+      "contracts/records/pre-review-validation-record.schema.json",
       "contracts/records/collaboration-record.schema.json",
       "contracts/records/collaboration-index.schema.json",
       "contracts/records/merge-queue-record.schema.json",
@@ -66,8 +64,7 @@
     ],
     "runtime_forbidden_roots": [
       "playground/**",
-      "generated/**",
-      "protected/source/**"
+      "generated/**"
     ],
     "zone_transition_contract": "contracts/transitions/zone-transition-manifest.json"
   },
@@ -474,7 +471,7 @@
         "suite_id": "v4-error-l2-regression"
       },
       "source_owner": "routecodex-v4-error",
-      "stage": "frozen"
+      "stage": "source_implemented"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-config/**",
@@ -663,7 +660,7 @@
         "suite_id": "v4-plugin-contract-l2-regression"
       },
       "source_owner": "routecodex-v4-plugin-contract",
-      "stage": "source_implemented"
+      "stage": "controlled_verified"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-plugin-plan/**",
@@ -1716,6 +1713,6 @@
     "bundle_manifest": ".appsdk/contracts/sdk-bundle.manifest.json",
     "name": "appsdk",
     "resource_record": ".appsdk/sdk-resources.json",
-    "version": "0.1.3"
+    "version": "0.1.5"
   }
 }

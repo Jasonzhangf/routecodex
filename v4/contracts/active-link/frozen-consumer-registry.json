@@ -8,6 +8,36 @@
     "routecodex-v4-control",
     "routecodex-v4-error"
   ],
+  "resolver_owner": "routecodex-v4-build-link",
+  "resources": [
+    "v4.build.link_surface",
+    "v4.build.active_artifact_index"
+  ],
+  "functions": [
+    "v4.build_link.resolve_active_artifact",
+    "v4.build_link.emit_link_flags"
+  ],
+  "required_gates": [
+    "v4_active_link_resolver",
+    "v4_frozen_source_edge_forbidden",
+    "v4_cargo_workspace_build"
+  ],
+  "active_link_edges": [
+    {"from":"routecodex-v4-edge","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-control","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-error","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-config","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-config","to":"routecodex-v4-edge","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-debug","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-router","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-provider","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-server","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-runtime","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-runtime","to":"routecodex-v4-control","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-runtime","to":"routecodex-v4-error","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-runtime-bin","to":"routecodex-v4-base-node","owner":"routecodex-v4-build-link"},
+    {"from":"routecodex-v4-runtime-bin","to":"routecodex-v4-error","owner":"routecodex-v4-build-link"}
+  ],
   "consumers": [
     {
       "consumer": "routecodex-v4-edge",

@@ -104,21 +104,24 @@ fn positive_frozen_base_node_active_identity_resolves() {
     let resolution = resolve(
         &fixture_root(),
         "routecodex-v4-base-node",
-        "active-v1",
+        "active-v2",
         &host,
     )
     .expect("frozen base-node Active artifact must resolve");
     assert_eq!(resolution.identity.module_id, "routecodex-v4-base-node");
-    assert_eq!(resolution.identity.active_version, "active-v1");
+    assert_eq!(resolution.identity.active_version, "active-v2");
     assert_eq!(
         resolution.identity.artifact_hash,
-        "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4"
+        "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd"
     );
     assert_eq!(
         resolution.identity.public_api_hash,
-        "sha256:95f9248e0568946c686d9e17c809dfb49ad25ba002ed90709102d3f9f7f490f8"
+        "sha256:45f153ddb96a6dab9f73e037a6ae4c4377fde82524a76a44586ff2089f5902fe"
     );
-    assert_eq!(resolution.identity.source_commit, "fac43e278");
+    assert_eq!(
+        resolution.identity.source_commit,
+        "555bee59c61e0b3bbfa782fc8893cb355ac87eb8"
+    );
     assert!(resolution.identity.dependencies.is_empty());
     assert_eq!(
         resolution.rlib_paths.len(),
@@ -138,12 +141,12 @@ fn positive_frozen_base_node_active_identity_resolves() {
 #[test]
 fn positive_edge_active_identity_resolves_with_dependency_closure() {
     let host = host_triple().expect("rustc host");
-    let resolution = resolve(&fixture_root(), "routecodex-v4-edge", "active-v3", &host)
+    let resolution = resolve(&fixture_root(), "routecodex-v4-edge", "active-v4", &host)
         .expect("frozen edge Active artifact must resolve");
     assert_eq!(resolution.identity.module_id, "routecodex-v4-edge");
     assert_eq!(
         resolution.identity.artifact_hash,
-        "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0"
+        "sha256:83728d3d7967db171cfb627301ba8e8d636eaf6015101f70e316a5234c260ea6"
     );
     assert_eq!(resolution.identity.dependencies.len(), 1);
     assert_eq!(
@@ -152,7 +155,7 @@ fn positive_edge_active_identity_resolves_with_dependency_closure() {
     );
     assert_eq!(
         resolution.identity.dependencies[0].active_version,
-        "active-v1"
+        "active-v2"
     );
     assert_eq!(resolution.dependency_resolutions.len(), 1);
     assert_eq!(emit_link_flags(&resolution).len(), 2);
@@ -172,7 +175,7 @@ fn positive_dependency_selection_skips_nonmatching_historical_version() {
     );
     assert_eq!(
         resolution.identity.dependencies[0].artifact_hash,
-        "sha256:16b93ccf529ec4a940c1ddeab745af7a8e70daf148396f5b8f5ba88ce1d08f70"
+        "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd"
     );
 }
 
@@ -262,12 +265,12 @@ fn negative_dependency_hash_without_matching_version_fails() {
 #[test]
 fn positive_control_active_identity_resolves_with_dependency_closure() {
     let host = host_triple().expect("rustc host");
-    let resolution = resolve(&fixture_root(), "routecodex-v4-control", "active-v2", &host)
+    let resolution = resolve(&fixture_root(), "routecodex-v4-control", "active-v3", &host)
         .expect("frozen control Active artifact must resolve");
     assert_eq!(resolution.identity.module_id, "routecodex-v4-control");
     assert_eq!(
         resolution.identity.artifact_hash,
-        "sha256:bf6b8e426f5bda1962b5c0c4b82bde1be090294eed5e44bbfdc49d7cdc0e0103"
+        "sha256:e280965a718eeaaee59725a1703dd58b16a875b616e6b0e8c65bf5b2b4a28676"
     );
     assert_eq!(resolution.identity.dependencies.len(), 1);
     assert_eq!(
@@ -276,7 +279,7 @@ fn positive_control_active_identity_resolves_with_dependency_closure() {
     );
     assert_eq!(
         resolution.identity.dependencies[0].active_version,
-        "active-v1"
+        "active-v2"
     );
     assert_eq!(resolution.dependency_resolutions.len(), 1);
     assert_eq!(emit_link_flags(&resolution).len(), 2);
@@ -285,12 +288,12 @@ fn positive_control_active_identity_resolves_with_dependency_closure() {
 #[test]
 fn positive_error_active_identity_resolves_with_dependency_closure() {
     let host = host_triple().expect("rustc host");
-    let resolution = resolve(&fixture_root(), "routecodex-v4-error", "active-v3", &host)
+    let resolution = resolve(&fixture_root(), "routecodex-v4-error", "active-v4", &host)
         .expect("frozen error Active artifact must resolve");
     assert_eq!(resolution.identity.module_id, "routecodex-v4-error");
     assert_eq!(
         resolution.identity.artifact_hash,
-        "sha256:c26ccfc3ee6c847b1b4b2f812b72071a20df81f98fe40e60d457c41b3aed5d3f"
+        "sha256:988609a37c6fb6d3ca9463c5e15e74471c3fec7414c634902a2009c4903461dc"
     );
     assert_eq!(resolution.identity.dependencies.len(), 1);
     assert_eq!(
@@ -299,7 +302,7 @@ fn positive_error_active_identity_resolves_with_dependency_closure() {
     );
     assert_eq!(
         resolution.identity.dependencies[0].active_version,
-        "active-v1"
+        "active-v2"
     );
     assert_eq!(resolution.dependency_resolutions.len(), 1);
     assert_eq!(emit_link_flags(&resolution).len(), 2);
@@ -323,7 +326,7 @@ fn negative_target_mismatch_fails_fast() {
     let error = resolve(
         &fixture_root(),
         "routecodex-v4-base-node",
-        "active-v1",
+        "active-v2",
         "x86_64-pc-windows-msvc",
     )
     .expect_err("cross-target resolution must fail");
@@ -348,7 +351,7 @@ fn negative_rustc_producer_mismatch_fails_fast() {
     let error = resolve(
         &mismatched_root,
         "routecodex-v4-base-node",
-        "active-v1",
+        "active-v2",
         &host,
     )
     .expect_err("producer rustc mismatch must fail before link flags");
@@ -360,7 +363,7 @@ fn negative_public_api_hash_tamper_fails_fast() {
     let host = host_triple().expect("rustc host");
     let tampered_root = temp_fixture("public-api-tamper");
     let artifact_file =
-        tampered_root.join("active/lib/routecodex-v4-base-node/active-v1/artifact.json");
+        tampered_root.join("active/lib/routecodex-v4-base-node/active-v2/artifact.json");
     let mut artifact: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&artifact_file).expect("read artifact"))
             .expect("parse artifact");
@@ -376,7 +379,7 @@ fn negative_public_api_hash_tamper_fails_fast() {
     let error = resolve(
         &tampered_root,
         "routecodex-v4-base-node",
-        "active-v1",
+        "active-v2",
         &host,
     )
     .expect_err("tampered public API hash record must fail");
@@ -397,7 +400,7 @@ fn negative_dependency_closure_mismatch_fails_fast() {
     let broken_root = temp_fixture("dep-missing");
     fs::remove_dir_all(broken_root.join("active/lib/routecodex-v4-base-node"))
         .expect("remove base-node fixture copy");
-    let error = resolve(&broken_root, "routecodex-v4-edge", "active-v3", &host)
+    let error = resolve(&broken_root, "routecodex-v4-edge", "active-v4", &host)
         .expect_err("dependency hash swap must fail");
     assert!(matches!(
         error,
@@ -414,9 +417,9 @@ fn negative_error_classify_without_witness_compile_fails() {
     // locks the positive witness-bearing call shape.
     let fixture = fixture_root();
     let base_rlib = fixture
-        .join("active/lib/routecodex-v4-base-node/active-v1/lib/libroutecodex_v4_base_node.rlib");
+        .join("active/lib/routecodex-v4-base-node/active-v2/lib/libroutecodex_v4_base_node.rlib");
     let error_rlib =
-        fixture.join("active/lib/routecodex-v4-error/active-v3/lib/libroutecodex_v4_error.rlib");
+        fixture.join("active/lib/routecodex-v4-error/active-v4/lib/libroutecodex_v4_error.rlib");
     assert!(base_rlib.is_file(), "fixture base-node rlib missing");
     assert!(error_rlib.is_file(), "fixture error rlib missing");
     let dir = std::env::temp_dir().join(format!(
@@ -515,12 +518,15 @@ fn negative_active_write_forbidden_nonexistent_path() {
 #[test]
 fn index_is_deterministic_and_drift_detected() {
     let root = temp_fixture("index-determinism");
-    let first = IndexBuilder::build(&root, "fac43e278").expect("build index");
-    let second = IndexBuilder::build(&root, "fac43e278").expect("rebuild index");
+    let first = IndexBuilder::build(&root, "555bee59c61e0b3bbfa782fc8893cb355ac87eb8")
+        .expect("build index");
+    let second = IndexBuilder::build(&root, "555bee59c61e0b3bbfa782fc8893cb355ac87eb8")
+        .expect("rebuild index");
     assert_eq!(first.manifest_hash, second.manifest_hash);
     assert_eq!(first.entries.len(), 4);
     IndexBuilder::write(&root, &first).expect("write index");
-    IndexBuilder::verify(&root, "fac43e278").expect("verify same-commit index");
+    IndexBuilder::verify(&root, "555bee59c61e0b3bbfa782fc8893cb355ac87eb8")
+        .expect("verify same-commit index");
     let drift = IndexBuilder::verify(&root, "different-commit").expect_err("drift must fail");
     assert!(matches!(drift, ActiveLinkError::ManifestInvalid(_)));
 }

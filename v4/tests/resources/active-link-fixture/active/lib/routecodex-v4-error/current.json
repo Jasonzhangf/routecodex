@@ -1,1 +1,5 @@
-{"module_id":"routecodex-v4-error","version":"active-v4","artifact_hash":"sha256:e172b55e1d30076d9adba3d6b9f12dc7ce6f7adc73bbe2fbf8b5abe8fd61ca74"}
+{
+  "module_id": "routecodex-v4-error",
+  "artifact_hash": "sha256:988609a37c6fb6d3ca9463c5e15e74471c3fec7414c634902a2009c4903461dc",
+  "version": "active-v4"
+}

@@ -1,1 +1,5 @@
-{"module_id":"routecodex-v4-edge","version":"active-v4","artifact_hash":"sha256:f44c0ae0fee3f077fe36e128406f777261947ce8f2ab9988577274232878a038"}
+{
+  "module_id": "routecodex-v4-edge",
+  "version": "active-v4",
+  "artifact_hash": "sha256:83728d3d7967db171cfb627301ba8e8d636eaf6015101f70e316a5234c260ea6"
+}
