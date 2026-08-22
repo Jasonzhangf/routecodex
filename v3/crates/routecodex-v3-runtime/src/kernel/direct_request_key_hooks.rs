@@ -670,12 +670,8 @@ mod tests {
         ];
 
         for (protocol, body) in cases {
-            let output = apply_v3_direct_request_key_hook(
-                body,
-                protocol,
-                &mut AppendHook,
-            )
-            .expect("each Direct protocol must consume the same typed key mounts");
+            let output = apply_v3_direct_request_key_hook(body, protocol, &mut AppendHook)
+                .expect("each Direct protocol must consume the same typed key mounts");
             assert!(output.to_string().contains("system addition"));
             assert!(output.to_string().contains("developer addition"));
             assert!(output.to_string().contains("tool addition"));

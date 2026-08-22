@@ -3,9 +3,9 @@
 //! I/O operations (disk persistence) stay in TS. Rust owns the decision and the
 //! stop-message state fields that must be persisted.
 
+use crate::internal::stopless_defaults;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::internal::stopless_defaults;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -284,12 +284,14 @@ fn resolve_budget_text_and_source(
     default_config: Option<&DefaultBudgetConfig>,
 ) -> (String, String) {
     if let Some(snapshot) = snapshot {
-        let text = normalize_text(&snapshot.text).unwrap_or_else(|| stopless_defaults().text.clone());
+        let text =
+            normalize_text(&snapshot.text).unwrap_or_else(|| stopless_defaults().text.clone());
         let source = normalize_text(&snapshot.source).unwrap_or_else(|| "default".to_string());
         return (text, source);
     }
     if let Some(default_config) = default_config {
-        let text = normalize_text(&default_config.text).unwrap_or_else(|| stopless_defaults().text.clone());
+        let text = normalize_text(&default_config.text)
+            .unwrap_or_else(|| stopless_defaults().text.clone());
         return (text, "default".to_string());
     }
     (stopless_defaults().text.clone(), "default".to_string())

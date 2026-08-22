@@ -1165,7 +1165,9 @@ pub enum V3ResponsesSseContentRewrite {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum V3ResponsesSseTreeError {
-    #[error("Responses semantic SSE event payload must be a JSON object with a string 'type' field")]
+    #[error(
+        "Responses semantic SSE event payload must be a JSON object with a string 'type' field"
+    )]
     EventNotObject,
     #[error("Responses SSE event is missing type")]
     MissingEventType,

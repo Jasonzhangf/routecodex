@@ -97,6 +97,7 @@ fn provider_failure_output(
         servertool_followup_required: false,
         observability: None,
         stream_observation: None,
+        provider_snapshots: None,
     }
 }
 
@@ -115,6 +116,7 @@ fn error_output(
         servertool_followup_required: false,
         observability: None,
         stream_observation: None,
+        provider_snapshots: None,
     }
 }
 

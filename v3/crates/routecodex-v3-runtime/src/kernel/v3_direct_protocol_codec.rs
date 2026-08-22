@@ -11,13 +11,13 @@
 //! 骨架执行流程（路由 -> 选择 -> 决策 -> 策略 -> wire -> transport -> 发送 ->
 //! 响应投影 -> 客户端帧 + 失败策略循环）在 `crate::kernel::execute_v3_direct_runtime_kernel_core`
 //! 中只实现一份。
+use crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog;
 use crate::nodes::{V3ChatDirect11Policy, V3Req04StandardizedChat};
 use crate::{
     direct_response_hooks::V3DirectResponseCompatContext,
     hooks::build_v3_provider_error_source,
     nodes::{V3Req04StandardizedResponses, V3ResponsesDirect11Policy},
 };
-use crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
     V3InternalErrorCode,
@@ -44,6 +44,7 @@ pub(crate) fn build_direct_response_compat_context(
     target: &V3Target10ConcreteProviderSelected,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
+    toolreason_observation_session_id: &str,
 ) -> Result<V3DirectResponseCompatContext, String> {
     Ok(V3DirectResponseCompatContext {
         provider_protocol: crate::hub_v1::provider_wire_protocol_for_selected_candidate(
@@ -54,6 +55,8 @@ pub(crate) fn build_direct_response_compat_context(
         compatibility_profile: target.candidate.compatibility_profile.clone(),
         tool_thinking_enabled,
         toolreason_client_projection,
+        toolreason_observation_session_id: Some(toolreason_observation_session_id.to_owned()),
+        runtime_timing: crate::runtime_timing::V3RuntimeTimingState::start(),
     })
 }
 
@@ -326,10 +329,26 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         _now_epoch_ms: u64,
         _trace: &mut Vec<&'static str>,
     ) -> Result<bool, V3Error01SourceRaised> {
-        let enabled = manifest.features.get("tool_thinking").copied().unwrap_or(false);
+        let enabled = manifest
+            .features
+            .get("tool_thinking")
+            .copied()
+            .unwrap_or(false);
+        let current_payload_start = crate::hub_v1::current_v3_tool_thinking_payload_start(
+            &standardized.body,
+        )
+        .map_err(|error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Req04StandardizedResponses",
+                "direct_tool_thinking_req04_current_boundary_missing",
+                error,
+                V3InternalErrorCode::V3Req04StandardizedResponses,
+            )
+        })?;
         crate::hub_v1::inject_v3_tool_thinking_guidance_at_req04(
             &mut standardized.body,
-            0,
+            current_payload_start,
             enabled,
         )
         .map_err(|error| {
@@ -482,12 +501,23 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
         _now_epoch_ms: u64,
         _trace: &mut Vec<&'static str>,
     ) -> Result<bool, V3Error01SourceRaised> {
-        let enabled = manifest.features.get("tool_thinking").copied().unwrap_or(false);
-        let current_payload_start = standardized
-            .body
-            .get("messages")
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len);
+        let enabled = manifest
+            .features
+            .get("tool_thinking")
+            .copied()
+            .unwrap_or(false);
+        let current_payload_start = crate::hub_v1::current_v3_tool_thinking_payload_start(
+            &standardized.body,
+        )
+        .map_err(|error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Req04StandardizedChat",
+                "direct_tool_thinking_req04_current_boundary_missing",
+                error,
+                V3InternalErrorCode::V3Req04StandardizedChat,
+            )
+        })?;
         crate::hub_v1::inject_v3_tool_thinking_guidance_at_req04(
             &mut standardized.body,
             current_payload_start,

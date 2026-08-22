@@ -590,6 +590,19 @@ pub struct V3Error06ClientProjected {
     pub health_action: Option<V3ErrorActionPlan>,
 }
 
+fn internal_client_status(source: &V3Error01SourceRaised) -> u16 {
+    match source.internal_error.as_ref().map(|error| error.lane) {
+        Some(V3InternalErrorLane::Response) => 599,
+        Some(V3InternalErrorLane::Request | V3InternalErrorLane::Other) => 598,
+        None if source.source_stage.contains("Resp")
+            || source.source_stage.contains("Response") =>
+        {
+            599
+        }
+        None => 598,
+    }
+}
+
 pub fn build_v3_error_01_source_raised(
     source_kind: V3ErrorSourceKind,
     source_stage: &'static str,
@@ -896,7 +909,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         V3ErrorSourceKind::ProviderFailure => 502,
         V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => 400,
         V3ErrorSourceKind::TargetPoolExhausted => 503,
-        V3ErrorSourceKind::RuntimeFailure => 500,
+        V3ErrorSourceKind::RuntimeFailure => internal_client_status(source),
         V3ErrorSourceKind::ClientDisconnect => 499,
         V3ErrorSourceKind::SuccessControl => 500,
     };
@@ -985,6 +998,8 @@ impl V3ErrorHandlingCenter {
             "provider failure projection requires caller-owned route/default availability proof"
         );
         let source_status = input.source_status;
+        let internal_runtime_failure =
+            input.source.source_kind == V3ErrorSourceKind::RuntimeFailure;
         let execution = Self::decide_provider(input, false, false, None);
         let mut projected = Self::project_terminal(execution);
         let linked_status = projected
@@ -993,11 +1008,13 @@ impl V3ErrorHandlingCenter {
             .and_then(serde_json::Value::as_u64)
             .and_then(|status| u16::try_from(status).ok())
             .filter(|status| *status >= 400);
-        if let Some(status) = source_status
-            .filter(|status| *status >= 400)
-            .or(linked_status)
-        {
-            projected.status = status;
+        if !internal_runtime_failure {
+            if let Some(status) = source_status
+                .filter(|status| *status >= 400)
+                .or(linked_status)
+            {
+                projected.status = status;
+            }
         }
         debug_assert!(
             projected.status >= 400,
@@ -1329,14 +1346,10 @@ mod tests {
 mod subscription;
 
 pub use subscription::{
-    build_v3_provider_global_error_fingerprint,
+    build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_error_fingerprint,
     build_v3_provider_global_error_fingerprint_from_classified,
-    build_v3_provider_failure_action_from_v3_error_02,
-    build_v3_provider_global_failure_policy,
-    V3ProviderErrorFingerprint,
-    V3ProviderFailureAction,
-    V3ProviderHealthScope,
-    V3ProviderRecoveryKind,
+    build_v3_provider_global_failure_policy, V3ProviderErrorFingerprint, V3ProviderFailureAction,
+    V3ProviderHealthScope, V3ProviderRecoveryKind,
 };
 
 /// Provider compat payload boundary violation: provider request or response

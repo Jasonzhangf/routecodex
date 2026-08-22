@@ -86,6 +86,7 @@ use routecodex_v3_runtime::{
     execute_v3_gemini_relay_runtime_with_default_transport_provider_health,
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health,
+    execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
@@ -115,6 +116,7 @@ use routecodex_v3_runtime::{
     V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlState,
     V3Execution11ProtocolDecisionMode, V3ResponsesProtocolExecutionPlan,
+    V3HubExecutionMode, V3RelayProviderSnapshots,
     V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayDryRunOutcome, V3ResponsesRelayLocalContinuationScope,
     V3ResponsesRelayLocalContinuationState, V3ResponsesRelayLocalStoplessControlInput,
@@ -359,7 +361,10 @@ pub async fn spawn_v3_server_aggregate(
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
     let webui_observability = V3WebuiObservability::new();
     let request_activity_gate = Arc::new(V3ServerRequestActivityGate::default());
-    let front_transport_broker = V3FrontTransportBroker::new(0);
+    // Generation zero is reserved for an uninitialized handoff carrier. A
+    // listener may accept requests as soon as it binds, so the normal startup
+    // broker must already carry a valid positive runtime generation.
+    let front_transport_broker = V3FrontTransportBroker::new(1);
     let mut listeners = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();

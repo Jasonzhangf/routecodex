@@ -290,7 +290,14 @@ pub(crate) fn openai_chat_relay_output_response(
     let frame = build_v3_server_16_http_frame_from_v3_resp_15(payload, node_trace, error_chain);
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(status).expect("typed V3 OpenAI Chat Relay status"))
-        .header("content-type", if stream { "text/event-stream" } else { "application/json" });
+        .header(
+            "content-type",
+            if stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+        );
     let body = match frame.body {
         V3Server16Body::Sse(client_stream) => v3_client_sse_body(
             wrap_v3_relay_client_sse_console_stream(client_stream, stream_console_finalizer),
@@ -464,10 +471,7 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
         "/v1/chat/completions",
         &request_id,
     );
-    let body = v3_client_sse_body(
-        client_stream,
-        Some(Duration::from_millis(keepalive_ms)),
-    );
+    let body = v3_client_sse_body(client_stream, Some(Duration::from_millis(keepalive_ms)));
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/event-stream")
@@ -482,9 +486,7 @@ pub(crate) async fn v3_openai_chat_relay_sse_accept_response(
 /// `wrap_v3_relay_sse_console_stream` 语义，禁止在流失败后当成功收口。
 pub(crate) async fn drain_v3_openai_chat_relay_sse_stream_to_client(
     stream: V3OpenAiChatClientStream,
-    tx: &tokio::sync::mpsc::Sender<
-        Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>,
-    >,
+    tx: &tokio::sync::mpsc::Sender<Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>>,
     stream_console_finalizer: Option<V3SseConsoleFinalizer>,
 ) {
     let mut stream = wrap_v3_relay_sse_console_stream(stream, stream_console_finalizer);
@@ -764,7 +766,14 @@ pub(crate) fn gemini_relay_output_response(
     let frame = build_v3_server_16_http_frame_from_v3_resp_15(payload, node_trace, error_chain);
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(status).expect("typed V3 Gemini Relay status"))
-        .header("content-type", if stream { "text/event-stream" } else { "application/json" });
+        .header(
+            "content-type",
+            if stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+        );
     let body = match frame.body {
         V3Server16Body::Sse(client_stream) => v3_client_sse_body(
             wrap_v3_relay_client_sse_console_stream(client_stream, stream_console_finalizer),

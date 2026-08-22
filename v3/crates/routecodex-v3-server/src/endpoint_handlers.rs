@@ -283,7 +283,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 &state.server,
                 &path,
                 &request_id,
-                project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                project_v3_server_runtime_failure(
+                    "V3Server03HttpRequestRaw",
+                    "provider_transport_handoff_scope_incomplete",
+                    message,
+                    598,
+                ),
                 None,
             );
         }
@@ -788,7 +793,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let output =
-            match execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health(
+            match execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(
                 &state.manifest,
                 V3OpenAiChatRelayRuntimeInput {
                     server_id: state.server.id.clone(),
@@ -797,6 +802,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     payload: payload.clone(),
                 },
                 state.provider_health.runtime_health(),
+                V3HubExecutionMode::Relay,
             )
             .await
             {
@@ -816,6 +822,15 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             return response;
         }
         let mut output = output;
+        if let Some(response) = capture_v3_relay_provider_snapshots(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &mut output.provider_snapshots,
+        ) {
+            return response;
+        }
         if let Some(response) = capture_v3_openai_chat_relay_response(
             &state,
             &trace_scope,
@@ -860,7 +875,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 output.stream_observation.is_none(),
             );
         }
-        return openai_chat_relay_output_response(output, stream_console_finalizer);
+        return openai_chat_relay_output_response(
+            output,
+            stream_console_finalizer,
+            Duration::from_millis(state.server.http_sse_keepalive_ms),
+        );
     }
     if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let stream = payload.get("stream").and_then(serde_json::Value::as_bool) == Some(true);
@@ -901,6 +920,16 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             output.error_chain.as_deref(),
             Some(&output.client_response),
             request_console_project_path.as_deref(),
+        ) {
+            return response;
+        }
+        let mut output = output;
+        if let Some(response) = capture_v3_relay_provider_snapshots(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &mut output.provider_snapshots,
         ) {
             return response;
         }
@@ -987,7 +1016,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 output.stream_observation.is_none(),
             );
         }
-        return gemini_relay_output_response(output, stream_console_finalizer);
+        return gemini_relay_output_response(
+            output,
+            stream_console_finalizer,
+            Duration::from_millis(state.server.http_sse_keepalive_ms),
+        );
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let continuation_scope = match build_responses_relay_local_continuation_scope(

@@ -187,11 +187,11 @@ fn compact_endpoint_precedes_thinking_route_policy_pool() {
             V3RouterRequestFacts::from_endpoint("/v1/responses/compact"),
         )
         .unwrap();
-    let classified = V3VirtualRouter::with_route_policy_pool(
-        classified,
-        Some("thinking".to_string()),
-    );
-    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    let classified =
+        V3VirtualRouter::with_route_policy_pool(classified, Some("thinking".to_string()));
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
     assert_eq!(
         router.hit_opaque_target_plan_once(plan, 0).unwrap().pool_id,
         "compact"

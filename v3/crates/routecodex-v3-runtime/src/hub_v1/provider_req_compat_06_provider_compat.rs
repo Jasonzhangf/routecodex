@@ -5,9 +5,9 @@ use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode,
     build_v3_openai_responses_standard_request_from_chat_canonical,
-    encode_v3_responses_semantic_as_anthropic_request, provider_protocol_compat_id,
-    V3HubOpaquePayload, V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic,
-    classify_v3_provider_compat_error, V3ProviderCompatError, V3ProviderCompatProfileId,
+    classify_v3_provider_compat_error, encode_v3_responses_semantic_as_anthropic_request,
+    provider_protocol_compat_id, V3HubOpaquePayload, V3HubProviderWireProtocol,
+    V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError, V3ProviderCompatProfileId,
 };
 use provider_compat_core::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
@@ -56,9 +56,8 @@ fn apply_v3_provider_req_compat(
 ) -> Result<Value, V3ProviderCompatError> {
     let reasoning_effort_explicit =
         provider_req_compat_reasoning_effort_explicit(input.provider_semantic_payload());
-    let payload = build_v3_provider_standard_protocol_payload_from_req07(input).map_err(|reason| {
-            classify_v3_provider_compat_error("request_protocol", profile, reason)
-        })?;
+    let payload = build_v3_provider_standard_protocol_payload_from_req07(input)
+        .map_err(|reason| classify_v3_provider_compat_error("request_protocol", profile, reason))?;
     apply_v3_provider_req_compat_to_provider_payload(
         payload,
         input.selected_target(),

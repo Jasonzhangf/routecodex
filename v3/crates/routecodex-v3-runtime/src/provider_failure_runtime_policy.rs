@@ -1,3 +1,4 @@
+use futures_util::future::join_all;
 use routecodex_v3_config::internal::classify_v3_internal_provider_error;
 use routecodex_v3_config::internal::v3_internal_error_handling;
 use routecodex_v3_config::{
@@ -35,7 +36,6 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use futures_util::future::join_all;
 
 static TEST_PROVIDER_STATE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -562,7 +562,8 @@ impl V3ProviderFailureRuntimeHealth {
             let auth_alias = permit.auth_alias().map(str::to_string);
             let model_id = permit.model_id().map(str::to_string);
             async move {
-                let result = (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
+                let result =
+                    (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
                 (permit, provider_id, auth_alias, model_id, result)
             }
         }))
@@ -633,7 +634,8 @@ impl V3ProviderFailureRuntimeHealth {
             let auth_alias = permit.auth_alias().map(str::to_string);
             let model_id = permit.model_id().map(str::to_string);
             async move {
-                let result = (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
+                let result =
+                    (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
                 (permit, provider_id, auth_alias, model_id, result)
             }
         }))
@@ -711,17 +713,22 @@ impl V3ProviderFailureRuntimeHealth {
             let auth_alias = permit.auth_alias().to_string();
             let model_id = permit.model_id().to_string();
             async move {
-                let result = (&probe)(
-                    provider_id.clone(),
-                    auth_alias.clone(),
-                    model_id.clone(),
+                let result =
+                    (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
+                (
+                    permit,
+                    provider_id,
+                    auth_alias,
+                    model_id,
+                    expected_generation,
+                    result,
                 )
-                .await;
-                (permit, provider_id, auth_alias, model_id, expected_generation, result)
             }
         }))
         .await;
-        for (permit, provider_id, auth_alias, model_id, expected_generation, result) in probe_results {
+        for (permit, provider_id, auth_alias, model_id, expected_generation, result) in
+            probe_results
+        {
             match result {
                 Ok(()) => self
                     .key_health

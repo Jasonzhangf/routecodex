@@ -240,14 +240,22 @@ function copyExecutableAtomic(sourcePath, targetPath, { sign = true } = {}) {
     path.dirname(targetPath),
     `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.tmp`,
   );
-  fs.copyFileSync(sourcePath, tempPath);
-  if (process.platform !== 'win32') {
-    fs.chmodSync(tempPath, 0o755);
+  try {
+    fs.copyFileSync(sourcePath, tempPath);
+    if (process.platform !== 'win32') {
+      fs.chmodSync(tempPath, 0o755);
+    }
+    if (sign) {
+      signExecutable(tempPath);
+    }
+    fs.renameSync(tempPath, targetPath);
+  } catch (error) {
+    fs.rmSync(tempPath, { force: true });
+    if (error?.code === 'EACCES' || error?.code === 'EPERM') {
+      fail(`cannot publish ${targetPath}: install target directory is not writable (${error.code}); check ownership and permissions for ${path.dirname(targetPath)}`);
+    }
+    throw error;
   }
-  if (sign) {
-    signExecutable(tempPath);
-  }
-  fs.renameSync(tempPath, targetPath);
 }
 
 function signExecutable(targetPath) {
@@ -277,8 +285,16 @@ function installAliasAtomic(aliasPath, binaryPath) {
     `.${path.basename(aliasPath)}.${process.pid}.${Date.now()}.tmp`,
   );
   fs.rmSync(temporaryPath, { force: true });
-  fs.symlinkSync(path.basename(binaryPath), temporaryPath);
-  fs.renameSync(temporaryPath, aliasPath);
+  try {
+    fs.symlinkSync(path.basename(binaryPath), temporaryPath);
+    fs.renameSync(temporaryPath, aliasPath);
+  } catch (error) {
+    fs.rmSync(temporaryPath, { force: true });
+    if (error?.code === 'EACCES' || error?.code === 'EPERM') {
+      fail(`cannot publish ${aliasPath}: install target directory is not writable (${error.code}); check ownership and permissions for ${path.dirname(aliasPath)}`);
+    }
+    throw error;
+  }
 }
 
 async function main() {

@@ -46,6 +46,49 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn responses_transport_keepalives_are_not_semantic_events() {
+        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data("ping"));
+        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data("null"));
+        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data("\n  \n"));
+        assert!(!crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(
+            r#"{"type":"response.output_text.delta","delta":"x"}"#
+        ));
+    }
+
+    #[tokio::test]
+    async fn responses_sse_transport_keepalive_before_output_does_not_abort_stream() {
+        use futures_util::StreamExt;
+        let manifest = test_relay_manifest();
+        let outcome = test_relay_outcome(&manifest);
+        let provider: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
+            Ok(b"data: null\n\n".to_vec()),
+            Ok(b"data: ping\n\n".to_vec()),
+            Ok(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n".to_vec()),
+            Ok(b"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec()),
+        ]));
+        let mut stream = project_responses_sse_as_openai_chat_stream(
+            "test-request-id".to_string(),
+            "test-session-id".to_string(),
+            provider,
+            None,
+            V3WebSearchExecutionMode::None,
+            None,
+            false,
+            false,
+            V3RuntimeStreamObservation::default(),
+            outcome,
+        );
+        let mut chunks = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            chunks.push(chunk.expect("transport keepalive must not be projected as provider error"));
+        }
+        let joined_bytes = chunks.concat();
+        let joined = String::from_utf8_lossy(&joined_bytes);
+        assert!(joined.contains("hi"));
+        assert!(joined.contains("data: [DONE]"));
+    }
+
     #[tokio::test]
     async fn responses_sse_ping_tail_after_completed_does_not_error_the_stream() {
         use futures_util::StreamExt;
@@ -57,6 +100,8 @@ mod tests {
             Ok(b"data: {\"type\":\"ping\",\"cost\":\"0\"}\n\n".to_vec()),
         ]));
         let mut stream = project_responses_sse_as_openai_chat_stream(
+            "test-request-id".to_string(),
+            "test-session-id".to_string(),
             provider,
             None,
             V3WebSearchExecutionMode::None,
@@ -94,6 +139,8 @@ mod tests {
             Ok(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"late text\"}\n\n".to_vec()),
         ]));
         let mut stream = project_responses_sse_as_openai_chat_stream(
+            "test-request-id".to_string(),
+            "test-session-id".to_string(),
             provider,
             None,
             V3WebSearchExecutionMode::None,
@@ -126,6 +173,8 @@ mod tests {
             Ok(b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_inc\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n".to_vec()),
         ]));
         let mut stream = project_responses_sse_as_openai_chat_stream(
+            "test-request-id".to_string(),
+            "test-session-id".to_string(),
             provider,
             None,
             V3WebSearchExecutionMode::None,
@@ -171,6 +220,8 @@ mod tests {
             }),
         ]));
         let mut stream = project_responses_sse_as_openai_chat_stream(
+            "test-request-id".to_string(),
+            "test-session-id".to_string(),
             provider,
             None,
             V3WebSearchExecutionMode::None,
@@ -212,6 +263,57 @@ mod tests {
             recorded: false,
             _provider_action_permit: None,
         }
+    }
+
+    #[test]
+    fn relay_resp03_projects_chat_delta_toolreason_after_canonical_conversion() {
+        let mut trace = Vec::new();
+        let payload = project_json_response(
+            Some("req-relay-delta-projection"),
+            None,
+            json!({
+                "object": "chat.completion.chunk",
+                "id": "chatcmpl_projection",
+                "model": "MiniMax-M3",
+                "choices": [{
+                    "index": 0,
+                    "delta": {"tool_calls": [{
+                        "index": 0,
+                        "id": "call_projection",
+                        "type": "function",
+                        "function": {
+                            "name": "pwd",
+                            "arguments": "{\"goal_alignment_confidence\":100,\"model_id\":\"MiniMax-M3\",\"reason\":\"读取当前目录\"}"
+                        }
+                    }]},
+                    "finish_reason": null
+                }]
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+            &Value::Null,
+            V3HubTransportIntent::Sse,
+            &mut trace,
+            None,
+            V3WebSearchExecutionMode::None,
+            None,
+            false,
+            true,
+        )
+        .expect("relay response hook must project without protocol failure");
+
+        let arguments = payload
+            .pointer("/choices/0/delta/tool_calls/0/function/arguments")
+            .and_then(Value::as_str)
+            .expect("native arguments remain in client delta");
+        assert_eq!(arguments, "{}");
+        assert_eq!(
+            payload.pointer("/choices/0/delta/reasoning_content"),
+            Some(&json!("调用工具 pwd：读取当前目录"))
+        );
+        let encoded = serde_json::to_string(&payload).expect("client payload serializes");
+        assert!(!encoded.contains("goal_alignment_confidence"));
+        assert!(!encoded.contains("model_id"));
+        assert!(!encoded.contains("\"reason\""));
     }
 
     fn test_relay_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {

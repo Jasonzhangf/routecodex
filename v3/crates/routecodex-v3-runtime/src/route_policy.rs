@@ -1,17 +1,15 @@
 use routecodex_v3_config::{
-    V3RouteConditionManifest, V3RoutePolicyManifest, V3RouteActionManifest,
-    V3Config05ManifestPublished,
+    V3Config05ManifestPublished, V3RouteActionManifest, V3RouteConditionManifest,
+    V3RoutePolicyManifest,
 };
 use routecodex_v3_route_classifier::{
     build_v3_current_turn_route_facts, evaluate_v3_route_policies, V3RouteCondition,
     V3RouteHistoryWindow, V3RoutePolicy, V3RoutePolicyAction, V3RouteTurnObservation,
 };
-use routecodex_v3_virtual_router::{
-    V3Router05RequestClassified, V3VirtualRouter,
-};
+use routecodex_v3_virtual_router::{V3Router05RequestClassified, V3VirtualRouter};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct V3RoutePolicyScope {
@@ -75,8 +73,9 @@ impl V3RoutePolicyRuntimeState {
         use std::sync::OnceLock;
         static SHARED: OnceLock<Arc<Mutex<BTreeMap<V3RoutePolicyScope, V3RouteHistoryWindow>>>> =
             OnceLock::new();
-        static SHARED_PENDING: OnceLock<Arc<Mutex<BTreeMap<V3RoutePolicyRequestKey, V3PendingRoutePolicyTurn>>>> =
-            OnceLock::new();
+        static SHARED_PENDING: OnceLock<
+            Arc<Mutex<BTreeMap<V3RoutePolicyRequestKey, V3PendingRoutePolicyTurn>>>,
+        > = OnceLock::new();
         Self {
             histories: SHARED.get_or_init(Default::default).clone(),
             pending: SHARED_PENDING.get_or_init(Default::default).clone(),
@@ -127,16 +126,19 @@ impl V3RoutePolicyRuntimeState {
             .unwrap_or_else(|| V3RouteHistoryWindow::new(max_policy_window(&policies)));
         let mut history_with_current = history;
         history_with_current.record_turn(observation);
-        let action = evaluate_v3_route_policies(
-            &policies,
-            observation.clone(),
-            &history_with_current,
-        )
-            .map_err(|error| format!("route policy evaluation failed: {error:?}"))?;
+        let action =
+            evaluate_v3_route_policies(&policies, observation.clone(), &history_with_current)
+                .map_err(|error| format!("route policy evaluation failed: {error:?}"))?;
         self.pending
             .lock()
             .map_err(|error| format!("route policy pending lock poisoned: {error}"))?
-            .insert(key, V3PendingRoutePolicyTurn { observation, action: action.clone() });
+            .insert(
+                key,
+                V3PendingRoutePolicyTurn {
+                    observation,
+                    action: action.clone(),
+                },
+            );
         Ok(V3VirtualRouter::with_route_policy_pool(
             classified,
             if request_is_compaction {
@@ -208,10 +210,7 @@ pub fn compile_route_policies(
         .collect()
 }
 
-pub fn observe_route_turn(
-    body: &Value,
-    route_name: &str,
-) -> V3RouteTurnObservation {
+pub fn observe_route_turn(body: &Value, route_name: &str) -> V3RouteTurnObservation {
     let current = build_v3_current_turn_route_facts(body);
     V3RouteTurnObservation {
         new_user_input: current.latest_message_from_user,
@@ -360,7 +359,9 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             state
                 .evaluate_request(&manifest, classified(), scope.clone(), &request_id, search)
                 .expect("evaluate");
-            state.commit_request(&scope, &request_id, &policies).expect("commit");
+            state
+                .commit_request(&scope, &request_id, &policies)
+                .expect("commit");
         }
         let dropped = "dropped";
         state
@@ -374,13 +375,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             .expect("evaluate dropped");
         state.discard_request(&scope, dropped).expect("discard");
         let action = state
-            .evaluate_request(
-                &manifest,
-                classified(),
-                scope.clone(),
-                "current",
-                search,
-            )
+            .evaluate_request(&manifest, classified(), scope.clone(), "current", search)
             .expect("evaluate current")
             .route_policy_pool;
         assert_eq!(action.as_deref(), Some("thinking"));
@@ -407,13 +402,10 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             condition: V3RouteCondition::CurrentCompaction,
             route_pool: "compact".into(),
         };
-        let action = evaluate_v3_route_policies(
-            &[policy],
-            observation,
-            &V3RouteHistoryWindow::new(1),
-        )
-        .expect("compact evaluation")
-        .expect("compact action");
+        let action =
+            evaluate_v3_route_policies(&[policy], observation, &V3RouteHistoryWindow::new(1))
+                .expect("compact evaluation")
+                .expect("compact action");
         assert_eq!(action.route_pool, "compact");
     }
 }

@@ -148,7 +148,8 @@ pub(crate) fn normalize_v3_responses_function_call_arguments(
             return Ok(());
         };
         if arguments.is_object() || arguments.is_array() {
-            *arguments = Value::String(serde_json::to_string(arguments).map_err(|error| error.to_string())?);
+            *arguments =
+                Value::String(serde_json::to_string(arguments).map_err(|error| error.to_string())?);
             normalized = true;
         }
         Ok(())
@@ -1009,12 +1010,14 @@ mod provider_sse_json_codec_tests {
 
     #[test]
     fn non_object_json_frames_are_transport_only_for_precommit() {
-        for data in [r#"null"#, r#""provider-control""#, r#"["provider-control"]"#] {
-            let outcome = classify_v3_provider_sse_json_data(
-                V3HubProviderWireProtocol::Responses,
-                data,
-            )
-            .expect("non-object transport frame must not be a semantic error");
+        for data in [
+            r#"null"#,
+            r#""provider-control""#,
+            r#"["provider-control"]"#,
+        ] {
+            let outcome =
+                classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, data)
+                    .expect("non-object transport frame must not be a semantic error");
             assert_eq!(outcome, None, "unexpected semantic outcome for {data}");
         }
     }
@@ -1451,9 +1454,11 @@ mod provider_sse_json_codec_tests {
         .expect("structured function arguments must be normalized");
         let value: Value = serde_json::from_str(&data).expect("normalized JSON");
         assert_eq!(value["item"]["arguments"], r#"{"cmd":"pwd"}"#);
-        assert!(classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
-            .expect("normalized function_call must classify")
-            .is_some());
+        assert!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
+                .expect("normalized function_call must classify")
+                .is_some()
+        );
     }
 
     #[test]

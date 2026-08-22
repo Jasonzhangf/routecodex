@@ -35,7 +35,11 @@ pub(super) fn observe_v3_runtime_responses_sse_transport_chunk_typed(
         catalog: compile_v3_hub_relay_response_hooks().typed_sse_catalog(),
     };
     observe_v3_runtime_responses_sse_transport_chunk_typed_with_hook(
-        chunk, decoder, observation, reducer, &mut hook,
+        chunk,
+        decoder,
+        observation,
+        reducer,
+        &mut hook,
     )
 }
 
@@ -52,7 +56,10 @@ pub(super) fn observe_v3_runtime_responses_sse_transport_chunk_typed_with_hook(
     let mut terminal_response = None;
     for frame in frames {
         if let Some(response) = observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
-            &frame, observation, reducer, hook,
+            &frame,
+            observation,
+            reducer,
+            hook,
         )? {
             terminal_response = Some(response);
         }
@@ -70,7 +77,10 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed(
         catalog: compile_v3_hub_relay_response_hooks().typed_sse_catalog(),
     };
     observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
-        frame, observation, reducer, &mut hook,
+        frame,
+        observation,
+        reducer,
+        &mut hook,
     )
 }
 
@@ -102,9 +112,8 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
     if !event.is_object() {
         return Ok(None);
     }
-    crate::hub_v1::normalize_v3_responses_function_call_arguments(&mut event).map_err(
-        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec,
-    )?;
+    crate::hub_v1::normalize_v3_responses_function_call_arguments(&mut event)
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
     if !event
         .get("type")
         .and_then(Value::as_str)
@@ -140,13 +149,10 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
     })?;
     let mut semantic = semantic;
     let protocol = semantic.protocol.clone();
-    apply_v3_responses_sse_semantic_hook(
-        &mut semantic,
-        &transport_object,
-        &protocol,
-        hook,
-    )
-    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()))?;
+    apply_v3_responses_sse_semantic_hook(&mut semantic, &transport_object, &protocol, hook)
+        .map_err(|error| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+        })?;
     let projected_event = project_v3_responses_sse_event_json(&semantic);
     observation
         .record_provider_event_json(&projected_event)
@@ -538,5 +544,29 @@ data: {"type":"response.output_item.done","output_index":0,"item":{"type":"funct
         )
         .expect_err("response.failed must remain an explicit provider event failure");
         assert!(error.to_string().contains("upstream model crashed"));
+    }
+
+    #[test]
+    fn missing_type_is_recovered_from_registered_sse_event_name() {
+        let observation = V3RuntimeStreamObservation::default();
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let mut reducer = V3ResponsesSseReducerState::default();
+        observe_v3_runtime_responses_sse_transport_chunk_typed(
+            b"event: response.output_text.delta\ndata: {\"delta\":\"recovered\"}\n\n",
+            &mut decoder,
+            &observation,
+            &mut reducer,
+        )
+        .expect("registered SSE event name supplies the missing semantic type");
+        assert_eq!(reducer.output_text, "recovered");
+    }
+
+    #[test]
+    fn event_name_is_valid_only_for_registered_missing_type_recovery() {
+        assert!(is_supported_typed_responses_event(
+            "response.output_text.delta"
+        ));
+        assert!(is_supported_typed_responses_event("response.completed"));
+        assert!(!is_supported_typed_responses_event("response.unknown"));
     }
 }

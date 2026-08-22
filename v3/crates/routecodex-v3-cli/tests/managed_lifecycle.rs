@@ -1697,7 +1697,10 @@ fn start_force_releases_occupied_admin_webui_port_before_server_bind() {
         );
     }
     let killed = occupied.wait().unwrap();
-    assert!(!killed.success(), "SIGTERM-resistant admin listener must be force-killed");
+    assert!(
+        !killed.success(),
+        "SIGTERM-resistant admin listener must be force-killed"
+    );
 
     for port in ports {
         wait_port(port, true);

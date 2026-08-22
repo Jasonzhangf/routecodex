@@ -426,6 +426,53 @@ async fn collect_projected_sse(
 }
 
 #[tokio::test]
+async fn client_sse_projects_toolreason_as_one_reasoning_item_lifecycle() {
+    let projected = collect_projected_sse(
+        build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
+            "id": "resp_toolreason_projection",
+            "status": "requires_action",
+            "output": [
+                {
+                    "id": "rcc_reason_tool_call",
+                    "type": "reasoning",
+                    "status": "completed",
+                    "summary": [{"type": "summary_text", "text": "调用工具 cat：读取目标文件"}]
+                },
+                {
+                    "id": "fc_1",
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "cat",
+                    "arguments": "{\"cmd\":\"cat README.md\"}"
+                }
+            ]
+        })),
+    )
+    .await
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .expect("toolreason projection must not fail");
+    let text = projected.join("\n");
+    assert_eq!(text.matches("event: response.output_item.added").count(), 2);
+    assert_eq!(
+        text.matches("event: response.reasoning_summary_text.delta")
+            .count(),
+        1
+    );
+    assert!(text.contains("event: response.reasoning_summary_part.added"));
+    assert!(text.contains("event: response.reasoning_summary_text.done"));
+    assert!(text.contains("event: response.reasoning_summary_part.done"));
+    assert!(text.contains("调用工具 cat：读取目标文件"));
+    assert!(!text.contains("<toolreason") && !text.contains("</toolreason>"));
+    let reasoning_added = text.find("event: response.output_item.added").unwrap();
+    let reasoning_done = text.find("event: response.output_item.done").unwrap();
+    let function_added = text
+        .find("\"type\":\"function_call\"")
+        .expect("function call must remain in client projection");
+    assert!(reasoning_added < reasoning_done && reasoning_done < function_added);
+}
+
+#[tokio::test]
 async fn provider_sse_eof_without_terminal_fails_before_client_projection() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![Ok(
@@ -616,10 +663,10 @@ async fn client_sse_function_call_projection_missing_call_id_fails_explicitly() 
 }
 
 #[tokio::test]
-async fn client_sse_function_call_projection_missing_arguments_fails_explicitly() {
+async fn client_sse_function_call_projection_preserves_missing_arguments_without_502() {
     let projected = collect_projected_sse(
         build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
-            "id": "resp_bad_arguments",
+            "id": "resp_missing_arguments",
             "status": "requires_action",
             "output": [{
                 "type": "function_call",
@@ -629,15 +676,40 @@ async fn client_sse_function_call_projection_missing_arguments_fails_explicitly(
         })),
     )
     .await;
-    let error = projected
+    let frames = projected
         .into_iter()
-        .find_map(Result::err)
-        .expect("missing arguments must fail before terminal success");
+        .collect::<Result<Vec<_>, _>>()
+        .expect("missing arguments must not turn a native tool call into 502");
+    let text = frames.join("\n");
+    assert!(text.contains("\"call_id\":\"call_missing_args\""));
+    assert!(text.contains("\"arguments\":\"\""));
+    assert!(text.contains("response.function_call_arguments.done"));
+    assert!(text.contains("response.completed"));
+}
 
-    assert!(
-        error.contains("missing string arguments"),
-        "missing function_call arguments must be an explicit SSE projection error: {error}"
-    );
+#[tokio::test]
+async fn client_sse_function_call_projection_serializes_structured_arguments_without_changing_values(
+) {
+    let projected = collect_projected_sse(
+        build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
+            "id": "resp_structured_arguments",
+            "status": "requires_action",
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_structured_args",
+                "name": "exec_command",
+                "arguments": {"cmd": "pwd", "path": "."}
+            }]
+        })),
+    )
+    .await;
+    let frames = projected
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("structured arguments must remain a valid client tool call");
+    let text = frames.join("\n");
+    assert!(text.contains("\\\"cmd\\\":\\\"pwd\\\""));
+    assert!(text.contains("\\\"path\\\":\\\".\\\""));
 }
 
 #[tokio::test]

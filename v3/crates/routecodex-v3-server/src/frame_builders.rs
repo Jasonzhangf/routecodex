@@ -296,33 +296,6 @@ pub(crate) fn wrap_v3_direct_sse_console_stream(
 pub(crate) type V3IoSseStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, io::Error>> + Send>>;
 
-pub(crate) fn v3_relay_client_sse_body(
-    stream: V3ResponsesRelayClientStream,
-    keepalive_interval: Option<Duration>,
-) -> Body {
-    let stream = stream::unfold((stream, false), |(mut stream, done)| async move {
-        if done {
-            return None;
-        }
-        match stream.next().await {
-            Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-            Some(Err(source)) if is_v3_client_disconnect_source(&source) => Some((
-                Err(io::Error::other(format!(
-                    "{}: {}",
-                    source.code, source.message
-                ))),
-                (stream, true),
-            )),
-            Some(Err(source)) => Some((
-                Ok(v3_post_commit_sse_error_event_chunk(source)),
-                (stream, true),
-            )),
-            None => None,
-        }
-    });
-    v3_io_sse_body(Box::pin(stream), keepalive_interval)
-}
-
 pub(crate) fn v3_client_sse_body(
     stream: V3ClientSseStream,
     keepalive_interval: Option<Duration>,

@@ -153,14 +153,14 @@ fn normalize_responses_input_content_parts(payload: &mut Value) {
         return;
     };
     for item in items {
-        let is_non_assistant_message = item
-            .get("role")
-            .and_then(Value::as_str)
-            .is_some_and(|role| {
-                role.eq_ignore_ascii_case("user")
-                    || role.eq_ignore_ascii_case("system")
-                    || role.eq_ignore_ascii_case("developer")
-            });
+        let is_non_assistant_message =
+            item.get("role")
+                .and_then(Value::as_str)
+                .is_some_and(|role| {
+                    role.eq_ignore_ascii_case("user")
+                        || role.eq_ignore_ascii_case("system")
+                        || role.eq_ignore_ascii_case("developer")
+                });
         if !is_non_assistant_message {
             continue;
         }
@@ -172,10 +172,7 @@ fn normalize_responses_input_content_parts(payload: &mut Value) {
                 continue;
             };
             if row.get("type").and_then(Value::as_str) == Some("text") {
-                row.insert(
-                    "type".to_string(),
-                    Value::String("input_text".to_string()),
-                );
+                row.insert("type".to_string(), Value::String("input_text".to_string()));
             }
         }
     }

@@ -97,20 +97,21 @@ pub fn project_v3_anthropic_client_sse_stream(
         .get("events")
         .and_then(Value::as_array)
         .cloned();
-    let stream: Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>> = match events {
-        Some(events) => Box::pin(stream::iter(events.into_iter().map(|event| {
-            build_v3_anthropic_client_sse_event_chunk(&event)
-        }))),
-        None => Box::pin(stream::iter(vec![Err(
-            "typed V3 Anthropic Relay SSE projection is missing events".to_string(),
-        )])),
-    };
+    let stream: Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>> =
+        match events {
+            Some(events) => Box::pin(stream::iter(
+                events
+                    .into_iter()
+                    .map(|event| build_v3_anthropic_client_sse_event_chunk(&event)),
+            )),
+            None => Box::pin(stream::iter(vec![Err(
+                "typed V3 Anthropic Relay SSE projection is missing events".to_string(),
+            )])),
+        };
     crate::nodes::map_v3_client_sse_stream(stream, "V3HubRespOutbound05ClientSemantic")
 }
 
-fn build_v3_anthropic_client_sse_event_chunk(
-    event: &Value,
-) -> Result<Vec<u8>, String> {
+fn build_v3_anthropic_client_sse_event_chunk(event: &Value) -> Result<Vec<u8>, String> {
     let (Some(name), Some(data)) = (
         event.get("event").and_then(Value::as_str),
         event.get("data"),

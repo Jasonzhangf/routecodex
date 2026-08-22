@@ -800,7 +800,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             captured_url: Mutex::new(None),
             captured_body: Mutex::new(None),
         };
-        let fresh = execute_v3_gemini_relay_runtime_with_provider_health(
+        let blocked = execute_v3_gemini_relay_runtime_with_provider_health(
             &manifest,
             V3GeminiRelayRuntimeInput {
                 server_id: server_id.into(),
@@ -854,7 +854,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
         )
         .await
         .expect("fresh request must not require provider revival after SSE transient failure");
-        assert_eq!(fresh.status, 200);
+        assert_eq!(second.status, 200);
     }
 }
 

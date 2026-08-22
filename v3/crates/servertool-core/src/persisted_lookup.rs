@@ -1,6 +1,6 @@
 // feature_id: hub.servertool_stopless_cli_continuation
-use crate::stop_gateway_context;
 use crate::internal::stopless_defaults;
+use crate::stop_gateway_context;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

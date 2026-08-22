@@ -1,9 +1,9 @@
 use crate::direct_response_hooks::{V3DirectResponseCompatBlock, V3DirectResponseCompatPlan};
 use crate::hub_v1::{
     classify_v3_provider_sse_json_data, collect_v3_provider_sse_json_data,
-    is_v3_provider_sse_keepalive_text, parse_v3_provider_sse_json_data,
-    v3_feature_enabled_for_server, V3HubProviderWireProtocol, V3ProviderResponsesJsonFrameOutcome,
-    V3RuntimeStreamObservation,
+    is_v3_provider_sse_keepalive_text, normalize_v3_provider_sse_json_data_for_event_name,
+    parse_v3_provider_sse_json_data, v3_feature_enabled_for_server, V3HubProviderWireProtocol,
+    V3ProviderResponsesJsonFrameOutcome, V3RuntimeStreamObservation,
 };
 use crate::nodes::{V3ClientBody, V3ClientSseStream, V3Resp15ClientPayload};
 use futures_util::{stream, StreamExt};
@@ -543,7 +543,14 @@ fn direct_sse_frame_provider_failure_source(
     business_output_seen: bool,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> Result<DirectSseInitialFrameAction, V3Error01SourceRaised> {
-    let data = collect_v3_provider_sse_json_data(fields);
+    let data = normalize_v3_provider_sse_json_data_for_event_name(provider_protocol, fields)
+        .map_err(|message| {
+            build_v3_provider_sse_json_error(
+                provider_id,
+                "provider_response_sse_event_invalid",
+                message,
+            )
+        })?;
     let parsed = match classify_v3_provider_sse_json_data(provider_protocol, &data) {
         Ok(parsed) => parsed,
         Err(message) => {
@@ -1168,7 +1175,15 @@ fn observe_sse_remote_continuation_chunk(
             observation_state.record_pending_response_id(&response_id)?;
         }
         observe_sse_usage_frame(provider_id, fields, usage_observation)?;
-        let data = collect_v3_provider_sse_json_data(fields);
+        let data = normalize_v3_provider_sse_json_data_for_event_name(provider_protocol, fields)
+            .map_err(|message| {
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "provider_response_sse_event_invalid",
+                    message,
+                )
+            })?;
         let classification =
             classify_v3_provider_sse_json_data(provider_protocol, &data).map_err(|message| {
                 build_v3_error_01_source_raised(
@@ -2198,10 +2213,7 @@ mod tests {
                 "item": {
                     "type": "function_call",
                     "name": "exec_command",
-                    "arguments": "{\"cmd\":\"pwd\"}",
-                    "reason": "确认当前工作目录",
-                    "goal_alignment_confidence": 100,
-                    "model_id": "x-preview-f-free"
+                    "arguments": "{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\"}"
                 }
             })
         );

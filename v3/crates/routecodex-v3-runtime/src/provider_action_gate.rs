@@ -389,8 +389,7 @@ impl V3ProviderActionGate {
                 state.generation = state.generation.saturating_add(1);
                 state.mode = V3ProviderActionGateMode::Sustained;
                 state.consecutive_failures = 0;
-                state.next_admission_at =
-                    now + Duration::from_millis(sustained_delay_ms());
+                state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
                 state.admitted_generation = None;
                 state.admitted_action_scope = None;
                 state.success_transition_generation = Some(state.generation);
@@ -435,8 +434,7 @@ impl V3ProviderActionGate {
                     state.generation = state.generation.saturating_add(1);
                     state.mode = V3ProviderActionGateMode::Sustained;
                     state.consecutive_failures = 0;
-                    state.next_admission_at =
-                        now + Duration::from_millis(sustained_delay_ms());
+                    state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
                     state.admitted_generation = None;
                     state.admitted_action_scope = None;
                     state.success_transition_generation = Some(state.generation);
@@ -484,8 +482,7 @@ impl V3ProviderActionGate {
         }) {
             state.generation = state.generation.saturating_add(1);
             state.mode = V3ProviderActionGateMode::Sustained;
-            state.next_admission_at =
-                now + Duration::from_millis(sustained_delay_ms());
+            state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
             state.admitted_generation = None;
             state.admitted_action_scope = None;
             state.success_transition_generation = None;
@@ -521,8 +518,7 @@ impl V3ProviderActionGate {
         }) {
             state.generation = state.generation.saturating_add(1);
             state.mode = V3ProviderActionGateMode::Sustained;
-            state.next_admission_at =
-                now + Duration::from_millis(sustained_delay_ms());
+            state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
             state.admitted_generation = None;
             state.admitted_action_scope = None;
             state.success_transition_generation = None;
@@ -598,8 +594,7 @@ impl V3ProviderActionGate {
                 }
                 state.mode = V3ProviderActionGateMode::Sustained;
                 state.consecutive_failures = state.consecutive_failures.saturating_add(1);
-                state.minimum_delay_ms =
-                    sustained_delay_ms().max(configured_minimum_delay_ms);
+                state.minimum_delay_ms = sustained_delay_ms().max(configured_minimum_delay_ms);
                 state.next_admission_at = now + Duration::from_millis(state.minimum_delay_ms);
                 state.success_transition_generation = None;
                 state.terminal_transition_generation = None;
@@ -669,9 +664,7 @@ impl V3ProviderActionGate {
             state.waiter_queue.push_back(ticket);
             if state.waiter_queue.len() > 1 && state.mode == V3ProviderActionGateMode::Isolated {
                 state.mode = V3ProviderActionGateMode::Sustained;
-                state.minimum_delay_ms = state
-                    .minimum_delay_ms
-                    .max(sustained_delay_ms());
+                state.minimum_delay_ms = state.minimum_delay_ms.max(sustained_delay_ms());
                 state.next_admission_at = now + Duration::from_millis(state.minimum_delay_ms);
                 state.updated_at = now;
                 let _ = state.change_tx.send(state.generation);
@@ -823,8 +816,7 @@ impl V3ProviderActionWaiter {
                         state.admitted_generation = Some(admission_generation);
                         state.admitted_action_scope = Some(self.action_scope.clone());
                         state.mode = V3ProviderActionGateMode::Sustained;
-                        state.next_admission_at =
-                            now + Duration::from_millis(sustained_delay_ms());
+                        state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
                     }
                     state.updated_at = now;
                     let admission = V3ProviderActionAdmission {
@@ -948,8 +940,7 @@ fn prune_idle_states(states: &mut HashMap<V3ProviderActionGateKey, V3ProviderAct
     states.retain(|_, state| {
         !state.waiter_queue.is_empty()
             || state.admitted_generation.is_some()
-            || now.saturating_duration_since(state.updated_at)
-                < Duration::from_millis(idle_ttl_ms)
+            || now.saturating_duration_since(state.updated_at) < Duration::from_millis(idle_ttl_ms)
     });
 }
 

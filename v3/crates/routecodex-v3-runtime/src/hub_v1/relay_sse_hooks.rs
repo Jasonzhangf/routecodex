@@ -43,9 +43,7 @@ impl V3RelaySseHookCatalog {
     pub(crate) const fn with_responses(
         mut self,
         notify: for<'a> fn(&V3ResponsesSseHookInput<'a>),
-        rewrite: fn(
-            &mut V3ResponsesSseSemanticObject,
-        ) -> Result<(), V3ResponsesSseTreeError>,
+        rewrite: fn(&mut V3ResponsesSseSemanticObject) -> Result<(), V3ResponsesSseTreeError>,
     ) -> Self {
         self.responses_notify = notify;
         self.responses_rewrite = rewrite;
@@ -55,9 +53,7 @@ impl V3RelaySseHookCatalog {
     pub(crate) const fn with_chat(
         mut self,
         notify: for<'a> fn(&V3OpenAiChatSseHookInput<'a>),
-        rewrite: fn(
-            &mut V3OpenAiChatSseSemanticObject,
-        ) -> Result<(), V3OpenAiChatSseTreeError>,
+        rewrite: fn(&mut V3OpenAiChatSseSemanticObject) -> Result<(), V3OpenAiChatSseTreeError>,
     ) -> Self {
         self.chat_notify = notify;
         self.chat_rewrite = rewrite;
@@ -145,9 +141,7 @@ mod tests {
         .unwrap();
         catalog.rewrite_responses(&mut responses).unwrap();
         assert_eq!(
-            responses
-                .item()
-                .and_then(|item| item.rewritten_content()),
+            responses.item().and_then(|item| item.rewritten_content()),
             Some("relay catalog rewrite")
         );
 
@@ -157,6 +151,9 @@ mod tests {
         }))
         .unwrap();
         catalog.rewrite_chat(&mut chat).unwrap();
-        assert_eq!(chat.choices[0].delta, super::super::V3OpenAiChatSseDelta::Text("relay catalog rewrite".to_owned()));
+        assert_eq!(
+            chat.choices[0].delta,
+            super::super::V3OpenAiChatSseDelta::Text("relay catalog rewrite".to_owned())
+        );
     }
 }

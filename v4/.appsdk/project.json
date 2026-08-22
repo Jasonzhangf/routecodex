@@ -6,6 +6,13 @@
       "protected/source/**"
     ]
   },
+  "development_scenarios": {
+    "manifest": ".appsdk/contracts/development-scenarios.manifest.json",
+    "enabled": [
+      "multi_worker_collaboration",
+      "multi_worktree_merge_queue"
+    ]
+  },
   "governance": {
     "active_kind": "immutable_consumable_library",
     "active_root": "active/lib/**",
@@ -45,6 +52,12 @@
       "contracts/records/goal-clarification-record.schema.json",
       "contracts/records/review-record.schema.json",
       "contracts/records/effectiveness-record.schema.json",
+      "contracts/records/collaboration-record.schema.json",
+      "contracts/records/collaboration-index.schema.json",
+      "contracts/records/merge-queue-record.schema.json",
+      "contracts/records/merge-queue-state.schema.json",
+      "contracts/records/integration-record.schema.json",
+      "contracts/records/mainline-receipt-record.schema.json",
       "contracts/records/merge-record.schema.json",
       "contracts/records/promotion-record.schema.json",
       "contracts/records/regression-report.schema.json",

@@ -400,13 +400,20 @@ fn consecutive_failures_follow_one_three_five_and_success_resets() {
 
     let third = gate.record_failure(&scope).expect("third failure");
     assert_eq!(third.mode, V3ProviderActionGateMode::Sustained);
-    assert_eq!(third.minimum_delay_ms, V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS);
+    assert_eq!(
+        third.minimum_delay_ms,
+        V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS
+    );
 
     let fourth = gate.record_failure(&scope).expect("fourth failure");
     assert_eq!(fourth.mode, V3ProviderActionGateMode::Sustained);
-    assert_eq!(fourth.minimum_delay_ms, V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS);
+    assert_eq!(
+        fourth.minimum_delay_ms,
+        V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS
+    );
 
-    gate.record_success(&scope).expect("success resets failure sequence");
+    gate.record_success(&scope)
+        .expect("success resets failure sequence");
     let after_success = gate.record_failure(&scope).expect("failure after success");
     assert_eq!(after_success.mode, V3ProviderActionGateMode::Isolated);
     assert_eq!(

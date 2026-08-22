@@ -196,20 +196,12 @@ impl V3WebuiObservability {
             && !inner.requests.contains_key(request_key)
             && inner.terminal_keys.contains(request_key)
         {
-            inner.resync_after_sequence = Some(
-                inner
-                    .resync_after_sequence
-                    .unwrap_or(0)
-                    .max(sequence),
-            );
+            inner.resync_after_sequence =
+                Some(inner.resync_after_sequence.unwrap_or(0).max(sequence));
             return Ok(sequence);
         }
 
-        let mut row = inner
-            .requests
-            .get(request_key)
-            .cloned()
-            .unwrap_or_default();
+        let mut row = inner.requests.get(request_key).cloned().unwrap_or_default();
         row.request_key = request_key.to_string();
         row.event_type = event_type_str.clone();
         row.meta = meta;
@@ -338,7 +330,9 @@ impl V3WebuiObservability {
         Ok(V3ObsSinceResult {
             next_cursor,
             events,
-            resync_required: inner.resync_after_sequence.is_some_and(|sequence| cursor < sequence)
+            resync_required: inner
+                .resync_after_sequence
+                .is_some_and(|sequence| cursor < sequence)
                 || inner
                     .oldest_retained_sequence
                     .is_some_and(|sequence| cursor.saturating_add(1) < sequence),
@@ -351,7 +345,11 @@ mod tests {
     use super::*;
 
     fn scope(port: u16) -> V3ObsScope {
-        V3ObsScope { port, workdir: Some("/w".to_string()), session: Some("s1".to_string()) }
+        V3ObsScope {
+            port,
+            workdir: Some("/w".to_string()),
+            session: Some("s1".to_string()),
+        }
     }
 
     fn meta(req: &str) -> V3ObsRequestMeta {
@@ -374,11 +372,20 @@ mod tests {
     fn lifecycle_upserts_same_row() {
         let o = V3WebuiObservability::new();
         let k = build_v3_obs_request_key(5555, "r1");
-        let s = o.record(V3ObsEventType::Started, &k, scope(5555), meta("r1")).unwrap();
+        let s = o
+            .record(V3ObsEventType::Started, &k, scope(5555), meta("r1"))
+            .unwrap();
         assert!(s >= 1);
         // route + provider attempt update the same row
-        o.record(V3ObsEventType::RouteSelected, &k, scope(5555), meta("r1")).unwrap();
-        o.record(V3ObsEventType::ProviderAttemptStarted, &k, scope(5555), meta("r1")).unwrap();
+        o.record(V3ObsEventType::RouteSelected, &k, scope(5555), meta("r1"))
+            .unwrap();
+        o.record(
+            V3ObsEventType::ProviderAttemptStarted,
+            &k,
+            scope(5555),
+            meta("r1"),
+        )
+        .unwrap();
         let snap = o.snapshot(0).unwrap();
         assert_eq!(snap.requests.len(), 1, "one request key => one row");
         let row = snap.requests.get(&k).unwrap();
@@ -390,8 +397,10 @@ mod tests {
     fn terminal_does_not_create_second_row_and_sets_result() {
         let o = V3WebuiObservability::new();
         let k = build_v3_obs_request_key(5555, "r2");
-        o.record(V3ObsEventType::Started, &k, scope(5555), meta("r2")).unwrap();
-        o.record(V3ObsEventType::Completed, &k, scope(5555), meta("r2")).unwrap();
+        o.record(V3ObsEventType::Started, &k, scope(5555), meta("r2"))
+            .unwrap();
+        o.record(V3ObsEventType::Completed, &k, scope(5555), meta("r2"))
+            .unwrap();
         let snap = o.snapshot(0).unwrap();
         assert_eq!(snap.requests.len(), 1, "no duplicate row");
         let row = snap.requests.get(&k).unwrap();
@@ -405,8 +414,10 @@ mod tests {
     fn failed_never_becomes_success() {
         let o = V3WebuiObservability::new();
         let k = build_v3_obs_request_key(5555, "r3");
-        o.record(V3ObsEventType::Started, &k, scope(5555), meta("r3")).unwrap();
-        o.record(V3ObsEventType::Failed, &k, scope(5555), meta("r3")).unwrap();
+        o.record(V3ObsEventType::Started, &k, scope(5555), meta("r3"))
+            .unwrap();
+        o.record(V3ObsEventType::Failed, &k, scope(5555), meta("r3"))
+            .unwrap();
         let snap = o.snapshot(0).unwrap();
         let row = snap.requests.get(&k).unwrap();
         assert_eq!(row.result.as_deref(), Some("error"));
@@ -418,15 +429,22 @@ mod tests {
     fn sequence_monotonic_and_stale_rejected() {
         let o = V3WebuiObservability::new();
         let k = build_v3_obs_request_key(5555, "r4");
-        let s1 = o.record(V3ObsEventType::Started, &k, scope(5555), meta("r4")).unwrap();
-        let s2 = o.record(V3ObsEventType::Completed, &k, scope(5555), meta("r4")).unwrap();
+        let s1 = o
+            .record(V3ObsEventType::Started, &k, scope(5555), meta("r4"))
+            .unwrap();
+        let s2 = o
+            .record(V3ObsEventType::Completed, &k, scope(5555), meta("r4"))
+            .unwrap();
         assert!(s2 > s1, "monotonic sequence");
         // replay since before start returns both; since after terminal returns none
         let first = o.since(0).unwrap();
         assert_eq!(first.events.len(), 2);
         assert!(!first.resync_required);
         let second = o.since(first.next_cursor).unwrap();
-        assert!(second.events.is_empty(), "stale events rejected past cursor");
+        assert!(
+            second.events.is_empty(),
+            "stale events rejected past cursor"
+        );
         assert!(!second.resync_required);
     }
 
@@ -434,7 +452,8 @@ mod tests {
     fn scope_is_carried_per_event() {
         let o = V3WebuiObservability::new();
         let k = build_v3_obs_request_key(4444, "r5");
-        o.record(V3ObsEventType::Started, &k, scope(4444), meta("r5")).unwrap();
+        o.record(V3ObsEventType::Started, &k, scope(4444), meta("r5"))
+            .unwrap();
         let result = o.since(0).unwrap();
         assert_eq!(result.events[0].scope.port, 4444);
         assert_eq!(result.events[0].scope.workdir.as_deref(), Some("/w"));
@@ -447,11 +466,15 @@ mod tests {
         let o = V3WebuiObservability::new();
         let k1 = build_v3_obs_request_key(5555, "a");
         let k2 = build_v3_obs_request_key(5555, "b");
-        o.record(V3ObsEventType::Started, &k1, scope(5555), meta("a")).unwrap();
-        o.record(V3ObsEventType::Started, &k2, scope(5555), meta("b")).unwrap();
+        o.record(V3ObsEventType::Started, &k1, scope(5555), meta("a"))
+            .unwrap();
+        o.record(V3ObsEventType::Started, &k2, scope(5555), meta("b"))
+            .unwrap();
         // Complete the rows in reverse arrival order; arrival order must hold.
-        o.record(V3ObsEventType::Completed, &k2, scope(5555), meta("b")).unwrap();
-        o.record(V3ObsEventType::Completed, &k1, scope(5555), meta("a")).unwrap();
+        o.record(V3ObsEventType::Completed, &k2, scope(5555), meta("b"))
+            .unwrap();
+        o.record(V3ObsEventType::Completed, &k1, scope(5555), meta("a"))
+            .unwrap();
         let snap = o.snapshot(0).unwrap();
         assert_eq!(snap.requests.len(), 2, "two distinct request keys");
         let row_a = snap.requests.get(&k1).unwrap();
@@ -471,8 +494,20 @@ mod tests {
         for index in 0..2050 {
             let request_id = format!("bounded-{index}");
             let key = build_v3_obs_request_key(5555, &request_id);
-            o.record(V3ObsEventType::Started, &key, scope(5555), meta(&request_id)).unwrap();
-            o.record(V3ObsEventType::Completed, &key, scope(5555), meta(&request_id)).unwrap();
+            o.record(
+                V3ObsEventType::Started,
+                &key,
+                scope(5555),
+                meta(&request_id),
+            )
+            .unwrap();
+            o.record(
+                V3ObsEventType::Completed,
+                &key,
+                scope(5555),
+                meta(&request_id),
+            )
+            .unwrap();
         }
         let snapshot = o.snapshot(0).unwrap();
         assert!(snapshot.requests.len() <= 2048);
@@ -484,9 +519,16 @@ mod tests {
         let o = V3WebuiObservability::new();
         let request_id = "repeated-terminal";
         let key = build_v3_obs_request_key(5555, request_id);
-        o.record(V3ObsEventType::Started, &key, scope(5555), meta(request_id)).unwrap();
+        o.record(V3ObsEventType::Started, &key, scope(5555), meta(request_id))
+            .unwrap();
         for _ in 0..10_000 {
-            o.record(V3ObsEventType::Completed, &key, scope(5555), meta(request_id)).unwrap();
+            o.record(
+                V3ObsEventType::Completed,
+                &key,
+                scope(5555),
+                meta(request_id),
+            )
+            .unwrap();
         }
         let snapshot = o.snapshot(0).unwrap();
         assert_eq!(snapshot.requests.len(), 1);
@@ -498,22 +540,55 @@ mod tests {
         let o = V3WebuiObservability::new();
         let first_id = "evicted-terminal";
         let first_key = build_v3_obs_request_key(5555, first_id);
-        o.record(V3ObsEventType::Started, &first_key, scope(5555), meta(first_id)).unwrap();
-        o.record(V3ObsEventType::Completed, &first_key, scope(5555), meta(first_id)).unwrap();
+        o.record(
+            V3ObsEventType::Started,
+            &first_key,
+            scope(5555),
+            meta(first_id),
+        )
+        .unwrap();
+        o.record(
+            V3ObsEventType::Completed,
+            &first_key,
+            scope(5555),
+            meta(first_id),
+        )
+        .unwrap();
         for index in 0..2048 {
             let request_id = format!("eviction-fill-{index}");
             let key = build_v3_obs_request_key(5555, &request_id);
-            o.record(V3ObsEventType::Started, &key, scope(5555), meta(&request_id)).unwrap();
-            o.record(V3ObsEventType::Completed, &key, scope(5555), meta(&request_id)).unwrap();
+            o.record(
+                V3ObsEventType::Started,
+                &key,
+                scope(5555),
+                meta(&request_id),
+            )
+            .unwrap();
+            o.record(
+                V3ObsEventType::Completed,
+                &key,
+                scope(5555),
+                meta(&request_id),
+            )
+            .unwrap();
         }
         assert!(!o.snapshot(0).unwrap().requests.contains_key(&first_key));
-        o.record(V3ObsEventType::Completed, &first_key, scope(5555), meta(first_id)).unwrap();
+        o.record(
+            V3ObsEventType::Completed,
+            &first_key,
+            scope(5555),
+            meta(first_id),
+        )
+        .unwrap();
         let snapshot = o.snapshot(0).unwrap();
         assert!(!snapshot.requests.contains_key(&first_key));
         assert_eq!(snapshot.stats.success, 2049);
         let replay = o.since(0).unwrap();
         assert!(replay.resync_required);
-        assert!(replay.events.iter().all(|event| event.request_key != first_key));
+        assert!(replay
+            .events
+            .iter()
+            .all(|event| event.request_key != first_key));
     }
 
     #[test]
@@ -522,8 +597,20 @@ mod tests {
         for index in 0..1100 {
             let request_id = format!("event-window-{index}");
             let key = build_v3_obs_request_key(5555, &request_id);
-            o.record(V3ObsEventType::Started, &key, scope(5555), meta(&request_id)).unwrap();
-            o.record(V3ObsEventType::RouteSelected, &key, scope(5555), meta(&request_id)).unwrap();
+            o.record(
+                V3ObsEventType::Started,
+                &key,
+                scope(5555),
+                meta(&request_id),
+            )
+            .unwrap();
+            o.record(
+                V3ObsEventType::RouteSelected,
+                &key,
+                scope(5555),
+                meta(&request_id),
+            )
+            .unwrap();
         }
         let stale = o.since(0).unwrap();
         assert!(stale.resync_required);
@@ -544,7 +631,12 @@ mod tests {
                     let request_id = format!("concurrent-{worker}-{index}");
                     let key = build_v3_obs_request_key(5555, &request_id);
                     worker_observability
-                        .record(V3ObsEventType::Started, &key, scope(5555), meta(&request_id))
+                        .record(
+                            V3ObsEventType::Started,
+                            &key,
+                            scope(5555),
+                            meta(&request_id),
+                        )
                         .unwrap();
                 }
             }));
@@ -567,7 +659,12 @@ mod tests {
         let key = build_v3_obs_request_key(5555, "last-sequence");
         assert_eq!(
             observability
-                .record(V3ObsEventType::Started, &key, scope(5555), meta("last-sequence"))
+                .record(
+                    V3ObsEventType::Started,
+                    &key,
+                    scope(5555),
+                    meta("last-sequence")
+                )
                 .unwrap(),
             u64::MAX
         );

@@ -213,6 +213,12 @@ impl Default for V3OpenAiChatSseReducerState {
 }
 
 impl V3OpenAiChatSseReducerState {
+    pub fn has_tool_calls(&self) -> bool {
+        self.choices
+            .iter()
+            .any(|choice| matches!(choice.delta, V3OpenAiChatSseDelta::ToolCall(_)))
+    }
+
     pub fn apply_chunk(&mut self, chunk: &Value) -> Result<(), V3OpenAiChatSseTreeError> {
         let metadata = V3OpenAiChatSseProtocolMetadata::from_chunk(chunk)?;
         self.id = metadata.id.or(self.id.take());
@@ -610,22 +616,34 @@ fn classify_choice(choice: &Value) -> Result<V3OpenAiChatSseChoice, V3OpenAiChat
     let delta_object = delta
         .as_object()
         .ok_or(V3OpenAiChatSseTreeError::DeltaNotObject)?;
-    let delta_extensions = object_extensions(
-        delta_object,
-        &[
-            "content",
-            "reasoning_content",
-            "reasoning",
-            "refusal",
-            "role",
-            "tool_calls",
-        ],
-    );
-    let semantic_delta = if let Some(tool_calls) = delta_object
+    let has_tool_calls = delta_object
         .get("tool_calls")
         .and_then(Value::as_array)
-        .filter(|calls| !calls.is_empty())
-    {
+        .is_some_and(|calls| !calls.is_empty());
+    // A tool-call delta may carry the Resp03 toolreason projection in the
+    // same delta. Keep the reasoning field as an extension in that shape;
+    // otherwise the tool-call semantic branch would consume the call and
+    // silently drop the co-located reasoning projection.
+    let delta_extensions = if has_tool_calls {
+        object_extensions(delta_object, &["content", "refusal", "role", "tool_calls"])
+    } else {
+        object_extensions(
+            delta_object,
+            &[
+                "content",
+                "reasoning_content",
+                "reasoning",
+                "refusal",
+                "role",
+                "tool_calls",
+            ],
+        )
+    };
+    let semantic_delta = if has_tool_calls {
+        let tool_calls = delta_object
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .ok_or(V3OpenAiChatSseTreeError::ToolCallNotObject)?;
         let call = tool_calls
             .first()
             .ok_or(V3OpenAiChatSseTreeError::ToolCallNotObject)?;

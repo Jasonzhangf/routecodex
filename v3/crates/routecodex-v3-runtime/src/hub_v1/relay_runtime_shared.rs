@@ -281,6 +281,13 @@ pub fn provider_runtime_failure(
     error: V3ProviderError,
     provider_id: &str,
 ) -> V3RelayProviderFailure {
+    let error_code = match &error {
+        // SSE 已经完成 provider response inbound 的协议判定；把这个语义错误码
+        // 保留下游，健康策略才能把它和 transport hang 区分开。不能降成通用
+        // provider_error，否则 relay 会按 transient 同 provider 重试后直接投影给客户端。
+        V3ProviderError::MalformedSse { .. } => "provider_response_sse_event_invalid",
+        _ => "provider_error",
+    };
     let terminal_projection =
         matches!(&error, V3ProviderError::ClientDisconnect { .. }).then(|| {
             project_v3_client_disconnect(
@@ -295,7 +302,7 @@ pub fn provider_runtime_failure(
         } else {
             502
         },
-        client_response: json!({"error":{"code":"provider_error","message":error.to_string()}}),
+        client_response: json!({"error":{"code":error_code,"message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),
         terminal_projection,
         error_type_fn: extract_error_code_style,
@@ -477,14 +484,14 @@ fn observe_relay_client_sse_usage_chunk(
         let Some(event) = object.data_value() else {
             continue;
         };
+        if !event.is_object() {
+            continue;
+        }
         match protocol {
             V3HubEntryProtocol::Responses => {
                 let semantic = crate::hub_v1::classify_v3_responses_sse_event(event)
                     .map_err(|error| error.to_string())?;
-                observation.record_typed_object_type(
-                    "responses",
-                    &semantic.protocol.event_type,
-                )?;
+                observation.record_typed_object_type("responses", &semantic.protocol.event_type)?;
                 observation.record_provider_event_json(&semantic.to_normalized_value())?;
             }
             V3HubEntryProtocol::OpenAiChat => {
@@ -516,12 +523,7 @@ mod tests {
     ) -> Result<(), String> {
         let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
         let chunk = format!("data: {data}\n\n");
-        observe_relay_client_sse_usage_chunk(
-            chunk.as_bytes(),
-            protocol,
-            &mut decoder,
-            observation,
-        )
+        observe_relay_client_sse_usage_chunk(chunk.as_bytes(), protocol, &mut decoder, observation)
     }
 
     #[test]
@@ -555,10 +557,23 @@ mod tests {
     }
 
     #[test]
+    fn relay_stream_observation_retains_provider_raw_sse_side_channel() {
+        let observation = V3RuntimeStreamObservation::default();
+        observation
+            .record_provider_raw_sse_chunk(b"event: response.output_text.delta\n\n")
+            .unwrap();
+        let snapshot = observation.snapshot().unwrap();
+        assert_eq!(
+            snapshot.provider_raw_sse,
+            "event: response.output_text.delta\n\n"
+        );
+    }
+
+    #[test]
     fn relay_client_observation_rejects_malformed_typed_payload() {
         let observation = V3RuntimeStreamObservation::default();
-        let error = observe_one(V3HubEntryProtocol::Responses, "not-json", &observation)
-            .unwrap_err();
+        let error =
+            observe_one(V3HubEntryProtocol::Responses, "not-json", &observation).unwrap_err();
         assert!(error.contains("not valid JSON"));
     }
 

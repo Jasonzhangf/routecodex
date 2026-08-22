@@ -56,8 +56,14 @@ fn responses_registered_item_types_each_have_typed_round_trip() {
             "function_call_output",
             V3ResponsesSseOutputItemKind::FunctionCallOutput,
         ),
-        ("web_search_call", V3ResponsesSseOutputItemKind::WebSearchCall),
-        ("file_search_call", V3ResponsesSseOutputItemKind::FileSearchCall),
+        (
+            "web_search_call",
+            V3ResponsesSseOutputItemKind::WebSearchCall,
+        ),
+        (
+            "file_search_call",
+            V3ResponsesSseOutputItemKind::FileSearchCall,
+        ),
         (
             "code_interpreter_call",
             V3ResponsesSseOutputItemKind::CodeInterpreterCall,
@@ -69,7 +75,10 @@ fn responses_registered_item_types_each_have_typed_round_trip() {
             "mcp_approval_request",
             V3ResponsesSseOutputItemKind::McpApprovalRequest,
         ),
-        ("tool_search_call", V3ResponsesSseOutputItemKind::ToolSearchCall),
+        (
+            "tool_search_call",
+            V3ResponsesSseOutputItemKind::ToolSearchCall,
+        ),
         (
             "apply_patch_call",
             V3ResponsesSseOutputItemKind::ApplyPatchCall,
@@ -311,7 +320,10 @@ fn responses_created_accepts_nullable_envelope_fields() {
         .expect("nullable Responses envelope fields are valid protocol data");
     assert_eq!(semantic.protocol.event_type, "response.created");
     assert_eq!(
-        semantic.response.as_ref().and_then(|value| value.id.as_deref()),
+        semantic
+            .response
+            .as_ref()
+            .and_then(|value| value.id.as_deref()),
         Some("resp_1")
     );
 }

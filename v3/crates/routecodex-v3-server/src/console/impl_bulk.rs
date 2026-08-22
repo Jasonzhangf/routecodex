@@ -1,7 +1,7 @@
-use crate::*;
 use crate::webui_observability::{
     build_v3_obs_request_key, V3ObsEventType, V3ObsRequestMeta, V3ObsScope,
 };
+use crate::*;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
@@ -54,7 +54,10 @@ fn build_v3_webui_meta_for_context(
     V3ObsRequestMeta {
         request_id: context.request_identity.request_id.clone(),
         endpoint: context.endpoint.clone(),
-        model: observability.model_id.clone().or_else(|| observability.wire_model.clone()),
+        model: observability
+            .model_id
+            .clone()
+            .or_else(|| observability.wire_model.clone()),
         route: Some(resolve_v3_console_route_projection(observability).label),
         provider: observability
             .provider_key
@@ -85,8 +88,10 @@ pub(crate) fn record_v3_webui_event_for_context(
     event_type: V3ObsEventType,
     observability: &V3RuntimeObservability,
 ) -> Result<u64, String> {
-    let request_key =
-        build_v3_obs_request_key(context.state.server.port, &context.request_identity.request_id);
+    let request_key = build_v3_obs_request_key(
+        context.state.server.port,
+        &context.request_identity.request_id,
+    );
     let scope = V3ObsScope {
         port: context.state.server.port,
         workdir: context.identity.project_path.clone(),
@@ -101,11 +106,11 @@ pub(crate) fn record_v3_webui_event_for_context(
 
 // Started projection: uses only scope + identity (route/model/provider unknown
 // until routing). Same typed side-channel as the rest of the projection.
-fn record_v3_webui_started_for_context(
-    context: &V3ConsoleEmissionContext,
-) -> Result<u64, String> {
-    let request_key =
-        build_v3_obs_request_key(context.state.server.port, &context.request_identity.request_id);
+fn record_v3_webui_started_for_context(context: &V3ConsoleEmissionContext) -> Result<u64, String> {
+    let request_key = build_v3_obs_request_key(
+        context.state.server.port,
+        &context.request_identity.request_id,
+    );
     let scope = V3ObsScope {
         port: context.state.server.port,
         workdir: context.identity.project_path.clone(),

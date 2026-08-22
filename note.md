@@ -36015,3 +36015,7 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - Origin/main server baseline was restored in `f509e2b70`: registered the existing typed WebUI observability store module, fixed console emission context initialization, and aligned startup provider-global probe invocation with the current runtime owner.
 - Installed binary hash after the first complete install/restart was `e54f4cc1c1988a6abf6cfae5d584c1e8d8174742b0820ae1e98f789739ab91ec`; all configured listener health endpoints returned build `0.90.4574`, manifest 3.
 - DSH review `v3-route-policy-condition-20260820-final-review` returned VERDICT: FAIL. It identified unauthenticated WebUI observability exposure, cross-listener shared observability, an internal cursor race, and an unregistered startup probe symbol. The observability HTTP routes were removed from ordinary listeners; the startup symbol and mainline/function map were synchronized. New install/restart/replay/review evidence is required.
+# 2026-08-22 SSE 静默失败修复
+- 根因：OpenAI Chat Relay accept-SSE channel 将 provider stream `Err(String)` 映射为 `std::io::Error`，再经 `v3_io_sse_body` 直接断流；错误未进入 typed Error01 链。
+- 修复：accept-SSE channel 改为 `V3Error01SourceRaised`；provider stream 错误在 `V3ProviderRespInbound01Raw/provider_response_sse_stream` 建 typed source；client stream 使用既有 typed SSE closeout。客户端断连不改成 provider failure。
+- 验证：定向 relay SSE 测试通过；测试新增断言 source_stage/code；`git diff --check` 通过。未做 install/restart/live replay。

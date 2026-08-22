@@ -41,6 +41,43 @@ fn chat_sse_keeps_text_and_tool_call_semantics_distinct() {
 }
 
 #[test]
+fn chat_sse_preserves_toolreason_reasoning_on_tool_call_delta() {
+    let input = json!({
+        "object": "chat.completion.chunk",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "reasoning_content": "调用工具 rcc_probe：用户明确要求执行探测",
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call_1",
+                            "function": {
+                                "name": "rcc_probe",
+                                "arguments": "{\"value\":\"x\"}"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": null
+            }
+        ]
+    });
+
+    let semantic = classify_v3_openai_chat_sse_chunk(&input).unwrap();
+    let projected = project_v3_openai_chat_sse_chunk_json(&semantic);
+    assert_eq!(
+        projected["choices"][0]["delta"]["reasoning_content"],
+        "调用工具 rcc_probe：用户明确要求执行探测"
+    );
+    assert_eq!(
+        projected["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
+        "{\"value\":\"x\"}"
+    );
+}
+
+#[test]
 fn chat_sse_null_usage_is_absent_but_scalar_usage_is_rejected() {
     let semantic = classify_v3_openai_chat_sse_chunk(&json!({
         "object":"chat.completion.chunk",

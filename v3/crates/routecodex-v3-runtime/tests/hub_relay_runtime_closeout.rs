@@ -1872,8 +1872,7 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
     assert_eq!(
         provider_sequence,
         vec![
-            "limited", "minimax", "limited", "minimax", "limited", "minimax", "limited",
-            "minimax",
+            "limited", "minimax", "limited", "minimax", "limited", "minimax", "limited", "minimax",
         ]
     );
 }

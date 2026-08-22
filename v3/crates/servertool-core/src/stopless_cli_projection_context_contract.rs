@@ -1,10 +1,9 @@
 // feature_id: hub.servertool_stopless_cli_projection_context
+use crate::internal::stopless_defaults;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::internal::stopless_defaults;
 
 use crate::cli_contract::normalize_stopless_trigger_hint_for_metadata;
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

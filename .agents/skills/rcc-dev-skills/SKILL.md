@@ -1,13 +1,63 @@
 ---
 name: rcc-dev-skills
-description: 证据优先：任何归因必须由同一 requestId 的 raw request、provider-bound request、raw response、client projection 和 live replay 证明，禁止把 provider/context/model 当默认锅；先定位唯一 owner 和数据形状，再改唯一真源。P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script 做跨文件或同一文件多位置语义批量替换；逐文件读取核实上下文后用 apply_patch hunk，formatter/canonical generator 只生成声明的机械产物，不得语义改写。P0 Architecture Guard：typed carrier / MetadataCenter 控制资源绝不能进入 payload，payload must not reconstruct control，必须 fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound 补偿。模块定义、owner、allowed/forbidden paths、相邻调用边、资源关系和方案越界审查先行，写完审 diff 越界，功能验证后最后 code review。
+description: >-
+  DEBUG FIRST / A-B-C 门禁：有请求/响应、provider、SSE、响应形状或切换问题时，先用同一 requestId 的 raw request → provider-bound request → raw response → client projection 做 Provider A/B/C 直连与 live replay；未完成前禁止归因、改代码或用普通 smoke 替代。确认唯一 owner/数据形状后才改唯一真源。P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script 做跨文件或同一文件多位置语义批量替换；逐文件读取核实上下文后用 apply_patch hunk，formatter/canonical generator 只生成声明的机械产物，不得语义改写。P0 Architecture Guard：typed carrier / MetadataCenter 控制资源绝不能进入 payload，payload must not reconstruct control，必须 fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound 补偿。模块定义、owner、allowed/forbidden paths、相邻调用边、资源关系和方案越界审查先行，写完审 diff 越界，功能验证后最后 code review。
 ---
+
+NO FALLBACK! FUCK FALLBACK!!!
+
+任何 fallback、降级、兜底、静默补偿、双路径补偿、猜测性恢复都禁止。错误必须回唯一真源显式暴露；只有同一合同明确登记的协议语法恢复才允许存在，不能把恢复语义伪装成成功。
+
+全局失效判定：方案、实现、测试、配置、安装版本或运行时路径中只要发现任意 fallback，整项交付立即判定失效；不得以主路径可用、局部测试通过或 fallback 未被触发为理由继续交付。
 
 # RCC Dev Skills
 
+## P0 内部错误与 Provider 错误状态码分流
+
+客户端看到的 HTTP 状态码必须先区分错误归属，不能把 RouteCodex 自己的错误伪装成 provider 502：
+
+- **598：RouteCodex 内部请求阶段错误**。包括请求归一化、请求治理、路由/目标选择、provider wire 构造、出站 transport 请求阶段的内部失败。
+- **599：RouteCodex 内部响应阶段错误**。包括 provider raw response 接收后的解析、SSE/JSON codec、RespInbound、RespChatProcess、RespOutbound 和客户端 frame 投影阶段的内部失败。
+- **502/429/401/403/503 等：外部 provider/upstream 错误**。只有 Error01 携带外部 provider/upstream 链接时，才允许使用外部状态码和 provider health 语义。
+- 上游 HTTP **201/200** 但我们在响应处理阶段失败，必须投影为 **599**；这说明请求已经到达上游，优先检查响应传输、读取、解析或投影链，不能称为 provider HTTP 502。
+- 内部错误的 598/599 由统一 Error06 投影 owner 按 `V3InternalErrorLane::{Request,Response}` 决定；SSE crate、handler、provider health 和客户端适配层不得自行改码、补码或按错误文案猜测归属。
+
+定位时先看状态码，再按错误链确认：598 查 Req04/VR/ProviderReq/Transport 请求链；599 查 ProviderResp/RespInbound/RespChatProcess/RespOutbound 响应链。没有外部 provider error link 时，禁止把 598/599 计入 provider key health 或改写成 502。
+
+## P0 请求/响应问题标准流程
+
+1. **Provider baseline**：先用 provider curl 最小 ping，确认 provider/key/model/endpoint 存活。
+2. **原始 payload 复现**：再用失败请求的完整 provider-bound payload 原样直连重试；最小 ping 成功而原始 payload 失败，优先判定请求构建/请求内容问题。
+3. **请求构建定位**：先查当前轮，再检查历史轮；确认第一个制造错误形状的唯一 owner。
+4. **错误码分流**：内部请求阶段使用当前 Error06 合同的 `598`，内部响应阶段使用 `599`；内部错误禁止使用外部 provider 状态码，发现后必须回唯一 owner 清理，不能在 handler/SSE/outbound 补偿。
+5. **原始 payload 在线复测**：修复后必须用同一入口、同一原始 payload 在线重放当前轮；普通最小 ping 或普通 smoke 不能替代原始样本复测。
+
+## P0 首先执行：Provider 归因 A/B/C 门禁
+
+这是所有 provider、SSE、响应形状、切换和客户端断流问题的**第一诊断动作**，优先级高于 console 摘要、7777/4444 在线重放、先改 SSE/handler、先改路由，以及“同入口最小请求”。没有完成本门禁，不得下 provider、请求构造、解析或客户端投影归因。
+
+1. 先锁定失败请求的 `requestId`、入口协议、目标 provider/model、端口和 `direct|relay`；从 canonical 样本/日志取同一次尝试的 `request.json`、实际 `provider-request.json`、`provider-response.json` 和 client projection。只看 console 摘要不算证据。
+2. 先做 provider 直连对照，再做代理请求：
+   - **A**：同 provider/model/key 的最小直连请求，只证明 provider 基线是否可用；
+   - **B**：把该失败 `requestId` 生成的完整 `provider-request.json` 原样直连同一 provider；
+   - **C**：同一客户端请求经过 RouteCodex 的真实在线请求。
+3. 只能按 A/B/C 结果归因：A 失败才调查 provider/key/model/endpoint；A 成功、B 失败是本地 provider-bound 请求构造/序列化/历史问题；A/B 成功、C 失败才调查传输、`RespInbound`、解析或 client projection。SSE 报错文案本身不能改变这个顺序。
+4. 找不到同一次失败的完整 B 和 raw provider response 时，只能记录“尚未定位”，不能用新请求、另一 key、另一端口或 console 文案替代，也不能先改兼容层“试试看”。若样本缺失，先补受控 snapshot/采集，再继续。
+5. **禁止顺序**：先测 proxy 再猜 provider、先用入口最小请求代替 provider 直连、先把错误归到 SSE、先切 key/改 cooldown、先改代码后补 A/B。违反本门禁属于 P0 流程错误。
+
+## P0 Provider SSE 兼容边界：只恢复语法，不猜语义
+
+Provider SSE 的兼容修复只能修复传输语法和格式，不得根据响应 shape 猜另一种协议或伪造语义：
+
+- 可恢复：SSE 多行 data 聚合、字符串内裸控制字符、合法 JSON 的 `null`/标量/数组控制帧、文本保活、JSON `ping`、`[DONE]`、已登记的空 settlement 帧。它们由 transport/parser 消费，不进入 semantic tree，也不进入 client payload。
+- 不可猜：对象缺少 `type`、对象缺少必要字段、Responses 对象混入 Chat/Anthropic 语义、未知事件类型。除非已有协议合同能无歧义恢复，否则进入 Error 链并切换 provider。
+- 不允许：在 SSE、handler 或 outbound 层补 `type`、补 tool/result、把 Chat shape 改成 Responses shape、把错误静默变成 EOF/成功，或用客户端入口协议替代 provider wire 协议。
+- 唯一 owner：SSE framing/JSON 语法恢复在 provider SSE codec；协议语义校验在对应 provider response inbound codec；relay/direct 只消费已经完成的协议决策，禁止同一帧重复解析和各自维护严格度。
+- 必须成对验证：正向测试证明可恢复格式不会触发 provider failure；反向测试证明真实语义对象缺字段仍进入错误链。在线验证必须使用同一 requestId 的 provider-bound request、raw response 和 client projection。
+
 ## 概要硬规则（Agent 列表阶段也必须看到）
 
-- **请求形状优先归因（最高优先级）**：一个请求的响应错误，很大概率首先是请求形状问题，禁止先规避 provider、改路由或把错误归因给 provider/key。必须先完成两步证据：**(1) 失败请求可复现；(2) 同入口的最简请求正常**。确认后，必须从最近一次失败请求逐步回退：先去掉最近一轮请求，验证是否由该轮引起；再按字段做最小差分，定位第一个触发错误的字段/组合。修复必须回到生成该 provider-bound request 的唯一 owner，解决请求根因；禁止用改配置绕行、降低路由优先级、排除 provider、静默裁剪字段、fallback 或错误投影掩盖问题。最终必须用同一入口、同一真实样本在线重放证明原错误消失，并保留“完整失败、最简成功、最近一轮差分、字段差分”的证据链。
+- **请求形状优先归因（最高优先级）**：先执行上面的 **Provider 归因 A/B/C 门禁**。一个请求的响应错误，很大概率首先是请求形状问题；禁止先规避 provider、改路由或把错误归因给 provider/key。A/B/C 锁定责任后，才从最近一次失败请求逐步回退：先去掉最近一轮请求，再按字段做最小差分，定位第一个触发错误的字段/组合。修复必须回到生成该 provider-bound request 的唯一 owner，解决请求根因；禁止用改配置绕行、降低路由优先级、排除 provider、静默裁剪字段、fallback 或错误投影掩盖问题。最终必须用同一入口、同一真实样本在线重放证明原错误消失，并保留“完整失败、最简成功、最近一轮差分、字段差分”的证据链。
 
 - P0 禁止脚本批量替换：绝对禁止用 Python、Node、Perl、sed、awk、临时脚本、shell loop、正则替换命令、编辑器宏或 transformation script，对跨文件或同一文件多位置做语义批量替换；逐文件读取核实上下文后，只能用明确、可审查的 `apply_patch` hunk 手工修改。formatter/canonical generator 只可生成其声明的机械产物，不得语义改写。
 - P0 控制面与业务 payload 物理隔离：routing、switching、continuation、retry、provider selection、health、debug、snapshot、error、scope、Stopless/servertool 状态只能走 typed carrier / MetadataCenter 控制资源 / Error 链，绝不能进入 request/response payload；payload 不得重建控制状态；发现泄漏必须 fail-fast，禁止 silent strip、请求侧 cleanup、handler/SSE/outbound/transport 补偿。
@@ -83,7 +133,7 @@ description: 证据优先：任何归因必须由同一 requestId 的 raw reques
 - 完成声明必须有 `evidence.jsonl`；跨 worker 集成默认走 `handoff/` 或 `merge-queue/`，checker 读取证据后再合并。
 
 ## Debug 首选顺序（强制）
-0. V3 任务先打开 `.agents/skills/rcc-v3-architecture/SKILL.md`，并用 `npm run render:v3-mainline-caller-flow` 生成/查看 `docs/architecture/wiki/html/v3-mainline-caller-flow.html` 的主骨架和相关分支图。
+0. **先执行本文件顶部的 P0 Provider 归因 A/B/C 门禁**；provider 直连 A/B 未完成前，不得开始 C 的 7777/4444 在线重放或进入实现归因。随后才打开 `.agents/skills/rcc-v3-architecture/SKILL.md`，并用 `npm run render:v3-mainline-caller-flow` 生成/查看 `docs/architecture/wiki/html/v3-mainline-caller-flow.html` 的主骨架和相关分支图。
 1. 先查 `function map / owner registry / verification map`
 - 锁唯一 owner、允许路径、required gates。
 2. 再查 `mainline source / wiki / manifest`
@@ -108,6 +158,8 @@ description: 证据优先：任何归因必须由同一 requestId 的 raw reques
 不要凭“线上没有字段”“模型没遵循”“上下文太长”把责任甩给 provider、模型或上下文。归因必须由同一 `requestId` 的实际字节和可重放样本证明；代码里“有注入函数”不等于本次请求真的注入。
 
 固定按以下顺序排查：
+
+> 本节是顶部 P0 门禁的详细执行表，不是可选的补充测试。入口最小请求只能作为 C，不能代替 provider 直连 A；只有 A/B/C 都记录在同一 requestId 证据链里，才允许写“请求问题”“provider 问题”或“解析/投影问题”。
 
 1. 锁定同一请求的 `entry protocol`、`direct|relay`、provider、model、port、`requestId`，读取 canonical provider request、provider raw response、client projection；不要先看 console 摘要下结论。
 2. 在 provider-bound request 上检查真实形状：`messages`/content 数量和 role 顺序、system 数量及位置、当前轮边界 `current_payload_start`、工具数量、目标工具 schema、required 字段、guidance 实际落点。参数若只被校验却没有参与落点计算，直接标为请求构造缺陷。
@@ -174,6 +226,7 @@ description: 证据优先：任何归因必须由同一 requestId 的 raw reques
 | servertool 开发/调试流 | `references/23-servertool-hook-dev-debug-flow.md` | servertool hook skeleton 的实施顺序、debug 切段、证据链与删 TS 前置条件 |
 | 节点合同调试法 | `references/24-node-contract-debug-method.md` | 高优先级方法：先生命周期/节点合同，再设计白盒与两端黑盒，最后才 debug/改代码 |
 | 协议/SSE/continuation 边界 | `references/25-protocol-sse-continuation-boundary.md` | `/v1/responses` continuation Chat Process save/restore 不可变区、SSE transport-only、inbound/outbound 只归一化 |
+| Toolreason dryrun 诊断 | `references/26-toolreason-dryrun-diagnostic.md` | 用同一 requestId 绑定原始请求、provider 请求、raw response、Resp03/client projection，先判请求还是响应 |
 | 唯一功能块 | `references/30-unique-block-index.md` | 快速锁唯一功能块 |
 | owner / feature / gate | `references/40-owner-registry.md` | function map / verification map / source anchor |
 | `~/.rcc` / provider 配置 | `references/50-rcc-config-ssot.md` | runtime 配置真源、schema、排障命令 |
@@ -245,6 +298,12 @@ description: 证据优先：任何归因必须由同一 requestId 的 raw reques
 - 结构化 test slicer 不要假设 `#[tokio::test]` 一定缩进四空格。抽离测试模块后，切片边界应同时兼容顶层 `\n#[tokio::test]` 和嵌套 `\n    #[tokio::test]`，否则 red-fixture 可能误判为 PASS。
 
 ## 硬护栏
+
+### Toolreason observation context guard
+
+- `TOOLREASON` observation must bind the same request's real `session_id` and `request_id` from the typed request identity carrier. Never synthesize `session_id` from `request_id`, and never use a provider-failure `request-local-*` scope as a substitute for the console session identity unless the canonical request-identity owner proves they are byte-identical.
+- Before attributing a session mismatch, compare one request's outer `sessionIDFull`, `req=...`, hook observation, provider snapshot, and client projection. Interleaved console order is not evidence of mismatch; the IDs must be compared by value.
+- Toolreason fixes belong in the Rust Chat Process hook skeleton. SSE code may pass typed context and consume hook output, but must not grow a second parser, timing workaround, terminal-event rule, or projection fallback. If the hook lacks the real identity carrier, stop at the carrier boundary and fix that owner with evidence.
 - 单一路径：`HTTP -> Hub Pipeline -> VR -> Provider Runtime -> Upstream`
 - Rust 真源优先：Hub Pipeline / Chat Process / 路由 / servertool 语义默认查 Rust
 - 禁止 fallback / 静默吞错

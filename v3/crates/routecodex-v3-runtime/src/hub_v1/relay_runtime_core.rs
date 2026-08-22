@@ -222,9 +222,7 @@ fn observe_v3_provider_sse(
 pub(crate) fn v3_relay_transport_response_timeout_from_ms(
     request_timeout_ms: Option<u64>,
 ) -> std::time::Duration {
-    std::time::Duration::from_millis(
-        request_timeout_ms.filter(|&ms| ms > 0).unwrap_or(300_000),
-    )
+    std::time::Duration::from_millis(request_timeout_ms.filter(|&ms| ms > 0).unwrap_or(300_000))
 }
 
 pub(crate) fn v3_relay_transport_response_timeout(

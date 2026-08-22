@@ -117,7 +117,10 @@ pub enum V3VirtualRouterError {
         pool_ids: Vec<String>,
     },
     #[error("route group {group_id} route object {route_object} is absent")]
-    RouteObjectMissing { group_id: String, route_object: String },
+    RouteObjectMissing {
+        group_id: String,
+        route_object: String,
+    },
     #[error("route group {group_id} non-default pool {pool_id} has no match declaration")]
     PoolMatchMissing { group_id: String, pool_id: String },
     #[error("routing facts entry protocol is empty or does not match endpoint {0}")]

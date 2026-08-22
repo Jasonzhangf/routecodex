@@ -292,7 +292,9 @@ fn compact_route_signal_uses_configured_independent_route_object_pool() {
             },
         )
         .unwrap();
-    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "compact");
     assert_eq!(hit.target_plan.len(), 1);
@@ -303,18 +305,12 @@ fn route_policy_pool_action_is_consumed_as_one_explicit_pool() {
     let router = V3VirtualRouter::default();
     let manifest = manifest(V3SelectionStrategy::Priority);
     let classified = router
-        .classify_request_with_facts(
-            &manifest,
-            "s",
-            "/v1/responses",
-            matching_facts(),
-        )
+        .classify_request_with_facts(&manifest, "s", "/v1/responses", matching_facts())
         .unwrap();
-    let classified = V3VirtualRouter::with_route_policy_pool(
-        classified,
-        Some("tools".to_string()),
-    );
-    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    let classified = V3VirtualRouter::with_route_policy_pool(classified, Some("tools".to_string()));
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "tools");
     assert_eq!(hit.target_plan.len(), 2);

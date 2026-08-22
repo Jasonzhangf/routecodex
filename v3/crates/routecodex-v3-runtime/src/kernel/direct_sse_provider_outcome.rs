@@ -1,7 +1,7 @@
 use super::*;
 use crate::hub_v1::{
-    classify_v3_provider_sse_json_data, collect_v3_provider_sse_json_data,
-    V3HubProviderWireProtocol, V3ProviderResponsesJsonFrameOutcome,
+    classify_v3_provider_sse_json_data, V3HubProviderWireProtocol,
+    V3ProviderResponsesJsonFrameOutcome,
 };
 pub(super) struct V3DirectSseProviderOutcome {
     pub(super) provider_health: V3ProviderFailureRuntimeHealth,
@@ -43,9 +43,8 @@ impl V3DirectSseProviderOutcome {
         &mut self,
         fields: &[SseField],
     ) -> Result<(), V3Error01SourceRaised> {
-        let data = collect_v3_provider_sse_json_data(fields);
-        let parsed =
-            classify_v3_provider_sse_json_data(self.provider_protocol, &data)
+        let data =
+            normalize_v3_provider_sse_json_data_for_event_name(self.provider_protocol, fields)
                 .map_err(|message| {
                     build_v3_error_01_source_raised(
                         V3ErrorSourceKind::ProviderFailure,
@@ -54,6 +53,16 @@ impl V3DirectSseProviderOutcome {
                         message,
                     )
                 })?;
+        let parsed = classify_v3_provider_sse_json_data(self.provider_protocol, &data).map_err(
+            |message| {
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "provider_response_sse_event_invalid",
+                    message,
+                )
+            },
+        )?;
         let Some(outcome) = parsed else {
             if data.trim() == "[DONE]" {
                 self.seen_done = true;

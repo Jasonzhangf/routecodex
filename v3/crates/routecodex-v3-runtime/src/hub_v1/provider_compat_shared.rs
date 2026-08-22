@@ -171,5 +171,4 @@ pub(crate) fn is_v3_retain_response_cipher(target_plan_len: usize, model_id: &st
 mod tests {
     use super::*;
     use serde_json::json;
-
 }

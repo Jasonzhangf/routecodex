@@ -16,19 +16,19 @@ use std::sync::Arc;
 const STOPLESS_CALL_ID: &str = "call_stopless_reasoning";
 const STOPLESS_CLI_COMMAND: &str = "routecodex hook run reasoningStop";
 
-pub(crate) const V3_TOOL_THINKING_GUIDANCE: &str = r#"下面内容只说明工具调用部分，不适用于普通回答：
-工具调用时必须先输出原因标签：在这一轮第一个结构化工具调用之前，输出且只输出一个 `<toolreason>...</toolreason>`。标签内部必须是一个 JSON 对象，不能是普通句子。JSON 必须包含两个字段：`reason` 是这一轮调用工具的直接动机，只说现在为什么调用，不说计划、步骤、结果或总结；`goal_alignment_confidence` 是当前工具调用与用户上一轮输入目标的一致性置信度，必须是 0 到 100 的整数。一致为 100，完全无关为 0，中间情况按判断给分。多个工具调用共用这一轮唯一 JSON，不要重复标签。规则不适用于普通回答、解释、代码块或工具结果。
+pub(crate) const V3_TOOL_THINKING_GUIDANCE: &str = r#"工具调用协议（只适用于本轮工具调用，不适用于普通回答）：
 
-格式：`<toolreason>{"reason":"真实、简短的直接动机","goal_alignment_confidence":85}</toolreason>`。实际调用时必须替换示例内容；不要输出示例原文、占位词、加号、反引号、角色说明或格式说明。
+每次发起工具调用时，必须在工具参数 JSON 对象本层增加以下字段，并立即输出工具调用：
+`reason`：现在调用该工具的唯一直接动机；短句，只说动机，不写计划、步骤、结果或工具参数。
+`goal_alignment_confidence`：以用户上一轮目标为标准，当前工具调用与目标的一致性评分；只能是 0 到 100 的整数，100 表示直接需要，0 表示完全无关。
+`model_id`：本次响应实际使用的模型 ID，填写精确值。
 
-工具调用必须使用当前工具接口的结构化调用能力，不要把工具名、参数或“调用工具”写成普通文本。`toolreason` 只是文本 fence，必须紧跟在第一个结构化调用之前。工具调用发出后，模型可能因协议结束本轮，不能依赖后置文本补原因。
+字段必须和原生工具参数处于同一个参数对象层级；对于 Anthropic 的 `input`、Responses/Chat 的 `arguments` 或其他参数容器，字段放在该容器对象的顶层。不要把字段嵌套到命令参数对象内部；RouteCodex 会在工具执行前剥离这三个辅助字段。
 
-完整调用示例：模型先输出 `<toolreason>{"reason":"确认当前工作目录","goal_alignment_confidence":100}</toolreason>`，然后立即使用结构化工具接口调用 `exec_command`，参数为 `{"cmd":"pwd"}`。
+正确：`{"name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"reason\":\"确认当前工作目录\",\"goal_alignment_confidence\":100,\"model_id\":\"x-preview-f-free\"}"}`
+错误：`{"name":"exec_command","arguments":"{\"cmd\":\"pwd\",\"metadata\":{\"reason\":\"确认当前工作目录\"}}"}`
 
-完整调用示例：模型先输出 `<toolreason>{"reason":"读取配置核对端口","goal_alignment_confidence":95}</toolreason>`，然后立即使用结构化工具接口调用 `read_file`，参数为 `{"path":"config.toml"}`。
-
-反例：输出普通句子而不是 JSON、缺少任一字段、置信度不是 0 到 100 的整数、输出占位词或加号、复述规则、标签外的普通解释、工具调用之间插入普通文本、一个 turn 输出多个标签。模型未输出标签或 JSON 不完整时仍照常发起工具调用，不能因此拒绝工具调用。
-
+同一轮多个工具调用时，每个工具调用对象分别填写字段；不要输出 fence、preamble、普通解释或第二份原因文本。不要省略字段，也不要用占位值；字段必须是本次调用的真实值。
 "#;
 
 pub(crate) fn inject_v3_tool_thinking_guidance_at_req04(
@@ -39,6 +39,23 @@ pub(crate) fn inject_v3_tool_thinking_guidance_at_req04(
     if !enabled {
         return Ok(());
     }
+    // Gemini has a separate native functionCall contract and is explicitly
+    // excluded from tool-thinking JSON injection in v1.
+    if payload.get("contents").is_some()
+        || payload.get("system_instruction").is_some()
+        || payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .is_some_and(|tools| {
+                tools
+                    .iter()
+                    .any(|tool| tool.get("function_declarations").is_some())
+            })
+    {
+        return Ok(());
+    }
+    inject_v3_tool_thinking_fields_into_tool_schemas(payload);
+    inject_tool_thinking_into_tool_list_guidance(payload);
     if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
         if current_payload_start > messages.len() {
             return Err(V3HubRelayRequestError::CurrentPayloadBoundaryInvalid {
@@ -47,27 +64,154 @@ pub(crate) fn inject_v3_tool_thinking_guidance_at_req04(
             });
         }
     }
-    inject_tool_thinking_into_system_prompt(payload);
     Ok(())
 }
 
-fn inject_tool_thinking_into_system_prompt(payload: &mut Value) {
-    let Some(object) = payload.as_object_mut() else {
+pub(crate) fn current_v3_tool_thinking_payload_start(payload: &Value) -> Result<usize, String> {
+    for field in ["messages", "input"] {
+        let Some(items) = payload.get(field).and_then(Value::as_array) else {
+            continue;
+        };
+        return items
+            .iter()
+            .rposition(|item| item.get("role").and_then(Value::as_str) == Some("user"))
+            .ok_or_else(|| format!("Responses {field} array has no current user message"));
+    }
+    Ok(0)
+}
+
+fn inject_v3_tool_thinking_fields_into_tool_schemas(payload: &mut Value) {
+    let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
         return;
     };
-    let instructions = object
-        .entry("instructions")
-        .or_insert_with(|| Value::String(String::new()));
-    let Value::String(existing) = instructions else {
+    for tool in tools {
+        if let Some(schema) = tool.get_mut("input_schema") {
+            inject_v3_tool_thinking_fields_into_schema(schema);
+        }
+        if let Some(schema) = tool.get_mut("parameters") {
+            inject_v3_tool_thinking_fields_into_schema(schema);
+        }
+        if let Some(schema) = tool
+            .get_mut("function")
+            .and_then(Value::as_object_mut)
+            .and_then(|function| function.get_mut("parameters"))
+        {
+            inject_v3_tool_thinking_fields_into_schema(schema);
+        }
+    }
+}
+
+fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) {
+    let Some(schema) = schema.as_object_mut() else {
         return;
     };
-    if existing.contains("<toolreason>") && existing.contains("工具调用时必须先输出原因标签") {
+    let properties = schema
+        .entry("properties".to_string())
+        .or_insert_with(|| json!({}));
+    let Some(properties) = properties.as_object_mut() else {
+        return;
+    };
+    properties.entry("reason".to_string()).or_insert_with(|| {
+        json!({
+            "type": "string",
+            "description": "当前工具调用的唯一直接动机，只说动机，简短"
+        })
+    });
+    properties
+        .entry("goal_alignment_confidence".to_string())
+        .or_insert_with(|| {
+            json!({
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"
+            })
+        });
+    properties.entry("model_id".to_string()).or_insert_with(|| {
+        json!({
+            "type": "string",
+            "description": "本次响应实际使用的模型 ID"
+        })
+    });
+    let required = schema
+        .entry("required".to_string())
+        .or_insert_with(|| json!([]));
+    let Some(required) = required.as_array_mut() else {
+        return;
+    };
+    for field in ["reason", "goal_alignment_confidence", "model_id"] {
+        if !required.iter().any(|value| value.as_str() == Some(field)) {
+            required.push(Value::String(field.to_string()));
+        }
+    }
+}
+
+fn inject_tool_thinking_into_tool_list_guidance(payload: &mut Value) {
+    let Some(tool) = payload
+        .get_mut("tools")
+        .and_then(Value::as_array_mut)
+        .and_then(|tools| tools.first_mut())
+    else {
+        return;
+    };
+    if let Some(function) = tool.get_mut("function") {
+        if let Some(description) = function.get_mut("description") {
+            append_v3_tool_thinking_guidance_to_text(description);
+        } else if let Some(function) = function.as_object_mut() {
+            function.insert(
+                "description".to_string(),
+                Value::String(V3_TOOL_THINKING_GUIDANCE.to_string()),
+            );
+        }
         return;
     }
-    if !existing.trim().is_empty() {
-        existing.push_str("\n\n");
+    if let Some(description) = tool.get_mut("description") {
+        append_v3_tool_thinking_guidance_to_text(description);
+    } else if let Some(tool) = tool.as_object_mut() {
+        tool.insert(
+            "description".to_string(),
+            Value::String(V3_TOOL_THINKING_GUIDANCE.to_string()),
+        );
     }
-    existing.push_str(V3_TOOL_THINKING_GUIDANCE);
+}
+
+fn append_v3_tool_thinking_guidance_to_text(value: &mut Value) {
+    if value
+        .to_string()
+        .contains("工具调用协议（只适用于本轮工具调用")
+    {
+        return;
+    }
+    match value {
+        Value::String(existing) => {
+            if !existing.trim().is_empty() {
+                existing.push_str("\n\n");
+            }
+            existing.push_str(V3_TOOL_THINKING_GUIDANCE);
+        }
+        Value::Array(parts) => {
+            if let Some(text) = parts.iter_mut().find_map(|part| {
+                (part.get("type").and_then(Value::as_str) == Some("text"))
+                    .then(|| part.get_mut("text"))
+                    .flatten()
+                    .and_then(|text| match text {
+                        Value::String(text) => Some(text),
+                        _ => None,
+                    })
+            }) {
+                if !text.trim().is_empty() {
+                    text.push_str("\n\n");
+                }
+                text.push_str(V3_TOOL_THINKING_GUIDANCE);
+            } else {
+                parts.push(json!({
+                    "type": "text",
+                    "text": V3_TOOL_THINKING_GUIDANCE
+                }));
+            }
+        }
+        _ => *value = Value::String(V3_TOOL_THINKING_GUIDANCE.to_string()),
+    }
 }
 
 pub(crate) fn is_v3_stopless_internal_call_id(call_id: &str) -> bool {

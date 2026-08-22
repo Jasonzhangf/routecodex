@@ -166,8 +166,8 @@ pub(crate) fn provider_request_relay_failure(
     let (source_stage, error_type, message, terminal_projection) = match error {
         V3ResponsesRelayRuntimeError::ProviderCompat(error) => {
             let boundary = match error.classification() {
-                V3ProviderCompatErrorClassification::PayloadBoundaryViolation => Some(
-                    V3ErrorHandlingCenter::project_terminal(
+                V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
+                    Some(V3ErrorHandlingCenter::project_terminal(
                         V3ErrorHandlingCenter::decide_provider(
                             V3ErrorHandlingCenterInput {
                                 source: super::provider_compat_boundary_source(
@@ -184,8 +184,8 @@ pub(crate) fn provider_request_relay_failure(
                             false,
                             None,
                         ),
-                    ),
-                ),
+                    ))
+                }
                 V3ProviderCompatErrorClassification::Other => None,
             };
             (
@@ -210,7 +210,9 @@ pub(crate) fn provider_request_relay_failure(
         other => return Err(other),
     };
     Ok(V3ResponsesRelayProviderFailure {
-        status: terminal_projection.as_ref().map_or(502, |projection| projection.status),
+        status: terminal_projection
+            .as_ref()
+            .map_or(502, |projection| projection.status),
         policy_error_type: error_type.to_string(),
         policy_error_message: message.clone(),
         provider_id: provider_id.to_string(),
@@ -408,15 +410,20 @@ mod tests {
                 local, 0, false, false,
             );
         let execution = routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
-            exhaustion,
-            None,
+            exhaustion, None,
         );
         let projected = routecodex_v3_error::build_v3_error_06_client_projected_from_v3_error_05(
             execution
                 .try_into_terminal()
                 .expect("exhausted relay transport error must project terminally"),
         );
-        assert_eq!(projected.chain, routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS);
-        assert_ne!(projected.body.get("response"), Some(&json!({"status":"completed"})));
+        assert_eq!(
+            projected.chain,
+            routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+        );
+        assert_ne!(
+            projected.body.get("response"),
+            Some(&json!({"status":"completed"}))
+        );
     }
 }

@@ -70,11 +70,7 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
 
     let evaluation = vec![
         ("compact", input.is_compaction, "compact:registered-ingress"),
-        (
-            "compact",
-            input.is_compaction,
-            "compact:request-purpose",
-        ),
+        ("compact", input.is_compaction, "compact:request-purpose"),
         (
             "multimodal",
             input.has_image_attachment,
