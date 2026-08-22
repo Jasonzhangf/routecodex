@@ -21,6 +21,11 @@ projection are separate adjacent stages. Provider raw SSE, provider errors,
 routing, health, retry, generation, checkpoint, and debug state are side
 channels and must never enter normal client or provider payloads.
 
+The retired `toolreason` text-fence syntax is outside the current protocol and
+outside this goal's runtime, compatibility, and acceptance surface. Current
+tests and live evidence must use typed native JSON/SSE events and structured
+tool-call/tool-result objects.
+
 ## Front contract
 
 The Front owns the accepted client connection, keepalive, client frame
