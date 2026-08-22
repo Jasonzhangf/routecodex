@@ -11,6 +11,7 @@ pub mod provider_global_health;
 pub mod raw_response;
 mod shared;
 pub mod transport;
+pub mod transport_handoff;
 pub mod wire;
 
 pub use error::{V3ProviderError, V3ProviderHttpFailure};
@@ -49,6 +50,10 @@ pub use transport::{
     is_v3_anthropic_provider_request_header_name, ProviderResponsesTransport,
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderCancellation, V3ProviderRequestHeader,
     V3Transport13ResponsesHttpRequest, V3Transport13ResponsesRequest,
+};
+pub use transport_handoff::{
+    V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptKey,
+    V3ProviderTransportAttemptState, V3ProviderTransportCheckpoint, V3ProviderTransportKind,
 };
 pub use wire::{
     apply_v3_response_cipher_policy, build_v3_provider_12_responses_wire_payload,
