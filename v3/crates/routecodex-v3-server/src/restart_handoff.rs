@@ -11,8 +11,9 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{mpsc, oneshot};
 use tower_service::Service;
 
@@ -763,6 +764,94 @@ impl V3StableFrontConnection {
     }
 }
 
+/// Production Front socket owner for the HTTP adapter. Hyper receives only
+/// an IO facade; the write half is held by this task so a Runtime Child cannot
+/// own or close the client socket while a provider attempt is replaced.
+#[derive(Clone, Debug)]
+pub struct V3StableFrontSocket {
+    write_tx: mpsc::Sender<Vec<u8>>,
+}
+
+impl V3StableFrontSocket {
+    fn spawn(mut write_half: OwnedWriteHalf) -> Self {
+        let (write_tx, mut write_rx) = mpsc::channel::<Vec<u8>>(32);
+        tokio::spawn(async move {
+            while let Some(frame) = write_rx.recv().await {
+                if write_half.write_all(&frame).await.is_err() {
+                    break;
+                }
+                if write_half.flush().await.is_err() {
+                    break;
+                }
+            }
+            let _ = write_half.shutdown().await;
+        });
+        Self { write_tx }
+    }
+}
+
+struct V3FrontHttpIo {
+    read_half: OwnedReadHalf,
+    front_socket: V3StableFrontSocket,
+}
+
+impl V3FrontHttpIo {
+    fn new(read_half: OwnedReadHalf, front_socket: V3StableFrontSocket) -> Self {
+        Self {
+            read_half,
+            front_socket,
+        }
+    }
+}
+
+impl AsyncRead for V3FrontHttpIo {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.read_half).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for V3FrontHttpIo {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        data: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let sender = &self.front_socket.write_tx;
+        match sender.try_reserve() {
+            Ok(permit) => {
+                let length = data.len();
+                permit.send(data.to_vec());
+                std::task::Poll::Ready(Ok(length))
+            }
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                cx.waker().wake_by_ref();
+                std::task::Poll::Pending
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => std::task::Poll::Ready(Err(
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "front socket is closed"),
+            )),
+        }
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
 /// Serve one already-accepted client connection through the existing axum
 /// service. This adapter owns only transport handoff; all request/response
 /// semantics remain in the existing Router service.
@@ -779,18 +868,26 @@ where
         + 'static,
     S::Future: Future<Output = Result<Response<Body>, Infallible>> + Send + 'static,
 {
+    let (read_half, write_half) = stream.into_split();
+    let front_socket = V3StableFrontSocket::spawn(write_half);
+    let request_front_socket = front_socket.clone();
     let hyper_service = hyper::service::service_fn(move |request: hyper::Request<Incoming>| {
         let mut service = service.clone();
+        let front_socket = request_front_socket.clone();
         async move {
             let (parts, body) = request.into_parts();
             let mut request = Request::from_parts(parts, Body::new(body));
             request.extensions_mut().insert(ConnectInfo(remote_addr));
             request.extensions_mut().insert(connection_identity);
+            request.extensions_mut().insert(front_socket);
             service.call(request).await
         }
     });
     hyper::server::conn::http1::Builder::new()
-        .serve_connection(TokioIo::new(stream), hyper_service)
+        .serve_connection(
+            TokioIo::new(V3FrontHttpIo::new(read_half, front_socket)),
+            hyper_service,
+        )
         .await
         .map_err(std::io::Error::other)
 }
