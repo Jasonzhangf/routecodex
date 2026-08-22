@@ -104,6 +104,10 @@ fn wrap_v3_direct_sse_provider_stream_for_outcome(
                 provider_id: policy.target.candidate.provider_id.clone(),
                 auth_alias: policy.target.candidate.auth_alias.clone(),
                 model_id: policy.target.candidate.model_id.clone(),
+                provider_protocol: crate::hub_v1::provider_wire_protocol_for_selected_candidate(
+                    &policy.target.candidate,
+                )
+                .expect("direct SSE outcome requires a registered provider protocol"),
                 terminal: false,
                 seen_done: false,
                 recorded: false,

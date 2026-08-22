@@ -9,6 +9,7 @@ pub(super) struct V3DirectSseProviderOutcome {
     pub(super) provider_id: String,
     pub(super) auth_alias: String,
     pub(super) model_id: String,
+    pub(super) provider_protocol: V3HubProviderWireProtocol,
     pub(super) terminal: bool,
     pub(super) seen_done: bool,
     pub(super) recorded: bool,
@@ -44,7 +45,7 @@ impl V3DirectSseProviderOutcome {
     ) -> Result<(), V3Error01SourceRaised> {
         let data = collect_v3_provider_sse_json_data(fields);
         let parsed =
-            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
+            classify_v3_provider_sse_json_data(self.provider_protocol, &data)
                 .map_err(|message| {
                     build_v3_error_01_source_raised(
                         V3ErrorSourceKind::ProviderFailure,
@@ -220,14 +221,26 @@ pub(super) fn wrap_direct_sse_provider_outcome_stream_with_terminal_commit(
                         return Some((result, state));
                     }
                     if !state.provider_outcome.terminal {
+                        let terminal_name = match state.provider_outcome.provider_protocol {
+                            V3HubProviderWireProtocol::Responses => "response.completed",
+                            V3HubProviderWireProtocol::Anthropic => "message_stop",
+                            V3HubProviderWireProtocol::OpenAiChat => "finish_reason",
+                            V3HubProviderWireProtocol::Gemini => "turn_complete",
+                        };
                         let source = build_v3_error_01_source_raised(
                             V3ErrorSourceKind::ProviderFailure,
                             "V3ProviderResp14Raw",
                             "provider_response_sse_terminal_missing",
                             if state.provider_outcome.seen_done {
-                                "provider Responses SSE emitted [DONE] without response.completed"
+                                format!(
+                                    "provider {:?} SSE emitted [DONE] without {terminal_name}",
+                                    state.provider_outcome.provider_protocol
+                                )
                             } else {
-                                "provider Responses SSE ended without response.completed"
+                                format!(
+                                    "provider {:?} SSE ended without {terminal_name}",
+                                    state.provider_outcome.provider_protocol
+                                )
                             },
                         );
                         let result = state

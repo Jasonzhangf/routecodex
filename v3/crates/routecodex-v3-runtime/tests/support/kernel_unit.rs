@@ -203,6 +203,7 @@ fn test_direct_sse_provider_outcome(routing_group: &str) -> V3DirectSseProviderO
         provider_id: "openai".to_string(),
         auth_alias: "key1".to_string(),
         model_id: "gpt-test".to_string(),
+        provider_protocol: V3HubProviderWireProtocol::Responses,
         terminal: false,
         seen_done: false,
         recorded: false,

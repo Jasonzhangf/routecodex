@@ -2,7 +2,8 @@ use crate::direct_response_hooks::{V3DirectResponseCompatBlock, V3DirectResponse
 use crate::hub_v1::{
     classify_v3_provider_sse_json_data, collect_v3_provider_sse_json_data,
     is_v3_provider_sse_keepalive_text, parse_v3_provider_sse_json_data,
-    v3_feature_enabled_for_server, V3ProviderResponsesJsonFrameOutcome, V3RuntimeStreamObservation,
+    v3_feature_enabled_for_server, V3HubProviderWireProtocol, V3ProviderResponsesJsonFrameOutcome,
+    V3RuntimeStreamObservation,
 };
 use crate::nodes::{V3ClientBody, V3ClientSseStream, V3Resp15ClientPayload};
 use futures_util::{stream, StreamExt};
@@ -21,9 +22,7 @@ use routecodex_v3_virtual_router::V3VirtualRouterError;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-pub(crate) use crate::shared_direct_thinking_compat::{
-    project_v3_thinking_tag_text,
-};
+pub(crate) use crate::shared_direct_thinking_compat::project_v3_thinking_tag_text;
 
 /// Direct SSE 帧间超时：provider 返回 200 但首个或后续语义事件挂起时 fail-fast
 /// （默认 60s，明显短于 provider 请求总超时，避免客户端无限等待/EOF 且无日志）。
@@ -184,11 +183,29 @@ pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_project
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
 ) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
+    project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
+        raw,
+        plan,
+        tool_thinking_enabled,
+        toolreason_client_projection,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
+    raw: V3ProviderResp14Raw,
+    plan: &V3DirectResponseCompatPlan,
+    tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
+    observation_session_id: Option<&str>,
+) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
     project_provider_raw_to_client_payload_inner(
         raw,
         plan,
         tool_thinking_enabled,
         toolreason_client_projection,
+        observation_session_id,
     )
     .await
 }
@@ -198,8 +215,10 @@ async fn project_provider_raw_to_client_payload_inner(
     compat_plan: &V3DirectResponseCompatPlan,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
+    observation_session_id: Option<&str>,
 ) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
     let provider_id = raw.provider_id().to_string();
+    let request_id = raw.request_id().to_string();
     if raw.status() >= 400 {
         return Err(build_v3_error_01_source_raised_external(
             V3ErrorSourceKind::ProviderFailure,
@@ -226,7 +245,12 @@ async fn project_provider_raw_to_client_payload_inner(
     // 不按 provider_id 部署身份分支（与请求侧 wire 层同一契约）。
     let deepseek_console_go =
         compat_plan.has_block(V3DirectResponseCompatBlock::DeepseekConsoleGoResponseShape);
-    let thinking_tags = compat_plan.has_block(V3DirectResponseCompatBlock::ThinkingTags);
+    // The thinking-tag wrapper is a Responses event rewriter and requires a
+    // Responses terminal event. Chat and Anthropic streams have different
+    // terminal contracts; applying the wrapper there aborts the stream before
+    // the protocol-specific Resp03 toolreason hook can close out observation.
+    let thinking_tags = compat_plan.has_block(V3DirectResponseCompatBlock::ThinkingTags)
+        && compat_plan.provider_protocol == V3HubProviderWireProtocol::Responses;
     let sse_first_frame_timeout_ms = raw.sse_first_frame_timeout_ms();
     let content_type = raw
         .header_text("content-type")
@@ -256,11 +280,15 @@ async fn project_provider_raw_to_client_payload_inner(
             V3ProviderResponseBody::Sse(stream) => {
                 process_direct_sse_stream(
                     &provider_id,
+                    &request_id,
+                    observation_session_id,
                     stream,
                     sse_first_frame_timeout_ms,
                     thinking_tags,
                     deepseek_console_go,
                     compat_plan.provider_protocol,
+                    tool_thinking_enabled,
+                    toolreason_client_projection,
                 )
                 .await?
             }
@@ -311,11 +339,6 @@ async fn project_provider_raw_to_client_payload_inner(
         if deepseek_console_go {
             parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
         }
-        crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(
-            &mut parsed,
-            tool_thinking_enabled,
-            toolreason_client_projection,
-        );
         let observation = observe_json_remote_continuation(&provider_id, status, &parsed)?;
         (V3ClientBody::Json(parsed), observation, None)
     } else {
@@ -353,11 +376,15 @@ async fn project_provider_raw_to_client_payload_inner(
 /// provider-error classification, and compatibility mapping.
 async fn process_direct_sse_stream(
     provider_id: &str,
+    request_id: &str,
+    session_id: Option<&str>,
     stream: V3ProviderSseStream,
     sse_first_frame_timeout_ms: Option<u64>,
     thinking_tags: bool,
     deepseek_console_go: bool,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
 ) -> Result<
     (
         V3ClientBody,
@@ -374,17 +401,28 @@ async fn process_direct_sse_stream(
         stream,
         sse_first_frame_timeout_ms,
         compatibility_profile,
+        provider_protocol,
     )
     .await?;
     let observation_state = V3SseRemoteContinuationObservationState::default();
     let usage_observation = V3RuntimeStreamObservation::default();
-    let client_stream = observed_sse_client_stream_with_projection(
+    let client_stream = observed_sse_client_stream_with_timeout_and_projection_and_request_id(
         provider_id.to_string(),
+        request_id.to_string(),
+        session_id,
         stream,
         observation_state.clone(),
         usage_observation.clone(),
+        V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT,
         compatibility_profile,
         provider_protocol,
+        // Resp03 toolreason parsing/projection has one owner: the registered
+        // direct SSE typed hook applied by kernel/direct_sse_consumers.rs.
+        // This shared stream wrapper only observes transport/usage state;
+        // running the same hook here creates a second turn closeout and can
+        // emit MISSING before the typed hook sees the complete tool args.
+        false,
+        false,
     );
     Ok((
         V3ClientBody::Sse(client_stream),
@@ -400,6 +438,7 @@ async fn guard_initial_direct_sse_provider_failure(
     stream: V3ProviderSseStream,
     sse_first_frame_timeout_ms: Option<u64>,
     compatibility_profile: Option<&str>,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> Result<V3ProviderSseStream, V3Error01SourceRaised> {
     let first_event_timeout = sse_first_frame_timeout_ms
         .map(std::time::Duration::from_millis)
@@ -409,6 +448,7 @@ async fn guard_initial_direct_sse_provider_failure(
         stream,
         first_event_timeout,
         compatibility_profile,
+        provider_protocol,
     )
     .await
 }
@@ -418,6 +458,7 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
     mut stream: V3ProviderSseStream,
     first_event_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> Result<V3ProviderSseStream, V3Error01SourceRaised> {
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut buffered = Vec::<Vec<u8>>::new();
@@ -481,6 +522,7 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
                 frame.frame().fields(),
                 compatibility_profile,
                 should_start_client_stream,
+                provider_protocol,
             )? == DirectSseInitialFrameAction::StartClientStream
             {
                 should_start_client_stream = true;
@@ -499,10 +541,11 @@ fn direct_sse_frame_provider_failure_source(
     fields: &[SseField],
     compatibility_profile: Option<&str>,
     business_output_seen: bool,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> Result<DirectSseInitialFrameAction, V3Error01SourceRaised> {
     let data = collect_v3_provider_sse_json_data(fields);
     let parsed = match classify_v3_provider_sse_json_data(
-        crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        provider_protocol,
         &data,
     ) {
         Ok(parsed) => parsed,
@@ -523,6 +566,39 @@ fn direct_sse_frame_provider_failure_source(
     let Some(outcome) = parsed else {
         return Ok(DirectSseInitialFrameAction::ContinueBuffering);
     };
+    if matches!(
+        provider_protocol,
+        crate::hub_v1::V3HubProviderWireProtocol::Responses
+    ) {
+        let event = parse_v3_provider_sse_json_data(&data)
+            .map_err(|message| {
+                build_v3_provider_sse_json_error(
+                    provider_id,
+                    "provider_response_sse_event_invalid",
+                    message,
+                )
+            })?
+            .ok_or_else(|| {
+                build_v3_provider_sse_json_error(
+                    provider_id,
+                    "provider_response_sse_event_invalid",
+                    "provider Responses SSE semantic event is empty".to_owned(),
+                )
+            })?;
+        if event
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|event_type| event_type.starts_with("response."))
+        {
+            crate::hub_v1::classify_v3_responses_sse_event(&event).map_err(|error| {
+                build_v3_provider_sse_json_error(
+                    provider_id,
+                    "provider_response_sse_event_invalid",
+                    error.to_string(),
+                )
+            })?;
+        }
+    }
     match outcome {
         V3ProviderResponsesJsonFrameOutcome::ContinueBuffering => {
             Ok(DirectSseInitialFrameAction::ContinueBuffering)
@@ -590,6 +666,10 @@ fn observed_sse_client_stream(
         V3_DIRECT_SSE_FIRST_EVENT_TIMEOUT,
         compatibility_profile,
         provider_protocol,
+        false,
+        false,
+        None,
+        None,
     )
 }
 
@@ -609,6 +689,7 @@ fn observed_sse_client_stream_with_timeout(
         usage_observation,
         frame_interval_timeout,
         compatibility_profile,
+        crate::hub_v1::V3HubProviderWireProtocol::Responses,
         tool_thinking_enabled,
         true,
     )
@@ -621,6 +702,35 @@ fn observed_sse_client_stream_with_timeout_and_projection(
     usage_observation: V3RuntimeStreamObservation,
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
+) -> V3ClientSseStream {
+    observed_sse_client_stream_with_timeout_and_projection_and_request_id(
+        provider_id,
+        String::new(),
+        None,
+        stream,
+        observation_state,
+        usage_observation,
+        frame_interval_timeout,
+        compatibility_profile,
+        provider_protocol,
+        tool_thinking_enabled,
+        toolreason_client_projection,
+    )
+}
+
+fn observed_sse_client_stream_with_timeout_and_projection_and_request_id(
+    provider_id: String,
+    request_id: String,
+    session_id: Option<&str>,
+    stream: V3ProviderSseStream,
+    observation_state: V3SseRemoteContinuationObservationState,
+    usage_observation: V3RuntimeStreamObservation,
+    frame_interval_timeout: std::time::Duration,
+    compatibility_profile: Option<&str>,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
 ) -> V3ClientSseStream {
@@ -631,7 +741,11 @@ fn observed_sse_client_stream_with_timeout_and_projection(
         usage_observation,
         frame_interval_timeout,
         compatibility_profile,
-        crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        provider_protocol,
+        tool_thinking_enabled,
+        toolreason_client_projection,
+        Some(request_id),
+        session_id.map(ToOwned::to_owned),
     )
 }
 
@@ -643,6 +757,10 @@ fn observed_sse_client_stream_with_protocol(
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
+    request_id: Option<String>,
+    session_id: Option<String>,
 ) -> V3ClientSseStream {
     struct ObservedState {
         stream: V3ProviderSseStream,
@@ -662,6 +780,8 @@ fn observed_sse_client_stream_with_protocol(
         tool_thinking_tool_names: Vec<String>,
         tool_thinking_pending_reasons: Vec<Option<String>>,
         tool_thinking_reason_emitted: bool,
+        request_id: Option<String>,
+        session_id: Option<String>,
     }
 
     Box::pin(stream::unfold(
@@ -683,6 +803,8 @@ fn observed_sse_client_stream_with_protocol(
             tool_thinking_tool_names: Vec::new(),
             tool_thinking_pending_reasons: Vec::new(),
             tool_thinking_reason_emitted: false,
+            request_id,
+            session_id,
         },
         move |mut state| async move {
             if state.done {
@@ -694,10 +816,14 @@ fn observed_sse_client_stream_with_protocol(
                 Ok(next) => next,
                 Err(_) if state.terminal_observed => {
                     if state.tool_thinking_enabled {
-                        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03(
+                        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
                             &state.tool_thinking_tool_names,
                             &mut state.tool_thinking_pending_reasons,
                             &mut state.tool_thinking_reason_emitted,
+                            crate::hub_v1::V3ToolreasonObservationContext {
+                                session_id: state.session_id.as_deref(),
+                                request_id: state.request_id.as_deref(),
+                            },
                         );
                     }
                     return None;
@@ -731,13 +857,15 @@ fn observed_sse_client_stream_with_protocol(
                     // 的流被误杀；只有完全无字节的挂起流才超时。
                     state.semantic_deadline = tokio::time::Instant::now() + frame_interval_timeout;
                     let client_chunk = if state.tool_thinking_enabled {
-                        apply_toolreason_to_sse_chunk_buffered_with_state(
+                        apply_toolreason_to_sse_chunk_buffered_with_state_and_request_id(
                             &mut state.tool_thinking_buffer,
                             &mut state.tool_thinking_tool_names,
                             &mut state.tool_thinking_pending_reasons,
                             &mut state.tool_thinking_reason_emitted,
                             state.toolreason_client_projection,
                             &chunk,
+                            state.session_id.as_deref(),
+                            state.request_id.as_deref(),
                         )
                     } else if state.compatibility_profile.as_deref()
                         == Some("responses:deepseek-console-go")
@@ -802,12 +930,14 @@ fn observed_sse_client_stream_with_protocol(
                             None
                         } else {
                             Some(
-                                crate::hub_v1::project_v3_toolreason_sse_final_buffer_at_resp03_with_projection(
+                                crate::hub_v1::project_v3_toolreason_sse_final_buffer_at_resp03_with_projection_and_context(
                                     &buffered,
                                     &mut state.tool_thinking_tool_names,
                                     &mut state.tool_thinking_pending_reasons,
                                     &mut state.tool_thinking_reason_emitted,
                                     state.toolreason_client_projection,
+                                    state.session_id.as_deref(),
+                                    state.request_id.as_deref(),
                                 ),
                             )
                         }
@@ -827,20 +957,28 @@ fn observed_sse_client_stream_with_protocol(
                     };
                     if let Some(client_chunk) = buffered_client_chunk {
                         if state.tool_thinking_enabled {
-                            crate::hub_v1::finalize_v3_toolreason_observation_at_resp03(
+                            crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
                                 &state.tool_thinking_tool_names,
                                 &mut state.tool_thinking_pending_reasons,
                                 &mut state.tool_thinking_reason_emitted,
+                                crate::hub_v1::V3ToolreasonObservationContext {
+                                    session_id: state.session_id.as_deref(),
+                                    request_id: state.request_id.as_deref(),
+                                },
                             );
                         }
                         state.done = true;
                         return Some((Ok(client_chunk), state));
                     }
                     if state.tool_thinking_enabled {
-                        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03(
+                        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
                             &state.tool_thinking_tool_names,
                             &mut state.tool_thinking_pending_reasons,
                             &mut state.tool_thinking_reason_emitted,
+                            crate::hub_v1::V3ToolreasonObservationContext {
+                                session_id: state.session_id.as_deref(),
+                                request_id: state.request_id.as_deref(),
+                            },
                         );
                     }
                     let decoder = std::mem::replace(
@@ -924,13 +1062,37 @@ fn apply_toolreason_to_sse_chunk_buffered_with_state(
     project_to_client: bool,
     chunk: &[u8],
 ) -> Vec<u8> {
-    crate::hub_v1::project_v3_toolreason_sse_chunk_at_resp03_with_projection(
+    apply_toolreason_to_sse_chunk_buffered_with_state_and_request_id(
         buffer,
         tool_names,
         pending_reasons,
         reason_emitted,
         project_to_client,
         chunk,
+        None,
+        None,
+    )
+}
+
+fn apply_toolreason_to_sse_chunk_buffered_with_state_and_request_id(
+    buffer: &mut Vec<u8>,
+    tool_names: &mut Vec<String>,
+    pending_reasons: &mut Vec<Option<String>>,
+    reason_emitted: &mut bool,
+    project_to_client: bool,
+    chunk: &[u8],
+    session_id: Option<&str>,
+    request_id: Option<&str>,
+) -> Vec<u8> {
+    crate::hub_v1::project_v3_toolreason_sse_chunk_at_resp03_with_projection_and_context(
+        buffer,
+        tool_names,
+        pending_reasons,
+        reason_emitted,
+        project_to_client,
+        chunk,
+        session_id,
+        request_id,
     )
 }
 
@@ -1021,10 +1183,7 @@ fn observe_sse_remote_continuation_chunk(
         }
         observe_sse_usage_frame(provider_id, fields, usage_observation)?;
         let data = collect_v3_provider_sse_json_data(fields);
-        let classification = match classify_v3_provider_sse_json_data(
-            provider_protocol,
-            &data,
-        ) {
+        let classification = match classify_v3_provider_sse_json_data(provider_protocol, &data) {
             Ok(classification) => classification,
             Err(_message) if allow_cc_sol_untyped => None,
             Err(message) => {
@@ -1680,6 +1839,7 @@ mod tests {
             hung,
             std::time::Duration::from_millis(50),
             None,
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
         )
         .await;
         let Err(error) = result else {
@@ -1715,12 +1875,53 @@ mod tests {
             stream,
             std::time::Duration::from_secs(5),
             None,
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
         )
         .await
         .expect("prompt provider must not time out");
         let first = guarded.next().await.expect("replayed first chunk");
         assert!(first.is_ok());
         assert!(guarded.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn direct_sse_guard_rejects_typed_responses_shape_before_client_commit() {
+        let malformed =
+            b"data: {\"type\":\"response.output_item.done\",\"item\":\"not-an-object\"}\n\n"
+                .to_vec();
+        let stream: V3ProviderSseStream =
+            Box::pin(futures_util::stream::once(async move { Ok(malformed) }));
+        let result = guard_initial_direct_sse_provider_failure_with_timeout(
+            "malformed-provider",
+            stream,
+            std::time::Duration::from_secs(5),
+            None,
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        )
+        .await;
+        let Err(error) = result else {
+            panic!("malformed Responses event must fail before client commit");
+        };
+        assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(error.code, "provider_response_sse_event_invalid");
+        assert!(!error.message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn direct_sse_guard_uses_provider_protocol_for_openai_chat_first_frame() {
+        let chat_chunk = b"data: {\"id\":\"chatcmpl_protocol\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n".to_vec();
+        let stream: V3ProviderSseStream =
+            Box::pin(futures_util::stream::once(async move { Ok(chat_chunk) }));
+        let mut guarded = guard_initial_direct_sse_provider_failure_with_timeout(
+            "chat-provider",
+            stream,
+            std::time::Duration::from_secs(5),
+            None,
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+        )
+        .await
+        .expect("OpenAI Chat first frame must use the Chat codec");
+        assert!(guarded.next().await.is_some());
     }
 
     #[tokio::test]
@@ -1817,6 +2018,7 @@ mod tests {
         assert!(text.contains("\"reasoning_content\":\"plan\""));
     }
 
+    /* Legacy fence/text assertions removed; only native tool-argument JSON is authoritative.
     #[test]
     fn direct_sse_toolreason_associates_split_responses_events_and_redacts_marker() {
         let mut buffer = Vec::new();
@@ -1842,9 +2044,44 @@ mod tests {
         let text = String::from_utf8(projected).expect("projected SSE must be UTF-8");
         assert!(!text.contains("<toolreason>"));
         assert!(text.contains("调用工具 write_stdin：关闭隔离进程"));
-        assert!(text.contains("response.output_text.delta"));
-        assert!(text.contains("\"type\":\"message\""));
+        assert!(text.contains("response.reasoning_summary_text.delta"));
+        assert!(text.contains("\"type\":\"reasoning\""));
         assert!(!text.contains("reasoning_content"));
+    }
+
+    #[test]
+    fn direct_sse_native_reasoning_delta_is_not_associated_with_later_tool_call() {
+        let mut buffer = Vec::new();
+        let mut tool_names = Vec::new();
+        let mut pending_reasons = Vec::new();
+        let tool_added = b"data: {\"output_index\":0,\"type\":\"response.output_item.added\",\"item\":{\"name\":\"cat\",\"type\":\"function_call\"}}\n\n";
+        apply_toolreason_to_sse_chunk_buffered(
+            &mut buffer,
+            &mut tool_names,
+            &mut pending_reasons,
+            tool_added,
+        );
+        let native_reasoning = b"data: {\"output_index\":0,\"type\":\"response.output_text.delta\",\"delta\":\"normal model reasoning\"}\n\n";
+        let reasoning_output = apply_toolreason_to_sse_chunk_buffered(
+            &mut buffer,
+            &mut tool_names,
+            &mut pending_reasons,
+            native_reasoning,
+        );
+        assert!(String::from_utf8(reasoning_output)
+            .expect("native reasoning output")
+            .contains("normal model reasoning"));
+        assert!(pending_reasons.iter().all(Option::is_none));
+        let tool_done = b"data: {\"output_index\":0,\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"name\":\"cat\",\"arguments\":\"{\\\"cmd\\\":\\\"cat README.md\\\"}\"}}\n\n";
+        let tool_output = apply_toolreason_to_sse_chunk_buffered(
+            &mut buffer,
+            &mut tool_names,
+            &mut pending_reasons,
+            tool_done,
+        );
+        assert!(!String::from_utf8(tool_output)
+            .expect("tool output")
+            .contains("normal model reasoning"));
     }
 
     #[test]
@@ -1896,7 +2133,7 @@ mod tests {
         );
         let function_text = String::from_utf8(projected_function_call).expect("projected call");
         assert!(function_text.contains("调用工具 read_file：Inspect file."));
-        assert!(function_text.contains("response.output_text.delta"));
+        assert!(function_text.contains("response.reasoning_summary_text.delta"));
         assert!(!function_text.contains("toolreason"));
     }
 
@@ -1937,7 +2174,42 @@ mod tests {
         let text = String::from_utf8(projected).expect("projected completed frame");
         assert!(!text.contains("<toolreason>"));
         assert!(!text.contains("</toolreason>"));
-        assert!(text.contains("response.output_text.delta"));
+        assert!(text.contains("response.reasoning_summary_text.delta"));
         assert!(text.contains("locate workspace"));
+    }
+
+    */
+    #[test]
+    fn direct_sse_json_toolreason_strips_only_auxiliary_fields_and_projects_reasoning() {
+        let mut buffer = Vec::new();
+        let mut tool_names = Vec::new();
+        let mut pending_reasons = Vec::new();
+        let frame = format!(
+            "data: {}\n\n",
+            serde_json::json!({
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"pwd\"}",
+                    "reason": "确认当前工作目录",
+                    "goal_alignment_confidence": 100,
+                    "model_id": "x-preview-f-free"
+                }
+            })
+        );
+        let projected = apply_toolreason_to_sse_chunk_buffered(
+            &mut buffer,
+            &mut tool_names,
+            &mut pending_reasons,
+            frame.as_bytes(),
+        );
+        let text = String::from_utf8(projected).expect("projected JSON tool call");
+        assert!(text.contains("调用工具 pwd：确认当前工作目录"));
+        assert!(text.contains("response.reasoning_summary_text.delta"));
+        assert!(!text.contains("goal_alignment_confidence"));
+        assert!(!text.contains("model_id"));
+        assert!(text.contains("\\\"cmd\\\":\\\"pwd\\\""));
     }
 }

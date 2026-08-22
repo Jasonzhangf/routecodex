@@ -278,7 +278,9 @@ impl V3ResponsesSseSemanticObject {
                 V3ResponsesSseTreeError::Projection(format!("missing extension {extension_name}"))
             })?;
         let object = extension.value.as_object_mut().ok_or_else(|| {
-            V3ResponsesSseTreeError::Projection(format!("extension {extension_name} is not an object"))
+            V3ResponsesSseTreeError::Projection(format!(
+                "extension {extension_name} is not an object"
+            ))
         })?;
         object.insert(field.to_owned(), Value::String(value.into()));
         Ok(())
@@ -387,7 +389,12 @@ impl V3ResponsesSseResponseContainer {
         if let Some(output) = &self.output {
             value.insert(
                 "output".to_owned(),
-                Value::Array(output.iter().map(V3ResponsesSseOutputItem::to_normalized_value).collect()),
+                Value::Array(
+                    output
+                        .iter()
+                        .map(V3ResponsesSseOutputItem::to_normalized_value)
+                        .collect(),
+                ),
             );
         }
         if let Some(usage) = &self.usage {
@@ -548,14 +555,12 @@ impl V3ResponsesJsonDocument {
             .as_object()
             .ok_or(V3ResponsesSseTreeError::EventNotObject)?;
         let mut response = parse_response_container(value)?;
-        response
-            .extensions
-            .retain(|extension| {
-                matches!(
-                    extension.name.as_str(),
-                    "id" | "status" | "model" | "usage" | "error"
-                )
-            });
+        response.extensions.retain(|extension| {
+            matches!(
+                extension.name.as_str(),
+                "id" | "status" | "model" | "usage" | "error"
+            )
+        });
         let output_present = object.contains_key("output");
         let items = match object.get("output") {
             None => Vec::new(),
@@ -571,7 +576,9 @@ impl V3ResponsesJsonDocument {
         };
         let extensions = event_extensions(
             object,
-            &["object", "id", "status", "model", "usage", "error", "output"],
+            &[
+                "object", "id", "status", "model", "usage", "error", "output",
+            ],
         );
         Ok(Self {
             object: string_field(object, "object"),
@@ -818,7 +825,9 @@ pub struct V3ResponsesSseReasoningSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3ResponsesSseItemPayload {
-    OutputText { text: Option<String> },
+    OutputText {
+        text: Option<String>,
+    },
     Message {
         content: Vec<V3ResponsesSseMessageContentPart>,
         content_present: bool,
@@ -866,7 +875,12 @@ impl V3ResponsesSseOutputItem {
         let V3ResponsesSseItemPayload::Reasoning { summary, .. } = &self.payload else {
             return None;
         };
-        Some(summary.iter().filter_map(|entry| entry.text.clone()).collect())
+        Some(
+            summary
+                .iter()
+                .filter_map(|entry| entry.text.clone())
+                .collect(),
+        )
     }
 
     pub fn message_output_texts(&self) -> Option<Vec<String>> {
@@ -1151,7 +1165,7 @@ pub enum V3ResponsesSseContentRewrite {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum V3ResponsesSseTreeError {
-    #[error("Responses SSE event must be a JSON object")]
+    #[error("Responses semantic SSE event payload must be a JSON object with a string 'type' field")]
     EventNotObject,
     #[error("Responses SSE event is missing type")]
     MissingEventType,
