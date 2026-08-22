@@ -35,6 +35,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use futures_util::future::join_all;
 
 static TEST_PROVIDER_STATE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -487,13 +488,7 @@ impl V3ProviderFailureRuntimeHealth {
             return Ok(());
         };
         self.key_health
-            .complete_probe_failure(
-                provider_id,
-                auth_alias,
-                model_id,
-                now_ms,
-                probe_interval_ms,
-            )
+            .complete_probe_failure(provider_id, auth_alias, model_id, now_ms, probe_interval_ms)
             .map(|_| ())
     }
 
@@ -547,20 +542,33 @@ impl V3ProviderFailureRuntimeHealth {
         probe: F,
     ) -> Result<(), String>
     where
-        F: Fn(String, Option<String>, Option<String>) -> Fut,
+        F: Fn(String, Option<String>, Option<String>) -> Fut + Clone,
         Fut: Future<Output = Result<(), String>>,
     {
+        let mut probe_errors = Vec::new();
+        let mut permits = Vec::new();
         loop {
             let permit = self
                 .global_cooldown
                 .lock()
                 .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
                 .acquire_startup_probe(now_ms)?;
-            let Some(permit) = permit else { return Ok(()) };
+            let Some(permit) = permit else { break };
+            permits.push(permit);
+        }
+        let probe_results = join_all(permits.into_iter().map(|permit| {
+            let probe = probe.clone();
             let provider_id = permit.provider_id().to_string();
             let auth_alias = permit.auth_alias().map(str::to_string);
             let model_id = permit.model_id().map(str::to_string);
-            match probe(provider_id.clone(), auth_alias.clone(), model_id.clone()).await {
+            async move {
+                let result = (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
+                (permit, provider_id, auth_alias, model_id, result)
+            }
+        }))
+        .await;
+        for (permit, provider_id, auth_alias, model_id, result) in probe_results {
+            match result {
                 Ok(()) => self
                     .global_cooldown
                     .lock()
@@ -586,11 +594,16 @@ impl V3ProviderFailureRuntimeHealth {
                         now_ms,
                         v3_internal_error_handling().unrecoverable_probe_interval_ms,
                     )?;
-                    return Err(format!(
+                    probe_errors.push(format!(
                         "startup provider cooldown probe failed for {provider_id}: {error}"
                     ));
                 }
             }
+        }
+        if probe_errors.is_empty() {
+            Ok(())
+        } else {
+            Err(probe_errors.join("; "))
         }
     }
 
@@ -600,10 +613,11 @@ impl V3ProviderFailureRuntimeHealth {
         probe: F,
     ) -> Result<(), String>
     where
-        F: Fn(String, Option<String>, Option<String>) -> Fut,
+        F: Fn(String, Option<String>, Option<String>) -> Fut + Clone,
         Fut: Future<Output = Result<(), String>>,
     {
         let mut probe_errors = Vec::new();
+        let mut permits = Vec::new();
         loop {
             let permit = self
                 .global_cooldown
@@ -611,10 +625,21 @@ impl V3ProviderFailureRuntimeHealth {
                 .map_err(|error| format!("provider cooldown lock poisoned: {error}"))?
                 .acquire_due_probe(now_ms)?;
             let Some(permit) = permit else { break };
+            permits.push(permit);
+        }
+        let probe_results = join_all(permits.into_iter().map(|permit| {
+            let probe = probe.clone();
             let provider_id = permit.provider_id().to_string();
             let auth_alias = permit.auth_alias().map(str::to_string);
             let model_id = permit.model_id().map(str::to_string);
-            match probe(provider_id.clone(), auth_alias.clone(), model_id.clone()).await {
+            async move {
+                let result = (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
+                (permit, provider_id, auth_alias, model_id, result)
+            }
+        }))
+        .await;
+        for (permit, provider_id, auth_alias, model_id, result) in probe_results {
+            match result {
                 Ok(()) => self
                     .global_cooldown
                     .lock()
@@ -660,13 +685,14 @@ impl V3ProviderFailureRuntimeHealth {
         probe: F,
     ) -> Result<(), String>
     where
-        F: Fn(String, String, String) -> Fut,
+        F: Fn(String, String, String) -> Fut + Clone,
         Fut: Future<Output = Result<(), String>>,
     {
         let candidates = self
             .key_health
             .provider_key_health_probe_keys(now_ms, startup)?;
         let mut probe_errors = Vec::new();
+        let mut permits = Vec::new();
         for (provider_id, auth_alias, model_id) in candidates {
             let Some(permit) = self.key_health.acquire_provider_key_health_probe(
                 &provider_id,
@@ -676,14 +702,27 @@ impl V3ProviderFailureRuntimeHealth {
             else {
                 continue;
             };
+            permits.push(permit);
+        }
+        let probe_results = join_all(permits.into_iter().map(|permit| {
+            let probe = probe.clone();
             let expected_generation = permit.expected_generation();
-            match probe(
-                permit.provider_id().to_string(),
-                permit.auth_alias().to_string(),
-                permit.model_id().to_string(),
-            )
-            .await
-            {
+            let provider_id = permit.provider_id().to_string();
+            let auth_alias = permit.auth_alias().to_string();
+            let model_id = permit.model_id().to_string();
+            async move {
+                let result = (&probe)(
+                    provider_id.clone(),
+                    auth_alias.clone(),
+                    model_id.clone(),
+                )
+                .await;
+                (permit, provider_id, auth_alias, model_id, expected_generation, result)
+            }
+        }))
+        .await;
+        for (permit, provider_id, auth_alias, model_id, expected_generation, result) in probe_results {
+            match result {
                 Ok(()) => self
                     .key_health
                     .complete_probe_success_at_generation(
@@ -704,9 +743,7 @@ impl V3ProviderFailureRuntimeHealth {
                     )?;
                     probe_errors.push(format!(
                         "persistent provider key probe failed for {}:{}:{}: {error}",
-                        permit.provider_id(),
-                        permit.auth_alias(),
-                        permit.model_id()
+                        provider_id, auth_alias, model_id
                     ));
                 }
             }
@@ -1338,10 +1375,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         .get(&candidate_key)
         .copied()
         .unwrap_or(0);
-    if configured_retry_mode(
-        matched_policy,
-        context.retry_policy.same_candidate_retries,
-    ) == Some(V3ProviderErrorRetryMode::RetrySame)
+    if configured_retry_mode(matched_policy, context.retry_policy.same_candidate_retries)
+        == Some(V3ProviderErrorRetryMode::RetrySame)
         && health_record.state != "cooldown"
         && retries_done < configured_same_candidate_retries
         && status != 400
@@ -1752,13 +1787,14 @@ fn terminal_projection_for(
         .try_into_terminal()
         .ok()
         .map(V3ErrorHandlingCenter::project_terminal_decision)?;
-    if let Some(V3ProviderDispositionStepManifest::Project { public_code, .. }) =
-        matched_policy.and_then(|policy| {
+    if let Some(V3ProviderDispositionStepManifest::Project { public_code, .. }) = matched_policy
+        .and_then(|policy| {
             policy.path.iter().rev().find_map(|step| match step {
                 V3ProviderDispositionStepManifest::Project { .. } => Some(step),
                 _ => None,
             })
-        }) {
+        })
+    {
         // Error06 owns the terminal HTTP status. Policy projection may only
         // customize the public error code without changing routing truth.
         if let Some(public_code) = public_code {

@@ -183,6 +183,7 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
         &target.provider_type,
         current_request_body,
     )?;
+    normalize_cc_sol_empty_tool_search_results(&mut body, &target);
     normalize_deepseek_thinking_stopless_tool_choice(&mut body, &target);
     // 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）：
     // 1. 历史密文剥离（encrypted_content）对所有非 gpt 目标统一执行——gpt 官方系
@@ -503,6 +504,72 @@ fn normalize_deepseek_thinking_stopless_tool_choice(
         && v3_wire_payload_is_thinking_mode(body)
     {
         provider_compat_core::apply_deepseek_v4_request_compat(body);
+    }
+}
+
+/// cc-sol rejects a native `tool_search_output` whose result is an empty array,
+/// although the Responses shape permits an empty search result.  Preserve the
+/// no-result meaning at this provider boundary by representing the completed
+/// search as an ordinary function call/output pair with `[]` output.  This is
+/// intentionally profile-gated; other Responses providers must retain the
+/// original protocol items byte-for-byte.
+fn normalize_cc_sol_empty_tool_search_results(
+    body: &mut Value,
+    target: &V3ResponsesProviderTarget,
+) {
+    if target.compatibility_profile.as_deref() != Some("responses:thinking-tags") {
+        return;
+    }
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let empty_call_ids = input
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("tool_search_output"))
+        .filter(|item| {
+            item.get("tools")
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+        })
+        .filter_map(|item| item.get("call_id").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect::<std::collections::HashSet<_>>();
+    if empty_call_ids.is_empty() {
+        return;
+    }
+    for item in input.iter_mut() {
+        let call_id = item.get("call_id").and_then(Value::as_str);
+        match item.get("type").and_then(Value::as_str) {
+            Some("tool_search_call") if call_id.is_some_and(|id| empty_call_ids.contains(id)) => {
+                let Some(call_id) = call_id else { continue };
+                let arguments = item
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Object(Map::new()));
+                *item = json!({
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": "tool_search",
+                    "arguments": serde_json::to_string(&arguments)
+                        .unwrap_or_else(|_| "{}".to_string())
+                });
+            }
+            Some("tool_search_output")
+                if item
+                    .get("tools")
+                    .and_then(Value::as_array)
+                    .is_some_and(Vec::is_empty)
+                    && call_id.is_some_and(|id| empty_call_ids.contains(id)) =>
+            {
+                let Some(call_id) = call_id else { continue };
+                *item = json!({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": "[]"
+                });
+            }
+            _ => {}
+        }
     }
 }
 

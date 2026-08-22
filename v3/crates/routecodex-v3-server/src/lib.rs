@@ -414,6 +414,28 @@ pub async fn spawn_v3_server_aggregate(
         if let Err(error) = startup_result {
             eprintln!("provider persistent startup probe cycle failed: {error}");
         }
+        let startup_key_manifest = Arc::clone(&probe_manifest);
+        let startup_key_result = probe_health
+            .run_due_provider_key_health_probes(
+                startup_now_ms,
+                true,
+                move |provider_id, auth_alias, model_id| {
+                    let startup_key_manifest = Arc::clone(&startup_key_manifest);
+                    async move {
+                        let target = build_v3_provider_global_probe_target(
+                            &startup_key_manifest,
+                            &provider_id,
+                            Some(&auth_alias),
+                            Some(&model_id),
+                        )?;
+                        probe_v3_provider_global_target(target).await
+                    }
+                },
+            )
+            .await;
+        if let Err(error) = startup_key_result {
+            eprintln!("provider persistent startup key probe cycle failed: {error}");
+        }
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             tokio::select! {
@@ -441,6 +463,26 @@ pub async fn spawn_v3_server_aggregate(
                     }).await;
                     if let Err(error) = result {
                         eprintln!("provider persistent cooldown probe cycle failed: {error}");
+                    }
+                    let key_manifest_for_probe = Arc::clone(&probe_manifest);
+                    let key_result = probe_health.run_due_provider_key_health_probes(
+                        now_ms,
+                        false,
+                        move |provider_id, auth_alias, model_id| {
+                            let key_manifest_for_probe = Arc::clone(&key_manifest_for_probe);
+                            async move {
+                                let target = build_v3_provider_global_probe_target(
+                                    &key_manifest_for_probe,
+                                    &provider_id,
+                                    Some(&auth_alias),
+                                    Some(&model_id),
+                                )?;
+                                probe_v3_provider_global_target(target).await
+                            }
+                        },
+                    ).await;
+                    if let Err(error) = key_result {
+                        eprintln!("provider persistent key probe cycle failed: {error}");
                     }
                 }
             }

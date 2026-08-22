@@ -485,6 +485,54 @@ mod tests {
         }
     }
 
+    #[test]
+    fn cc_sol_empty_tool_search_result_uses_provider_compatible_noop_pair() {
+        let mut target = target();
+        target.compatibility_profile = Some("responses:thinking-tags".into());
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {"type":"tool_search_call","call_id":"call_empty","arguments":{"query":"none","limit":1},"status":"completed","execution":"client"},
+                {"type":"tool_search_output","call_id":"call_empty","tools":[],"status":"completed","execution":"client"},
+                {"type":"tool_search_call","call_id":"call_nonempty","arguments":{"query":"real","limit":1}},
+                {"type":"tool_search_output","call_id":"call_nonempty","tools":[{"type":"function","name":"real","description":"real tool"}]}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-cc-sol-empty", target, body)
+            .unwrap();
+        assert_eq!(wire.body()["input"][0]["type"], "function_call");
+        assert_eq!(wire.body()["input"][0]["name"], "tool_search");
+        assert_eq!(wire.body()["input"][1], json!({
+            "type":"function_call_output",
+            "call_id":"call_empty",
+            "output":"[]"
+        }));
+        assert_eq!(wire.body()["input"][2]["type"], "tool_search_call");
+        assert_eq!(wire.body()["input"][3]["type"], "tool_search_output");
+    }
+
+    #[test]
+    fn non_cc_sol_and_nonempty_tool_search_results_are_unchanged() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {"type":"tool_search_call","call_id":"call_empty","arguments":{"query":"none"}},
+                {"type":"tool_search_output","call_id":"call_empty","tools":[]},
+                {"type":"tool_search_call","call_id":"call_nonempty","arguments":{"query":"real"}},
+                {"type":"tool_search_output","call_id":"call_nonempty","tools":[{"type":"function","name":"real"}]}
+            ]
+        });
+        let neutral = build_v3_provider_12_responses_wire_payload("req-neutral-empty", target(), body.clone())
+            .unwrap();
+        assert_eq!(neutral.body()["input"], body["input"]);
+        let mut cc_sol = target();
+        cc_sol.compatibility_profile = Some("responses:thinking-tags".into());
+        let wire = build_v3_provider_12_responses_wire_payload("req-cc-sol-nonempty", cc_sol, body)
+            .unwrap();
+        assert_eq!(wire.body()["input"][2]["type"], "tool_search_call");
+        assert_eq!(wire.body()["input"][3]["type"], "tool_search_output");
+    }
+
     fn cleanup_target(fields: &[&str]) -> V3ResponsesProviderTarget {
         let mut target = target();
         target.provider_request_cleanup.historical_fields =
