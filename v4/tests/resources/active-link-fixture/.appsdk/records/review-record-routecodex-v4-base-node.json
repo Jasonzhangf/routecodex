@@ -1,19 +1,29 @@
 {
-  "ai_confidence": 1.0,
-  "confidence_rationale": "blackbox public API regression plus whitebox invariant tests both pass on the compiled artifact",
-  "created_at": "2026-08-14T03:40:00Z",
+  "ai_confidence": 0.93,
+  "confidence_rationale": "Post-merge architecture re-audit confirms the migration candidate remains governance-only, while current maps bind real debug/router/provider/server symbols and runtime-owned typed control resources. Base-node remains frozen behind Active artifacts; owner, payload-isolation, dependency, and verification boundaries are explicit and fail closed.",
+  "created_at": "2026-08-16T04:04:00Z",
   "evidence_ids": [
-    "evidence-base-node-v1"
+    "base-sdk013-candidate",
+    "base-sdk013-positive",
+    "base-sdk013-negative"
   ],
-  "issue_id": "routecodex-v4-foundation",
-  "promotion_id": "promotion-base-node-v1",
-  "review_id": "review-base-node-v1",
-  "reviewed_artifact_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
-  "reviewed_commit": "fac43e278",
-  "reviewed_scope_hash": "scope-base-node-v1",
+  "fix_candidate_id": "base-sdk013-candidate",
+  "function_map_hash": "sha256:69f16dfe5d056634f6164cd325dbdbdf134588890b69f101c0d9045e6a01d776",
+  "issue_id": "appsdk-013-migration",
+  "mainline_call_map_hash": "sha256:c36e4f9d5cff527d7f98b339772a53c87f420db58bb2215b6b68210e01124673",
+  "promotion_id": "base-sdk013-promotion",
+  "resource_map_hash": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
+  "review_id": "base-sdk013-architecture-review",
+  "review_kind": "architecture",
+  "reviewed_artifact_hash": "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd",
+  "reviewed_commit": "fdd46128479594611ed14ba6099247727bd16d4b",
+  "reviewed_diff_hash": "sha256:80e687c2399584140aa406e61c9e5a5a96172d1c3c7c71b6ed4c1ff1839603e2",
+  "reviewed_scope_hash": "sha256:7d1e6dda7043dedd559eb5c13df6ae94d7c49165b54e4602ecbd29ad5c6c6de9",
+  "reviewed_tree_hash": "5e569af73f8d707e03918d2d91d041ffad5b5a23",
   "reviewer": {
-    "adapter": "codex",
-    "identity": "codex::architecture-review"
+    "adapter": "routecodex-codex-adapter",
+    "identity": "codex-gpt-5"
   },
-  "verdict": "pass"
+  "verdict": "pass",
+  "verification_map_hash": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230"
 }

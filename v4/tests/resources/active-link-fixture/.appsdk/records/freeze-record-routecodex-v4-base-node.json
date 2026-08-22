@@ -1,32 +1,42 @@
 {
-  "active_version": "active-v1",
-  "artifact_record_id": "evidence-base-node-v1",
+  "active_version": "active-v2",
+  "artifact_record_id": "base-sdk013-candidate",
   "clean_scope": {
-    "base_commit": "fac43e278",
-    "changed_paths": [],
-    "generated_policy": "tracked_hash",
-    "ignored_paths": []
+    "base_commit": "3a845cd50ae0a7c3cf0cf29bd5d25997b7a07d59",
+    "changed_paths": [
+      "v4/.appsdk/**",
+      "v4/contracts/**",
+      "v4/docs/goals/appsdk-0.1.3-migration.md",
+      "v4/.gitignore",
+      "v4/protected/**"
+    ],
+    "generated_policy": "excluded_from_source_clean",
+    "ignored_paths": [
+      "v4/active/lib/**",
+      "v4/generated/**",
+      "v4/target/**"
+    ]
   },
-  "created_at": "2026-08-14T03:45:00Z",
-  "freeze_id": "freeze-base-node-v1",
+  "created_at": "2026-08-16T04:07:20Z",
+  "freeze_id": "base-sdk013-freeze",
   "git_clean": true,
-  "issue_id": "routecodex-v4-foundation",
-  "library_hash": "sha256:036daf4575cf81288e72a36e7a65a17854167dd6fa8cfdeb164b4506b595e4c4",
+  "issue_id": "appsdk-013-migration",
+  "library_hash": "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd",
   "module_id": "routecodex-v4-base-node",
   "owners": {
-    "api_extractor": "appsdk",
-    "artifact_registry": "appsdk",
-    "compiler": "cargo",
-    "review": "codex",
+    "api_extractor": "appsdk-0.1.5",
+    "artifact_registry": "appsdk-active",
+    "compiler": "appsdk-0.1.5",
+    "review": "routecodex-codex-adapter",
     "vcs": "git"
   },
-  "previous_active_immutable": false,
-  "previous_active_version": null,
-  "promotion_id": "promotion-base-node-v1",
-  "promotion_record_hash": "sha256:6d95730e496a16009a020a4ec83315b575ab5f4719440731425afb9f269c984a",
-  "public_api_hash": "sha256:95f9248e0568946c686d9e17c809dfb49ad25ba002ed90709102d3f9f7f490f8",
-  "regression_report_hash": "sha256:377997a39f90d6d4a57f7a760b4741e2a56ec56d5cc08f7af402c9f59c154a74",
-  "regression_report_id": "regression-base-node-v1",
-  "review_id": "review-base-node-v1",
-  "source_commit_or_tag": "fac43e278"
+  "previous_active_immutable": true,
+  "previous_active_version": "active-v1",
+  "promotion_id": "base-sdk013-promotion",
+  "promotion_record_hash": "sha256:78464922f826173136f83267f5442c1b32a57d4ee10b6f53de9b1cabf86d3d62",
+  "public_api_hash": "sha256:45f153ddb96a6dab9f73e037a6ae4c4377fde82524a76a44586ff2089f5902fe",
+  "regression_report_hash": "sha256:0ed242bf01cd91550b692b6e47eb119b0c128cd63b516ad7cefd312c0cbbf750",
+  "regression_report_id": "base-sdk013-regression",
+  "review_id": "base-sdk013-architecture-review",
+  "source_commit_or_tag": "fdd46128479594611ed14ba6099247727bd16d4b"
 }

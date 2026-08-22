@@ -1,0 +1,34 @@
+{
+  "validation_id": "error-sdk013-prereview-validation",
+  "issue_id": "appsdk-013-migration",
+  "module_id": "routecodex-v4-error",
+  "fix_candidate_id": "error-sdk013-candidate",
+  "candidate_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
+  "candidate_tree_hash": "144f4e0d8c2cdbbaface771797ccb9170e05e9ec",
+  "artifact_hash": "sha256:988609a37c6fb6d3ca9463c5e15e74471c3fec7414c634902a2009c4903461dc",
+  "whitebox_producer": {
+    "adapter": "cargo",
+    "identity": "routecodex-v4-error-regression"
+  },
+  "whitebox_evidence_ids": [
+    "error-sdk013-prereview-positive",
+    "error-sdk013-prereview-negative"
+  ],
+  "blackbox_evidence_ids": [
+    "error-sdk013-prereview-blackbox"
+  ],
+  "deployment": {
+    "environment_id": "v4-local-worktree",
+    "install_receipt_id": "error-sdk013-install",
+    "restart_receipt_id": "error-sdk013-restart",
+    "entrypoint": "cargo run --quiet --release -p routecodex-v4-build-link -- test-consumer",
+    "producer": {
+      "adapter": "cargo",
+      "identity": "routecodex-v4-error"
+    },
+    "observed_at": "2026-08-22T05:55:05Z"
+  },
+  "source_unchanged": true,
+  "result": "pass",
+  "created_at": "2026-08-22T05:55:06Z"
+}
