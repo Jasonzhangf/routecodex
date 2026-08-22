@@ -1002,6 +1002,12 @@ fn openai_chat_provider_http_failure(
 ) -> V3RelayProviderFailure {
     let body = match serde_json::from_slice::<Value>(body) {
         Ok(value) => value,
+        Err(_) if body.is_empty() => json!({
+            "error": {
+                "type": "provider_error",
+                "message": format!("provider returned HTTP {status}")
+            }
+        }),
         Err(error) => json!({
             "error": {
                 "type": "provider_error",

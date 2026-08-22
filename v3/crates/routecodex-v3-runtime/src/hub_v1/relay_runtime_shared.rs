@@ -236,6 +236,12 @@ pub fn provider_http_failure(
 ) -> V3RelayProviderFailure {
     let body = match serde_json::from_slice::<Value>(body) {
         Ok(value) => value,
+        Err(_) if body.is_empty() => json!({
+            "error": {
+                "code": "provider_http_status",
+                "message": format!("provider returned HTTP {status}")
+            }
+        }),
         Err(error) => json!({
             "error": {
                 "code": "provider_error_body_malformed",

@@ -1380,6 +1380,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         && health_record.state != "cooldown"
         && retries_done < configured_same_candidate_retries
         && status != 400
+        // HTTP 503 is an upstream availability signal.  Do not spend a
+        // same-candidate retry budget on it; mark this candidate failed and
+        // reselect immediately.
+        && status != 503
     {
         state
             .same_candidate_retries
