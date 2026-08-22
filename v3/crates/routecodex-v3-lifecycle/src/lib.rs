@@ -34,6 +34,7 @@ const DEFAULT_START_GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_START_FORCE_KILL_TIMEOUT: Duration = Duration::from_secs(3);
 const RESTART_PLAN_FILE: &str = "restart.plan.json";
 const FRONT_HANDOFF_FILE: &str = "front-handoff.json";
+const PROVIDER_HANDOFF_FILE: &str = "provider-handoff.json";
 
 #[derive(Debug, Error)]
 pub enum V3LifecycleError {
@@ -854,6 +855,16 @@ impl V3ManagedLifecycle {
                 .restore_front_checkpoints(&checkpoints)
                 .map_err(V3LifecycleError::Validation)?;
             fs::remove_file(&handoff_path)?;
+        }
+        let provider_handoff_path = instance_dir.join(PROVIDER_HANDOFF_FILE);
+        if provider_handoff_path.exists() {
+            let checkpoints: Vec<routecodex_v3_provider_responses::V3ProviderTransportCheckpoint> =
+                read_json(&provider_handoff_path)?;
+            routecodex_v3_runtime::restore_default_provider_transport_handoff_checkpoints(
+                &checkpoints,
+            )
+            .map_err(V3LifecycleError::Validation)?;
+            fs::remove_file(provider_handoff_path)?;
         }
         let mut handle = Some(handle);
         write_status(

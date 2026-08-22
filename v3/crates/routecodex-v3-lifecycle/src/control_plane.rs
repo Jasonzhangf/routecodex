@@ -47,10 +47,15 @@ pub(crate) async fn restart_managed_runtime_in_place(
         Some("exec restart accepted".to_string()),
     )?;
     let _ = fs::remove_file(instance_dir.join(RESTART_PLAN_FILE));
+    let provider_checkpoints = routecodex_v3_runtime::default_provider_transport_handoff_checkpoints();
     let checkpoints = handle.prepare_for_exec().await;
     write_json_atomic(
         &instance_dir.join(FRONT_HANDOFF_FILE),
         &checkpoints,
+    )?;
+    write_json_atomic(
+        &instance_dir.join(PROVIDER_HANDOFF_FILE),
+        &provider_checkpoints,
     )?;
     write_json_atomic(&instance_dir.join("instance.json"), declaration)?;
     let _ = fs::remove_file(instance_dir.join("control.json"));

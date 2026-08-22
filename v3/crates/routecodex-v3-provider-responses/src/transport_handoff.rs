@@ -192,6 +192,70 @@ impl V3ProviderTransportAttemptBroker {
             .map(|attempt| attempt.checkpoint.clone())
     }
 
+    pub fn checkpoints(&self) -> Vec<V3ProviderTransportCheckpoint> {
+        self.attempts
+            .lock()
+            .expect("provider transport attempt lock")
+            .values()
+            .map(|attempt| attempt.checkpoint.clone())
+            .collect()
+    }
+
+    pub fn restore_detached(
+        &self,
+        checkpoints: &[V3ProviderTransportCheckpoint],
+    ) -> Result<usize, String> {
+        let mut attempts = self
+            .attempts
+            .lock()
+            .expect("provider transport attempt lock");
+        let mut restored_next_ids = BTreeMap::<(String, String), u64>::new();
+        for checkpoint in checkpoints {
+            if checkpoint.key.request_id.trim().is_empty()
+                || checkpoint.key.provider_id.trim().is_empty()
+                || checkpoint.scope.pipeline_id.trim().is_empty()
+                || checkpoint.scope.server_id.trim().is_empty()
+                || checkpoint.scope.session_scope.trim().is_empty()
+                || checkpoint.scope.port == 0
+                || checkpoint.scope.runtime_generation == 0
+            {
+                return Err("provider transport checkpoint has incomplete scope".to_string());
+            }
+            if attempts.contains_key(&checkpoint.key) {
+                return Err("provider transport checkpoint key is already active".to_string());
+            }
+            let mut restored = checkpoint.clone();
+            if matches!(
+                restored.state,
+                V3ProviderTransportAttemptState::Connecting
+                    | V3ProviderTransportAttemptState::Streaming
+            ) {
+                restored.state = V3ProviderTransportAttemptState::Detached;
+            }
+            let next_id = restored_next_ids
+                .entry((
+                    restored.key.request_id.clone(),
+                    restored.key.provider_id.clone(),
+                ))
+                .or_insert(0);
+            *next_id = (*next_id).max(restored.key.attempt_id.saturating_add(1));
+            attempts.insert(
+                restored.key.clone(),
+                V3ProviderTransportAttempt { checkpoint: restored },
+            );
+        }
+        drop(attempts);
+        let mut next_ids = self
+            .next_attempt_ids
+            .lock()
+            .expect("provider transport attempt id lock");
+        for (key, next_id) in restored_next_ids {
+            let current = next_ids.entry(key).or_insert(0);
+            *current = (*current).max(next_id);
+        }
+        Ok(checkpoints.len())
+    }
+
     pub fn remove(
         &self,
         key: &V3ProviderTransportAttemptKey,
@@ -277,5 +341,29 @@ mod tests {
             broker.state(&key),
             Some(V3ProviderTransportAttemptState::Terminal)
         );
+    }
+
+    #[test]
+    fn provider_transport_checkpoint_restores_active_attempt_as_detached() {
+        let source = V3ProviderTransportAttemptBroker::default();
+        let key = key();
+        source
+            .begin(key.clone(), V3ProviderTransportKind::Http, scope(7))
+            .unwrap();
+        source
+            .transition(&key, V3ProviderTransportAttemptState::Streaming)
+            .unwrap();
+        source.observe_provider_frame(&key, 0).unwrap();
+        let checkpoint = source.checkpoint(&key).unwrap();
+
+        let restored = V3ProviderTransportAttemptBroker::default();
+        assert_eq!(restored.restore_detached(&[checkpoint]), Ok(1));
+        let restored_checkpoint = restored.checkpoint(&key).unwrap();
+        assert_eq!(
+            restored_checkpoint.state,
+            V3ProviderTransportAttemptState::Detached
+        );
+        assert_eq!(restored_checkpoint.next_provider_sequence, 1);
+        assert_eq!(restored_checkpoint.scope.runtime_generation, 7);
     }
 }

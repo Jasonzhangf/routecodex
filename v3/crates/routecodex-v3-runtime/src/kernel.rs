@@ -99,6 +99,21 @@ static DEFAULT_RESPONSES_TRANSPORT: OnceLock<ReqwestResponsesTransport> = OnceLo
 pub fn default_responses_transport() -> &'static ReqwestResponsesTransport {
     DEFAULT_RESPONSES_TRANSPORT.get_or_init(ReqwestResponsesTransport::default)
 }
+
+pub fn default_provider_transport_handoff_checkpoints(
+) -> Vec<routecodex_v3_provider_responses::V3ProviderTransportCheckpoint> {
+    default_responses_transport()
+        .transport_handoff_broker()
+        .checkpoints()
+}
+
+pub fn restore_default_provider_transport_handoff_checkpoints(
+    checkpoints: &[routecodex_v3_provider_responses::V3ProviderTransportCheckpoint],
+) -> Result<usize, String> {
+    default_responses_transport()
+        .transport_handoff_broker()
+        .restore_detached(checkpoints)
+}
 include!("kernel/direct_kernel_entrypoints.rs");
 include!("kernel/direct_state.rs");
 async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(

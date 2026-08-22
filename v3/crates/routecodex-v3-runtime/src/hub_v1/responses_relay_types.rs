@@ -640,7 +640,7 @@ pub(crate) struct V3LiveSnapResponsesTransport<T> {
 impl V3LiveSnapResponsesTransport<ReqwestResponsesTransport> {
     pub(crate) fn with_default_transport() -> Self {
         Self {
-            inner: ReqwestResponsesTransport::default(),
+            inner: crate::default_responses_transport().clone(),
             snapshots: V3LiveSnapProviderSnapshotRecorder::default(),
         }
     }

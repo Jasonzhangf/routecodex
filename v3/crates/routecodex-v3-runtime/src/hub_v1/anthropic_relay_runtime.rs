@@ -196,7 +196,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_default_transport(
     manifest: &V3Config05ManifestPublished,
     input: V3AnthropicRelayRuntimeInput,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
-    execute_v3_anthropic_relay_runtime(manifest, input, &ReqwestResponsesTransport::default()).await
+    execute_v3_anthropic_relay_runtime(manifest, input, crate::default_responses_transport()).await
 }
 
 pub async fn execute_v3_anthropic_relay_runtime_with_default_transport_provider_health(
@@ -207,7 +207,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_default_transport_provider_
     execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
         manifest,
         input,
-        &ReqwestResponsesTransport::default(),
+        crate::default_responses_transport(),
         Vec::new(),
         provider_health,
     )
@@ -222,7 +222,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_default_transport_and_clien
     execute_v3_anthropic_relay_runtime_with_client_headers(
         manifest,
         input,
-        &ReqwestResponsesTransport::default(),
+        crate::default_responses_transport(),
         client_headers,
     )
     .await
@@ -237,7 +237,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_default_transport_client_he
     execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
         manifest,
         input,
-        &ReqwestResponsesTransport::default(),
+        crate::default_responses_transport(),
         client_headers,
         provider_health,
     )

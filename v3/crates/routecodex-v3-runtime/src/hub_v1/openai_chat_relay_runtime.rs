@@ -108,7 +108,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport(
     manifest: &V3Config05ManifestPublished,
     input: V3OpenAiChatRelayRuntimeInput,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
-    execute_v3_openai_chat_relay_runtime(manifest, input, &ReqwestResponsesTransport::default())
+    execute_v3_openai_chat_relay_runtime(manifest, input, crate::default_responses_transport())
         .await
 }
 
@@ -120,7 +120,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
     execute_v3_openai_chat_relay_runtime_with_provider_health(
         manifest,
         input,
-        &ReqwestResponsesTransport::default(),
+        crate::default_responses_transport(),
         provider_health,
     )
     .await

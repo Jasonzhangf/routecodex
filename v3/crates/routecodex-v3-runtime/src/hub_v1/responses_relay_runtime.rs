@@ -124,7 +124,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime(manifest, input, &ReqwestResponsesTransport::default()).await
+    execute_v3_responses_relay_runtime(manifest, input, crate::default_responses_transport()).await
 }
 
 pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control<
@@ -254,7 +254,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
         manifest,
         input,
-        &ReqwestResponsesTransport::default(),
+        crate::default_responses_transport(),
         provider_health,
         V3ResponsesRelayLocalStoplessControlInput::new(
             state,
@@ -280,7 +280,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target(
         manifest,
         input,
-        &ReqwestResponsesTransport::default(),
+        crate::default_responses_transport(),
         provider_health,
         V3ResponsesRelayLocalStoplessControlInput::new(
             state,
@@ -305,7 +305,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
         manifest,
         input,
-        &ReqwestResponsesTransport::default(),
+        crate::default_responses_transport(),
         provider_health,
         local_stopless,
     )
@@ -325,7 +325,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target(
         manifest,
         input,
-        &ReqwestResponsesTransport::default(),
+        crate::default_responses_transport(),
         provider_health,
         local_stopless,
         initial_selected_target,
