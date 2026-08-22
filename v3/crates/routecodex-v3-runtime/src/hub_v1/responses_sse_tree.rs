@@ -1277,6 +1277,7 @@ pub fn classify_v3_responses_sse_event(
     let metadata = V3ResponsesSseProtocolMetadata::from_event(event)?;
     let item_object = event
         .get("item")
+        .filter(|value| !value.is_null())
         .map(classify_v3_responses_sse_output_item)
         .transpose()?;
     let item = item_object.as_ref().map(|item| item.kind());
@@ -1338,6 +1339,7 @@ pub fn classify_v3_responses_sse_event(
         content_field,
         response: event
             .get("response")
+            .filter(|value| !value.is_null())
             .map(parse_response_container)
             .transpose()?,
         extensions,
@@ -1574,10 +1576,19 @@ pub(crate) fn parse_response_container(
             value: value.clone(),
         })
         .collect();
-    let usage = object.get("usage").map(parse_usage).transpose()?;
-    let error = object.get("error").map(parse_response_error).transpose()?;
+    let usage = object
+        .get("usage")
+        .filter(|value| !value.is_null())
+        .map(parse_usage)
+        .transpose()?;
+    let error = object
+        .get("error")
+        .filter(|value| !value.is_null())
+        .map(parse_response_error)
+        .transpose()?;
     let output = object
         .get("output")
+        .filter(|value| !value.is_null())
         .map(|value| {
             value
                 .as_array()

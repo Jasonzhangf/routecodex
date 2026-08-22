@@ -295,6 +295,28 @@ fn responses_semantic_event_projection_preserves_event_envelope() {
 }
 
 #[test]
+fn responses_created_accepts_nullable_envelope_fields() {
+    let input = json!({
+        "type":"response.created",
+        "item":null,
+        "response":{
+            "id":"resp_1",
+            "status":"requires_action",
+            "output":null,
+            "usage":null,
+            "error":null
+        }
+    });
+    let semantic = classify_v3_responses_sse_event(&input)
+        .expect("nullable Responses envelope fields are valid protocol data");
+    assert_eq!(semantic.protocol.event_type, "response.created");
+    assert_eq!(
+        semantic.response.as_ref().and_then(|value| value.id.as_deref()),
+        Some("resp_1")
+    );
+}
+
+#[test]
 fn responses_semantic_hook_notifies_and_rewrites_typed_item() {
     let input = json!({
         "type":"response.output_item.done",
