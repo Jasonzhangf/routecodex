@@ -1,3 +1,4 @@
+use crate::V3MetadataCenterExecutionPlan;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{Request, Response};
@@ -174,7 +175,7 @@ impl V3FrontRequestLease {
     /// this constructor never derives it from payload, provider response, or
     /// logs.
     pub fn from_responses_execution_plan(
-        plan: &routecodex_v3_runtime::V3ResponsesProtocolExecutionPlan,
+        plan: &V3MetadataCenterExecutionPlan,
         request_id: impl Into<String>,
         pipeline_id: impl Into<String>,
         server_id: impl Into<String>,

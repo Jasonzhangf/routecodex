@@ -330,6 +330,15 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
             V3Execution11ProtocolDecisionMode::HubRelay => V3EntryProtocolExecutionMode::Relay,
         };
+        let metadata_plan = V3MetadataCenterExecutionPlan::new(
+            request_id.clone(),
+            request_identity.pipeline_id.clone(),
+            state.server.id.clone(),
+            state.server.port,
+            provider_failure_session_scope.session_id().to_string(),
+            v3_responses_request_wants_sse(&request_headers, &payload),
+            plan,
+        );
         if front_transport_owns_keepalive {
             if let Some(connection_identity) = front_connection_identity {
                 // The request-stage plan is the only owner of the Front
@@ -338,7 +347,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 // is carried beside the request id; it is not reconstructed
                 // from payload, provider response, or logs.
                 let lease = V3FrontRequestLease::from_responses_execution_plan(
-                    &plan,
+                    &metadata_plan,
                     request_id.clone(),
                     request_identity.pipeline_id.clone(),
                     state.server.id.clone(),
@@ -371,7 +380,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 }
             }
         }
-        Some(plan)
+        Some(metadata_plan)
     } else {
         None
     };
@@ -1222,7 +1231,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             request_id.clone(),
             execution_id,
             payload,
-            responses_protocol_plan.as_ref(),
+            responses_protocol_plan
+                .as_ref()
+                .map(V3MetadataCenterExecutionPlan::protocol_plan),
             None,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
