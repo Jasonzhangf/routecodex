@@ -7326,6 +7326,15 @@ chains:
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
     status: anchored
     owner_feature_id: v3.tool_thinking_hook_skeleton
+  - step_id: v3-tool-thinking-resp03-direct-sse-client-reasoning
+    from_node: V3DirectResp14ProviderProjectionPrepared
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: V3DirectSseContentConsumer::take_toolreason_reasoning_projection
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    callee_symbol: build_v3_toolreason_visible_text_sse_events_at_resp03
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    status: anchored
+    owner_feature_id: v3.tool_thinking_hook_skeleton
 
 - chain_id: v3.server.internal_observability_projection
   owner_feature_id: v3.server_internal_observability_projection
@@ -7757,6 +7766,45 @@ chains:
       consumes: [v3.sse.direct.typed_hook_catalog, v3.sse.responses.semantic_tree]
       produces: [v3.sse.responses.hook_effect]
       side_channel_reads: [v3.sse.direct.typed_hook_catalog]
+      side_channel_writes: []
+
+- chain_id: v3.direct_sse_accept_skeleton
+  owner_feature_id: v3.direct_sse_accept_skeleton
+  summary: Direct Responses SSE establishes a client transport channel and heartbeat before existing Direct provider attempts finish; only the runtime projected client frame crosses the channel.
+  manifest: docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
+  entry_contract:
+    node: V3DirectSseAccept01ClientChannel
+    owner_doc: docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
+  edges:
+  - step_id: v3-direct-sse-accept-skeleton-01
+    from_node: V3DirectSseAccept01ClientChannel
+    to_node: V3DirectSseAccept02RuntimeWorker
+    caller_symbol: pending_endpoint_after_responses_admission
+    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    callee_symbol: pending_endpoint_after_responses_admission_inner
+    callee_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    status: anchored
+    edge_kind: client_accept_to_background_runtime
+    owner_feature_id: v3.direct_sse_accept_skeleton
+    resource_flow:
+      consumes: [v3.sse.direct.accept_skeleton, v3.config.http_sse_keepalive_interval]
+      produces: []
+      side_channel_reads: [v3.config.http_sse_keepalive_interval]
+      side_channel_writes: []
+  - step_id: v3-direct-sse-accept-skeleton-02
+    from_node: V3DirectSseAccept02RuntimeWorker
+    to_node: V3DirectSseAccept03ProjectedClientFrame
+    caller_symbol: pending_endpoint_after_responses_admission_inner
+    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    callee_symbol: v3_io_sse_body
+    callee_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
+    status: anchored
+    edge_kind: projected_client_frame_only
+    owner_feature_id: v3.direct_sse_accept_skeleton
+    resource_flow:
+      consumes: [v3.response.client_payload, v3.error.chain]
+      produces: []
+      side_channel_reads: [v3.error.chain]
       side_channel_writes: []
   - step_id: v3-direct-typed-hook-catalog-02
     from_node: V3DirectResp14ProviderProjectionPrepared

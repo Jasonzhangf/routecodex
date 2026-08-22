@@ -204,6 +204,7 @@
     "verify:server-function-map-boundary": "node scripts/architecture/verify-server-function-map-boundary.mjs",
     "verify:runtime-responses-provider-compat": "node scripts/architecture/verify-runtime-responses-provider-compat.mjs",
     "verify:sse-architecture-boundary": "node scripts/architecture/verify-sse-architecture-boundary.mjs",
+    "verify:v3-direct-sse-accept-skeleton": "npm --prefix v3 run verify:v3-direct-sse-accept-skeleton",
     "test:v3-sse-transport-adapter": "npm --prefix v3 run test:v3-sse-transport-adapter",
     "test:agent-collab-protocol-red-fixtures": "node scripts/tests/agent-collab-protocol-red-fixtures.mjs",
     "verify:v3-rust-only-server-entry": "npm --prefix v3 run verify:v3-rust-only-server-entry",

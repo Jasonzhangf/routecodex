@@ -24,6 +24,7 @@
     "test:isolation:red": "node tests/scripts/v3-independent-build-isolation-red-fixtures.mjs",
     "test:cargo": "node scripts/run-v3-cargo-test.mjs",
     "verify:v3-architecture-ci": "node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-architecture-ci.mjs",
+    "verify:v3-direct-sse-accept-skeleton": "node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-direct-sse-accept-skeleton.mjs",
     "verify:v3-architecture-docs": "npm run verify:v3-provider-directory-config && npm run verify:v3-resource-relation-edge-lock && npm run verify:v3-mainline-caller-flow && npm run verify:v3-stopless-resource-control && npm run verify:v3-stopless-state-machine-docs && npm run verify:v3-normalization-payload-logic-boundary && npm run verify:v3-selected-provider-model-binding && npm run verify:v3-provider-action-gate && npm run verify:v3-console-request-count-visibility && npm run verify:v3-responses-session-admission && npm run verify:v3-runtime-timing-observability && node scripts/architecture/verify-v3-architecture-docs.mjs",
     "verify:v3-rust-only": "node scripts/architecture/verify-v3-rust-only.mjs",
     "verify:v3-rust-only-server-entry": "node scripts/architecture/verify-v3-rust-only-server-entry.mjs",

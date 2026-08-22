@@ -1,0 +1,49 @@
+version: 1
+lifecycle_id: v3.direct_sse_accept_skeleton.mainline
+owner_feature_id: v3.direct_sse_accept_skeleton
+status: source_controlled_runtime_pending_live_replay
+entrypoint:
+  node_id: V3DirectSseAccept01ClientChannel
+  call_map_chain_id: v3.direct_sse_accept_skeleton
+nodes:
+  - V3DirectSseAccept01ClientChannel
+  - V3DirectSseAccept02RuntimeWorker
+  - V3DirectSseAccept03ProjectedClientFrame
+edges:
+  - step_id: v3-direct-sse-accept-skeleton-01
+    from_node: V3DirectSseAccept01ClientChannel
+    to_node: V3DirectSseAccept02RuntimeWorker
+    owner_feature_id: v3.direct_sse_accept_skeleton
+    status: anchored
+    contract: client SSE headers and transport-only keepalive are established before provider execution completes
+  - step_id: v3-direct-sse-accept-skeleton-02
+    from_node: V3DirectSseAccept02RuntimeWorker
+    to_node: V3DirectSseAccept03ProjectedClientFrame
+    owner_feature_id: v3.direct_sse_accept_skeleton
+    status: anchored
+    contract: only the existing direct runtime client projection is forwarded; provider raw SSE is never forwarded
+return_path:
+  precommit_provider_failure: Error01 -> Error03 -> Error04 -> Error05 -> reselect; client channel remains open
+  committed_provider_failure: current stream emits the existing post-commit error projection and closes; no current-request reroute
+  success: projected client SSE bytes, transport keepalive, and EOF
+forbidden_paths:
+  - provider raw SSE -> client
+  - direct accept layer -> provider semantic parser
+  - direct accept layer -> routing
+  - direct accept layer -> health
+  - direct accept layer -> continuation
+  - feature -> replacement of V3DirectSseAccept01ClientChannel
+  - feature -> replacement of V3DirectSseAccept02RuntimeWorker
+canonical_docs:
+  - docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
+  - docs/goals/v3-sse-transport-json-semantic-decoupling-audit.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+verification_gates:
+  - npm run verify:v3-direct-sse-accept-skeleton
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_guard_rejects_typed_responses_shape_before_client_commit -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib direct_sse_http_projection_injects_keepalive_and_preserves_provider_bytes -- --nocapture
+  - npm run verify:sse-architecture-boundary
+  - git diff --check

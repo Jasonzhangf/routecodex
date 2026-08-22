@@ -14,6 +14,7 @@
 import { spawnSync } from 'node:child_process';
 
 const STEPS = [
+  ['verify:v3-direct-sse-accept-skeleton', 'Direct SSE client accept/worker skeleton remains frozen'],
   ['verify:v3-rust-only', 'V3 runtime crates must be Rust-only'],
   ['verify:v3-rust-only-server-entry', 'Legacy TypeScript server entries remain physically retired'],
   ['verify:v3-build-test-artifact-budget', 'V3 Cargo tests release owned artifacts and enforce the 2 GiB debug budget'],
