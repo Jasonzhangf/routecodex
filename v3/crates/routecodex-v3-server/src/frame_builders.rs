@@ -176,6 +176,14 @@ pub(crate) fn project_v3_responses_direct_stream_error_frame_if_requested(
         }
     };
     let (code, message) = v3_error_body_code_message(&body);
+    let (code, message) = if code.starts_with("provider_response_") {
+        (
+            "response_stream_terminated".to_string(),
+            "response stream terminated before completion".to_string(),
+        )
+    } else {
+        (code, message)
+    };
     if frame.error_body.is_none() {
         frame.error_body = Some(body);
     }
