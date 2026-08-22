@@ -27,6 +27,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Repo sanity (no root junk)
         run: npm run verify:repo-sanity
+      - name: Fallback and internal policy hardcode gate
+        run: npm run verify:fallback-hardcode
       - name: V3 architecture CI umbrella
         run: npm run verify:v3-architecture-ci
       - name: V3 compaction request routing

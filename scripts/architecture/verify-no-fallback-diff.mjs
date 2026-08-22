@@ -26,13 +26,26 @@ function normalizeRel(filePath) {
   return filePath.split(path.sep).join('/');
 }
 
+function isIgnoredPath(relFile) {
+  const normalized = normalizeRel(relFile).replace(/^\.\//, '');
+  const pathSegments = normalized.split('/');
+  const ignoredPathSegments = config.ignorePathSegments || ['node_modules', 'target', 'coverage'];
+  if (pathSegments.some((segment) => ignoredPathSegments.includes(segment))) {
+    return true;
+  }
+  return config.ignorePaths.some((prefix) => {
+    const normalizedPrefix = normalizeRel(prefix).replace(/^\.\//, '').replace(/\/$/, '');
+    return normalized === normalizedPrefix || normalized.startsWith(`${normalizedPrefix}/`);
+  });
+}
+
 function isTargetFile(relFile) {
   const normalized = normalizeRel(relFile);
   if (requestedFiles) {
     return requestedFiles.has(normalized);
   }
   const ext = path.extname(normalized);
-  return config.extensions.includes(ext) && !config.ignorePaths.some((prefix) => normalized.startsWith(prefix));
+  return config.extensions.includes(ext) && !isIgnoredPath(normalized);
 }
 
 function parseUnifiedDiff(diffText) {
@@ -90,14 +103,16 @@ function addUntrackedFiles(added) {
 
 function collectAllTargetFiles() {
   const out = new Map();
-  const stack = [root];
+  const scanRoots = config.scanRoots || ['.'];
+  const stack = scanRoots.map((scanRoot) => path.join(root, scanRoot));
   while (stack.length > 0) {
     const current = stack.pop();
+    if (!fs.existsSync(current)) continue;
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const nextAbs = path.join(current, entry.name);
       const relFile = normalizeRel(path.relative(root, nextAbs));
       if (entry.isDirectory()) {
-        if (config.ignorePaths.some((prefix) => relFile.startsWith(prefix.replace(/\/$/, '')))) continue;
+        if (isIgnoredPath(relFile)) continue;
         stack.push(nextAbs);
         continue;
       }
