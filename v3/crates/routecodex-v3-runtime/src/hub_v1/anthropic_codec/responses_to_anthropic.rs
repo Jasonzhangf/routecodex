@@ -928,16 +928,17 @@ pub(super) fn responses_tool_as_anthropic_tool(
     }) {
         output.insert("description".to_string(), description.clone());
     }
-    output.insert(
-        "input_schema".to_string(),
-        tool.get("parameters")
-            .or_else(|| {
-                tool.get("function")
-                    .and_then(|function| function.get("parameters"))
-            })
-            .cloned()
-            .unwrap_or_else(|| json!({"type":"object"})),
-    );
+    let input_schema = tool
+        .get("parameters")
+        .or_else(|| {
+            tool.get("function")
+                .and_then(|function| function.get("parameters"))
+        })
+        .cloned()
+        .unwrap_or_else(|| json!({"type":"object"}));
+    let mut input_schema = input_schema;
+    super::super::servertool_hooks::inject_v3_tool_thinking_fields_into_schema(&mut input_schema);
+    output.insert("input_schema".to_string(), input_schema);
     Ok(Value::Object(output))
 }
 
@@ -1016,20 +1017,22 @@ fn responses_custom_tool_as_anthropic_compatibility_tool(
     let description = source_description
         .map(|source| format!("{source}\n\n{compatibility_note}"))
         .unwrap_or_else(|| compatibility_note.clone());
+    let mut input_schema = json!({
+        "type":"object",
+        "properties":{
+            "input":{
+                "type":"string",
+                "description":compatibility_note
+            }
+        },
+        "required":["input"],
+        "additionalProperties":false
+    });
+    super::super::servertool_hooks::inject_v3_tool_thinking_fields_into_schema(&mut input_schema);
     Ok(json!({
         "name":name,
         "description":description,
-        "input_schema":{
-            "type":"object",
-            "properties":{
-                "input":{
-                    "type":"string",
-                    "description":compatibility_note
-                }
-            },
-            "required":["input"],
-            "additionalProperties":false
-        }
+        "input_schema":input_schema
     }))
 }
 

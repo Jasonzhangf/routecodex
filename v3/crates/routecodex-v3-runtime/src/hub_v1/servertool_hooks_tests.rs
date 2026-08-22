@@ -32,6 +32,30 @@ fn req04_tool_thinking_injects_detailed_guidance_into_tool_list() {
 }
 
 #[test]
+fn req04_tool_thinking_guidance_reaches_each_external_tool_but_not_internal_tools() {
+    let mut payload = json!({
+        "tools": [
+            {"type":"function","name":"first","description":"first"},
+            {"type":"function","name":"second","description":"second"},
+            {"type":"function","name":"reasoningStop","description":"internal"},
+            {"type":"function","name":"noop","description":"internal"}
+        ]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("enabled tool-thinking must inject");
+    assert!(payload["tools"][0]["description"]
+        .as_str()
+        .unwrap()
+        .contains("工具调用协议"));
+    assert!(payload["tools"][1]["description"]
+        .as_str()
+        .unwrap()
+        .contains("工具调用协议"));
+    assert_eq!(payload["tools"][2]["description"], "internal");
+    assert_eq!(payload["tools"][3]["description"], "internal");
+}
+
+#[test]
 fn req04_tool_thinking_guidance_is_not_injected_twice() {
     let mut payload = json!({"instructions":"client instructions"});
     inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
@@ -228,6 +252,25 @@ fn req04_tool_thinking_injects_every_present_native_schema_shape() {
             );
         }
     }
+}
+
+#[test]
+fn req04_tool_thinking_custom_tool_keeps_freeform_input_and_adds_auxiliary_schema() {
+    let mut payload = json!({
+        "tools": [{
+            "type": "custom",
+            "name": "apply_patch",
+            "description": "raw patch",
+            "format": {"type":"text"}
+        }]
+    });
+    inject_v3_tool_thinking_guidance_at_req04(&mut payload, 0, true)
+        .expect("custom tool guidance must inject");
+    assert!(payload["tools"][0]["description"]
+        .as_str()
+        .unwrap()
+        .contains("工具调用协议"));
+    assert!(payload["tools"][0].get("parameters").is_none());
 }
 
 #[test]

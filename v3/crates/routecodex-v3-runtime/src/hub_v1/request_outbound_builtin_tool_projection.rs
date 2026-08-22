@@ -5,6 +5,69 @@ use routecodex_v3_config::V3WebSearchExecutionMode;
 
 use super::is_v3_gpt_canonical_model;
 
+pub(super) fn project_openai_responses_custom_tools_to_function_schema(
+    payload: &mut Value,
+) -> Result<(), String> {
+    let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for (index, tool) in tools.iter_mut().enumerate() {
+        let Some(row) = tool.as_object_mut() else {
+            continue;
+        };
+        if row.get("type").and_then(Value::as_str) == Some("function") {
+            let is_apply_patch = row
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+                .is_some_and(|name| name.eq_ignore_ascii_case("apply_patch"));
+            if is_apply_patch {
+                let function = row
+                    .get_mut("function")
+                    .and_then(Value::as_object_mut)
+                    .ok_or_else(|| {
+                        format!(
+                            "MalformedOutboundField target_protocol=responses path=$.tools[{index}].function"
+                        )
+                    })?;
+                let parameters = function
+                    .entry("parameters".to_string())
+                    .or_insert_with(|| serde_json::json!({"type":"object"}));
+                super::servertool_hooks::inject_v3_tool_thinking_fields_into_schema(parameters);
+            }
+            continue;
+        }
+        if row.get("type").and_then(Value::as_str) != Some("custom") {
+            continue;
+        }
+        let name = row
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|name| !name.trim().is_empty())
+            .ok_or_else(|| {
+                format!(
+                    "MalformedOutboundField target_protocol=responses path=$.tools[{index}].name"
+                )
+            })?;
+        if !name.eq_ignore_ascii_case("apply_patch") {
+            continue;
+        }
+        let schema = openai_chat_freeform_custom_tool_parameters();
+        let mut function = Map::new();
+        function.insert("name".to_string(), Value::String(name.to_string()));
+        if let Some(description) = row.get("description") {
+            function.insert("description".to_string(), description.clone());
+        }
+        function.insert("parameters".to_string(), schema);
+        *tool = serde_json::json!({
+            "type":"function",
+            "function":Value::Object(function)
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub(super) fn project_openai_chat_provider_tools(payload: &mut Value) -> Result<(), String> {
     project_openai_chat_provider_tools_for_web_search_mode(
@@ -383,6 +446,9 @@ fn normalize_openai_chat_function_tool(
                     openai_chat_freeform_custom_tool_parameters(),
                 );
             }
+            if let Some(parameters) = function.get_mut("parameters") {
+                super::servertool_hooks::inject_v3_tool_thinking_fields_into_schema(parameters);
+            }
         }
         return Ok(Value::Object(normalized));
     }
@@ -399,7 +465,7 @@ fn normalize_openai_chat_function_tool(
 }
 
 fn openai_chat_freeform_custom_tool_parameters() -> Value {
-    serde_json::json!({
+    let mut schema = serde_json::json!({
         "type": "object",
         "properties": {
             "input": {
@@ -409,5 +475,7 @@ fn openai_chat_freeform_custom_tool_parameters() -> Value {
         },
         "required": ["input"],
         "additionalProperties": false
-    })
+    });
+    super::servertool_hooks::inject_v3_tool_thinking_fields_into_schema(&mut schema);
+    schema
 }

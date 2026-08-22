@@ -101,7 +101,7 @@ fn inject_v3_tool_thinking_fields_into_tool_schemas(payload: &mut Value) {
     }
 }
 
-fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) {
+pub(super) fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) {
     let Some(schema) = schema.as_object_mut() else {
         return;
     };
@@ -147,31 +147,36 @@ fn inject_v3_tool_thinking_fields_into_schema(schema: &mut Value) {
 }
 
 fn inject_tool_thinking_into_tool_list_guidance(payload: &mut Value) {
-    let Some(tool) = payload
-        .get_mut("tools")
-        .and_then(Value::as_array_mut)
-        .and_then(|tools| tools.first_mut())
-    else {
+    let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
         return;
     };
-    if let Some(function) = tool.get_mut("function") {
-        if let Some(description) = function.get_mut("description") {
+    for tool in tools {
+        let tool_name = tool
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| tool.pointer("/function/name").and_then(Value::as_str));
+        if tool_name.is_some_and(|name| {
+            name.eq_ignore_ascii_case("reasoningStop") || name.eq_ignore_ascii_case("noop")
+        }) {
+            continue;
+        }
+        if let Some(function) = tool.get_mut("function") {
+            if let Some(description) = function.get_mut("description") {
+                append_v3_tool_thinking_guidance_to_text(description);
+            } else if let Some(function) = function.as_object_mut() {
+                function.insert(
+                    "description".to_string(),
+                    Value::String(V3_TOOL_THINKING_GUIDANCE.to_string()),
+                );
+            }
+        } else if let Some(description) = tool.get_mut("description") {
             append_v3_tool_thinking_guidance_to_text(description);
-        } else if let Some(function) = function.as_object_mut() {
-            function.insert(
+        } else if let Some(tool) = tool.as_object_mut() {
+            tool.insert(
                 "description".to_string(),
                 Value::String(V3_TOOL_THINKING_GUIDANCE.to_string()),
             );
         }
-        return;
-    }
-    if let Some(description) = tool.get_mut("description") {
-        append_v3_tool_thinking_guidance_to_text(description);
-    } else if let Some(tool) = tool.as_object_mut() {
-        tool.insert(
-            "description".to_string(),
-            Value::String(V3_TOOL_THINKING_GUIDANCE.to_string()),
-        );
     }
 }
 

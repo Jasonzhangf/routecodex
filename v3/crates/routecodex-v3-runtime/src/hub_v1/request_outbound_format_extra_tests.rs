@@ -32,6 +32,28 @@ fn responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids() {
 }
 
 #[test]
+fn responses_wire_preserves_apply_patch_custom_tool_contract() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "patch"}],
+        "tools": [{
+            "type": "custom",
+            "name": "apply_patch",
+            "description": "Apply a patch",
+            "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}
+        }]
+    });
+
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Responses wire must preserve native custom apply_patch");
+    let tool = &request["tools"][0];
+    assert_eq!(tool["type"], "custom");
+    assert_eq!(tool["name"], "apply_patch");
+    assert_eq!(tool["format"]["type"], "grammar");
+    assert!(tool.get("parameters").is_none());
+}
+
+#[test]
 fn responses_wire_normalizes_system_text_parts_to_input_text() {
     let payload = json!({
         "model": "gpt-test",
@@ -495,7 +517,12 @@ fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
         tools[1]["function"]["parameters"],
         json!({
             "type":"object",
-            "properties":{"input":{"type":"string","description":"Raw free-form tool input."}},
+            "properties":{
+                "input":{"type":"string","description":"Raw free-form tool input."},
+                "reason":{"type":"string","description":"当前工具调用的唯一直接动机，只说动机，简短"},
+                "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100,"description":"当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"},
+                "model_id":{"type":"string","description":"本次响应实际使用的模型 ID"}
+            },
             "required":["input"],
             "additionalProperties":false
         })
@@ -530,8 +557,13 @@ fn openai_chat_wire_repairs_preflattened_apply_patch_function_schema() {
         request["tools"][0]["function"]["parameters"],
         json!({
             "type":"object",
-            "properties":{"input":{"type":"string","description":"Raw free-form tool input."}},
-            "required":["input"],
+            "properties":{
+                "input":{"type":"string","description":"Raw free-form tool input."},
+                "reason":{"type":"string","description":"当前工具调用的唯一直接动机，只说动机，简短"},
+                "goal_alignment_confidence":{"type":"integer","minimum":0,"maximum":100,"description":"当前工具调用与用户上一轮目标的一致性，0 到 100 的整数"},
+                "model_id":{"type":"string","description":"本次响应实际使用的模型 ID"}
+            },
+            "required":["input","reason","goal_alignment_confidence","model_id"],
             "additionalProperties":false
         })
     );

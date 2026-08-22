@@ -3255,14 +3255,14 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
                 "message":{
                     "role":"assistant",
                     "content":"",
-                    "tool_calls":[{
-                        "id":"call_exec_1",
-                        "type":"custom",
-                        "custom":{
-                            "name":"exec",
-                            "input":"text('hello from custom exec')"
-                        }
-                    }]
+                        "tool_calls":[{
+                            "id":"call_exec_1",
+                            "type":"function",
+                            "function":{
+                                "name":"exec",
+                                "arguments":"{\"input\":\"text('hello from custom exec')\",\"reason\":\"执行用户要求的脚本\",\"goal_alignment_confidence\":100,\"model_id\":\"gpt-5.5\"}"
+                            }
+                        }]
                 },
                 "finish_reason":"tool_calls"
             }]
@@ -3358,14 +3358,19 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
                 "message":{
                     "role":"assistant",
                     "content":"",
-                    "tool_calls":[{
-                        "id":"call_exec_unescaped",
-                        "type":"custom",
-                        "custom":{
-                            "name":"exec",
-                            "input": raw_script
-                        }
-                    }]
+                        "tool_calls":[{
+                            "id":"call_exec_unescaped",
+                            "type":"function",
+                            "function":{
+                                "name":"exec",
+                                "arguments": serde_json::to_string(&json!({
+                                    "input": raw_script,
+                                    "reason":"执行用户要求的脚本",
+                                    "goal_alignment_confidence":100,
+                                    "model_id":"gpt-5.5"
+                                })).unwrap()
+                            }
+                        }]
                 },
                 "finish_reason":"tool_calls"
             }]

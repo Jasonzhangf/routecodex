@@ -323,7 +323,10 @@ fn responses_custom_tool_projects_registered_anthropic_wrapper() {
         tool["input_schema"]["properties"]["input"]["type"],
         "string"
     );
-    assert_eq!(tool["input_schema"]["required"], json!(["input"]));
+    assert_eq!(
+        tool["input_schema"]["required"],
+        json!(["input", "reason", "goal_alignment_confidence", "model_id"])
+    );
     assert_eq!(tool["input_schema"]["additionalProperties"], false);
     let description = tool["description"].as_str().expect("tool description");
     assert!(description.contains("Apply a patch"), "{description}");
