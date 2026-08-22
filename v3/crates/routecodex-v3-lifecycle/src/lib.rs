@@ -33,6 +33,7 @@ const START_TAKEOVER_POLL: Duration = Duration::from_millis(150);
 const DEFAULT_START_GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_START_FORCE_KILL_TIMEOUT: Duration = Duration::from_secs(3);
 const RESTART_PLAN_FILE: &str = "restart.plan.json";
+const FRONT_HANDOFF_FILE: &str = "front-handoff.json";
 
 #[derive(Debug, Error)]
 pub enum V3LifecycleError {
@@ -844,6 +845,16 @@ impl V3ManagedLifecycle {
                 return Err(error.into());
             }
         };
+        let mut handle = handle;
+        let handoff_path = instance_dir.join(FRONT_HANDOFF_FILE);
+        if handoff_path.exists() {
+            let checkpoints: Vec<routecodex_v3_server::V3RuntimeHandoffCheckpoint> =
+                read_json(&handoff_path)?;
+            handle
+                .restore_front_checkpoints(&checkpoints)
+                .map_err(V3LifecycleError::Validation)?;
+            fs::remove_file(&handoff_path)?;
+        }
         let mut handle = Some(handle);
         write_status(
             &instance_dir,

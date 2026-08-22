@@ -269,7 +269,8 @@ impl V3ServerAggregateHandle {
     /// bodies. Active bodies belong to Front/Transport handoff and must be
     /// checkpointed/reattached by the lifecycle owner; waiting here would
     /// deadlock restart on a provider stream that is already being replaced.
-    pub async fn prepare_for_exec(mut self) {
+    pub async fn prepare_for_exec(mut self) -> Vec<V3RuntimeHandoffCheckpoint> {
+        let checkpoints = self.front_transport_broker.freeze(Instant::now());
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -279,6 +280,15 @@ impl V3ServerAggregateHandle {
             }
         }
         let _ = &self.request_activity_gate;
+        checkpoints
+    }
+
+    pub fn restore_front_checkpoints(
+        &self,
+        checkpoints: &[V3RuntimeHandoffCheckpoint],
+    ) -> Result<usize, String> {
+        self.front_transport_broker
+            .restore_checkpoints(checkpoints, Instant::now())
     }
 
     pub async fn shutdown_listener_ports(&mut self, ports: &BTreeSet<u16>) -> Vec<u16> {

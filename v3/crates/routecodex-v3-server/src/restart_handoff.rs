@@ -153,6 +153,7 @@ pub struct V3RuntimeHandoffCheckpoint {
     pub closeout_state: V3FrontCloseoutState,
     pub absolute_remaining_ms: u64,
     pub idle_remaining_ms: u64,
+    pub captured_at_epoch_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -237,6 +238,7 @@ impl V3FrontRequestLease {
             closeout_state: self.closeout_state,
             absolute_remaining_ms: absolute.as_millis().min(u64::MAX as u128) as u64,
             idle_remaining_ms: idle.as_millis().min(u64::MAX as u128) as u64,
+            captured_at_epoch_ms: v3_front_epoch_ms(),
         }
     }
 
@@ -431,6 +433,60 @@ impl V3FrontTransportBroker {
         frozen
     }
 
+    pub fn restore_checkpoints(
+        &self,
+        checkpoints: &[V3RuntimeHandoffCheckpoint],
+        now: Instant,
+    ) -> Result<usize, String> {
+        self.restore_checkpoints_at(checkpoints, now, v3_front_epoch_ms())
+    }
+
+    pub fn restore_checkpoints_at(
+        &self,
+        checkpoints: &[V3RuntimeHandoffCheckpoint],
+        now: Instant,
+        restored_at_epoch_ms: u64,
+    ) -> Result<usize, String> {
+        let next_generation = checkpoints
+            .iter()
+            .map(|checkpoint| checkpoint.runtime_generation)
+            .max()
+            .unwrap_or_else(|| self.generation())
+            .saturating_add(1);
+        let mut stored = self
+            .checkpoints
+            .lock()
+            .expect("front broker checkpoint lock");
+        for checkpoint in checkpoints {
+            if checkpoint.key.request_id.trim().is_empty()
+                || checkpoint.key.pipeline_id.trim().is_empty()
+                || checkpoint.key.server_id.trim().is_empty()
+                || checkpoint.key.session_scope.trim().is_empty()
+            {
+                return Err("front handoff checkpoint has incomplete request scope".to_string());
+            }
+            let mut checkpoint = checkpoint.clone();
+            let elapsed_ms = restored_at_epoch_ms.saturating_sub(checkpoint.captured_at_epoch_ms);
+            checkpoint.absolute_remaining_ms = checkpoint
+                .absolute_remaining_ms
+                .saturating_sub(elapsed_ms);
+            checkpoint.idle_remaining_ms = checkpoint.idle_remaining_ms.saturating_sub(elapsed_ms);
+            let lease = V3FrontRequestLease::reattach(&checkpoint, now, next_generation);
+            stored.insert(
+                lease.key.clone(),
+                V3BrokerCheckpoint {
+                    checkpoint: lease.checkpoint(now),
+                    captured_at: now,
+                },
+            );
+        }
+        *self
+            .generation
+            .lock()
+            .expect("front broker generation lock") = next_generation;
+        Ok(checkpoints.len())
+    }
+
     pub fn reattach(
         &self,
         checkpoint: &V3RuntimeHandoffCheckpoint,
@@ -526,6 +582,13 @@ impl V3FrontTransportBroker {
         connections.insert(lease.key.clone(), connection);
         Ok(())
     }
+}
+
+fn v3_front_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
+        .unwrap_or(0)
 }
 
 enum V3StableFrontConnectionCommand {
@@ -851,6 +914,41 @@ mod tests {
         second.key.request_id = "req-2".into();
         assert!(broker.bind_connection_lease(connection, second, now).is_err());
         assert_eq!(broker.connection_lease(connection).unwrap().request_id, "req-1");
+    }
+
+    #[test]
+    fn broker_restores_checkpoint_with_new_generation_and_same_deadline_budget() {
+        let now = Instant::now();
+        let source = V3FrontTransportBroker::new(4);
+        let lease = lease(now);
+        source.register(&lease, now);
+        let checkpoint = source.freeze(now + Duration::from_secs(1));
+
+        let restored = V3FrontTransportBroker::new(4);
+        assert_eq!(
+            restored.restore_checkpoints_at(
+                &checkpoint,
+                now + Duration::from_secs(2),
+                checkpoint[0].captured_at_epoch_ms + 1_000,
+            ),
+            Ok(1)
+        );
+        assert_eq!(restored.generation(), 5);
+        let restored_checkpoint = restored.freeze(now + Duration::from_secs(2));
+        assert_eq!(restored_checkpoint[0].key.generation, 5);
+        assert!(restored_checkpoint[0].absolute_remaining_ms < checkpoint[0].absolute_remaining_ms);
+    }
+
+    #[test]
+    fn broker_rejects_checkpoint_with_incomplete_request_scope() {
+        let now = Instant::now();
+        let mut lease = lease(now);
+        lease.key.pipeline_id.clear();
+        let checkpoint = [lease.checkpoint(now)];
+        let restored = V3FrontTransportBroker::new(4);
+
+        assert!(restored.restore_checkpoints(&checkpoint, now).is_err());
+        assert!(restored.freeze(now).is_empty());
     }
 
     #[tokio::test]
