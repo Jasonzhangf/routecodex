@@ -652,6 +652,7 @@ fn test_v3_console_emission_context(
 ) -> V3ConsoleEmissionContext {
     let request_identity = V3AllocatedRequestIdentity {
         request_id: request_id.to_string(),
+        pipeline_id: format!("pipeline-{request_id}"),
         total_count: 1,
         daily_count: 1,
     };
@@ -1278,6 +1279,7 @@ fn startup_console_uses_the_same_layered_builder() {
 fn console_layering_keeps_request_debug_fields_off_human_headline() {
     let request_identity = V3AllocatedRequestIdentity {
         request_id: "openai-responses-router-gpt-5.5-sample-669944-7581".to_string(),
+        pipeline_id: "pipeline-sample-669944-7581".to_string(),
         total_count: 669_944,
         daily_count: 7_581,
     };
@@ -1317,16 +1319,19 @@ fn console_layering_keeps_request_debug_fields_off_human_headline() {
 fn console_request_count_keeps_following_human_fields_aligned() {
     let short = V3AllocatedRequestIdentity {
         request_id: "short".to_string(),
+        pipeline_id: "pipeline-short".to_string(),
         total_count: 1,
         daily_count: 1,
     };
     let current = V3AllocatedRequestIdentity {
         request_id: "current".to_string(),
+        pipeline_id: "pipeline-current".to_string(),
         total_count: 669_944,
         daily_count: 7_581,
     };
     let oversized = V3AllocatedRequestIdentity {
         request_id: "oversized".to_string(),
+        pipeline_id: "pipeline-oversized".to_string(),
         total_count: 12_345_678_901_234,
         daily_count: 123_456,
     };
@@ -1359,6 +1364,7 @@ fn console_request_count_keeps_following_human_fields_aligned() {
 fn console_layering_promotes_response_facts_before_debug_details() {
     let request_identity = V3AllocatedRequestIdentity {
         request_id: "openai-responses-router-gpt-5.5-sample-669944-7581".to_string(),
+        pipeline_id: "pipeline-sample-669944-7581".to_string(),
         total_count: 669_944,
         daily_count: 7_581,
     };

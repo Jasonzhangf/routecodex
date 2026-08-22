@@ -168,6 +168,61 @@ pub struct V3FrontRequestLease {
 }
 
 impl V3FrontRequestLease {
+    /// Build the Front lease from the request-stage execution plan. The
+    /// response path must not inspect provider response shape to choose this
+    /// mode. The caller must provide the request-ingress pipeline identity;
+    /// this constructor never derives it from payload, provider response, or
+    /// logs.
+    pub fn from_responses_execution_plan(
+        plan: &routecodex_v3_runtime::V3ResponsesProtocolExecutionPlan,
+        request_id: impl Into<String>,
+        pipeline_id: impl Into<String>,
+        server_id: impl Into<String>,
+        port: u16,
+        session_scope: impl Into<String>,
+        generation: u64,
+        now: Instant,
+    ) -> Self {
+        let execution_mode = match plan.decision.mode {
+            routecodex_v3_runtime::V3Execution11ProtocolDecisionMode::SameProtocolDirect => {
+                V3FrontExecutionMode::Direct
+            }
+            routecodex_v3_runtime::V3Execution11ProtocolDecisionMode::HubRelay => {
+                V3FrontExecutionMode::Relay
+            }
+        };
+        let continuation_owner = match execution_mode {
+            V3FrontExecutionMode::Direct => V3FrontContinuationOwner::Direct,
+            V3FrontExecutionMode::Relay => V3FrontContinuationOwner::Relay,
+        };
+        let absolute = Duration::from_millis(plan.decision.target.candidate.request_timeout_ms);
+        let idle = Duration::from_millis(
+            plan.decision
+                .target
+                .candidate
+                .sse_first_frame_timeout_ms
+                .unwrap_or(plan.decision.target.candidate.request_timeout_ms),
+        );
+        Self {
+            key: V3FrontRequestLeaseKey {
+                request_id: request_id.into(),
+                pipeline_id: pipeline_id.into(),
+                server_id: server_id.into(),
+                port,
+                session_scope: session_scope.into(),
+                generation,
+            },
+            execution_mode,
+            continuation_owner,
+            runtime_generation: generation,
+            state: V3FrontLeaseState::Running,
+            semantic_commit: false,
+            closeout_state: V3FrontCloseoutState::Open,
+            frame_sequence: V3FrontFrameSequence::default(),
+            deadline: V3FrontDeadlineBudget::new(now, absolute, idle.min(absolute)),
+        }
+    }
+
     pub fn checkpoint(&self, now: Instant) -> V3RuntimeHandoffCheckpoint {
         let (absolute, idle) = self.deadline.remaining(now);
         V3RuntimeHandoffCheckpoint {

@@ -330,6 +330,47 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
             V3Execution11ProtocolDecisionMode::HubRelay => V3EntryProtocolExecutionMode::Relay,
         };
+        if front_transport_owns_keepalive {
+            if let Some(connection_identity) = front_connection_identity {
+                // The request-stage plan is the only owner of the Front
+                // execution mode. The provider response is not consulted.
+                // The pipeline identity was allocated at request ingress and
+                // is carried beside the request id; it is not reconstructed
+                // from payload, provider response, or logs.
+                let lease = V3FrontRequestLease::from_responses_execution_plan(
+                    &plan,
+                    request_id.clone(),
+                    request_identity.pipeline_id.clone(),
+                    state.server.id.clone(),
+                    state.server.port,
+                    provider_failure_session_scope.session_id().to_string(),
+                    state.front_transport_broker.generation(),
+                    Instant::now(),
+                );
+                if let Err(error) = state.front_transport_broker.bind_connection_lease(
+                    connection_identity,
+                    lease,
+                    Instant::now(),
+                ) {
+                    let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                        project_v3_server_runtime_failure(
+                            "V3Server03HttpRequestRaw",
+                            "front_request_lease_binding_failed",
+                            error,
+                            598,
+                        ),
+                    );
+                    return responses_direct_output_response(
+                        project_v3_responses_error_frame_for_request_if_sse(
+                            frame,
+                            &request_headers,
+                            Some(&payload),
+                        ),
+                        client_keepalive_interval,
+                    );
+                }
+            }
+        }
         Some(plan)
     } else {
         None
