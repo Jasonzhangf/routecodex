@@ -845,7 +845,7 @@ impl V3ManagedLifecycle {
                 return Err(error.into());
             }
         };
-        let mut handle = handle;
+        let handle = handle;
         let handoff_path = instance_dir.join(FRONT_HANDOFF_FILE);
         if handoff_path.exists() {
             let checkpoints: Vec<routecodex_v3_server::V3RuntimeHandoffCheckpoint> =
