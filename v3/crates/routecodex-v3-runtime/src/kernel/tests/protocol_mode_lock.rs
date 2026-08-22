@@ -31,6 +31,7 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
     let raw = V3Server03HttpRequestRaw {
         request_purpose: V3RequestPurpose::Conversation,
         port: None,
+        pipeline_id: None,
         server_id: "test".to_string(),
         failure_session_scope: test_failure_session_scope(routing_group),
         request_id: "req".to_string(),
@@ -202,6 +203,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "primary-mod
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::NativeCompaction,
             port: None,
+            pipeline_id: None,
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("default"),
             request_id: "compact-plan".to_string(),
@@ -231,6 +233,7 @@ fn relay_only_same_protocol_responses_is_planned_as_hub_relay() {
     let raw = V3Server03HttpRequestRaw {
         request_purpose: V3RequestPurpose::Conversation,
         port: None,
+        pipeline_id: None,
         server_id: "test".to_string(),
         failure_session_scope: test_failure_session_scope("default"),
         request_id: "req-relay-only".to_string(),
@@ -262,6 +265,7 @@ fn same_protocol_without_direct_or_relay_fails_explicitly() {
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::Conversation,
             port: None,
+            pipeline_id: None,
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("default"),
             request_id: "req-no-mode".to_string(),
@@ -293,6 +297,7 @@ fn protocol_mismatch_is_decided_before_same_protocol_process_policy() {
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::Conversation,
             port: None,
+            pipeline_id: None,
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("default"),
             request_id: "req-protocol-first".to_string(),

@@ -63,6 +63,7 @@ async fn missing_exact_pin_is_provider_availability_error05_without_router_reent
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::Conversation,
             port: None,
+            pipeline_id: None,
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("test"),
             request_id: "req-missing-exact-pin".to_string(),
@@ -175,6 +176,7 @@ async fn exact_pin_capability_revision_mismatch_stays_out_of_provider_failure_ga
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::Conversation,
             port: None,
+            pipeline_id: None,
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("test"),
             request_id: "req-revision-mismatch".to_string(),

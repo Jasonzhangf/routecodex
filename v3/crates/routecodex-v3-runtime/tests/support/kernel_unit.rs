@@ -153,6 +153,7 @@ fn test_plan_http_request(
     V3Server03HttpRequestRaw {
         request_purpose: V3RequestPurpose::Conversation,
         port: None,
+        pipeline_id: None,
         server_id: "test".to_string(),
         failure_session_scope: test_failure_session_scope(routing_group),
         request_id: request_id.to_string(),
@@ -172,6 +173,7 @@ fn test_responses_raw(
     V3Server03HttpRequestRaw {
         request_purpose: V3RequestPurpose::Conversation,
         port: None,
+        pipeline_id: None,
         server_id: "test".to_string(),
         failure_session_scope: test_failure_session_scope(routing_group),
         request_id: request_id.to_string(),
@@ -1003,6 +1005,7 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::Conversation,
             port: None,
+            pipeline_id: None,
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("test"),
             request_id: "req-control-leak".to_string(),
@@ -1130,6 +1133,7 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::Conversation,
             port: None,
+            pipeline_id: None,
             server_id: "test".to_string(),
             failure_session_scope: session_a,
             request_id: "req-plan-session-a".to_string(),
@@ -1163,6 +1167,7 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::Conversation,
             port: None,
+            pipeline_id: None,
             server_id: "test".to_string(),
             failure_session_scope: session_b,
             request_id: "req-plan-session-b".to_string(),
@@ -1861,6 +1866,7 @@ async fn pinned_unavailable_provider_consumes_error05_gate_before_terminal_relea
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::Conversation,
             port: None,
+            pipeline_id: None,
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("test"),
             request_id: "req-pinned-unavailable-retry".to_string(),

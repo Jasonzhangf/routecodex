@@ -18,6 +18,9 @@ pub struct V3Server03HttpRequestRaw {
     /// legacy/unit construction paths and must be present before restart
     /// handoff is admitted; no owner may infer it from server_id or payload.
     pub port: Option<u16>,
+    /// Request ingress pipeline identity. Missing legacy/unit scope remains
+    /// explicit and cannot be reconstructed from execution_id or payload.
+    pub pipeline_id: Option<String>,
     pub failure_session_scope: V3ProviderFailureSessionScope,
     pub request_id: String,
     pub execution_id: String,
@@ -71,7 +74,7 @@ pub fn build_v3_server_03_http_request_raw_with_purpose(
     request_purpose: V3RequestPurpose,
     body: Value,
 ) -> V3Server03HttpRequestRaw {
-    build_v3_server_03_http_request_raw_with_purpose_and_port(
+    build_v3_server_03_http_request_raw_with_purpose_and_scope(
         server_id,
         failure_session_scope,
         request_id,
@@ -79,6 +82,7 @@ pub fn build_v3_server_03_http_request_raw_with_purpose(
         method,
         path,
         request_purpose,
+        None,
         None,
         body,
     )
@@ -95,9 +99,36 @@ pub fn build_v3_server_03_http_request_raw_with_purpose_and_port(
     port: Option<u16>,
     body: Value,
 ) -> V3Server03HttpRequestRaw {
+    build_v3_server_03_http_request_raw_with_purpose_and_scope(
+        server_id,
+        failure_session_scope,
+        request_id,
+        execution_id,
+        method,
+        path,
+        request_purpose,
+        port,
+        None,
+        body,
+    )
+}
+
+pub fn build_v3_server_03_http_request_raw_with_purpose_and_scope(
+    server_id: String,
+    failure_session_scope: V3ProviderFailureSessionScope,
+    request_id: String,
+    execution_id: String,
+    method: String,
+    path: String,
+    request_purpose: V3RequestPurpose,
+    port: Option<u16>,
+    pipeline_id: Option<String>,
+    body: Value,
+) -> V3Server03HttpRequestRaw {
     V3Server03HttpRequestRaw {
         server_id,
         port,
+        pipeline_id,
         failure_session_scope,
         request_id,
         execution_id,
@@ -146,6 +177,7 @@ pub fn build_v3_chat_direct_11_policy_from_v3_target_10(
 pub struct V3ProtocolContext {
     pub server_id: String,
     pub port: Option<u16>,
+    pub pipeline_id: Option<String>,
     pub failure_session_scope: V3ProviderFailureSessionScope,
     pub request_id: String,
     pub execution_id: String,
@@ -240,6 +272,7 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
         protocol_context: V3ProtocolContext {
             server_id: raw.server_id,
             port: raw.port,
+            pipeline_id: raw.pipeline_id,
             failure_session_scope: raw.failure_session_scope,
             request_id: raw.request_id,
             execution_id: raw.execution_id,
@@ -269,6 +302,7 @@ pub fn build_v3_chat_req_04_standardized_from_v3_server_03(
         protocol_context: V3ProtocolContext {
             server_id: raw.server_id,
             port: raw.port,
+            pipeline_id: raw.pipeline_id,
             failure_session_scope: raw.failure_session_scope,
             request_id: raw.request_id,
             execution_id: raw.execution_id,
@@ -758,7 +792,7 @@ mod tests {
         build_v3_router_request_facts_from_v3_req_04_chat,
         build_v3_server_03_http_request_raw,
         build_v3_server_03_http_request_raw_with_purpose,
-        build_v3_server_03_http_request_raw_with_purpose_and_port, V3RequestPurpose,
+        build_v3_server_03_http_request_raw_with_purpose_and_scope, V3RequestPurpose,
     };
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use routecodex_v3_error::V3ProviderFailureSessionScope;
@@ -768,7 +802,7 @@ mod tests {
 
     #[test]
     fn req04_carries_listener_port_as_typed_scope_only() {
-        let raw = build_v3_server_03_http_request_raw_with_purpose_and_port(
+        let raw = build_v3_server_03_http_request_raw_with_purpose_and_scope(
             "server".to_string(),
             V3ProviderFailureSessionScope::new("server", "default", "request")
                 .expect("failure scope"),
@@ -778,11 +812,16 @@ mod tests {
             "/v1/responses".to_string(),
             V3RequestPurpose::Conversation,
             Some(7777),
+            Some("responses-pipeline-1".to_string()),
             json!({"model":"gpt-5.5","input":[]}),
         );
         let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
             .expect("Responses inbound must preserve typed scope");
         assert_eq!(normalized.protocol_context.port, Some(7777));
+        assert_eq!(
+            normalized.protocol_context.pipeline_id.as_deref(),
+            Some("responses-pipeline-1")
+        );
         assert!(normalized.body.get("port").is_none());
     }
 

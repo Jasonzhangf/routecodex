@@ -77,6 +77,7 @@ use routecodex_v3_runtime::{
     build_v3_provider_global_probe_target, build_v3_server_03_http_request_raw,
     build_v3_server_03_http_request_raw_with_purpose,
     build_v3_server_03_http_request_raw_with_purpose_and_port,
+    build_v3_server_03_http_request_raw_with_purpose_and_scope,
     execute_v3_anthropic_relay_dry_run_runtime_with_client_headers,
     execute_v3_anthropic_relay_runtime_with_default_transport,
     execute_v3_anthropic_relay_runtime_with_default_transport_and_client_headers,
