@@ -38,7 +38,7 @@ pub struct V3FrontRequestLeaseKey {
     pub generation: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct V3FrontConnectionIdentity(pub u64);
 
 #[derive(Debug, Clone)]
@@ -239,6 +239,7 @@ pub struct V3FrontTransportBroker {
     generation: Arc<Mutex<u64>>,
     next_connection_id: Arc<Mutex<u64>>,
     checkpoints: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3BrokerCheckpoint>>>,
+    connection_leases: Arc<Mutex<BTreeMap<V3FrontConnectionIdentity, V3FrontRequestLease>>>,
     client_connections: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3StableFrontConnection>>>,
 }
 
@@ -254,6 +255,7 @@ impl V3FrontTransportBroker {
             generation: Arc::new(Mutex::new(generation)),
             next_connection_id: Arc::new(Mutex::new(0)),
             checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
+            connection_leases: Arc::new(Mutex::new(BTreeMap::new())),
             client_connections: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -290,6 +292,49 @@ impl V3FrontTransportBroker {
 
     pub fn refresh(&self, lease: &V3FrontRequestLease, now: Instant) {
         self.register(lease, now);
+    }
+
+    /// Bind the accepted Front connection to the complete request lease only
+    /// after request admission has produced all typed scope components. The
+    /// connection identity alone is never a recovery key.
+    pub fn bind_connection_lease(
+        &self,
+        connection: V3FrontConnectionIdentity,
+        lease: V3FrontRequestLease,
+        now: Instant,
+    ) -> Result<(), String> {
+        let mut connections = self
+            .connection_leases
+            .lock()
+            .expect("front broker connection lease lock");
+        if connections.contains_key(&connection) {
+            return Err("front connection identity is already bound to a request lease".to_string());
+        }
+        self.register(&lease, now);
+        connections.insert(connection, lease);
+        Ok(())
+    }
+
+    pub fn connection_lease(
+        &self,
+        connection: V3FrontConnectionIdentity,
+    ) -> Option<V3FrontRequestLeaseKey> {
+        self.connection_leases
+            .lock()
+            .expect("front broker connection lease lock")
+            .get(&connection)
+            .map(|lease| lease.key.clone())
+    }
+
+    pub fn lease_for_connection(
+        &self,
+        connection: V3FrontConnectionIdentity,
+    ) -> Option<V3FrontRequestLease> {
+        self.connection_leases
+            .lock()
+            .expect("front broker connection lease lock")
+            .get(&connection)
+            .cloned()
     }
 
     pub fn observe_provider_frame(
@@ -719,6 +764,37 @@ mod tests {
             .remaining(now + Duration::from_secs(120))
             .0
             .is_zero());
+    }
+
+    #[test]
+    fn broker_binds_front_connection_identity_to_full_request_lease() {
+        let now = Instant::now();
+        let broker = V3FrontTransportBroker::new(4);
+        let connection = broker.allocate_connection_identity();
+        let lease = lease(now);
+
+        broker
+            .bind_connection_lease(connection, lease.clone(), now)
+            .expect("front connection lease binding");
+
+        assert_eq!(broker.connection_lease(connection), Some(lease.key.clone()));
+        assert_eq!(broker.lease_for_connection(connection).unwrap().key, lease.key);
+    }
+
+    #[test]
+    fn broker_rejects_duplicate_front_connection_identity_binding() {
+        let now = Instant::now();
+        let broker = V3FrontTransportBroker::new(4);
+        let connection = broker.allocate_connection_identity();
+        let first = lease(now);
+        broker
+            .bind_connection_lease(connection, first, now)
+            .expect("first front connection lease binding");
+
+        let mut second = lease(now);
+        second.key.request_id = "req-2".into();
+        assert!(broker.bind_connection_lease(connection, second, now).is_err());
+        assert_eq!(broker.connection_lease(connection).unwrap().request_id, "req-1");
     }
 
     #[tokio::test]
