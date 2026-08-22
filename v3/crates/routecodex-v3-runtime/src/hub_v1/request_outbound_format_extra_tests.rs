@@ -502,6 +502,34 @@ fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
 }
 
 #[test]
+fn openai_chat_wire_repairs_preflattened_apply_patch_function_schema() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "patch"}],
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "apply_patch",
+                "description": "The apply_patch tool",
+                "parameters": {"type": "object"}
+            }
+        }]
+    });
+
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("pre-flattened apply_patch must receive the freeform input contract");
+    assert_eq!(
+        request["tools"][0]["function"]["parameters"],
+        json!({
+            "type":"object",
+            "properties":{"input":{"type":"string","description":"Raw free-form tool input."}},
+            "required":["input"],
+            "additionalProperties":false
+        })
+    );
+}
+
+#[test]
 fn openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade() {
     // custom 工具含非 type/name/description/format 字段：拒绝（UnmappedOutboundFields），
     // 禁止降级为 function 静默丢失（opencode-go 等上游以 unknown variant 'custom' 拒绝）。

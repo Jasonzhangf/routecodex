@@ -301,7 +301,7 @@ fn normalize_openai_chat_custom_tool(
         ("name".to_string(), Value::String(name.to_string())),
         (
             "parameters".to_string(),
-            serde_json::json!({"type":"object"}),
+            openai_chat_freeform_custom_tool_parameters(),
         ),
     ]);
     if let Some(description) = row.get("description") {
@@ -356,7 +356,34 @@ fn normalize_openai_chat_function_tool(
     path: &str,
 ) -> Result<Value, String> {
     if row.get("function").and_then(Value::as_object).is_some() {
-        let normalized = row.clone();
+        let mut normalized = row.clone();
+        let is_apply_patch = row
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)
+            == Some("apply_patch");
+        if is_apply_patch {
+            let function = normalized
+                .get_mut("function")
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| {
+                    format!(
+                        "MalformedOutboundField target_protocol=openai_chat path={path}.function"
+                    )
+                })?;
+            let parameters = function
+                .get("parameters")
+                .and_then(Value::as_object)
+                .map(|parameters| parameters.len() <= 1)
+                .unwrap_or(true);
+            if parameters {
+                function.insert(
+                    "parameters".to_string(),
+                    openai_chat_freeform_custom_tool_parameters(),
+                );
+            }
+        }
         return Ok(Value::Object(normalized));
     }
     let mut function = Map::new();
@@ -369,4 +396,18 @@ fn normalize_openai_chat_function_tool(
         ("type".to_string(), Value::String("function".to_string())),
         ("function".to_string(), Value::Object(function)),
     ])))
+}
+
+fn openai_chat_freeform_custom_tool_parameters() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "input": {
+                "type": "string",
+                "description": "Raw free-form tool input."
+            }
+        },
+        "required": ["input"],
+        "additionalProperties": false
+    })
 }
