@@ -175,6 +175,7 @@ struct V3ListenerState {
     realtime_cooled_provider_keys: Arc<Mutex<BTreeSet<String>>>,
     responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
+    front_transport_broker: V3FrontTransportBroker,
     webui_observability: V3WebuiObservability,
 }
 
@@ -344,6 +345,7 @@ pub async fn spawn_v3_server_aggregate(
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
     let webui_observability = V3WebuiObservability::new();
     let request_activity_gate = Arc::new(V3ServerRequestActivityGate::default());
+    let front_transport_broker = V3FrontTransportBroker::new(0);
     let mut listeners = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
@@ -364,6 +366,7 @@ pub async fn spawn_v3_server_aggregate(
             realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeSet::new())),
             responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
             request_activity_gate: Arc::clone(&request_activity_gate),
+            front_transport_broker: front_transport_broker.clone(),
             webui_observability: webui_observability.clone(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -507,7 +510,7 @@ pub async fn spawn_v3_server_aggregate(
         listeners,
         probe_shutdown: Some(probe_shutdown),
         request_activity_gate,
-        front_transport_broker: V3FrontTransportBroker::new(0),
+        front_transport_broker,
     })
 }
 
