@@ -179,16 +179,52 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             );
         }
     };
-    let responses_protocol_plan = None;
-    if entry_protocol == "responses" {
-        if let Some(entry_facts) = responses_entry_facts.as_ref() {
-            execution_mode = responses_effective_execution_mode_for_request_purpose(
-                execution_mode,
-                entry_facts,
-                request_purpose,
-            );
-        }
-    }
+    let responses_protocol_plan = if entry_protocol == "responses"
+        && responses_entry_facts
+            .as_ref()
+            .is_some_and(responses_entry_facts_allow_fresh_protocol_plan)
+    {
+        let raw = build_v3_server_03_http_request_raw_with_purpose(
+            state.server.id.clone(),
+            provider_failure_session_scope.clone(),
+            request_id.clone(),
+            execution_id.clone(),
+            method.clone(),
+            path.clone(),
+            request_purpose,
+            payload.clone(),
+        );
+        let plan = match plan_v3_responses_protocol_execution_with_provider_health(
+            &state.manifest,
+            raw,
+            state.provider_health.runtime_health(),
+            current_epoch_ms(),
+        ) {
+            Ok(plan) => plan,
+            Err(failure) => {
+                let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                    project_v3_protocol_execution_plan_failure(failure),
+                );
+                return responses_direct_output_response(
+                    project_v3_responses_error_frame_for_request_if_sse(
+                        frame,
+                        &request_headers,
+                        Some(&payload),
+                    ),
+                    Duration::from_millis(state.server.http_sse_keepalive_ms),
+                );
+            }
+        };
+        execution_mode = match plan.decision.mode {
+            V3Execution11ProtocolDecisionMode::SameProtocolDirect => {
+                V3EntryProtocolExecutionMode::Direct
+            }
+            V3Execution11ProtocolDecisionMode::HubRelay => V3EntryProtocolExecutionMode::Relay,
+        };
+        Some(plan)
+    } else {
+        None
+    };
     if execution_mode == V3EntryProtocolExecutionMode::Relay {
         if let Some(response) = capture_v3_live_raw_request(
             &state,
