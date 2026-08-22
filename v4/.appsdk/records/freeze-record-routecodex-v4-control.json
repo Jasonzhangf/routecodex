@@ -30,10 +30,10 @@
   "previous_active_immutable": true,
   "previous_active_version": "active-v2",
   "promotion_id": "control-sdk013-promotion",
-  "promotion_record_hash": "sha256:75b19c1b5d9f17ab90610027afdc153a3f20cc3b90873da32a5b2d77c2f895d7",
+  "promotion_record_hash": "sha256:e362564805e48eaaf9122ac0e4a39245a3baf46b6478525a0060605e6c275442",
   "public_api_hash": "sha256:43364e0f503e8721caebb31df47192e5dcf8e2501b4616203cf91f3f2f6b9902",
-  "regression_report_hash": "sha256:dbd9e31302bad6d764ee072a6b4a38113ececd1fef0209d658a230ec37971d28",
+  "regression_report_hash": "sha256:9034bc4bf598fe2e25ce98cd7d4ce5702453eb41b6c8fb63103221cda465c767",
   "regression_report_id": "control-sdk013-regression",
   "review_id": "control-sdk013-architecture-review",
-  "source_commit_or_tag": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9"
+  "source_commit_or_tag": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8"
 }

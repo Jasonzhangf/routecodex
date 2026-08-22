@@ -3,8 +3,8 @@
   "issue_id": "appsdk-013-migration",
   "module_id": "routecodex-v4-control",
   "fix_candidate_id": "control-sdk013-candidate",
-  "candidate_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
-  "candidate_tree_hash": "144f4e0d8c2cdbbaface771797ccb9170e05e9ec",
+  "candidate_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
+  "candidate_tree_hash": "674c43a073f24ddb02679b65c76300e984639d7b",
   "artifact_hash": "sha256:e280965a718eeaaee59725a1703dd58b16a875b616e6b0e8c65bf5b2b4a28676",
   "whitebox_producer": {
     "adapter": "cargo",

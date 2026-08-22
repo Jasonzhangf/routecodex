@@ -1,1 +1,26 @@
-{"evidence_id":"error-sdk013-prereview-negative","issue_id":"appsdk-013-migration","experiment_id":"error-sdk013-experiment","phase":"development_whitebox","kind":"negative_test","source_commit":"73a427ee5e4a529cc16890cdb8b4a1b5940704c9","artifact_hash":"sha256:988609a37c6fb6d3ca9463c5e15e74471c3fec7414c634902a2009c4903461dc","execution_surface":"development_whitebox","scope":{"module_id":"routecodex-v4-error","feature_id":"v4.appsdk-013-migration","entrypoint":"appsdk verify --review-admission"},"producer":{"adapter":"cargo","identity":"routecodex-v4-error-regression"},"result":"pass","created_at":"2026-08-22T05:55:01Z","expires_at":"2026-08-23T05:55:01Z","input_hashes":["sha256:b37ac3d9e153ea32ed4af9c5429b8198bd0dcb7b1c4f9ae96918b5c6e2123b81"],"scope_hash":"sha256:4693a7972e4743e7e0be3f2e6ab48c86039a26e51eb8f590abc40ca70ec42d27"}
+{
+  "evidence_id": "error-sdk013-prereview-negative",
+  "issue_id": "appsdk-013-migration",
+  "experiment_id": "error-sdk013-experiment",
+  "phase": "development_whitebox",
+  "kind": "negative_test",
+  "source_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
+  "artifact_hash": "sha256:988609a37c6fb6d3ca9463c5e15e74471c3fec7414c634902a2009c4903461dc",
+  "execution_surface": "development_whitebox",
+  "scope": {
+    "module_id": "routecodex-v4-error",
+    "feature_id": "v4.appsdk-013-migration",
+    "entrypoint": "appsdk verify --review-admission"
+  },
+  "producer": {
+    "adapter": "cargo",
+    "identity": "routecodex-v4-error-regression"
+  },
+  "result": "pass",
+  "created_at": "2026-08-22T05:55:01Z",
+  "expires_at": "2026-08-23T12:00:00Z",
+  "input_hashes": [
+    "sha256:b37ac3d9e153ea32ed4af9c5429b8198bd0dcb7b1c4f9ae96918b5c6e2123b81"
+  ],
+  "scope_hash": "sha256:4693a7972e4743e7e0be3f2e6ab48c86039a26e51eb8f590abc40ca70ec42d27"
+}

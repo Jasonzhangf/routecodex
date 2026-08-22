@@ -1,7 +1,7 @@
 {
   "ai_confidence": 0.93,
   "confidence_rationale": "Post-merge architecture re-audit confirms the migration candidate remains governance-only, Error remains a frozen Active dependency, and latest runtime control resources expose explicit errors through their unique runtime owner. Current maps bind real symbols and preserve the business-payload versus control/error side-channel boundary.",
-  "created_at": "2026-08-16T04:23:20Z",
+  "created_at": "2026-08-22T05:56:00Z",
   "evidence_ids": [
     "error-sdk013-candidate",
     "error-sdk013-positive",
@@ -16,14 +16,15 @@
   "review_id": "error-sdk013-architecture-review",
   "review_kind": "architecture",
   "reviewed_artifact_hash": "sha256:988609a37c6fb6d3ca9463c5e15e74471c3fec7414c634902a2009c4903461dc",
-  "reviewed_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
+  "reviewed_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
   "reviewed_diff_hash": "sha256:b37ac3d9e153ea32ed4af9c5429b8198bd0dcb7b1c4f9ae96918b5c6e2123b81",
   "reviewed_scope_hash": "sha256:4693a7972e4743e7e0be3f2e6ab48c86039a26e51eb8f590abc40ca70ec42d27",
-  "reviewed_tree_hash": "144f4e0d8c2cdbbaface771797ccb9170e05e9ec",
+  "reviewed_tree_hash": "674c43a073f24ddb02679b65c76300e984639d7b",
   "reviewer": {
     "adapter": "routecodex-codex-adapter",
     "identity": "codex-gpt-5"
   },
   "verdict": "pass",
-  "verification_map_hash": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230"
+  "verification_map_hash": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230",
+  "pre_review_validation_id": "error-sdk013-prereview-validation"
 }

@@ -3,11 +3,11 @@
   "artifact_hash": "sha256:83728d3d7967db171cfb627301ba8e8d636eaf6015101f70e316a5234c260ea6",
   "base_artifact_hash": "sha256:f937c6471d252447384a48fc9fb95f1158f9e35fd2cc69c6910c0c99ab8a01a0",
   "base_commit": "8bef032e6",
-  "candidate_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
+  "candidate_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
   "change_reason_comment": "Rebind the immutable edge library to base-node active-v2 under AppSDK 0.1.3 without rewriting active-v3.",
   "change_set_id": "edge-sdk013-change-set",
   "compatibility_level": "migration_required",
-  "created_at": "2026-08-16T04:25:00Z",
+  "created_at": "2026-08-22T05:53:00Z",
   "design_id": "v4-appsdk-0.1.3-migration-v1",
   "effectiveness_record_id": "edge-sdk013-effectiveness",
   "evidence_ids": [
@@ -23,7 +23,7 @@
   "fix_candidate_id": "edge-sdk013-candidate",
   "issue_id": "appsdk-013-migration",
   "merge_record_id": "edge-sdk013-merge",
-  "merged_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
+  "merged_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
   "migration_id": "sdk-0.1.2-to-0.1.3",
   "module_id": "routecodex-v4-edge",
   "new_active_version": "active-v4",
@@ -62,6 +62,6 @@
   "review_id": "edge-sdk013-architecture-review",
   "root_cause": "The previous frozen consumer artifact binds base-node active-v1 and cannot coexist as the current graph after base-node is promoted to active-v2.",
   "scope_hash": "sha256:fb0002a89089b892f7c8323cb555a8d50d261bc125c4116b76578bc79c4520ad",
-  "source_commit": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9",
+  "source_commit": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8",
   "worktree_record_id": "edge-sdk013-worktree"
 }

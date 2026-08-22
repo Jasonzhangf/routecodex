@@ -30,10 +30,10 @@
   "previous_active_immutable": true,
   "previous_active_version": "active-v3",
   "promotion_id": "error-sdk013-promotion",
-  "promotion_record_hash": "sha256:32a328c0c8568c5f51cc64d11f9434f762645ffa5a8979adca7f872bc0c78410",
+  "promotion_record_hash": "sha256:82475bbdaecd74519873d5a5c47c873e4f46c2d83b4b9e052cde9a4342724c1c",
   "public_api_hash": "sha256:de339870034290ad3d70684a2355ff7c70a9315817744648a5d7cb0d66ed734d",
-  "regression_report_hash": "sha256:0a4a75f4bded244bb44519714b2f93d0b4ee9bb70317db44632d18194d088a4c",
+  "regression_report_hash": "sha256:cf92f3bab232ab3c82edfc10c99bc5761c8593ef1c17bae40564c02803d61456",
   "regression_report_id": "error-sdk013-regression",
   "review_id": "error-sdk013-architecture-review",
-  "source_commit_or_tag": "73a427ee5e4a529cc16890cdb8b4a1b5940704c9"
+  "source_commit_or_tag": "555bee59c61e0b3bbfa782fc8893cb355ac87eb8"
 }
