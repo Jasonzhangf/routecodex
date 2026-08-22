@@ -133,7 +133,9 @@ pub(crate) fn normalize_v3_provider_sse_json_data_with_event_name(
     serde_json::to_string(&event).map_err(|error| error.to_string())
 }
 
-fn normalize_v3_responses_function_call_arguments(event: &mut Value) -> Result<bool, String> {
+pub(crate) fn normalize_v3_responses_function_call_arguments(
+    event: &mut Value,
+) -> Result<bool, String> {
     let mut normalized = false;
     let mut normalize_item = |item: &mut Value| -> Result<(), String> {
         let Some(object) = item.as_object_mut() else {
@@ -161,6 +163,11 @@ fn normalize_v3_responses_function_call_arguments(event: &mut Value) -> Result<b
             .and_then(|response| response.get_mut("output"))
             .and_then(Value::as_array_mut)
         {
+            for item in output {
+                normalize_item(item)?;
+            }
+        }
+        if let Some(output) = object.get_mut("output").and_then(Value::as_array_mut) {
             for item in output {
                 normalize_item(item)?;
             }

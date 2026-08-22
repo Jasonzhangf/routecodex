@@ -94,11 +94,38 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
             "V3 Responses Relay response event payload is malformed".to_string(),
         ));
     }
-    let event = object.data_value().cloned().ok_or_else(|| {
+    let mut event = object.data_value().cloned().ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             "V3 Responses Relay response event payload is missing".to_string(),
         )
     })?;
+    if !event.is_object() {
+        return Ok(None);
+    }
+    crate::hub_v1::normalize_v3_responses_function_call_arguments(&mut event).map_err(
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec,
+    )?;
+    if !event
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|event_type| !event_type.trim().is_empty())
+    {
+        let Some(event_name) = object.event_name() else {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "Responses semantic SSE event payload is missing type and event name".to_string(),
+            ));
+        };
+        if !is_supported_typed_responses_event(event_name) {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "Responses semantic SSE event payload is missing type for an unregistered event"
+                    .to_string(),
+            ));
+        }
+        event
+            .as_object_mut()
+            .expect("event was checked to be an object")
+            .insert("type".to_owned(), Value::String(event_name.to_owned()));
+    }
     let transport_object = V3ResponsesSseTransportObject::new(
         object.event_name().map(ToOwned::to_owned),
         event.clone(),
@@ -405,6 +432,49 @@ data: {"type":"response.output_item.done","output_index":0,"item":{"type":"messa
                 .typed_object_types,
             vec!["responses:response.output_item.done".to_owned()]
         );
+    }
+
+    #[test]
+    fn relay_normalizes_function_call_object_arguments_before_semantic_validation() {
+        let observation = V3RuntimeStreamObservation::default();
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let chunk = br#"event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":{"cmd":"pwd"}}}
+
+"#;
+
+        observe_v3_runtime_responses_sse_transport_chunk_typed(
+            chunk,
+            &mut decoder,
+            &observation,
+            &mut reducer,
+        )
+        .expect("relay must stringify compatible function_call arguments");
+
+        assert_eq!(reducer.items.len(), 1);
+        assert_eq!(
+            reducer.items[0].item().to_normalized_value()["arguments"],
+            json!(r#"{"cmd":"pwd"}"#)
+        );
+    }
+
+    #[test]
+    fn relay_normalizes_function_call_arguments_in_terminal_response_output() {
+        let observation = V3RuntimeStreamObservation::default();
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let chunk = br#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":{"cmd":"pwd"}}]}}
+
+"#;
+
+        observe_v3_runtime_responses_sse_transport_chunk_typed(
+            chunk,
+            &mut decoder,
+            &observation,
+            &mut reducer,
+        )
+        .expect("terminal response output must accept structured function_call arguments");
     }
 
     #[test]
