@@ -24,9 +24,21 @@ pub struct V3ProviderTransportAttemptKey {
     pub attempt_id: u64,
 }
 
+/// Request-scoped control identity for provider transport handoff. This is
+/// never serialized into a provider request or client response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct V3ProviderTransportHandoffScope {
+    pub pipeline_id: String,
+    pub server_id: String,
+    pub port: u16,
+    pub session_scope: String,
+    pub runtime_generation: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct V3ProviderTransportCheckpoint {
     pub key: V3ProviderTransportAttemptKey,
+    pub scope: V3ProviderTransportHandoffScope,
     pub kind: V3ProviderTransportKind,
     pub state: V3ProviderTransportAttemptState,
     pub next_provider_sequence: u64,
@@ -50,7 +62,7 @@ impl V3ProviderTransportAttemptBroker {
         request_id: impl Into<String>,
         provider_id: impl Into<String>,
         kind: V3ProviderTransportKind,
-        runtime_generation: u64,
+        scope: V3ProviderTransportHandoffScope,
     ) -> Result<V3ProviderTransportAttemptKey, String> {
         let request_id = request_id.into();
         let provider_id = provider_id.into();
@@ -69,7 +81,7 @@ impl V3ProviderTransportAttemptBroker {
             provider_id,
             attempt_id,
         };
-        self.begin(key.clone(), kind, runtime_generation)?;
+        self.begin(key.clone(), kind, scope)?;
         Ok(key)
     }
 
@@ -77,7 +89,7 @@ impl V3ProviderTransportAttemptBroker {
         &self,
         key: V3ProviderTransportAttemptKey,
         kind: V3ProviderTransportKind,
-        runtime_generation: u64,
+        scope: V3ProviderTransportHandoffScope,
     ) -> Result<(), String> {
         let mut attempts = self
             .attempts
@@ -86,11 +98,13 @@ impl V3ProviderTransportAttemptBroker {
         if attempts.contains_key(&key) {
             return Err("provider transport attempt key is already active".to_string());
         }
+        let runtime_generation = scope.runtime_generation;
         attempts.insert(
             key.clone(),
             V3ProviderTransportAttempt {
                 checkpoint: V3ProviderTransportCheckpoint {
                     key,
+                    scope,
                     kind,
                     state: V3ProviderTransportAttemptState::Connecting,
                     next_provider_sequence: 0,
@@ -202,12 +216,22 @@ mod tests {
         }
     }
 
+    fn scope(generation: u64) -> V3ProviderTransportHandoffScope {
+        V3ProviderTransportHandoffScope {
+            pipeline_id: "pipeline-1".into(),
+            server_id: "server-1".into(),
+            port: 7777,
+            session_scope: "session-1".into(),
+            runtime_generation: generation,
+        }
+    }
+
     #[test]
     fn provider_transport_attempt_tracks_state_and_sequence() {
         let broker = V3ProviderTransportAttemptBroker::default();
         let key = key();
         broker
-            .begin(key.clone(), V3ProviderTransportKind::Http, 7)
+            .begin(key.clone(), V3ProviderTransportKind::Http, scope(7))
             .unwrap();
         assert_eq!(
             broker.state(&key),
@@ -226,10 +250,10 @@ mod tests {
         let broker = V3ProviderTransportAttemptBroker::default();
         let key = key();
         broker
-            .begin(key.clone(), V3ProviderTransportKind::WebSocketV2, 3)
+            .begin(key.clone(), V3ProviderTransportKind::WebSocketV2, scope(3))
             .unwrap();
         assert!(broker
-            .begin(key, V3ProviderTransportKind::WebSocketV2, 4)
+            .begin(key, V3ProviderTransportKind::WebSocketV2, scope(4))
             .is_err());
     }
 
@@ -238,7 +262,7 @@ mod tests {
         let broker = V3ProviderTransportAttemptBroker::default();
         let key = key();
         broker
-            .begin(key.clone(), V3ProviderTransportKind::Http, 3)
+            .begin(key.clone(), V3ProviderTransportKind::Http, scope(3))
             .unwrap();
         broker
             .transition(&key, V3ProviderTransportAttemptState::Terminal)

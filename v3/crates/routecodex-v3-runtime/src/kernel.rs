@@ -939,6 +939,47 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 return error_output(source, trace, &hook_registry);
             }
         };
+        let context = &standardized.protocol_context;
+        let handoff_scope = match (
+            context.pipeline_id.clone(),
+            context.port,
+            context.runtime_generation,
+        ) {
+            (Some(pipeline_id), Some(port), Some(runtime_generation)) => {
+                routecodex_v3_provider_responses::V3ProviderTransportHandoffScope {
+                    pipeline_id,
+                    server_id: context.server_id.clone(),
+                    port,
+                    session_scope: format!(
+                        "{}:{}:{}",
+                        context.failure_session_scope.server_id(),
+                        context.failure_session_scope.routing_group(),
+                        context.failure_session_scope.session_id()
+                    ),
+                    runtime_generation,
+                }
+            }
+            _ => {
+                return error_output(
+                    runtime_source(
+                        "V3Transport13ResponsesHttpRequest",
+                        "provider transport handoff scope is missing",
+                    ),
+                    trace,
+                    &hook_registry,
+                )
+            }
+        };
+        let transport_request = match transport_request.with_handoff_scope(handoff_scope) {
+            Ok(request) => request,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3Transport13ResponsesHttpRequest", error),
+                    trace,
+                    &hook_registry,
+                )
+            }
+        };
         trace.push("V3Transport13ResponsesHttpRequest");
 
         send_attempts = send_attempts.saturating_add(1);

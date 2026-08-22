@@ -21,6 +21,9 @@ pub struct V3Server03HttpRequestRaw {
     /// Request ingress pipeline identity. Missing legacy/unit scope remains
     /// explicit and cannot be reconstructed from execution_id or payload.
     pub pipeline_id: Option<String>,
+    /// Runtime generation from the Front/MetadataCenter scope. Missing
+    /// legacy/unit scope must not be inferred for provider reattach.
+    pub runtime_generation: Option<u64>,
     pub failure_session_scope: V3ProviderFailureSessionScope,
     pub request_id: String,
     pub execution_id: String,
@@ -84,6 +87,7 @@ pub fn build_v3_server_03_http_request_raw_with_purpose(
         request_purpose,
         None,
         None,
+        None,
         body,
     )
 }
@@ -109,6 +113,7 @@ pub fn build_v3_server_03_http_request_raw_with_purpose_and_port(
         request_purpose,
         port,
         None,
+        None,
         body,
     )
 }
@@ -123,12 +128,14 @@ pub fn build_v3_server_03_http_request_raw_with_purpose_and_scope(
     request_purpose: V3RequestPurpose,
     port: Option<u16>,
     pipeline_id: Option<String>,
+    runtime_generation: Option<u64>,
     body: Value,
 ) -> V3Server03HttpRequestRaw {
     V3Server03HttpRequestRaw {
         server_id,
         port,
         pipeline_id,
+        runtime_generation,
         failure_session_scope,
         request_id,
         execution_id,
@@ -178,6 +185,7 @@ pub struct V3ProtocolContext {
     pub server_id: String,
     pub port: Option<u16>,
     pub pipeline_id: Option<String>,
+    pub runtime_generation: Option<u64>,
     pub failure_session_scope: V3ProviderFailureSessionScope,
     pub request_id: String,
     pub execution_id: String,
@@ -273,6 +281,7 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
             server_id: raw.server_id,
             port: raw.port,
             pipeline_id: raw.pipeline_id,
+            runtime_generation: raw.runtime_generation,
             failure_session_scope: raw.failure_session_scope,
             request_id: raw.request_id,
             execution_id: raw.execution_id,
@@ -303,6 +312,7 @@ pub fn build_v3_chat_req_04_standardized_from_v3_server_03(
             server_id: raw.server_id,
             port: raw.port,
             pipeline_id: raw.pipeline_id,
+            runtime_generation: raw.runtime_generation,
             failure_session_scope: raw.failure_session_scope,
             request_id: raw.request_id,
             execution_id: raw.execution_id,

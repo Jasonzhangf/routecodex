@@ -303,6 +303,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             request_purpose,
             Some(state.server.port),
             Some(request_identity.pipeline_id.clone()),
+            Some(state.front_transport_broker.generation()),
             payload.clone(),
         );
         let plan = match plan_v3_responses_protocol_execution_with_provider_health(

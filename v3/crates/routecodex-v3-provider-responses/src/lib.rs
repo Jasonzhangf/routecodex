@@ -53,7 +53,8 @@ pub use transport::{
 };
 pub use transport_handoff::{
     V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptKey,
-    V3ProviderTransportAttemptState, V3ProviderTransportCheckpoint, V3ProviderTransportKind,
+    V3ProviderTransportAttemptState, V3ProviderTransportCheckpoint,
+    V3ProviderTransportHandoffScope, V3ProviderTransportKind,
 };
 pub use wire::{
     apply_v3_response_cipher_policy, build_v3_provider_12_responses_wire_payload,
