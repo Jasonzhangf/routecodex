@@ -300,9 +300,13 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
                 context.failure_session_scope.routing_group(),
                 context.failure_session_scope.session_id()
             ),
-            runtime_generation: context.runtime_generation.ok_or_else(|| {
-                "provider transport handoff runtime_generation is missing".to_string()
-            })?,
+            runtime_generation: context
+                .failure_session_scope
+                .transport_handoff_scope()
+                .map(|(_, _, generation)| generation)
+                .ok_or_else(|| {
+                    "provider transport handoff runtime_generation is missing".to_string()
+                })?,
         })
     }
 
@@ -452,9 +456,13 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
                 context.failure_session_scope.routing_group(),
                 context.failure_session_scope.session_id()
             ),
-            runtime_generation: context.runtime_generation.ok_or_else(|| {
-                "provider transport handoff runtime_generation is missing".to_string()
-            })?,
+            runtime_generation: context
+                .failure_session_scope
+                .transport_handoff_scope()
+                .map(|(_, _, generation)| generation)
+                .ok_or_else(|| {
+                    "provider transport handoff runtime_generation is missing".to_string()
+                })?,
         })
     }
 

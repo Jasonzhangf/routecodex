@@ -354,6 +354,12 @@ pub struct V3ProviderFailureSessionScope {
     server_id: String,
     routing_group: String,
     session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transport_pipeline_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transport_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transport_runtime_generation: Option<u64>,
 }
 
 impl V3ProviderFailureSessionScope {
@@ -376,7 +382,26 @@ impl V3ProviderFailureSessionScope {
             server_id: required(server_id.into(), "server_id")?,
             routing_group: required(routing_group.into(), "routing_group")?,
             session_id: required(session_id.into(), "session_id")?,
+            transport_pipeline_id: None,
+            transport_port: None,
+            transport_runtime_generation: None,
         })
+    }
+
+    pub fn with_transport_handoff_scope(
+        mut self,
+        pipeline_id: impl Into<String>,
+        port: u16,
+        runtime_generation: u64,
+    ) -> Result<Self, String> {
+        let pipeline_id = pipeline_id.into();
+        if pipeline_id.trim().is_empty() || runtime_generation == 0 {
+            return Err("provider failure transport handoff scope is incomplete".to_string());
+        }
+        self.transport_pipeline_id = Some(pipeline_id);
+        self.transport_port = Some(port);
+        self.transport_runtime_generation = Some(runtime_generation);
+        Ok(self)
     }
 
     pub fn server_id(&self) -> &str {
@@ -389,6 +414,16 @@ impl V3ProviderFailureSessionScope {
 
     pub fn session_id(&self) -> &str {
         &self.session_id
+    }
+
+    pub fn transport_handoff_scope(
+        &self,
+    ) -> Option<(&str, u16, u64)> {
+        Some((
+            self.transport_pipeline_id.as_deref()?,
+            self.transport_port?,
+            self.transport_runtime_generation?,
+        ))
     }
 }
 

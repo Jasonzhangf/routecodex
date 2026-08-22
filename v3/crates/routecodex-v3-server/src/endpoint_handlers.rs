@@ -288,6 +288,23 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             );
         }
     };
+    let provider_failure_session_scope = match provider_failure_session_scope
+        .with_transport_handoff_scope(
+            request_identity.pipeline_id.clone(),
+            state.server.port,
+            state.front_transport_broker.generation(),
+        ) {
+        Ok(scope) => scope,
+        Err(message) => {
+            return error_output_response_for_server_with_project_path(
+                &state.server,
+                &path,
+                &request_id,
+                project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                None,
+            );
+        }
+    };
     let responses_protocol_plan = if entry_protocol == "responses"
         && responses_entry_facts
             .as_ref()
@@ -303,7 +320,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             request_purpose,
             Some(state.server.port),
             Some(request_identity.pipeline_id.clone()),
-            Some(state.front_transport_broker.generation()),
             payload.clone(),
         );
         let plan = match plan_v3_responses_protocol_execution_with_provider_health(

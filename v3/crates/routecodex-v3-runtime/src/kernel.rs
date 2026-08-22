@@ -943,7 +943,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         let handoff_scope = match (
             context.pipeline_id.clone(),
             context.port,
-            context.runtime_generation,
+            context
+                .failure_session_scope
+                .transport_handoff_scope()
+                .map(|(_, _, generation)| generation),
         ) {
             (Some(pipeline_id), Some(port), Some(runtime_generation)) => {
                 routecodex_v3_provider_responses::V3ProviderTransportHandoffScope {

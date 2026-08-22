@@ -503,6 +503,32 @@ where
                 error
             ),
         };
+        let transport_request = if let Some((pipeline_id, port, runtime_generation)) =
+            failure_session_scope.transport_handoff_scope()
+        {
+            let handoff_scope = routecodex_v3_provider_responses::V3ProviderTransportHandoffScope {
+                pipeline_id: pipeline_id.to_string(),
+                server_id: server_id.to_string(),
+                port,
+                session_scope: format!(
+                    "{}:{}:{}",
+                    failure_session_scope.server_id(),
+                    failure_session_scope.routing_group(),
+                    failure_session_scope.session_id()
+                ),
+                runtime_generation,
+            };
+            match transport_request.with_handoff_scope(handoff_scope) {
+                Ok(request) => request,
+                Err(error) => {
+                    return Err(V3RelayCoreError::Target(format!(
+                        "provider transport handoff scope: {error}"
+                    )))
+                }
+            }
+        } else {
+            transport_request
+        };
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
         if let Some(recovery) = pending_provider_action_recovery.take() {
