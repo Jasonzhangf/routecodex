@@ -170,6 +170,42 @@ pub struct V3FrontRequestLease {
 }
 
 impl V3FrontRequestLease {
+    pub fn from_execution_mode(
+        execution_mode: V3FrontExecutionMode,
+        request_id: impl Into<String>,
+        pipeline_id: impl Into<String>,
+        server_id: impl Into<String>,
+        port: u16,
+        session_scope: impl Into<String>,
+        generation: u64,
+        absolute: Duration,
+        idle: Duration,
+        now: Instant,
+    ) -> Self {
+        let continuation_owner = match execution_mode {
+            V3FrontExecutionMode::Direct => V3FrontContinuationOwner::Direct,
+            V3FrontExecutionMode::Relay => V3FrontContinuationOwner::Relay,
+        };
+        Self {
+            key: V3FrontRequestLeaseKey {
+                request_id: request_id.into(),
+                pipeline_id: pipeline_id.into(),
+                server_id: server_id.into(),
+                port,
+                session_scope: session_scope.into(),
+                generation,
+            },
+            execution_mode,
+            continuation_owner,
+            runtime_generation: generation,
+            state: V3FrontLeaseState::Running,
+            semantic_commit: false,
+            closeout_state: V3FrontCloseoutState::Open,
+            frame_sequence: V3FrontFrameSequence::default(),
+            deadline: V3FrontDeadlineBudget::new(now, absolute, idle.min(absolute)),
+        }
+    }
+
     /// Build the Front lease from the request-stage execution plan. The
     /// response path must not inspect provider response shape to choose this
     /// mode. The caller must provide the request-ingress pipeline identity;
@@ -193,10 +229,6 @@ impl V3FrontRequestLease {
                 V3FrontExecutionMode::Relay
             }
         };
-        let continuation_owner = match execution_mode {
-            V3FrontExecutionMode::Direct => V3FrontContinuationOwner::Direct,
-            V3FrontExecutionMode::Relay => V3FrontContinuationOwner::Relay,
-        };
         let absolute = Duration::from_millis(plan.decision.target.candidate.request_timeout_ms);
         let idle = Duration::from_millis(
             plan.decision
@@ -205,24 +237,18 @@ impl V3FrontRequestLease {
                 .sse_first_frame_timeout_ms
                 .unwrap_or(plan.decision.target.candidate.request_timeout_ms),
         );
-        Self {
-            key: V3FrontRequestLeaseKey {
-                request_id: request_id.into(),
-                pipeline_id: pipeline_id.into(),
-                server_id: server_id.into(),
-                port,
-                session_scope: session_scope.into(),
-                generation,
-            },
+        Self::from_execution_mode(
             execution_mode,
-            continuation_owner,
-            runtime_generation: generation,
-            state: V3FrontLeaseState::Running,
-            semantic_commit: false,
-            closeout_state: V3FrontCloseoutState::Open,
-            frame_sequence: V3FrontFrameSequence::default(),
-            deadline: V3FrontDeadlineBudget::new(now, absolute, idle.min(absolute)),
-        }
+            request_id,
+            pipeline_id,
+            server_id,
+            port,
+            session_scope,
+            generation,
+            absolute,
+            idle,
+            now,
+        )
     }
 
     pub fn checkpoint(&self, now: Instant) -> V3RuntimeHandoffCheckpoint {

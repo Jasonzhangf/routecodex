@@ -384,6 +384,74 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     } else {
         None
     };
+    if entry_protocol == "responses"
+        && front_transport_owns_keepalive
+        && responses_protocol_plan.is_none()
+    {
+        if let Some(connection_identity) = front_connection_identity {
+            // Continuation owner resolution is a request-stage control
+            // decision too. It has no fresh provider target plan, so use the
+            // server's configured request deadline without consulting the
+            // provider response or reconstructing control state from payload.
+            let now = Instant::now();
+            let lease = V3FrontRequestLease::from_execution_mode(
+                match execution_mode {
+                    V3EntryProtocolExecutionMode::Direct => V3FrontExecutionMode::Direct,
+                    V3EntryProtocolExecutionMode::Relay => V3FrontExecutionMode::Relay,
+                    V3EntryProtocolExecutionMode::PendingNotImplemented => {
+                        return responses_direct_output_response(
+                            project_v3_responses_error_frame_for_request_if_sse(
+                                build_v3_server_16_http_frame_from_v3_error_06(
+                                    project_v3_server_runtime_failure(
+                                        "V3HubReqContinuation03Classified",
+                                        "front_execution_mode_missing",
+                                        "continuation request has no executable Direct/Relay mode",
+                                        598,
+                                    ),
+                                ),
+                                &request_headers,
+                                Some(&payload),
+                            ),
+                            client_keepalive_interval,
+                        );
+                    }
+                },
+                request_id.clone(),
+                request_identity.pipeline_id.clone(),
+                state.server.id.clone(),
+                state.server.port,
+                provider_failure_session_scope.session_id().to_string(),
+                state.front_transport_broker.generation(),
+                Duration::from_millis(
+                    routecodex_v3_config::default_provider_request_timeout_ms(),
+                ),
+                Duration::from_millis(
+                    routecodex_v3_config::default_provider_request_timeout_ms(),
+                ),
+                now,
+            );
+            if let Err(error) = state
+                .front_transport_broker
+                .bind_connection_lease(connection_identity, lease, now)
+            {
+                return responses_direct_output_response(
+                    project_v3_responses_error_frame_for_request_if_sse(
+                        build_v3_server_16_http_frame_from_v3_error_06(
+                            project_v3_server_runtime_failure(
+                                "V3Server03HttpRequestRaw",
+                                "front_request_lease_binding_failed",
+                                error,
+                                598,
+                            ),
+                        ),
+                        &request_headers,
+                        Some(&payload),
+                    ),
+                    client_keepalive_interval,
+                );
+            }
+        }
+    }
     if execution_mode == V3EntryProtocolExecutionMode::Relay {
         if let Some(response) = capture_v3_live_raw_request(
             &state,
