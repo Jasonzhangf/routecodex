@@ -155,7 +155,7 @@ pub(crate) fn foundation_output_response(output: V3FoundationRuntimeOutput) -> R
 
 pub(crate) fn responses_direct_output_response(
     frame: V3Server16HttpFrame,
-    keepalive_interval: Duration,
+    keepalive_interval: Option<Duration>,
 ) -> Response<Body> {
     responses_direct_output_response_with_console(frame, None, keepalive_interval)
 }
@@ -219,8 +219,20 @@ pub(crate) fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -
 }
 
 fn v3_post_commit_sse_error_event_chunk(source: V3Error01SourceRaised) -> Vec<u8> {
-    let projected = project_v3_post_commit_sse_source(source, 502);
-    let (code, message) = v3_error_body_code_message(&projected.body);
+    let provider_failure = matches!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
+    );
+    let projected = project_v3_post_commit_sse_source(source, 599);
+    let (code, message): (String, String) = if provider_failure {
+        (
+            "response_stream_terminated".to_string(),
+            "response stream terminated before completion".to_string(),
+        )
+    } else {
+        let (code, message) = v3_error_body_code_message(&projected.body);
+        (code, message)
+    };
     let event = json!({
         "type": "error",
         "error": {
@@ -234,7 +246,7 @@ fn v3_post_commit_sse_error_event_chunk(source: V3Error01SourceRaised) -> Vec<u8
 pub(crate) fn responses_direct_output_response_with_console(
     frame: V3Server16HttpFrame,
     stream_console_finalizer: Option<V3DirectSseConsoleFinalizer>,
-    keepalive_interval: Duration,
+    keepalive_interval: Option<Duration>,
 ) -> Response<Body> {
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
@@ -246,7 +258,7 @@ pub(crate) fn responses_direct_output_response_with_console(
         V3Server16Body::Bytes(bytes) => bytes,
         V3Server16Body::Sse(stream) => {
             let stream = wrap_v3_direct_sse_console_stream(stream, stream_console_finalizer);
-            let keepalive = frame.error_chain.is_empty().then_some(keepalive_interval);
+            let keepalive = frame.error_chain.is_empty().then_some(keepalive_interval).flatten();
             return builder
                 .body(v3_client_sse_body(stream, keepalive))
                 .expect("typed response");
@@ -732,7 +744,7 @@ pub(crate) fn error_output_response_for_server_with_project_path(
 ) -> Response<Body> {
     let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
     emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
-    responses_direct_output_response(frame, Duration::from_millis(server.http_sse_keepalive_ms))
+    responses_direct_output_response(frame, Some(Duration::from_millis(server.http_sse_keepalive_ms)))
 }
 
 pub(crate) fn error_output_response_for_responses_request_with_project_path(
@@ -748,7 +760,7 @@ pub(crate) fn error_output_response_for_responses_request_with_project_path(
     emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
     responses_direct_output_response(
         project_v3_responses_error_frame_for_request_if_sse(frame, request_headers, payload),
-        Duration::from_millis(server.http_sse_keepalive_ms),
+        Some(Duration::from_millis(server.http_sse_keepalive_ms)),
     )
 }
 

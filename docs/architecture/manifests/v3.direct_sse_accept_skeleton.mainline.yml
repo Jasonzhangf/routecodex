@@ -21,7 +21,7 @@ edges:
     to_node: V3DirectSseAccept03ProjectedClientFrame
     owner_feature_id: v3.direct_sse_accept_skeleton
     status: anchored
-    contract: only the existing direct runtime client projection is forwarded; provider raw SSE is never forwarded
+    contract: only the existing Direct or Relay runtime client projection is forwarded; provider raw SSE is never forwarded
 return_path:
   precommit_provider_failure: Error01 -> Error03 -> Error04 -> Error05 -> reselect; client channel remains open
   committed_provider_failure: current stream emits the existing post-commit error projection and closes; no current-request reroute
@@ -34,6 +34,7 @@ forbidden_paths:
   - direct accept layer -> continuation
   - feature -> replacement of V3DirectSseAccept01ClientChannel
   - feature -> replacement of V3DirectSseAccept02RuntimeWorker
+  - front -> protocol selection from provider response shape
 canonical_docs:
   - docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
   - docs/goals/v3-sse-transport-json-semantic-decoupling-audit.md

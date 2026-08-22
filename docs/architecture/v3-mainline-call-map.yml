@@ -7770,7 +7770,7 @@ chains:
 
 - chain_id: v3.direct_sse_accept_skeleton
   owner_feature_id: v3.direct_sse_accept_skeleton
-  summary: Direct Responses SSE establishes a client transport channel and heartbeat before existing Direct provider attempts finish; only the runtime projected client frame crosses the channel.
+  summary: Responses SSE establishes a shared Front client transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only the runtime projected client frame crosses the channel.
   manifest: docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
   entry_contract:
     node: V3DirectSseAccept01ClientChannel

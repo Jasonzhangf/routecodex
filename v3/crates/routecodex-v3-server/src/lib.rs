@@ -370,15 +370,29 @@ pub async fn spawn_v3_server_aggregate(
             webui_observability: webui_observability.clone(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let connection_broker = front_transport_broker.clone();
         tokio::spawn(async move {
-            let _ = axum::serve(
-                listener,
-                app.into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.await;
-            })
-            .await;
+            let mut shutdown_rx = shutdown_rx;
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => break,
+                    accepted = listener.accept() => {
+                        let Ok((stream, remote_addr)) = accepted else { break };
+                        let connection_identity = connection_broker.allocate_connection_identity();
+                        let service = app.clone().into_service();
+                        tokio::spawn(async move {
+                            if let Err(error) = serve_v3_front_http_connection(
+                                stream,
+                                remote_addr,
+                                connection_identity,
+                                service,
+                            ).await {
+                                eprintln!("V3 Front HTTP connection failed: {error}");
+                            }
+                        });
+                    }
+                }
+            }
         });
         listeners.push(V3ListenerHandle {
             server_id,
@@ -752,6 +766,10 @@ async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
+    let front_connection_identity = request
+        .extensions()
+        .get::<V3FrontConnectionIdentity>()
+        .copied();
     let request_headers = request.headers().clone();
     let method = request.method().as_str().to_string();
     let path = request.uri().path().to_string();
@@ -864,7 +882,7 @@ async fn pending_endpoint(
             };
             return responses_direct_output_response(
                 frame,
-                Duration::from_millis(state.server.http_sse_keepalive_ms),
+                Some(Duration::from_millis(state.server.http_sse_keepalive_ms)),
             );
         }
     };
@@ -880,6 +898,7 @@ async fn pending_endpoint(
     let request_activity_permit = state.request_activity_gate.admit();
     let response = pending_endpoint_after_responses_admission(
         state,
+        front_connection_identity,
         request_headers,
         method,
         path,

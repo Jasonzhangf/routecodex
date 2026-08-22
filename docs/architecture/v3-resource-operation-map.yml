@@ -2014,8 +2014,8 @@ resources:
     binding_status: design
 
   - resource_id: v3.sse.direct.accept_skeleton
-    resource_kind: direct_sse_client_accept_channel
-    lifecycle: v3.direct.response_sse.accept_and_project
+    resource_kind: responses_sse_front_client_accept_channel
+    lifecycle: v3.responses.sse.front.accept_and_project
     owner_feature_id: v3.direct_sse_accept_skeleton
     owner_crate: routecodex-v3-server
     owner_module: endpoint_handlers

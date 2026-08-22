@@ -1,7 +1,19 @@
+use axum::body::Body;
+use axum::extract::ConnectInfo;
+use axum::http::{Request, Response};
+use hyper::body::Incoming;
+use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::convert::Infallible;
+use std::future::Future;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
+use tokio::sync::{mpsc, oneshot};
+use tower_service::Service;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum V3FrontExecutionMode {
@@ -23,7 +35,11 @@ pub struct V3FrontRequestLeaseKey {
     pub server_id: String,
     pub port: u16,
     pub session_scope: String,
+    pub generation: u64,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct V3FrontConnectionIdentity(pub u64);
 
 #[derive(Debug, Clone)]
 pub struct V3FrontDeadlineBudget {
@@ -117,20 +133,28 @@ pub enum V3FrontLeaseState {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum V3FrontCloseoutState {
+    Open,
+    TerminalSent,
+    Closed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct V3RuntimeHandoffCheckpoint {
     pub key: V3FrontRequestLeaseKey,
     pub runtime_generation: u64,
     pub execution_mode: V3FrontExecutionMode,
     pub continuation_owner: V3FrontContinuationOwner,
-    pub last_client_sequence: u64,
-    pub last_provider_sequence: u64,
+    pub next_client_sequence: u64,
+    pub next_provider_sequence: u64,
     pub semantic_commit: bool,
+    pub closeout_state: V3FrontCloseoutState,
     pub absolute_remaining_ms: u64,
     pub idle_remaining_ms: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct V3FrontRequestLease {
     pub key: V3FrontRequestLeaseKey,
     pub execution_mode: V3FrontExecutionMode,
@@ -138,6 +162,7 @@ pub struct V3FrontRequestLease {
     pub runtime_generation: u64,
     pub state: V3FrontLeaseState,
     pub semantic_commit: bool,
+    pub closeout_state: V3FrontCloseoutState,
     pub frame_sequence: V3FrontFrameSequence,
     pub deadline: V3FrontDeadlineBudget,
 }
@@ -150,9 +175,10 @@ impl V3FrontRequestLease {
             runtime_generation: self.runtime_generation,
             execution_mode: self.execution_mode,
             continuation_owner: self.continuation_owner,
-            last_client_sequence: self.frame_sequence.client_next().saturating_sub(1),
-            last_provider_sequence: self.frame_sequence.provider_next().saturating_sub(1),
+            next_client_sequence: self.frame_sequence.client_next(),
+            next_provider_sequence: self.frame_sequence.provider_next(),
             semantic_commit: self.semantic_commit,
+            closeout_state: self.closeout_state,
             absolute_remaining_ms: absolute.as_millis().min(u64::MAX as u128) as u64,
             idle_remaining_ms: idle.as_millis().min(u64::MAX as u128) as u64,
         }
@@ -164,15 +190,18 @@ impl V3FrontRequestLease {
         new_generation: u64,
     ) -> Self {
         let mut frame_sequence = V3FrontFrameSequence::default();
-        frame_sequence.next_client_sequence = checkpoint.last_client_sequence.saturating_add(1);
-        frame_sequence.next_provider_sequence = checkpoint.last_provider_sequence.saturating_add(1);
+        frame_sequence.next_client_sequence = checkpoint.next_client_sequence;
+        frame_sequence.next_provider_sequence = checkpoint.next_provider_sequence;
+        let mut key = checkpoint.key.clone();
+        key.generation = new_generation;
         Self {
-            key: checkpoint.key.clone(),
+            key,
             execution_mode: checkpoint.execution_mode,
             continuation_owner: checkpoint.continuation_owner,
             runtime_generation: new_generation,
             state: V3FrontLeaseState::Attached,
             semantic_commit: checkpoint.semantic_commit,
+            closeout_state: checkpoint.closeout_state,
             frame_sequence,
             deadline: V3FrontDeadlineBudget::restore_remaining(
                 now,
@@ -208,7 +237,9 @@ impl V3FrontRequestLeaseRegistry {
 #[derive(Debug, Clone, Default)]
 pub struct V3FrontTransportBroker {
     generation: Arc<Mutex<u64>>,
+    next_connection_id: Arc<Mutex<u64>>,
     checkpoints: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3BrokerCheckpoint>>>,
+    client_connections: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3StableFrontConnection>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -221,7 +252,9 @@ impl V3FrontTransportBroker {
     pub fn new(generation: u64) -> Self {
         Self {
             generation: Arc::new(Mutex::new(generation)),
+            next_connection_id: Arc::new(Mutex::new(0)),
             checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
+            client_connections: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -230,6 +263,16 @@ impl V3FrontTransportBroker {
             .generation
             .lock()
             .expect("front broker generation lock")
+    }
+
+    pub fn allocate_connection_identity(&self) -> V3FrontConnectionIdentity {
+        let mut next = self
+            .next_connection_id
+            .lock()
+            .expect("front broker connection identity lock");
+        let identity = V3FrontConnectionIdentity(*next);
+        *next = next.saturating_add(1);
+        identity
     }
 
     pub fn register(&self, lease: &V3FrontRequestLease, now: Instant) {
@@ -247,6 +290,22 @@ impl V3FrontTransportBroker {
 
     pub fn refresh(&self, lease: &V3FrontRequestLease, now: Instant) {
         self.register(lease, now);
+    }
+
+    pub fn observe_provider_frame(
+        &self,
+        key: &V3FrontRequestLeaseKey,
+        sequence: u64,
+    ) -> Result<V3FrontFrameDecision, String> {
+        let mut checkpoints = self
+            .checkpoints
+            .lock()
+            .expect("front broker checkpoint lock");
+        let Some(checkpoint) = checkpoints.get_mut(key) else {
+            return Err("provider frame lease key is not registered".to_string());
+        };
+        let decision = observe_next(&mut checkpoint.checkpoint.next_provider_sequence, sequence);
+        Ok(decision)
     }
 
     pub fn freeze(&self, now: Instant) -> Vec<V3RuntimeHandoffCheckpoint> {
@@ -281,12 +340,13 @@ impl V3FrontTransportBroker {
             .lock()
             .expect("front broker generation lock");
         *generation = generation.saturating_add(1);
+        let old_key = checkpoint.key.clone();
         let mut checkpoint = checkpoint.clone();
         if let Some(entry) = self
             .checkpoints
             .lock()
             .expect("front broker checkpoint lock")
-            .get(&checkpoint.key)
+            .get(&old_key)
         {
             let elapsed = now.saturating_duration_since(entry.captured_at);
             let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
@@ -295,16 +355,18 @@ impl V3FrontTransportBroker {
             checkpoint.idle_remaining_ms = checkpoint.idle_remaining_ms.saturating_sub(elapsed_ms);
         }
         let lease = V3FrontRequestLease::reattach(&checkpoint, now, *generation);
-        self.checkpoints
+        let mut checkpoints = self
+            .checkpoints
             .lock()
-            .expect("front broker checkpoint lock")
-            .insert(
-                lease.key.clone(),
-                V3BrokerCheckpoint {
-                    checkpoint: lease.checkpoint(now),
-                    captured_at: now,
-                },
-            );
+            .expect("front broker checkpoint lock");
+        checkpoints.remove(&old_key);
+        checkpoints.insert(
+            lease.key.clone(),
+            V3BrokerCheckpoint {
+                checkpoint: lease.checkpoint(now),
+                captured_at: now,
+            },
+        );
         lease
     }
 
@@ -315,6 +377,232 @@ impl V3FrontTransportBroker {
             .remove(key)
             .map(|entry| entry.checkpoint)
     }
+
+    pub fn register_client_connection(&self, connection: V3StableFrontConnection) {
+        self.client_connections
+            .lock()
+            .expect("front broker client connection lock")
+            .insert(connection.key(), connection);
+    }
+
+    pub fn client_connection(
+        &self,
+        key: &V3FrontRequestLeaseKey,
+    ) -> Option<V3StableFrontConnection> {
+        self.client_connections
+            .lock()
+            .expect("front broker client connection lock")
+            .get(key)
+            .cloned()
+    }
+
+    pub fn remove_client_connection(
+        &self,
+        key: &V3FrontRequestLeaseKey,
+    ) -> Option<V3StableFrontConnection> {
+        self.client_connections
+            .lock()
+            .expect("front broker client connection lock")
+            .remove(key)
+    }
+
+    pub fn reattach_client_connection(
+        &self,
+        old_key: &V3FrontRequestLeaseKey,
+        lease: V3FrontRequestLease,
+    ) -> Result<(), String> {
+        let mut connections = self
+            .client_connections
+            .lock()
+            .expect("front broker client connection lock");
+        let Some(connection) = connections.remove(old_key) else {
+            return Err("front client connection lease key is not registered".to_string());
+        };
+        if connection.rebind_lease(lease.clone()).is_err() {
+            connections.insert(old_key.clone(), connection);
+            return Err("front client connection lease scope mismatch".to_string());
+        }
+        connections.insert(lease.key.clone(), connection);
+        Ok(())
+    }
+}
+
+enum V3StableFrontConnectionCommand {
+    SendClientFrame(Vec<u8>),
+    DetachRuntime,
+    Close(oneshot::Sender<()>),
+}
+
+/// Owns the accepted client socket independently from the runtime attachment.
+/// Runtime Child code receives only the command handle; it never receives the
+/// `TcpStream`. This is the first executable Front skeleton and deliberately
+/// has no provider or protocol parsing responsibility.
+#[derive(Clone, Debug)]
+pub struct V3StableFrontConnection {
+    lease: Arc<Mutex<V3FrontRequestLease>>,
+    command_tx: mpsc::Sender<V3StableFrontConnectionCommand>,
+}
+
+impl V3StableFrontConnection {
+    pub fn spawn(stream: TcpStream, lease: V3FrontRequestLease) -> Self {
+        let (command_tx, mut command_rx) = mpsc::channel(32);
+        tokio::spawn(async move {
+            let mut stream = stream;
+            while let Some(command) = command_rx.recv().await {
+                match command {
+                    V3StableFrontConnectionCommand::SendClientFrame(frame) => {
+                        if stream.write_all(&frame).await.is_err() {
+                            break;
+                        }
+                        if stream.flush().await.is_err() {
+                            break;
+                        }
+                    }
+                    V3StableFrontConnectionCommand::DetachRuntime => {
+                        // Detaching the Runtime Child must not close or
+                        // otherwise mutate the client connection.
+                    }
+                    V3StableFrontConnectionCommand::Close(ack) => {
+                        let _ = stream.shutdown().await;
+                        let _ = ack.send(());
+                        break;
+                    }
+                }
+            }
+        });
+        Self {
+            lease: Arc::new(Mutex::new(lease)),
+            command_tx,
+        }
+    }
+
+    pub fn key(&self) -> V3FrontRequestLeaseKey {
+        // The lease is immutable in identity for the lifetime of this
+        // connection. Callers must use the typed lease key, never payload or
+        // session-only recovery.
+        self.lease
+            .lock()
+            .expect("stable front lease lock")
+            .key
+            .clone()
+    }
+
+    fn rebind_lease(&self, lease: V3FrontRequestLease) -> Result<(), String> {
+        let mut current = self.lease.lock().expect("stable front lease lock");
+        if current.key.request_id != lease.key.request_id
+            || current.key.pipeline_id != lease.key.pipeline_id
+            || current.key.server_id != lease.key.server_id
+            || current.key.port != lease.key.port
+            || current.key.session_scope != lease.key.session_scope
+            || lease.key.generation <= current.key.generation
+        {
+            return Err("front client connection lease scope mismatch".to_string());
+        }
+        *current = lease;
+        Ok(())
+    }
+
+    pub async fn detach_runtime(&self) -> Result<(), String> {
+        self.command_tx
+            .send(V3StableFrontConnectionCommand::DetachRuntime)
+            .await
+            .map_err(|_| "stable front connection is closed".to_string())
+    }
+
+    pub async fn send_client_frame(&self, sequence: u64, frame: &[u8]) -> Result<(), String> {
+        let decision = self.lease.lock().expect("stable front lease lock");
+        if decision.deadline.is_expired(Instant::now()) {
+            return Err("stable front request deadline expired".to_string());
+        }
+        if decision.closeout_state != V3FrontCloseoutState::Open {
+            return Err("stable front request is already closed out".to_string());
+        }
+        let mut lease = decision;
+        let frame_decision = lease.frame_sequence.observe_client(sequence);
+        drop(lease);
+        if frame_decision != V3FrontFrameDecision::New {
+            return Err(format!(
+                "client frame sequence rejected: {frame_decision:?}"
+            ));
+        }
+        self.command_tx
+            .send(V3StableFrontConnectionCommand::SendClientFrame(
+                frame.to_vec(),
+            ))
+            .await
+            .map_err(|_| "stable front connection is closed".to_string())
+    }
+
+    pub async fn send_client_terminal(&self, sequence: u64, frame: &[u8]) -> Result<(), String> {
+        let mut lease = self.lease.lock().expect("stable front lease lock");
+        if lease.deadline.is_expired(Instant::now()) {
+            return Err("stable front request deadline expired".to_string());
+        }
+        if lease.closeout_state != V3FrontCloseoutState::Open {
+            return Err("stable front terminal closeout already committed".to_string());
+        }
+        let frame_decision = lease.frame_sequence.observe_client(sequence);
+        if frame_decision != V3FrontFrameDecision::New {
+            return Err(format!(
+                "client frame sequence rejected: {frame_decision:?}"
+            ));
+        }
+        lease.closeout_state = V3FrontCloseoutState::TerminalSent;
+        drop(lease);
+        self.command_tx
+            .send(V3StableFrontConnectionCommand::SendClientFrame(
+                frame.to_vec(),
+            ))
+            .await
+            .map_err(|_| "stable front connection is closed".to_string())
+    }
+
+    pub async fn close(&self) -> Result<(), String> {
+        self.lease
+            .lock()
+            .expect("stable front lease lock")
+            .closeout_state = V3FrontCloseoutState::Closed;
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.command_tx
+            .send(V3StableFrontConnectionCommand::Close(ack_tx))
+            .await
+            .map_err(|_| "stable front connection is already closed".to_string())?;
+        ack_rx
+            .await
+            .map_err(|_| "stable front connection close was interrupted".to_string())
+    }
+}
+
+/// Serve one already-accepted client connection through the existing axum
+/// service. This adapter owns only transport handoff; all request/response
+/// semantics remain in the existing Router service.
+pub async fn serve_v3_front_http_connection<S>(
+    stream: TcpStream,
+    remote_addr: SocketAddr,
+    connection_identity: V3FrontConnectionIdentity,
+    service: S,
+) -> Result<(), std::io::Error>
+where
+    S: Service<Request<Body>, Response = Response<Body>, Error = Infallible>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Future<Output = Result<Response<Body>, Infallible>> + Send + 'static,
+{
+    let hyper_service = hyper::service::service_fn(move |request: hyper::Request<Incoming>| {
+        let mut service = service.clone();
+        async move {
+            let (parts, body) = request.into_parts();
+            let mut request = Request::from_parts(parts, Body::new(body));
+            request.extensions_mut().insert(ConnectInfo(remote_addr));
+            request.extensions_mut().insert(connection_identity);
+            service.call(request).await
+        }
+    });
+    hyper::server::conn::http1::Builder::new()
+        .serve_connection(TokioIo::new(stream), hyper_service)
+        .await
+        .map_err(std::io::Error::other)
 }
 
 #[cfg(test)]
@@ -328,6 +616,7 @@ mod tests {
             server_id: "server-1".into(),
             port: 7777,
             session_scope: "session-1".into(),
+            generation: 4,
         }
     }
 
@@ -339,6 +628,7 @@ mod tests {
             runtime_generation: 4,
             state: V3FrontLeaseState::Running,
             semantic_commit: false,
+            closeout_state: V3FrontCloseoutState::Open,
             frame_sequence: V3FrontFrameSequence::default(),
             deadline: V3FrontDeadlineBudget::new(
                 now,
@@ -376,6 +666,7 @@ mod tests {
         assert_eq!(restored.continuation_owner, V3FrontContinuationOwner::Relay);
         assert!(restored.semantic_commit);
         assert_eq!(restored.runtime_generation, 5);
+        assert_eq!(restored.key.generation, 5);
         assert_eq!(restored.frame_sequence.client_next(), 1);
         assert_eq!(restored.frame_sequence.provider_next(), 1);
     }
@@ -412,12 +703,154 @@ mod tests {
         let lease = lease(now);
         broker.register(&lease, now);
         let checkpoint = broker.freeze(now).pop().expect("registered checkpoint");
+        assert_eq!(
+            broker.observe_provider_frame(&checkpoint.key, 0),
+            Ok(V3FrontFrameDecision::New)
+        );
+        assert_eq!(
+            broker.observe_provider_frame(&checkpoint.key, 0),
+            Ok(V3FrontFrameDecision::Duplicate)
+        );
         let restored = broker.reattach(&checkpoint, now + Duration::from_secs(1));
         assert_eq!(restored.runtime_generation, 5);
+        assert_eq!(restored.key.generation, 5);
         assert!(restored
             .deadline
             .remaining(now + Duration::from_secs(120))
             .0
             .is_zero());
+    }
+
+    #[tokio::test]
+    async fn stable_front_keeps_client_socket_open_while_runtime_detaches() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = tokio::net::TcpStream::connect(address).await.unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+        let now = Instant::now();
+        let original_lease = lease(now);
+        let old_key = original_lease.key.clone();
+        let front = V3StableFrontConnection::spawn(server, original_lease.clone());
+        let broker = V3FrontTransportBroker::new(original_lease.runtime_generation);
+        broker.register_client_connection(front.clone());
+        broker.register(&original_lease, now);
+        let checkpoint = broker.freeze(now).pop().expect("front checkpoint");
+        let restored = broker.reattach(&checkpoint, now + Duration::from_secs(1));
+        broker
+            .reattach_client_connection(&old_key, restored.clone())
+            .unwrap();
+        assert!(broker.client_connection(&old_key).is_none());
+        let mut mismatched = restored.clone();
+        mismatched.key.session_scope = "different-session".into();
+        assert!(broker
+            .reattach_client_connection(&restored.key, mismatched)
+            .is_err());
+        assert!(broker.client_connection(&restored.key).is_some());
+        let front = broker
+            .client_connection(&restored.key)
+            .expect("front connection registered in broker");
+
+        front.detach_runtime().await.unwrap();
+        front
+            .send_client_frame(0, b"data: still-alive\n\n")
+            .await
+            .unwrap();
+
+        let mut client = client;
+        let mut received = [0_u8; 64];
+        let read = tokio::time::timeout(
+            Duration::from_millis(100),
+            tokio::io::AsyncReadExt::read(&mut client, &mut received),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(&received[..read], b"data: still-alive\n\n");
+        front
+            .send_client_terminal(1, b"data: terminal\n\n")
+            .await
+            .unwrap();
+        assert!(front
+            .send_client_terminal(2, b"data: duplicate\n\n")
+            .await
+            .is_err());
+        assert!(front
+            .send_client_frame(2, b"data: after-terminal\n\n")
+            .await
+            .is_err());
+        front.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn stable_front_rejects_client_frame_after_absolute_deadline() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let _client = tokio::net::TcpStream::connect(address).await.unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+        let now = Instant::now();
+        let expired = V3FrontRequestLease {
+            key: key(),
+            execution_mode: V3FrontExecutionMode::Direct,
+            continuation_owner: V3FrontContinuationOwner::Direct,
+            runtime_generation: 1,
+            state: V3FrontLeaseState::Running,
+            semantic_commit: false,
+            closeout_state: V3FrontCloseoutState::Open,
+            frame_sequence: V3FrontFrameSequence::default(),
+            deadline: V3FrontDeadlineBudget::new(now, Duration::ZERO, Duration::ZERO),
+        };
+        let front = V3StableFrontConnection::spawn(server, expired);
+
+        let error = front.send_client_frame(0, b"data: must-not-send\n\n").await;
+        assert_eq!(
+            error,
+            Err("stable front request deadline expired".to_string())
+        );
+        front.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn front_http_adapter_preserves_existing_router_service() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let broker = V3FrontTransportBroker::new(0);
+        let connection_identity = broker.allocate_connection_identity();
+        let expected_identity = connection_identity;
+        let app = axum::Router::new().route(
+            "/",
+            axum::routing::get(
+                move |axum::extract::Extension(identity): axum::extract::Extension<
+                    V3FrontConnectionIdentity,
+                >| async move {
+                    assert_eq!(identity, expected_identity);
+                    axum::http::StatusCode::NO_CONTENT
+                },
+            ),
+        );
+        let accept = tokio::spawn(async move {
+            let (stream, remote) = listener.accept().await.unwrap();
+            serve_v3_front_http_connection(stream, remote, connection_identity, app.into_service())
+                .await
+                .unwrap();
+        });
+        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+        tokio::io::AsyncWriteExt::write_all(
+            &mut client,
+            b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+        let mut response = Vec::new();
+        tokio::io::AsyncReadExt::read_to_end(&mut client, &mut response)
+            .await
+            .unwrap();
+        accept.await.unwrap();
+        assert!(String::from_utf8_lossy(&response).contains("204 No Content"));
     }
 }

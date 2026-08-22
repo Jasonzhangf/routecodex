@@ -52,6 +52,8 @@ base64 = "0.22"
 bytes = "1"
 clap = { version = "4.5", features = ["derive"] }
 futures-util = { version = "0.3", features = ["sink"] }
+hyper = { version = "1.1", features = ["server", "http1"] }
+hyper-util = { version = "0.1.3", features = ["tokio", "server", "service"] }
 libc = "0.2"
 provider-compat-core = { path = "crates/provider-compat-core" }
 regex = "1"
@@ -65,6 +67,7 @@ thiserror = "1"
 tiktoken-rs = "0.12"
 tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+tower-service = "0.3"
 toml = "0.8"
 uuid = { version = "1", features = ["v4"] }
 

@@ -2,12 +2,117 @@ use crate::*;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, Response};
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub(crate) async fn pending_endpoint_after_responses_admission(
     state: Arc<V3ListenerState>,
+    front_connection_identity: Option<V3FrontConnectionIdentity>,
+    request_headers: HeaderMap,
+    method: String,
+    path: String,
+    started_at: Instant,
+    entry_protocol: String,
+    execution_mode: V3EntryProtocolExecutionMode,
+    pending_owner_symbol: Option<String>,
+    request_purpose: V3RequestPurpose,
+    payload: Value,
+) -> Response<Body> {
+    if entry_protocol == "responses" && v3_responses_request_wants_sse(&request_headers, &payload) {
+        return V3DirectSseAcceptSkeleton::accept(
+            state,
+            front_connection_identity,
+            request_headers,
+            method,
+            path,
+            started_at,
+            entry_protocol,
+            execution_mode,
+            pending_owner_symbol,
+            request_purpose,
+            payload,
+        )
+        .await;
+    }
+    pending_endpoint_after_responses_admission_inner(
+        state,
+        front_connection_identity,
+        request_headers,
+        method,
+        path,
+        started_at,
+        entry_protocol,
+        execution_mode,
+        pending_owner_symbol,
+        request_purpose,
+        payload,
+        false,
+    )
+    .await
+}
+
+struct V3DirectSseAcceptSkeleton;
+
+impl V3DirectSseAcceptSkeleton {
+    async fn accept(
+        state: Arc<V3ListenerState>,
+        front_connection_identity: Option<V3FrontConnectionIdentity>,
+        request_headers: HeaderMap,
+        method: String,
+        path: String,
+        started_at: Instant,
+        entry_protocol: String,
+        execution_mode: V3EntryProtocolExecutionMode,
+        pending_owner_symbol: Option<String>,
+        request_purpose: V3RequestPurpose,
+        payload: Value,
+    ) -> Response<Body> {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(32);
+        let keepalive_interval =
+            std::time::Duration::from_millis(state.server.http_sse_keepalive_ms);
+        tokio::spawn(async move {
+            let response = pending_endpoint_after_responses_admission_inner(
+                state,
+                front_connection_identity,
+                request_headers,
+                method,
+                path,
+                started_at,
+                entry_protocol,
+                execution_mode,
+                pending_owner_symbol,
+                request_purpose,
+                payload,
+                true,
+            )
+            .await;
+            let mut body = response.into_body().into_data_stream();
+            while let Some(chunk) = body.next().await {
+                let chunk = chunk
+                    .map(|bytes| bytes.to_vec())
+                    .map_err(std::io::Error::other);
+                if tx.send(chunk).await.is_err() {
+                    return;
+                }
+            }
+        });
+        let client_stream = futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        });
+        let body = v3_io_sse_body(Box::pin(client_stream), Some(keepalive_interval));
+        Response::builder()
+            .status(axum::http::StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(body)
+            .expect("Direct SSE accept response")
+    }
+}
+
+pub(crate) async fn pending_endpoint_after_responses_admission_inner(
+    state: Arc<V3ListenerState>,
+    front_connection_identity: Option<V3FrontConnectionIdentity>,
     request_headers: HeaderMap,
     method: String,
     path: String,
@@ -17,7 +122,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
     pending_owner_symbol: Option<String>,
     request_purpose: V3RequestPurpose,
     payload: Value,
+    front_transport_owns_keepalive: bool,
 ) -> Response<Body> {
+    let client_keepalive_interval = (!front_transport_owns_keepalive)
+        .then_some(Duration::from_millis(state.server.http_sse_keepalive_ms));
     let request_identity = match allocate_v3_console_request_identity(&state, &path, Some(&payload))
     {
         Ok(request_identity) => request_identity,
@@ -53,7 +161,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             } else {
                 "conversation"
             },
-            "server_id": state.server.id.clone()
+            "server_id": state.server.id.clone(),
+            "front_connection_identity": front_connection_identity.map(|identity| identity.0)
         })),
     ) {
         return foundation_output_response(project_v3_debug_failure(
@@ -105,7 +214,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                     );
                     return responses_direct_output_response(
                         frame,
-                        Duration::from_millis(state.server.http_sse_keepalive_ms),
+                        client_keepalive_interval,
                     );
                 }
             };
@@ -157,7 +266,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                 );
                 return responses_direct_output_response(
                     frame,
-                    Duration::from_millis(state.server.http_sse_keepalive_ms),
+                    client_keepalive_interval,
                 );
             }
         }
@@ -211,7 +320,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                         &request_headers,
                         Some(&payload),
                     ),
-                    Duration::from_millis(state.server.http_sse_keepalive_ms),
+                    client_keepalive_interval,
                 );
             }
         };
@@ -1007,7 +1116,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                     return responses_direct_output_response_with_console(
                         frame,
                         stream_console_finalizer,
-                        Duration::from_millis(state.server.http_sse_keepalive_ms),
+                        client_keepalive_interval,
                     );
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(mut relay_output) => {
@@ -1031,6 +1140,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                         started_at,
                         request_console_project_path.as_deref(),
                         &console_payload,
+                        client_keepalive_interval,
                     );
                 }
             }
@@ -1047,6 +1157,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
             started_at,
             request_console_project_path.as_deref(),
             &console_payload,
+            client_keepalive_interval,
         );
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
@@ -1162,7 +1273,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                 responses_direct_output_response_with_console(
                     frame,
                     stream_console_finalizer,
-                    Duration::from_millis(state.server.http_sse_keepalive_ms),
+                    client_keepalive_interval,
                 )
             }
             V3ResponsesDirectServerOutcome::RelayOutput(output) => {
@@ -1178,6 +1289,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission(
                     started_at,
                     request_console_project_path.as_deref(),
                     &raw_request_payload,
+                    client_keepalive_interval,
                 )
             }
         }

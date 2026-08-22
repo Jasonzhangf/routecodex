@@ -1273,6 +1273,8 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures-util",
+ "hyper",
+ "hyper-util",
  "libc",
  "reqwest",
  "routecodex-v3-config",
@@ -1284,6 +1286,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite",
+ "tower-service",
 ]
 
 [[package]]
