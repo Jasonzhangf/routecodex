@@ -539,22 +539,13 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
 fn direct_sse_frame_provider_failure_source(
     provider_id: &str,
     fields: &[SseField],
-    compatibility_profile: Option<&str>,
+    _compatibility_profile: Option<&str>,
     business_output_seen: bool,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> Result<DirectSseInitialFrameAction, V3Error01SourceRaised> {
     let data = collect_v3_provider_sse_json_data(fields);
-    let parsed = match classify_v3_provider_sse_json_data(
-        provider_protocol,
-        &data,
-    ) {
+    let parsed = match classify_v3_provider_sse_json_data(provider_protocol, &data) {
         Ok(parsed) => parsed,
-        Err(message) if compatibility_profile.is_some_and(is_cc_sol_thinking_tags_profile) => {
-            // cc-sol occasionally emits an untyped envelope before its first
-            // Responses event. Preserve it for the client and let the stream
-            // continue; all other providers remain fail-fast.
-            return Ok(DirectSseInitialFrameAction::StartClientStream);
-        }
         Err(message) => {
             return Err(build_v3_provider_sse_json_error(
                 provider_id,
@@ -894,10 +885,6 @@ fn observed_sse_client_stream_with_protocol(
                         &state.observation_state,
                         &state.usage_observation,
                         provider_protocol,
-                        state
-                            .compatibility_profile
-                            .as_deref()
-                            .is_some_and(is_cc_sol_thinking_tags_profile),
                     );
                     let result = match result {
                         Ok((terminal, semantic)) => {
@@ -1167,7 +1154,6 @@ fn observe_sse_remote_continuation_chunk(
     observation_state: &V3SseRemoteContinuationObservationState,
     usage_observation: &V3RuntimeStreamObservation,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
-    allow_cc_sol_untyped: bool,
 ) -> Result<(bool, bool), V3Error01SourceRaised> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
@@ -1183,18 +1169,15 @@ fn observe_sse_remote_continuation_chunk(
         }
         observe_sse_usage_frame(provider_id, fields, usage_observation)?;
         let data = collect_v3_provider_sse_json_data(fields);
-        let classification = match classify_v3_provider_sse_json_data(provider_protocol, &data) {
-            Ok(classification) => classification,
-            Err(_message) if allow_cc_sol_untyped => None,
-            Err(message) => {
-                return Err(build_v3_error_01_source_raised(
+        let classification =
+            classify_v3_provider_sse_json_data(provider_protocol, &data).map_err(|message| {
+                build_v3_error_01_source_raised(
                     V3ErrorSourceKind::ProviderFailure,
                     "V3ProviderResp14Raw",
                     "provider_response_sse_event_invalid",
                     message,
-                ));
-            }
-        };
+                )
+            })?;
         semantic_observed |= classification.is_some();
         terminal_observed |= matches!(
             classification,
@@ -1905,6 +1888,29 @@ mod tests {
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "provider_response_sse_event_invalid");
         assert!(!error.message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn direct_sse_guard_rejects_untyped_cc_sol_frame_before_client_commit() {
+        let malformed = b"data: {\"unexpected\":\"cc-sol-envelope\"}
+
+"
+        .to_vec();
+        let stream: V3ProviderSseStream =
+            Box::pin(futures_util::stream::once(async move { Ok(malformed) }));
+        let result = guard_initial_direct_sse_provider_failure_with_timeout(
+            "cc-sol",
+            stream,
+            std::time::Duration::from_secs(5),
+            Some("responses:thinking-tags"),
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        )
+        .await;
+        let Err(error) = result else {
+            panic!("untyped cc-sol Responses frame must fail before client commit");
+        };
+        assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(error.code, "provider_response_sse_event_invalid");
     }
 
     #[tokio::test]
