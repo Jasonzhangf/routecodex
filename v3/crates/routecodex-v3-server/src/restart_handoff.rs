@@ -602,6 +602,17 @@ impl V3FrontTransportBroker {
                 captured_at: now,
             },
         );
+        let socket = self
+            .client_sockets
+            .lock()
+            .expect("front broker client socket lock")
+            .remove(&old_key);
+        if let Some(socket) = socket {
+            self.client_sockets
+                .lock()
+                .expect("front broker client socket lock")
+                .insert(lease.key.clone(), socket);
+        }
         lease
     }
 
@@ -1125,6 +1136,28 @@ mod tests {
 
         assert!(broker.front_socket(connection).is_none());
         assert!(broker.client_socket(&lease.key).is_some());
+    }
+
+    #[test]
+    fn broker_reattach_moves_client_socket_to_new_generation_key() {
+        let now = Instant::now();
+        let broker = V3FrontTransportBroker::new(4);
+        let connection = broker.allocate_connection_identity();
+        let lease = lease(now);
+        let (write_tx, _write_rx) = mpsc::channel(1);
+
+        broker
+            .register_front_socket(connection, V3StableFrontSocket { write_tx })
+            .expect("front socket registration");
+        broker
+            .bind_connection_lease(connection, lease.clone(), now)
+            .expect("front connection lease binding");
+        let checkpoint = broker.freeze(now).pop().expect("front checkpoint");
+
+        let restored = broker.reattach(&checkpoint, now + Duration::from_secs(1));
+
+        assert!(broker.client_socket(&lease.key).is_none());
+        assert!(broker.client_socket(&restored.key).is_some());
     }
 
     #[test]
