@@ -491,7 +491,15 @@ fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
     assert_eq!(tools[1]["type"], "function");
     assert_eq!(tools[1]["function"]["name"], "apply_patch");
     assert_eq!(tools[1]["function"]["description"], "Apply a patch");
-    assert_eq!(tools[1]["function"]["parameters"], json!({"type":"object"}));
+    assert_eq!(
+        tools[1]["function"]["parameters"],
+        json!({
+            "type":"object",
+            "properties":{"input":{"type":"string","description":"Raw free-form tool input."}},
+            "required":["input"],
+            "additionalProperties":false
+        })
+    );
     assert!(tools[1].get("custom").is_none(), "{tools:?}");
     assert_eq!(tools[2]["function"]["name"], "tool_search");
     assert_eq!(
@@ -600,8 +608,13 @@ fn openai_chat_wire_flattens_custom_grammar_to_function_tool() {
     );
     assert_eq!(
         request["tools"][0]["function"]["parameters"],
-        json!({"type":"object"}),
-        "go requires parameters to be a JSON Schema with type object"
+        json!({
+            "type":"object",
+            "properties":{"input":{"type":"string","description":"Raw free-form tool input."}},
+            "required":["input"],
+            "additionalProperties":false
+        }),
+        "apply_patch requires a raw free-form input string"
     );
     assert!(request["tools"][0].get("custom").is_none(), "{request}");
 }
@@ -625,7 +638,12 @@ fn openai_chat_wire_flattens_any_custom_format_to_function_tool() {
     assert_eq!(request["tools"][0]["function"]["name"], "apply_patch");
     assert_eq!(
         request["tools"][0]["function"]["parameters"],
-        json!({"type":"object"})
+        json!({
+            "type":"object",
+            "properties":{"input":{"type":"string","description":"Raw free-form tool input."}},
+            "required":["input"],
+            "additionalProperties":false
+        })
     );
 }
 
