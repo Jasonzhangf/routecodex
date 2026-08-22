@@ -632,10 +632,9 @@ impl Default for ProviderResponsesTransport {
 }
 
 impl ProviderResponsesTransport {
-    fn with_http_read_timeout(timeout: Duration) -> Self {
+    fn with_http_read_timeout(_timeout: Duration) -> Self {
         Self {
             client: reqwest::Client::builder()
-                .read_timeout(timeout)
                 .pool_idle_timeout(Duration::from_secs(V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS))
                 .tcp_keepalive(Duration::from_secs(V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS))
                 .build()
